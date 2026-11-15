@@ -195,6 +195,24 @@ pub fn drawn_ships(commands: &[DrawCommand]) -> Vec<String> {
         .collect()
 }
 
+/// Every ship drawn anywhere in `frames`, by player name, each once, in the order they first
+/// appear.
+pub fn track_players(frames: &[Vec<DrawCommand>]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    frames.iter().flat_map(|commands| drawn_ships(commands)).filter(|name| seen.insert(name.clone())).collect()
+}
+
+/// The recording player's name, as the track's ship commands carry it. `None` for a recording
+/// with no ship of its own drawn, such as a spectator's.
+pub fn self_player(frames: &[Vec<DrawCommand>]) -> Option<String> {
+    frames.iter().flatten().find_map(|command| match command {
+        DrawCommand::Ship { is_self: true, player_name, .. } | DrawCommand::DeadShip { is_self: true, player_name, .. } => {
+            player_name.clone()
+        }
+        _ => None,
+    })
+}
+
 /// Whether the reader has asked for this ship's trail or this range.
 ///
 /// The global switches decide whether a layer is drawn at all; this decides

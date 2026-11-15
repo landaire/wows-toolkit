@@ -8,6 +8,7 @@ use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::draw_command::ShipConfigVisibility;
 
 use crate::replay_render::export::ExportSettings;
+use crate::replay_render::ships::ShipChoices;
 
 /// What a playback viewport draws when it opens.
 ///
@@ -50,16 +51,14 @@ pub fn playback_options() -> RenderOptions {
 
 /// What a batch draws of what it baked, and whether dead ships are among it.
 ///
-/// The reader's saved layers, less the two a viewport holds off for the same
-/// reasons: the stats panel's ship silhouettes are a load the bake skips, so its
-/// gutter would be empty and the kill feed and the chat that share it would go
-/// unfilmed; and which ships have their range circles drawn is a per-ship choice
-/// a batch is never given, so drawing every ship's would bury the map.
+/// The reader's saved layers, less the stats panel a viewport holds off for the
+/// same reason: its ship silhouettes are a load the bake skips, so its gutter
+/// would be empty and the kill feed and the chat that share it would go
+/// unfilmed.
 pub fn batch_options(defaults: &SavedRenderOptions) -> (RenderOptions, bool) {
     let mut options = playback_options();
     defaults.apply_to(&mut options);
     options.show_stats_panel = false;
-    options.show_ship_config = false;
 
     (options, defaults.show_dead_ships)
 }
@@ -78,18 +77,38 @@ pub fn adopt_saved_defaults(saved: &SavedRenderOptions, options: &mut RenderOpti
     options.show_stats_panel = false;
 }
 
+/// Puts the saved self ranges on the recording player's ship, `self_player`, which is where the
+/// egui renderer's saved self range filter applies. Nothing changes for a recording with no ship
+/// of its own.
+pub fn adopt_saved_self_ranges(
+    saved: &SavedRenderOptions,
+    self_player: Option<&str>,
+    choices: &mut ShipChoices,
+    options: &mut RenderOptions,
+) {
+    let Some(player) = self_player else { return };
+    let filter = saved.self_range_filter();
+    if !filter.any_enabled() {
+        return;
+    }
+
+    choices.set_ranges_for(player, |ranges| *ranges = filter, options);
+}
+
 /// What a viewport showing `options` saves as the defaults, over what is
 /// `stored`.
 ///
-/// What this viewport has no control over is left as it was: the self
-/// ranges, which are per-ship here rather than one saved filter, and the
-/// stats panel, which a bake cannot fill and which this viewport therefore
-/// holds off whatever the reader chose in the egui renderer.
+/// `self_ranges` are the ranges the recording player's ship shows, saved as
+/// the self range filter; `None` for a recording with no ship of its own,
+/// which leaves the stored filter as it was. The stats panel, which a bake
+/// cannot fill and which this viewport therefore holds off, is also left as
+/// the reader chose it in the egui renderer.
 pub fn defaults_to_save(
     stored: &SavedRenderOptions,
     options: &RenderOptions,
     show_dead_ships: bool,
     export: &ExportSettings,
+    self_ranges: Option<ShipConfigFilter>,
 ) -> SavedRenderOptions {
     let mut saved = stored.clone();
     saved.read_from(options);
@@ -98,6 +117,9 @@ pub fn defaults_to_save(
     saved.prefer_cpu_encoder = export.prefer_cpu;
     saved.video_codec = export.codec;
     saved.include_pre_battle = export.include_pre_battle;
+    if let Some(ranges) = self_ranges {
+        saved.set_self_range_filter(&ranges);
+    }
 
     saved
 }

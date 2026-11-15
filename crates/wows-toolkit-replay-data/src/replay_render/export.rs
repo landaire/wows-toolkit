@@ -1,7 +1,9 @@
 //! Encoding a baked battle to a video file, one replay or a batch of them.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -10,19 +12,25 @@ use rust_i18n::t;
 use wows_minimap_renderer::EncoderKind;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
+use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::VideoEncoder;
-use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::error::VideoError;
+use wows_minimap_renderer::map_data::MinimapPos;
+use wows_minimap_renderer::trail::TrailHistory;
 use wows_minimap_renderer::video::CodecChoice;
+use wows_minimap_renderer::video::FPS;
+use wows_minimap_renderer::video::OUTPUT_DURATION;
+use wows_replays::types::EntityId;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
 use crate::replay_render::options::batch_options;
+use crate::replay_render::raster::shown_commands;
 use crate::replay_render::ships::ShipChoices;
-use crate::replay_render::track::BAKE_INTERVAL;
+use crate::replay_render::ships::track_players;
 use crate::replay_render::track::Track;
 use crate::replay_render::track::bake;
 
@@ -107,7 +115,7 @@ pub enum ExportError {
     Cancelled,
 }
 
-/// Which replay of how many a batch has reached.
+/// Which replay of how many a batch has reached, and how far its encode has got.
 ///
 /// `done` counts the ones behind it, so the first report reads as none done of
 /// however many there are.
@@ -117,6 +125,8 @@ pub struct BatchStep {
     pub total: usize,
     /// The replay being read, by its file stem.
     pub replay: String,
+    /// The encode's progress through this replay's frames. `None` while it is read and baked.
+    pub frames: Option<ExportProgress>,
 }
 
 /// What a batch wrote, and which replays it could not.
@@ -158,41 +168,201 @@ pub fn export_settings_of(saved: &SavedRenderOptions) -> ExportSettings {
     }
 }
 
-/// The file name a save dialog suggests for a replay titled `title`.
-pub fn suggested_name(title: &str) -> String {
-    format!("{title}.mp4")
+/// The file name a save dialog suggests for a track whose video is called `video_stem`.
+pub fn suggested_name(video_stem: &str) -> String {
+    format!("{video_stem}.mp4")
 }
 
-/// The frames an export of `track` writes.
+/// How many frames every export writes: a fixed length at a fixed rate, the battle compressed to
+/// fit, as the egui renderer writes it.
+pub const EXPORT_FRAME_COUNT: usize = (OUTPUT_DURATION * FPS) as usize;
+
+/// What an export draws of a battle: the layers and per-ship choices on screen, and what was
+/// drawn over the battle rather than by it (annotations and placed ranges).
+pub struct ExportLayers {
+    pub options: RenderOptions,
+    pub show_dead_ships: bool,
+    pub choices: ShipChoices,
+    pub drawn_on: Vec<DrawCommand>,
+}
+
+/// The frames an export writes, drawn one at a time as the encoder takes them.
 ///
-/// What is on screen, not what was baked: a layer the reader turned off
-/// should not come back in the file. The overlays drawn over a battle
-/// (trails, annotations, the ranges placed on the map) are derived at draw
-/// time and are not written.
-pub fn export_frames(
-    track: &Track,
-    settings: &ExportSettings,
-    options: &RenderOptions,
-    show_dead_ships: bool,
-    choices: &ShipChoices,
-) -> Vec<Vec<DrawCommand>> {
-    track
-        .frames_to_export(settings.include_pre_battle)
+/// [`EXPORT_FRAME_COUNT`] frames spread evenly over the exported stretch of the battle. A track
+/// keeps fewer frames than that, and a long battle's are further apart, so each written frame is
+/// the baked frame before it with the ships moved the matching part of the way to the next.
+/// What is on screen is what is written: a layer the reader turned off does not come back in the
+/// file, and trails are derived from the baked frames behind, as the viewport derives them.
+pub struct ExportFrames {
+    track: Arc<Track>,
+    layers: ExportLayers,
+    /// The first baked frame the export covers.
+    first: usize,
+    /// The game time of the first written frame, how much game time the export covers, and the
+    /// game time between written frames.
+    start: f32,
+    duration: f32,
+    step: f32,
+    written: usize,
+    trails: TrailHistory,
+    /// How many baked frames `trails` has walked.
+    walked: usize,
+}
+
+impl ExportFrames {
+    /// `None` for a track with no frames to export.
+    pub fn new(track: Arc<Track>, include_pre_battle: bool, layers: ExportLayers) -> Option<Self> {
+        if track.is_empty() {
+            return None;
+        }
+        let first = track.export_start(include_pre_battle);
+        let start = track.seconds_at(first);
+        let end = track.seconds_at(track.last());
+        let duration = (end - start).max(0.0);
+        let step = duration / (EXPORT_FRAME_COUNT - 1) as f32;
+
+        Some(Self {
+            track,
+            layers,
+            first: first.get(),
+            start,
+            duration,
+            step,
+            written: 0,
+            trails: TrailHistory::new(),
+            walked: 0,
+        })
+    }
+
+    /// How many frames the export writes.
+    pub fn len(&self) -> usize {
+        EXPORT_FRAME_COUNT
+    }
+
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
+    /// How much game time the export covers, in seconds.
+    pub fn duration_seconds(&self) -> f32 {
+        self.duration
+    }
+}
+
+impl Iterator for ExportFrames {
+    type Item = Vec<DrawCommand>;
+
+    fn next(&mut self) -> Option<Vec<DrawCommand>> {
+        if self.written >= EXPORT_FRAME_COUNT {
+            return None;
+        }
+        let at = self.start + self.step * self.written as f32;
+        self.written += 1;
+
+        let base = self.track.frame_at(at).get().max(self.first);
+        let wants_trails = self.layers.options.show_trails || self.layers.options.show_speed_trails;
+        while wants_trails && self.walked <= base {
+            self.trails.push(&self.track.frames[self.walked]);
+            self.walked += 1;
+        }
+        let trails = self.trails.trails(&self.layers.options);
+
+        let layers = &self.layers;
+        let between = interpolated(&self.track, base, at);
+        let mut shown =
+            shown_commands(trails.into_iter().chain(between), &layers.options, layers.show_dead_ships, &layers.choices);
+        shown.extend(layers.drawn_on.iter().cloned());
+
+        Some(shown)
+    }
+}
+
+/// Where a ship is drawn in a baked frame.
+#[derive(Clone, Copy, Debug)]
+struct ShipPlace {
+    pos: MinimapPos,
+    yaw: f32,
+    visibility: ShipVisibility,
+}
+
+/// How far one ship moves and turns between a baked frame and an export frame after it.
+#[derive(Clone, Copy, Debug)]
+struct ShipMove {
+    dx: f32,
+    dy: f32,
+    turn: f32,
+}
+
+/// Frame `base`'s commands with each ship moved the part of the way to frame `base + 1` that
+/// game time `at` is, and what is drawn at the ship (its health bar, ranges, consumables and
+/// camera line) moved with it.
+fn interpolated(track: &Track, base: usize, at: f32) -> Vec<DrawCommand> {
+    let commands = &track.frames[base];
+    let (Some(next), Some(from), Some(to)) =
+        (track.frames.get(base + 1), track.clocks.get(base), track.clocks.get(base + 1))
+    else {
+        return commands.clone();
+    };
+    let span = to.seconds() - from.seconds();
+    if span <= 0.0 {
+        return commands.clone();
+    }
+    let fraction = ((at - from.seconds()) / span).clamp(0.0, 1.0);
+
+    let ahead: HashMap<EntityId, ShipPlace> = next
         .iter()
-        .map(|frame| {
-            frame
-                .iter()
-                .filter(|command| should_draw_command(command, options, show_dead_ships))
-                .filter(|command| choices.allows(command))
-                .cloned()
-                .collect()
+        .filter_map(|command| match command {
+            DrawCommand::Ship { entity_id, pos, yaw, visibility, .. } => {
+                Some((*entity_id, ShipPlace { pos: *pos, yaw: *yaw, visibility: *visibility }))
+            }
+            _ => None,
+        })
+        .collect();
+    let moves: HashMap<EntityId, ShipMove> = commands
+        .iter()
+        .filter_map(|command| {
+            let DrawCommand::Ship { entity_id, pos, yaw, visibility, .. } = command else { return None };
+            let ShipPlace { pos: next_pos, yaw: next_yaw, visibility: next_visibility } = ahead.get(entity_id)?;
+            // A ship coming into or going out of sight jumps between where it was last seen and
+            // where it is, which is not a path it sailed.
+            if next_visibility != visibility {
+                return None;
+            }
+            let turn = (next_yaw - yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            Some((
+                *entity_id,
+                ShipMove {
+                    dx: (next_pos.x - pos.x) * fraction,
+                    dy: (next_pos.y - pos.y) * fraction,
+                    turn: turn * fraction,
+                },
+            ))
+        })
+        .collect();
+
+    commands
+        .iter()
+        .cloned()
+        .map(|mut command| {
+            let (entity_id, pos, yaw) = match &mut command {
+                DrawCommand::Ship { entity_id, pos, yaw, .. } => (*entity_id, pos, Some(yaw)),
+                DrawCommand::HealthBar { entity_id, pos, .. }
+                | DrawCommand::CameraDirection { entity_id, pos, .. }
+                | DrawCommand::ConsumableRadius { entity_id, pos, .. }
+                | DrawCommand::ConsumableIcons { entity_id, pos, .. }
+                | DrawCommand::ShipConfigCircle { entity_id, pos, .. } => (*entity_id, pos, None),
+                _ => return command,
+            };
+            if let Some(step) = moves.get(&entity_id) {
+                pos.x += step.dx;
+                pos.y += step.dy;
+                if let Some(yaw) = yaw {
+                    *yaw += step.turn;
+                }
+            }
+            command
         })
         .collect()
-}
-
-/// How much game time `frame_count` exported frames cover, in seconds.
-pub fn export_duration(frame_count: usize) -> f32 {
-    frame_count.saturating_sub(1) as f32 * BAKE_INTERVAL
 }
 
 /// A place to render to that outlives this process, for the clipboard.
@@ -233,8 +403,7 @@ pub fn temporary_batch_dir() -> Option<PathBuf> {
 /// Setting `cancel` stops the encode before the next frame, or before the file is written.
 pub fn encode_track(
     renderer: &SharedPreviewRenderer,
-    frames: &[Vec<DrawCommand>],
-    duration_seconds: f32,
+    frames: ExportFrames,
     output: &Path,
     settings: ExportSettings,
     cancel: &AtomicBool,
@@ -246,7 +415,7 @@ pub fn encode_track(
     let Some(path) = output.to_str() else {
         return Err(ExportError::UnusablePath { path: output.to_path_buf() });
     };
-    let mut encoder = VideoEncoder::new(Some(path), None, false, duration_seconds, width, height);
+    let mut encoder = VideoEncoder::new(Some(path), None, false, frames.duration_seconds(), width, height);
     encoder.set_prefer_cpu(must_use_cpu(&settings, encoder_status()));
     encoder.set_codec(match settings.codec {
         Some(codec) => CodecChoice::Explicit(codec),
@@ -257,11 +426,11 @@ pub fn encode_track(
     // The encoder writes `output` only once it finishes, so a cancelled encode leaves whatever was
     // there before untouched.
     let total = frames.len() as u64;
-    for (index, commands) in frames.iter().enumerate() {
+    for (index, commands) in frames.enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err(ExportError::Cancelled);
         }
-        let image = drawing.render(commands);
+        let image = drawing.render(&commands);
         encoder.submit_frame(&image).map_err(|report| ExportError::Frame { index, report })?;
         progress(ExportProgress { done: index as u64 + 1, total, stage: ExportStage::Encoding });
     }
@@ -288,8 +457,8 @@ pub fn encode_track(
 /// batch writes what a viewport would have shown rather than the built-in set.
 /// `bake_options` is what each replay is baked with, normally
 /// [`playback_options`](crate::replay_render::options::playback_options).
-/// `report` is told which replay the batch has reached before it is read, so the
-/// reader is not left watching a still line for forty files.
+/// `report` is told which replay the batch has reached before it is read, and
+/// then how far its encode has got after every frame.
 pub fn batch_export(
     paths: Vec<PathBuf>,
     game_data: &GameDataCache,
@@ -307,12 +476,7 @@ pub fn batch_export(
 
     for (index, path) in paths.into_iter().enumerate() {
         let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
-        report(BatchStep { done: index, total, replay: named });
-        let Some(stem) = path.file_stem() else {
-            outcome.failed.push(path);
-            continue;
-        };
-        let output = out_dir.join(stem).with_extension("mp4");
+        report(BatchStep { done: index, total, replay: named.clone(), frames: None });
 
         let (track, renderer) = match bake(&path, &[], game_data, &cancel, bake_options.clone()) {
             Ok(baked) => baked,
@@ -322,28 +486,18 @@ pub fn batch_export(
                 continue;
             }
         };
+        let output = out_dir.join(suggested_name(&track.video_stem));
 
-        // The bake holds every layer it could; which of them are drawn is
-        // what the saved defaults decide, as they do in a viewport.
-        let frames: Vec<Vec<DrawCommand>> = track
-            .frames_to_export(settings.include_pre_battle)
-            .iter()
-            .map(|frame| {
-                frame
-                    .iter()
-                    .filter(|command| should_draw_command(command, &options, show_dead_ships))
-                    .cloned()
-                    .collect()
-            })
-            .collect();
-        if frames.is_empty() {
+        let layers = batch_layers(&options, show_dead_ships, &track);
+        let Some(frames) = ExportFrames::new(Arc::new(track), settings.include_pre_battle, layers) else {
             outcome.failed.push(path);
             continue;
-        }
-        let duration = export_duration(frames.len());
+        };
 
-        // The batch reports per replay rather than per frame.
-        match encode_track(&renderer, &frames, duration, &output, settings, &cancel, |_progress| {}) {
+        let encoded = encode_track(&renderer, frames, &output, settings, &cancel, |step| {
+            report(BatchStep { done: index, total, replay: named.clone(), frames: Some(step) });
+        });
+        match encoded {
             Ok(()) => outcome.written.push(output),
             Err(reason) => {
                 tracing::warn!(path = %path.display(), %reason, "batch render: the encode failed");
@@ -353,4 +507,19 @@ pub fn batch_export(
     }
 
     outcome
+}
+
+/// What a batch draws of `track` under its saved `options`.
+///
+/// The bake holds every layer it could; which of them are drawn is what the saved defaults
+/// decide, as they do in a viewport. Saved range circles are every ship's, as the egui batch draws
+/// them, since a batch has no per-ship choices of its own.
+pub(crate) fn batch_layers(options: &RenderOptions, show_dead_ships: bool, track: &Track) -> ExportLayers {
+    let mut options = options.clone();
+    let mut choices = ShipChoices::new();
+    if options.show_ship_config {
+        choices.all_ranges(&track_players(&track.frames), &mut options);
+    }
+
+    ExportLayers { options, show_dead_ships, choices, drawn_on: Vec::new() }
 }

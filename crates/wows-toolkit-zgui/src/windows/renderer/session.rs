@@ -34,14 +34,14 @@ use wows_toolkit_replay_data::replay_render::collab::CursorReport;
 use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
 use wows_toolkit_replay_data::replay_render::collab::frame_broadcast;
 use wows_toolkit_replay_data::replay_render::collab::shared_replay;
+use wows_toolkit_replay_data::replay_render::export::ExportFrames;
+use wows_toolkit_replay_data::replay_render::export::ExportLayers;
 use wows_toolkit_replay_data::replay_render::export::ExportProgress;
 use wows_toolkit_replay_data::replay_render::export::ExportSettings;
 use wows_toolkit_replay_data::replay_render::export::ExportStage;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
 use wows_toolkit_replay_data::replay_render::export::encode_track;
 use wows_toolkit_replay_data::replay_render::export::encoder_status;
-use wows_toolkit_replay_data::replay_render::export::export_duration;
-use wows_toolkit_replay_data::replay_render::export::export_frames;
 use wows_toolkit_replay_data::replay_render::export::export_settings_of;
 use wows_toolkit_replay_data::replay_render::export::must_use_cpu;
 use wows_toolkit_replay_data::replay_render::export::suggested_name;
@@ -50,6 +50,7 @@ use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
 use wows_toolkit_replay_data::replay_render::hover::consumable_at;
 use wows_toolkit_replay_data::replay_render::hover::hover_changed;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
+use wows_toolkit_replay_data::replay_render::options::adopt_saved_self_ranges;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
 use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
@@ -61,6 +62,7 @@ use wows_toolkit_replay_data::replay_render::raster::follow_layout;
 use wows_toolkit_replay_data::replay_render::raster::raster_commands;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_replay_data::replay_render::ships::ShipMenu;
+use wows_toolkit_replay_data::replay_render::ships::self_player;
 use wows_toolkit_replay_data::replay_render::ships::drawn_ships;
 use wows_toolkit_replay_data::replay_render::ships::ship_at;
 use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
@@ -530,6 +532,8 @@ impl RendererSession {
         };
         self.export.update(|export| export.settings = export_settings_of(&saved));
         self.set_layers(|layers| adopt_saved_defaults(&saved, &mut layers.options, &mut layers.show_dead_ships));
+        let own = self.track_untracked().and_then(|track| self_player(&track.frames));
+        self.choose(|choices, _, options| adopt_saved_self_ranges(&saved, own.as_deref(), choices, options));
     }
 
     /// Writes what this viewport shows back as what a viewport opens with. Resolves to whether it
@@ -543,9 +547,11 @@ impl RendererSession {
             .await
             .unwrap_or_default();
         let settings = self.export.with_untracked(|export| export.settings);
-        let saved = self
-            .layers
-            .with_untracked(|layers| defaults_to_save(&stored, &layers.options, layers.show_dead_ships, &settings));
+        let own = self.track_untracked().and_then(|track| self_player(&track.frames));
+        let self_ranges = own.map(|player| self.choices.with_untracked(|choices| choices.ranges_for(&player)));
+        let saved = self.layers.with_untracked(|layers| {
+            defaults_to_save(&stored, &layers.options, layers.show_dead_ships, &settings, self_ranges)
+        });
         let json = match wows_toolkit_replay_data::render_defaults::serialize(&saved) {
             Ok(json) => json,
             Err(err) => {
@@ -1318,11 +1324,22 @@ impl RendererSession {
             return;
         }
         let settings = self.export.with_untracked(|export| export.settings);
-        let frames = self.layers.with_untracked(|layers| {
-            self.choices.with_untracked(|choices| {
-                export_frames(&track, &settings, &layers.options, layers.show_dead_ships, choices)
-            })
+        let link = self.collab.get_untracked();
+        let game_data = self.run.try_with_value(|run| run.game_data.clone()).flatten();
+        let drawn_on = match game_data {
+            Some(game_data) => {
+                self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data))
+            }
+            None => Vec::new(),
+        };
+        let layers = self.layers.with_untracked(|layers| ExportLayers {
+            options: layers.options.clone(),
+            show_dead_ships: layers.show_dead_ships,
+            choices: self.choices.get_untracked(),
+            drawn_on,
         });
+        let suggested = suggested_name(&track.video_stem);
+        let Some(frames) = ExportFrames::new(track, settings.include_pre_battle, layers) else { return };
         // Held for the whole encode, which is why the transport refuses while one runs.
         let Some((renderer, generation)) = self
             .with_run(|run| {
@@ -1339,13 +1356,9 @@ impl RendererSession {
             self.playback.update(Playback::stop);
             return;
         };
-        let Some((title, services, cancel)) =
-            self.run.try_with_value(|run| (run.title.clone(), run.services, Arc::clone(&run.cancel)))
-        else {
+        let Some((services, cancel)) = self.run.try_with_value(|run| (run.services, Arc::clone(&run.cancel))) else {
             return;
         };
-        let duration = export_duration(frames.len());
-        let suggested = suggested_name(&title);
         let total = frames.len() as u64;
 
         self.run.update_value(|run| run.ticker = None);
@@ -1394,7 +1407,7 @@ impl RendererSession {
             // Dropping this task leaves the encode running, so closing the session stops it
             // through `cancel`.
             let encode = blocking(move || {
-                let outcome = encode_track(&renderer, &frames, duration, &written, settings, &cancel, |step| {
+                let outcome = encode_track(&renderer, frames, &written, settings, &cancel, |step| {
                     let _ = progress_tx.unbounded_send(step);
                 });
                 (renderer, outcome)
