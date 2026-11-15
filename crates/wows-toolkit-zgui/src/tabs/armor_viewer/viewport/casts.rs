@@ -54,6 +54,7 @@ use super::types::Isolate;
 use super::types::SimAgreement;
 use super::types::SplashState;
 use super::types::TrajectoryState;
+use super::types::ViewportChange;
 use super::types::agreement;
 
 /// How far outside the hull a cast ray starts, in model units, so it crosses every plate on the
@@ -311,13 +312,15 @@ impl ViewportModel {
         cx.notify();
     }
 
-    /// Shows or hides the outlines of the ship's named splash boxes.
+    /// Shows or hides the outlines of the ship's named splash boxes. A preference, so the pane
+    /// reports it to be saved.
     pub(super) fn set_show_splash_boxes(&mut self, show: bool, cx: &mut ViewCx) {
         if self.show_splash_boxes == show {
             return;
         }
         self.show_splash_boxes = show;
         self.reupload_current_armor(cx);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 

@@ -150,6 +150,8 @@ impl ViewportModel {
         self.display_settings = upload::DisplaySettings::from_defaults(defaults);
         self.armor_all_visible = defaults.map(|d| d.armor_all_visible).unwrap_or(true);
         self.hull_all_visible = defaults.map(|d| d.hull_all_visible).unwrap_or(false);
+        // Off with no saved row, as the row's own column default and the egui viewer have it.
+        self.show_splash_boxes = defaults.is_some_and(|d| d.show_splash_boxes);
         self.reupload_current_armor(cx);
         cx.notify();
     }

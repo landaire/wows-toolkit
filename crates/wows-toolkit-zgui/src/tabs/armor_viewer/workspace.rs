@@ -199,14 +199,6 @@ struct Following {
     pane: PaneId,
 }
 
-/// The part of `armor_viewer_defaults` the port has no control for, kept as read so a save writes
-/// it back unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-struct UnportedDefaults {
-    /// The row's own column default, for a database with no row yet.
-    show_splash_boxes: bool,
-}
-
 /// What decides the ship a trajectory cast fires and its shell.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CastKey {
@@ -259,7 +251,6 @@ pub struct ArmorWorkspace {
     seek: StoredValue<Option<UnsyncCallback<GameClock>>, LocalStorage>,
     pub pen: RwSignal<PenetrationState, LocalStorage>,
     pub legend: RwSignal<LegendState, LocalStorage>,
-    unported: StoredValue<UnportedDefaults>,
     /// Whether the ships list is open, which the status bar toggles.
     pub sidebar_open: RwSignal<bool, LocalStorage>,
     /// Whether the options rail is open, which the status bar toggles.
@@ -301,7 +292,6 @@ impl ArmorWorkspace {
             seek: StoredValue::new_local(None),
             pen: RwSignal::new_local(PenetrationState::default()),
             legend: RwSignal::new_local(LegendState::default()),
-            unported: StoredValue::new(UnportedDefaults::default()),
             sidebar_open: RwSignal::new_local(true),
             options_open: RwSignal::new_local(true),
             sections: RwSignal::new_local(OptionSectionsOpen::default()),
@@ -615,9 +605,6 @@ impl ArmorWorkspace {
         show_armor: bool,
         xray_highlight: XrayHighlight,
     ) {
-        if let Some(defaults) = defaults {
-            self.unported.set_value(UnportedDefaults { show_splash_boxes: defaults.show_splash_boxes });
-        }
         self.legend.set(LegendState::from_defaults(defaults));
         for viewport in self.viewports_untracked() {
             viewport.apply_armor_defaults(defaults);
@@ -667,7 +654,6 @@ impl ArmorWorkspace {
         let display = active.display_settings();
         let all_visible = active.all_visible();
         let legend = self.legend.get_untracked();
-        let unported = self.unported.get_value();
         let row = ArmorViewerDefaultsRow {
             show_plate_edges: display.show_plate_edges,
             show_waterline: display.show_waterline,
@@ -677,9 +663,7 @@ impl ArmorWorkspace {
             hull_opaque: display.hull_opaque,
             hull_all_visible: all_visible.hull,
             armor_all_visible: all_visible.armor,
-            // Splash boxes have no control here, so they are written back as read and never
-            // overwrite what the other app set.
-            show_splash_boxes: unported.show_splash_boxes,
+            show_splash_boxes: active.splash_state().boxes_shown,
             show_legend: legend.visible,
             legend_collapsed: legend.collapsed,
             legend_pos_x: Some(f64::from(legend.pos.x)),

@@ -697,6 +697,29 @@ fn the_saved_waterline_reaches_every_pane_and_its_toggle_saves_it() {
     assert_eq!(saved.waterline_opacity, f64::from(0.6_f32), "the opacity is kept");
 }
 
+/// The saved splash-box outlines reach the open pane and a pane opened later, and turning them off
+/// saves that back.
+#[test]
+fn the_saved_splash_boxes_reach_every_pane_and_their_toggle_saves_them() {
+    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    let row = ArmorViewerDefaultsRow { show_splash_boxes: true, ..saved_row() };
+    workspace.services.settings.save_armor_defaults(row.clone());
+    workspace.apply_defaults(Some(&row), true, XrayHighlight::Always);
+
+    assert!(workspace.active_untracked().splash_state().boxes_shown);
+    workspace.compare(None);
+    assert!(
+        workspace.active_untracked().splash_state().boxes_shown,
+        "a pane opened later starts from the saved defaults"
+    );
+
+    // As the rail's splash-box button does.
+    workspace.active_untracked().set_show_splash_boxes(false);
+    let saved = workspace.services.settings.read_untracked(|settings| settings.armor_defaults.clone()).flatten();
+    assert!(!saved.expect("the toggle saved the defaults").show_splash_boxes, "the toggle is saved");
+}
+
 /// Choosing a mode in the common settings menu saves it.
 #[test]
 fn choosing_an_xray_mode_in_the_menu_saves_it() {
