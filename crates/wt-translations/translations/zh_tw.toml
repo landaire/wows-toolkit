@@ -1689,6 +1689,15 @@ shatters = "未擊穿"
 angle_dependent = "取決於角度"
 no_data = "沒有貫穿力資料"
 
+[ui.armor.splash]
+hint = "在爆風模式下點擊裝甲，查看爆炸波及的區域"
+half_extent = "爆炸半寬：%{value} 模型單位"
+triangles = "爆炸範圍內的裝甲三角形：%{total}，擊穿：%{penetrated}"
+no_zones = "此處沒有重疊的爆風框"
+zones = "爆炸範圍內的區域"
+direct_hit = "直接命中"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "艦體"
 contents = "內容"

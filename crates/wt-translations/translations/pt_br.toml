@@ -1643,6 +1643,15 @@ shatters = "estilhaça"
 angle_dependent = "depende do ângulo"
 no_data = "sem dados de penetração"
 
+[ui.armor.splash]
+hint = "Clique na blindagem no modo de respingo para ver quais zonas uma explosão atinge"
+half_extent = "Meia extensão da explosão: %{value} unidades do modelo"
+triangles = "Triângulos de blindagem na explosão: %{total}, penetrados: %{penetrated}"
+no_zones = "Nenhuma caixa de respingo se sobrepõe neste ponto"
+zones = "Zonas na explosão"
+direct_hit = "Acerto direto"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Casco"
 contents = "Conteúdo"

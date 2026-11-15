@@ -2419,7 +2419,8 @@ impl ViewportView {
 
         let point: [f32; 3] = surface.world_position.into();
         let reach = self.burst_reach();
-        self.splash_result = Some(splash::compute_splash(point, reach, data, armor.hit_locations.as_ref()));
+        self.splash_result =
+            Some(splash::compute_splash(point, reach, data, armor.hit_locations.as_ref(), &armor.meshes));
         self.reupload_current_armor(cx);
         cx.notify();
     }
@@ -2430,15 +2431,9 @@ impl ViewportView {
     /// at the smallest reach rather than none, so the click is not silently
     /// ignored; the list beside it says no shell was found.
     fn burst_reach(&self) -> splash::ModelUnit {
-        let largest = self.cast_shell.as_ref().map(|cast| &cast.ship).and_then(|ship| {
-            ship.shells
-                .iter()
-                .filter(|shell| matches!(shell.ammo_type, AmmoType::HE | AmmoType::SAP))
-                .map(|shell| shell.caliber)
-                .max_by(|a, b| a.value().total_cmp(&b.value()))
-        });
-        match largest {
-            Some(caliber) => splash::splash_half_extent(caliber),
+        let shell = self.cast_shell.as_ref().and_then(|cast| splash::bursting_shell(&cast.ship.shells));
+        match shell {
+            Some(shell) => splash::splash_half_extent(shell.caliber),
             None => splash::ModelUnit::new(0.0),
         }
     }

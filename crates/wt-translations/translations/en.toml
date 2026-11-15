@@ -1730,6 +1730,15 @@ shatters = "shatters"
 angle_dependent = "depends on the angle"
 no_data = "no penetration data"
 
+[ui.armor.splash]
+hint = "Click armor in splash mode to see which zones a burst reaches"
+half_extent = "Burst half-extent: %{value} model units"
+triangles = "Armor triangles in burst: %{total}, penetrated: %{penetrated}"
+no_zones = "No splash boxes overlap at this point"
+zones = "Zones in the burst"
+direct_hit = "Direct hit"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Hull"
 contents = "Contents"

@@ -29,6 +29,8 @@ use wows_toolkit_viewmodel::armor::arc::compare_with_server;
 use wows_toolkit_viewmodel::armor::arc::describe_arc;
 use wows_toolkit_viewmodel::armor::arc::isolate;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
+use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
+use wows_toolkit_viewmodel::armor::penetration::Ifhe;
 use wowsunpack::ballistics::ImpactResult;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
@@ -38,6 +40,7 @@ use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 
 use super::depth_cues::landed;
+use super::model::Burst;
 use super::model::CastArc;
 use super::model::HitPulse;
 use super::model::PendingComparison;
@@ -295,7 +298,7 @@ impl ViewportModel {
             shown: self.splash_mode,
             boxes_shown: self.show_splash_boxes,
             has_data: self.current_armor.as_ref().is_some_and(|armor| armor.splash_data.is_some()),
-            zones_reached: self.splash_result.as_ref().map(|result| result.hit_zones.len()).unwrap_or(0),
+            zones_reached: self.burst.as_ref().map(|burst| burst.result.hit_zones.len()).unwrap_or(0),
         }
     }
 
@@ -320,14 +323,12 @@ impl ViewportModel {
 
     /// Bursts a shell where the pointer is.
     ///
-    /// The burst is sized by the largest high-explosive or semi-armour-piercing shell the chosen
-    /// attacker carries, which is the shell worth asking about: an armour-piercing round that
-    /// fails to penetrate does not burst outside the hull. Clicking past the ship clears the
-    /// burst.
+    /// The burst is sized by the chosen attacker's bursting shell. Clicking past the ship clears
+    /// the burst.
     pub(super) fn burst_at(&mut self, pointer: Vec2, cx: &mut ViewCx) {
         let Some(rect) = self.last_bounds else { return };
         let Some(surface) = self.viewport.pick(pointer, rect) else {
-            self.splash_result = None;
+            self.burst = None;
             self.reupload_current_armor(cx);
             cx.notify();
             return;
@@ -337,29 +338,25 @@ impl ViewportModel {
         let Some(data) = armor.splash_data.as_ref() else { return };
 
         let point: [f32; 3] = surface.world_position.into();
-        let reach = self.burst_reach();
-        self.splash_result = Some(splash::compute_splash(point, reach, data, armor.hit_locations.as_ref()));
+        let shell = self.cast_shell.as_ref().and_then(|cast| splash::bursting_shell(&cast.ship.shells)).cloned();
+        // With no bursting shell the burst still marks the click at the smallest reach rather than
+        // ignoring it; the readout says no shell sized it.
+        let reach = match &shell {
+            Some(shell) => splash::splash_half_extent(shell.caliber),
+            None => splash::ModelUnit::new(0.0),
+        };
+        let result = splash::compute_splash(point, reach, data, armor.hit_locations.as_ref(), &armor.meshes);
+        self.burst = Some(Burst { result, shell });
         self.reupload_current_armor(cx);
         cx.notify();
     }
 
-    /// How far the chosen attacker's burst reaches.
-    ///
-    /// A ship with no bursting shell, or none chosen, still places a marker at the smallest reach
-    /// rather than none, so the click is not silently ignored; the list beside it says no shell
-    /// was found.
-    fn burst_reach(&self) -> splash::ModelUnit {
-        let largest = self.cast_shell.as_ref().map(|cast| &cast.ship).and_then(|ship| {
-            ship.shells
-                .iter()
-                .filter(|shell| matches!(shell.ammo_type, AmmoType::HE | AmmoType::SAP))
-                .map(|shell| shell.caliber)
-                .max_by(|a, b| a.value().total_cmp(&b.value()))
-        });
-        match largest {
-            Some(caliber) => splash::splash_half_extent(caliber),
-            None => splash::ModelUnit::new(0.0),
-        }
+    /// What the burst on screen reached, with each HE and SAP shell of `ships` held against it.
+    /// `None` while there is no burst.
+    pub(super) fn splash_readout(&self, ships: &[ComparisonShip], ifhe: Ifhe) -> Option<splash::SplashReadout> {
+        let burst = self.burst.as_ref()?;
+
+        Some(splash::splash_readout(&burst.result, burst.shell.as_ref(), ships, ifhe))
     }
 
     /// Whether a ricocheting shell is followed past the bounce.
@@ -752,6 +749,19 @@ impl ArmorViewportState {
 
     pub fn set_show_splash_boxes(self, show: bool) {
         self.update(|this, cx| this.set_show_splash_boxes(show, cx));
+    }
+
+    pub fn splash_readout(self, ships: &[ComparisonShip], ifhe: Ifhe) -> Option<splash::SplashReadout> {
+        self.read(|this| this.splash_readout(ships, ifhe)).flatten()
+    }
+
+    /// Puts a burst on screen as a click would, without the device a click picks through.
+    #[cfg(test)]
+    pub fn set_burst(self, result: splash::SplashResult, shell: Option<ShellInfo>) {
+        self.update(|this, cx| {
+            this.burst = Some(Burst { result, shell });
+            cx.notify();
+        });
     }
 
     pub fn set_continue_on_ricochet(self, on: bool) {

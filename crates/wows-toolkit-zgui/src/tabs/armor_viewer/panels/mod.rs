@@ -6,6 +6,7 @@
 //!   arc a marker selects.
 //! - `export`: the GLB export dialog, and the export it confirms, run off the UI thread.
 //! - `legend`: the armor thickness legend.
+//! - `splash`: the zones a burst reached, and what each compared shell does to their plating.
 //!
 //! The tab owns one `PenetrationState` per pane and hands the panels the viewport's state.
 
@@ -13,6 +14,7 @@ pub mod export;
 pub mod incoming;
 pub mod legend;
 pub mod pen;
+pub mod splash;
 #[cfg(test)]
 mod tests;
 pub mod trajectory;

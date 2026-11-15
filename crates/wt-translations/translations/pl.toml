@@ -1643,6 +1643,15 @@ shatters = "nie penetruje"
 angle_dependent = "zależy od kąta"
 no_data = "brak danych o penetracji"
 
+[ui.armor.splash]
+hint = "Kliknij pancerz w trybie rozbryzgu, aby zobaczyć, do których stref dociera wybuch"
+half_extent = "Połowa rozmiaru wybuchu: %{value} jednostek modelu"
+triangles = "Trójkąty pancerza w wybuchu: %{total}, spenetrowane: %{penetrated}"
+no_zones = "W tym punkcie nie nakładają się żadne strefy rozbryzgu"
+zones = "Strefy w wybuchu"
+direct_hit = "Trafienie bezpośrednie"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Kadłub"
 contents = "Zawartość"

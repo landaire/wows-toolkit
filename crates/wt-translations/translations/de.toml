@@ -1689,6 +1689,15 @@ shatters = "zerschellt"
 angle_dependent = "abhängig vom Winkel"
 no_data = "keine Durchschlagsdaten"
 
+[ui.armor.splash]
+hint = "Klicken Sie im Splash-Modus auf Panzerung, um zu sehen, welche Zonen eine Explosion erreicht"
+half_extent = "Halbe Ausdehnung der Explosion: %{value} Modelleinheiten"
+triangles = "Panzerungsdreiecke in der Explosion: %{total}, durchschlagen: %{penetrated}"
+no_zones = "An dieser Stelle überlappen keine Splash-Boxen"
+zones = "Zonen in der Explosion"
+direct_hit = "Direkter Treffer"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Rumpf"
 contents = "Inhalt"

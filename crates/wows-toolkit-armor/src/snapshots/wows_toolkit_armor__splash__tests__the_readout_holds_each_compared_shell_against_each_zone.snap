@@ -1,0 +1,136 @@
+---
+source: crates/wows-toolkit-armor/src/splash.rs
+expression: readout
+---
+SplashReadout {
+    half_extent: ModelUnit(
+        0.5,
+    ),
+    triangles: Some(
+        BurstTriangles {
+            in_volume: 2,
+            penetrated: 1,
+        },
+    ),
+    zones: [
+        ZoneReadout {
+            zone_name: "Cit",
+            is_direct_hit: true,
+            thickness: Some(
+                Millimeters(
+                    32.0,
+                ),
+            ),
+            max_hp: Some(
+                1000.0,
+            ),
+            verdicts: [
+                ShellVerdict {
+                    ship_name: "Atlanta",
+                    ammo_type: HE,
+                    caliber: Millimeters(
+                        127.0,
+                    ),
+                    penetration: Some(
+                        Millimeters(
+                            26.25,
+                        ),
+                    ),
+                    ifhe_applied: true,
+                    result: Some(
+                        Bounces,
+                    ),
+                },
+                ShellVerdict {
+                    ship_name: "Mogami",
+                    ammo_type: SAP,
+                    caliber: Millimeters(
+                        203.0,
+                    ),
+                    penetration: Some(
+                        Millimeters(
+                            35.0,
+                        ),
+                    ),
+                    ifhe_applied: false,
+                    result: Some(
+                        Penetrates,
+                    ),
+                },
+                ShellVerdict {
+                    ship_name: "Unknown",
+                    ammo_type: HE,
+                    caliber: Millimeters(
+                        152.0,
+                    ),
+                    penetration: None,
+                    ifhe_applied: false,
+                    result: None,
+                },
+            ],
+        },
+        ZoneReadout {
+            zone_name: "Bow 1",
+            is_direct_hit: false,
+            thickness: None,
+            max_hp: None,
+            verdicts: [],
+        },
+        ZoneReadout {
+            zone_name: "SS",
+            is_direct_hit: false,
+            thickness: Some(
+                Millimeters(
+                    13.0,
+                ),
+            ),
+            max_hp: Some(
+                500.0,
+            ),
+            verdicts: [
+                ShellVerdict {
+                    ship_name: "Atlanta",
+                    ammo_type: HE,
+                    caliber: Millimeters(
+                        127.0,
+                    ),
+                    penetration: Some(
+                        Millimeters(
+                            26.25,
+                        ),
+                    ),
+                    ifhe_applied: true,
+                    result: Some(
+                        Penetrates,
+                    ),
+                },
+                ShellVerdict {
+                    ship_name: "Mogami",
+                    ammo_type: SAP,
+                    caliber: Millimeters(
+                        203.0,
+                    ),
+                    penetration: Some(
+                        Millimeters(
+                            35.0,
+                        ),
+                    ),
+                    ifhe_applied: false,
+                    result: Some(
+                        Penetrates,
+                    ),
+                },
+                ShellVerdict {
+                    ship_name: "Unknown",
+                    ammo_type: HE,
+                    caliber: Millimeters(
+                        152.0,
+                    ),
+                    penetration: None,
+                    ifhe_applied: false,
+                    result: None,
+                },
+            ],
+        },
+    ],
+}

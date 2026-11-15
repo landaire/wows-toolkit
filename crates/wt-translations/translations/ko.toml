@@ -1689,6 +1689,15 @@ shatters = "비관통"
 angle_dependent = "각도에 따라 다름"
 no_data = "관통 데이터 없음"
 
+[ui.armor.splash]
+hint = "스플래시 모드에서 장갑을 클릭하여 폭발이 닿는 구역을 확인하세요"
+half_extent = "폭발 범위 반폭: %{value} 모델 단위"
+triangles = "폭발 범위 내 장갑 삼각형: %{total}, 관통: %{penetrated}"
+no_zones = "이 지점에 겹치는 스플래시 박스가 없습니다"
+zones = "폭발 범위 내 구역"
+direct_hit = "직격"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "선체"
 contents = "내용"

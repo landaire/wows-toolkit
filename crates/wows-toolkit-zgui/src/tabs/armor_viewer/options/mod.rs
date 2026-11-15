@@ -46,6 +46,7 @@ use crate::shell::tabs::ModifierKey;
 use crate::tabs::armor_viewer::options::filter::MarkedLabel;
 use crate::tabs::armor_viewer::options::filter::RailFilter;
 use crate::tabs::armor_viewer::panels::pen::PenCheckPanelProps;
+use crate::tabs::armor_viewer::panels::splash::SplashReadoutPanelProps;
 use crate::tabs::armor_viewer::panels::trajectory::TrajectoryPanelProps;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use crate::tabs::armor_viewer::viewport::PaneMenu;
@@ -400,6 +401,16 @@ fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> AnyView {
             }
         }
     });
+    // What the splash tool answers, under the tools while splash mode is on. Not an option, so the
+    // filter puts it away.
+    let splash_readout = (!filter.is_active() && features.is_some_and(|features| features.ship)).then(|| {
+        let pen = workspace.pen;
+        AnyView::new(view! {
+            if move || viewport.splash_state().shown {
+                SplashReadoutPanel(pen = pen, viewport = viewport)
+            }
+        })
+    });
 
     let mut sections: Vec<AnyView> = Vec::new();
     // Not built at all for a model without armor.
@@ -452,6 +463,7 @@ fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> AnyView {
     AnyView::new(view! {
         column(class = "wt-armor-options__content") {
             {tools}
+            {splash_readout}
             {cast_hint}
             {sections}
             {none}

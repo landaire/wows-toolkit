@@ -1643,6 +1643,15 @@ shatters = "no penetra"
 angle_dependent = "depende del ángulo"
 no_data = "sin datos de penetración"
 
+[ui.armor.splash]
+hint = "Haga clic en el blindaje en el modo de salpicadura para ver qué zonas alcanza una explosión"
+half_extent = "Semiextensión de la explosión: %{value} unidades del modelo"
+triangles = "Triángulos de blindaje en la explosión: %{total}, penetrados: %{penetrated}"
+no_zones = "Ninguna zona de salpicadura se superpone en este punto"
+zones = "Zonas en la explosión"
+direct_hit = "Impacto directo"
+hp = "%{value} PS"
+
 [ui.armor.export]
 hull = "Casco"
 contents = "Contenido"

@@ -1689,6 +1689,15 @@ shatters = "se fragmente"
 angle_dependent = "dépend de l'angle"
 no_data = "aucune donnée de pénétration"
 
+[ui.armor.splash]
+hint = "Cliquez sur le blindage en mode splash pour voir quelles zones une explosion atteint"
+half_extent = "Demi-étendue de l'explosion : %{value} unités du modèle"
+triangles = "Triangles de blindage dans l'explosion : %{total}, pénétrés : %{penetrated}"
+no_zones = "Aucune zone d'éclaboussure ne se chevauche à cet endroit"
+zones = "Zones dans l'explosion"
+direct_hit = "Coup direct"
+hp = "%{value} PV"
+
 [ui.armor.export]
 hull = "Coque"
 contents = "Contenu"

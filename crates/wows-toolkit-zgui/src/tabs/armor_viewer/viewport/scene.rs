@@ -825,7 +825,7 @@ impl ViewportModel {
         self.sim_verdicts.clear();
         self.sim_unchecked = 0;
         self.last_plate = None;
-        self.splash_result = None;
+        self.burst = None;
         self.splash_labels.clear();
         self.gap_count = 0;
 

@@ -1689,6 +1689,15 @@ shatters = "versplintert"
 angle_dependent = "hangt af van de hoek"
 no_data = "geen penetratiegegevens"
 
+[ui.armor.splash]
+hint = "Klik in splashmodus op pantser om te zien welke zones een explosie bereikt"
+half_extent = "Halve omvang van de explosie: %{value} modeleenheden"
+triangles = "Pantserdriehoeken in de explosie: %{total}, gepenetreerd: %{penetrated}"
+no_zones = "Op dit punt overlappen geen splashboxen"
+zones = "Zones in de explosie"
+direct_hit = "Voltreffer"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Romp"
 contents = "Inhoud"

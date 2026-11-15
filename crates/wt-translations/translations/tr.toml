@@ -1643,6 +1643,15 @@ shatters = "parçalanır"
 angle_dependent = "açıya bağlı"
 no_data = "delme verisi yok"
 
+[ui.armor.splash]
+hint = "Bir patlamanın hangi bölgelere ulaştığını görmek için sıçrama modunda zırha tıklayın"
+half_extent = "Patlamanın yarı genişliği: %{value} model birimi"
+triangles = "Patlamadaki zırh üçgenleri: %{total}, delinen: %{penetrated}"
+no_zones = "Bu noktada çakışan sıçrama kutusu yok"
+zones = "Patlamadaki bölgeler"
+direct_hit = "Doğrudan isabet"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Gövde"
 contents = "İçerik"

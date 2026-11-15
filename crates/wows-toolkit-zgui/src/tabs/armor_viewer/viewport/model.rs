@@ -152,6 +152,13 @@ impl CastArc {
     }
 }
 
+/// A burst on screen: what it reached, and the shell whose calibre sized it, which its triangles
+/// are counted against. `shell` is `None` when no attacker with a bursting shell was chosen.
+pub(super) struct Burst {
+    pub(super) result: splash::SplashResult,
+    pub(super) shell: Option<ShellInfo>,
+}
+
 /// The export-confirm panel's target, fixed when the panel opens so a selection made while it is
 /// open does not retarget it.
 pub(super) struct ExportConfirm {
@@ -364,8 +371,8 @@ pub struct ViewportModel {
     pub(super) cast_range: Km,
     /// Whether a left click bursts a shell instead of hiding the plate under it.
     pub(super) splash_mode: bool,
-    /// The burst on screen, and what it reached.
-    pub(super) splash_result: Option<splash::SplashResult>,
+    /// The burst on screen.
+    pub(super) burst: Option<Burst>,
     /// Whether the named splash boxes are outlined over the hull.
     pub(super) show_splash_boxes: bool,
     /// The boxes' names and where each is written, while they are outlined.
@@ -461,7 +468,7 @@ impl ViewportModel {
             cast_shell: None,
             cast_range: DEFAULT_CAST_RANGE,
             splash_mode: false,
-            splash_result: None,
+            burst: None,
             show_splash_boxes: false,
             splash_labels: Vec::new(),
             gap_count: 0,

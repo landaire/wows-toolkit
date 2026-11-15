@@ -263,9 +263,9 @@ impl ViewportModel {
             }
         }
 
-        if let Some(result) = self.splash_result.as_ref() {
+        if let Some(burst) = self.burst.as_ref() {
             let (vertices, indices) =
-                splash::build_splash_cube_mesh(result.impact_point, result.half_extent, splash::CUBE_COLOR);
+                splash::build_splash_cube_mesh(burst.result.impact_point, burst.result.half_extent, splash::CUBE_COLOR);
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }

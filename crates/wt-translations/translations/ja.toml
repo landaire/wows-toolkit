@@ -1689,6 +1689,15 @@ shatters = "不貫通"
 angle_dependent = "角度による"
 no_data = "貫通データなし"
 
+[ui.armor.splash]
+hint = "スプラッシュモードで装甲をクリックすると、爆発が及ぶ区画を確認できます"
+half_extent = "爆発範囲の半幅: %{value} モデル単位"
+triangles = "爆発範囲内の装甲三角形: %{total}、貫通: %{penetrated}"
+no_zones = "この地点に重なるスプラッシュボックスはありません"
+zones = "爆発範囲内の区画"
+direct_hit = "直撃"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "船体"
 contents = "内容"

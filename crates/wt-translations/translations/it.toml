@@ -1689,6 +1689,15 @@ shatters = "si frantuma"
 angle_dependent = "dipende dall'angolo"
 no_data = "nessun dato di penetrazione"
 
+[ui.armor.splash]
+hint = "Clicca sulla corazza in modalità splash per vedere quali zone raggiunge un'esplosione"
+half_extent = "Semiampiezza dell'esplosione: %{value} unità del modello"
+triangles = "Triangoli di corazza nell'esplosione: %{total}, penetrati: %{penetrated}"
+no_zones = "Nessun volume splash si sovrappone in questo punto"
+zones = "Zone nell'esplosione"
+direct_hit = "Colpo diretto"
+hp = "%{value} PS"
+
 [ui.armor.export]
 hull = "Scafo"
 contents = "Contenuto"

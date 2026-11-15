@@ -52,5 +52,5 @@ workspace_test(
     package = "wows-toolkit-armor",
     version = "0.1.0",
     deps = ARMOR_DEPS,
-    test_deps = ["//third-party/rust:gettext", "//third-party/rust:pollster", "//third-party/rust:serde_json"],
+    test_deps = ["//third-party/rust:gettext", "//third-party/rust:insta", "//third-party/rust:pollster", "//third-party/rust:serde_json"],
 )

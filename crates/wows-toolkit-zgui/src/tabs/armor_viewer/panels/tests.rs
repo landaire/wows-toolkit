@@ -15,6 +15,9 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_toolkit_armor::assets::load_ship_assets;
 use wows_toolkit_armor::catalog::ShipCatalog;
+use wows_toolkit_armor::splash::ModelUnit;
+use wows_toolkit_armor::splash::SplashResult;
+use wows_toolkit_armor::splash::SplashZoneHit;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
@@ -50,6 +53,7 @@ use crate::tabs::armor_viewer::panels::legend::LegendState;
 use crate::tabs::armor_viewer::panels::pen::PenCheckPanelProps;
 use crate::tabs::armor_viewer::panels::pen::PenetrationState;
 use crate::tabs::armor_viewer::panels::pen::PlateUnderPointer;
+use crate::tabs::armor_viewer::panels::splash::SplashReadoutPanelProps;
 use crate::tabs::armor_viewer::panels::trajectory::TrajectoryPanelProps;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use wows_toolkit_armor::trajectory;
@@ -103,6 +107,7 @@ fn Page(caught: Caught, catalog: Option<Arc<ShipCatalog>>, assets: Option<Arc<Sh
                     viewport = viewport
                 )
                 TrajectoryPanel(pen = pen, viewport = viewport)
+                SplashReadoutPanel(pen = pen, viewport = viewport)
             }
             box(style = "flex: 1; position: relative; background-color: var(--lui-color-panel)") {
                 ArmorLegend(state = legend, on_saved_change = UnsyncCallback::new(move |()| saved.update(|saved| *saved += 1)))
@@ -277,6 +282,50 @@ fn the_trajectory_section_asks_for_a_ship_until_one_is_compared() {
     assert!(!shown(&window, "armor-trajectory-add-ship"));
     assert!(shown(&window, "armor-trajectory-ship"));
     assert!(shown(&window, "armor-trajectory-shell"));
+}
+
+fn zone(name: &str, thickness: Option<f32>, max_hp: Option<f32>, is_direct_hit: bool) -> SplashZoneHit {
+    SplashZoneHit {
+        zone_name: name.to_owned(),
+        box_name: format!("CM_SB_{name}_1"),
+        thickness: thickness.map(Millimeters::from),
+        max_hp,
+        is_direct_hit,
+    }
+}
+
+#[test]
+fn the_splash_readout_lists_each_zone_with_each_compared_shell_against_it() {
+    let (mut window, mounted) = open();
+    assert!(shown(&window, "armor-splash-hint"), "nothing has burst yet");
+
+    mounted.pen.update(|pen| pen.add(ship("PA", "Alpha")));
+    let burst = SplashResult {
+        impact_point: [0.0; 3],
+        half_extent: ModelUnit::new(0.5),
+        direct_hit_box: Some("CM_SB_Cit_1".to_owned()),
+        hit_zones: vec![
+            zone("Cit", Some(32.0), Some(1000.0), true),
+            zone("SS", Some(45.0), Some(500.0), false),
+            zone("Bow", None, None, false),
+        ],
+        plates_in_volume: vec![Millimeters::from(19.0), Millimeters::from(45.0)],
+    };
+    mounted.viewport.set_burst(burst, Some(shell(AmmoType::HE, 203.0, Some(40.0))));
+    window.advance(Duration::from_millis(100));
+
+    assert!(!shown(&window, "armor-splash-hint"));
+    assert_eq!(text_of(&window, "wt-armor-splash__zone-name"), ["Cit", "SS", "Bow"]);
+    assert!(shown(&window, "armor-splash-direct-hit"), "the zone the burst started in is marked");
+    assert_eq!(text_of(&window, "wt-armor-splash__triangles"), ["Armor triangles in burst: 2, penetrated: 1"]);
+    // Only the HE shell is held against each known plating; the bow's plating is unknown.
+    assert_eq!(text_of(&window, "wt-armor-splash__shell-name"), ["Alpha HE 203mm", "Alpha HE 203mm"]);
+    assert_eq!(text_of(&window, "wt-armor-splash__verdict"), ["penetrates", "shatters"]);
+
+    click(&mut window, "armor-pen-ifhe");
+    assert_eq!(text_of(&window, "wt-armor-splash__shell-pen"), ["50mm IFHE", "50mm IFHE"]);
+    assert_eq!(text_of(&window, "wt-armor-splash__verdict"), ["penetrates", "penetrates"], "IFHE lifts it over 45 mm");
+    assert_eq!(text_of(&window, "wt-armor-splash__triangles"), ["Armor triangles in burst: 2, penetrated: 2"]);
 }
 
 /// Escape in the ship search empties what was typed and keeps the caret there.

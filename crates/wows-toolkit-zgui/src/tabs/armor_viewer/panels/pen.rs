@@ -471,7 +471,7 @@ fn ship_block(
 
 /// How a verdict is toned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Tone {
+pub(super) enum Tone {
     Ok,
     Error,
     Warn,
@@ -479,7 +479,7 @@ enum Tone {
 }
 
 impl Tone {
-    fn name(self) -> &'static str {
+    pub(super) fn name(self) -> &'static str {
         match self {
             Self::Ok => "ok",
             Self::Error => "error",
@@ -492,12 +492,19 @@ impl Tone {
 /// What a shell does to a plate of `thickness`, and the tone it reads in. No plate under the
 /// pointer is no question yet, which reads differently from a shell the data has no figure for.
 fn verdict(shell: &ShellInfo, thickness: Option<Millimeters>, ifhe: Ifhe) -> (&'static str, Tone) {
-    match thickness.map(|thickness| check_penetration(shell, thickness, ifhe)) {
+    match thickness {
         None => ("ui.armor.pen.awaiting_plate", Tone::Dim),
-        Some(Some(PenResult::Penetrates)) => ("ui.armor.pen.penetrates", Tone::Ok),
-        Some(Some(PenResult::Bounces)) => ("ui.armor.pen.shatters", Tone::Error),
-        Some(Some(PenResult::AngleDependent)) => ("ui.armor.pen.angle_dependent", Tone::Warn),
-        Some(None) => ("ui.armor.pen.no_data", Tone::Dim),
+        Some(thickness) => result_verdict(check_penetration(shell, thickness, ifhe)),
+    }
+}
+
+/// The words and tone of a penetration check. `None` is a shell the data has no figure for.
+pub(super) fn result_verdict(result: Option<PenResult>) -> (&'static str, Tone) {
+    match result {
+        Some(PenResult::Penetrates) => ("ui.armor.pen.penetrates", Tone::Ok),
+        Some(PenResult::Bounces) => ("ui.armor.pen.shatters", Tone::Error),
+        Some(PenResult::AngleDependent) => ("ui.armor.pen.angle_dependent", Tone::Warn),
+        None => ("ui.armor.pen.no_data", Tone::Dim),
     }
 }
 
@@ -517,13 +524,18 @@ fn shell_row(row: usize, shell: &ShellInfo, thickness: Option<Millimeters>, ifhe
 
 /// The ammo type and calibre, which tells two of a ship's shells apart.
 pub(super) fn shell_label(shell: &ShellInfo) -> String {
-    let ammo = match &shell.ammo_type {
+    ammo_label(&shell.ammo_type, shell.caliber)
+}
+
+/// `ammo` and `caliber` as a shell label reads them.
+pub(super) fn ammo_label(ammo: &AmmoType, caliber: Millimeters) -> String {
+    let ammo = match ammo {
         AmmoType::AP => "AP",
         AmmoType::HE => "HE",
         AmmoType::SAP => "SAP",
         AmmoType::Unknown(_) => "?",
     };
-    format!("{ammo} {:.0}mm", shell.caliber.value())
+    format!("{ammo} {:.0}mm", caliber.value())
 }
 
 /// What the shell brings to the plate: a flat figure for HE and SAP. AP is measured by overmatch

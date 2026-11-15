@@ -1643,6 +1643,15 @@ shatters = "roztříští se"
 angle_dependent = "závisí na úhlu"
 no_data = "žádná data o průniku"
 
+[ui.armor.splash]
+hint = "Klikněte na pancíř v režimu rozstřiku a zjistěte, které zóny výbuch zasáhne"
+half_extent = "Poloviční rozměr výbuchu: %{value} jednotek modelu"
+triangles = "Trojúhelníky pancíře ve výbuchu: %{total}, prostřeleno: %{penetrated}"
+no_zones = "V tomto bodě se nepřekrývají žádné oblasti rozstřiku"
+zones = "Zóny ve výbuchu"
+direct_hit = "Přímý zásah"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "Trup"
 contents = "Obsah"

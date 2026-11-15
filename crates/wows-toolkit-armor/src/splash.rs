@@ -11,6 +11,14 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
+use wows_toolkit_viewmodel::armor::penetration::Ifhe;
+use wows_toolkit_viewmodel::armor::penetration::PenResult;
+use wows_toolkit_viewmodel::armor::penetration::check_penetration;
+use wows_toolkit_viewmodel::armor::penetration::he_penetration;
+use wows_toolkit_viewmodel::armor::penetration::sap_penetration;
+use wowsunpack::export::armor_ray::transform_point;
+use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::HitLocation;
 use wowsunpack::game_params::types::Millimeters;
@@ -88,10 +96,9 @@ pub struct SplashResult {
     pub direct_hit_box: Option<String>,
     /// Every zone the burst reached, the one it started in first.
     pub hit_zones: Vec<SplashZoneHit>,
-    /// How many armour triangles fall inside the burst, and how many of those
-    /// the shell gets through. Both zero until a shell is shaded against it.
-    pub triangles_in_volume: usize,
-    pub triangles_penetrated: usize,
+    /// The plating of each armour triangle whose centre falls inside the
+    /// burst, which a shell is counted against afterwards.
+    pub plates_in_volume: Vec<Millimeters>,
 }
 
 impl SplashResult {
@@ -209,6 +216,7 @@ pub fn compute_splash(
     half_extent: ModelUnit,
     splash_data: &ShipSplashData,
     hit_locations: Option<&HashMap<String, HitLocation>>,
+    armor_meshes: &[InteractiveArmorMesh],
 ) -> SplashResult {
     let reach = half_extent.value();
     let burst_min = [impact_point[0] - reach, impact_point[1] - reach, impact_point[2] - reach];
@@ -249,32 +257,176 @@ pub fn compute_splash(
         half_extent,
         direct_hit_box,
         hit_zones,
-        triangles_in_volume: 0,
-        triangles_penetrated: 0,
+        plates_in_volume: plates_in_burst(armor_meshes, burst_min, burst_max),
     }
 }
 
-/// How much armour a shell's burst gets through.
+/// The plating of every armour triangle whose centre lies inside the burst.
 ///
-/// `None` when the shell is neither high-explosive nor semi-armour-piercing,
-/// and when the one it is carries no published figure: an absent figure is
-/// not zero penetration, and reporting it as zero would say the shell bounces
-/// off everything.
-pub fn shell_pen_mm(shell: &ShellInfo, ifhe: bool) -> Option<Millimeters> {
-    let raw = match shell.ammo_type {
-        AmmoType::HE => shell.he_pen_mm.map(|base| if ifhe { base * 1.25 } else { base }),
-        AmmoType::SAP => shell.sap_pen_mm,
-        _ => None,
-    }?;
-    Some(Millimeters::new(raw))
+/// A triangle the mesh carries no plate record for is left out: its plating
+/// is unknown, and counting it as zero would claim it is penetrated.
+fn plates_in_burst(meshes: &[InteractiveArmorMesh], burst_min: [f32; 3], burst_max: [f32; 3]) -> Vec<Millimeters> {
+    let mut plates = Vec::new();
+    for mesh in meshes {
+        for (triangle, corners) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+            let Some(info) = mesh.triangle_info.get(triangle) else { continue };
+            let Some(centre) = triangle_centre(mesh, corners) else { continue };
+
+            if point_in_box(centre, burst_min, burst_max) {
+                plates.push(Millimeters::new(info.thickness_mm));
+            }
+        }
+    }
+
+    plates
 }
 
-/// Whether a shell's burst gets through `thickness`.
-///
-/// `None` when the shell's penetration is unknown, so a caller can say so
-/// rather than show a verdict it cannot support.
-pub fn shell_penetrates(shell: &ShellInfo, thickness: Millimeters, ifhe: bool) -> Option<bool> {
-    Some(shell_pen_mm(shell, ifhe)?.value() >= thickness.value())
+/// A triangle's centre in ship space. `None` when the mesh's own indices do
+/// not reach its corners, which a truncated model can produce.
+fn triangle_centre(mesh: &InteractiveArmorMesh, corners: &[u32; 3]) -> Option<[f32; 3]> {
+    let mut centre = [0.0_f32; 3];
+    for &corner in corners {
+        let position = *mesh.positions.get(corner as usize)?;
+        let position = match &mesh.transform {
+            Some(transform) => transform_point(transform, position),
+            None => position,
+        };
+        for (sum, coordinate) in centre.iter_mut().zip(position) {
+            *sum += coordinate / 3.0;
+        }
+    }
+
+    Some(centre)
+}
+
+/// The shell whose burst a ship is asked about: its largest high-explosive or
+/// semi-armour-piercing one. An armour-piercing round that fails to
+/// penetrate does not burst outside the hull.
+pub fn bursting_shell(shells: &[ShellInfo]) -> Option<&ShellInfo> {
+    shells
+        .iter()
+        .filter(|shell| matches!(shell.ammo_type, AmmoType::HE | AmmoType::SAP))
+        .max_by(|a, b| a.caliber.value().total_cmp(&b.caliber.value()))
+}
+
+/// The flat penetration an HE or SAP shell brings. `None` for any other shell
+/// and for one that carries no published figure: an absent figure is not zero
+/// penetration.
+fn flat_penetration(shell: &ShellInfo, ifhe: Ifhe) -> Option<Millimeters> {
+    match shell.ammo_type {
+        AmmoType::HE => he_penetration(shell, ifhe),
+        AmmoType::SAP => sap_penetration(shell),
+        AmmoType::AP | AmmoType::Unknown(_) => None,
+    }
+}
+
+/// One HE or SAP shell of a compared ship held against a zone's plating.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellVerdict {
+    pub ship_name: String,
+    pub ammo_type: AmmoType,
+    pub caliber: Millimeters,
+    /// `None` when the shell carries no published figure.
+    pub penetration: Option<Millimeters>,
+    /// Whether Inertia Fuse for HE Shells raised `penetration`.
+    pub ifhe_applied: bool,
+    /// `None` when the penetration is unknown.
+    pub result: Option<PenResult>,
+}
+
+/// One zone a burst reached, with what each compared shell does to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneReadout {
+    pub zone_name: String,
+    pub is_direct_hit: bool,
+    pub thickness: Option<Millimeters>,
+    pub max_hp: Option<f32>,
+    /// Empty when the zone's plating is unknown, since no verdict can be
+    /// reached without it.
+    pub verdicts: Vec<ShellVerdict>,
+}
+
+/// How many armour triangles a burst holds, and how many of those the shell
+/// that sized it gets through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BurstTriangles {
+    pub in_volume: usize,
+    pub penetrated: usize,
+}
+
+/// What the splash readout lists for one burst.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplashReadout {
+    pub half_extent: ModelUnit,
+    /// `None` when the burst reached no zone, when no shell sized it, when
+    /// that shell has no published penetration, or when no armour triangle
+    /// lies inside it: shading plates no zone holds would claim damage the
+    /// game does not deal.
+    pub triangles: Option<BurstTriangles>,
+    pub zones: Vec<ZoneReadout>,
+}
+
+/// The readout for `result`: each zone with every HE and SAP shell of
+/// `ships` held against its plating, and the burst's triangles counted
+/// against `burst_shell`, the shell that sized it.
+pub fn splash_readout(
+    result: &SplashResult,
+    burst_shell: Option<&ShellInfo>,
+    ships: &[ComparisonShip],
+    ifhe: Ifhe,
+) -> SplashReadout {
+    let shells: Vec<(&str, &ShellInfo)> = ships
+        .iter()
+        .flat_map(|ship| {
+            ship.shells
+                .iter()
+                .filter(|shell| matches!(shell.ammo_type, AmmoType::HE | AmmoType::SAP))
+                .map(|shell| (ship.display_name.as_str(), shell))
+        })
+        .collect();
+
+    let zones = result
+        .hit_zones
+        .iter()
+        .map(|zone| {
+            let verdicts = match zone.thickness {
+                Some(thickness) => shells
+                    .iter()
+                    .map(|(ship_name, shell)| {
+                        let penetration = flat_penetration(shell, ifhe);
+                        ShellVerdict {
+                            ship_name: (*ship_name).to_owned(),
+                            ammo_type: shell.ammo_type.clone(),
+                            caliber: shell.caliber,
+                            ifhe_applied: penetration.is_some()
+                                && ifhe == Ifhe::Applied
+                                && shell.ammo_type == AmmoType::HE,
+                            penetration,
+                            result: check_penetration(shell, thickness, ifhe),
+                        }
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            ZoneReadout {
+                zone_name: zone.zone_name.clone(),
+                is_direct_hit: zone.is_direct_hit,
+                thickness: zone.thickness,
+                max_hp: zone.max_hp,
+                verdicts,
+            }
+        })
+        .collect();
+
+    let triangles = burst_shell
+        .filter(|_| result.reached_anything() && !result.plates_in_volume.is_empty())
+        .and_then(|shell| flat_penetration(shell, ifhe))
+        .map(|penetration| BurstTriangles {
+            in_volume: result.plates_in_volume.len(),
+            penetrated: result.plates_in_volume.iter().filter(|plate| penetration >= **plate).count(),
+        });
+
+    SplashReadout { half_extent: result.half_extent, triangles, zones }
 }
 
 /// The burst volume, drawn as the twelve edges of its box.
@@ -424,7 +576,7 @@ mod tests {
     fn a_burst_inside_a_box_records_it_as_a_direct_hit() {
         let ship = data(vec![splash_box("CM_SB_cit_1", [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])]);
 
-        let result = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.1), &ship, None);
+        let result = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.1), &ship, None, &[]);
 
         assert_eq!(result.direct_hit_box.as_deref(), Some("CM_SB_cit_1"));
         assert!(result.hit_zones[0].is_direct_hit);
@@ -435,7 +587,7 @@ mod tests {
         let ship = data(vec![splash_box("CM_SB_cit_1", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])]);
 
         // Centred outside the box, but wide enough to reach into it.
-        let result = compute_splash([-0.5, 0.5, 0.5], ModelUnit::new(1.0), &ship, None);
+        let result = compute_splash([-0.5, 0.5, 0.5], ModelUnit::new(1.0), &ship, None, &[]);
 
         assert!(result.direct_hit_box.is_none(), "the burst did not start inside");
         assert_eq!(result.hit_zones.len(), 1, "but it reached the box");
@@ -447,7 +599,7 @@ mod tests {
         let ship = data(vec![splash_box("CM_SB_cit_1", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])]);
 
         // The burst ends exactly on the near face.
-        let result = compute_splash([-1.0, 0.5, 0.5], ModelUnit::new(1.0), &ship, None);
+        let result = compute_splash([-1.0, 0.5, 0.5], ModelUnit::new(1.0), &ship, None, &[]);
 
         assert!(!result.reached_anything());
     }
@@ -461,7 +613,7 @@ mod tests {
             splash_box("CM_SB_zzz_1", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
         ]);
 
-        let result = compute_splash([0.5, 0.5, 0.5], ModelUnit::new(1.0), &ship, None);
+        let result = compute_splash([0.5, 0.5, 0.5], ModelUnit::new(1.0), &ship, None, &[]);
 
         assert_eq!(result.hit_zones.len(), 2, "one entered, one reached");
         assert_eq!(result.hit_zones[0].box_name, "CM_SB_zzz_1", "the one entered leads despite sorting last");
@@ -479,7 +631,7 @@ mod tests {
             splash_box("CM_SB_gk_1_1", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
         ]);
 
-        let result = compute_splash([0.5, 0.5, 0.5], ModelUnit::new(0.1), &ship, None);
+        let result = compute_splash([0.5, 0.5, 0.5], ModelUnit::new(0.1), &ship, None, &[]);
 
         assert_eq!(result.direct_hit_box.as_deref(), Some("CM_SB_ss_1"));
     }
@@ -488,7 +640,7 @@ mod tests {
     fn a_zone_with_no_hit_location_reports_an_unknown_thickness_not_a_zero_one() {
         let ship = data(vec![splash_box("CM_SB_cit_1", [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])]);
 
-        let result = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.1), &ship, None);
+        let result = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.1), &ship, None, &[]);
 
         assert!(result.hit_zones[0].thickness.is_none(), "an unnamed zone's plating is unknown, not absent");
         assert!(result.hit_zones[0].max_hp.is_none());
@@ -573,5 +725,162 @@ mod tests {
         assert_eq!(highlight_color(Some(true)), PEN_COLOR);
         assert_eq!(highlight_color(Some(false)), NO_PEN_COLOR);
         assert_eq!(highlight_color(None), NO_PEN_COLOR);
+    }
+
+    fn shell(ammo_type: AmmoType, caliber: f32, he_pen_mm: Option<f32>, sap_pen_mm: Option<f32>) -> ShellInfo {
+        ShellInfo {
+            name: "PTEST".to_string(),
+            ammo_type,
+            caliber: Millimeters::new(caliber),
+            he_pen_mm,
+            sap_pen_mm,
+            alpha_damage: 0.0,
+            muzzle_velocity: 0.0,
+            mass_kg: 0.0,
+            krupp: 0.0,
+            ricochet_angle: None,
+            always_ricochet_angle: None,
+            fuse_time: None,
+            fuse_threshold: None,
+            burn_prob: None,
+            air_drag: 0.0,
+            normalization: None,
+            cap: true,
+        }
+    }
+
+    fn ship(name: &str, shells: Vec<ShellInfo>) -> ComparisonShip {
+        ComparisonShip {
+            param_index: name.to_string(),
+            display_name: name.to_string(),
+            tier: 10,
+            nation: "usa".to_string(),
+            species: wowsunpack::game_params::types::Species::Cruiser,
+            shells,
+        }
+    }
+
+    fn hit_location(thickness: f32, max_hp: f32, box_name: &str) -> HitLocation {
+        HitLocation::builder()
+            .max_hp(max_hp)
+            .hl_type("test".to_string())
+            .thickness(thickness)
+            .splash_boxes(vec![box_name.to_string()])
+            .build()
+    }
+
+    /// One small triangle per `(centre, thickness)`, the triangle at index
+    /// `missing_info` left without a plate record.
+    fn plate_mesh(
+        plates: &[([f32; 3], f32)],
+        transform: Option<[f32; 16]>,
+        missing_info: Option<usize>,
+    ) -> InteractiveArmorMesh {
+        let mut positions = Vec::new();
+        let mut triangle_info = Vec::new();
+        for (index, &(centre, thickness)) in plates.iter().enumerate() {
+            positions.push([centre[0] - 0.01, centre[1] - 0.01, centre[2]]);
+            positions.push([centre[0] + 0.02, centre[1] - 0.01, centre[2]]);
+            positions.push([centre[0] - 0.01, centre[1] + 0.02, centre[2]]);
+            if missing_info != Some(index) {
+                triangle_info.push(wowsunpack::export::gltf_export::ArmorTriangleInfo {
+                    model_index: 1,
+                    triangle_index: index as u32,
+                    material_id: 0,
+                    material: wowsunpack::game_params::ttx::armor_material::ArmorMaterial::parse("Cit_Belt")
+                        .expect("a table key"),
+                    zone: "Citadel".to_string(),
+                    thickness_mm: thickness,
+                    layers: vec![thickness],
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    hidden: false,
+                });
+            }
+        }
+        let count = positions.len();
+
+        InteractiveArmorMesh {
+            name: "CM_PA_test".to_string(),
+            positions,
+            normals: vec![[0.0, 1.0, 0.0]; count],
+            indices: (0..count as u32).collect(),
+            colors: vec![[0.0, 0.0, 0.0, 1.0]; count],
+            triangle_info,
+            transform,
+        }
+    }
+
+    #[test]
+    fn bursting_shell_is_the_largest_he_or_sap_shell() {
+        let shells = vec![
+            shell(AmmoType::AP, 406.0, None, None),
+            shell(AmmoType::HE, 127.0, Some(21.0), None),
+            shell(AmmoType::SAP, 203.0, None, Some(35.0)),
+        ];
+
+        let chosen = bursting_shell(&shells).expect("a bursting shell is carried");
+
+        assert_eq!(chosen.ammo_type, AmmoType::SAP, "the larger AP shell does not burst outside the hull");
+        assert!(bursting_shell(&shells[..1]).is_none());
+    }
+
+    #[test]
+    fn a_turret_plate_is_placed_before_it_is_tested_against_the_burst() {
+        let mut moved_by_ten = [0.0_f32; 16];
+        for axis in 0..4 {
+            moved_by_ten[axis * 5] = 1.0;
+        }
+        moved_by_ten[12] = 10.0;
+        let turret = plate_mesh(&[([0.0, 0.0, 0.0], 76.0)], Some(moved_by_ten), None);
+        let hull = plate_mesh(&[([10.0, 0.0, 0.0], 25.0), ([10.0, 0.1, 0.0], 32.0)], None, Some(1));
+        let ship = data(vec![splash_box("CM_SB_gk_1_1", [9.0, -1.0, -1.0], [11.0, 1.0, 1.0])]);
+
+        let result = compute_splash([10.0, 0.0, 0.0], ModelUnit::new(0.5), &ship, None, &[turret, hull]);
+
+        // The turret plate counts once moved into the burst; the hull triangle with no plate record
+        // does not count at all.
+        assert_eq!(result.plates_in_volume, vec![Millimeters::new(76.0), Millimeters::new(25.0)]);
+    }
+
+    #[test]
+    fn the_readout_holds_each_compared_shell_against_each_zone() {
+        let mut ship_data = data(vec![
+            splash_box("CM_SB_cit_1", [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]),
+            splash_box("CM_SB_ss_1", [1.0, -1.0, -1.0], [3.0, 1.0, 1.0]),
+            splash_box("CM_SB_bow_1", [-1.0, 1.0, -1.0], [1.0, 3.0, 1.0]),
+        ]);
+        let locations = HashMap::from([
+            ("Cit".to_string(), hit_location(32.0, 1000.0, "CM_SB_cit_1")),
+            ("SS".to_string(), hit_location(13.0, 500.0, "CM_SB_ss_1")),
+        ]);
+        ship_data.box_to_zone = HashMap::from([
+            ("CM_SB_cit_1".to_string(), "Cit".to_string()),
+            ("CM_SB_ss_1".to_string(), "SS".to_string()),
+        ]);
+        let meshes =
+            [plate_mesh(&[([0.8, 0.5, 0.0], 19.0), ([1.2, 0.6, 0.0], 50.0), ([5.0, 0.0, 0.0], 10.0)], None, None)];
+        let atlanta =
+            ship("Atlanta", vec![shell(AmmoType::AP, 127.0, None, None), shell(AmmoType::HE, 127.0, Some(21.0), None)]);
+        let mogami = ship("Mogami", vec![shell(AmmoType::SAP, 203.0, None, Some(35.0))]);
+        let unknown = ship("Unknown", vec![shell(AmmoType::HE, 152.0, None, None)]);
+        let burst_shell = bursting_shell(&atlanta.shells).cloned();
+        // Wide enough to enter the citadel box, reach the superstructure and bow boxes beside it, and
+        // hold two of the three plates.
+        let result = compute_splash([0.8, 0.6, 0.0], ModelUnit::new(0.5), &ship_data, Some(&locations), &meshes);
+
+        let readout = splash_readout(&result, burst_shell.as_ref(), &[atlanta, mogami, unknown], Ifhe::Applied);
+
+        insta::assert_debug_snapshot!(readout);
+    }
+
+    #[test]
+    fn no_triangles_are_counted_without_a_shell_to_count_them_against() {
+        let ship_data = data(vec![splash_box("CM_SB_cit_1", [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])]);
+        let meshes = [plate_mesh(&[([0.0, 0.0, 0.0], 19.0)], None, None)];
+        let result = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.5), &ship_data, None, &meshes);
+        let no_figure = shell(AmmoType::HE, 152.0, None, None);
+
+        assert_eq!(splash_readout(&result, None, &[], Ifhe::NotApplied).triangles, None);
+        assert_eq!(splash_readout(&result, Some(&no_figure), &[], Ifhe::NotApplied).triangles, None);
     }
 }

@@ -1689,6 +1689,15 @@ shatters = "未击穿"
 angle_dependent = "取决于角度"
 no_data = "没有穿深数据"
 
+[ui.armor.splash]
+hint = "在溅射模式下单击装甲，查看爆炸波及的区域"
+half_extent = "爆炸半宽：%{value} 模型单位"
+triangles = "爆炸范围内的装甲三角形：%{total}，击穿：%{penetrated}"
+no_zones = "此处没有重叠的溅射框"
+zones = "爆炸范围内的区域"
+direct_hit = "直接命中"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "舰体"
 contents = "内容"

@@ -1689,6 +1689,15 @@ shatters = "เจาะไม่เข้า"
 angle_dependent = "ขึ้นกับมุม"
 no_data = "ไม่มีข้อมูลการเจาะทะลุ"
 
+[ui.armor.splash]
+hint = "คลิกเกราะในโหมดสแปลชเพื่อดูว่าแรงระเบิดไปถึงโซนใดบ้าง"
+half_extent = "ครึ่งขนาดของแรงระเบิด: %{value} หน่วยโมเดล"
+triangles = "สามเหลี่ยมเกราะในแรงระเบิด: %{total}, เจาะทะลุ: %{penetrated}"
+no_zones = "ไม่มีกล่องสแปลชซ้อนทับที่จุดนี้"
+zones = "โซนในแรงระเบิด"
+direct_hit = "โดนตรง"
+hp = "%{value} HP"
+
 [ui.armor.export]
 hull = "ตัวเรือ"
 contents = "เนื้อหา"

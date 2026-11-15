@@ -16616,6 +16616,7 @@ dependencies = [
  "bytemuck",
  "gettext",
  "image",
+ "insta",
  "nalgebra",
  "pollster 0.4.0",
  "rootcause",
