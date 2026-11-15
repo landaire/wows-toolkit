@@ -86,6 +86,14 @@ pub fn render_many(workspace: ReplayWorkspace, paths: Vec<PathBuf>, target: Batc
             });
             let watch = async {
                 while let Some(step) = steps.next().await {
+                    // The replays behind it, and how far into this one's frames the encode is.
+                    let progress = match step.frames {
+                        Some(frames) => Progress::new(
+                            step.done as u64 * frames.total + frames.done,
+                            step.total as u64 * frames.total,
+                        ),
+                        None => Progress::new(step.done as u64, step.total as u64),
+                    };
                     job.report(Job {
                         name: t!(
                             "ui.replay.renderer.batch_progress",
@@ -94,7 +102,7 @@ pub fn render_many(workspace: ReplayWorkspace, paths: Vec<PathBuf>, target: Batc
                             replay = step.replay
                         )
                         .into_owned(),
-                        progress: Progress::new(step.done as u64, step.total as u64),
+                        progress,
                     });
                 }
             };

@@ -11,6 +11,8 @@ use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_replay_data::force_reindex::version_said;
+use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;
@@ -421,4 +423,82 @@ fn a_replay_landing_in_a_pinned_folder_is_indexed_under_its_own_source() {
     std::fs::copy(fixture(FIXTURES[0]), &played).expect("the replay is copied");
     simulated_watch::report(&main_dir, DirChange::Appeared(played));
     settle_until(&mut window, "the install's battle is indexed", |_| live().is_some());
+}
+
+/// Writes a battle played in the rating fixture's ship under the Live source rooted at the
+/// install's replays directory, as an index write without a rating table stores it.
+fn store_unrated_battle(control: BrowserControl, install: &tempfile::TempDir) -> PathBuf {
+    let (pool, runtime) = index(control);
+    let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
+    let path = replays.join("stored.wowsreplay");
+    runtime.block_on(async {
+        let now = jiff::Timestamp::now();
+        let source = query::ensure_default_source(&pool, &replays, now).await.expect("the live source is made");
+        let arena_id = ArenaId::new(4_100_200_301);
+        let indexed = ObjectiveMatch {
+            arena_id,
+            timestamp: now,
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: None,
+        };
+        query::upsert_match(&pool, &indexed).await.expect("the match inserts");
+        let record = ReplayRecord {
+            arena_id,
+            source_id: source,
+            replay_path: path.clone(),
+            file_mtime: None,
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: Some(FIXTURE_PR_SHIP_ID.into()),
+            self_survived: Some(true),
+            self_damage: Some(50_000),
+            self_kills: Some(1),
+            self_pr: None,
+            results_available: true,
+            indexed_at: now,
+        };
+        query::upsert_record(&pool, &record).await.expect("the record inserts");
+    });
+
+    path
+}
+
+/// A battle that lands is listed at once, and its row reads what the index stored of it as soon
+/// as the write ends rather than at the next relist.
+#[test]
+fn a_landed_battles_row_reads_the_index_once_it_is_written() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    let listing = control.install_listing().expect("the install has a listing");
+
+    let path = store_unrated_battle(control, &install);
+    landed_indexed(control, FolderId::INSTALL, true);
+
+    settle_until(&mut window, "the row reads the stored battle", |_| {
+        listing.summaries.with_untracked(|summaries| summaries.contains_key(&path))
+    });
+}
+
+/// A battle stored without a rating is rated once the table arrives, and its row reads the
+/// rating.
+#[test]
+fn a_battle_stored_unrated_is_rated_when_the_table_arrives() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    let listing = control.install_listing().expect("the install has a listing");
+    let path = store_unrated_battle(control, &install);
+
+    control.adopt_personal_rating(Arc::new(fixture_personal_rating_data()));
+
+    settle_until(&mut window, "the stored battle is rated", |_| {
+        listing.summaries.with_untracked(|summaries| summaries.get(&path).and_then(|summary| summary.self_pr)).is_some()
+    });
 }

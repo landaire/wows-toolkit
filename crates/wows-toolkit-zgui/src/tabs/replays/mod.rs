@@ -180,6 +180,7 @@ pub fn ReplaysTab() -> impl IntoView {
     let offer = GameDataOffer::new();
 
     load_personal_rating(workspace);
+    follow_personal_rating(workspace, control);
     layout::persist(workspace);
     follow_dock(workspace);
     follow_session(workspace);
@@ -324,6 +325,15 @@ fn load_personal_rating(workspace: ReplayWorkspace) {
         });
     });
     on_cleanup_local(move || drop(loading));
+}
+
+/// Hands the browser the rating table as it arrives, to rate the index rows stored without one.
+fn follow_personal_rating(workspace: ReplayWorkspace, control: BrowserControl) {
+    let handing = RenderEffect::new(move |_| {
+        let Some(table) = workspace.personal_rating.get() else { return };
+        control.adopt_personal_rating(table);
+    });
+    on_cleanup_local(move || drop(handing));
 }
 
 /// Lets go of closed tabs, and of viewports that moved into windows of their own.

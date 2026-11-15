@@ -19,6 +19,7 @@ use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::config::hide_command_parts;
 use wows_minimap_renderer::toggles::TOGGLES;
 use wows_minimap_renderer::toggles::Toggle;
 use wows_minimap_renderer::track_file::TrackFile;
@@ -153,8 +154,8 @@ struct Demo {
     options: RenderOptions,
     show_dead_ships: bool,
     switches: Vec<Switch>,
-    /// The trails through the frame they were derived for.
-    trails: Option<(FrameIndex, Vec<DrawCommand>)>,
+    /// The trails, and what they were derived for.
+    trails: Option<(TrailKey, Vec<DrawCommand>)>,
 
     tour: Tour,
     before_tour: Option<Settings>,
@@ -401,18 +402,35 @@ impl Demo {
     /// Frame `frame`'s commands, behind them the trails so far when trails
     /// are on, as the desktop viewer draws them.
     fn commands_for(&mut self, frame: FrameIndex) -> Vec<DrawCommand> {
-        let shown = &self.frames[frame.get()];
-        if !self.options.show_trails {
-            return shown.clone();
-        }
+        let options = &self.options;
+        let trails: &[DrawCommand] = if options.show_trails || options.show_speed_trails {
+            let wanted = TrailKey { frame, by_speed: options.show_speed_trails, with_dead: options.show_dead_trails };
+            if self.trails.as_ref().map(|(key, _)| *key) != Some(wanted) {
+                self.trails = Some((wanted, trails_through(&self.frames[..=frame.get()], options)));
+            }
+            self.trails.as_ref().map_or(&[][..], |(_, trails)| trails.as_slice())
+        } else {
+            &[]
+        };
 
-        if self.trails.as_ref().map(|(at, _)| *at) != Some(frame) {
-            self.trails = Some((frame, trails_through(&self.frames[..=frame.get()])));
-        }
-        let trails = self.trails.as_ref().map_or(&[][..], |(_, trails)| trails.as_slice());
-
-        trails.iter().chain(shown).cloned().collect()
+        trails
+            .iter()
+            .chain(&self.frames[frame.get()])
+            .cloned()
+            .map(|mut command| {
+                hide_command_parts(&mut command, options);
+                command
+            })
+            .collect()
     }
+}
+
+/// What a set of derived trails was derived for: the frame and the trail switches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TrailKey {
+    frame: FrameIndex,
+    by_speed: bool,
+    with_dead: bool,
 }
 
 /// What the demo draws before the visitor changes anything: the desktop

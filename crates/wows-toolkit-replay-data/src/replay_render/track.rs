@@ -70,6 +70,8 @@ pub struct Track {
     pub map_origin: (f32, f32),
     /// The map's space name, which a peer watching this playback loads art by.
     pub space: String,
+    /// What an exported video of this battle is called, without its extension.
+    pub video_stem: String,
 }
 
 impl Track {
@@ -134,17 +136,13 @@ impl Track {
             .collect()
     }
 
-    /// The frames an export covers.
+    /// The first frame an export covers.
     ///
     /// A replay records the loading screen and the countdown before the battle
     /// proper; unless the reader asked for them, an export starts where the
     /// battle did.
-    pub fn frames_to_export(&self, include_pre_battle: bool) -> &[Vec<DrawCommand>] {
-        if include_pre_battle {
-            return &self.frames;
-        }
-        let from = self.frame_at(self.battle_start.seconds());
-        self.frames.get(from.0..).unwrap_or(&self.frames)
+    pub fn export_start(&self, include_pre_battle: bool) -> FrameIndex {
+        if include_pre_battle { FrameIndex::FIRST } else { self.frame_at(self.battle_start.seconds()) }
     }
 
     /// The game time of the last frame, in seconds.
@@ -191,6 +189,7 @@ pub fn bake(
         version: baked.version,
         map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
         space: baked.map_name,
+        video_stem: baked.video_stem,
     };
 
     Ok((track, baked.renderer))
