@@ -150,6 +150,18 @@ pub const TOGGLES: &[Toggle] = &[
         write: |o, _, v| o.show_trails = v,
     },
     Toggle {
+        id: "renderer-opt-speed-trails",
+        label_key: "ui.renderer.settings.speed_trails",
+        read: |o, _| o.show_speed_trails,
+        write: |o, _, v| o.show_speed_trails = v,
+    },
+    Toggle {
+        id: "renderer-opt-dead-trails",
+        label_key: "ui.renderer.settings.dead_ship_trails",
+        read: |o, _| o.show_dead_trails,
+        write: |o, _, v| o.show_dead_trails = v,
+    },
+    Toggle {
         id: "renderer-opt-ship-ranges",
         label_key: "ui.renderer.settings.ship_ranges",
         read: |o, _| o.show_ship_config,
@@ -160,6 +172,12 @@ pub const TOGGLES: &[Toggle] = &[
         label_key: "ui.renderer.settings.team_advantage",
         read: |o, _| o.show_advantage,
         write: |o, _, v| o.show_advantage = v,
+    },
+    Toggle {
+        id: "renderer-opt-score-timers",
+        label_key: "ui.renderer.settings.score_timers",
+        read: |o, _| o.show_score_timer,
+        write: |o, _, v| o.show_score_timer = v,
     },
     Toggle {
         id: "renderer-opt-team-rosters",

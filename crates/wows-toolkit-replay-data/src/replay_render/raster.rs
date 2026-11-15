@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::config::hide_command_parts;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::SidePanelLayout;
@@ -48,17 +49,31 @@ pub fn raster_commands(
     drawn_on: Vec<DrawCommand>,
 ) -> Option<Vec<DrawCommand>> {
     let commands = track.commands(at)?;
-    let trails = if options.show_trails { trails_through(&track.frames[..=at.get()]) } else { Vec::new() };
+    let trails = trails_through(&track.frames[..=at.get()], options);
 
-    let mut shown: Vec<DrawCommand> = trails
-        .into_iter()
-        .chain(commands.iter().cloned())
-        .filter(|command| should_draw_command(command, options, show_dead_ships))
-        .filter(|command| choices.allows(command))
-        .collect();
+    let mut shown =
+        shown_commands(trails.into_iter().chain(commands.iter().cloned()), options, show_dead_ships, choices);
     shown.extend(drawn_on);
 
     Some(shown)
+}
+
+/// What of `commands` the layer switches and the per-ship choices let through, with the parts
+/// they hide cleared.
+pub fn shown_commands(
+    commands: impl Iterator<Item = DrawCommand>,
+    options: &RenderOptions,
+    show_dead_ships: bool,
+    choices: &ShipChoices,
+) -> Vec<DrawCommand> {
+    commands
+        .filter(|command| should_draw_command(command, options, show_dead_ships))
+        .filter(|command| choices.allows(command))
+        .map(|mut command| {
+            hide_command_parts(&mut command, options);
+            command
+        })
+        .collect()
 }
 
 /// Moves a viewport onto the canvas `options` now need. Blocks while a new
