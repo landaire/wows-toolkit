@@ -10,6 +10,12 @@ script_test(
     script = "//scripts:check-publish-dependencies.py",
 )
 
+# THIRD_PARTY_NOTICES.txt was generated from the current Cargo.lock.
+script_test(
+    name = "third_party_notices",
+    script = "//scripts:check-third-party-notices.py",
+)
+
 # Clippy and rustfmt over every first-party Rust target.
 nu_script(
     name = "lint",

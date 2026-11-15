@@ -20,6 +20,16 @@ description = "Install the reindeer used to regenerate third-party/rust/BUCK"
 # package name.
 run = "cargo install --locked --git https://github.com/facebookincubator/reindeer reindeer"
 
+# The version scripts/update_third_party_notices.nu requires, which is also the
+# one flake.lock pins for `nix develop`.
+[tasks.install-cargo-about]
+description = "Install the cargo-about used to regenerate THIRD_PARTY_NOTICES.txt"
+run = "cargo install --locked cargo-about@0.8.4"
+
+[tasks.update-notices]
+description = "Regenerates THIRD_PARTY_NOTICES.txt from the dependency graph"
+run = "nu scripts/update_third_party_notices.nu"
+
 [tasks.setup]
 description = "Download and locate the tools a native build needs (NASM, clang, llvm-ar)"
 run = "python scripts/setup.py"

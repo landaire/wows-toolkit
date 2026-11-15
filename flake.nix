@@ -243,6 +243,9 @@
               mise
               cargo-edit
               cargo-local-registry
+              # THIRD_PARTY_NOTICES.txt. scripts/update_third_party_notices.nu
+              # requires the version this nixpkgs revision provides.
+              cargo-about
               reindeer
               direnv
               nushell

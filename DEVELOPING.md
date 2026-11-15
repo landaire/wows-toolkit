@@ -219,6 +219,18 @@ Build the affected targets with Buck before pushing. A new dependency that pulls
 
 Do not hand-edit `third-party/rust/BUCK`. Everything in it comes from `reindeer.toml` and the fixups, and the next regeneration discards anything else.
 
+### Third-party notices
+
+`THIRD_PARTY_NOTICES.txt` holds the license notices of everything the releases distribute. The apps embed it and the installers and archives carry it. Regenerate it whenever `Cargo.lock` changes, and commit it with the lock file:
+
+```bash
+nu scripts/update_third_party_notices.nu
+```
+
+It runs [cargo-about](https://github.com/EmbarkStudios/cargo-about) over every package listed in `third-party/licenses/notices.toml`. `nix develop` provides the pinned version, and `mise run install-cargo-about` installs it elsewhere. A component that is not a Rust crate, such as a font, icon set or bundled C library, is listed by hand in that file. So is a crate that bundles code under a license its manifest does not declare.
+
+`buck2 test //ci:third_party_notices` fails when any input of the file changed since it was generated: `Cargo.lock`, the Cargo manifests, the configuration, or a license file it reads from this repository. The graph test `scripts/test-third-party-notices.nu` fails when Buck links a crate into a release binary that the file does not list.
+
 ### Fixups
 
 A crate needs a fixup in `third-party/rust/fixups/<crate>/fixups.toml` when its build script does something a hermetic action cannot. In rough order of preference:
@@ -418,7 +430,7 @@ CI runs only buck2 commands (`.github/workflows/buck.yml`), after `./bootstrap.s
 - `buck2 build root//:` and `buck2 build -m release root//:`: every alias in both modes, including the `wt-web` site.
 - `buck2 run //ci:hermetic`: the hermeticity check over every alias.
 - `buck2 run //ci:lint`: clippy and rustfmt over every first-party Rust target, and clippy over `wt-web` and the crates it uses as built for `wasm32`.
-- `buck2 test root//crates/... root//ci/...`: the crates' tests, plus the checks that the Buck2 pins agree and that no publishable crate depends on an unpublished one.
+- `buck2 test root//crates/... root//ci/...`: the crates' tests, plus the checks that the Buck2 pins agree, that no publishable crate depends on an unpublished one, and that `THIRD_PARTY_NOTICES.txt` matches `Cargo.lock`.
 - `buck2 run //ci:graph_tests`: the build-graph tests.
 
 Each run checks only the first-party targets a change affects. `buck2 run //ci:affected -- --base <commit>` compares every first-party target's recursive target hash against the last successful run on `main`. The hash covers the target's sources, attributes and dependencies, so a target is selected when its own code changes or when a crate or toolchain it depends on does. Third-party targets are never checked directly. A change to Buck configuration, `.bzl` rules, toolchains, the flake, or the checks themselves (`ci/`, `scripts/`) checks everything, because no target hash covers those. So does a manual run of the workflow. The build-graph tests run when everything is checked or a `BUCK` file or manifest changed. The `root//ci/...` checks always run.
