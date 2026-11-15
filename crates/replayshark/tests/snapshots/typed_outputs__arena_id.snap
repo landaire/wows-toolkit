@@ -1,0 +1,5 @@
+---
+source: crates/replayshark/tests/typed_outputs.rs
+expression: arena_id
+---
+4086023203010197

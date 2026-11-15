@@ -10,37 +10,14 @@ use crate::analyzer::decoder::Recognized;
 use crate::packet2::EntityMethodPacket;
 use crate::packet2::Packet;
 use crate::packet2::PacketType;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
+
+use serde::Serialize;
 
 use super::analyzer::Analyzer;
 
-pub struct SummaryBuilder;
-
-impl Default for SummaryBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SummaryBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn build(self, meta: &crate::ReplayMeta) -> Box<dyn Analyzer> {
-        println!("Username: {}", meta.playerName);
-        println!("Date/time: {}", meta.dateTime);
-        println!("Map: {}", meta.mapDisplayName);
-        println!("Vehicle: {}", meta.playerVehicle);
-        println!("Game mode: {} {:?}", meta.name, meta.gameLogic);
-        println!("Game version: {}", meta.clientVersionFromExe);
-        println!();
-
-        Box::new(Summary { ribbons: HashMap::new(), damage: HashMap::new() })
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Serialize)]
 pub enum Ribbon {
     PlaneShotDown,
     Incapacitation,
@@ -66,26 +43,46 @@ pub enum Ribbon {
     ShotDownByAircraft,
 }
 
-struct Summary {
+/// The recording player's ribbons and damage, collected by [`Summary`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SummaryStats {
+    pub ribbons: BTreeMap<Ribbon, usize>,
+
+    /// From the last damage report, summed over weapons.
+    pub enemy_damage: f64,
+}
+
+/// Collects the recording player's ribbons and damage reports.
+pub struct Summary {
     ribbons: HashMap<Ribbon, usize>,
     damage: HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
 }
 
-impl Analyzer for Summary {
-    fn finish(&mut self) {
-        for (ribbon, count) in self.ribbons.iter() {
-            println!("{:?}: {}", ribbon, count);
-        }
-        println!();
+impl Summary {
+    pub fn new() -> Self {
+        Self { ribbons: HashMap::new(), damage: HashMap::new() }
+    }
 
+    pub fn stats(&self) -> SummaryStats {
         let enemy_damage: f64 = self
             .damage
             .values()
             .filter(|entry| entry.category == Recognized::Known(DamageStatCategory::Enemy))
             .map(|entry| entry.total)
             .sum();
-        println!("Total damage: {:.0}", enemy_damage);
+
+        SummaryStats { ribbons: self.ribbons.iter().map(|(ribbon, count)| (*ribbon, *count)).collect(), enemy_damage }
     }
+}
+
+impl Default for Summary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Analyzer for Summary {
+    fn finish(&mut self) {}
 
     fn process(&mut self, packet: &Packet<'_, '_>) {
         // Collect banners, damage reports, etc.

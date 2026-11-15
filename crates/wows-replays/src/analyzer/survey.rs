@@ -25,30 +25,31 @@ impl SurveyStats {
     }
 }
 
-pub struct SurveyBuilder {
+pub struct SurveyBuilder<'a> {
     stats: Rc<RefCell<SurveyStats>>,
     skip_decoder: bool,
-    game_constants: Option<&'static crate::game_constants::GameConstants>,
+    game_constants: Option<&'a crate::game_constants::GameConstants>,
 }
 
-impl SurveyBuilder {
+impl<'a> SurveyBuilder<'a> {
     pub fn new(stats: Rc<RefCell<SurveyStats>>, skip_decoder: bool) -> Self {
         Self { stats, skip_decoder, game_constants: None }
     }
 
     /// Override the game constants used for decoding.
-    pub fn game_constants(mut self, gc: &'static crate::game_constants::GameConstants) -> Self {
+    pub fn game_constants(mut self, gc: &'a crate::game_constants::GameConstants) -> Self {
         self.game_constants = Some(gc);
         self
     }
 
-    pub fn build(self, meta: &crate::ReplayMeta) -> Box<dyn Analyzer> {
+    pub fn build(self, meta: &crate::ReplayMeta) -> Box<dyn Analyzer + 'a> {
         let version = wowsunpack::data::Version::from_client_exe(&meta.clientVersionFromExe);
         {
             let mut stats: RefMut<_> = self.stats.borrow_mut();
             stats.date_time = meta.dateTime.clone();
         }
-        let gc = self.game_constants.unwrap_or(&*crate::game_constants::DEFAULT_GAME_CONSTANTS);
+        let gc: &'a crate::game_constants::GameConstants =
+            self.game_constants.unwrap_or(&*crate::game_constants::DEFAULT_GAME_CONSTANTS);
         Box::new(Survey {
             skip_decoder: self.skip_decoder,
             decoder: decoder::DecoderBuilder::new(true, true, None).game_constants(gc).build(meta),
@@ -64,14 +65,14 @@ impl SurveyBuilder {
     }
 }
 
-struct Survey {
+struct Survey<'a> {
     skip_decoder: bool,
-    decoder: Box<dyn Analyzer>,
+    decoder: Box<dyn Analyzer + 'a>,
     stats: Rc<RefCell<SurveyStats>>,
-    packet_decoder: PacketDecoder<'static>,
+    packet_decoder: PacketDecoder<'a>,
 }
 
-impl Analyzer for Survey {
+impl Analyzer for Survey<'_> {
     fn finish(&mut self) {
         self.decoder.finish();
     }

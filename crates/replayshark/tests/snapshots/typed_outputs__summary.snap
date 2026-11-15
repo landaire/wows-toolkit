@@ -1,0 +1,16 @@
+---
+source: crates/replayshark/tests/typed_outputs.rs
+expression: summary
+---
+value:
+  player_name: P_yk
+  date_time: "13.02.2026 14:35:18"
+  map: 22_tierra_del_fuego
+  vehicle: PASB110-Vermont
+  game_mode: 12x12
+  game_logic: ~
+  client_version: "15,1,0,11965230"
+  stats:
+    ribbons: {}
+    enemy_damage: 103091.60677036883
+diagnostics: []

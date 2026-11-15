@@ -41,27 +41,28 @@ use wowsunpack::unpack_rpc_args;
 
 use super::super::analyzer::Analyzer;
 
-pub struct DecoderBuilder {
+pub struct DecoderBuilder<'a> {
     silent: bool,
     no_meta: bool,
     path: Option<String>,
-    game_constants: Option<&'static crate::game_constants::GameConstants>,
+    game_constants: Option<&'a crate::game_constants::GameConstants>,
 }
 
-impl DecoderBuilder {
+impl<'a> DecoderBuilder<'a> {
     pub fn new(silent: bool, no_meta: bool, output: Option<&str>) -> Self {
         Self { silent, no_meta, path: output.map(|s| s.to_string()), game_constants: None }
     }
 
     /// Override the game constants used for decoding (consumable IDs, battle stages, etc.).
-    pub fn game_constants(mut self, gc: &'static crate::game_constants::GameConstants) -> Self {
+    pub fn game_constants(mut self, gc: &'a crate::game_constants::GameConstants) -> Self {
         self.game_constants = Some(gc);
         self
     }
 
-    pub fn build(self, meta: &crate::ReplayMeta) -> Box<dyn Analyzer> {
+    pub fn build(self, meta: &crate::ReplayMeta) -> Box<dyn Analyzer + 'a> {
         let version = Version::from_client_exe(&meta.clientVersionFromExe);
-        let gc = self.game_constants.unwrap_or(&*crate::game_constants::DEFAULT_GAME_CONSTANTS);
+        let gc: &'a crate::game_constants::GameConstants =
+            self.game_constants.unwrap_or(&*crate::game_constants::DEFAULT_GAME_CONSTANTS);
         let mut decoder = Decoder {
             silent: self.silent,
             output: self
@@ -2891,13 +2892,13 @@ impl<'a> PacketDecoder<'a> {
     }
 }
 
-struct Decoder {
+struct Decoder<'a> {
     silent: bool,
     output: Option<Box<dyn std::io::Write>>,
-    packet_decoder: PacketDecoder<'static>,
+    packet_decoder: PacketDecoder<'a>,
 }
 
-impl Decoder {
+impl Decoder<'_> {
     fn write(&mut self, line: &str) {
         if !self.silent {
             match self.output.as_mut() {
@@ -2928,7 +2929,7 @@ mod raw_minimap_update {
 }
 use raw_minimap_update::RawMinimapUpdate;
 
-impl Analyzer for Decoder {
+impl Analyzer for Decoder<'_> {
     fn finish(&mut self) {}
 
     fn process(&mut self, packet: &Packet<'_, '_>) {

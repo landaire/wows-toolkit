@@ -11238,6 +11238,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "gettext",
+ "insta",
  "jiff",
  "parse_int",
  "rootcause",

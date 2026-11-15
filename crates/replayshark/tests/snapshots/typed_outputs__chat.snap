@@ -1,0 +1,234 @@
+---
+source: crates/replayshark/tests/typed_outputs.rs
+expression: chat
+---
+value:
+  - clock: 114.202156
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 115.05483
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 120.36556
+    sender: HAIY_KFC
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 122.94265
+    sender: P_yk
+    body:
+      chat:
+        audience: battle_team
+        message: why abandon the flank
+  - clock: 157.6688
+    sender: veenestra
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 158.21442
+    sender: veenestra
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 159.93295
+    sender: veenestra
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 169.0747
+    sender: Amok_Squirrel
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 173.49818
+    sender: P_yk
+    body:
+      chat:
+        audience: battle_team
+        message: "RPF: None"
+  - clock: 173.92633
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 270.96014
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 270.96014
+    sender: Ell1eEu_l2E
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 271.34274
+    sender: Ell1eEu_l2E
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 272.0954
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 272.70303
+    sender: Ell1eEu_l2E
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 272.92877
+    sender: Ell1eEu_l2E
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 273.35074
+    sender: Ell1eEu_l2E
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 284.10056
+    sender: Schmetterer
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 326.7871
+    sender: GrayGhos_CV6Enterprise
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 360.37418
+    sender: LVSS_87
+    body:
+      chat:
+        audience: battle_team
+        message: dont overpush
+  - clock: 369.49432
+    sender: Amok_Squirrel
+    body:
+      chat:
+        audience: battle_team
+        message: "now you why, because of two DDs at that flank"
+  - clock: 384.79935
+    sender: sonacles
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 395.37573
+    sender: GrayGhos_CV6Enterprise
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 403.0796
+    sender: LVSS_87
+    body:
+      chat:
+        audience: battle_team
+        message: we got caps
+  - clock: 410.08426
+    sender: Schmetterer
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 416.7859
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 423.13922
+    sender: P_yk
+    body:
+      chat:
+        audience: battle_team
+        message: can you be any less useless
+  - clock: 436.1029
+    sender: Schmetterer
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 467.68384
+    sender: HAIY_KFC
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 480.81616
+    sender: LVSS_87
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 482.8095
+    sender: destings
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 493.93314
+    sender: GrayGhos_CV6Enterprise
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 665.666
+    sender: LVSS_87
+    body:
+      chat:
+        audience: battle_team
+        message: enemy team chose to not play
+  - clock: 685.3673
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 685.6672
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 685.9281
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 686.3895
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 688.6804
+    sender: P_yk
+    body:
+      chat:
+        audience: battle_team
+        message: tromp
+  - clock: 692.54224
+    sender: destings
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 694.51276
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 705.51715
+    sender: destings
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 710.2637
+    sender: Schmetterer
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 723.67975
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+  - clock: 723.9429
+    sender: P_yk
+    body:
+      voice_line:
+        Unknown: 0
+diagnostics: []

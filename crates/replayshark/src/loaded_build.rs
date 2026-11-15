@@ -22,6 +22,11 @@ impl LoadedBuild {
         Self { provider: Arc::new(provider), constants: Arc::new(constants) }
     }
 
+    /// For a caller that already shares the build's data.
+    pub fn from_shared(provider: Arc<GameMetadataProvider>, constants: Arc<GameConstants>) -> Self {
+        Self { provider, constants }
+    }
+
     pub fn provider(&self) -> &GameMetadataProvider {
         &self.provider
     }

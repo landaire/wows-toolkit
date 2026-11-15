@@ -1,0 +1,10 @@
+---
+source: crates/replayshark/tests/typed_outputs.rs
+expression: survey
+---
+value:
+  date_time: "13.02.2026 14:35:18"
+  total_packets: 105536
+  invalid_packets: 0
+  audits: []
+diagnostics: []

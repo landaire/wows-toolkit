@@ -1,0 +1,11 @@
+---
+source: crates/replayshark/tests/typed_outputs.rs
+expression: roster
+---
+version: "15,1,0,11965230"
+own_class: Battleship
+classes:
+  Battleship: 10
+  Cruiser: 6
+  Destroyer: 6
+  Submarine: 2
