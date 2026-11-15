@@ -199,20 +199,12 @@ struct Following {
     pane: PaneId,
 }
 
-/// The parts of `armor_viewer_defaults` the port has no control for, kept as read so a save
-/// writes them back unchanged.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The part of `armor_viewer_defaults` the port has no control for, kept as read so a save writes
+/// it back unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct UnportedDefaults {
+    /// The row's own column default, for a database with no row yet.
     show_splash_boxes: bool,
-    show_waterline: bool,
-    waterline_opacity: f64,
-}
-
-impl Default for UnportedDefaults {
-    /// The row's own column defaults, for a database with no row yet.
-    fn default() -> Self {
-        Self { show_splash_boxes: false, show_waterline: true, waterline_opacity: 0.3 }
-    }
 }
 
 /// What decides the ship a trajectory cast fires and its shell.
@@ -382,6 +374,11 @@ impl ArmorWorkspace {
         self.next_pane.update_value(|next| *next += 1);
         let owner = self.owner.with_value(Owner::child);
         let viewport = owner.with(ArmorViewportState::new);
+        // A pane opened after the settings were read starts from the saved defaults, as the first
+        // one did when they arrived.
+        if let Some(defaults) = self.services.settings.read_untracked(|settings| settings.armor_defaults.clone()) {
+            viewport.apply_armor_defaults(defaults.as_ref());
+        }
         viewport.set_hardpoint_targets(self.hardpoints.get_untracked().as_ref().clone());
         viewport.set_pane_menu(super::options::pane_menu(self, viewport));
         viewport.on_change(move |change| self.on_viewport_change(viewport, change));
@@ -619,11 +616,7 @@ impl ArmorWorkspace {
         xray_highlight: XrayHighlight,
     ) {
         if let Some(defaults) = defaults {
-            self.unported.set_value(UnportedDefaults {
-                show_splash_boxes: defaults.show_splash_boxes,
-                show_waterline: defaults.show_waterline,
-                waterline_opacity: defaults.waterline_opacity,
-            });
+            self.unported.set_value(UnportedDefaults { show_splash_boxes: defaults.show_splash_boxes });
         }
         self.legend.set(LegendState::from_defaults(defaults));
         for viewport in self.viewports_untracked() {
@@ -677,15 +670,15 @@ impl ArmorWorkspace {
         let unported = self.unported.get_value();
         let row = ArmorViewerDefaultsRow {
             show_plate_edges: display.show_plate_edges,
-            show_waterline: unported.show_waterline,
+            show_waterline: display.show_waterline,
             show_zero_mm: display.show_zero_mm,
             armor_opacity: f64::from(display.armor_opacity),
-            waterline_opacity: unported.waterline_opacity,
+            waterline_opacity: f64::from(display.waterline_opacity),
             hull_opaque: display.hull_opaque,
             hull_all_visible: all_visible.hull,
             armor_all_visible: all_visible.armor,
-            // Splash boxes and the water plane have no control here, so they are written back
-            // as read and never overwrite what the other app set.
+            // Splash boxes have no control here, so they are written back as read and never
+            // overwrite what the other app set.
             show_splash_boxes: unported.show_splash_boxes,
             show_legend: legend.visible,
             legend_collapsed: legend.collapsed,

@@ -36,6 +36,7 @@ use wows_toolkit_armor::viewport::renderer::LAYER_OVERLAY;
 use wows_toolkit_armor::viewport::types::LightingSettings;
 use wows_toolkit_armor::visibility;
 use wows_toolkit_armor::visibility::VisibilityFilter;
+use wows_toolkit_armor::water_plane;
 use wows_toolkit_armor::waterline_grid;
 use wows_toolkit_services::dialog;
 use wows_toolkit_viewmodel::formatting::byte_size;
@@ -244,6 +245,15 @@ impl ViewportModel {
         };
         if let Some(written) = self.length_marks.as_ref() {
             waterline_grid::upload_waterline_grid(&mut self.viewport, device, written.marks(), layers);
+        }
+        // A model stands on no water.
+        if armor.is_ship() && self.display_settings.show_waterline {
+            water_plane::upload_water_plane(
+                &mut self.viewport,
+                device,
+                armor.bounds,
+                self.display_settings.waterline_opacity,
+            );
         }
 
         if self.display_settings.show_ship_center {

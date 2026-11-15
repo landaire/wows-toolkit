@@ -61,6 +61,10 @@ pub struct DisplaySettings {
     /// Distances marked and written on the plane under the model, with its
     /// overall length and beam. Independent of `show_grid`.
     pub show_length_marks: bool,
+    /// The translucent water at a ship's waterline.
+    pub show_waterline: bool,
+    /// How solid the water is drawn, 0.05 to 1.
+    pub waterline_opacity: f32,
 }
 
 impl Default for DisplaySettings {
@@ -75,6 +79,8 @@ impl Default for DisplaySettings {
             marker_opacity: 1.0,
             show_grid: true,
             show_length_marks: true,
+            show_waterline: true,
+            waterline_opacity: 0.3,
         }
     }
 }
@@ -97,6 +103,8 @@ impl DisplaySettings {
             marker_opacity: Self::default().marker_opacity,
             show_grid: Self::default().show_grid,
             show_length_marks: Self::default().show_length_marks,
+            show_waterline: row.show_waterline,
+            waterline_opacity: row.waterline_opacity as f32,
         }
     }
 }
@@ -612,6 +620,8 @@ mod tests {
         assert!(d.show_zero_mm);
         assert!(d.hull_opaque);
         assert_eq!(d.armor_opacity, 0.5);
+        assert!(!d.show_waterline);
+        assert_eq!(d.waterline_opacity, 0.75);
     }
 
     /// Needs a local game install and a real GPU adapter: loads one real

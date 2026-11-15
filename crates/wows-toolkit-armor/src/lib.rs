@@ -31,4 +31,5 @@ pub mod upload;
 pub mod upload_hull;
 pub mod viewport;
 pub mod visibility;
+pub mod water_plane;
 pub mod waterline_grid;

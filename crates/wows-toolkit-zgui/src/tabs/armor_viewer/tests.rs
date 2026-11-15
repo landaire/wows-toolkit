@@ -39,6 +39,7 @@ use wows_toolkit_armor::textures::SceneMaterial;
 use wows_toolkit_armor::textures::SceneTextures;
 use wows_toolkit_armor::textures::TextureLookup;
 use wows_toolkit_armor::viewport::renderer::HighlightDepth;
+use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_services::dialog::Asked;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
@@ -649,6 +650,51 @@ fn the_xray_mode_is_restored_and_a_pick_outlasts_the_saved_one() {
     assert_eq!(workspace.xray_highlight.get_untracked(), XrayHighlight::WhileHeld);
     let saved = workspace.services.settings.read_untracked(|settings| settings.model_xray_highlight);
     assert_eq!(saved, Some(XrayHighlight::WhileHeld), "the pick is what is saved");
+}
+
+/// A saved defaults row, as the database holds one.
+fn saved_row() -> ArmorViewerDefaultsRow {
+    ArmorViewerDefaultsRow {
+        show_plate_edges: true,
+        show_waterline: false,
+        show_zero_mm: false,
+        armor_opacity: 1.0,
+        waterline_opacity: 0.6,
+        hull_opaque: false,
+        hull_all_visible: false,
+        armor_all_visible: true,
+        show_splash_boxes: false,
+        show_legend: true,
+        legend_collapsed: false,
+        legend_pos_x: None,
+        legend_pos_y: None,
+    }
+}
+
+/// The saved water reaches the open pane and a pane opened later, and the toggle saves it back.
+/// Tall, so the water rows at the foot of the display section are in view.
+#[test]
+fn the_saved_waterline_reaches_every_pane_and_its_toggle_saves_it() {
+    let mut armor = ArmorWindow::open_tall();
+    let workspace = armor.workspace;
+    let row = saved_row();
+    workspace.services.settings.save_armor_defaults(row.clone());
+    workspace.apply_defaults(Some(&row), true, XrayHighlight::Always);
+
+    let display = workspace.active_untracked().display_settings();
+    assert!(!display.show_waterline);
+    assert_eq!(display.waterline_opacity, 0.6);
+    workspace.compare(None);
+    let later = workspace.active_untracked().display_settings();
+    assert!(!later.show_waterline, "a pane opened later starts from the saved defaults");
+    assert_eq!(later.waterline_opacity, 0.6);
+
+    armor.install(ship_scene(), &[OptionSection::Display]);
+    armor.click("armor-display-waterline");
+    let saved = workspace.services.settings.read_untracked(|settings| settings.armor_defaults.clone()).flatten();
+    let saved = saved.expect("the toggle saved the defaults");
+    assert!(saved.show_waterline, "the toggle is saved");
+    assert_eq!(saved.waterline_opacity, f64::from(0.6_f32), "the opacity is kept");
 }
 
 /// Choosing a mode in the common settings menu saves it.

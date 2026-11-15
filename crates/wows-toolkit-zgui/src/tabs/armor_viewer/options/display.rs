@@ -69,7 +69,7 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
 
     let armor = features.armor;
     let ship = features.ship;
-    let model = model_rows(cx, armor, filter);
+    let model = model_rows(cx, armor, ship, filter);
     // The camera orbits are the ship's own, which a model has none of.
     let camera = ship
         .then(|| {
@@ -150,8 +150,8 @@ fn setting_checkbox(
 }
 
 /// The settings at the top of the display section, about the model itself. `armor` shows the
-/// legend, plate edges, 0 mm plates and the armor and marker opacity.
-fn model_rows(cx: &SectionCx, armor: bool, filter: &RailFilter) -> Option<AnyView> {
+/// legend, plate edges, 0 mm plates and the armor and marker opacity; `ship` shows the water.
+fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> Option<AnyView> {
     let viewport = cx.viewport;
     let workspace = cx.workspace;
     let factory = DisplaySettings::default();
@@ -226,6 +226,35 @@ fn model_rows(cx: &SectionCx, armor: bool, filter: &RailFilter) -> Option<AnyVie
         ]
     });
 
+    // The water is a ship's own; a model stands on none. The opacity is refused rather than hidden
+    // while the water is off, so the rail's filter finds it either way.
+    let waterline_rows = ship.then(|| {
+        let off = Signal::derive_local(move || {
+            !viewport.read(|model| model.display_settings.show_waterline).unwrap_or(false)
+        });
+        [
+            setting_checkbox(
+                viewport,
+                "armor-display-waterline",
+                t!("ui.armor.waterline").into_owned(),
+                filter,
+                |d| d.show_waterline,
+                |d, on| d.show_waterline = on,
+            ),
+            labeled_slider_row(
+                t!("ui.armor.opacity").into_owned(),
+                Signal::derive_local(move || {
+                    viewport.read(|model| f64::from(model.display_settings.waterline_opacity)).unwrap_or(0.0)
+                }),
+                const { SliderRange::new(0.05, 1.0, 0.01) },
+                f64::from(factory.waterline_opacity),
+                off,
+                filter,
+                move |value| viewport.mutate_display_settings(move |d| d.waterline_opacity = value as f32),
+            ),
+        ]
+    });
+
     // The range of the egui slider: a hull heels this far in a hard turn, and further reads as a
     // capsize rather than a camera angle worth checking armor against.
     const ROLL_LIMIT_DEG: f64 = 25.0;
@@ -258,6 +287,7 @@ fn model_rows(cx: &SectionCx, armor: bool, filter: &RailFilter) -> Option<AnyVie
                 |d, on| d.show_ship_center = on,
             ),
         ])
+        .chain(waterline_rows.into_iter().flatten())
         .chain(opacity_rows.into_iter().flatten())
         // Heeling the hull over is what says whether a belt is still a belt at the angle the ship
         // is fighting at.
