@@ -69,6 +69,7 @@ use zgui_ui::prelude::Binding;
 
 use crate::launcher::CSS;
 use crate::launcher::SHEET;
+use crate::launcher::account::KeyringHintProps;
 use crate::launcher::model::LauncherModel;
 use crate::long_job::long_job;
 use crate::shell::HostedDialogProps;
@@ -415,6 +416,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
         shell.toasts().warn(t!("ui.launcher.game_settings.no_install").into_owned());
         return;
     };
+    model.ensure_sessions();
 
     shell.dialogs.open(move |handle| {
         install_stylesheet(SHEET, CSS);
@@ -483,6 +485,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
                         DialogTitle {{t!("ui.launcher.game_settings.title").into_owned()}}
                         text(class = "wt-game-settings__note wt-launcher__truncate") {{subtitle.get_value()}}
                     }
+                    KeyringHint(model = model)
                     Show(when = move || running.get()) {
                         text(class = "wt-game-settings__banner", attr:data-testid = "launcher-game-settings-locked") {{t!("ui.launcher.game_settings.locked").into_owned()}}
                     }

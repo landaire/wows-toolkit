@@ -14,8 +14,10 @@ use wows_toolkit_viewmodel::settings_drawer::Setting;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::With;
@@ -29,6 +31,7 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::SeparatorProps;
 
+use crate::launcher::account::KeyringHintProps;
 use crate::launcher::account::open_sign_in;
 use crate::launcher::display::AccountRow;
 use crate::launcher::display::CatalogView;
@@ -85,6 +88,13 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
         open.set(false);
         action();
     };
+    // The rows show each account's session, so opening is when the store is first read.
+    let reading = RenderEffect::new(move |_| {
+        if open.get() {
+            model.ensure_sessions();
+        }
+    });
+    on_cleanup_local(move || drop(reading));
 
     let extra_play = move || match state.get() {
         PlayState::Update { account, .. } => Some(
@@ -123,6 +133,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
             InstallLine(shell = shell, model = model)
             Separator()
             text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.accounts")}}
+            KeyringHint(model = model)
             if move || rows.with(Vec::is_empty) {
                 text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-accounts") {{locale.text("ui.launcher.popover.no_accounts")}}
             } else {}
@@ -301,7 +312,7 @@ fn AccountRowView(
         AccountStatus::Ready(SessionStorage::PlaintextFile) => AnyView::new(view! {
             text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.unencrypted")}}
         }),
-        AccountStatus::Restoring => AnyView::new(view! {
+        AccountStatus::NotLoaded | AccountStatus::Restoring => AnyView::new(view! {
             text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.restoring")}}
         }),
         AccountStatus::KeyringLocked => AnyView::new(view! {

@@ -154,7 +154,8 @@ impl PlayState {
         }
 
         match launcher.account_status(account.key) {
-            AccountStatus::Ready(_) => Self::Play(label),
+            // Not read yet: Play reads it, so the keyring is not asked before the user acts.
+            AccountStatus::Ready(_) | AccountStatus::NotLoaded => Self::Play(label),
             AccountStatus::Restoring => Self::Restoring(label),
             AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::KeyringLocked => {
                 Self::SignInAgain(label)

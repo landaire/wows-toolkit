@@ -158,6 +158,11 @@ pub struct Launcher {
     pub(crate) next_restore: u64,
     pub(crate) login: LoginState,
     pub(crate) keyring: KeyringState,
+    /// Whether the credential store has answered this run. Its unlock prompt, if any, comes
+    /// before that.
+    pub(crate) store_answered: bool,
+    /// Whether a keyring probe is out, which may meet the store's unlock prompt.
+    pub(crate) keyring_probing: bool,
 
     pub(crate) game: GameState,
     pub(crate) gate: GameGate,
@@ -190,6 +195,8 @@ impl Launcher {
             next_restore: 0,
             login: LoginState::new(LoginTarget::NewAccount),
             keyring: KeyringState::Unknown,
+            store_answered: false,
+            keyring_probing: false,
             game: GameState::Idle,
             gate: GameGate::new(),
             launch: LaunchId::default(),

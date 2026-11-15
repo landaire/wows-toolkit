@@ -1832,11 +1832,11 @@ impl TabState {
             self.launcher_started = false;
         } else if !self.launcher_started {
             self.launcher_started = true;
+            // Sessions wait for the Launcher tab: reading them may prompt to unlock the keyring.
             self.launcher_op(|launcher, settings, env| {
-                let changed = launcher.start_session_restore(settings, env);
                 launcher.start_install_discovery(settings, env);
                 launcher.start_runner_probe(settings, env);
-                changed
+                false
             });
         }
 

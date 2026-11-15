@@ -2067,6 +2067,7 @@ not_saved = "This session will not be saved. You will need to sign in again afte
 missing = "No system keyring (Secret Service) is available."
 how = "How to enable one"
 how_detail = "Enable the Secret Service API of KDE Wallet (System Settings, KDE Wallet), or install and start gnome-keyring. Then restart the toolkit."
+unlock_hint = "Your system keyring may ask to unlock so the toolkit can read your saved sign-in."
 
 [ui.launcher.play]
 play = "Play"

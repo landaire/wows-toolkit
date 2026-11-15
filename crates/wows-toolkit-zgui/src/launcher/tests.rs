@@ -102,7 +102,6 @@ impl LauncherWindow {
         for game in wgc_catalog::known_games::known_games() {
             self.model.apply(test_support::game_checked(game.game_id, CatalogCheckState::Ready(fresh_build())));
         }
-        self.model.apply(test_support::keyring_probed(KeyringState::Available));
         self.settle();
     }
 
@@ -632,11 +631,48 @@ fn enter_in_the_code_field_does_nothing_while_it_is_empty() {
 }
 
 #[test]
+fn the_keyring_is_read_only_once_the_popover_opens() {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+    assert_eq!(launcher.play_state(), "play", "an unread session does not hold Play back");
+    assert_eq!(store.reads(), 0, "nothing reads the keyring before a session is needed");
+
+    store.close();
+    launcher.press("launcher-play-menu");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(launcher.has("launcher-keyring-hint"), "the hint is up while the read waits");
+    assert_eq!(store.reads(), 1);
+
+    store.open();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(!launcher.has("launcher-keyring-hint"), "the hint goes once the keyring answers");
+    assert!(launcher.has("launcher-account-eu-697769785-sign-in"), "no saved session means signing in");
+}
+
+#[test]
+fn play_reads_an_unread_session_instead_of_starting() {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+
+    launcher.press("launcher-play");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+
+    assert_eq!(store.reads(), 1);
+    assert_eq!(launcher.play_state(), "sign-in-again", "the store held no session");
+    assert!(!launcher.has("launcher-sign-in-dialog"), "the press only read the session");
+}
+
+#[test]
 fn without_a_secret_store_the_dialog_and_the_row_say_the_session_is_not_kept() {
     let mut launcher = ready();
     launcher.model.update_launcher(|launcher| launcher.reset_login(wows_toolkit_launcher::LoginTarget::NewAccount));
     launcher.model.apply(test_support::keyring_probed(KeyringState::Unavailable));
-    // The probe above was taken by `ready`; the store's answer now comes from a sign-in.
     let asia = AccountKey { realm: wgc_auth::AccountRealm::Asia, account_id: wgc_auth::AccountId::new(2_051_681_179) };
     launcher.model.apply(test_support::signed_in_unencrypted(test_support::session(asia, "Starbuck")));
     launcher.settle();

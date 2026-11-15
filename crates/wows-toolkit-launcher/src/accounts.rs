@@ -77,6 +77,9 @@ impl From<wgc_auth::StorageBackend> for KeyringState {
 /// A saved account's session as this run knows it.
 #[derive(Debug, Clone)]
 pub enum AccountSession {
+    /// Not read from the store yet. The store may prompt to unlock, so it is read only once a
+    /// session is needed; see [`Launcher::ensure_sessions`].
+    NotLoaded,
     /// Loading from the keyring and checking with WGNI.
     Restoring,
     SignedIn {
@@ -94,6 +97,7 @@ pub enum AccountSession {
 /// [`AccountSession`] without the session, for display and errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccountStatus {
+    NotLoaded,
     Restoring,
     Ready(SessionStorage),
     Expired,
@@ -104,6 +108,7 @@ pub enum AccountStatus {
 impl AccountSession {
     pub fn status(&self) -> AccountStatus {
         match self {
+            AccountSession::NotLoaded => AccountStatus::NotLoaded,
             AccountSession::Restoring => AccountStatus::Restoring,
             AccountSession::SignedIn { storage, .. } => AccountStatus::Ready(*storage),
             AccountSession::Expired => AccountStatus::Expired,
@@ -247,11 +252,12 @@ impl LoginState {
 }
 
 impl Launcher {
-    /// The session state of a saved account. An account this run has not restored is signed out.
+    /// The session state of a saved account. An account this run has not read from the store is
+    /// [`AccountSession::NotLoaded`].
     pub fn account_session(&self, key: AccountKey) -> &AccountSession {
-        const SIGNED_OUT: AccountSession = AccountSession::SignedOut;
+        const NOT_LOADED: AccountSession = AccountSession::NotLoaded;
 
-        self.sessions.get(&key).unwrap_or(&SIGNED_OUT)
+        self.sessions.get(&key).unwrap_or(&NOT_LOADED)
     }
 
     pub fn account_status(&self, key: AccountKey) -> AccountStatus {
@@ -274,9 +280,10 @@ impl Launcher {
     /// Asks the OS secret store whether it is there, off the calling thread, so the sign-in form
     /// can say before a sign-in where the session will be kept.
     pub fn start_keyring_probe(&mut self, env: &LauncherEnv) {
-        if self.keyring != KeyringState::Unknown {
+        if self.keyring != KeyringState::Unknown || self.keyring_probing {
             return;
         }
+        self.keyring_probing = true;
         let sender = self.sender(env);
         let credentials = env.credentials.clone();
         env.runtime.spawn_blocking(move || {
@@ -285,10 +292,22 @@ impl Launcher {
     }
 
     pub(crate) fn apply_keyring_probe(&mut self, state: KeyringState) {
+        self.store_answered = true;
+        self.keyring_probing = false;
         // A sign-in or restore that has already found out is newer than the probe.
         if self.keyring == KeyringState::Unknown {
             self.keyring = state;
         }
+    }
+
+    /// Whether to say that the system keyring may ask to unlock: the store has not answered yet
+    /// this run, and a probe is out or a saved session still has to be read.
+    pub fn keyring_prompt_ahead(&self, settings: &LauncherSettings) -> bool {
+        !self.store_answered
+            && (self.keyring_probing
+                || settings.accounts.iter().any(|account| {
+                    matches!(self.account_status(account.key), AccountStatus::NotLoaded | AccountStatus::Restoring)
+                }))
     }
 
     pub fn login_in_progress(&self) -> bool {
@@ -337,24 +356,39 @@ impl Launcher {
         restore
     }
 
-    /// Load every saved account's session from the OS keyring and check it with WGNI, off the
-    /// calling thread: the keyring may block on its service. Returns whether `settings` changed
-    /// (a tracking id was minted) and need saving.
+    /// Loads every saved account's session not read yet from the store and checks it with WGNI,
+    /// off the calling thread: the store may block on its service or an unlock prompt. Call it
+    /// once a session is needed, not at startup. Returns whether `settings` changed (a tracking
+    /// id was minted) and need saving.
     #[must_use]
-    pub fn start_session_restore(&mut self, settings: &mut LauncherSettings, env: &LauncherEnv) -> bool {
-        let (tracking_id, changed) = settings.ensure_tracking_id();
-        let keys: Vec<AccountKey> = settings.accounts.iter().map(|account| account.key).collect();
-        for key in keys {
-            let restore = self.bump_restore(key);
-            self.sessions.insert(key, AccountSession::Restoring);
-            let sender = self.sender(env);
-            let tracking_id = tracking_id.clone();
-            let credentials = env.credentials.clone();
-            env.runtime.spawn(async move {
-                let outcome = restore_session(key, tracking_id, credentials).await;
-                sender.send(Event::SessionRestored { key, restore, outcome });
-            });
+    pub fn ensure_sessions(&mut self, settings: &mut LauncherSettings, env: &LauncherEnv) -> bool {
+        let keys: Vec<AccountKey> = settings
+            .accounts
+            .iter()
+            .map(|account| account.key)
+            .filter(|key| self.account_status(*key) == AccountStatus::NotLoaded)
+            .collect();
+        if keys.is_empty() {
+            return false;
         }
+
+        let (tracking_id, changed) = settings.ensure_tracking_id();
+        let restores: Vec<(AccountKey, RestoreId)> = keys
+            .into_iter()
+            .map(|key| {
+                self.sessions.insert(key, AccountSession::Restoring);
+                (key, self.bump_restore(key))
+            })
+            .collect();
+        let sender = self.sender(env);
+        let credentials = env.credentials.clone();
+        // One after another, so a locked store prompts once rather than once per account.
+        env.runtime.spawn(async move {
+            for (key, restore) in restores {
+                let outcome = restore_session(key, tracking_id.clone(), credentials.clone()).await;
+                sender.send(Event::SessionRestored { key, restore, outcome });
+            }
+        });
 
         changed
     }
@@ -366,6 +400,7 @@ impl Launcher {
         outcome: RestoreOutcome,
         settings: &mut LauncherSettings,
     ) -> bool {
+        self.store_answered = true;
         if self.restores.get(&key) != Some(&restore) {
             return false;
         }
@@ -398,6 +433,7 @@ impl Launcher {
         self.login.in_progress = false;
         match msg {
             LoginMsg::Success { session, storage, keyring } => {
+                self.store_answered = true;
                 if keyring != KeyringState::Unknown {
                     self.keyring = keyring;
                 }
@@ -833,7 +869,48 @@ mod tests {
 
         assert!(settings.accounts.is_empty());
         assert_eq!(settings.default_account, None);
+        assert!(launcher.session(eu).is_none());
+    }
+
+    #[test]
+    fn sessions_are_read_once_when_first_needed() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env = env(&runtime);
+        let eu = key(wgc_auth::AccountRealm::Eu, 697_769_785);
+        let mut settings = LauncherSettings::default();
+        let _ = settings.upsert_account(eu, wgc_auth::Nickname::new("saved"));
+        let (mut launcher, _events) = Launcher::new();
+        assert_eq!(launcher.account_status(eu), AccountStatus::NotLoaded);
+        assert!(launcher.keyring_prompt_ahead(&settings));
+
+        let _ = launcher.ensure_sessions(&mut settings, &env);
+        assert_eq!(launcher.account_status(eu), AccountStatus::Restoring);
+        let restore = launcher.restores[&eu];
+        let _ = launcher.ensure_sessions(&mut settings, &env);
+        assert_eq!(launcher.restores[&eu], restore, "a session being read is not read again");
+
+        let missing = LauncherEvent(Event::SessionRestored { key: eu, restore, outcome: RestoreOutcome::Missing });
+        let _ = launcher.apply(missing, &mut settings, &env);
         assert_eq!(launcher.account_status(eu), AccountStatus::SignedOut);
+        assert!(!launcher.keyring_prompt_ahead(&settings));
+        let _ = launcher.ensure_sessions(&mut settings, &env);
+        assert_eq!(launcher.account_status(eu), AccountStatus::SignedOut, "an answered read is kept");
+    }
+
+    #[test]
+    fn a_keyring_probe_without_saved_accounts_says_the_keyring_may_ask() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env = env(&runtime);
+        let mut settings = LauncherSettings::default();
+        let (mut launcher, _events) = Launcher::new();
+        assert!(!launcher.keyring_prompt_ahead(&settings), "nothing will read the store");
+
+        launcher.start_keyring_probe(&env);
+        assert!(launcher.keyring_prompt_ahead(&settings));
+
+        let probed = LauncherEvent(Event::KeyringProbed(KeyringState::Available));
+        let _ = launcher.apply(probed, &mut settings, &env);
+        assert!(!launcher.keyring_prompt_ahead(&settings));
     }
 
     #[test]

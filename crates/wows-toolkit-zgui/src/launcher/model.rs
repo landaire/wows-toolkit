@@ -41,7 +41,7 @@ pub struct LauncherModel {
     state: RwSignal<LauncherState, LocalStorage>,
     /// The resolved proxy the launcher's own requests go through. `None` is a direct connection.
     proxy: StoredValue<Option<String>>,
-    /// Whether discovery, the catalog checks and the session restore have been started.
+    /// Whether discovery and the catalog checks have been started.
     working: StoredValue<bool>,
     services: Services,
 }
@@ -114,7 +114,8 @@ impl LauncherModel {
         self.state.update(|state| state.settings = Some(settings));
     }
 
-    /// Restores the saved sessions and looks for installs, once, while the launcher is enabled.
+    /// Looks for installs and the runner, once, while the launcher is enabled. Sessions wait for
+    /// [`Self::ensure_sessions`], since reading them may prompt to unlock the system keyring.
     fn start_work(self) {
         if self.working.get_value() || !self.with_untracked(LauncherState::is_enabled) {
             return;
@@ -122,13 +123,21 @@ impl LauncherModel {
         self.working.set_value(true);
 
         self.op(|launcher, settings, env| {
-            let minted = launcher.start_session_restore(settings, env);
             launcher.start_install_discovery(settings, env);
             launcher.start_runner_probe(settings, env);
             launcher.start_available_games_check(env);
-            launcher.start_keyring_probe(env);
-            minted
+            false
         });
+    }
+
+    /// Reads the saved sessions not read yet, once something needs one. Nothing happens while
+    /// the launcher is off.
+    pub fn ensure_sessions(self) {
+        if !self.with_untracked(LauncherState::is_enabled) {
+            return;
+        }
+
+        self.op(|launcher, settings, env| launcher.ensure_sessions(settings, env));
     }
 
     /// Turns the launcher on, after the user accepted the notice, and starts its work.
@@ -220,7 +229,10 @@ impl LauncherModel {
             // The shell's event task awaits the channel, and its wake-up is the channel's own.
             wake: Arc::new(|| {}),
             runtime_dirs: storage_dir.as_deref().map(wgc_launch::RuntimeDirs::new),
+            #[cfg(not(test))]
             credentials: wgc_auth::CredentialStore::new(storage_dir.as_deref()),
+            #[cfg(test)]
+            credentials: wgc_auth::CredentialStore::with_backends(crate::launcher::testing::store(), None),
         })
     }
 

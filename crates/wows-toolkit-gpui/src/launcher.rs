@@ -168,10 +168,27 @@ impl LauncherView {
         let env = settings.env_vars_text();
         self.extra_args.update(cx, |state, cx| state.set_value(args, window, cx));
         self.env_vars.update(cx, |state, cx| state.set_value(env, window, cx));
+        let enabled = settings.is_enabled();
         self.settings = Some(settings);
+        // Nothing starts before the opt-in. Sessions wait for Play or a sign-in, since reading
+        // them may prompt to unlock the system keyring.
+        if enabled {
+            self.op(cx, |launcher, settings, env| {
+                launcher.start_install_discovery(settings, env);
+                false
+            });
+        }
+    }
+
+    /// Reads the saved sessions not read yet, or asks the store whether it is there when there
+    /// are none, so the account section can say where a sign-in will be kept.
+    fn ensure_sessions(&mut self, cx: &mut Context<Self>) {
         self.op(cx, |launcher, settings, env| {
-            let changed = launcher.start_session_restore(settings, env);
-            launcher.start_install_discovery(settings, env);
+            let changed = launcher.ensure_sessions(settings, env);
+            // A restore reading the store answers this too, and a second read would prompt again.
+            if !launcher.keyring_prompt_ahead(settings) {
+                launcher.start_keyring_probe(env);
+            }
             changed
         });
     }
@@ -292,6 +309,12 @@ impl LauncherView {
     /// Plays the default account. An account set to the toolkit's install plays `install`.
     fn launch(&mut self, install: GameInstall, window: &mut Window, cx: &mut Context<Self>) {
         let Some(key) = self.settings.as_ref().and_then(|settings| settings.default_account) else { return };
+        // An unread session is read first; the account section says the keyring may ask, and a
+        // second press plays.
+        if self.launcher.account_status(key) == AccountStatus::NotLoaded {
+            self.ensure_sessions(cx);
+            return;
+        }
         let safe_mode = self.safe_mode;
         let mut launched = Ok(());
         self.op(cx, |launcher, settings, env| {
@@ -426,6 +449,13 @@ impl LauncherView {
                     ),
                 )
                 .into_any_element()
+        } else if default_account.is_some_and(|key| launcher.account_status(key) == AccountStatus::Restoring) {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(dim(t!("ui.launcher.popover.restoring")))
+                .child(Spinner::new().xsmall())
+                .into_any_element()
         } else if !self.show_sign_in {
             h_flex()
                 .gap_2()
@@ -437,7 +467,7 @@ impl LauncherView {
                         .compact()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.show_sign_in = true;
-                            cx.notify();
+                            this.ensure_sessions(cx);
                         })),
                 )
                 .into_any_element()
@@ -487,6 +517,11 @@ impl LauncherView {
                 )
                 .into_any_element()
         };
+        let prompt_ahead = self.settings.as_ref().is_some_and(|settings| self.launcher.keyring_prompt_ahead(settings));
+        let body = v_flex()
+            .gap_2()
+            .when(prompt_ahead, |this| this.child(dim(t!("ui.launcher.keyring.unlock_hint"))))
+            .child(body);
         section(t!("ui.launcher.account.heading"), body, cx)
     }
 

@@ -228,6 +228,19 @@ impl ToolkitTabViewer<'_> {
     }
 
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
+        // The tab lists each account's session, so showing it is when the store is first read.
+        let unread = self
+            .tab_state
+            .persisted
+            .read()
+            .settings
+            .launcher
+            .accounts
+            .iter()
+            .any(|account| self.tab_state.launcher.account_status(account.key) == AccountStatus::NotLoaded);
+        if unread {
+            self.tab_state.launcher_op(|launcher, settings, env| launcher.ensure_sessions(settings, env));
+        }
         self.build_account_section(ui);
         ui.separator();
 
@@ -569,6 +582,9 @@ impl ToolkitTabViewer<'_> {
             if settings.accounts.is_empty() {
                 ui.weak("No saved accounts.");
             }
+            if launcher.keyring_prompt_ahead(&settings) {
+                ui.weak(t!("ui.launcher.keyring.unlock_hint"));
+            }
             for account in &settings.accounts {
                 let key = account.key;
                 ui.horizontal(|ui| {
@@ -592,7 +608,7 @@ impl ToolkitTabViewer<'_> {
                                 actions.push(AccountAction::SignIn(key));
                             }
                         }
-                        AccountStatus::Restoring => {}
+                        AccountStatus::NotLoaded | AccountStatus::Restoring => {}
                     }
                     if ui.small_button("Remove").clicked() {
                         actions.push(AccountAction::Forget(key));
@@ -792,7 +808,7 @@ impl ToolkitTabViewer<'_> {
 /// One account's session status, with its expiry and storage when signed in.
 fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, status: AccountStatus) {
     match status {
-        AccountStatus::Restoring => {
+        AccountStatus::NotLoaded | AccountStatus::Restoring => {
             ui.spinner();
             ui.weak("restoring session");
         }

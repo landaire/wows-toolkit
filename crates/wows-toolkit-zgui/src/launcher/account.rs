@@ -117,10 +117,6 @@ impl SignInForm {
 /// Opens the sign-in dialog for `target`. It closes itself once the account is signed in.
 pub fn open_sign_in(shell: Shell, model: LauncherModel, target: LoginTarget) {
     model.update_launcher(|launcher| launcher.reset_login(target));
-    model.op(|launcher, _, env| {
-        launcher.start_keyring_probe(env);
-        false
-    });
     shell.dialogs.open(move |handle| {
         install_stylesheet(SHEET, CSS);
         let title = match target {
@@ -144,11 +140,38 @@ pub fn open_sign_in(shell: Shell, model: LauncherModel, target: LoginTarget) {
                     DialogHeader {
                         DialogTitle {{title.get_value()}}
                     }
+                    KeyringHint(model = model)
                     SignInPanel(model = model, target = target)
                 }
             }
         })
     });
+    // After the dialog, so its keyring hint is up before the store can prompt.
+    model.ensure_sessions();
+    model.op(|launcher, settings, env| {
+        // A restore reading the store answers this too, and a second read would prompt again.
+        if !launcher.keyring_prompt_ahead(settings) {
+            launcher.start_keyring_probe(env);
+        }
+        false
+    });
+}
+
+/// Says, until the store first answers, that the system keyring may ask to unlock for the saved
+/// sign-ins. The prompt names no application, so this says who asks.
+#[component]
+pub fn KeyringHint(model: LauncherModel) -> impl IntoView {
+    let locale = Services::current().locale;
+    let ahead = Memo::new(move |_| {
+        model
+            .with(|state| state.settings.as_ref().is_some_and(|settings| state.launcher.keyring_prompt_ahead(settings)))
+    });
+
+    view! {
+        Show(when = move || ahead.get()) {
+            text(class = "wt-launcher__dim", attr:data-testid = "launcher-keyring-hint") {{locale.text("ui.launcher.keyring.unlock_hint")}}
+        }
+    }
 }
 
 /// The sign-in form for `target`, at whichever step the attempt has reached.

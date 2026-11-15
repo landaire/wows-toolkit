@@ -9,6 +9,7 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_launcher::AccountKey;
+use wows_toolkit_launcher::AccountStatus;
 use wows_toolkit_launcher::LaunchFailure;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::PlayError;
@@ -277,6 +278,11 @@ fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal
 
 /// Starts the game for `account`, saying in a message why it could not.
 pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool) {
+    // An unread session is read first; the control waits on it, and a second press plays.
+    if model.with_untracked(|state| state.launcher.account_status(account) == AccountStatus::NotLoaded) {
+        model.ensure_sessions();
+        return;
+    }
     let wows_dir = model.wows_dir_untracked();
     let played = model.run(move |launcher, settings, env| {
         let played = launcher.play(account, wows_dir.as_deref(), safe_mode, settings, env, |command| {
