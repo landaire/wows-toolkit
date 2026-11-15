@@ -16,6 +16,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
 use crate::armament::Armament;
+use crate::armament::Equipped;
 use crate::builds::Planner;
 use crate::data::GameData;
 use crate::error::QueryError;
@@ -31,6 +32,7 @@ use crate::ship_variants::ShipCategory;
 use crate::ship_variants::ShipRank;
 use crate::ship_variants::family_key;
 use crate::ship_variants::listing_order;
+use crate::special_abilities::SpecialAbility;
 use crate::text::clean;
 
 const FIND_SHIPS_LIMIT: usize = 40;
@@ -633,6 +635,11 @@ pub struct ShipOverview {
 
     /// Armament of the stock modules, or of the modules given.
     pub armament: Armament,
+
+    /// The ability on the F key, Combat Instructions or an alternative main
+    /// battery fire mode: one summary per ability, naming the modules that
+    /// carry it when only some do. Independent of `modules`.
+    pub special_ability: Equipped<Vec<String>>,
 }
 
 /// An inclusive tier range.
@@ -896,6 +903,9 @@ impl GameData {
             variants,
             firing_range,
             armament,
+            special_ability: Equipped::from_list(
+                self.special_abilities(ship).iter().map(SpecialAbility::summary).collect(),
+            ),
         })
     }
 

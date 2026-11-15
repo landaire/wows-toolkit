@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 1788
 expression: overview
 ---
 ship:
@@ -82,3 +81,4 @@ armament:
     - slot: 3
       options:
         - Auxiliary and Torpedo Weaponry Coordination
+special_ability: none

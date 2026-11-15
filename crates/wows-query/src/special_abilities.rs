@@ -702,8 +702,13 @@ impl SpecialAbility {
         name.to_lowercase().contains(words) || effects.iter().any(|effect| effect.to_lowercase().contains(words))
     }
 
-    /// "Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): effects".
-    fn summary(&self) -> String {
+    /// "Combat Instructions \"Modified Secondary Munitions\" (manual, 30 s): effects",
+    /// with "on <modules> only" when the ship's modules differ.
+    pub(crate) fn summary(&self) -> String {
+        let only = |modules: &[String]| {
+            if modules.is_empty() { String::new() } else { format!("; on {} only", modules.join(", ")) }
+        };
+
         match self {
             Self::CombatInstructions(info) => {
                 let activation = if info.activation.starts_with("Press") { "manual" } else { "automatic" };
@@ -711,7 +716,12 @@ impl SpecialAbility {
                     Some(duration) => format!("{activation}, {} s", duration.value()),
                     None => activation.to_owned(),
                 };
-                format!("{COMBAT_INSTRUCTIONS} \"{}\" ({timing}): {}", info.name, info.effects.join(", "))
+                format!(
+                    "{COMBAT_INSTRUCTIONS} \"{}\" ({timing}{}): {}",
+                    info.name,
+                    only(&info.hulls),
+                    info.effects.join(", ")
+                )
             }
             Self::AlternativeFireMode(info) => {
                 let cadence = match (info.shots_per_burst, info.shot_interval_s) {
@@ -723,7 +733,7 @@ impl SpecialAbility {
                     ),
                     _ => format!("{} s reload", info.reload_s.value()),
                 };
-                let mut summary = format!("{} ({cadence})", info.name);
+                let mut summary = format!("{} ({cadence}{})", info.name, only(&info.modules));
                 if !info.effects.is_empty() {
                     summary.push_str(&format!(": {}", info.effects.join(", ")));
                 }

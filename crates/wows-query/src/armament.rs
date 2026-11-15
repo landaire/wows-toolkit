@@ -50,7 +50,7 @@ pub enum Equipped<T> {
 }
 
 impl<T> Equipped<Vec<T>> {
-    fn from_list(items: Vec<T>) -> Self {
+    pub(crate) fn from_list(items: Vec<T>) -> Self {
         if items.is_empty() { Self::None } else { Self::Some(items) }
     }
 }

@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 352
 expression: overviews
 ---
 - ship:
@@ -118,6 +117,7 @@ expression: overviews
       - slot: 4
         options:
           - Repair Party
+  special_ability: none
 - ship:
     name: Annapolis
     index: PASC111
@@ -224,6 +224,8 @@ expression: overviews
       - slot: 4
         options:
           - Repair Party
+  special_ability:
+    - "Burst Fire (3 salvos 1.5 s apart, then 40 s reload)"
 - ship:
     name: Salem
     index: PASC710
@@ -326,3 +328,4 @@ expression: overviews
       - slot: 4
         options:
           - Repair Party
+  special_ability: none
