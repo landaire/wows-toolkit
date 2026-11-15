@@ -17,4 +17,10 @@ tracing = "0.1"
 zeroize = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+clap = { workspace = true }
 insta = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+wgc-core = { workspace = true }
+wgc-launch = { workspace = true }
+wows-game-settings = { workspace = true }

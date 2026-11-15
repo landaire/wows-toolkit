@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_integration_tests", "workspace_library")
 
 WGC_IPC_DEPS = [
     "//crates/wgc-auth:wgc-auth",
@@ -26,4 +26,24 @@ workspace_integration_tests(
     library = ":wgc-ipc",
     deps = WGC_IPC_DEPS,
     test_deps = ["//third-party/rust:insta"],
+)
+
+# examples/play.rs: one launch through the runner, install view and relay.
+workspace_binary(
+    name = "play",
+    crate = "play",
+    package = "wgc-ipc",
+    version = "0.1.0",
+    crate_root = "examples/play.rs",
+    deps = [
+        ":wgc-ipc",
+        "//crates/wgc-auth:wgc-auth",
+        "//crates/wgc-core:wgc-core",
+        "//crates/wgc-launch:wgc-launch",
+        "//crates/wows-game-settings:wows-game-settings",
+        "//third-party/rust:clap",
+        "//third-party/rust:tokio",
+        "//third-party/rust:tracing",
+        "//third-party/rust:tracing-subscriber",
+    ],
 )

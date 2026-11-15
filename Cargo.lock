@@ -15377,6 +15377,7 @@ dependencies = [
 name = "wgc-ipc"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "insta",
  "rand 0.10.3",
  "serde_json",
@@ -15384,8 +15385,12 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wgc-auth",
+ "wgc-core",
+ "wgc-launch",
  "wgc-relay-protocol",
+ "wows-game-settings",
  "zeroize",
 ]
 
