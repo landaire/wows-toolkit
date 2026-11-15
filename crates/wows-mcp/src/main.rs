@@ -7,7 +7,9 @@ use rootcause::prelude::*;
 use tokio_util::sync::CancellationToken;
 use wows_mcp::GameDataSource;
 use wows_mcp::McpServer;
+use wows_mcp::ReplayFiles;
 use wows_mcp::Transport;
+use wows_mcp::confine::PathRoots;
 use wows_query::GameData;
 
 /// MCP server answering World of Warships game data questions.
@@ -34,6 +36,11 @@ struct Cli {
     /// instead of stdio.
     #[arg(long)]
     http: Option<SocketAddr>,
+
+    /// Restrict replay_summary to replays inside this directory. Repeat for
+    /// several directories. Without it, replay_summary reads any path.
+    #[arg(long)]
+    replay_root: Vec<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,12 +95,17 @@ async fn run() -> Result<(), Report<MainError>> {
     let game = Arc::new(load(&cli).await?);
     tracing::info!(version = %game.version().to_path(), ships = game.ship_count(), "game data loaded");
 
+    let replay_files = if cli.replay_root.is_empty() {
+        ReplayFiles::Any
+    } else {
+        ReplayFiles::Within(PathRoots::new(cli.replay_root.iter().cloned()))
+    };
     let transport = match cli.http {
         Some(address) => Transport::Http(address),
         None => Transport::Stdio,
     };
     let server = McpServer::builder(transport)
-        .game_data(GameDataSource::Loaded(game))
+        .game_data(GameDataSource::Loaded(game), replay_files)
         .build()
         .await
         .context(MainError::Build)?;

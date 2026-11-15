@@ -1,5 +1,5 @@
 //! Streamable HTTP serving with an embedder's tool set: tool registration,
-//! shutdown and bind failures.
+//! DNS rebinding and cross-origin rejection, shutdown and bind failures.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -108,13 +108,14 @@ impl Response {
 
 struct Request<'a> {
     host: String,
+    origin: Option<&'a str>,
     session: Option<&'a str>,
     body: Value,
 }
 
 impl<'a> Request<'a> {
     fn new(address: SocketAddr, body: Value) -> Self {
-        Self { host: address.to_string(), session: None, body }
+        Self { host: address.to_string(), origin: None, session: None, body }
     }
 
     async fn send(self, address: SocketAddr) -> Response {
@@ -124,6 +125,9 @@ impl<'a> Request<'a> {
             self.host,
             body.len()
         );
+        if let Some(origin) = self.origin {
+            head.push_str(&format!("Origin: {origin}\r\n"));
+        }
         if let Some(session) = self.session {
             head.push_str(&format!("Mcp-Session-Id: {session}\r\n"));
         }
@@ -210,6 +214,14 @@ async fn rpc(address: SocketAddr, session: &str, id: u64, method: &str, params: 
     response.message()
 }
 
+async fn initialize_status(address: SocketAddr, host: String, origin: Option<&str>) -> u16 {
+    let mut request = Request::new(address, initialize(1));
+    request.host = host;
+    request.origin = origin;
+
+    request.send(address).await.status
+}
+
 #[tokio::test]
 async fn an_embedder_tool_is_listed_and_called() {
     let server = start().await;
@@ -249,6 +261,41 @@ async fn duplicate_tool_names_fail_the_build() {
 
     let error = result.err().expect("duplicate tools are rejected");
     assert!(matches!(error.current_context(), BuildError::DuplicateTool { name } if name == "echo"));
+}
+
+#[tokio::test]
+async fn a_rebinding_host_is_rejected() {
+    let server = start().await;
+    let port = server.address.port();
+
+    assert_eq!(initialize_status(server.address, "evil.example".to_owned(), None).await, 403);
+    assert_eq!(initialize_status(server.address, format!("evil.example:{port}"), None).await, 403);
+    assert_eq!(initialize_status(server.address, format!("127.0.0.1.evil.example:{port}"), None).await, 403);
+}
+
+#[tokio::test]
+async fn loopback_hosts_are_accepted() {
+    let server = start().await;
+    let port = server.address.port();
+
+    for host in
+        [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}"), "localhost".to_owned()]
+    {
+        assert_eq!(initialize_status(server.address, host.clone(), None).await, 200, "{host}");
+    }
+}
+
+#[tokio::test]
+async fn a_cross_origin_request_is_rejected() {
+    let server = start().await;
+    let host = server.address.to_string();
+
+    for origin in ["http://evil.example", "https://evil.example:443", "null", "http://127.0.0.1.evil.example"] {
+        assert_eq!(initialize_status(server.address, host.clone(), Some(origin)).await, 403, "{origin}");
+    }
+    for origin in ["http://localhost:5173", "http://127.0.0.1", "http://[::1]:8080"] {
+        assert_eq!(initialize_status(server.address, host.clone(), Some(origin)).await, 200, "{origin}");
+    }
 }
 
 #[tokio::test]

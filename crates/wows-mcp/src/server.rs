@@ -24,6 +24,7 @@ use crate::error::BuildError;
 use crate::error::ServeError;
 use crate::game_data::GameDataSource;
 use crate::game_data::GameDataTools;
+use crate::game_data::ReplayFiles;
 use crate::http::HttpEndpoint;
 use crate::tool_set::ToolSet;
 
@@ -50,12 +51,12 @@ impl McpServerBuilder {
     }
 
     /// Serves the `wows_query` tools and `replay_summary` over `source`.
-    pub fn game_data(mut self, source: GameDataSource) -> Self {
+    pub fn game_data(mut self, source: GameDataSource, replay_files: ReplayFiles) -> Self {
         self.description = match &source {
             GameDataSource::Loaded(game) => format!("World of Warships {} game data", game.version().to_path()),
             GameDataSource::Dump { .. } => "World of Warships game data".to_owned(),
         };
-        self.tool_sets.insert(0, Arc::new(GameDataTools::new(source)));
+        self.tool_sets.insert(0, Arc::new(GameDataTools::new(source, replay_files)));
         self
     }
 

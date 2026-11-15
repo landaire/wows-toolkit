@@ -38,6 +38,16 @@ To serve streamable HTTP instead of stdio, give an address:
 wows-mcp --data ~/wows-game-data --http 127.0.0.1:8080
 ```
 
+The server then listens on `http://127.0.0.1:8080/mcp`. It answers only requests whose `Host` header names `localhost`, `127.0.0.1`, `::1` or the address you gave, and rejects requests from web pages on other sites, so a page in your browser cannot reach it through DNS rebinding.
+
+The server has no authentication. If you give an address other than loopback, such as `0.0.0.0` or your LAN address, anyone on that network can use every tool, including `replay_summary`. Keep it on a loopback address unless you trust everyone on the network.
+
+`replay_summary` reads any replay path the server can open, except network shares and devices. To limit it to your replay folders, pass `--replay-root` once for each folder:
+
+```bash
+wows-mcp --data ~/wows-game-data --http 127.0.0.1:8080 --replay-root ~/Games/World_of_Warships/replays
+```
+
 ### Client configuration
 
 For a client that launches stdio servers from a JSON config:

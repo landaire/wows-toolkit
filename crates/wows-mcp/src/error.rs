@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 /// Failure to assemble an [`crate::McpServer`].
 #[derive(Debug, thiserror::Error)]
@@ -30,4 +31,21 @@ impl BuildError {
 pub enum ServeError {
     #[error("failed to serve MCP on stdio")]
     Stdio,
+}
+
+/// A path argument that does not name a file inside the permitted roots.
+#[derive(Debug, thiserror::Error)]
+pub enum PathError {
+    #[error("{path:?} contains a parent directory component")]
+    ParentComponent { path: PathBuf },
+
+    #[error("{path:?} does not exist or cannot be read")]
+    Unreadable {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("{path:?} is outside the permitted directories")]
+    OutsideRoots { path: PathBuf },
 }

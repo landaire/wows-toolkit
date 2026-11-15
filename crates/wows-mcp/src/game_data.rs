@@ -17,6 +17,7 @@ use wows_query::GameData;
 use wows_query::error::LoadError;
 use wows_query::tools::ToolCallError;
 
+use crate::confine::PathRoots;
 use crate::tool_set::ToolFuture;
 use crate::tool_set::ToolSet;
 use crate::tool_set::tool_failure;
@@ -31,6 +32,15 @@ const REPLAY_SUMMARY: &str = "replay_summary";
 pub struct ReplaySummaryArgs {
     /// Path of a .wowsreplay file on the server's file system.
     pub path: String,
+}
+
+/// Which files `replay_summary` may open.
+#[derive(Debug, Clone)]
+pub enum ReplayFiles {
+    /// Any path the server process can read, apart from network shares and devices.
+    Any,
+    /// Only files inside these directories.
+    Within(PathRoots),
 }
 
 /// Where the query tools get their game build.
@@ -58,6 +68,7 @@ pub fn load_dump(path: &Path, cache_dir: Option<&Path>) -> Result<GameData, Repo
 /// `replay_summary`, which reads a replay from the server's file system.
 pub struct GameDataTools {
     build: Build,
+    replay_files: ReplayFiles,
 }
 
 enum Build {
@@ -66,13 +77,13 @@ enum Build {
 }
 
 impl GameDataTools {
-    pub fn new(source: GameDataSource) -> Self {
+    pub fn new(source: GameDataSource, replay_files: ReplayFiles) -> Self {
         let build = match source {
             GameDataSource::Loaded(game) => Build::Loaded(game),
             GameDataSource::Dump { path, cache_dir } => Build::Dump { path, cache_dir, game: OnceCell::new() },
         };
 
-        Self { build }
+        Self { build, replay_files }
     }
 
     /// The build, loading it on first use. A failed load is retried by the
@@ -104,12 +115,33 @@ impl GameDataTools {
 
         let args: ReplaySummaryArgs = serde_json::from_value(arguments)
             .map_err(|error| format!("invalid arguments for {REPLAY_SUMMARY}: {error}"))?;
-        let file = tokio::fs::File::open(&args.path).await.map_err(|_| format!("cannot read replay {}", args.path))?;
+        let unreadable = || format!("cannot read replay {}", args.path);
+        let path = match &self.replay_files {
+            ReplayFiles::Any => {
+                if crate::confine::is_network_or_device(args.path.as_ref()) {
+                    return Err(format!("{} is a network or device path", args.path));
+                }
+                tokio::fs::canonicalize(&args.path).await.map_err(|_| unreadable())?
+            }
+            ReplayFiles::Within(roots) => {
+                roots.resolve(args.path.as_ref()).map_err(|error| format!("cannot read replay: {error}"))?
+            }
+        };
+        if !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("wowsreplay")) {
+            return Err(format!("{} is not a .wowsreplay file", args.path));
+        }
+        // Opening a FIFO would wait for a writer, so the type is checked before the open, and again
+        // on the opened handle.
+        let regular = |metadata: std::fs::Metadata| metadata.is_file();
+        if !tokio::fs::metadata(&path).await.is_ok_and(regular) {
+            return Err(unreadable());
+        }
+        let file = tokio::fs::File::open(&path).await.map_err(|_| unreadable())?;
+        if !file.metadata().await.is_ok_and(regular) {
+            return Err(unreadable());
+        }
         let mut bytes = Vec::new();
-        file.take(REPLAY_LIMIT + 1)
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|_| format!("cannot read replay {}", args.path))?;
+        file.take(REPLAY_LIMIT + 1).read_to_end(&mut bytes).await.map_err(|_| unreadable())?;
         if bytes.len() as u64 > REPLAY_LIMIT {
             return Err(format!("{} is larger than any replay", args.path));
         }

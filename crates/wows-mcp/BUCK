@@ -14,6 +14,10 @@ WOWS_MCP_DEPS = [
     "//third-party/rust:tracing",
 ]
 
+WOWS_MCP_TEST_DEPS = [
+    "//third-party/rust:tempfile",
+]
+
 workspace_library(
     name = "wows_mcp",
     crate = "wows_mcp",
@@ -29,6 +33,7 @@ workspace_test(
     package = "wows-mcp",
     version = "0.1.0",
     deps = WOWS_MCP_DEPS,
+    test_deps = WOWS_MCP_TEST_DEPS,
 )
 
 workspace_binary(
@@ -57,4 +62,5 @@ workspace_integration_tests(
     version = "0.1.0",
     library = ":wows_mcp",
     deps = WOWS_MCP_DEPS,
+    test_deps = WOWS_MCP_TEST_DEPS,
 )
