@@ -37,6 +37,8 @@ pub(crate) mod timeline;
 mod tools;
 pub mod view;
 pub mod watched;
+#[cfg(test)]
+mod watched_tests;
 
 use wows_toolkit_config::WindowKind;
 use zgui::prelude::WindowHandle;

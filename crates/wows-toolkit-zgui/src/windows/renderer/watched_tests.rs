@@ -1,0 +1,113 @@
+//! The watched window, fed frames through a session that has no peer task behind it.
+//!
+//! The session's lock type comes from `CollabLink::for_test`, which spares naming the crate that
+//! provides it.
+
+use std::cell::Cell;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
+
+use landaire_ui::test_support::HeadlessOptions;
+use landaire_ui::test_support::HeadlessWindow;
+use landaire_ui::test_support::WindowSize;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::map_data::MinimapPos;
+use wows_replays::types::ElapsedClock;
+use wows_replays::types::GameClock;
+use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_services::collab::SharedWindow;
+use wt_collab_client::PlaybackFrame;
+use zgui::view;
+
+use crate::services::Services;
+use crate::windows::renderer::watched::WatchSession;
+use crate::windows::renderer::watched::WatchedViewProps;
+
+const VIEWPORT: WindowSize = WindowSize { width: 1000.0, height: 800.0 };
+const REPLAY: u64 = 78;
+
+/// A watched window on `link`'s session, and its watch.
+fn open(link: CollabLink) -> (HeadlessWindow, WatchSession) {
+    let handle = Rc::new(Cell::new(None));
+    let built = Rc::clone(&handle);
+    let window = HeadlessWindow::open(HeadlessOptions::new(VIEWPORT), move || {
+        Services::provide(None);
+        let shared = SharedWindow {
+            replay_id: REPLAY,
+            replay_name: "watched".to_owned(),
+            map: "Ocean".to_owned(),
+            map_name: "00_CO_ocean".to_owned(),
+            art_png: None,
+        };
+        let watch = WatchSession::open(shared, link.clone(), None);
+        built.set(Some(watch));
+        view! { WatchedView(watch = watch) }
+    })
+    .expect("the watched window opens headlessly");
+    let watch = handle.get().expect("the watch was opened");
+
+    (window, watch)
+}
+
+/// A frame of the host's playback carrying `commands`.
+fn frame(commands: Vec<DrawCommand>) -> PlaybackFrame {
+    PlaybackFrame {
+        replay_id: REPLAY,
+        commands,
+        clock: GameClock(30.0),
+        frame_index: 10,
+        total_frames: 100,
+        game_duration: 1200.0,
+    }
+}
+
+fn timer() -> DrawCommand {
+    DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(42.0) }
+}
+
+fn torpedo() -> DrawCommand {
+    DrawCommand::Torpedo { pos: MinimapPos { x: 50.0, y: 60.0 }, color: [0, 255, 0] }
+}
+
+/// Long enough for the window to look for frames again.
+fn take_in(window: &mut HeadlessWindow) {
+    window.advance(Duration::from_millis(120));
+}
+
+fn click(window: &mut HeadlessWindow, test_id: &str) {
+    let element = window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is drawn"));
+    window.click(element).expect("the element has a box");
+    window.advance(Duration::from_millis(50));
+}
+
+fn shows_timer(watch: WatchSession) -> bool {
+    watch.shown().expect("a frame has arrived").iter().any(|command| matches!(command, DrawCommand::Timer { .. }))
+}
+
+fn shows_torpedo(watch: WatchSession) -> bool {
+    watch.shown().expect("a frame has arrived").iter().any(|command| matches!(command, DrawCommand::Torpedo { .. }))
+}
+
+/// A layer turned off in the watched window's own toggles leaves the host's frames drawn without
+/// it, and leaves the other layers drawn.
+#[test]
+fn a_layer_turned_off_in_the_watched_window_is_not_drawn() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
+    take_in(&mut window);
+    assert!(shows_timer(watch) && shows_torpedo(watch), "both layers are drawn at first");
+
+    click(&mut window, "watched-playback-layers-toggle");
+    assert!(window.by_test_id("renderer-opt-team-rosters").is_none(), "a watched frame has no room for the rosters");
+    click(&mut window, "renderer-opt-timer");
+
+    assert!(!shows_timer(watch), "the timer is no longer drawn");
+    assert!(shows_torpedo(watch), "the torpedoes still are");
+
+    state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
+    take_in(&mut window);
+    assert!(!shows_timer(watch), "nor is it on the host's next frame");
+}

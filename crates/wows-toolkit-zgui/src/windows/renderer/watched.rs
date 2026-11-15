@@ -14,13 +14,25 @@ use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 
 use landaire_ui::LoadingProps;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::drawing::SidePanelLayout;
+use wows_minimap_renderer::toggles::TOGGLES;
+use wows_minimap_renderer::toggles::Toggle;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replays::types::GameClock;
+use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::minimap_preview::layout_for;
 use wows_toolkit_replay_data::minimap_preview::render_map;
 use wows_toolkit_replay_data::minimap_preview::render_map_art;
+use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
+use wows_toolkit_replay_data::replay_render::raster::shown_commands;
+use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedWindow;
@@ -31,11 +43,13 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
@@ -44,10 +58,22 @@ use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui::view::set_interval;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
+use zgui_ui::PopoverContentProps;
+use zgui_ui::PopoverProps;
+use zgui_ui::PopoverTriggerProps;
+use zgui_ui_primitives::Align;
+use zgui_ui_primitives::Placement;
+use zgui_ui_primitives::Side;
 
 use crate::frames::FrameSink;
 use crate::frames::FrameViewProps;
+use crate::icons::AppIconProps;
 use crate::services::Services;
+use crate::windows::renderer::options;
+use crate::windows::renderer::options::LayerListProps;
+use crate::windows::renderer::session::Layers;
 
 const SHEET: &str = "wt-watched";
 
@@ -112,6 +138,8 @@ pub struct WatchSession {
     pub clock: RwSignal<Option<HostClock>, LocalStorage>,
     /// Whether a frame has been drawn into the sink.
     pub drawn: RwSignal<bool, LocalStorage>,
+    /// What this end draws of the frames the host sends. The host sends every layer it baked.
+    pub layers: RwSignal<Layers, LocalStorage>,
     run: StoredValue<WatchRun, LocalStorage>,
 }
 
@@ -128,7 +156,9 @@ struct WatchRun {
     /// Bounded, and the far end drops rather than blocks: a frame nobody has drawn yet is stale.
     frames: Receiver<PlaybackFrame>,
     /// The commands the last frame carried.
-    latest: Option<Arc<Vec<DrawCommand>>>,
+    latest: Option<Vec<DrawCommand>>,
+    /// Whose ranges and trails are drawn: nobody's ranges until asked for, as in the renderer.
+    choices: ShipChoices,
     sink: FrameSink,
     /// One raster at a time: frames arrive faster than a map-sized image is drawn on a fast
     /// playback. A frame that arrives during one is drawn when it finishes.
@@ -159,6 +189,8 @@ impl WatchSession {
         Self {
             clock: RwSignal::new_local(None),
             drawn: RwSignal::new_local(false),
+            // What a renderer opens with, so a battle watched here starts as one played here does.
+            layers: RwSignal::new_local(Layers { options: playback_options_hidden(), show_dead_ships: true }),
             run: StoredValue::new_local(WatchRun {
                 replay_id,
                 space: shared.map_name,
@@ -166,6 +198,7 @@ impl WatchSession {
                 game_data,
                 frames,
                 latest: None,
+                choices: ShipChoices::new(),
                 sink: FrameSink::new(),
                 rasterising: false,
                 stale: false,
@@ -185,7 +218,7 @@ impl WatchSession {
         let newest = self.run.try_with_value(|run| run.frames.try_iter().last()).flatten();
         let Some(frame) = newest else { return };
 
-        self.run.update_value(|run| run.latest = Some(Arc::new(frame.commands)));
+        self.run.update_value(|run| run.latest = Some(frame.commands));
         self.clock.set(Some(HostClock {
             clock: frame.clock,
             frame: frame.frame_index,
@@ -199,10 +232,33 @@ impl WatchSession {
         self.run.try_with_value(|run| run.link.stop_watching(run.replay_id));
     }
 
+    /// The commands the next raster draws: the last frame, less what the layers leave out. `None`
+    /// until a frame has arrived.
+    pub fn shown(self) -> Option<Vec<DrawCommand>> {
+        self.run
+            .try_with_value(|run| {
+                let latest = run.latest.as_ref()?;
+                let shown = self.layers.with_untracked(|layers| {
+                    shown_commands(latest.iter().cloned(), &layers.options, layers.show_dead_ships, &run.choices)
+                });
+                Some(shown)
+            })
+            .flatten()
+    }
+
+    /// Changes what is drawn and draws the last frame again, so a toggle shows before the host
+    /// sends another.
+    pub fn set_layers(self, apply: impl FnOnce(&mut Layers)) {
+        let mut layers = self.layers.get_untracked();
+        apply(&mut layers);
+        self.layers.set(layers);
+        self.redraw();
+    }
+
     /// Draws the frame this viewport last had, off the UI thread.
     fn redraw(self) {
+        let Some(commands) = self.shown() else { return };
         let started = self.run.try_update_value(|run| {
-            let commands = Arc::clone(run.latest.as_ref()?);
             // The fonts and icons a frame needs are this build's own: without them there is
             // nothing to draw the commands with.
             let game_data = run.game_data.clone()?;
@@ -248,7 +304,7 @@ impl WatchSession {
 
 /// One frame to rasterise, carried off the UI thread.
 struct RasterJob {
-    commands: Arc<Vec<DrawCommand>>,
+    commands: Vec<DrawCommand>,
     game_data: GameDataCache,
     space: String,
     art: Option<Arc<image::RgbImage>>,
@@ -277,9 +333,17 @@ impl RasterJob {
 /// A viewport onto a battle the session is playing elsewhere.
 #[component]
 pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView {
-    install_stylesheet(SHEET, CSS);
     let game_data = Services::current().game_data.cache_untracked();
     let watch = WatchSession::open(shared, link, game_data);
+
+    view! { WatchedView(watch = watch) }
+}
+
+/// What `watch` shows, taking in the host's frames while it is up and stopping the watch as it
+/// goes.
+#[component]
+pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
     let drain = set_interval(DRAIN, move || watch.take_frames());
     on_cleanup_local(move || {
         drop(drain);
@@ -304,7 +368,8 @@ pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView 
     }
 }
 
-/// Where the end that owns the replay has reached, as a strip to read.
+/// Where the end that owns the replay has reached, as a strip to read, with what this end draws
+/// of it.
 #[component]
 fn HostClockStrip(watch: WatchSession) -> impl IntoView {
     let clock = move || watch.clock.get();
@@ -325,9 +390,62 @@ fn HostClockStrip(watch: WatchSession) -> impl IntoView {
                         )
                     }
                 }
+                WatchedLayers(watch = watch)
             }
         }
     }
+}
+
+/// The renderer's display toggles over the host's frames, less those a watched frame has no room
+/// for.
+#[component]
+fn WatchedLayers(watch: WatchSession) -> impl IntoView {
+    install_stylesheet(options::SHEET, options::CSS);
+    let label = t!("ui.renderer.settings.title").into_owned();
+    let named = label.clone();
+    let set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| {
+        watch.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
+    });
+
+    view! {
+        Popover {
+            PopoverTrigger(
+                variant = ButtonVariant::Outline,
+                size = ButtonSize::IconXs,
+                attr:data-testid = "watched-playback-layers-toggle",
+                a11y:label = label.clone()
+            ) {
+                Tooltip {
+                    TooltipTrigger {
+                        AppIcon(glyph = Glyph::Settings)
+                    }
+                    TooltipContent {{named.clone()}}
+                }
+            }
+            PopoverContent(
+                placement = Placement::new(Side::Bottom, Align::End),
+                class = "wt-renderer-options__panel",
+                attr:data-testid = "watched-playback-layers-list"
+            ) {
+                LayerList(layers = watch.layers, toggles = map_toggles(), set = set)
+            }
+        }
+    }
+}
+
+/// The toggles a watched frame can show. It is drawn on the map alone, so the layers that need a
+/// gutter beside it are left out.
+fn map_toggles() -> Vec<&'static Toggle> {
+    TOGGLES
+        .iter()
+        .filter(|toggle| {
+            let mut options =
+                RenderOptions { show_team_rosters: false, show_stats_panel: false, ..RenderOptions::default() };
+            let mut show_dead_ships = true;
+            (toggle.write)(&mut options, &mut show_dead_ships, true);
+            layout_for(&options) == SidePanelLayout::None
+        })
+        .collect()
 }
 
 #[cfg(test)]

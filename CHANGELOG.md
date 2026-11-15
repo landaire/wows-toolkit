@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Choose which layers a watched collab playback draws from its own display toggles
 - *(zgui)* Draw trails in the replay renderer and exported videos from every recorded position, as the egui renderer does, rather than from the frames the bake kept
 - *(zgui)* Offer the stats panel in the replay renderer, drawn with the recording player's ship silhouette, and film it in exports. A merged replay opens on the team rosters, as in egui
 - *(zgui)* Open a Match Timeline window from the replay panel's Actions menu, with event filters, search, copy and save to file

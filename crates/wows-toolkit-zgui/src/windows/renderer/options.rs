@@ -14,6 +14,7 @@ use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
@@ -46,6 +47,7 @@ use zgui_ui_primitives::Placement;
 use zgui_ui_primitives::Side;
 
 use crate::icons::AppIconProps;
+use crate::windows::renderer::session::Layers;
 use crate::windows::renderer::session::RendererSession;
 use crate::windows::renderer::view::TransportButtonProps;
 
@@ -107,11 +109,13 @@ fn OptionsGear(session: RendererSession) -> impl IntoView {
                 class = "wt-renderer-options__panel",
                 attr:data-testid = "replay-renderer-settings-list"
             ) {
-                column(class = "wt-renderer-options__list") {
-                    for toggle in move || TOGGLES.iter().collect::<Vec<_>>(), key = |toggle: &&Toggle| toggle.id {
-                        LayerToggle(session = session, toggle = toggle)
-                    }
-                }
+                LayerList(
+                    layers = session.layers,
+                    toggles = TOGGLES.iter().collect(),
+                    set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| {
+                        session.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
+                    })
+                )
                 ExportSettingsSection(session = session)
                 SaveDefaultsButton(session = session)
             }
@@ -119,15 +123,32 @@ fn OptionsGear(session: RendererSession) -> impl IntoView {
     }
 }
 
+/// The display toggles in `toggles`, each read off `layers` and changed through `set`.
+#[component]
+pub(super) fn LayerList(
+    layers: RwSignal<Layers, LocalStorage>,
+    toggles: Vec<&'static Toggle>,
+    set: UnsyncCallback<(&'static Toggle, bool)>,
+) -> impl IntoView {
+    view! {
+        column(class = "wt-renderer-options__list") {
+            for toggle in move || toggles.clone(), key = |toggle: &&Toggle| toggle.id {
+                LayerToggle(layers = layers, toggle = toggle, set = set)
+            }
+        }
+    }
+}
+
 /// One of the display toggles.
 #[component]
-fn LayerToggle(session: RendererSession, toggle: &'static Toggle) -> impl IntoView {
-    let checked = Signal::derive_local(move || {
-        session.layers.with(|layers| (toggle.read)(&layers.options, layers.show_dead_ships))
-    });
-    let on_change = UnsyncCallback::new(move |on: bool| {
-        session.set_layers(|layers| (toggle.write)(&mut layers.options, &mut layers.show_dead_ships, on));
-    });
+fn LayerToggle(
+    layers: RwSignal<Layers, LocalStorage>,
+    toggle: &'static Toggle,
+    set: UnsyncCallback<(&'static Toggle, bool)>,
+) -> impl IntoView {
+    let checked =
+        Signal::derive_local(move || layers.with(|layers| (toggle.read)(&layers.options, layers.show_dead_ships)));
+    let on_change = UnsyncCallback::new(move |on: bool| set.run((toggle, on)));
 
     view! {
         CheckRow(label = t!(toggle.label_key).into_owned(), test_id = toggle.id.to_owned(), checked = checked, on_change = on_change)
