@@ -650,3 +650,116 @@ fn a_refused_recording_is_dropped_and_the_battle_read_again() {
     assert!(alts.get_untracked().is_empty(), "the refused recording is dropped");
     assert_eq!(ASKED_AGAIN.get(), Some(ReparseCause::FileRewritten), "the file change is read again");
 }
+
+/// Two advantage changes, at 10 and 30 seconds.
+fn two_events() -> wows_replay_insights::timeline::TimelineExtractionResult {
+    use wows_replay_insights::timeline::TimelineEvent;
+    use wows_replay_insights::timeline::TimelineEventKind;
+    let events = [10.0, 30.0]
+        .into_iter()
+        .map(|seconds: f32| TimelineEvent {
+            clock: wows_replays::types::ElapsedClock(seconds),
+            kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
+        })
+        .collect();
+    wows_replay_insights::timeline::TimelineExtractionResult {
+        events,
+        battle_start: wows_replays::types::GameClock(0.0),
+        battle_end: None,
+        viewer_team: None,
+    }
+}
+
+/// A timeline that failed to read says why and reads again on Retry; a click on an event then
+/// copies it.
+#[test]
+fn the_timeline_window_retries_a_failed_read_and_copies_an_event() {
+    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&reads);
+    let read: super::timeline::ReadEvents = Arc::new(move |_: &super::timeline::TimelineSource| {
+        match counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+            0 => Err("not this time".to_owned()),
+            _ => Ok(two_events()),
+        }
+    });
+    let mut window =
+        crate::interaction_tests::open_shell(HeadlessOptions::new(WindowSize { width: 900.0, height: 700.0 }));
+    let source = super::timeline::TimelineSource {
+        path: PathBuf::from("battle.wowsreplay"),
+        alts: Vec::new(),
+        map: "Ocean".to_owned(),
+    };
+    super::timeline::open(crate::interaction_tests::shell(), source, read);
+    crate::interaction_tests::settle_in_real_time(&mut window);
+
+    let failed = window.texts_by_class("wt-replay-timeline__failed").concat();
+    assert!(failed.contains("not this time"), "the window says why it read nothing: {failed:?}");
+    let retry = window.by_test_id("replay-timeline-retry").expect("a failed read offers to try again");
+    window.click(retry).expect("clickable");
+    crate::interaction_tests::settle_in_real_time(&mut window);
+
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2, "Retry reads the battle again");
+    assert!(window.by_test_id("replay-timeline-row-1").is_some(), "the events are listed");
+    assert!(window.by_test_id("replay-timeline-save").is_some(), "and can be saved");
+    let row = window.by_test_id("replay-timeline-row-1").expect("the second event is listed");
+    window.click(row).expect("clickable");
+    window.advance(Duration::from_millis(300));
+    let toasts = window.texts_by_class("lui-toasts").concat();
+    assert!(toasts.contains(&t!("ui.replay.timeline_event_copied").into_owned()), "{toasts:?}");
+}
+
+/// A filter set while the events are still being read holds once they land.
+#[test]
+fn a_filter_set_during_the_read_holds_once_the_events_land() {
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = std::sync::Mutex::new(released);
+    let read: super::timeline::ReadEvents = Arc::new(move |_: &super::timeline::TimelineSource| {
+        released.lock().expect("unpoisoned").recv().map_err(|err| err.to_string())?;
+        Ok(two_events())
+    });
+    let mut window =
+        crate::interaction_tests::open_shell(HeadlessOptions::new(WindowSize { width: 900.0, height: 700.0 }));
+    let source = super::timeline::TimelineSource {
+        path: PathBuf::from("battle.wowsreplay"),
+        alts: Vec::new(),
+        map: "Ocean".to_owned(),
+    };
+    super::timeline::open(crate::interaction_tests::shell(), source, read);
+    window.advance(Duration::from_millis(300));
+
+    let none = window.by_test_id("replay-timeline-none").expect("the filter is offered while reading");
+    window.click(none).expect("clickable");
+    release.send(()).expect("the read is waiting");
+    crate::interaction_tests::settle_in_real_time(&mut window);
+
+    assert!(window.by_test_id("replay-timeline-row-0").is_none(), "no kind is shown, as the reader chose");
+    let all = window.by_test_id("replay-timeline-all").expect("offered");
+    window.click(all).expect("clickable");
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("replay-timeline-row-0").is_some(), "the events had landed");
+}
+
+/// The Actions menu opens the timeline of the battle it reads.
+#[test]
+fn the_actions_menu_opens_the_timeline() {
+    let Opened { mut window } =
+        open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
+
+    let actions = window.by_test_id("replay-actions").expect("the menu is offered");
+    window.click(actions).expect("clickable");
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("replay-timeline-open").is_some(), "the menu offers the timeline");
+}
+
+#[test]
+fn a_saved_timeline_ends_every_line_and_a_picked_event_reads_alone() {
+    let events = wows_toolkit_replay_data::replay_render::timeline::BattleEvents::from_extraction(
+        two_events(),
+        std::collections::HashMap::new(),
+    );
+    let saved = events.save_text();
+    assert_eq!(saved.lines().count(), 2);
+    assert!(saved.ends_with('\n'));
+    assert_eq!(events.event_text(1).as_deref(), saved.lines().nth(1));
+    assert_eq!(events.event_text(2), None);
+}

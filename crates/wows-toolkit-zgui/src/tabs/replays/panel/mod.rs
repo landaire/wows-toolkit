@@ -21,6 +21,7 @@ mod figures;
 mod raw_json;
 #[cfg(test)]
 pub(crate) mod tests;
+pub mod timeline;
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -42,6 +43,7 @@ use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::loader::LoadRequest;
+use wows_toolkit_replay_data::minimap_preview;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
@@ -110,6 +112,7 @@ use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
 use crate::tabs::replays::panel::raw_json::RawJsonPanelProps;
+use crate::tabs::replays::panel::timeline::TimelineSource;
 use crate::tabs::replays::table::PlayerDetail;
 use crate::tabs::replays::table::PlayerDetailCx;
 
@@ -1396,6 +1399,22 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
             .collect::<Vec<_>>()
     };
     let load_alt = UnsyncCallback::new(move |()| add_alt());
+    let game_data = Services::current().game_data;
+    let shell = export.with_value(|export| export.shell);
+    let open_timeline = UnsyncCallback::new(move |()| {
+        let Some(loaded) = loaded.get_untracked() else { return };
+        let Some(cache) = game_data.cache_untracked() else { return };
+        let source = TimelineSource {
+            path: path.get_value(),
+            alts: alts.get_untracked(),
+            map: loaded.model.with_untracked(|model| model.map.clone()),
+        };
+        let read: timeline::ReadEvents = Arc::new(move |source: &TimelineSource| {
+            minimap_preview::extract_merged_timeline(&source.path, &source.alts, &cache).map_err(|err| err.to_string())
+        });
+        timeline::open(shell, source, read);
+    });
+    let no_timeline = Signal::derive_local(move || loaded.with(Option::is_none) || game_data.cache().is_none());
     let debug_items = move || {
         if !debug.get() {
             return None;
@@ -1439,6 +1458,9 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
                     ) {{t!("ui.replay.context.render_replay").into_owned()}}
                 }))}
                 MenuItem(attr:data-testid = "replay-load-alt", on_select = load_alt) {{alt_label}}
+                MenuItem(attr:data-testid = "replay-timeline-open", disabled = no_timeline, on_select = open_timeline) {
+                    {t!("ui.replay.timeline").into_owned()}
+                }
                 Show(when = is_test_ship) {
                     MenuCheckboxItem(
                         checked = Binding::controlled(Signal::derive_local(hidden), |_| {}),

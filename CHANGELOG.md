@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Open a Match Timeline window from the replay panel's Actions menu, with event filters, search, copy and save to file
 - *(zgui)* Warn once the game data loads when the install folder lists no replays
 - *(zgui)* Autoload and announce a battle that lands in the folder on screen as well as the install folder, and only count one landing in a folder that is not on screen
 - *(zgui)* Render a date or ship group to video or the clipboard, and set or add it as session stats, from its header's context menu

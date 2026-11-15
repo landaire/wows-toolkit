@@ -492,6 +492,40 @@ pub fn extract_events(
     ))
 }
 
+/// The events of `path`'s battle merged with those its `alts` recorded of the same battle, in the
+/// order they happened, for the inspector's timeline. An alt that cannot be read is skipped: the
+/// primary's events are still worth showing.
+pub fn extract_merged_timeline(
+    path: &std::path::Path,
+    alts: &[std::path::PathBuf],
+    game_data: &GameDataCache,
+) -> Result<TimelineExtractionResult, PreviewError> {
+    let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
+    let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
+        .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let build =
+        version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let loaded = load_build(game_data, build, &version)?;
+    let constants = decode_constants(&loaded, build.get(), version, game_data);
+    let extract = |replay: &ReplayFile| {
+        wows_replay_insights::timeline::extract_timeline_events(replay, loaded.provider(), Some(&constants))
+    };
+
+    let primary = extract(&replay);
+    let alts = alts
+        .iter()
+        .filter_map(|alt| match ReplayFile::from_file(alt) {
+            Ok(alt) => Some(extract(&alt)),
+            Err(err) => {
+                tracing::warn!("timeline: skipping alt replay {}: {err}", alt.display());
+                None
+            }
+        })
+        .collect();
+
+    Ok(wows_replay_insights::timeline::merge_timelines(primary, alts))
+}
+
 /// Walks `path`'s battle once, keeping the draw commands of up to `budget`
 /// frames and the renderer they are drawn through.
 ///

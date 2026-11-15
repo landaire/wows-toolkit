@@ -33,7 +33,7 @@ pub mod session;
 mod ship_menu;
 #[cfg(test)]
 mod shot_tests;
-mod timeline;
+pub(crate) mod timeline;
 mod tools;
 pub mod view;
 pub mod watched;

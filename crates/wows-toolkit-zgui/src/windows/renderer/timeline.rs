@@ -1,4 +1,5 @@
-//! The transport's event timeline: what happened, filtered, and clickable.
+//! The event timeline: what happened, filtered, and clickable. The transport's popover and the
+//! replay panel's timeline window share its controls.
 
 use landaire_ui::EscapeClears;
 use landaire_ui::LoadingLineProps;
@@ -20,6 +21,9 @@ use zgui::css;
 use zgui::prelude::ClipboardKind;
 use zgui::prelude::Clipboards;
 use zgui::prelude::try_use_clipboard;
+use zgui::reactive::Callable;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
@@ -49,9 +53,9 @@ use crate::icons::AppIconProps;
 use crate::windows::renderer::options::CheckRowProps;
 use crate::windows::renderer::session::RendererSession;
 
-const SHEET: &str = "wt-renderer-timeline";
+pub(crate) const SHEET: &str = "wt-renderer-timeline";
 
-const CSS: &str = css!(
+pub(crate) const CSS: &str = css!(
     ".wt-renderer-timeline { display: flex; flex-direction: column; gap: 4px; width: 340px; padding: 8px; }
     .wt-renderer-timeline__header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
     .wt-renderer-timeline__title { font-size: 12px; font-weight: 700; }
@@ -70,6 +74,38 @@ const CSS: &str = css!(
     .wt-renderer-timeline__hover { display: flex; flex-direction: column; font-size: 11px; }"
 );
 
+/// What a timeline's controls read, and where a click on a row goes.
+#[derive(Clone, Copy)]
+pub(crate) struct TimelineCx {
+    pub events: RwSignal<BattleEvents, LocalStorage>,
+    /// What each control's test id starts with.
+    pub test_id: &'static str,
+    pub on_pick: UnsyncCallback<PickedEvent>,
+}
+
+impl TimelineCx {
+    fn test_id(self, part: &str) -> String {
+        format!("{}-{part}", self.test_id)
+    }
+
+    /// Escape in the search empties it before it closes what holds the timeline.
+    pub(crate) fn escape(self) -> EscapeClears {
+        let events = self.events;
+        EscapeClears::with(
+            Signal::derive_local(move || events.with(|events| !events.filter().search.is_empty())),
+            move || events.update(|events| events.set_filter(|filter| filter.search = String::new())),
+        )
+    }
+}
+
+/// A row the reader clicked: its place among the listed rows, and when it happened.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PickedEvent {
+    pub index: usize,
+    /// Seconds into the battle.
+    pub at: f32,
+}
+
 /// The list button on the transport and the timeline it opens.
 #[component]
 pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
@@ -77,11 +113,12 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
     let label = t!("ui.renderer.settings.event_timeline").into_owned();
     let named = label.clone();
     let title = label.clone();
-    // Escape in the search empties it before it closes the popover.
-    let escape = EscapeClears::with(
-        Signal::derive_local(move || session.events.with(|events| !events.filter().search.is_empty())),
-        move || session.events.update(|events| events.set_filter(|filter| filter.search = String::new())),
-    );
+    let cx = TimelineCx {
+        events: session.events,
+        test_id: "replay-renderer-timeline",
+        on_pick: UnsyncCallback::new(move |picked: PickedEvent| session.go_to_elapsed(picked.at)),
+    };
+    let escape = cx.escape();
 
     view! {
         Popover {
@@ -106,11 +143,11 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
             ) {
                 row(class = "wt-renderer-timeline__header") {
                     text(class = "wt-renderer-timeline__title") {{title.clone()}}
-                    CopyButton(session = session)
+                    TimelineCopyButton(cx = cx)
                 }
-                FilterBar(session = session, escape = escape)
+                TimelineFilterBar(cx = cx, escape = escape)
                 Separator()
-                TimelineRows(session = session)
+                TimelineRows(cx = cx)
             }
         }
     }
@@ -118,12 +155,13 @@ pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
 
 /// Puts the listed events on the clipboard as text.
 #[component]
-fn CopyButton(session: RendererSession) -> impl IntoView {
+pub(crate) fn TimelineCopyButton(cx: TimelineCx) -> impl IntoView {
     let toasts = Toasts::current();
     let clipboard = StoredValue::new_local(try_use_clipboard());
-    let nothing_listed = Signal::derive_local(move || session.events.with(|events| events.visible().is_empty()));
+    let events = cx.events;
+    let nothing_listed = Signal::derive_local(move || events.with(|events| events.visible().is_empty()));
     let copy = move || {
-        let text = session.events.with(BattleEvents::copy_text);
+        let text = events.with(BattleEvents::copy_text);
         clipboard.with_value(|clipboard: &Option<Clipboards>| {
             // A platform with no clipboard has nowhere to put it.
             let Some(clipboard) = clipboard else { return };
@@ -141,7 +179,7 @@ fn CopyButton(session: RendererSession) -> impl IntoView {
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Sm,
                     disabled = nothing_listed,
-                    attr:data-testid = "replay-renderer-timeline-copy",
+                    attr:data-testid = cx.test_id("copy"),
                     on:click = move |_| copy()
                 ) {
                     {t!("ui.buttons.copy").into_owned()}
@@ -154,10 +192,11 @@ fn CopyButton(session: RendererSession) -> impl IntoView {
 
 /// The kind switches and the search box.
 #[component]
-fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
-    let search = Signal::derive_local(move || session.events.with(|events| events.filter().search.clone()));
+pub(crate) fn TimelineFilterBar(cx: TimelineCx, escape: EscapeClears) -> impl IntoView {
+    let events = cx.events;
+    let search = Signal::derive_local(move || events.with(|events| events.filter().search.clone()));
     let set_every_kind =
-        move |on: bool| session.events.update(|events| events.set_filter(|filter| filter.kinds = [on; KIND_COUNT]));
+        move |on: bool| events.update(|events| events.set_filter(|filter| filter.kinds = [on; KIND_COUNT]));
 
     view! {
         column {
@@ -165,7 +204,7 @@ fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Sm,
-                    attr:data-testid = "replay-renderer-timeline-all",
+                    attr:data-testid = cx.test_id("all"),
                     on:click = move |_| set_every_kind(true)
                 ) {
                     {t!("ui.replay.timeline_filter_all").into_owned()}
@@ -173,7 +212,7 @@ fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Sm,
-                    attr:data-testid = "replay-renderer-timeline-none",
+                    attr:data-testid = cx.test_id("none"),
                     on:click = move |_| set_every_kind(false)
                 ) {
                     {t!("ui.replay.timeline_filter_none").into_owned()}
@@ -181,10 +220,10 @@ fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
                 box(class = "wt-renderer-timeline__search") {
                     Input(
                         value = Binding::controlled(search, move |text: String| {
-                            session.events.update(|events| events.set_filter(|filter| filter.search = text));
+                            events.update(|events| events.set_filter(|filter| filter.search = text));
                         }),
                         placeholder = t!("ui.replay.timeline_search_hint").into_owned(),
-                        attr:data-testid = "replay-renderer-timeline-search",
+                        attr:data-testid = cx.test_id("search"),
                         node_ref = escape.node_ref(),
                         on:key_down = move |ev| {
                             escape.key_down(ev);
@@ -196,10 +235,10 @@ fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
                 for index in move || (0..KIND_COUNT).collect::<Vec<_>>(), key = |index: &usize| *index {
                     CheckRow(
                         label = t!(kind_label_key(index)).into_owned(),
-                        test_id = format!("replay-renderer-timeline-kind-{index}"),
-                        checked = Signal::derive_local(move || session.events.with(|events| events.filter().kinds[index])),
+                        test_id = cx.test_id(&format!("kind-{index}")),
+                        checked = Signal::derive_local(move || events.with(|events| events.filter().kinds[index])),
                         on_change = UnsyncCallback::new(move |on: bool| {
-                            session.events.update(|events| events.set_filter(|filter| filter.kinds[index] = on));
+                            events.update(|events| events.set_filter(|filter| filter.kinds[index] = on));
                         })
                     )
                 }
@@ -211,7 +250,7 @@ fn FilterBar(session: RendererSession, escape: EscapeClears) -> impl IntoView {
 /// What the timeline says while there is no list to show.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Listing {
-    /// The second walk of the replay has not finished.
+    /// The walk of the replay that reads its events has not finished.
     Reading,
     /// The battle had nothing worth listing.
     NothingHappened,
@@ -222,9 +261,10 @@ enum Listing {
 
 /// The filtered list, or what to say instead of one.
 #[component]
-fn TimelineRows(session: RendererSession) -> impl IntoView {
+pub(crate) fn TimelineRows(cx: TimelineCx) -> impl IntoView {
+    let events = cx.events;
     let listing = move || {
-        session.events.with(|events| {
+        events.with(|events| {
             if !events.is_read() {
                 Listing::Reading
             } else if events.events().is_empty() {
@@ -248,21 +288,21 @@ fn TimelineRows(session: RendererSession) -> impl IntoView {
             text(class = "wt-renderer-timeline__said") {{t!("ui.replay.timeline_no_matches").into_owned()}}
         }),
         Listing::Rows => AnyView::new(view! {
-            column(class = "wt-renderer-timeline__list", attr:data-testid = "replay-renderer-timeline-list") {
+            column(class = "wt-renderer-timeline__list", attr:data-testid = cx.test_id("list")) {
                 // Keyed by place and wording: the same place holds a different event once the
                 // filter moves, and the same event is marked anew as the search changes.
-                for entry in move || session.events.with(BattleEvents::rows).into_iter().enumerate().collect::<Vec<_>>(),
+                for entry in move || events.with(BattleEvents::rows).into_iter().enumerate().collect::<Vec<_>>(),
                     key = |entry: &(usize, TimelineRow)| (entry.0, entry.1.label.clone(), entry.1.at.to_bits(), entry.1.marks.clone()) {
-                    TimelineEntry(session = session, index = entry.0, row = entry.1)
+                    TimelineEntry(cx = cx, index = entry.0, row = entry.1)
                 }
             }
         }),
     }
 }
 
-/// One event: when, what, and on hover the detail; a click goes there.
+/// One event: when, what, and on hover the detail; a click picks it.
 #[component]
-fn TimelineEntry(session: RendererSession, index: usize, row: TimelineRow) -> impl IntoView {
+fn TimelineEntry(cx: TimelineCx, index: usize, row: TimelineRow) -> impl IntoView {
     let TimelineRow { at, label, hover, tone, marks } = row;
     let tone = match tone {
         // The two colours this app already paints a friendly and an enemy team in.
@@ -270,11 +310,12 @@ fn TimelineEntry(session: RendererSession, index: usize, row: TimelineRow) -> im
         EventTone::Enemy => "enemy",
         EventTone::Neutral => "neutral",
     };
+    let on_pick = cx.on_pick;
     let entry = view! {
         row(
             class = "wt-renderer-timeline__row",
-            attr:data-testid = format!("replay-renderer-timeline-row-{index}"),
-            on:click = move |_| session.go_to_elapsed(at)
+            attr:data-testid = cx.test_id(&format!("row-{index}")),
+            on:click = move |_| on_pick.run(PickedEvent { index, at })
         ) {
             text(class = "wt-renderer-timeline__at") {{mmss(at)}}
             MarkedText(class = "wt-renderer-timeline__label", attr:data-tone = tone, text = label, ranges = marks.into())

@@ -172,6 +172,16 @@ impl BattleEvents {
         self.visible().into_iter().map(format_timeline_event).collect::<Vec<_>>().join("\n")
     }
 
+    /// The listed events as a text file, each line ended.
+    pub fn save_text(&self) -> String {
+        self.visible().into_iter().map(|event| format!("{}\n", format_timeline_event(event))).collect()
+    }
+
+    /// The listed event at `index` of [`Self::rows`] as text.
+    pub fn event_text(&self, index: usize) -> Option<String> {
+        self.visible().get(index).copied().map(format_timeline_event)
+    }
+
     /// The event before `elapsed` seconds into the battle, if there is one.
     ///
     /// Half a second back, as the egui renderer looks: without it, landing on
