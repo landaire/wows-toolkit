@@ -1540,6 +1540,7 @@ load_failed = "Échec du chargement des paramètres"
 not_set = "(non défini)"
 
 [ui.settings.panel]
+mcp = "Serveur MCP"
 open = "Ouvrir les paramètres"
 search_placeholder = "Rechercher dans les paramètres"
 count_one = "1 paramètre"
@@ -2126,3 +2127,29 @@ section_stand_in = "Cette section de coque n'a pas de géométrie propre. Le nav
 [ui.armor.hidden_ship]
 clan_rental = "Location de clan"
 other_class = "Pas une classe de navire"
+
+[ui.settings.mcp]
+enabled = "Activer le serveur MCP"
+enabled_description = "Fournit les replays et les données du jeu aux assistants IA via MCP. Affiche un contrôle dans la barre d'état."
+start_on_launch = "Démarrer avec le programme"
+start_on_launch_description = "Démarre le serveur à l'ouverture de WoWs Toolkit."
+bind_address = "Adresse d'écoute"
+bind_address_description = "Adresse IP de bouclage sur laquelle le serveur écoute, comme 127.0.0.1 ou ::1. Seul cet ordinateur peut joindre le serveur."
+port = "Port"
+port_description = "Port TCP d'écoute. Choisi au hasard à la première activation et conservé."
+port_unset = "Choisi à la première activation"
+address_not_loopback = "%{input} n'est pas une adresse de bouclage. Le serveur n'écoute que sur cet ordinateur, par exemple sur 127.0.0.1."
+address_invalid = "%{input} n'est pas une adresse IP"
+port_invalid = "%{input} n'est pas un port de 1 à 65535"
+port_in_use = "Un autre programme utilise ce port. Choisissez un autre port."
+
+[ui.mcp]
+started = "Serveur MCP actif sur %{url}"
+copy_url = "Copier l'URL"
+start_failed = "Impossible de démarrer le serveur MCP : %{reason}"
+port_in_use = "le port %{port} sur %{address} est utilisé par un autre programme"
+no_watchdog = "le superviseur des tâches de fond ne fonctionne pas"
+status_running = "Serveur MCP actif sur %{url}. Cliquez pour l'arrêter."
+status_starting = "Démarrage du serveur MCP sur %{address}"
+status_failed = "Le serveur MCP n'a pas démarré. Cliquez pour réessayer."
+status_stopped = "Serveur MCP arrêté. Cliquez pour le démarrer."

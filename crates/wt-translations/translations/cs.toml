@@ -1494,6 +1494,7 @@ load_failed = "Nepodařilo se načíst nastavení"
 not_set = "(nenastaveno)"
 
 [ui.settings.panel]
+mcp = "Server MCP"
 open = "Otevřít nastavení"
 search_placeholder = "Hledat v nastavení"
 count_one = "1 nastavení"
@@ -2080,3 +2081,29 @@ section_stand_in = "Tato část trupu nemá vlastní geometrii. Loď tuto část
 [ui.armor.hidden_ship]
 clan_rental = "Klanová zápůjčka"
 other_class = "Není třída lodi"
+
+[ui.settings.mcp]
+enabled = "Zapnout server MCP"
+enabled_description = "Poskytuje záznamy a herní data asistentům AI přes MCP. Zobrazí ovladač ve stavovém řádku."
+start_on_launch = "Spouštět s programem"
+start_on_launch_description = "Spustí server při otevření WoWs Toolkit."
+bind_address = "Adresa naslouchání"
+bind_address_description = "Adresa smyčky (loopback), na které server naslouchá, například 127.0.0.1 nebo ::1. Server je dostupný jen z tohoto počítače."
+port = "Port"
+port_description = "TCP port naslouchání. Při prvním zapnutí zvolen náhodně a zachován."
+port_unset = "Zvolí se při prvním zapnutí"
+address_not_loopback = "%{input} není adresa smyčky (loopback). Server naslouchá jen na tomto počítači, například na 127.0.0.1."
+address_invalid = "%{input} není IP adresa"
+port_invalid = "%{input} není port od 1 do 65535"
+port_in_use = "Tento port používá jiný program. Zvolte jiný port."
+
+[ui.mcp]
+started = "Server MCP běží na %{url}"
+copy_url = "Kopírovat URL"
+start_failed = "Server MCP nelze spustit: %{reason}"
+port_in_use = "port %{port} na %{address} používá jiný program"
+no_watchdog = "dozor nad úlohami na pozadí neběží"
+status_running = "Server MCP běží na %{url}. Kliknutím zastavíte."
+status_starting = "Server MCP se spouští na %{address}"
+status_failed = "Server MCP se nepodařilo spustit. Kliknutím zkusíte znovu."
+status_stopped = "Server MCP je zastaven. Kliknutím spustíte."

@@ -439,6 +439,7 @@ pub const fn section_glyph(section: SettingsSection) -> Glyph {
         SettingsSection::Replays => Glyph::Table,
         SettingsSection::Collaboration => Glyph::Users,
         SettingsSection::Twitch => Glyph::Twitch,
+        SettingsSection::Mcp => Glyph::Plug,
         SettingsSection::ArmorViewer => Glyph::Shield,
     }
 }

@@ -23,11 +23,12 @@ pub enum SettingsSection {
     Replays,
     Collaboration,
     Twitch,
+    Mcp,
     ArmorViewer,
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::General,
         Self::Appearance,
         Self::Game,
@@ -36,6 +37,7 @@ impl SettingsSection {
         Self::Replays,
         Self::Collaboration,
         Self::Twitch,
+        Self::Mcp,
         Self::ArmorViewer,
     ];
 
@@ -49,6 +51,7 @@ impl SettingsSection {
             Self::Replays => t!("ui.settings.panel.replays"),
             Self::Collaboration => t!("ui.settings.panel.collaboration"),
             Self::Twitch => t!("ui.settings.panel.twitch"),
+            Self::Mcp => t!("ui.settings.panel.mcp"),
             // The Armor Viewer tab's own name.
             Self::ArmorViewer => t!("ui.tabs.armor_viewer"),
         }
@@ -86,6 +89,10 @@ pub enum Setting {
     TwitchGetToken,
     TwitchToken,
     TwitchChannel,
+    McpEnabled,
+    McpStartOnLaunch,
+    McpBindAddress,
+    McpPort,
     ArmorPlateEdges,
     ArmorOpaqueHull,
     /// Stands in for the two above while nothing has been saved.
@@ -94,7 +101,7 @@ pub enum Setting {
 
 impl Setting {
     /// Every setting, in the order the drawer lists them.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 34] = [
         Self::Language,
         Self::DataSharing,
         Self::CodeIntegrity,
@@ -122,6 +129,10 @@ impl Setting {
         Self::TwitchGetToken,
         Self::TwitchToken,
         Self::TwitchChannel,
+        Self::McpEnabled,
+        Self::McpStartOnLaunch,
+        Self::McpBindAddress,
+        Self::McpPort,
         Self::ArmorPlateEdges,
         Self::ArmorOpaqueHull,
         Self::ArmorNoDefaults,
@@ -149,6 +160,7 @@ impl Setting {
             | Self::AutoExport => SettingsSection::Replays,
             Self::DisplayName | Self::SuppressIpWarning | Self::DisableAutoOpen => SettingsSection::Collaboration,
             Self::TwitchGetToken | Self::TwitchToken | Self::TwitchChannel => SettingsSection::Twitch,
+            Self::McpEnabled | Self::McpStartOnLaunch | Self::McpBindAddress | Self::McpPort => SettingsSection::Mcp,
             Self::ArmorPlateEdges | Self::ArmorOpaqueHull | Self::ArmorNoDefaults => SettingsSection::ArmorViewer,
         }
     }
@@ -182,6 +194,10 @@ impl Setting {
             Self::TwitchGetToken => t!("ui.settings.twitch.get_token"),
             Self::TwitchToken => t!("ui.settings.panel.token"),
             Self::TwitchChannel => t!("ui.settings.twitch.monitored_channel"),
+            Self::McpEnabled => t!("ui.settings.mcp.enabled"),
+            Self::McpStartOnLaunch => t!("ui.settings.mcp.start_on_launch"),
+            Self::McpBindAddress => t!("ui.settings.mcp.bind_address"),
+            Self::McpPort => t!("ui.settings.mcp.port"),
             Self::ArmorPlateEdges => t!("ui.armor.plate_edges"),
             Self::ArmorOpaqueHull => t!("ui.armor.opaque_hull"),
             Self::ArmorNoDefaults => t!("ui.settings.panel.armor_defaults"),
@@ -217,6 +233,10 @@ impl Setting {
             Self::TwitchGetToken => t!("ui.settings.panel.get_token_description"),
             Self::TwitchToken => t!("ui.settings.twitch.paste_token_tooltip"),
             Self::TwitchChannel => t!("ui.settings.panel.monitored_channel_description"),
+            Self::McpEnabled => t!("ui.settings.mcp.enabled_description"),
+            Self::McpStartOnLaunch => t!("ui.settings.mcp.start_on_launch_description"),
+            Self::McpBindAddress => t!("ui.settings.mcp.bind_address_description"),
+            Self::McpPort => t!("ui.settings.mcp.port_description"),
             Self::ArmorPlateEdges | Self::ArmorOpaqueHull => t!("ui.settings.panel.armor_saved_description"),
             Self::ArmorNoDefaults => t!("ui.settings.armor.no_defaults"),
         }
@@ -241,6 +261,8 @@ impl Setting {
                 | Self::DisplayName
                 | Self::TwitchToken
                 | Self::TwitchChannel
+                | Self::McpBindAddress
+                | Self::McpPort
         )
     }
 

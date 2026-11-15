@@ -1540,6 +1540,7 @@ load_failed = "설정을 불러오지 못했습니다"
 not_set = "(설정 안 됨)"
 
 [ui.settings.panel]
+mcp = "MCP 서버"
 open = "설정 열기"
 search_placeholder = "설정 검색"
 count_one = "설정 1개"
@@ -2126,3 +2127,29 @@ section_stand_in = "이 선체 구역에는 자체 지오메트리가 없습니�
 [ui.armor.hidden_ship]
 clan_rental = "클랜 대여"
 other_class = "함종이 아님"
+
+[ui.settings.mcp]
+enabled = "MCP 서버 사용"
+enabled_description = "MCP를 통해 리플레이와 게임 데이터를 AI 어시스턴트에 제공합니다. 상태 표시줄에 컨트롤을 표시합니다."
+start_on_launch = "프로그램과 함께 시작"
+start_on_launch_description = "WoWs Toolkit을 열 때 서버를 시작합니다."
+bind_address = "바인드 주소"
+bind_address_description = "서버가 수신할 루프백 IP 주소입니다(예: 127.0.0.1 또는 ::1). 이 컴퓨터에서만 서버에 연결할 수 있습니다."
+port = "포트"
+port_description = "수신할 TCP 포트입니다. 처음 사용할 때 무작위로 선택되어 유지됩니다."
+port_unset = "처음 사용할 때 선택됨"
+address_not_loopback = "%{input}은(는) 루프백 주소가 아닙니다. 서버는 이 컴퓨터에서만 수신합니다(예: 127.0.0.1)."
+address_invalid = "%{input}은(는) IP 주소가 아닙니다"
+port_invalid = "%{input}은(는) 1에서 65535 사이의 포트가 아닙니다"
+port_in_use = "다른 프로그램이 이 포트를 사용 중입니다. 다른 포트를 선택하세요."
+
+[ui.mcp]
+started = "MCP 서버 실행 중: %{url}"
+copy_url = "URL 복사"
+start_failed = "MCP 서버를 시작할 수 없습니다: %{reason}"
+port_in_use = "%{address}의 포트 %{port}을(를) 다른 프로그램이 사용 중입니다"
+no_watchdog = "백그라운드 작업 감시자가 실행되고 있지 않습니다"
+status_running = "MCP 서버 실행 중: %{url}. 클릭하여 중지합니다."
+status_starting = "%{address}에서 MCP 서버 시작 중"
+status_failed = "MCP 서버를 시작하지 못했습니다. 클릭하여 다시 시도합니다."
+status_stopped = "MCP 서버 중지됨. 클릭하여 시작합니다."

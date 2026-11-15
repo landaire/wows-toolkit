@@ -1494,6 +1494,7 @@ load_failed = "Ayarlar yüklenemedi"
 not_set = "(ayarlanmamış)"
 
 [ui.settings.panel]
+mcp = "MCP Sunucusu"
 open = "Ayarları Aç"
 search_placeholder = "Ayarlarda ara"
 count_one = "1 ayar"
@@ -2080,3 +2081,29 @@ section_stand_in = "Bu gövde bölümünün kendi geometrisi yok. Gemi, gövdeni
 [ui.armor.hidden_ship]
 clan_rental = "Klan kiralığı"
 other_class = "Bir gemi sınıfı değil"
+
+[ui.settings.mcp]
+enabled = "MCP sunucusunu etkinleştir"
+enabled_description = "Tekrarları ve oyun verilerini MCP üzerinden yapay zeka asistanlarına sunar. Durum çubuğunda bir denetim gösterir."
+start_on_launch = "Programla birlikte başlat"
+start_on_launch_description = "WoWs Toolkit açıldığında sunucuyu başlatır."
+bind_address = "Dinleme adresi"
+bind_address_description = "Sunucunun dinleyeceği geri döngü IP adresi, örneğin 127.0.0.1 veya ::1. Sunucuya yalnızca bu bilgisayardan erişilebilir."
+port = "Bağlantı noktası"
+port_description = "Dinlenecek TCP bağlantı noktası. İlk etkinleştirmede rastgele seçilir ve korunur."
+port_unset = "İlk etkinleştirmede seçilir"
+address_not_loopback = "%{input} bir geri döngü adresi değil. Sunucu yalnızca bu bilgisayarda dinler, örneğin 127.0.0.1 üzerinde."
+address_invalid = "%{input} bir IP adresi değil"
+port_invalid = "%{input} 1 ile 65535 arasında bir bağlantı noktası değil"
+port_in_use = "Bu bağlantı noktasını başka bir program kullanıyor. Başka bir bağlantı noktası seçin."
+
+[ui.mcp]
+started = "MCP sunucusu %{url} adresinde çalışıyor"
+copy_url = "URL'yi kopyala"
+start_failed = "MCP sunucusu başlatılamıyor: %{reason}"
+port_in_use = "%{address} üzerindeki %{port} bağlantı noktası başka bir program tarafından kullanılıyor"
+no_watchdog = "arka plan görev denetleyicisi çalışmıyor"
+status_running = "MCP sunucusu %{url} adresinde çalışıyor. Durdurmak için tıklayın."
+status_starting = "MCP sunucusu %{address} üzerinde başlatılıyor"
+status_failed = "MCP sunucusu başlatılamadı. Yeniden denemek için tıklayın."
+status_stopped = "MCP sunucusu durduruldu. Başlatmak için tıklayın."

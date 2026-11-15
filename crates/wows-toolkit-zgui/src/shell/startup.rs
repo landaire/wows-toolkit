@@ -137,6 +137,7 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
         update::check_for_update(services, shell, Asked::AtStartup);
     }
     shell.restart_twitch_poll();
+    shell.start_mcp_at_launch();
 }
 
 /// Marks the game directory read at startup when it holds no install, off the UI thread: the

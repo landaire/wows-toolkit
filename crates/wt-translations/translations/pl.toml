@@ -1494,6 +1494,7 @@ load_failed = "Nie udało się wczytać ustawień"
 not_set = "(nie ustawiono)"
 
 [ui.settings.panel]
+mcp = "Serwer MCP"
 open = "Otwórz ustawienia"
 search_placeholder = "Szukaj w ustawieniach"
 count_one = "1 ustawienie"
@@ -2080,3 +2081,29 @@ section_stand_in = "Ta sekcja kadłuba nie ma własnej geometrii. Okręt rysuje 
 [ui.armor.hidden_ship]
 clan_rental = "Wypożyczenie klanowe"
 other_class = "To nie jest klasa okrętu"
+
+[ui.settings.mcp]
+enabled = "Włącz serwer MCP"
+enabled_description = "Udostępnia powtórki i dane gry asystentom AI przez MCP. Pokazuje przełącznik na pasku stanu."
+start_on_launch = "Uruchamiaj z programem"
+start_on_launch_description = "Uruchamia serwer przy otwarciu WoWs Toolkit."
+bind_address = "Adres nasłuchu"
+bind_address_description = "Adres IP pętli zwrotnej, na którym nasłuchuje serwer, np. 127.0.0.1 lub ::1. Serwer jest dostępny tylko z tego komputera."
+port = "Port"
+port_description = "Port TCP nasłuchu. Losowany przy pierwszym włączeniu i zachowywany."
+port_unset = "Wybierany przy pierwszym włączeniu"
+address_not_loopback = "%{input} nie jest adresem pętli zwrotnej. Serwer nasłuchuje tylko na tym komputerze, np. na 127.0.0.1."
+address_invalid = "%{input} nie jest adresem IP"
+port_invalid = "%{input} nie jest portem od 1 do 65535"
+port_in_use = "Inny program używa tego portu. Wybierz inny port."
+
+[ui.mcp]
+started = "Serwer MCP działa pod %{url}"
+copy_url = "Kopiuj URL"
+start_failed = "Nie można uruchomić serwera MCP: %{reason}"
+port_in_use = "port %{port} na %{address} jest używany przez inny program"
+no_watchdog = "nadzorca zadań w tle nie działa"
+status_running = "Serwer MCP działa pod %{url}. Kliknij, aby zatrzymać."
+status_starting = "Uruchamianie serwera MCP na %{address}"
+status_failed = "Nie udało się uruchomić serwera MCP. Kliknij, aby ponowić."
+status_stopped = "Serwer MCP zatrzymany. Kliknij, aby uruchomić."

@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use rust_i18n::t;
+use wows_toolkit_viewmodel::mcp::McpAddressError;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
@@ -37,6 +38,14 @@ pub enum SettingFault {
     CacheRepairNeeded { builds: usize },
     /// The last download into the cache failed.
     CacheDownloadFailed { reason: String },
+    /// The typed MCP bind address is not an IP address.
+    McpAddressInvalid { input: String },
+    /// The typed or saved MCP bind address is not a loopback one, so the server does not start.
+    McpAddressNotLoopback { input: String },
+    /// The typed MCP port is not one from 1 to 65535.
+    McpPortInvalid { input: String },
+    /// Another program holds the MCP server's port.
+    McpPortInUse,
 }
 
 impl SettingFault {
@@ -50,6 +59,12 @@ impl SettingFault {
             Self::CacheRepairNeeded { builds } => {
                 t!("ui.settings.wows.cache.repair_needed", count = builds).into_owned()
             }
+            Self::McpAddressInvalid { input } => t!("ui.settings.mcp.address_invalid", input = input).into_owned(),
+            Self::McpAddressNotLoopback { input } => {
+                t!("ui.settings.mcp.address_not_loopback", input = input).into_owned()
+            }
+            Self::McpPortInvalid { input } => t!("ui.settings.mcp.port_invalid", input = input).into_owned(),
+            Self::McpPortInUse => t!("ui.settings.mcp.port_in_use").into_owned(),
         }
     }
 }
@@ -94,6 +109,27 @@ pub fn setting_faults(shell: Shell, setting: Setting) -> Vec<SettingFault> {
                 faults.push(SettingFault::CacheDownloadFailed { reason });
             }
         }),
+        Setting::McpBindAddress => {
+            match shell.mcp.address_refused() {
+                Some(McpAddressError::NotAnAddress { input }) => faults.push(SettingFault::McpAddressInvalid { input }),
+                Some(McpAddressError::NotLoopback { input }) => {
+                    faults.push(SettingFault::McpAddressNotLoopback { input });
+                }
+                None => {}
+            }
+            let saved = shell.services().settings.read(|settings| settings.mcp.bind_address);
+            if let Some(saved) = saved.filter(|saved| !saved.is_loopback()) {
+                faults.push(SettingFault::McpAddressNotLoopback { input: saved.to_string() });
+            }
+        }
+        Setting::McpPort => {
+            if let Some(input) = shell.mcp.port_refused() {
+                faults.push(SettingFault::McpPortInvalid { input });
+            }
+            if shell.mcp_port_in_use() {
+                faults.push(SettingFault::McpPortInUse);
+            }
+        }
         // Nothing else has a state that keeps it from working.
         _ => {}
     }

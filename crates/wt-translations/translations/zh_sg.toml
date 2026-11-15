@@ -1540,6 +1540,7 @@ load_failed = "加载设置失败"
 not_set = "（未设置）"
 
 [ui.settings.panel]
+mcp = "MCP 服务器"
 open = "打开设置"
 search_placeholder = "搜索设置"
 count_one = "1 项设置"
@@ -2126,3 +2127,29 @@ section_stand_in = "此船体分段没有自己的几何数据。舰船在另一
 [ui.armor.hidden_ship]
 clan_rental = "军团租借"
 other_class = "不是舰种"
+
+[ui.settings.mcp]
+enabled = "启用 MCP 服务器"
+enabled_description = "通过 MCP 向 AI 助手提供录像和游戏数据。在状态栏显示控制按钮。"
+start_on_launch = "随程序启动"
+start_on_launch_description = "打开 WoWs Toolkit 时启动服务器。"
+bind_address = "绑定地址"
+bind_address_description = "服务器监听的环回 IP 地址，例如 127.0.0.1 或 ::1。只有这台计算机能访问服务器。"
+port = "端口"
+port_description = "监听的 TCP 端口。首次启用时随机选择并保留。"
+port_unset = "首次启用时选择"
+address_not_loopback = "%{input} 不是环回地址。服务器只在这台计算机上监听，例如 127.0.0.1。"
+address_invalid = "%{input} 不是 IP 地址"
+port_invalid = "%{input} 不是 1 到 65535 之间的端口"
+port_in_use = "其他程序正在使用此端口。请选择其他端口。"
+
+[ui.mcp]
+started = "MCP 服务器运行于 %{url}"
+copy_url = "复制 URL"
+start_failed = "无法启动 MCP 服务器：%{reason}"
+port_in_use = "%{address} 上的端口 %{port} 被其他程序占用"
+no_watchdog = "后台任务监督程序未运行"
+status_running = "MCP 服务器运行于 %{url}。点击停止。"
+status_starting = "MCP 服务器正在 %{address} 上启动"
+status_failed = "MCP 服务器启动失败。点击重试。"
+status_stopped = "MCP 服务器已停止。点击启动。"

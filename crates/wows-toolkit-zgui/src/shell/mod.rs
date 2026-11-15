@@ -14,6 +14,7 @@ mod drop;
 mod file_dialog;
 mod first_run;
 mod game_data_cache;
+pub mod mcp;
 mod menu;
 mod notices;
 pub mod palette;
@@ -97,6 +98,7 @@ use crate::shell::drop::DropIntent;
 use crate::shell::drop::DropScrimProps;
 use crate::shell::drop::DropScrimState;
 use crate::shell::game_data_cache::GameDataCacheJobs;
+use crate::shell::mcp::McpLink;
 use crate::shell::menu::AppMenuProps;
 use crate::shell::palette::CommandPaletteProps;
 use crate::shell::palette::PaletteControl;
@@ -288,6 +290,8 @@ pub struct Shell {
     pub cache: GameDataCacheJobs,
     pub replay_index: ReplayIndexJobs,
     pub twitch: TwitchLink,
+    /// The MCP server's field input the settings did not take.
+    pub mcp: McpLink,
     pub palette: PaletteControl,
     pub dialogs: Dialogs,
     /// The tactics board's window, the layouts it starts from and the session it joins.
@@ -325,6 +329,7 @@ impl Shell {
             cache: GameDataCacheJobs::new(),
             replay_index: ReplayIndexJobs::new(),
             twitch: TwitchLink::new(),
+            mcp: McpLink::new(),
             palette: PaletteControl::new(),
             dialogs: Dialogs::new(),
             tactics: TacticsHost::new(),
@@ -689,6 +694,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     shell.collab.begin(shell);
     shell.armor.begin(services);
     shell.live.follow_install(services);
+    shell.begin_mcp();
     follow_selection(shell);
     let root = NodeRef::new();
     hear_unfocused_keys(root);

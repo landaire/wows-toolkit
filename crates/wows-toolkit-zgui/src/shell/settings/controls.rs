@@ -418,6 +418,40 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 commit = UnsyncCallback::new(move |channel: String| shell.set_twitch_channel(channel))
             )
         }),
+        Setting::McpEnabled => setting_switch(
+            shell,
+            setting,
+            "mcp-enabled",
+            |settings| settings.mcp.enabled,
+            |shell, on| shell.set_mcp_enabled(on),
+        ),
+        Setting::McpStartOnLaunch => setting_switch(
+            shell,
+            setting,
+            "mcp-start-on-launch",
+            |settings| settings.mcp.start_on_launch,
+            |shell, on| shell.set_mcp_start_on_launch(on),
+        ),
+        Setting::McpBindAddress => AnyView::new(view! {
+            FollowingField(
+                shell = shell,
+                setting = setting,
+                test_id = "mcp-bind-address",
+                placeholder = "127.0.0.1".to_owned(),
+                read = |settings: &StartupSettings| settings.mcp.bind_address.to_string(),
+                commit = UnsyncCallback::new(move |text: String| shell.commit_mcp_address(text))
+            )
+        }),
+        Setting::McpPort => AnyView::new(view! {
+            FollowingField(
+                shell = shell,
+                setting = setting,
+                test_id = "mcp-port",
+                placeholder = t!("ui.settings.mcp.port_unset").into_owned(),
+                read = |settings: &StartupSettings| settings.mcp.port.map(|port| port.to_string()).unwrap_or_default(),
+                commit = UnsyncCallback::new(move |text: String| shell.commit_mcp_port(text))
+            )
+        }),
         // The viewport writes these itself when a pane changes, so the drawer reports them rather
         // than offering a second way to set them.
         Setting::ArmorPlateEdges => {
@@ -658,6 +692,44 @@ fn CommittedField(
     commit: UnsyncCallback<String>,
 ) -> impl IntoView {
     let value = RwSignal::new_local(shell.services().settings.read_untracked(read).unwrap_or_default());
+    let adopt = move || commit.run(value.get_untracked().trim().to_owned());
+
+    view! {
+        Input(
+            value = value,
+            placeholder = placeholder,
+            label = setting.title().into_owned(),
+            class = "wt-settings__field",
+            attr:data-testid = test_id,
+            on:key_down = move |ev| {
+                if ev.key == Key::Named(NamedKey::Enter) {
+                    adopt();
+                }
+            },
+            on:focus_out = move |_| adopt()
+        )
+    }
+}
+
+/// [`CommittedField`] for a setting the app also changes, such as a port chosen on first use: the
+/// text follows the saved value whenever that changes.
+#[component]
+fn FollowingField(
+    shell: Shell,
+    setting: Setting,
+    test_id: &'static str,
+    #[prop(into)] placeholder: String,
+    read: fn(&StartupSettings) -> String,
+    commit: UnsyncCallback<String>,
+) -> impl IntoView {
+    let settings = shell.services().settings;
+    let value = RwSignal::new_local(settings.read_untracked(read).unwrap_or_default());
+    let following = RenderEffect::new(move |_| {
+        if let Some(saved) = settings.read(read) {
+            value.set(saved);
+        }
+    });
+    on_cleanup_local(move || drop(following));
     let adopt = move || commit.run(value.get_untracked().trim().to_owned());
 
     view! {

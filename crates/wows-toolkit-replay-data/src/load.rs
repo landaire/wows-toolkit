@@ -98,6 +98,12 @@ fn game_params_bin_path(build: u32) -> PathBuf {
     }
 }
 
+/// A game translation catalog and the `texts/` directory it was read from.
+struct GameTranslations {
+    catalog: Catalog,
+    language: String,
+}
+
 fn translation_directories(locale: &str) -> Vec<String> {
     let normalized = locale.replace('-', "_");
     let primary = normalized.split('_').next().unwrap_or("en").to_owned();
@@ -110,30 +116,31 @@ fn translation_directories(locale: &str) -> Vec<String> {
     directories
 }
 
-fn parse_translation_catalog(path: &Path, build: u32, locale: &str) -> Option<Catalog> {
+fn parse_translation_catalog(path: &Path, build: u32, locale: &str) -> Option<GameTranslations> {
     let file = std::fs::File::open(path).ok()?;
-    Catalog::parse(file)
+    let catalog = Catalog::parse(file)
         .inspect_err(|err| tracing::warn!(build, locale, path = %path.display(), error = ?err, "game translation catalog would not parse"))
-        .ok()
+        .ok()?;
+    Some(GameTranslations { catalog, language: locale.to_owned() })
 }
 
-fn load_translations_catalog(wows_dir: &Path, build: u32, locale: &str) -> Option<Catalog> {
+fn load_translations_catalog(wows_dir: &Path, build: u32, locale: &str) -> Option<GameTranslations> {
     for directory in translation_directories(locale) {
         let path = wows_dir.join(format!("bin/{build}/res/texts/{directory}/LC_MESSAGES/global.mo"));
-        if let Some(catalog) = parse_translation_catalog(&path, build, &directory) {
-            return Some(catalog);
+        if let Some(translations) = parse_translation_catalog(&path, build, &directory) {
+            return Some(translations);
         }
     }
     None
 }
 
-fn load_dump_translations(cas: &BuildCas, locale: &str) -> Option<Catalog> {
+fn load_dump_translations(cas: &BuildCas, locale: &str) -> Option<GameTranslations> {
     for directory in translation_directories(locale) {
         let Some(path) = cas.derived_path(&format!("translations/{directory}/LC_MESSAGES/global.mo")) else {
             continue;
         };
-        if let Some(catalog) = parse_translation_catalog(&path, cas.metadata().build, &directory) {
-            return Some(catalog);
+        if let Some(translations) = parse_translation_catalog(&path, cas.metadata().build, &directory) {
+            return Some(translations);
         }
     }
     None
@@ -144,24 +151,33 @@ fn load_translations_for_build(
     dump_base: Option<&Path>,
     build: u32,
     locale: &str,
-) -> Option<Catalog> {
+) -> Option<GameTranslations> {
     let dump_dir = dump_base.and_then(|base| dump_for_build(base, build, None));
     let cas = dump_dir.as_deref().and_then(BuildCas::open);
     for directory in translation_directories(locale) {
         if let Some(wows_dir) = wows_dir {
             let live_path = wows_dir.join(format!("bin/{build}/res/texts/{directory}/LC_MESSAGES/global.mo"));
-            if let Some(catalog) = parse_translation_catalog(&live_path, build, &directory) {
-                return Some(catalog);
+            if let Some(translations) = parse_translation_catalog(&live_path, build, &directory) {
+                return Some(translations);
             }
         }
         if let Some(cas) = &cas
             && let Some(path) = cas.derived_path(&format!("translations/{directory}/LC_MESSAGES/global.mo"))
-            && let Some(catalog) = parse_translation_catalog(&path, build, &directory)
+            && let Some(translations) = parse_translation_catalog(&path, build, &directory)
         {
-            return Some(catalog);
+            return Some(translations);
         }
     }
     None
+}
+
+/// The language of the catalog a provider holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatalogLanguage {
+    /// The catalog's directory under `texts/`, e.g. `en` or `pt_br`.
+    pub language: String,
+    /// The provider's [`GameMetadataProvider::translation_epoch`] once it held the catalog.
+    pub translation_epoch: u64,
 }
 
 /// One installed build's `GameMetadataProvider` and base `GameConstants`
@@ -187,6 +203,8 @@ pub struct LoadedGameData {
     /// version reports its own, which is what a per-build cache is keyed by.
     build: u32,
     version: Option<Version>,
+    /// The language of the provider's catalog, recorded with each swap. Locked across the swap.
+    catalog_language: Mutex<Option<CatalogLanguage>>,
 }
 
 impl LoadedGameData {
@@ -204,6 +222,23 @@ impl LoadedGameData {
 
     pub fn version(&self) -> Option<Version> {
         self.version
+    }
+
+    /// The language of the provider's display names. `None` when it holds no catalog, or when its
+    /// catalog was swapped other than through this data.
+    pub fn catalog_language(&self) -> Option<CatalogLanguage> {
+        let language = self.catalog_language.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        language.as_ref().filter(|language| language.translation_epoch == self.provider.translation_epoch()).cloned()
+    }
+
+    /// Swaps the provider's catalog for `translations` and records its language.
+    fn set_translations(&self, translations: GameTranslations) {
+        let mut language = self.catalog_language.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.provider.set_translations(translations.catalog);
+        *language = Some(CatalogLanguage {
+            language: translations.language,
+            translation_epoch: self.provider.translation_epoch(),
+        });
     }
 
     /// This build's base `GameConstants`, before a specific replay's own
@@ -251,7 +286,15 @@ impl LoadedGameData {
     #[cfg(any(test, feature = "test-support"))]
     pub fn for_test(provider: GameMetadataProvider, vfs: VfsPath, build: u32) -> Self {
         let base_constants = GameConstants::from_vfs(&vfs);
-        Self { provider: Arc::new(provider), base_constants, vfs, assets_vfs: OnceLock::new(), build, version: None }
+        Self {
+            provider: Arc::new(provider),
+            base_constants,
+            vfs,
+            assets_vfs: OnceLock::new(),
+            build,
+            version: None,
+            catalog_language: Mutex::new(None),
+        }
     }
 
     /// [`Self::for_test`] for a build that names its version.
@@ -273,15 +316,23 @@ impl LoadedGameData {
         crate::heap_profile::mark(&format!("build{build}.vfs"));
         let provider = Self::load_provider(&vfs, build)?;
         crate::heap_profile::mark(&format!("build{build}.params"));
-        if let Some(catalog) = load_translations_catalog(wows_dir, build, locale) {
-            provider.set_translations(catalog);
-        }
-        let provider = Arc::new(provider);
         let base_constants = GameConstants::from_vfs(&vfs);
         let version = version_from_vfs(&vfs);
+        let loaded = Self {
+            provider: Arc::new(provider),
+            base_constants,
+            vfs,
+            assets_vfs: OnceLock::new(),
+            build,
+            version,
+            catalog_language: Mutex::new(None),
+        };
+        if let Some(translations) = load_translations_catalog(wows_dir, build, locale) {
+            loaded.set_translations(translations);
+        }
         crate::heap_profile::mark(&format!("build{build}.done"));
 
-        Ok(Self { provider, base_constants, vfs, assets_vfs: OnceLock::new(), build, version })
+        Ok(loaded)
     }
 
     /// Loads a build out of the game-data cache, for a replay recorded on one
@@ -321,21 +372,24 @@ impl LoadedGameData {
         };
         let provider = GameMetadataProvider::from_params_with_vfs(params, &vfs)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-        if let Some(catalog) = load_dump_translations(&cas, locale) {
-            provider.set_translations(catalog);
-        }
 
         let base_constants = GameConstants::from_vfs(&vfs);
         let version = version_from_vfs(&vfs);
 
-        Ok(Self {
+        let loaded = Self {
             provider: Arc::new(provider),
             base_constants,
             vfs,
             assets_vfs: OnceLock::new(),
             build: dump_build,
             version,
-        })
+            catalog_language: Mutex::new(None),
+        };
+        if let Some(translations) = load_dump_translations(&cas, locale) {
+            loaded.set_translations(translations);
+        }
+
+        Ok(loaded)
     }
 
     /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk
@@ -455,12 +509,12 @@ impl GameDataCache {
         for slot in slots {
             let Some(Ok(loaded)) = slot.get() else { continue };
             let build = loaded.build();
-            let catalog =
+            let translations =
                 load_translations_for_build(self.wows_dir.as_deref(), self.dump_base.as_deref(), build, locale);
-            if let Some(catalog) = catalog {
+            if let Some(translations) = translations {
                 let current = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 if *current == locale && self.locale_generation.load(Ordering::Acquire) == generation {
-                    loaded.provider().set_translations(catalog);
+                    loaded.set_translations(translations);
                 }
             }
         }
@@ -600,7 +654,7 @@ impl GameDataCache {
         };
         if generation != current_generation
             && let Ok(loaded) = &result
-            && let Some(catalog) = load_translations_for_build(
+            && let Some(translations) = load_translations_for_build(
                 self.wows_dir.as_deref(),
                 self.dump_base.as_deref(),
                 loaded.build(),
@@ -609,7 +663,7 @@ impl GameDataCache {
         {
             let locale = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             if *locale == current_locale && self.locale_generation.load(Ordering::Acquire) == current_generation {
-                loaded.provider().set_translations(catalog);
+                loaded.set_translations(translations);
             }
         }
 

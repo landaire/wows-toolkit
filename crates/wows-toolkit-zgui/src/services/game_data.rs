@@ -16,6 +16,8 @@ use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::Track;
+use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::task::blocking;
 use zgui::task::spawn_detached;
@@ -53,6 +55,10 @@ pub struct GameDataRequest {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Generation(u64);
 
+/// Counts the times the loaded builds' names were rewritten in another language.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CatalogRevision(u64);
+
 /// The cache and the state of its startup load.
 #[derive(Clone, Copy)]
 pub struct GameData {
@@ -60,6 +66,7 @@ pub struct GameData {
     /// `None` until the settings have said where the install is.
     cache: RwSignal<Option<GameDataCache>, LocalStorage>,
     generation: StoredValue<Generation>,
+    catalogs: RwSignal<CatalogRevision, LocalStorage>,
 }
 
 impl GameData {
@@ -68,6 +75,7 @@ impl GameData {
             state: RwSignal::new_local(GameDataState::NoInstall),
             cache: RwSignal::new_local(None),
             generation: StoredValue::new(Generation::default()),
+            catalogs: RwSignal::new_local(CatalogRevision::default()),
         }
     }
 
@@ -92,6 +100,12 @@ impl GameData {
 
     pub fn cache_untracked(self) -> Option<GameDataCache> {
         self.cache.get_untracked()
+    }
+
+    /// Makes the running effect rerun once each rewrite of the loaded builds' names in another
+    /// language is done.
+    pub fn track_catalogs(self) {
+        self.catalogs.track();
     }
 
     /// Replaces the cache with one over `request`'s install and loads its newest build.
@@ -181,6 +195,8 @@ impl GameData {
                 minimap_preview::forget_kept_previews();
             })
             .await;
+            // `try_`, as the services may be gone by the time the rewrite is done.
+            self.catalogs.try_update(|revision| revision.0 += 1);
         });
     }
 }

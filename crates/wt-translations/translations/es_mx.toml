@@ -1494,6 +1494,7 @@ load_failed = "Error al cargar la configuración"
 not_set = "(sin configurar)"
 
 [ui.settings.panel]
+mcp = "Servidor MCP"
 open = "Abrir configuración"
 search_placeholder = "Buscar en la configuración"
 count_one = "1 opción"
@@ -2080,3 +2081,29 @@ section_stand_in = "Esta sección del casco no tiene geometría propia. El barco
 [ui.armor.hidden_ship]
 clan_rental = "Renta de clan"
 other_class = "No es una clase de barco"
+
+[ui.settings.mcp]
+enabled = "Activar servidor MCP"
+enabled_description = "Ofrece repeticiones y datos del juego a asistentes de IA mediante MCP. Muestra un control en la barra de estado."
+start_on_launch = "Iniciar con el programa"
+start_on_launch_description = "Inicia el servidor al abrir WoWs Toolkit."
+bind_address = "Dirección de escucha"
+bind_address_description = "Dirección IP de loopback en la que escucha el servidor, como 127.0.0.1 o ::1. Solo esta computadora puede acceder al servidor."
+port = "Puerto"
+port_description = "Puerto TCP en el que escuchar. Se elige al azar la primera vez y se conserva."
+port_unset = "Se elige al activarlo por primera vez"
+address_not_loopback = "%{input} no es una dirección de loopback. El servidor solo escucha en esta computadora, por ejemplo en 127.0.0.1."
+address_invalid = "%{input} no es una dirección IP"
+port_invalid = "%{input} no es un puerto de 1 a 65535"
+port_in_use = "Otro programa usa este puerto. Elige otro puerto."
+
+[ui.mcp]
+started = "Servidor MCP activo en %{url}"
+copy_url = "Copiar URL"
+start_failed = "No se puede iniciar el servidor MCP: %{reason}"
+port_in_use = "el puerto %{port} en %{address} lo usa otro programa"
+no_watchdog = "el supervisor de tareas en segundo plano no está en marcha"
+status_running = "Servidor MCP activo en %{url}. Haz clic para detenerlo."
+status_starting = "Iniciando servidor MCP en %{address}"
+status_failed = "El servidor MCP no pudo iniciarse. Haz clic para reintentar."
+status_stopped = "Servidor MCP detenido. Haz clic para iniciarlo."

@@ -549,26 +549,29 @@ impl App {
             .pb_3()
             .border_b_1()
             .border_color(cx.theme().border)
-            .children(SettingsSection::ALL.map(|section| {
-                let listed = rows.iter().any(|setting| setting.section() == section);
-                let current = at_top == Some(section);
-                selectable(
-                    ("settings-category", section as usize),
-                    current,
-                    Button::new(("settings-category-button", section as usize))
-                        .ghost()
-                        .small()
-                        .icon(Icon::from(section_glyph(section)))
-                        .accessibility_label(section.name())
-                        .tooltip(section.name())
-                        .selected(current)
-                        .disabled(!listed)
-                        .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                            this.settings_drawer.scroll_to = Some(SettingsTarget::Section(section));
-                            cx.notify();
-                        })),
-                )
-            }));
+            // The MCP server is a zgui feature; its section has no rows here.
+            .children(SettingsSection::ALL.into_iter().filter(|section| *section != SettingsSection::Mcp).map(
+                |section| {
+                    let listed = rows.iter().any(|setting| setting.section() == section);
+                    let current = at_top == Some(section);
+                    selectable(
+                        ("settings-category", section as usize),
+                        current,
+                        Button::new(("settings-category-button", section as usize))
+                            .ghost()
+                            .small()
+                            .icon(Icon::from(section_glyph(section)))
+                            .accessibility_label(section.name())
+                            .tooltip(section.name())
+                            .selected(current)
+                            .disabled(!listed)
+                            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                                this.settings_drawer.scroll_to = Some(SettingsTarget::Section(section));
+                                cx.notify();
+                            })),
+                    )
+                },
+            ));
 
         // Taken even when no rows are drawn, so that no later frame applies it.
         let anchor = self.settings_drawer.zoom_slider_anchor.take();
@@ -645,6 +648,8 @@ impl App {
             }
             Setting::ArmorPlateEdges | Setting::ArmorOpaqueHull => armor_saved,
             Setting::ArmorNoDefaults => !armor_saved,
+            // The MCP server is a zgui feature.
+            Setting::McpEnabled | Setting::McpStartOnLaunch | Setting::McpBindAddress | Setting::McpPort => false,
             _ => true,
         }
     }
@@ -930,6 +935,10 @@ impl App {
                 (Some(setting_switch(id, setting, on).disabled(true).into_any_element()), None)
             }
             Setting::ArmorNoDefaults => (None, None),
+            // Never listed: see `setting_present`.
+            Setting::McpEnabled | Setting::McpStartOnLaunch | Setting::McpBindAddress | Setting::McpPort => {
+                (None, None)
+            }
         }
     }
 
@@ -1534,6 +1543,8 @@ fn section_glyph(section: SettingsSection) -> crate::icons::Glyph {
         SettingsSection::Replays => Glyph::Table,
         SettingsSection::Collaboration => Glyph::Users,
         SettingsSection::Twitch => Glyph::Twitch,
+        // Never drawn: the strip leaves the section out.
+        SettingsSection::Mcp => Glyph::Settings,
         SettingsSection::ArmorViewer => Glyph::Shield,
     }
 }

@@ -1540,6 +1540,7 @@ load_failed = "Einstellungen konnten nicht geladen werden"
 not_set = "(nicht festgelegt)"
 
 [ui.settings.panel]
+mcp = "MCP-Server"
 open = "Einstellungen öffnen"
 search_placeholder = "Einstellungen durchsuchen"
 count_one = "1 Einstellung"
@@ -2126,3 +2127,29 @@ section_stand_in = "Dieser Rumpfabschnitt hat keine eigene Geometrie. Das Schiff
 [ui.armor.hidden_ship]
 clan_rental = "Clan-Leihschiff"
 other_class = "Keine Schiffsklasse"
+
+[ui.settings.mcp]
+enabled = "MCP-Server aktivieren"
+enabled_description = "Stellt Replays und Spieldaten KI-Assistenten per MCP bereit. Zeigt ein Steuerelement in der Statusleiste."
+start_on_launch = "Mit dem Programm starten"
+start_on_launch_description = "Startet den Server, wenn WoWs Toolkit geöffnet wird."
+bind_address = "Bind-Adresse"
+bind_address_description = "Loopback-IP-Adresse, auf der der Server lauscht, etwa 127.0.0.1 oder ::1. Nur dieser Computer erreicht den Server."
+port = "Port"
+port_description = "TCP-Port, auf dem gelauscht wird. Beim ersten Aktivieren zufällig gewählt und beibehalten."
+port_unset = "Wird beim ersten Aktivieren gewählt"
+address_not_loopback = "%{input} ist keine Loopback-Adresse. Der Server lauscht nur auf diesem Computer, etwa auf 127.0.0.1."
+address_invalid = "%{input} ist keine IP-Adresse"
+port_invalid = "%{input} ist kein Port von 1 bis 65535"
+port_in_use = "Ein anderes Programm verwendet diesen Port. Wähle einen anderen Port."
+
+[ui.mcp]
+started = "MCP-Server läuft unter %{url}"
+copy_url = "URL kopieren"
+start_failed = "MCP-Server kann nicht gestartet werden: %{reason}"
+port_in_use = "Port %{port} auf %{address} wird von einem anderen Programm verwendet"
+no_watchdog = "die Überwachung der Hintergrundprozesse läuft nicht"
+status_running = "MCP-Server läuft unter %{url}. Klicken zum Beenden."
+status_starting = "MCP-Server startet auf %{address}"
+status_failed = "MCP-Server konnte nicht starten. Klicken zum Wiederholen."
+status_stopped = "MCP-Server gestoppt. Klicken zum Starten."

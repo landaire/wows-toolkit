@@ -1540,6 +1540,7 @@ load_failed = "โหลดการตั้งค่าไม่สำเร�
 not_set = "(ยังไม่ได้ตั้งค่า)"
 
 [ui.settings.panel]
+mcp = "เซิร์ฟเวอร์ MCP"
 open = "เปิดการตั้งค่า"
 search_placeholder = "ค้นหาการตั้งค่า"
 count_one = "การตั้งค่า 1 รายการ"
@@ -2126,3 +2127,29 @@ section_stand_in = "ส่วนตัวเรือนี้ไม่มีร
 [ui.armor.hidden_ship]
 clan_rental = "เรือเช่าของแคลน"
 other_class = "ไม่ใช่ประเภทเรือ"
+
+[ui.settings.mcp]
+enabled = "เปิดใช้เซิร์ฟเวอร์ MCP"
+enabled_description = "ให้บริการรีเพลย์และข้อมูลเกมแก่ผู้ช่วย AI ผ่าน MCP แสดงตัวควบคุมในแถบสถานะ"
+start_on_launch = "เริ่มพร้อมโปรแกรม"
+start_on_launch_description = "เริ่มเซิร์ฟเวอร์เมื่อเปิด WoWs Toolkit"
+bind_address = "ที่อยู่ที่รับฟัง"
+bind_address_description = "ที่อยู่ IP แบบลูปแบ็กที่เซิร์ฟเวอร์รับฟัง เช่น 127.0.0.1 หรือ ::1 เข้าถึงเซิร์ฟเวอร์ได้จากคอมพิวเตอร์เครื่องนี้เท่านั้น"
+port = "พอร์ต"
+port_description = "พอร์ต TCP ที่จะรับฟัง สุ่มเลือกเมื่อเปิดใช้ครั้งแรกและเก็บไว้"
+port_unset = "เลือกเมื่อเปิดใช้ครั้งแรก"
+address_not_loopback = "%{input} ไม่ใช่ที่อยู่ลูปแบ็ก เซิร์ฟเวอร์รับฟังบนคอมพิวเตอร์เครื่องนี้เท่านั้น เช่น 127.0.0.1"
+address_invalid = "%{input} ไม่ใช่ที่อยู่ IP"
+port_invalid = "%{input} ไม่ใช่พอร์ตระหว่าง 1 ถึง 65535"
+port_in_use = "โปรแกรมอื่นกำลังใช้พอร์ตนี้ โปรดเลือกพอร์ตอื่น"
+
+[ui.mcp]
+started = "เซิร์ฟเวอร์ MCP ทำงานที่ %{url}"
+copy_url = "คัดลอก URL"
+start_failed = "ไม่สามารถเริ่มเซิร์ฟเวอร์ MCP: %{reason}"
+port_in_use = "พอร์ต %{port} บน %{address} ถูกใช้โดยโปรแกรมอื่น"
+no_watchdog = "ตัวควบคุมงานเบื้องหลังไม่ทำงาน"
+status_running = "เซิร์ฟเวอร์ MCP ทำงานที่ %{url} คลิกเพื่อหยุด"
+status_starting = "กำลังเริ่มเซิร์ฟเวอร์ MCP บน %{address}"
+status_failed = "เริ่มเซิร์ฟเวอร์ MCP ไม่สำเร็จ คลิกเพื่อลองอีกครั้ง"
+status_stopped = "เซิร์ฟเวอร์ MCP หยุดแล้ว คลิกเพื่อเริ่ม"

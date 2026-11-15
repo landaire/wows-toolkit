@@ -1540,6 +1540,7 @@ load_failed = "設定の読み込みに失敗しました"
 not_set = "(未設定)"
 
 [ui.settings.panel]
+mcp = "MCPサーバー"
 open = "設定を開く"
 search_placeholder = "設定を検索"
 count_one = "1 件の設定"
@@ -2126,3 +2127,29 @@ section_stand_in = "この船体セクションには独自のジオメトリが
 [ui.armor.hidden_ship]
 clan_rental = "クラン貸与"
 other_class = "艦種ではありません"
+
+[ui.settings.mcp]
+enabled = "MCPサーバーを有効にする"
+enabled_description = "MCP経由でリプレイとゲームデータをAIアシスタントに提供します。ステータスバーに操作ボタンを表示します。"
+start_on_launch = "プログラムと同時に起動"
+start_on_launch_description = "WoWs Toolkitを開いたときにサーバーを起動します。"
+bind_address = "待ち受けアドレス"
+bind_address_description = "サーバーが待ち受けるループバック IP アドレス (127.0.0.1 や ::1 など)。このコンピューターからのみ接続できます。"
+port = "ポート"
+port_description = "待ち受けるTCPポート。最初に有効にしたときにランダムに選ばれ、保持されます。"
+port_unset = "最初に有効にしたときに選択"
+address_not_loopback = "%{input} はループバックアドレスではありません。サーバーはこのコンピューター上でのみ待ち受けます (例: 127.0.0.1)。"
+address_invalid = "%{input} はIPアドレスではありません"
+port_invalid = "%{input} は1から65535のポートではありません"
+port_in_use = "このポートは別のプログラムが使用しています。別のポートを選んでください。"
+
+[ui.mcp]
+started = "MCPサーバーが %{url} で動作中"
+copy_url = "URLをコピー"
+start_failed = "MCPサーバーを起動できません: %{reason}"
+port_in_use = "%{address} のポート %{port} は別のプログラムが使用中です"
+no_watchdog = "バックグラウンド処理の監視が動作していません"
+status_running = "MCPサーバーが %{url} で動作中。クリックで停止。"
+status_starting = "MCPサーバーを %{address} で起動中"
+status_failed = "MCPサーバーを起動できませんでした。クリックで再試行。"
+status_stopped = "MCPサーバーは停止中。クリックで起動。"
