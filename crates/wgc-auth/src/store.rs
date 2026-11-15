@@ -1,7 +1,7 @@
-//! Keyring-backed persistence for `StoredSession`.
+//! Keyring-backed persistence for `StoredSession` and game token2.
 //!
-//! `SessionStore` is the only place in this crate that touches the
-//! `keyring` crate; `AuthClient` never persists anything itself.
+//! This module is the only place in this crate that touches the `keyring`
+//! crate; `AuthClient` never persists anything itself.
 
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
@@ -12,6 +12,7 @@ use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
 use crate::error::AuthError;
+use crate::game_token::GameToken2;
 use crate::identity::AccountId;
 use crate::identity::Nickname;
 use crate::realm::AccountRealm;
@@ -77,6 +78,60 @@ impl SessionStore {
 impl Default for SessionStore {
     fn default() -> SessionStore {
         SessionStore::new()
+    }
+}
+
+/// Keyring storage for the game token2 a game client asks WGC to keep
+/// (`SaveSpaToken2`) and replays on its next launch (`LoadSpaToken2`). WGC
+/// keys it per game instance and account; the toolkit serves one game, so
+/// realm and account are the key.
+pub struct GameTokenStore;
+
+impl GameTokenStore {
+    pub fn new() -> GameTokenStore {
+        GameTokenStore
+    }
+
+    /// Errs with `NoSecretStore` when no OS secret store exists; there is no
+    /// plaintext fallback.
+    pub fn save(&self, realm: AccountRealm, account_id: AccountId, token: &GameToken2) -> Result<(), AuthError> {
+        let entry = self.entry(realm, account_id)?;
+
+        entry.set_password(token.expose_secret()).map_err(map_keyring_error)
+    }
+
+    /// `None` when no token2 is stored for this realm and account.
+    pub fn load(&self, realm: AccountRealm, account_id: AccountId) -> Result<Option<GameToken2>, AuthError> {
+        let entry = self.entry(realm, account_id)?;
+
+        match entry.get_password() {
+            Ok(token) => Ok(Some(GameToken2::new(token))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(source) => Err(map_keyring_error(source)),
+        }
+    }
+
+    pub fn delete(&self, realm: AccountRealm, account_id: AccountId) -> Result<(), AuthError> {
+        let entry = self.entry(realm, account_id)?;
+
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(source) => Err(map_keyring_error(source)),
+        }
+    }
+
+    fn entry(&self, realm: AccountRealm, account_id: AccountId) -> Result<keyring::Entry, AuthError> {
+        // Prefixed so a token2 entry never collides with the session entry
+        // of the same account under the shared service name.
+        let username = format!("token2:{}:{}", realm_key(realm), account_id.get());
+        keyring::Entry::new(KEYRING_SERVICE, &username).map_err(map_keyring_error)
+    }
+}
+
+impl Default for GameTokenStore {
+    fn default() -> GameTokenStore {
+        GameTokenStore::new()
     }
 }
 
@@ -231,5 +286,23 @@ mod tests {
         assert_eq!(loaded.nickname.as_str(), "KeyringTest");
         store.delete(session.realm, session.account_id).expect("delete");
         assert!(matches!(store.load(session.realm, session.account_id), Err(AuthError::NoStoredSession)));
+    }
+
+    #[test]
+    #[ignore = "touches the OS keyring / Secret Service"]
+    fn game_token2_save_load_delete_roundtrip_via_os_keyring() {
+        let store = GameTokenStore::new();
+        let realm = AccountRealm::Na;
+        let account_id = AccountId::new(1_999_999_001);
+
+        store.save(realm, account_id, &GameToken2::new("keyring-test-token2".to_string())).expect("save");
+        let loaded = store.load(realm, account_id).expect("load").expect("token2 stored");
+        assert_eq!(loaded.expose_secret(), "keyring-test-token2");
+
+        // A session entry for the same account must not shadow the token2 entry.
+        assert!(matches!(SessionStore::new().load(realm, account_id), Err(AuthError::NoStoredSession)));
+
+        store.delete(realm, account_id).expect("delete");
+        assert!(store.load(realm, account_id).expect("load after delete").is_none());
     }
 }

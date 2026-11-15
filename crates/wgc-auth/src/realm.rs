@@ -15,7 +15,7 @@ use crate::identity::AccountId;
 ///
 /// Selecting a realm selects the whole `RealmConfig` tuple together;
 /// `client_id` is realm-bound, not global.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AccountRealm {
     Eu,
     Na,

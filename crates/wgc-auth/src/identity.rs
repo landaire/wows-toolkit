@@ -6,7 +6,7 @@ use serde::Serialize;
 
 /// The numeric SPA (single platform account) id -- the wire's `user`
 /// (login response) / `sub` (account/info response) field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AccountId(u64);
 
 impl AccountId {
