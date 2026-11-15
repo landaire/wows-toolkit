@@ -7,7 +7,7 @@ def main [] {
 
     # Enumerated from the root BUCK file rather than repeated here, so a new
     # alias is covered without touching this test.
-    let targets = (^buck2 targets "root//:" | lines | where {|line| ($line | str trim) != "" })
+    let targets = (^buck2 uquery "kind(alias, root//:)" | lines | where {|line| ($line | str trim) != "" })
     if ($targets | length) < 5 {
         error make {msg: $"Expected the root package to declare the release aliases, found ($targets | length)."}
     }

@@ -69,6 +69,7 @@ file = "Fichier"
 check_updates = "Vérifier les mises à jour"
 about = "À propos"
 quit = "Quitter"
+licenses = "Licences"
 
 # -- Titres des fenêtres --
 
@@ -85,6 +86,7 @@ software_encode = "Aucun encodeur vidéo GPU"
 about = "À propos"
 refresh_persisted_data = "Actualiser les données de replay enregistrées"
 tactics_board = "Tableau tactique"
+licenses = "Licences"
 
 # -- Texte des dialogues / messages --
 
@@ -126,6 +128,11 @@ and = " et "
 suppress_warning = "Ne plus afficher ce message"
 more_info = "Plus d'informations"
 loading_replays = "Chargement de %{count} replays..."
+app_version = "Version %{version}"
+project_license = "WoWs Toolkit est distribué sous la licence %{license}."
+third_party_notices = "Mentions de tiers"
+notices_search_hint = "Rechercher dans les mentions"
+no_matching_notices = "Aucune mention ne correspond à la recherche."
 
 # -- Messages toast --
 
@@ -1561,6 +1568,11 @@ token = "Jeton de connexion"
 monitored_channel_description = "Chaîne à surveiller. Laissez vide pour surveiller la vôtre."
 armor_defaults = "Paramètres par défaut enregistrés"
 armor_saved_description = "Enregistré depuis les options du Visualiseur de modèles"
+
+[ui.settings.licenses]
+title = "À propos et licences"
+back = "Retour aux paramètres"
+third_party_intro = "Cette application contient les composants tiers listés ci-dessous. Sélectionnez une entrée pour afficher les paquets qui l'utilisent et le texte complet de sa licence."
 
 [ui.settings.armor]
 no_defaults = "(aucun paramètre par défaut enregistré)"

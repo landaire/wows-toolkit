@@ -69,6 +69,7 @@ file = "Datei"
 check_updates = "Nach Updates suchen"
 about = "Über"
 quit = "Beenden"
+licenses = "Lizenzen"
 
 # -- Fenstertitel --
 
@@ -85,6 +86,7 @@ software_encode = "Kein GPU-Videoencoder"
 about = "Über"
 refresh_persisted_data = "Gespeicherte Replay-Daten aktualisieren"
 tactics_board = "Taktiktafel"
+licenses = "Lizenzen"
 
 # -- Dialog- / Nachrichtentexte --
 
@@ -126,6 +128,11 @@ and = " und "
 suppress_warning = "Nicht mehr anzeigen"
 more_info = "Mehr Informationen"
 loading_replays = "Lade %{count} Replays..."
+app_version = "Version %{version}"
+project_license = "WoWs Toolkit wird unter der Lizenz %{license} verbreitet."
+third_party_notices = "Hinweise zu Drittanbieterkomponenten"
+notices_search_hint = "Hinweise durchsuchen"
+no_matching_notices = "Keine Hinweise entsprechen der Suche."
 
 # -- Toast-Nachrichten --
 
@@ -1561,6 +1568,11 @@ token = "Anmeldetoken"
 monitored_channel_description = "Zu beobachtender Kanal. Leer lassen, um den eigenen zu beobachten."
 armor_defaults = "Gespeicherte Standardwerte"
 armor_saved_description = "Aus den Optionen der Modellansicht gespeichert"
+
+[ui.settings.licenses]
+title = "Info und Lizenzen"
+back = "Zurück zu den Einstellungen"
+third_party_intro = "Diese Anwendung enthält die unten aufgeführten Drittanbieterkomponenten. Wählen Sie einen Eintrag, um die Pakete, die ihn verwenden, und den vollständigen Lizenztext anzuzeigen."
 
 [ui.settings.armor]
 no_defaults = "(keine gespeicherten Standardwerte)"

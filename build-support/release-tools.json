@@ -23,7 +23,9 @@
   ],
   "_extra_files_comment": [
     "wows_data_mgr locates its manifest by walking up from the working",
-    "directory, so game_versions.toml has to sit next to the binaries."
+    "directory, so game_versions.toml has to sit next to the binaries.",
+    "LICENSE and THIRD_PARTY_NOTICES.txt carry the license notices that",
+    "distributing the binaries requires."
   ],
-  "extra_files": ["game_versions.toml"]
+  "extra_files": ["game_versions.toml", "LICENSE", "THIRD_PARTY_NOTICES.txt"]
 }

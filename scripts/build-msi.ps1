@@ -73,6 +73,7 @@ $outDir = "target\wix"
 $binDir = Join-Path $outDir 'payload'
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 Copy-Item -LiteralPath $binary -Destination (Join-Path $binDir 'wows_toolkit.exe') -Force
+Copy-Item -LiteralPath 'LICENSE', 'THIRD_PARTY_NOTICES.txt' -Destination $binDir -Force
 $msiPath = "$outDir\wows-toolkit-v${version}-windows-x86_64.msi"
 Write-Host "Building MSI: $msiPath"
 

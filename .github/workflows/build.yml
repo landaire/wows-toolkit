@@ -203,7 +203,7 @@ jobs:
         run: |
           $slug = "${{ steps.buck.outputs.slug }}"
           Copy-Item -Recurse "crates/wt-translations/translations" "translations" -Force
-          Compress-Archive -Path "dist/wows_toolkit.exe","dist/wows_toolkit.pdb","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
+          Compress-Archive -Path "dist/wows_toolkit.exe","dist/wows_toolkit.pdb","LICENSE","THIRD_PARTY_NOTICES.txt","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
@@ -284,6 +284,9 @@ jobs:
 
           mkdir -p build-dir/files/share/metainfo
           cp "assets/${APP_ID}.metainfo.xml" build-dir/files/share/metainfo/
+
+          mkdir -p "build-dir/files/share/licenses/${APP_ID}"
+          cp LICENSE THIRD_PARTY_NOTICES.txt "build-dir/files/share/licenses/${APP_ID}/"
 
           flatpak build-finish build-dir             --share=ipc             --share=network             --socket=x11             --socket=wayland             --socket=fallback-x11             --device=dri             --filesystem=host:ro             --command=wows_toolkit
 
@@ -368,6 +371,9 @@ jobs:
           chmod +x "$APP/Contents/MacOS/wows_toolkit"
           cp wows_toolkit.icns "$APP/Contents/Resources/"
           cp -r crates/wt-translations/translations "$APP/Contents/MacOS/translations"
+          # Inside the bundle so the notices stay with the app after it is
+          # dragged out of the disk image.
+          cp LICENSE THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/"
 
           cat > "$APP/Contents/Info.plist" << EOF
           <?xml version="1.0" encoding="UTF-8"?>

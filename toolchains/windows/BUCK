@@ -71,6 +71,10 @@ wix_msi(
     binaries = {"wows_toolkit.exe": _APP_BINARY},
     # Installed beside the executable so a crash backtrace names its functions.
     pdbs = {"wows_toolkit.pdb": _APP_BINARY + "[pdb]"},
+    files = {
+        "LICENSE": "root//:license",
+        "THIRD_PARTY_NOTICES.txt": "root//:third_party_notices",
+    },
     # MSI ProductVersion is numeric only, so a pre-release tag ships under its
     # release version. scripts/test-workspace-package-metadata.nu holds this to
     # the numeric core of the workspace version.

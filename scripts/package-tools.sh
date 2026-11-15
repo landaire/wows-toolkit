@@ -67,7 +67,7 @@ chmod +w artifacts/*
 
 # Linking through Nix records a store path as the interpreter, and that path
 # exists only on the builder. patchelf only accepts ELF files, and the staging
-# directory also holds the manifest that ships beside the binaries.
+# directory also holds the extra files that ship beside the binaries.
 for f in artifacts/*; do
   if [ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" != "7f454c46" ]; then
     continue

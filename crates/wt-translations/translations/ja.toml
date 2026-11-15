@@ -69,6 +69,7 @@ file = "ファイル"
 check_updates = "アップデートを確認"
 about = "情報"
 quit = "終了"
+licenses = "ライセンス"
 
 # -- ウィンドウタイトル --
 
@@ -85,6 +86,7 @@ software_encode = "GPU ビデオエンコーダーなし"
 about = "情報"
 refresh_persisted_data = "保存済みリプレイデータを更新"
 tactics_board = "作戦ボード"
+licenses = "ライセンス"
 
 # -- ダイアログ / メッセージテキスト --
 
@@ -126,6 +128,11 @@ and = " および "
 suppress_warning = "今後表示しない"
 more_info = "詳細情報"
 loading_replays = "%{count} 件のリプレイを読み込み中..."
+app_version = "バージョン %{version}"
+project_license = "WoWs Toolkit は %{license} ライセンスの下で配布されています。"
+third_party_notices = "サードパーティの表示"
+notices_search_hint = "表示を検索"
+no_matching_notices = "検索に一致する表示はありません。"
 
 # -- トーストメッセージ --
 
@@ -1561,6 +1568,11 @@ token = "ログイントークン"
 monitored_channel_description = "監視するチャンネル。空欄にすると自分のチャンネルを監視します。"
 armor_defaults = "保存済み既定値"
 armor_saved_description = "モデルビューアーのオプションから保存"
+
+[ui.settings.licenses]
+title = "情報とライセンス"
+back = "設定に戻る"
+third_party_intro = "このアプリケーションには以下のサードパーティ製コンポーネントが含まれています。項目を選択すると、それを使用するクレートとライセンスの全文が表示されます。"
 
 [ui.settings.armor]
 no_defaults = "(保存済みの既定値なし)"

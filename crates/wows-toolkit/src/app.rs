@@ -58,6 +58,7 @@ use crate::task::NetworkResult;
 use crate::task::PlanTicket;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::ui::file_unpacker::UNPACKER_STOP;
+use crate::ui::licenses::LicensesWindow;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::util::error::ToolkitError;
 use crate::util::file_dialog;
@@ -427,6 +428,8 @@ pub struct WowsToolkitApp {
     latest_release: Option<Release>,
     #[serde(skip)]
     show_about_window: bool,
+    #[serde(skip)]
+    licenses_window: LicensesWindow,
     #[serde(skip)]
     show_error_window: bool,
     #[serde(skip)]
@@ -1049,6 +1052,7 @@ impl Default for WowsToolkitApp {
             language_selection_open: false,
             latest_release: None,
             show_about_window: false,
+            licenses_window: LicensesWindow::default(),
             tab_state: Default::default(),
             dock_state: DockState::new({
                 let mut tabs = Vec::new();
@@ -3422,6 +3426,8 @@ impl WowsToolkitApp {
             });
         }
 
+        self.licenses_window.show(ctx);
+
         // Panels are drawn in ui() via draw_panels()
 
         self.show_confirmation_dialog(ctx);
@@ -4974,6 +4980,10 @@ impl eframe::App for WowsToolkitApp {
                         }
                         if ui.button(t!("ui.menu.about")).clicked() {
                             self.show_about_window = true;
+                            ui.close_kind(UiKind::Menu);
+                        }
+                        if ui.button(t!("ui.menu.licenses")).clicked() {
+                            self.licenses_window.open();
                             ui.close_kind(UiKind::Menu);
                         }
                         if ui.button(t!("ui.menu.quit")).clicked() {
