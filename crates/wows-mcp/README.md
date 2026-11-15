@@ -61,6 +61,10 @@ For a client that launches stdio servers from a JSON config:
 
 Each tool returns compact JSON. The query logic lives in the `wows-query` crate.
 
+## Embedding
+
+Another program can serve these tools next to its own. Implement `wows_mcp::ToolSet` for a group of tools and add it with `McpServer::builder(transport).tool_set(..)`. `wows_mcp::tool_set::typed_tool` makes a tool definition from argument and answer types that derive `JsonSchema`.
+
 ## Building
 
 ```bash

@@ -19179,6 +19179,7 @@ cargo.rust_library(
         "http2",
         "server",
         "server-auto",
+        "server-graceful",
         "service",
     ],
     platform = {
@@ -19199,7 +19200,6 @@ cargo.rust_library(
                 ":libc-0.2",
                 ":percent-encoding-2",
                 ":socket2-0.6",
-                ":tokio-1",
                 ":tracing-0.1",
             ],
         ),
@@ -19221,7 +19221,6 @@ cargo.rust_library(
                 ":percent-encoding-2",
                 ":socket2-0.6",
                 ":system-configuration-0.7",
-                ":tokio-1",
                 ":tracing-0.1",
             ],
         ),
@@ -19242,7 +19241,6 @@ cargo.rust_library(
                 ":libc-0.2",
                 ":percent-encoding-2",
                 ":socket2-0.6",
-                ":tokio-1",
                 ":tracing-0.1",
                 ":windows-registry-0.6",
             ],
@@ -19255,6 +19253,7 @@ cargo.rust_library(
         ":http-body-1",
         ":hyper-1",
         ":pin-project-lite-0.2",
+        ":tokio-1",
         ":tower-service-0.3",
     ],
 )
@@ -47156,6 +47155,12 @@ cargo.rust_library(
         ":tokio-rustls-0.26",
         ":tungstenite-0.29",
     ],
+)
+
+alias(
+    name = "tokio-util",
+    actual = ":tokio-util-0.7",
+    visibility = ["PUBLIC"],
 )
 
 http_archive(

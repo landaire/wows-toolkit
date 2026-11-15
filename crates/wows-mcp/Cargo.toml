@@ -10,7 +10,7 @@ description = "MCP server answering World of Warships game data questions"
 [dependencies]
 wows-query = { workspace = true, features = ["download"] }
 clap = { workspace = true }
-hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "service", "tokio"] }
 # rustls without a crypto provider; rustls-graviola is installed at startup.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots-no-provider"] }
 rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
@@ -20,6 +20,7 @@ schemars = "1.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

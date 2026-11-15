@@ -1,24 +1,14 @@
-mod server;
-
 use std::net::SocketAddr;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use hyper_util::rt::TokioExecutor;
-use hyper_util::rt::TokioIo;
-use hyper_util::server::conn::auto;
-use hyper_util::service::TowerToHyperService;
-use rmcp::ServiceExt;
-use rmcp::transport::stdio;
-use rmcp::transport::streamable_http_server::StreamableHttpServerConfig;
-use rmcp::transport::streamable_http_server::StreamableHttpService;
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rootcause::prelude::*;
+use tokio_util::sync::CancellationToken;
+use wows_mcp::GameDataSource;
+use wows_mcp::McpServer;
+use wows_mcp::Transport;
 use wows_query::GameData;
-
-use crate::server::GameDataServer;
 
 /// MCP server answering World of Warships game data questions.
 #[derive(Debug, Parser)]
@@ -47,25 +37,21 @@ struct Cli {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ServeError {
+enum MainError {
     #[error("failed to load game data from {path}")]
     Load { path: PathBuf },
 
     #[error("failed to build the HTTP client")]
     HttpClient(#[source] reqwest::Error),
 
-    #[error("failed to serve MCP on stdio")]
-    Stdio,
+    #[error("failed to start the MCP server")]
+    Build,
 
-    #[error("failed to listen on {address}")]
-    Listen {
-        address: SocketAddr,
-        #[source]
-        source: std::io::Error,
-    },
+    #[error("the MCP server failed")]
+    Serve,
 }
 
-async fn load(cli: &Cli) -> Result<GameData, Report<ServeError>> {
+async fn load(cli: &Cli) -> Result<GameData, Report<MainError>> {
     let dump = if cli.download {
         // Every TLS connection in this process uses graviola, so no C or
         // assembly crypto library is linked.
@@ -73,85 +59,61 @@ async fn load(cli: &Cli) -> Result<GameData, Report<ServeError>> {
         let client = reqwest::Client::builder()
             .user_agent(concat!("wows-mcp/", env!("CARGO_PKG_VERSION")))
             .build()
-            .map_err(|source| report!(ServeError::HttpClient(source)))?;
+            .map_err(|source| report!(MainError::HttpClient(source)))?;
         Some(
             wows_query::download::download_latest(&client, &cli.data)
                 .await
-                .context(ServeError::Load { path: cli.data.clone() })?,
+                .context(MainError::Load { path: cli.data.clone() })?,
         )
     } else {
         None
     };
 
-    let data = cli.data.clone();
+    // A download yields the build directory it wrote.
+    let path = dump.unwrap_or_else(|| cli.data.clone());
     let cache_dir = cli.cache_dir.clone();
     tokio::task::spawn_blocking(move || {
-        let loaded = match dump {
-            Some(dir) => GameData::load_dump(&dir, cache_dir.as_deref()),
-            None if is_build_dir(&data) => GameData::load_dump(&data, cache_dir.as_deref()),
-            None => GameData::load_latest(&data, cache_dir.as_deref()),
-        };
-        loaded.context(ServeError::Load { path: data })
+        wows_mcp::load_dump(&path, cache_dir.as_deref()).context(MainError::Load { path: path.clone() })
     })
     .await
     .expect("game data load task panicked")
 }
 
-fn is_build_dir(path: &Path) -> bool {
-    path.join("metadata.toml").is_file()
-}
-
-async fn serve_http(server: GameDataServer, address: SocketAddr) -> Result<(), Report<ServeError>> {
-    let service: StreamableHttpService<GameDataServer, LocalSessionManager> = StreamableHttpService::new(
-        move || Ok(server.clone()),
-        Default::default(),
-        StreamableHttpServerConfig::default(),
-    );
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
-        .map_err(|source| report!(ServeError::Listen { address, source }))?;
-    tracing::info!(%address, "serving MCP over streamable HTTP");
-
-    loop {
-        let (stream, peer) = match listener.accept().await {
-            Ok(accepted) => accepted,
-            Err(error) => {
-                tracing::warn!(%error, "failed to accept a connection");
-                continue;
-            }
-        };
-        let service = TowerToHyperService::new(service.clone());
-        tokio::spawn(async move {
-            if let Err(error) =
-                auto::Builder::new(TokioExecutor::new()).serve_connection(TokioIo::new(stream), service).await
-            {
-                tracing::debug!(%peer, %error, "connection ended with an error");
-            }
-        });
-    }
-}
-
 #[tokio::main]
-async fn run() -> Result<(), Report<ServeError>> {
+async fn run() -> Result<(), Report<MainError>> {
     // Stdout carries the MCP protocol; logs go to stderr.
     tracing_subscriber::fmt().with_writer(std::io::stderr).with_ansi(false).init();
 
     let cli = Cli::parse();
     let game = Arc::new(load(&cli).await?);
     tracing::info!(version = %game.version().to_path(), ships = game.ship_count(), "game data loaded");
-    let server = GameDataServer::new(game);
 
-    match cli.http {
-        Some(address) => serve_http(server, address).await,
-        None => {
-            let running = server.serve(stdio()).await.context(ServeError::Stdio)?;
-            running.waiting().await.context(ServeError::Stdio)?;
-            Ok(())
-        }
+    let transport = match cli.http {
+        Some(address) => Transport::Http(address),
+        None => Transport::Stdio,
+    };
+    let server = McpServer::builder(transport)
+        .game_data(GameDataSource::Loaded(game))
+        .build()
+        .await
+        .context(MainError::Build)?;
+    if let Some(endpoint) = server.http_endpoint() {
+        tracing::info!(url = %endpoint.url(), "MCP endpoint");
     }
+
+    // HTTP serves until interrupted; stdio ends when the client disconnects.
+    let shutdown = CancellationToken::new();
+    let interrupt = shutdown.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            interrupt.cancel();
+        }
+    });
+
+    server.run(shutdown).await.context(MainError::Serve)
 }
 
-fn main() -> Result<(), Report<ServeError>> {
+fn main() -> Result<(), Report<MainError>> {
     // gameparams_query runs jq in a copy of this program; in that copy this
     // evaluates and exits.
     wows_query::jq_worker::init();
