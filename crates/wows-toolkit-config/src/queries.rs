@@ -1,8 +1,18 @@
 //! Typed read/write functions for each database table.
 
+use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use sqlx::Decode;
+use sqlx::Encode;
+use sqlx::Sqlite;
 use sqlx::SqlitePool;
+use sqlx::Type;
+use sqlx::encode::IsNull;
+use sqlx::error::BoxDynError;
+use sqlx::sqlite::SqliteArgumentValue;
+use sqlx::sqlite::SqliteTypeInfo;
+use sqlx::sqlite::SqliteValueRef;
 
 /// Why a setting could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -285,6 +295,46 @@ pub struct ArmorViewerDefaultsRow {
     pub legend_collapsed: bool,
     pub legend_pos_x: Option<f64>,
     pub legend_pos_y: Option<f64>,
+    /// `None` for a row with no lighting column set, which has no lighting to restore.
+    pub lighting: Option<SavedLighting>,
+}
+
+/// The armor viewer's hull lighting as the defaults row stores it, a JSON object in one column.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedLighting {
+    pub enabled: bool,
+    pub flat_intensity: f32,
+    pub flat_color: [f32; 3],
+    pub key_intensity: f32,
+    pub key_color: [f32; 3],
+    pub azimuth_deg: f32,
+    pub elevation_deg: f32,
+    pub rim_strength: f32,
+    pub rim_power: f32,
+    pub specular_strength: f32,
+    pub shininess: f32,
+}
+
+impl Type<Sqlite> for SavedLighting {
+    fn type_info() -> SqliteTypeInfo {
+        <str as Type<Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &SqliteTypeInfo) -> bool {
+        <str as Type<Sqlite>>::compatible(ty)
+    }
+}
+
+impl<'q> Encode<'q, Sqlite> for SavedLighting {
+    fn encode_by_ref(&self, args: &mut Vec<SqliteArgumentValue<'q>>) -> Result<IsNull, BoxDynError> {
+        <String as Encode<'q, Sqlite>>::encode(serde_json::to_string(self)?, args)
+    }
+}
+
+impl<'r> Decode<'r, Sqlite> for SavedLighting {
+    fn decode(value: SqliteValueRef<'r>) -> Result<Self, BoxDynError> {
+        Ok(serde_json::from_str(<&str as Decode<'r, Sqlite>>::decode(value)?)?)
+    }
 }
 
 /// Save armor viewer defaults (upsert single row).
@@ -293,12 +343,13 @@ pub async fn save_armor_viewer_defaults(pool: &SqlitePool, d: &ArmorViewerDefaul
         "INSERT INTO armor_viewer_defaults \
          (id, show_plate_edges, show_waterline, show_zero_mm, armor_opacity, waterline_opacity, \
           hull_opaque, hull_all_visible, armor_all_visible, show_splash_boxes, \
-          show_legend, legend_collapsed, legend_pos_x, legend_pos_y) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+          show_legend, legend_collapsed, legend_pos_x, legend_pos_y, lighting) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
          ON CONFLICT(id) DO UPDATE SET \
          show_plate_edges=?1, show_waterline=?2, show_zero_mm=?3, armor_opacity=?4, \
          waterline_opacity=?5, hull_opaque=?6, hull_all_visible=?7, armor_all_visible=?8, \
-         show_splash_boxes=?9, show_legend=?10, legend_collapsed=?11, legend_pos_x=?12, legend_pos_y=?13",
+         show_splash_boxes=?9, show_legend=?10, legend_collapsed=?11, legend_pos_x=?12, legend_pos_y=?13, \
+         lighting=?14",
     )
     .bind(d.show_plate_edges)
     .bind(d.show_waterline)
@@ -313,6 +364,7 @@ pub async fn save_armor_viewer_defaults(pool: &SqlitePool, d: &ArmorViewerDefaul
     .bind(d.legend_collapsed)
     .bind(d.legend_pos_x)
     .bind(d.legend_pos_y)
+    .bind(&d.lighting)
     .execute(pool)
     .await?;
     Ok(())
@@ -323,7 +375,7 @@ pub async fn get_armor_viewer_defaults(pool: &SqlitePool) -> Result<Option<Armor
     sqlx::query_as(
         "SELECT show_plate_edges, show_waterline, show_zero_mm, armor_opacity, waterline_opacity, \
                     hull_opaque, hull_all_visible, armor_all_visible, show_splash_boxes, \
-                    show_legend, legend_collapsed, legend_pos_x, legend_pos_y \
+                    show_legend, legend_collapsed, legend_pos_x, legend_pos_y, lighting \
                     FROM armor_viewer_defaults WHERE id = 1",
     )
     .fetch_optional(pool)

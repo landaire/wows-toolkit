@@ -973,6 +973,7 @@ impl ArmorViewerPane {
                 show_splash_boxes: defaults.show_splash_boxes,
                 show_waterline: defaults.show_waterline,
                 waterline_opacity: defaults.waterline_opacity,
+                lighting: defaults.lighting.clone(),
             };
         }
         self.legend = LegendState::from_defaults(defaults);
@@ -1724,7 +1725,7 @@ impl ArmorViewerPane {
         // than a setting of their own.
         let all_visible = active.read(cx).all_visible();
         let (visible, collapsed, pos) = (self.legend.visible, self.legend.collapsed, self.legend.pos);
-        let unported = self.unported_defaults;
+        let unported = self.unported_defaults.clone();
         let row = ArmorViewerDefaultsRow {
             show_plate_edges: display.show_plate_edges,
             show_waterline: unported.show_waterline,
@@ -1743,6 +1744,8 @@ impl ArmorViewerPane {
             legend_collapsed: collapsed,
             legend_pos_x: Some(f32::from(pos.x) as f64),
             legend_pos_y: Some(f32::from(pos.y) as f64),
+            // The port does not save its own lighting, so the saved one is written back as read.
+            lighting: unported.lighting,
         };
 
         cx.spawn(async move |_this, cx| {
@@ -1762,18 +1765,19 @@ impl ArmorViewerPane {
 
 /// The parts of `armor_viewer_defaults` the port does not draw a control
 /// for.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct UnportedDefaults {
     show_splash_boxes: bool,
     show_waterline: bool,
     waterline_opacity: f64,
+    lighting: Option<wows_toolkit_config::queries::SavedLighting>,
 }
 
 impl Default for UnportedDefaults {
     /// The row's own column defaults (`001_initial.sql`), for a database with
     /// no row yet.
     fn default() -> Self {
-        Self { show_splash_boxes: false, show_waterline: true, waterline_opacity: 0.3 }
+        Self { show_splash_boxes: false, show_waterline: true, waterline_opacity: 0.3, lighting: None }
     }
 }
 

@@ -37,6 +37,7 @@ use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::scene_load::FirstStage;
 use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
+use wows_toolkit_config::queries::SavedLighting;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
@@ -668,6 +669,7 @@ impl ArmorWorkspace {
             legend_collapsed: legend.collapsed,
             legend_pos_x: Some(f64::from(legend.pos.x)),
             legend_pos_y: Some(f64::from(legend.pos.y)),
+            lighting: Some(SavedLighting::from(&active.lighting())),
         };
         self.services.settings.save_armor_defaults(row);
     }

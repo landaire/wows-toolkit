@@ -434,6 +434,22 @@ async fn load_armor_viewer_defaults(pool: &SqlitePool, ts: &mut TabState) -> Res
             (Some(x), Some(y)) => Some([x as f32, y as f32]),
             _ => None,
         };
+        // A row with no lighting keeps the lighting already held.
+        if let Some(saved) = row.lighting {
+            p.armor_viewer_defaults.lighting = crate::viewport_3d::types::LightingSettings {
+                enabled: saved.enabled,
+                flat_intensity: saved.flat_intensity,
+                flat_color: saved.flat_color,
+                key_intensity: saved.key_intensity,
+                key_color: saved.key_color,
+                azimuth_deg: saved.azimuth_deg,
+                elevation_deg: saved.elevation_deg,
+                rim_strength: saved.rim_strength,
+                rim_power: saved.rim_power,
+                specular_strength: saved.specular_strength,
+                shininess: saved.shininess,
+            };
+        }
     }
     info!("  loaded armor viewer defaults");
     Ok(())

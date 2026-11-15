@@ -152,6 +152,11 @@ impl ViewportModel {
         self.hull_all_visible = defaults.map(|d| d.hull_all_visible).unwrap_or(false);
         // Off with no saved row, as the row's own column default and the egui viewer have it.
         self.show_splash_boxes = defaults.is_some_and(|d| d.show_splash_boxes);
+        // A row with no lighting leaves the lighting as it is.
+        if let Some(lighting) = defaults.and_then(|d| d.lighting.clone()) {
+            self.viewport.lighting = lighting.into();
+            self.viewport.mark_dirty();
+        }
         self.reupload_current_armor(cx);
         cx.notify();
     }

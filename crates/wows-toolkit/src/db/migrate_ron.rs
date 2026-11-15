@@ -422,6 +422,19 @@ async fn save_armor_viewer_defaults(pool: &SqlitePool, ctx: &SaveContext) -> Res
             legend_collapsed: d.legend_collapsed,
             legend_pos_x: d.legend_pos.map(|p| p[0] as f64),
             legend_pos_y: d.legend_pos.map(|p| p[1] as f64),
+            lighting: Some(queries::SavedLighting {
+                enabled: d.lighting.enabled,
+                flat_intensity: d.lighting.flat_intensity,
+                flat_color: d.lighting.flat_color,
+                key_intensity: d.lighting.key_intensity,
+                key_color: d.lighting.key_color,
+                azimuth_deg: d.lighting.azimuth_deg,
+                elevation_deg: d.lighting.elevation_deg,
+                rim_strength: d.lighting.rim_strength,
+                rim_power: d.lighting.rim_power,
+                specular_strength: d.lighting.specular_strength,
+                shininess: d.lighting.shininess,
+            }),
         }
     };
     queries::save_armor_viewer_defaults(pool, &row).await?;

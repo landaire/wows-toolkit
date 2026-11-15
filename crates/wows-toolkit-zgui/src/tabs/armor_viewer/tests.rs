@@ -668,7 +668,28 @@ fn saved_row() -> ArmorViewerDefaultsRow {
         legend_collapsed: false,
         legend_pos_x: None,
         legend_pos_y: None,
+        lighting: None,
     }
+}
+
+/// The saved lighting reaches the pane, a row with none leaves the lighting alone, and a lighting
+/// change saves it back.
+#[test]
+fn the_saved_lighting_is_restored_and_a_change_saves_it() {
+    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    let studio = wows_toolkit_armor::viewport::types::LightingSettings::studio();
+    let row = ArmorViewerDefaultsRow { lighting: Some((&studio).into()), ..saved_row() };
+    workspace.apply_defaults(Some(&row), true, XrayHighlight::Always);
+    assert_eq!(workspace.active_untracked().lighting(), studio);
+
+    workspace.apply_defaults(Some(&saved_row()), true, XrayHighlight::Always);
+    assert_eq!(workspace.active_untracked().lighting(), studio, "a row with no lighting leaves it as it was");
+
+    workspace.active_untracked().mutate_lighting(|lighting| lighting.shininess = 10.0);
+    let saved = workspace.services.settings.read_untracked(|settings| settings.armor_defaults.clone()).flatten();
+    let saved = saved.and_then(|row| row.lighting).expect("the change saved the lighting");
+    assert_eq!(saved.shininess, 10.0);
 }
 
 /// The saved water reaches the open pane and a pane opened later, and the toggle saves it back.

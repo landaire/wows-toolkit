@@ -614,6 +614,7 @@ mod tests {
             legend_collapsed: false,
             legend_pos_x: None,
             legend_pos_y: None,
+            lighting: None,
         };
         let d = DisplaySettings::from_defaults(Some(&row));
         assert!(!d.show_plate_edges);

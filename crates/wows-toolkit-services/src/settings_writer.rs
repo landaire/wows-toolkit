@@ -152,6 +152,7 @@ mod tests {
             legend_collapsed: false,
             legend_pos_x: None,
             legend_pos_y: None,
+            lighting: None,
         }
     }
 

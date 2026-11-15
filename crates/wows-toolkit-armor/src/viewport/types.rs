@@ -1,5 +1,7 @@
 extern crate nalgebra as na;
 
+use wows_toolkit_config::queries::SavedLighting;
+
 /// 3D vector type used throughout the crate. Alias for `nalgebra::Vector3<f32>`.
 pub type Vec3 = na::Vector3<f32>;
 
@@ -252,6 +254,42 @@ impl LightingSettings {
             self.key_color[1] * self.key_intensity,
             self.key_color[2] * self.key_intensity,
         ]
+    }
+}
+
+impl From<&LightingSettings> for SavedLighting {
+    fn from(lighting: &LightingSettings) -> Self {
+        Self {
+            enabled: lighting.enabled,
+            flat_intensity: lighting.flat_intensity,
+            flat_color: lighting.flat_color,
+            key_intensity: lighting.key_intensity,
+            key_color: lighting.key_color,
+            azimuth_deg: lighting.azimuth_deg,
+            elevation_deg: lighting.elevation_deg,
+            rim_strength: lighting.rim_strength,
+            rim_power: lighting.rim_power,
+            specular_strength: lighting.specular_strength,
+            shininess: lighting.shininess,
+        }
+    }
+}
+
+impl From<SavedLighting> for LightingSettings {
+    fn from(saved: SavedLighting) -> Self {
+        Self {
+            enabled: saved.enabled,
+            flat_intensity: saved.flat_intensity,
+            flat_color: saved.flat_color,
+            key_intensity: saved.key_intensity,
+            key_color: saved.key_color,
+            azimuth_deg: saved.azimuth_deg,
+            elevation_deg: saved.elevation_deg,
+            rim_strength: saved.rim_strength,
+            rim_power: saved.rim_power,
+            specular_strength: saved.specular_strength,
+            shininess: saved.shininess,
+        }
     }
 }
 
