@@ -174,6 +174,7 @@ impl RootItem {
             Self::Mode(PaletteMode::Players) => 20,
             Self::Mode(PaletteMode::MyShips) => 21,
             Self::Mode(PaletteMode::ArmorShips) => 22,
+            Self::Mode(PaletteMode::ShipToolShips) => 23,
             Self::Command(RootCommand::GamesIDiedIn) => 30,
             Self::Command(RootCommand::GamesIWon) => 31,
             Self::Command(RootCommand::OpenReplayFile) => 40,
@@ -219,6 +220,7 @@ pub fn mode_name(mode: PaletteMode) -> &'static str {
         PaletteMode::Players => "players",
         PaletteMode::MyShips => "my-ships",
         PaletteMode::ArmorShips => "armor-ships",
+        PaletteMode::ShipToolShips => "shiptool-ships",
         PaletteMode::ReindexVersions => "reindex-versions",
         PaletteMode::ReplayFolders => "replay-folders",
     }

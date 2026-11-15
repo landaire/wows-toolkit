@@ -10,12 +10,14 @@ use landaire_ui::Appearance;
 use landaire_ui::MARK_CLASS;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
+use wows_replay_insights::build::shiptool;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use zgui::reactive::Mounted;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 
+use crate::desktop::opened_for_test;
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
@@ -309,6 +311,26 @@ fn the_palette_opens_any_ship_in_the_armor_viewer() {
     shortcut(&mut window, 'p');
     press(&mut window, NamedKey::Backspace);
     assert!(shown(&window, ROOT), "Backspace in an empty ship search returns to the root list");
+}
+
+/// The ShipTool entry lists every ship, and choosing one opens that ship's ShipTool page.
+#[test]
+fn the_palette_opens_any_ship_on_shiptool() {
+    let mut window = open_window(TestModes { ships: Some(ships()), ..TestModes::default() });
+
+    shortcut(&mut window, 'k');
+    assert!(shown(&window, "palette-item-mode-shiptool-ships"), "the root list offers the ShipTool list");
+    window
+        .click(window.by_test_id("palette-item-mode-shiptool-ships").expect("the entry is listed"))
+        .expect("the entry can be clicked");
+    settle(&mut window);
+    assert!(shown(&window, "palette-mode-shiptool-ships"), "the entry opens the ship list");
+    assert!(shown(&window, "palette-row-2"), "an empty search lists every ship");
+
+    type_text(&mut window, "yamat");
+    press(&mut window, NamedKey::Enter);
+    assert!(!shown(&window, PALETTE), "choosing a ship closes the palette");
+    assert_eq!(opened_for_test(), [shiptool::ship_url("PJSB018")], "the ship's ShipTool page is opened");
 }
 
 /// A row marks the letters of its name the query matched, and an empty query marks nothing.

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use rust_i18n::t;
+use wows_replay_insights::build::shiptool;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::force_reindex::ReindexScope;
 use wows_toolkit_replay_data::force_reindex::VersionCount;
@@ -33,6 +34,7 @@ use zgui::task::blocking;
 use zgui::task::spawn_detached;
 use zgui::task::spawn_local;
 
+use crate::desktop;
 use crate::services::Services;
 use crate::shell::ReplayRequest;
 use crate::shell::Shell;
@@ -251,7 +253,7 @@ fn browse_folder(shell: Shell) {
     });
 }
 
-/// One ship the ship mode lists.
+/// One ship the ship modes list.
 #[derive(Clone, Debug)]
 pub struct ArmorShipRow {
     param_index: ShipParamIndex,
@@ -286,12 +288,34 @@ pub enum ShipList {
 /// Every ship in `ships`, best match first, each opened in the Armor Viewer. Entering the mode
 /// runs `load`, which starts the catalogue load the list waits on.
 pub fn armor_ships(ships: Signal<ShipList, LocalStorage>, load: impl Fn() + 'static) -> ModeSpec {
-    let filter = move |query: &str| ships.with(|list| ship_rows(list, query));
+    let filter = move |query: &str| ships.with(|list| ship_rows(list, query, &view_armor));
 
     ModeSpec { source: ModeSource::Local(Rc::new(filter)), on_enter: Some(Rc::new(load)) }
 }
 
-fn ship_rows(list: &ShipList, query: &str) -> ModeRows {
+/// Every ship in `ships`, best match first, each opened on ShipTool in the browser. Entering the
+/// mode runs `load`, which starts the catalogue load the list waits on.
+pub fn shiptool_ships(ships: Signal<ShipList, LocalStorage>, load: impl Fn() + 'static) -> ModeSpec {
+    let filter = move |query: &str| ships.with(|list| ship_rows(list, query, &open_in_shiptool));
+
+    ModeSpec { source: ModeSource::Local(Rc::new(filter)), on_enter: Some(Rc::new(load)) }
+}
+
+fn view_armor(row: &ArmorShipRow) -> PaletteRun {
+    PaletteRun::Request(TabRequest::ViewArmor {
+        param_index: row.param_index.clone(),
+        display_name: row.display_name.clone(),
+    })
+}
+
+fn open_in_shiptool(row: &ArmorShipRow) -> PaletteRun {
+    let url = shiptool::ship_url(&row.param_index.0);
+
+    PaletteRun::action(move || desktop::open_url(&url))
+}
+
+/// `list` ranked for `query`, each row running what `open` makes of its ship.
+fn ship_rows(list: &ShipList, query: &str, open: &dyn Fn(&ArmorShipRow) -> PaletteRun) -> ModeRows {
     match list {
         ShipList::Pending => ModeRows::Loading(t!("ui.palette.ships_loading").into_owned()),
         ShipList::Unavailable(reason) => {
@@ -302,15 +326,9 @@ fn ship_rows(list: &ShipList, query: &str) -> ModeRows {
             let listed = query
                 .rank(rows.iter(), |row| &row.key)
                 .into_iter()
-                .map(|row| {
-                    let request = TabRequest::ViewArmor {
-                        param_index: row.param_index.clone(),
-                        display_name: row.display_name.clone(),
-                    };
-                    ModeRow {
-                        marks: marks_within(&query, &row.label, &row.display_name),
-                        ..ModeRow::new(row.label.clone(), PaletteRun::Request(request))
-                    }
+                .map(|row| ModeRow {
+                    marks: marks_within(&query, &row.label, &row.display_name),
+                    ..ModeRow::new(row.label.clone(), open(row))
                 })
                 .collect();
 
@@ -417,8 +435,9 @@ mod tests {
     /// opens the chosen ship in the Armor Viewer.
     #[test]
     fn ships_wait_for_the_catalogue_then_rank_by_name() {
-        assert!(matches!(ship_rows(&ShipList::Pending, ""), ModeRows::Loading(_)));
-        let ModeRows::Unavailable(said) = ship_rows(&ShipList::Unavailable("no install".to_owned()), "") else {
+        assert!(matches!(ship_rows(&ShipList::Pending, "", &view_armor), ModeRows::Loading(_)));
+        let unavailable = ShipList::Unavailable("no install".to_owned());
+        let ModeRows::Unavailable(said) = ship_rows(&unavailable, "", &view_armor) else {
             panic!("an unavailable catalogue says why");
         };
         assert!(said.contains("no install"), "{said}");
@@ -427,7 +446,7 @@ mod tests {
             ArmorShipRow::new(ShipParamIndex(index.to_owned()), name.to_owned(), "X", "Cruiser", "Nation")
         };
         let list = ShipList::Ready(Rc::from([ship("PASC001", "Moskva"), ship("PASC002", "Des Moines")]));
-        let opened: Vec<TabRequest> = ready(ship_rows(&list, "moines"))
+        let opened: Vec<TabRequest> = ready(ship_rows(&list, "moines", &view_armor))
             .into_iter()
             .map(|row| match row.run {
                 PaletteRun::Request(request) => request,

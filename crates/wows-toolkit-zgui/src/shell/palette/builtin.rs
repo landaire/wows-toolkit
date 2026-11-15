@@ -62,8 +62,9 @@ pub fn offer(shell: Shell) {
     let offers_ships = true;
     if offers_ships {
         let armor = shell.armor;
-        palette
-            .offer_mode(PaletteMode::ArmorShips, modes::armor_ships(armor.ship_list(services), move || armor.want()));
+        let ships = armor.ship_list(services);
+        palette.offer_mode(PaletteMode::ArmorShips, modes::armor_ships(ships, move || armor.want()));
+        palette.offer_mode(PaletteMode::ShipToolShips, modes::shiptool_ships(ships, move || armor.want()));
     }
 
     palette.offer(RootCommand::GamesIDiedIn, PaletteRun::Request(TabRequest::Search(GAMES_I_DIED_IN.to_owned())));
@@ -111,6 +112,7 @@ fn offer_test_modes(shell: Shell) {
     if let Some(ships) = offered.ships {
         let ships = Signal::stored_local(modes::ShipList::Ready(ships.into()));
         shell.palette.offer_mode(PaletteMode::ArmorShips, modes::armor_ships(ships, || {}));
+        shell.palette.offer_mode(PaletteMode::ShipToolShips, modes::shiptool_ships(ships, || {}));
     }
     if let Some(folders) = offered.folders {
         shell

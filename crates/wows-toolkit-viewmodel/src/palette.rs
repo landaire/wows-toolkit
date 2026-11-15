@@ -20,6 +20,8 @@ pub enum PaletteMode {
     MyShips,
     /// Every ship in the loaded build, to open in the Armor Viewer.
     ArmorShips,
+    /// Every ship in the loaded build, to open on ShipTool.
+    ShipToolShips,
     /// The game versions the listing holds, to force a re-index of one.
     ReindexVersions,
     /// "Browse..." and the directories most recently opened, to open one in the listing.
@@ -28,7 +30,8 @@ pub enum PaletteMode {
 
 impl PaletteMode {
     /// The modes the root list leads into from its searches. The version list is offered beside
-    /// the other re-index command instead, and the directory list beside opening a file.
+    /// the other re-index command instead, the directory list beside opening a file, and the
+    /// ShipTool list only by a front end that opens it.
     pub const ALL: [Self; 3] = [Self::Players, Self::MyShips, Self::ArmorShips];
 
     /// What the root entry that enters this mode is called.
@@ -37,6 +40,7 @@ impl PaletteMode {
             Self::Players => "ui.palette.search_players",
             Self::MyShips => "ui.palette.my_matches_in_ship",
             Self::ArmorShips => "ui.palette.open_ship_in_armor_viewer",
+            Self::ShipToolShips => "ui.palette.open_ship_in_shiptool",
             Self::ReindexVersions => "ui.reindex.palette_by_version",
             Self::ReplayFolders => "ui.replay.open_directory",
         }
@@ -48,6 +52,7 @@ impl PaletteMode {
             Self::Players => "ui.palette.players_title",
             Self::MyShips => "ui.palette.my_ships_title",
             Self::ArmorShips => "ui.palette.armor_ships_title",
+            Self::ShipToolShips => "ui.palette.shiptool_ships_title",
             Self::ReindexVersions => "ui.reindex.versions_title",
             Self::ReplayFolders => "ui.replay_folders.recent_title",
         }
@@ -57,7 +62,7 @@ impl PaletteMode {
         match self {
             Self::Players => "ui.palette.players_placeholder",
             Self::MyShips => "ui.palette.my_ships_placeholder",
-            Self::ArmorShips => "ui.palette.armor_ships_placeholder",
+            Self::ArmorShips | Self::ShipToolShips => "ui.palette.armor_ships_placeholder",
             Self::ReindexVersions => "ui.reindex.versions_placeholder",
             Self::ReplayFolders => "ui.replay_folders.recent_placeholder",
         }

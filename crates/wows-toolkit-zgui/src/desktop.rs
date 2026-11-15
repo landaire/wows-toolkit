@@ -6,6 +6,12 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
+#[cfg(test)]
+thread_local! {
+    /// What was handed to the desktop on this thread, oldest first.
+    static OPENED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Shows `dir` in the desktop's file manager.
 pub fn open_directory(dir: &Path) {
     run_opener(dir.as_os_str());
@@ -37,7 +43,7 @@ pub fn open_data_directory() {
 /// as wows-numbers' `/player/<id>,<name>` and paths that contain one, so the shell is asked
 /// directly. It may block on shell extensions, so it runs off the UI thread, in the
 /// single-threaded COM apartment some of those extensions require.
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 fn run_opener(target: &OsStr) {
     use std::os::windows::ffi::OsStrExt as _;
 
@@ -85,7 +91,7 @@ fn run_opener(target: &OsStr) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(test)))]
 fn run_opener(target: &OsStr) {
     #[cfg(target_os = "macos")]
     let opener = "open";
@@ -97,4 +103,16 @@ fn run_opener(target: &OsStr) {
     if let Err(err) = wows_toolkit_services::child_process::prepare(&mut command).spawn() {
         tracing::warn!("{} could not be opened: {err}", target.to_string_lossy());
     }
+}
+
+/// Notes `target` rather than opening it, so a test launches nothing.
+#[cfg(test)]
+fn run_opener(target: &OsStr) {
+    OPENED.with_borrow_mut(|opened| opened.push(target.to_string_lossy().into_owned()));
+}
+
+/// Every directory and link handed to the desktop on this thread, oldest first.
+#[cfg(test)]
+pub fn opened_for_test() -> Vec<String> {
+    OPENED.with_borrow(Clone::clone)
 }

@@ -290,6 +290,9 @@ fn the_palette_seeds_a_search() {
     let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
     window.press_character('k', Modifiers::PRIMARY);
     settle(&mut window);
+    // Narrowed, so the entry is in view however long the root list is.
+    window.type_text("won");
+    settle(&mut window);
     click(&mut window, "palette-item-games-i-won");
 
     assert!(tab_selected(&mut window, "search"), "the Search tab is shown");

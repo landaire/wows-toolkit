@@ -2123,6 +2123,11 @@ impl App {
                     history.folders().iter().cloned().map(crate::palette::FolderRow::new).collect();
                 crate::palette::ModeSource::Folders(rows.into())
             }
+            // Offered by the zgui palette only; nothing here enters it.
+            PaletteMode::ShipToolShips => {
+                tracing::warn!("palette: the ShipTool ship list is not offered in this app");
+                return;
+            }
         };
 
         self.palette = cx.new(|cx| CommandState::new(window, cx));
