@@ -22,7 +22,6 @@ use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithValue;
-use zgui::task::blocking;
 use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
@@ -38,6 +37,7 @@ use zgui_ui::DialogTitleProps;
 
 use crate::desktop;
 use crate::http::USER_AGENT;
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::JobHandle;
 use crate::services::Services;
@@ -129,7 +129,7 @@ impl ReleaseSource for PublishedReleases {
     ) -> LocalBoxFuture<'static, Result<(), rootcause::Report>> {
         let proxy = proxy_url(services);
         let runtime = services.runtime();
-        Box::pin(blocking(move || {
+        Box::pin(long_job(move || {
             let Some(runtime) = runtime else {
                 return Err(wows_toolkit_services::update::UpdateError::NoRuntime.into());
             };

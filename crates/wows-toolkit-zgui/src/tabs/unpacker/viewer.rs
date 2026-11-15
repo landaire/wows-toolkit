@@ -21,7 +21,6 @@ use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -30,6 +29,7 @@ use zgui::view::install_stylesheet;
 use zgui::vocab::PropValue;
 use zgui_image::ImageBytes;
 
+use crate::long_job::long_job;
 use crate::tabs::unpacker::text_view::TextViewProps;
 
 const SHEET: &str = "wt-unpacker-viewer";
@@ -189,7 +189,7 @@ impl ViewerDoc {
             ViewerContent::Plaintext { extension, text } => {
                 let lines = RwSignal::new_local(Rc::new(plain_lines(&text)));
                 spawn_local(async move {
-                    if let Some(highlighted) = blocking(move || highlight(&extension, &text)).await {
+                    if let Some(highlighted) = long_job(move || highlight(&extension, &text)).await {
                         lines.set(Rc::new(highlighted));
                     }
                 });

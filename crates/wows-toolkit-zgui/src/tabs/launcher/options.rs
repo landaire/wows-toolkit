@@ -12,7 +12,6 @@ use zgui::reactive::Memo;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::IntoView;
@@ -21,6 +20,7 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::TextareaProps;
 
+use crate::long_job::long_job;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::launcher::SectionProps;
@@ -179,7 +179,7 @@ pub fn autodetect_proton(model: LauncherModel, shell: Shell) {
     let asked_with = (settings.proton_binary.clone(), settings.proton_prefix.clone());
 
     spawn_local(async move {
-        let (detected, result) = blocking(move || {
+        let (detected, result) = long_job(move || {
             let result =
                 wows_toolkit_launcher::proton::autodetect(&mut settings, wows_toolkit_config::storage_dir().as_deref());
             (settings, result)

@@ -46,11 +46,11 @@ use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::Task;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 
+use crate::long_job::long_job;
 use crate::services::Services;
 use crate::tabs::armor_viewer::sidebar::ModelsSource;
 use crate::tabs::armor_viewer::sidebar::ShipChoice;
@@ -247,7 +247,7 @@ impl SidebarState {
             let references_catalog = Arc::clone(&catalog);
             // Hidden ships list their parts and name their models too, for when the reader shows
             // them.
-            let (all_ships, references) = blocking(move || {
+            let (all_ships, references) = long_job(move || {
                 let all_ships = Arc::new(references_catalog.catalog.with_hidden());
                 let references = ModelReferences::build(&all_ships, references_catalog.assets.metadata());
                 (all_ships, Arc::new(references))
@@ -256,7 +256,7 @@ impl SidebarState {
 
             let (index_catalog, index_library, index_references) =
                 (Arc::clone(&catalog), Arc::clone(&library), Arc::clone(&references));
-            let index = blocking(move || {
+            let index = long_job(move || {
                 let metadata = index_catalog.assets.metadata();
                 let buildings = BuildingArmorIndex::build(metadata, &index_library);
                 let models = index_library.catalog();
@@ -267,7 +267,7 @@ impl SidebarState {
                 (index, fortifications)
             });
             let (parts_catalog, parts_library) = (Arc::clone(&catalog), Arc::clone(&library));
-            let parts = blocking(move || {
+            let parts = long_job(move || {
                 list_all_ship_parts(&all_ships, parts_catalog.assets.metadata(), &parts_library, &references)
             });
 

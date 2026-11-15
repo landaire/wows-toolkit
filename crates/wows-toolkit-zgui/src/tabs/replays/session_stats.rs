@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use wows_toolkit_config::queries;
 use wows_toolkit_replay_data::load::parse_replay;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 
+use crate::long_job::long_job;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
 /// Records `paths` in the session, each read as opening it would: a session row's figures come
@@ -40,7 +40,7 @@ pub fn record(workspace: ReplayWorkspace, paths: Vec<PathBuf>, replace: bool) {
 
             for path in paths {
                 let (reading, cache) = (path.clone(), game_data.clone());
-                let stat = match blocking(move || parse_replay(&reading, &cache, None)).await {
+                let stat = match long_job(move || parse_replay(&reading, &cache, None)).await {
                     Ok(parsed) => parsed.session_stat,
                     Err(err) => {
                         tracing::warn!(path = %path.display(), "session stats: the replay would not parse: {err}");

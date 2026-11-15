@@ -24,9 +24,9 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
-use zgui::task::blocking;
 use zgui::task::spawn_detached;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::services::progress;
@@ -71,7 +71,7 @@ impl GameDataCacheJobs {
         let Some(generation) = wanted.flatten() else { return };
 
         spawn_detached(async move {
-            let measured = blocking(move || wows_toolkit_services::game_data_cache::measure(&base)).await;
+            let measured = long_job(move || wows_toolkit_services::game_data_cache::measure(&base)).await;
             self.state.try_update(|state| state.measured(measured, generation));
         });
     }
@@ -137,7 +137,7 @@ impl Shell {
         }
         cache.pruning.set(true);
         spawn_detached(async move {
-            let deleted = blocking(move || wows_data_mgr::dump::delete_old_versions(&base)).await;
+            let deleted = long_job(move || wows_data_mgr::dump::delete_old_versions(&base)).await;
             cache.pruning.try_set(false);
             if deleted > 0 {
                 cache.forget_findings();
@@ -255,7 +255,7 @@ where
 
     let asked = base.clone();
     spawn_detached(async move {
-        let working = blocking(move || {
+        let working = long_job(move || {
             let Some(runtime) = runtime else {
                 return CacheOutcome::Failed(crate::services::TokioError::NoRuntime.to_string());
             };

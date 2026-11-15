@@ -55,9 +55,9 @@ use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::services::Services;
@@ -252,7 +252,7 @@ impl UnpackerModel {
         let services = self.services;
         self.spawn(async move {
             let job = services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
-            let loaded = blocking(move || load_package_vfs(&source).map_err(|err| err.to_string())).await;
+            let loaded = long_job(move || load_package_vfs(&source).map_err(|err| err.to_string())).await;
             if !current() {
                 return;
             }
@@ -268,7 +268,7 @@ impl UnpackerModel {
             self.pkg.set_vfs(package_vfs.clone());
 
             job.report(Job { name: t!("ui.unpacker.loading_assets").into_owned(), progress: None });
-            let opened = blocking(move || load_assets_bin(&package_vfs).map_err(|err| err.to_string())).await;
+            let opened = long_job(move || load_assets_bin(&package_vfs).map_err(|err| err.to_string())).await;
             if !current() {
                 return;
             }
@@ -325,7 +325,7 @@ impl UnpackerModel {
         self.extract.set(ExtractState::Counting);
 
         let (progress_tx, mut progress_rx) = mpsc::unbounded::<ExtractProgress>();
-        let worker = blocking(move || {
+        let worker = long_job(move || {
             let files = expand_to_files(&queued);
             extract_files(
                 &files,
@@ -375,7 +375,7 @@ impl UnpackerModel {
 
         let stop = results.stop_flag.get_value();
         let (tx, mut rx) = mpsc::unbounded::<SearchUpdate>();
-        let worker = blocking(move || {
+        let worker = long_job(move || {
             let targets = files_to_scan(&files, &path_filter);
             let hits = tx.clone();
             scan(
@@ -490,7 +490,7 @@ impl UnpackerModel {
         );
         self.spawn(async move {
             let Some(target) = chosen(self.shell, asked).await else { return };
-            let written = blocking(move || {
+            let written = long_job(move || {
                 let json = viewer::decode_to_json(&path).map_err(|err| err.to_string())?;
                 std::fs::write(&target, json).map_err(|err| err.to_string())
             })
@@ -515,7 +515,7 @@ impl UnpackerModel {
             self.dump_status.set(Some("Writing...".to_string()));
             let _job =
                 services.jobs.start(Job { name: t!("ui.unpacker.dump_parameters").into_owned(), progress: None });
-            let written = blocking(move || {
+            let written = long_job(move || {
                 request.write(&vfs, &path, |vfs| {
                     wows_toolkit_replay_data::load::load_game_params(vfs, build.0)
                         .map_err(|err| GameParamsDumpError::Decode(err.to_string()))

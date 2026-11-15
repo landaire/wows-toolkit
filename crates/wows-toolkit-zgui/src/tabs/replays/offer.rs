@@ -25,7 +25,6 @@ use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithValue;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -43,6 +42,7 @@ use zgui_ui::DialogHeaderProps;
 use zgui_ui::DialogTitleProps;
 use zgui_ui::prelude::Binding;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
@@ -145,7 +145,7 @@ impl GameDataOffer {
         let _planning = owner.with(|| {
             spawn_local(async move {
                 // The repository's futures are not `Send`, so each is built and driven on one worker.
-                let outcome = blocking(move || {
+                let outcome = long_job(move || {
                     match wows_toolkit_services::http::client(
                         crate::http::USER_AGENT,
                         &proxy,

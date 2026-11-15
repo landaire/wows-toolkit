@@ -33,9 +33,9 @@ use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithValue;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 
+use crate::long_job::long_job;
 use crate::services::GameDataState;
 use crate::services::Job;
 use crate::services::Services;
@@ -211,7 +211,7 @@ impl ArmorLibrary {
 
         spawn_local(async move {
             let job = services.jobs.start(Job { name: t!("ui.armor.loading_catalog").into_owned(), progress: None });
-            let read = blocking(move || {
+            let read = long_job(move || {
                 let assets = load_ship_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider())?;
                 let catalog = ShipCatalog::build(loaded.provider());
                 Ok::<_, wows_toolkit_armor::assets::ArmorAssetsError>(ArmorBundle {
@@ -237,7 +237,7 @@ impl ArmorLibrary {
             // Separate, so the ship list is usable while `assets.bin` is indexed.
             self.models.set(ModelsState::Loading);
             let job = services.jobs.start(Job { name: t!("ui.models.loading").into_owned(), progress: None });
-            let built = blocking(move || ModelAssets::build(&bundle.assets)).await;
+            let built = long_job(move || ModelAssets::build(&bundle.assets)).await;
             drop(job);
             if self.generation.try_get_value() != Some(generation) {
                 return;

@@ -94,6 +94,7 @@ use zgui_ui::MenuSeparatorProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
+use crate::long_job::long_job;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
@@ -744,7 +745,7 @@ pub fn ReplayPanel(
                 }
             };
             let checked = alt.clone();
-            let check = blocking(move || wows_toolkit_replay_data::load::check_alt(&primary, &checked, &cache)).await;
+            let check = long_job(move || wows_toolkit_replay_data::load::check_alt(&primary, &checked, &cache)).await;
             match check {
                 Ok(()) => {
                     if alts.with_untracked(|kept| kept.iter().any(|kept| same_file(kept, &alt))) {
