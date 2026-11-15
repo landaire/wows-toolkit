@@ -242,7 +242,8 @@ def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAU
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
-    rustc_flags = rustc_flags + _profile_rustc_flags()
+    # Target flags last, so they can override the profile.
+    rustc_flags = _profile_rustc_flags() + rustc_flags
 
     kwargs = {}
     if incoming_transition != None:

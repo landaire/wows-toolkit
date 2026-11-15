@@ -1,5 +1,5 @@
 load("//build-support/buck:workspace_rules.bzl", "workspace_binary")
-load("@toolchains//:hermetic_rust.bzl", "windows_cross_compatible_with", "windows_cross_resource")
+load("@toolchains//:hermetic_rust.bzl", "WINDOWS_HELPER_RUSTC_FLAGS", "windows_cross_compatible_with", "windows_cross_resource")
 
 # build.rs compiles the same script under Cargo.
 windows_cross_resource(
@@ -9,6 +9,7 @@ windows_cross_resource(
     target_compatible_with = windows_cross_compatible_with(),
 )
 
+# No C runtime: the entry point is main.rs's own.
 workspace_binary(
     name = "wgc_placeholder_bin",
     crate = "wgc_placeholder",
@@ -16,6 +17,11 @@ workspace_binary(
     version = "0.1.0",
     crate_root = "src/main.rs",
     incoming_transition = "//build-support/buck/windows_cross:transition",
-    rustc_flags = ["-Clink-arg=$(location :version_resource)"],
+    rustc_flags = WINDOWS_HELPER_RUSTC_FLAGS + [
+        "--cfg=wows_buck_build",
+        "-Clink-arg=$(location :version_resource)",
+        "-Clink-arg=-nostartfiles",
+        "-Clink-arg=-Wl,--entry=wgc_placeholder_start",
+    ],
     target_compatible_with = windows_cross_compatible_with(),
 )

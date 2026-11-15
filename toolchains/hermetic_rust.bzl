@@ -46,6 +46,17 @@ def windows_cross_compatible_with():
     """
     return [] if _TOOLCHAIN_ROOTS["nix_windows_cross"] else ["prelude//:none"]
 
+# The Wine helpers ship beside the Linux launcher and are copied into every
+# prefix, so they are built for size. These follow the toolchain's own flags
+# and the release `-Clto=thin`, and override them.
+WINDOWS_HELPER_RUSTC_FLAGS = [
+    "-Copt-level=z",
+    "-Ccodegen-units=1",
+    "-Clto=fat",
+    "-Cpanic=abort",
+    "-Cstrip=symbols",
+]
+
 def _windows_cross_resource_impl(ctx):
     root = _toolchain_root("nix_windows_cross")
     output = ctx.actions.declare_output(ctx.attrs.out)
