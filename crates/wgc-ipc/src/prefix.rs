@@ -2,6 +2,7 @@
 //! into a toolkit-owned Wine prefix. The relay writes the matching registry
 //! value itself on start, inside the prefix's wineserver.
 
+use std::fmt;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::path::Path;
@@ -9,14 +10,35 @@ use std::path::PathBuf;
 
 use wgc_relay_protocol::GAME_CENTER_DIR;
 
+use crate::buck_resources::BuckResources;
 use crate::error::PrefixError;
 
-/// Overrides the directory the relay binaries are taken from, for runs out of
-/// a build tree.
+const RELAY_FILE_NAME: &str = "wgc-relay.exe";
+
+/// Overrides the directory the relay binaries are taken from.
 pub const RELAY_DIR_ENV: &str = "WOWS_TOOLKIT_WGC_RELAY_DIR";
 
-const RELAY_FILE_NAME: &str = "wgc-relay.exe";
-const PLACEHOLDER_FILE_NAME: &str = "wgc-placeholder.exe";
+/// A Windows executable shipped beside the Linux toolkit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayBinary {
+    Relay,
+    Placeholder,
+}
+
+impl RelayBinary {
+    pub fn file_name(self) -> &'static str {
+        match self {
+            RelayBinary::Relay => RELAY_FILE_NAME,
+            RelayBinary::Placeholder => "wgc-placeholder.exe",
+        }
+    }
+}
+
+impl fmt::Display for RelayBinary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.file_name())
+    }
+}
 
 /// The two Windows executables shipped with the Linux toolkit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,25 +54,40 @@ impl RelayBinaries {
         RelayBinaries { relay, placeholder }
     }
 
-    /// Looks in [`RELAY_DIR_ENV`], else beside the running executable.
+    /// Looks in [`RELAY_DIR_ENV`], else as [`RelayBinaries::beside`] the
+    /// running executable.
     pub fn locate() -> Result<RelayBinaries, PrefixError> {
-        let dir = match std::env::var_os(RELAY_DIR_ENV) {
-            Some(dir) => PathBuf::from(dir),
-            None => {
-                let exe = std::env::current_exe().map_err(PrefixError::CurrentExe)?;
-                let dir = exe.parent().ok_or_else(|| PrefixError::CurrentExe(ErrorKind::NotFound.into()))?;
-                dir.to_path_buf()
-            }
-        };
-
-        let binaries = RelayBinaries::new(dir.join(RELAY_FILE_NAME), dir.join(PLACEHOLDER_FILE_NAME));
-        for path in [&binaries.relay, &binaries.placeholder] {
-            if !path.is_file() {
-                return Err(PrefixError::BinaryMissing { path: path.clone() });
-            }
+        if let Some(dir) = std::env::var_os(RELAY_DIR_ENV) {
+            return RelayBinaries::find(Path::new(&dir), None);
         }
 
-        Ok(binaries)
+        let exe = std::env::current_exe().map_err(PrefixError::CurrentExe)?;
+        RelayBinaries::beside(&exe)
+    }
+
+    /// Looks in `exe`'s directory, else in the Buck resource database of an
+    /// `exe` in a build tree.
+    pub fn beside(exe: &Path) -> Result<RelayBinaries, PrefixError> {
+        let dir = exe.parent().ok_or_else(|| PrefixError::CurrentExe(ErrorKind::NotFound.into()))?;
+        let resources = BuckResources::load(exe, dir)?;
+
+        RelayBinaries::find(dir, resources.as_ref())
+    }
+
+    fn find(dir: &Path, resources: Option<&BuckResources>) -> Result<RelayBinaries, PrefixError> {
+        let path = |binary: RelayBinary| {
+            let shipped = dir.join(binary.file_name());
+            if shipped.is_file() {
+                return Ok(shipped);
+            }
+
+            resources
+                .and_then(|resources| resources.path(binary.file_name()))
+                .filter(|path| path.is_file())
+                .ok_or_else(|| PrefixError::BinaryMissing { binary, dir: dir.to_path_buf() })
+        };
+
+        Ok(RelayBinaries::new(path(RelayBinary::Relay)?, path(RelayBinary::Placeholder)?))
     }
 }
 

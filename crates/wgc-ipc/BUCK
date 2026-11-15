@@ -4,6 +4,7 @@ WGC_IPC_DEPS = [
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-relay-protocol:wgc-relay-protocol",
     "//third-party/rust:rand",
+    "//third-party/rust:serde_json",
     "//third-party/rust:tempfile",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",

@@ -1,6 +1,8 @@
 use std::path::Path;
 
+use wgc_ipc::PrefixError;
 use wgc_ipc::RelayBinaries;
+use wgc_ipc::RelayBinary;
 use wgc_ipc::prepare_prefix;
 
 fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
@@ -67,4 +69,64 @@ fn replaces_a_changed_relay() {
     let prepared = prepare_prefix(drive_c.path(), &binaries).unwrap();
 
     assert_eq!(std::fs::read(prepared.relay_exe).unwrap(), b"new");
+}
+
+#[test]
+fn locates_binaries_beside_the_executable() {
+    let shipped = tempfile::tempdir().unwrap();
+    for name in ["wows_toolkit", "wgc-relay.exe", "wgc-placeholder.exe"] {
+        std::fs::write(shipped.path().join(name), name).unwrap();
+    }
+
+    let binaries = RelayBinaries::beside(&shipped.path().join("wows_toolkit")).unwrap();
+
+    assert_eq!(
+        binaries,
+        RelayBinaries::new(shipped.path().join("wgc-relay.exe"), shipped.path().join("wgc-placeholder.exe"))
+    );
+}
+
+/// The layout `buck2 run` leaves: each resource is another target's output,
+/// listed in `<exe>.resources.json` relative to the executable's directory.
+#[test]
+fn locates_binaries_through_the_buck_resource_database() {
+    let out = tempfile::tempdir().unwrap();
+    let exe_dir = out.path().join("crates/wows-toolkit-zgui/__zgui_bin__");
+    let relay_dir = out.path().join("crates/wgc-relay/__wgc_relay_bin__");
+    let placeholder_dir = out.path().join("crates/wgc-placeholder/__wgc_placeholder_bin__");
+    for dir in [&exe_dir, &relay_dir, &placeholder_dir] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    let exe = exe_dir.join("zgui_bin");
+    std::fs::write(&exe, b"zgui").unwrap();
+    std::fs::write(relay_dir.join("wgc_relay.exe"), b"relay").unwrap();
+    std::fs::write(placeholder_dir.join("wgc_placeholder.exe"), b"placeholder").unwrap();
+    std::fs::write(
+        exe_dir.join("zgui_bin.resources.json"),
+        r#"{
+            "crates/wows-toolkit-zgui/wgc-placeholder.exe": "../../wgc-placeholder/__wgc_placeholder_bin__/wgc_placeholder.exe",
+            "crates/wows-toolkit-zgui/wgc-relay.exe": "../../wgc-relay/__wgc_relay_bin__/wgc_relay.exe"
+        }"#,
+    )
+    .unwrap();
+
+    let binaries = RelayBinaries::beside(&exe).unwrap();
+
+    assert_eq!(std::fs::read(binaries.relay).unwrap(), b"relay");
+    assert_eq!(std::fs::read(binaries.placeholder).unwrap(), b"placeholder");
+}
+
+#[test]
+fn names_the_missing_binary() {
+    let shipped = tempfile::tempdir().unwrap();
+    std::fs::write(shipped.path().join("wows_toolkit"), b"toolkit").unwrap();
+    std::fs::write(shipped.path().join("wgc-relay.exe"), b"relay").unwrap();
+
+    let err = RelayBinaries::beside(&shipped.path().join("wows_toolkit")).unwrap_err();
+
+    assert!(
+        matches!(&err, PrefixError::BinaryMissing { binary: RelayBinary::Placeholder, dir } if dir == shipped.path()),
+        "{err:?}"
+    );
+    assert!(err.to_string().starts_with("wgc-placeholder.exe is missing from "), "{err}");
 }

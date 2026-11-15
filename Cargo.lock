@@ -15379,6 +15379,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "rand 0.10.3",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",

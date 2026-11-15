@@ -59,6 +59,14 @@ def os_select(macos, linux, windows):
         "config//os/constraints:windows": windows,
     })
 
+# Resources of the Linux GUI binaries, under the names wgc-ipc's
+# `RelayBinaries::locate` looks up in a build tree. The launcher runs them in
+# the game's Wine prefix.
+LINUX_WINE_HELPER_RESOURCES = {
+    "wgc-placeholder.exe": "//crates/wgc-placeholder:wgc_placeholder_bin",
+    "wgc-relay.exe": "//crates/wgc-relay:wgc_relay_bin",
+}
+
 # Linux GUI binaries start under the host's dynamic loader, which resolves the
 # graphics drivers and the libraries they link against through the host's
 # ld.so.cache. The Nix loader the toolchain records by default searches only

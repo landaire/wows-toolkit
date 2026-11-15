@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "LINUX_WINE_HELPER_RESOURCES", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "wows_toolkit_build",
@@ -179,6 +179,11 @@ GUI_LINK_FLAGS = os_select(
     ],
 )
 
+TOOLKIT_RESOURCES = {
+    "constants.json": "//embedded_resources:constants_json",
+    "wows_toolkit.png": "//assets:wows_toolkit_png",
+}
+
 workspace_binary(
     name = "wows_toolkit_bin",
     crate = "wows_toolkit",
@@ -188,7 +193,11 @@ workspace_binary(
     features = TOOLKIT_FEATURES,
     deps = [":wows_toolkit"] + TOOLKIT_DEPS,
     buildscript = buildscript,
-    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
+    resources = os_select(
+        macos = TOOLKIT_RESOURCES,
+        linux = TOOLKIT_RESOURCES | LINUX_WINE_HELPER_RESOURCES,
+        windows = TOOLKIT_RESOURCES,
+    ),
     rustc_flags = GUI_LINK_FLAGS,
 )
 

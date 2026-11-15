@@ -6,6 +6,7 @@
 
 mod account;
 mod answer;
+mod buck_resources;
 pub mod command;
 mod error;
 pub mod message;
@@ -25,6 +26,7 @@ pub use message::Message;
 pub use prefix::PreparedPrefix;
 pub use prefix::RELAY_DIR_ENV;
 pub use prefix::RelayBinaries;
+pub use prefix::RelayBinary;
 pub use prefix::prepare_prefix;
 pub use relay::RelayListener;
 pub use responder::BoxFuture;

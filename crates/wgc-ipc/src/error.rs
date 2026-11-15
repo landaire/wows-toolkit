@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::prefix::RelayBinary;
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CodecError {
     #[error("message ends at byte {offset} with {needed} more bytes needed")]
@@ -42,8 +44,10 @@ pub enum IpcError {
 
 #[derive(Debug, Error)]
 pub enum PrefixError {
-    #[error("{path} is missing; the launcher ships it beside the toolkit executable")]
-    BinaryMissing { path: PathBuf },
+    #[error("{binary} is missing from {dir}; it ships beside the toolkit, so reinstall the toolkit")]
+    BinaryMissing { binary: RelayBinary, dir: PathBuf },
+    #[error("reading the Buck resource database {path} failed: {source}")]
+    ResourceDatabase { path: PathBuf, source: serde_json::Error },
     #[error("cannot locate the toolkit executable: {0}")]
     CurrentExe(std::io::Error),
     #[error("writing {path} failed: {source}")]
