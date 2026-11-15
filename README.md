@@ -55,6 +55,12 @@ This is not considered a World of Warships mod and does not modify your World of
 - Can browse and extract packed game files.
 - Automatically sends **builds** (not raw replays) to shipbuilds.com for build statistic gathering from **Randoms** and **Ranked** games. Training rooms are not sent. Sending replay data can be disabled in the application settings tab.
 
+## License
+
+WoWs Toolkit is distributed under the [MIT License](LICENSE). The app shows its license and the third-party notices in the settings drawer under "About and licenses" in the beta, and under File, Licenses in the stable release.
+
+The releases include software by other authors. [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) holds their license notices, and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) credits the projects WoWs Toolkit builds on.
+
 ## For Developers
 
 If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
