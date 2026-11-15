@@ -21,6 +21,7 @@ use zgui::task::spawn_detached;
 use zgui::task::spawn_local;
 
 use crate::i18n::LanguageCode;
+use crate::long_job::long_job;
 use crate::services::GameDataRequest;
 use crate::services::GameDataState;
 use crate::services::Services;
@@ -179,7 +180,7 @@ fn maintain_game_data_cache(services: Services) {
             .read(|settings| wows_toolkit_services::game_data_cache::base(&settings.game_data_cache_dir))
             .flatten();
         let Some(base) = base else { return false };
-        spawn_detached(blocking(move || wows_toolkit_services::game_data_cache::maintain(&base)));
+        spawn_detached(long_job(move || wows_toolkit_services::game_data_cache::maintain(&base)));
         true
     });
     on_cleanup_local(move || drop(maintaining));

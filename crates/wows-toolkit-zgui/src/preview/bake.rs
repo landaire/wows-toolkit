@@ -16,6 +16,7 @@ use wows_toolkit_replay_data::minimap_preview::PreviewError;
 use wows_toolkit_replay_data::minimap_preview::PreviewFrames;
 use zgui::task::blocking;
 
+use crate::long_job::long_job;
 use crate::services::GameData;
 use crate::services::Settings;
 
@@ -86,7 +87,7 @@ impl PreviewBaker for GameDataBaker {
         let (frame_sender, frames) = mpsc::unbounded();
 
         let baking_cache = cache.clone();
-        let finished = blocking(move || {
+        let finished = long_job(move || {
             minimap_preview::bake_from_file(
                 &path,
                 &baking_cache,

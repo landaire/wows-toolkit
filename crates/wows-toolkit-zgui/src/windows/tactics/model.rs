@@ -25,6 +25,7 @@ use zgui::task::blocking;
 use zgui::task::spawn_local;
 
 use crate::frames::FrameSink;
+use crate::long_job::long_job;
 use crate::services::Services;
 use crate::windows::tactics::TacticsHost;
 
@@ -186,7 +187,7 @@ impl BoardModel {
             }
         });
         spawn_local(async move {
-            let outcome = blocking(move || {
+            let outcome = long_job(move || {
                 let outcome = job.run(|step| {
                     let _ = reports.unbounded_send(step);
                 });

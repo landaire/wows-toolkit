@@ -91,6 +91,7 @@ mod i18n;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+mod long_job;
 mod preview;
 mod services;
 mod shell;

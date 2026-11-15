@@ -64,6 +64,7 @@ use zgui::task::spawn_local;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
 
+use crate::long_job::long_job;
 use crate::services::GameDataState;
 use crate::services::Services;
 use crate::tabs::replays::browser::tree::BrowserTree;
@@ -437,7 +438,7 @@ impl Listing {
 
             let (reports, mut progress) = mpsc::unbounded();
             let scanned_dir = dir.clone();
-            let scan = blocking(move || scan_replay_files(&scanned_dir, &reports));
+            let scan = long_job(move || scan_replay_files(&scanned_dir, &reports));
             let shown = self.spawn(async move {
                 while let Some(report) = progress.next().await {
                     self.show_scan_progress(generation, report);
@@ -463,7 +464,7 @@ impl Listing {
     /// under.
     async fn read_dropped(self, generation: u64, paths: Vec<PathBuf>, wows_dir: Option<String>) {
         let (reports, mut progress) = mpsc::unbounded();
-        let read = blocking(move || {
+        let read = long_job(move || {
             let install = wows_dir.filter(|dir| !dir.is_empty()).map(|dir| {
                 let replays = resolve_replays_dir(Path::new(&dir));
                 // A directory that does not resolve is compared by the path it was named by.
@@ -707,7 +708,7 @@ impl Listing {
         }
 
         let missed_dir = dir.clone();
-        let missed = blocking(move || report_missed(&missed_dir, &walked, &messages));
+        let missed = long_job(move || report_missed(&missed_dir, &walked, &messages));
         let task = self.spawn(async move {
             missed.await;
             let cause = loop {

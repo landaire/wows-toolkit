@@ -21,6 +21,7 @@ use zgui::task::blocking;
 use zgui::task::spawn_detached;
 
 use crate::i18n::LanguageCode;
+use crate::long_job::long_job;
 
 /// What the game data is doing.
 #[derive(Clone)]
@@ -138,14 +139,14 @@ impl GameData {
         let pruned_dir = wows_dir.clone();
         let dump_base = wows_toolkit_config::game_data_dump_base_with_override(&request.cache_dir);
         spawn_detached(async move {
-            blocking(move || {
+            long_job(move || {
                 wows_toolkit_replay_data::load::prune_stale_caches(&pruned_dir, dump_base.as_deref());
             })
             .await;
         });
 
         spawn_detached(async move {
-            let loaded = blocking(move || {
+            let loaded = long_job(move || {
                 heap_profile::mark("startup_preload.begin");
                 let loaded = load_current_build(&wows_dir, &cache);
                 heap_profile::mark("startup_preload.done");
@@ -173,7 +174,7 @@ impl GameData {
     pub fn set_locale(self, code: LanguageCode) {
         let Some(cache) = self.cache.get_untracked() else { return };
         spawn_detached(async move {
-            blocking(move || {
+            long_job(move || {
                 cache.set_locale(code.as_str());
                 // Kept preview tracks carry ship names in the previous language. Forgotten once
                 // the names are rewritten, so a walk begun in between is not kept either.

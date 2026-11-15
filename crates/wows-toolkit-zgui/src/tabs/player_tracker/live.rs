@@ -56,6 +56,7 @@ use zgui_image::ImageBytes;
 use crate::game_art;
 use crate::game_art::ClassIconKey;
 use crate::http::USER_AGENT;
+use crate::long_job::long_job;
 use crate::services::Services;
 
 /// How often the chat observations are re-read while a battle is under way. The egui app's chat
@@ -307,7 +308,7 @@ impl LiveModel {
         let game_data = config.game_data.clone();
         let config = config.clone();
         let task = self.spawn(async move {
-            let loaded = blocking(move || game_data.get_or_load_build(build)).await;
+            let loaded = long_job(move || game_data.get_or_load_build(build)).await;
             if self.started_at() != Some(started_at) {
                 return;
             }
@@ -358,7 +359,11 @@ impl LiveModel {
             let mut first = true;
             loop {
                 if !std::mem::replace(&mut first, false) {
-                    blocking(|| std::thread::sleep(CHAT_POLL_INTERVAL)).await;
+                    // Built inside the runtime: a tokio timer made outside one panics.
+                    let waited = services.on_tokio(async { tokio::time::sleep(CHAT_POLL_INTERVAL).await }).await;
+                    if waited.is_err() {
+                        return;
+                    }
                 }
                 let read = pool.clone();
                 let found =
@@ -437,7 +442,7 @@ impl LiveModel {
             // Dropped with this task, which stops the retries between attempts.
             let cancel = ScanCancel::default();
             let cancelled = Arc::clone(&cancel.0);
-            let state = blocking(move || scan_arena_retrying(&source, &metadata, &game_data, &cancelled)).await;
+            let state = long_job(move || scan_arena_retrying(&source, &metadata, &game_data, &cancelled)).await;
             drop(cancel);
             if self.started_at() != Some(started_at) {
                 return;

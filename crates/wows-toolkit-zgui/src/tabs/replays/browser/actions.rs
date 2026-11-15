@@ -93,6 +93,7 @@ use zgui_ui::AlertDialogHeaderProps;
 use zgui_ui::AlertDialogProps;
 use zgui_ui::AlertDialogTitleProps;
 
+use crate::long_job::long_job;
 use crate::services::GameDataState;
 use crate::services::Job;
 use crate::services::Progress;
@@ -614,7 +615,7 @@ async fn ask_repository(control: BrowserControl, base: PathBuf, missing: &[Relea
         missing.iter().map(|release| (release.build.0, Some(release.version_said()))).collect();
     let proxy = proxy_url(services);
     // The repository's futures are not `Send`, so each is built and driven on one worker thread.
-    let outcome = blocking(move || {
+    let outcome = long_job(move || {
         match wows_toolkit_services::http::client(crate::http::USER_AGENT, &proxy, reqwest::redirect::Policy::default())
         {
             Ok(client) => runtime.block_on(game_data_cache::plan(&client, &base, &requests)),
@@ -742,7 +743,7 @@ async fn download(control: BrowserControl, base: PathBuf, downloads: &[BuildNeed
         let (reports, steps) = mpsc::unbounded::<game_data_cache::Progress>();
         // The repository's futures are not `Send`, so each is built and driven on one worker
         // thread.
-        let fetching = blocking(move || {
+        let fetching = long_job(move || {
             match wows_toolkit_services::http::client(
                 crate::http::USER_AGENT,
                 &proxy,
@@ -838,7 +839,7 @@ async fn read_again(
     let write_mode = purpose.write_mode();
     let (reports, steps) = mpsc::unbounded::<IndexProgress>();
     let proxy = proxy_url(services);
-    let reading = blocking(move || {
+    let reading = long_job(move || {
         // Nothing here stops a forced pass part-way; this is the flag the pass checks.
         let cancel = AtomicBool::new(false);
         let rating = owner_rating(&runtime, &proxy);
@@ -1037,7 +1038,7 @@ fn run_next_pass(control: BrowserControl) {
     let (reports, steps) = mpsc::unbounded::<IndexProgress>();
     let proxy = proxy_url(services);
     let task = work.spawn(async move {
-        let walking = blocking(move || {
+        let walking = long_job(move || {
             let rating = owner_rating(&runtime, &proxy);
             let report = |step| {
                 let _ = reports.unbounded_send(step);
@@ -1110,7 +1111,7 @@ pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
     let proxy = proxy_url(services);
 
     control.work.spawn(async move {
-        let indexed = blocking(move || -> Result<(), IndexOneError> {
+        let indexed = long_job(move || -> Result<(), IndexOneError> {
             let now = jiff::Timestamp::now();
             let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
             let rating = owner_rating(&runtime, &proxy);
@@ -1210,7 +1211,7 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
             }
 
             let (reading, cache) = (path.clone(), game_data.clone());
-            let parsed = blocking(move || parse_replay(&reading, &cache, None)).await;
+            let parsed = long_job(move || parse_replay(&reading, &cache, None)).await;
             let parsed = match parsed {
                 Ok(parsed) => parsed,
                 Err(err) => {

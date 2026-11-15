@@ -57,7 +57,6 @@ use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::With;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -71,6 +70,7 @@ use zgui_ui::InputProps;
 use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;
+use crate::long_job::long_job;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::armor_viewer::sidebar::art::SidebarArt;
@@ -250,7 +250,7 @@ pub fn ArmorSidebar(
         };
         spawn_local(async move {
             let read = Arc::clone(&catalog);
-            let loaded = blocking(move || SidebarArt::read(read.assets.vfs(), &read.catalog)).await;
+            let loaded = long_job(move || SidebarArt::read(read.assets.vfs(), &read.catalog)).await;
             if state.catalog_untracked().is_some_and(|current| Arc::ptr_eq(&current, &catalog)) {
                 art.set(Rc::new(loaded));
             }

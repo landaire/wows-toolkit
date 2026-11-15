@@ -24,10 +24,10 @@ use zgui::reactive::StoredValue;
 use zgui::reactive::Task;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::UpdateValue;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view::Timers;
 
+use crate::long_job::long_job;
 use crate::tabs::replays::browser::proxy_url;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::export_extension;
@@ -134,7 +134,7 @@ impl Arrivals {
                 }
 
                 let reading = named.clone();
-                let written = blocking(move || {
+                let written = long_job(move || {
                     let parsed = parse_replay(&reading, &game_data, personal_rating.as_deref())
                         .map_err(|err| ExportFailure::Parse(err.to_string()))?;
                     if parsed.raw_results_json.is_none() {
@@ -212,7 +212,7 @@ fn contribute(workspace: ReplayWorkspace, path: &Path) {
     workspace.under_tab(|| {
         spawn_local(async move {
             let reading = named.clone();
-            let parsed = match blocking(move || parse_replay(&reading, &game_data, None)).await {
+            let parsed = match long_job(move || parse_replay(&reading, &game_data, None)).await {
                 Ok(parsed) => parsed,
                 Err(err) => {
                     tracing::warn!(path = %named.display(), %err, "sharing: the replay did not parse");

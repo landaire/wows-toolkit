@@ -48,7 +48,6 @@ use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Track;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateUntracked;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -69,6 +68,7 @@ use zgui_ui::ContextMenuProps;
 use zgui_ui::ContextMenuTriggerProps;
 use zgui_ui::MenuItemProps;
 
+use crate::long_job::long_job;
 use crate::services::GameDataState;
 use crate::services::Job;
 use crate::services::Services;
@@ -536,7 +536,7 @@ fn read_inventory(workspace: ArmorWorkspace, armor: &Arc<LoadedShipArmor>) {
         let armor = Arc::clone(&armor);
         spawn_local(async move {
             let job = services.jobs.start(Job { name: t!("ui.armor.textures.reading").into_owned(), progress: None });
-            blocking(move || {
+            long_job(move || {
                 armor.textures(&models.library);
             })
             .await;
@@ -722,7 +722,7 @@ impl Extraction {
         spawn_local(async move {
             let job =
                 services.jobs.start(Job { name: t!("ui.armor.textures.extracting").into_owned(), progress: None });
-            let written = blocking(move || write_placements(&vfs, &placements)).await;
+            let written = long_job(move || write_placements(&vfs, &placements)).await;
             drop(job);
             match written {
                 Ok(count) => {
