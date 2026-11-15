@@ -7,6 +7,7 @@
 pub mod clans;
 pub mod history;
 pub mod live;
+pub mod saved_view;
 pub mod store;
 
 /// How loudly a number of encounters reads.
@@ -86,8 +87,8 @@ pub const TRACKER_SETTINGS_KEY: &str = "player_tracker";
 /// What the tracker remembers between sessions: the window of time it looks
 /// back over, how each table is ordered, and what the filter box holds.
 ///
-/// The egui tracker keeps none of this, so this row belongs to the newer
-/// front ends rather than one all three share.
+/// The egui tracker keeps the same view under keys of its own, which
+/// [`saved_view::load`] imports once.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackerSettings {
     #[serde(default)]

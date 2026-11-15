@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
+use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
 use crate::tab_state::TabState;
@@ -217,7 +218,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         let pt = ctx.player_tracker.read();
         serde_json::to_string(&pt.filter_time_period).unwrap_or_default()
     };
-    queries::set_setting_raw(pool, "player_tracker.filter_time_period", &filter_period).await?;
+    queries::set_setting_raw(pool, saved_view::EGUI_TIME_PERIOD_KEY, &filter_period).await?;
 
     trace!("  saved settings");
     Ok(())
@@ -306,7 +307,6 @@ type TrackerPrefsSnapshot = (SortedBy, ClanSortedBy, String);
 /// accounts that was tens of megabytes per save. A save with nothing to write
 /// opens no transaction.
 async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx::Error> {
-    use crate::ui::player_tracker::TrackerPrefs;
     use wows_toolkit_viewmodel::player_tracker::store;
 
     // Built under the lock, which is also what keeps the write and the change
@@ -341,9 +341,9 @@ async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<()
     }
 
     store::store_view_modes(pool, modes).await?;
-    queries::set_setting(pool, TrackerPrefs::SORT_ORDER_KEY, &prefs.sort_order).await?;
-    queries::set_setting(pool, TrackerPrefs::CLAN_SORT_ORDER_KEY, &prefs.clan_sort_order).await?;
-    queries::set_setting(pool, TrackerPrefs::PLAYER_FILTER_KEY, &prefs.player_filter).await?;
+    queries::set_setting(pool, saved_view::EGUI_SORT_ORDER_KEY, &prefs.sort_order).await?;
+    queries::set_setting(pool, saved_view::EGUI_CLAN_SORT_ORDER_KEY, &prefs.clan_sort_order).await?;
+    queries::set_setting(pool, saved_view::EGUI_PLAYER_FILTER_KEY, &prefs.player_filter).await?;
     *LAST_TRACKER_SETTINGS.lock() = Some((modes, snapshot));
 
     Ok(())

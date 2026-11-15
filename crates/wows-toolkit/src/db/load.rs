@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
+use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
 use crate::data::session_stats::PerGameStat;
@@ -259,7 +260,7 @@ async fn load_tracked_players(pool: &SqlitePool, ts: &mut TabState) -> Result<()
     // be held across an await.
     let modes = store::load_view_modes(pool).await;
     let prefs = load_tracker_prefs(pool).await;
-    let period = queries::get_setting(pool, "player_tracker.filter_time_period").await;
+    let period = queries::get_setting(pool, saved_view::EGUI_TIME_PERIOD_KEY).await;
     {
         let mut tracker = ts.player_tracker.write();
         tracker.win_rate_mode = modes.win_rate_mode;
@@ -377,9 +378,9 @@ async fn load_tracker_prefs(pool: &SqlitePool) -> crate::ui::player_tracker::Tra
     use crate::ui::player_tracker::TrackerPrefs;
 
     TrackerPrefs {
-        sort_order: queries::get_setting(pool, TrackerPrefs::SORT_ORDER_KEY).await.unwrap_or_default(),
-        clan_sort_order: queries::get_setting(pool, TrackerPrefs::CLAN_SORT_ORDER_KEY).await.unwrap_or_default(),
-        player_filter: queries::get_setting(pool, TrackerPrefs::PLAYER_FILTER_KEY).await.unwrap_or_default(),
+        sort_order: queries::get_setting(pool, saved_view::EGUI_SORT_ORDER_KEY).await.unwrap_or_default(),
+        clan_sort_order: queries::get_setting(pool, saved_view::EGUI_CLAN_SORT_ORDER_KEY).await.unwrap_or_default(),
+        player_filter: queries::get_setting(pool, saved_view::EGUI_PLAYER_FILTER_KEY).await.unwrap_or_default(),
     }
 }
 

@@ -94,6 +94,7 @@ use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 use wows_toolkit_viewmodel::player_tracker::live::win_rate_hover;
+use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked;
@@ -1892,11 +1893,20 @@ impl PlayerTrackerView {
     fn load_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         cx.spawn_in(window, async move |this, cx| {
-            let stored = runtime::spawn(cx, async move {
-                wows_toolkit_config::queries::get_setting::<TrackerSettings>(&pool, TRACKER_SETTINGS_KEY).await
-            })
-            .await;
-            let Ok(Some(settings)) = stored else { return };
+            let stored = runtime::spawn(cx, async move { saved_view::load(&pool).await }).await;
+            let settings = match stored {
+                Ok(Ok(Some(settings))) => settings,
+                // Nothing saved: the defaults stand.
+                Ok(Ok(None)) => return,
+                Ok(Err(err)) => {
+                    tracing::warn!("player tracker: the saved view could not be read: {err}");
+                    return;
+                }
+                Err(err) => {
+                    tracing::warn!("player tracker: the saved view did not load: {err}");
+                    return;
+                }
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 this.period = settings.period;
                 this.sort = settings.sort;

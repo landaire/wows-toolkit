@@ -64,6 +64,23 @@ pub async fn set_setting_raw(pool: &SqlitePool, key: &str, json: &str) -> Result
     Ok(())
 }
 
+/// Writes a JSON-encoded setting only when `key` holds nothing, so a value written meanwhile
+/// wins. `true` when this write landed.
+pub async fn insert_setting_if_absent<T: Serialize>(
+    pool: &SqlitePool,
+    key: &str,
+    value: &T,
+) -> Result<bool, sqlx::Error> {
+    let json = serde_json::to_string(value).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    let result = sqlx::query("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING")
+        .bind(key)
+        .bind(json)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected() == 1)
+}
+
 /// Removes a setting, if it is there.
 pub async fn delete_setting(pool: &SqlitePool, key: &str) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM settings WHERE key = ?1").bind(key).execute(pool).await?;

@@ -30,6 +30,7 @@ use wows_toolkit_viewmodel::player_tracker::clans::build_clan_breakdown;
 use wows_toolkit_viewmodel::player_tracker::clans::visible_clans;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
+use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
@@ -45,6 +46,7 @@ use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
@@ -70,6 +72,21 @@ pub enum LoadState {
 /// Bumped per index query, so a slower earlier answer cannot overwrite a later one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Generation(u64);
+
+/// The view fields the reader changed before the saved view loaded.
+#[derive(Clone, Copy, Debug, Default)]
+struct ViewEdits {
+    period: bool,
+    sort: bool,
+    clan_sort: bool,
+    filter: bool,
+}
+
+impl ViewEdits {
+    fn any(self) -> bool {
+        self.period || self.sort || self.clan_sort || self.filter
+    }
+}
 
 /// One note to write, in the order the notes were kept.
 struct NoteWrite {
@@ -101,6 +118,9 @@ pub struct TrackerModel {
     pub load: RwSignal<LoadState, LocalStorage>,
     pub clan_load: RwSignal<LoadState, LocalStorage>,
     generation: StoredValue<Generation>,
+    /// `Some` until the saved view has loaded. The load keeps the fields changed meanwhile, and
+    /// saving waits for it so a partial view does not stand in for the saved one.
+    view_edits: StoredValue<Option<ViewEdits>>,
     /// Opened rows, keyed by identity so a re-sort carries the open state with the row.
     pub expanded_players: RwSignal<HashSet<AccountId>, LocalStorage>,
     pub expanded_clans: RwSignal<HashSet<String>, LocalStorage>,
@@ -201,6 +221,7 @@ impl TrackerModel {
             load: RwSignal::new_local(LoadState::Idle),
             clan_load: RwSignal::new_local(LoadState::Idle),
             generation: StoredValue::new(Generation::default()),
+            view_edits: StoredValue::new(Some(ViewEdits::default())),
             expanded_players: RwSignal::new_local(HashSet::new()),
             expanded_clans: RwSignal::new_local(HashSet::new()),
             editing_note: RwSignal::new_local(None),
@@ -227,16 +248,31 @@ impl TrackerModel {
         let services = self.services;
         let read = pool.clone();
         self.spawn(async move {
-            let stored = services
-                .on_tokio(async move {
-                    wows_toolkit_config::queries::get_setting::<TrackerSettings>(&read, TRACKER_SETTINGS_KEY).await
-                })
-                .await;
-            if let Ok(Some(settings)) = stored {
-                self.period.set(settings.period);
-                self.sort.set(settings.sort);
-                self.clan_sort.set(settings.clan_sort);
-                self.filter.set(settings.filter);
+            let stored = services.on_tokio(async move { saved_view::load(&read).await }).await;
+            let edits = self.view_edits.get_value().unwrap_or_default();
+            self.view_edits.set_value(None);
+            match stored {
+                Ok(Ok(Some(settings))) => {
+                    if !edits.period {
+                        self.period.set(settings.period);
+                    }
+                    if !edits.sort {
+                        self.sort.set(settings.sort);
+                    }
+                    if !edits.clan_sort {
+                        self.clan_sort.set(settings.clan_sort);
+                    }
+                    if !edits.filter {
+                        self.filter.set(settings.filter);
+                    }
+                }
+                // Nothing saved: the defaults stand.
+                Ok(Ok(None)) => {}
+                Ok(Err(err)) => tracing::warn!("player tracker: the saved view could not be read: {err}"),
+                Err(err) => tracing::warn!("player tracker: the saved view did not load: {err}"),
+            }
+            if edits.any() {
+                self.save_view();
             }
             self.refresh(pool);
         });
@@ -359,6 +395,9 @@ impl TrackerModel {
     }
 
     fn save_view(self) {
+        if self.view_edits.with_value(Option::is_some) {
+            return;
+        }
         let settings = TrackerSettings {
             period: self.period.get_untracked(),
             sort: self.sort.get_untracked(),
@@ -368,11 +407,21 @@ impl TrackerModel {
         self.services.settings.save(TRACKER_SETTINGS_KEY, &settings);
     }
 
+    /// Notes a view field changed before the saved view loaded.
+    fn note_edit(self, edit: impl FnOnce(&mut ViewEdits)) {
+        self.view_edits.update_value(|edits| {
+            if let Some(edits) = edits {
+                edit(edits);
+            }
+        });
+    }
+
     pub fn set_period(self, period: TimePeriod) {
         if self.period.get_untracked() == period {
             return;
         }
         self.period.set(period);
+        self.note_edit(|edits| edits.period = true);
         self.save_view();
         // A different window of time is a different query, not a filter over what is loaded.
         if let Some(pool) = self.pool() {
@@ -385,16 +434,19 @@ impl TrackerModel {
             return;
         }
         self.filter.set(text);
+        self.note_edit(|edits| edits.filter = true);
         self.save_view();
     }
 
     pub fn sort_by(self, column: SortColumn) {
         self.sort.update(|sort| *sort = sort.toggled(column));
+        self.note_edit(|edits| edits.sort = true);
         self.save_view();
     }
 
     pub fn sort_clans_by(self, column: ClanSortColumn) {
         self.clan_sort.update(|sort| *sort = sort.toggled(column));
+        self.note_edit(|edits| edits.clan_sort = true);
         self.save_view();
     }
 

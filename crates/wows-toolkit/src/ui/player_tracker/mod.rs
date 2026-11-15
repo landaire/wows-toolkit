@@ -77,22 +77,14 @@ pub(crate) struct StatsLookup {
     pub(crate) request: MatchStatsRequest,
 }
 
-/// The Historical and Clans table settings, persisted one key apiece.
-///
-/// Only this app has them, which is why they are not in the shared
-/// [`ViewModes`](wows_toolkit_viewmodel::player_tracker::tracked::ViewModes):
-/// the port would have to write keys it knows nothing about to keep them.
+/// The Historical and Clans table settings, persisted one key apiece under
+/// the keys in [`saved_view`](wows_toolkit_viewmodel::player_tracker::saved_view),
+/// which imports them once into the zgui and GPUI view.
 #[derive(Debug, Default)]
 pub struct TrackerPrefs {
     pub sort_order: SortedBy,
     pub clan_sort_order: ClanSortedBy,
     pub player_filter: String,
-}
-
-impl TrackerPrefs {
-    pub const SORT_ORDER_KEY: &'static str = "player_tracker.sort_order";
-    pub const CLAN_SORT_ORDER_KEY: &'static str = "player_tracker.clan_sort_order";
-    pub const PLAYER_FILTER_KEY: &'static str = "player_tracker.player_filter";
 }
 
 /// Every stored field defaults: a tracker read out of a database written by an
