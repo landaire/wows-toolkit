@@ -808,6 +808,11 @@ axis_game = "Partita"
 series_average = "%{stat} (media)"
 series_running = "%{stat} (progressiva)"
 series_more = "+%{count} altre"
+mode_random = "Casuali"
+mode_ranked = "Classificate"
+mode_other = "Altre"
+win_rate_rated_only = "La % vittorie conta solo le battaglie casuali e classificate"
+win_rate_breakdown_line = "%{mode}: %{rate} (battaglie: %{battles})"
 
 [ui.stats.table]
 min = "Min"

@@ -1,0 +1,27 @@
+---
+source: crates/wows-toolkit-viewmodel/src/stats/mod.rs
+expression: "format!(\"{:#?}\\nrated: {} {:?}\\n\\n{}\", summary.records, rated.label(), rated.win_rate(),\nsummary.records.hover_text())"
+---
+RecordBreakdown {
+    random: Record {
+        wins: 2,
+        losses: 1,
+        draws: 0,
+    },
+    ranked: Record {
+        wins: 0,
+        losses: 1,
+        draws: 0,
+    },
+    other: Record {
+        wins: 3,
+        losses: 1,
+        draws: 0,
+    },
+}
+rated: 2W/2L Some(50.0)
+
+Win rate counts only Random and Ranked battles
+Random: 66.7% (battles: 3)
+Ranked: 0.0% (battles: 1)
+Other: 75.0% (battles: 4)

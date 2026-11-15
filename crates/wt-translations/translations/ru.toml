@@ -774,6 +774,11 @@ axis_game = "Бой"
 series_average = "%{stat} (среднее)"
 series_running = "%{stat} (скользящее)"
 series_more = "+%{count} ещё"
+mode_random = "Случайные"
+mode_ranked = "Ранговые"
+mode_other = "Другие"
+win_rate_rated_only = "Процент побед учитывает только случайные и ранговые бои"
+win_rate_breakdown_line = "%{mode}: %{rate} (боёв: %{battles})"
 
 [ui.stats.table]
 min = "Мин"

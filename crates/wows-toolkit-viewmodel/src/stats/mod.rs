@@ -19,15 +19,19 @@ pub mod sample;
 
 pub mod saved_charts;
 
+pub mod record;
+
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
+use wowsunpack::rating_scope::RatingScope;
 
 use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::PersonalRatingResult;
 use crate::personal_rating::ShipBattleStats;
+use crate::stats::record::RecordBreakdown;
 use wows_toolkit_config::queries::SessionStatRow;
 
 /// One achievement earned, as the session rows store it.
@@ -120,12 +124,23 @@ pub struct PerGameStat {
 }
 
 impl PerGameStat {
+    /// Whether a rating applies to this game. The stored rows keep only the
+    /// match group, so that is what classifies it.
+    pub fn rating_scope(&self) -> RatingScope {
+        RatingScope::of_match_group(&self.match_group)
+    }
+
     /// This game's personal rating, against the expected-values table.
     ///
     /// `None` without a table, rather than zero, so a chart or a badge shows
-    /// nothing instead of a rating the data cannot support.
+    /// nothing instead of a rating the data cannot support; and `None` for a
+    /// battle kind the rating does not apply to.
     pub fn personal_rating(&self, table: Option<&PersonalRatingData>) -> Option<f64> {
         let table = table?;
+        if !self.rating_scope().is_rated() {
+            return None;
+        }
+
         let stats = ShipBattleStats {
             ship_id: self.ship_id,
             battles: 1,
@@ -261,9 +276,7 @@ pub fn sortable_game_time(game_time: &str) -> String {
 /// them left to right.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionSummary {
-    pub wins: usize,
-    pub losses: usize,
-    pub draws: usize,
+    pub records: RecordBreakdown,
     pub total_frags: i64,
     /// Best single game, with the ship that did it. `None` with no games.
     pub best_frags: Option<(GameParamId, i64)>,
@@ -273,34 +286,10 @@ pub struct SessionSummary {
 impl SessionSummary {
     pub fn from_games(games: &[&PerGameStat]) -> Self {
         Self {
-            wins: games.iter().filter(|game| game.is_win).count(),
-            losses: games.iter().filter(|game| game.is_loss).count(),
-            draws: games.iter().filter(|game| game.is_draw).count(),
+            records: RecordBreakdown::from_games(games.iter().copied()),
             total_frags: games.iter().map(|game| game.frags).sum(),
             best_frags: games.iter().map(|game| (game.ship_id, game.frags)).max_by_key(|entry| entry.1),
             best_damage: games.iter().map(|game| (game.ship_id, game.damage)).max_by_key(|entry| entry.1),
-        }
-    }
-
-    /// Games that reached a result. A game with no result counts for none of
-    /// win, loss or draw, so this is not simply the game count.
-    pub fn games_played(&self) -> usize {
-        self.wins + self.losses + self.draws
-    }
-
-    /// `None` when no game reached a result, rather than a zero percent that
-    /// reads as having lost them all.
-    pub fn win_rate(&self) -> Option<f64> {
-        let played = self.games_played();
-        (played > 0).then(|| (self.wins as f64 / played as f64) * 100.0)
-    }
-
-    /// The egui overview's win/loss line: draws appear only when there are any.
-    pub fn record_label(&self) -> String {
-        if self.draws > 0 {
-            format!("{}W/{}L/{}D", self.wins, self.losses, self.draws)
-        } else {
-            format!("{}W/{}L", self.wins, self.losses)
         }
     }
 }
@@ -414,9 +403,7 @@ pub fn all_match_groups(games: &[PerGameStat]) -> std::collections::BTreeSet<Str
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PerformanceInfo {
     ship_id: Option<GameParamId>,
-    wins: usize,
-    losses: usize,
-    draws: usize,
+    records: RecordBreakdown,
     total_games: usize,
     total_frags: i64,
     max_frags: Option<i64>,
@@ -435,6 +422,9 @@ pub struct PerformanceInfo {
     min_win_adjusted_xp: Option<i64>,
     /// `sort_key` of the most recent game, so the column sorts chronologically.
     last_played: String,
+
+    /// The Random and Ranked games alone, which the rating is scored on.
+    rated: RatedTotals,
 }
 
 impl PerformanceInfo {
@@ -446,12 +436,11 @@ impl PerformanceInfo {
                 info.ship_id = Some(game.ship_id);
             }
 
-            if game.is_win {
-                info.wins += 1;
-            } else if game.is_loss {
-                info.losses += 1;
-            } else if game.is_draw {
-                info.draws += 1;
+            info.records.add(game);
+            if game.rating_scope().is_rated() {
+                info.rated.battles += 1;
+                info.rated.damage += game.damage;
+                info.rated.frags += game.frags;
             }
 
             info.total_frags += game.frags;
@@ -490,18 +479,12 @@ impl PerformanceInfo {
         self.ship_id
     }
 
-    pub fn wins(&self) -> usize {
-        self.wins
+    /// Every game's result, by the battle kinds the win rate is broken down by.
+    pub fn records(&self) -> &RecordBreakdown {
+        &self.records
     }
 
-    pub fn losses(&self) -> usize {
-        self.losses
-    }
-
-    pub fn draws(&self) -> usize {
-        self.draws
-    }
-
+    /// Every game in view, rated or not, which is what the averages divide by.
     pub fn total_games(&self) -> usize {
         self.total_games
     }
@@ -510,10 +493,17 @@ impl PerformanceInfo {
         &self.last_played
     }
 
-    /// Wins over games played. `None` with no games, rather than zero, which
-    /// a zero-game ship would otherwise be sorted and coloured by.
-    pub fn win_rate(&self) -> Option<f64> {
-        (self.total_games > 0).then(|| (self.wins as f64 / self.total_games as f64) * 100.0)
+    /// Wins over the Random and Ranked battles that reached a result. `None`
+    /// with none, rather than zero, which a ship played only in other modes
+    /// would otherwise be sorted and coloured by.
+    pub fn rated_win_rate(&self) -> Option<f64> {
+        self.records.rated().win_rate()
+    }
+
+    /// Whether any game in view is one a rating applies to, whether or not
+    /// it reached a result.
+    pub fn is_rated(&self) -> bool {
+        self.rated.battles > 0
     }
 
     pub fn total_frags(&self) -> i64 {
@@ -596,29 +586,43 @@ impl PerformanceInfo {
         (self.total_games > 0).then(|| self.total_win_adjusted_xp as f64 / self.total_games as f64)
     }
 
-    /// This ship's rating over the games in view, from the summed battles
-    /// rather than the mean of their individual ratings.
+    /// This ship's rating over its Random and Ranked games in view, from the
+    /// summed battles rather than the mean of their individual ratings.
     ///
     /// `None` when the ship is unknown, which is what a zero-game aggregate
-    /// carries, or when the table has no expected values for it.
+    /// carries, when it has no rated game, or when the table has no expected
+    /// values for it.
     pub fn personal_rating(&self, table: &PersonalRatingData) -> Option<PersonalRatingResult> {
         let ship_id = self.ship_id?;
+        if self.rated.battles == 0 {
+            return None;
+        }
+
         let stats = ShipBattleStats {
             ship_id,
-            battles: self.total_games as u32,
-            damage: self.total_damage,
-            wins: self.wins as u32,
-            frags: self.total_frags,
+            battles: self.rated.battles,
+            damage: self.rated.damage,
+            wins: self.records.rated().wins as u32,
+            frags: self.rated.frags,
         };
         table.calculate_pr(&[stats])
     }
 }
 
-/// The session's rating across every ship played.
+/// Totals over the games a rating applies to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RatedTotals {
+    /// Every rated game, including one that reached no result.
+    battles: u32,
+    damage: u64,
+    frags: i64,
+}
+
+/// The session's rating across every ship played in Random and Ranked.
 ///
 /// Each ship contributes its own aggregate, which is what the rating formula
 /// expects: it weights a ship against that ship's expected values, not against
-/// a pooled average.
+/// a pooled average. `None` without a table or a rated game.
 pub fn session_personal_rating(
     games: &[&PerGameStat],
     table: Option<&PersonalRatingData>,
@@ -626,7 +630,7 @@ pub fn session_personal_rating(
     let table = table?;
 
     let mut per_ship: std::collections::HashMap<GameParamId, ShipBattleStats> = std::collections::HashMap::new();
-    for game in games {
+    for game in games.iter().filter(|game| game.rating_scope().is_rated()) {
         let entry = per_ship.entry(game.ship_id).or_insert(ShipBattleStats {
             ship_id: game.ship_id,
             battles: 0,
@@ -659,11 +663,13 @@ pub struct PrStats {
 }
 
 impl PrStats {
+    /// Scored over the Random and Ranked games in `games` alone.
+    ///
     /// `None` when no game in `games` could be rated, which is also what a
-    /// missing expected-values table produces, and when the games name more
-    /// than one ship: the aggregate is scored against one ship's expected
-    /// values, so pooling two ships into it would rate them both as the
-    /// first.
+    /// missing expected-values table or a set of only unrated battle kinds
+    /// produces, and when the games name more than one ship: the aggregate is
+    /// scored against one ship's expected values, so pooling two ships into it
+    /// would rate them both as the first.
     pub fn from_games(games: &[&PerGameStat], table: &PersonalRatingData) -> Option<Self> {
         let first = games.first()?;
         let ship_id = first.ship_id;
@@ -671,7 +677,8 @@ impl PrStats {
             return None;
         }
 
-        let ratings: Vec<f64> = games.iter().filter_map(|game| game.personal_rating(Some(table))).collect();
+        let rated: Vec<&PerGameStat> = games.iter().copied().filter(|game| game.rating_scope().is_rated()).collect();
+        let ratings: Vec<f64> = rated.iter().filter_map(|game| game.personal_rating(Some(table))).collect();
         if ratings.is_empty() {
             return None;
         }
@@ -680,10 +687,10 @@ impl PrStats {
 
         let aggregate = ShipBattleStats {
             ship_id,
-            battles: games.len() as u32,
-            damage: games.iter().map(|game| game.damage).sum(),
-            wins: games.iter().filter(|game| game.is_win).count() as u32,
-            frags: games.iter().map(|game| game.frags).sum(),
+            battles: rated.len() as u32,
+            damage: rated.iter().map(|game| game.damage).sum(),
+            wins: rated.iter().filter(|game| game.is_win).count() as u32,
+            frags: rated.iter().map(|game| game.frags).sum(),
         };
         let average = table.calculate_pr(&[aggregate])?;
 
@@ -731,6 +738,7 @@ pub fn per_ship_performance_by_id(games: &[&PerGameStat]) -> Vec<(String, Perfor
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stats::record::Record;
 
     fn game(ship: &str, sort_key: &str, damage: u64, frags: i64, win: bool, div: bool, mode: &str) -> PerGameStat {
         PerGameStat {
@@ -851,13 +859,12 @@ mod tests {
         let info = PerformanceInfo::from_games(&yamato);
 
         assert_eq!(info.total_games(), 2);
-        assert_eq!(info.wins(), 1);
-        assert_eq!(info.losses(), 1);
+        assert_eq!(info.records().rated(), Record { wins: 1, losses: 1, draws: 0 });
         assert_eq!(info.total_damage(), 150_000);
         assert_eq!(info.max_damage(), Some(100_000));
         assert_eq!(info.min_damage(), Some(50_000));
         assert_eq!(info.avg_damage(), Some(75_000.0));
-        assert_eq!(info.win_rate(), Some(50.0));
+        assert_eq!(info.rated_win_rate(), Some(50.0));
         assert_eq!(info.last_played(), "2026-01-02 10:00:00");
 
         // The other four statistics aggregate on the same rule; asserting
@@ -886,11 +893,9 @@ mod tests {
 
         let info = PerformanceInfo::from_games(&[&drawn]);
 
-        assert_eq!(info.draws(), 1);
-        assert_eq!(info.wins(), 0);
-        assert_eq!(info.losses(), 0);
+        assert_eq!(info.records().rated(), Record { wins: 0, losses: 0, draws: 1 });
         assert_eq!(info.total_games(), 1);
-        assert_eq!(info.win_rate(), Some(0.0), "a draw is a game played, not an absent one");
+        assert_eq!(info.rated_win_rate(), Some(0.0), "a draw is a game played, not an absent one");
     }
 
     #[test]
@@ -899,7 +904,7 @@ mod tests {
         assert_eq!(info.total_games(), 0);
         assert_eq!(info.min_damage(), None);
         assert_eq!(info.min_frags(), None);
-        assert_eq!(info.win_rate(), None, "no games is not a zero win rate");
+        assert_eq!(info.rated_win_rate(), None, "no games is not a zero win rate");
         assert_eq!(info.avg_damage(), None);
         assert_eq!(info.ship_id(), None);
     }
@@ -941,11 +946,11 @@ mod tests {
     fn the_record_line_shows_draws_only_when_there_are_any() {
         let games = [result_of(true, false, false, 1, 10), result_of(false, true, false, 0, 5)];
         let refs: Vec<&PerGameStat> = games.iter().collect();
-        assert_eq!(SessionSummary::from_games(&refs).record_label(), "1W/1L");
+        assert_eq!(SessionSummary::from_games(&refs).records.rated().label(), "1W/1L");
 
         let with_draw = [result_of(true, false, false, 1, 10), result_of(false, false, true, 0, 5)];
         let refs: Vec<&PerGameStat> = with_draw.iter().collect();
-        assert_eq!(SessionSummary::from_games(&refs).record_label(), "1W/0L/1D");
+        assert_eq!(SessionSummary::from_games(&refs).records.rated().label(), "1W/0L/1D");
     }
 
     #[test]
@@ -957,14 +962,14 @@ mod tests {
         ];
         let refs: Vec<&PerGameStat> = games.iter().collect();
         let summary = SessionSummary::from_games(&refs);
-        assert_eq!(summary.games_played(), 2, "the game with no result is not counted");
-        assert_eq!(summary.win_rate(), Some(50.0));
+        assert_eq!(summary.records.rated().battles(), 2, "the game with no result is not counted");
+        assert_eq!(summary.records.rated().win_rate(), Some(50.0));
     }
 
     #[test]
     fn a_session_with_no_finished_games_has_no_win_rate_and_no_best_game() {
         let summary = SessionSummary::from_games(&[]);
-        assert_eq!(summary.win_rate(), None);
+        assert_eq!(summary.records.rated().win_rate(), None);
         assert_eq!(summary.best_damage, None);
         assert_eq!(summary.best_frags, None);
     }
@@ -1095,5 +1100,184 @@ mod rating_tests {
 
         assert_eq!(games[0].personal_rating(None), None);
         assert!(session_personal_rating(&refs, None).is_none());
+    }
+}
+
+/// Win rate and rating count Random and Ranked games alone.
+#[cfg(test)]
+mod scope_tests {
+    use super::PerGameStat;
+    use super::PerformanceInfo;
+    use super::PrStats;
+    use super::SessionSummary;
+    use super::chart::ChartableStat;
+    use super::chart::bar_chart_series;
+    use super::chart::line_chart_series;
+    use super::per_ship_performance_by_id;
+    use super::record::Record;
+    use super::session_personal_rating;
+    use super::table::ship_header;
+    use crate::personal_rating::PersonalRatingData;
+    use crate::personal_rating::ShipBattleStats;
+
+    /// A ship the fixture carries expected values for.
+    const RATED_SHIP: u64 = 3374266064;
+
+    fn fixture_table() -> PersonalRatingData {
+        let mut table = PersonalRatingData::new();
+        table.load_from_bytes(crate::personal_rating::EXPECTED_VALUES_FIXTURE).expect("the fixture parses");
+        table
+    }
+
+    fn played(at: usize, match_group: &str, damage: u64, frags: i64, win: bool) -> PerGameStat {
+        let time = format!("2026-01-01 10:{at:02}:00");
+        PerGameStat {
+            ship_name: "Yamato".into(),
+            ship_id: RATED_SHIP.into(),
+            game_time: time.clone(),
+            sort_key: time,
+            player_id: 1,
+            damage,
+            spotting_damage: damage / 10,
+            frags,
+            raw_xp: 1_000,
+            base_xp: 500,
+            is_win: win,
+            is_loss: !win,
+            is_draw: false,
+            is_div: false,
+            match_group: match_group.into(),
+            achievements: Vec::new(),
+        }
+    }
+
+    /// Random 2W/1L, Ranked 0W/1L, and four strong games in other modes that
+    /// would lift both the win rate and the rating if they counted.
+    fn mixed() -> Vec<PerGameStat> {
+        vec![
+            played(0, "pvp", 120_000, 3, true),
+            played(1, "cooperative", 150_000, 5, true),
+            played(2, "pvp", 40_000, 0, false),
+            played(3, "ranked", 60_000, 1, false),
+            played(4, "clan", 20_000, 0, false),
+            played(5, "pvp", 80_000, 1, true),
+            played(6, "cooperative", 140_000, 4, true),
+            played(7, "event", 90_000, 2, true),
+        ]
+    }
+
+    fn rated_subset(games: &[PerGameStat]) -> Vec<&PerGameStat> {
+        games.iter().filter(|game| matches!(game.match_group.as_str(), "pvp" | "ranked")).collect()
+    }
+
+    fn coop_only() -> Vec<PerGameStat> {
+        vec![played(0, "cooperative", 150_000, 5, true), played(1, "pve", 30_000, 0, false)]
+    }
+
+    #[test]
+    fn the_win_rate_counts_random_and_ranked_and_the_hover_breaks_it_down() {
+        let games = mixed();
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+        let summary = SessionSummary::from_games(&refs);
+        let rated = summary.records.rated();
+
+        insta::assert_snapshot!(format!(
+            "{:#?}\nrated: {} {:?}\n\n{}",
+            summary.records,
+            rated.label(),
+            rated.win_rate(),
+            summary.records.hover_text()
+        ));
+    }
+
+    #[test]
+    fn a_ships_record_and_header_count_its_rated_games() {
+        let games = mixed();
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+        let info = PerformanceInfo::from_games(&refs);
+
+        assert_eq!(info.total_games(), 8, "every game still counts toward the averages");
+        assert_eq!(info.rated_win_rate(), Some(50.0));
+        assert_eq!(info.records().rated(), Record { wins: 2, losses: 2, draws: 0 });
+        assert_eq!(info.records().other, Record { wins: 3, losses: 1, draws: 0 });
+        assert_eq!(ship_header("Yamato", &info, None), "Yamato 2W/2L (50%)");
+    }
+
+    /// Each rating aggregate over a mixed set is the one its rated games give
+    /// alone, and differs from what every game together would give.
+    #[test]
+    fn ratings_are_computed_over_the_rated_games_alone() {
+        let table = fixture_table();
+        let games = mixed();
+        let all: Vec<&PerGameStat> = games.iter().collect();
+        let rated = rated_subset(&games);
+
+        let session = session_personal_rating(&all, Some(&table)).expect("the rated games rate");
+        assert_eq!(Some(session.clone()), session_personal_rating(&rated, Some(&table)));
+        let every_game = table
+            .calculate_pr(&[ShipBattleStats {
+                ship_id: RATED_SHIP.into(),
+                battles: all.len() as u32,
+                damage: all.iter().map(|game| game.damage).sum(),
+                wins: all.iter().filter(|game| game.is_win).count() as u32,
+                frags: all.iter().map(|game| game.frags).sum(),
+            }])
+            .expect("the fixture rates this ship");
+        assert!((session.pr - every_game.pr).abs() > 1.0, "the other modes are excluded, not counted");
+
+        assert_eq!(PrStats::from_games(&all, &table), PrStats::from_games(&rated, &table));
+        assert_eq!(
+            PerformanceInfo::from_games(&all).personal_rating(&table),
+            PerformanceInfo::from_games(&rated).personal_rating(&table)
+        );
+        assert_eq!(all[1].personal_rating(Some(&table)), None, "a co-op game carries no rating of its own");
+    }
+
+    #[test]
+    fn charts_plot_rating_and_win_rate_over_the_rated_games_alone() {
+        let table = fixture_table();
+        let games = mixed();
+        let all: Vec<&PerGameStat> = games.iter().collect();
+        let rated = rated_subset(&games);
+        let ships = [RATED_SHIP.into()];
+
+        for stat in [ChartableStat::PersonalRating, ChartableStat::WinRate] {
+            let mixed_lines = line_chart_series(&all, stat, &ships, Some(&table), true, true);
+            let rated_lines = line_chart_series(&rated, stat, &ships, Some(&table), true, true);
+            assert_eq!(mixed_lines, rated_lines, "{stat:?}");
+            assert_eq!(mixed_lines[0].points.len(), rated.len(), "{stat:?}: one point per rated game");
+
+            let bars = bar_chart_series(&per_ship_performance_by_id(&all), stat, &ships, Some(&table));
+            let rated_bars = bar_chart_series(&per_ship_performance_by_id(&rated), stat, &ships, Some(&table));
+            assert_eq!(bars, rated_bars, "{stat:?}");
+        }
+    }
+
+    /// With no Random or Ranked game there is no win rate or rating to show,
+    /// rather than a zero.
+    #[test]
+    fn a_set_of_only_other_modes_has_no_win_rate_and_no_rating() {
+        let table = fixture_table();
+        let games = coop_only();
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+        let ships = [RATED_SHIP.into()];
+
+        let summary = SessionSummary::from_games(&refs);
+        assert_eq!(summary.records.rated().win_rate(), None);
+        assert_eq!(session_personal_rating(&refs, Some(&table)), None);
+        assert_eq!(PrStats::from_games(&refs, &table), None);
+
+        let info = PerformanceInfo::from_games(&refs);
+        assert_eq!(info.rated_win_rate(), None);
+        assert_eq!(info.personal_rating(&table), None);
+        assert_eq!(ship_header("Yamato", &info, None), "Yamato", "no record or rate for unrated battles");
+
+        for stat in [ChartableStat::PersonalRating, ChartableStat::WinRate] {
+            assert!(line_chart_series(&refs, stat, &ships, Some(&table), true, true).is_empty(), "{stat:?}");
+            let bars = bar_chart_series(&per_ship_performance_by_id(&refs), stat, &ships, Some(&table));
+            assert!(bars.is_empty(), "{stat:?}");
+        }
+
+        insta::assert_snapshot!(summary.records.hover_text());
     }
 }

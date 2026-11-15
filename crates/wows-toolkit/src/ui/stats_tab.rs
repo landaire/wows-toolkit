@@ -13,6 +13,7 @@ use crate::data::session_stats::DivisionFilter;
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::SerializableAchievement;
 use crate::data::session_stats::SessionStats;
+use crate::data::session_stats::SessionTotals;
 use crate::data::session_stats::resolve_ship_name;
 use crate::data::settings::StatsFilterSettings;
 use crate::data::wows_data::GameAsset;
@@ -26,7 +27,6 @@ use crate::tab_state::TabState;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::util::personal_rating::PersonalRatingData;
-use crate::util::personal_rating::PersonalRatingResult;
 use crate::util::separate_number;
 use rust_i18n::t;
 use std::cmp::Reverse;
@@ -476,14 +476,7 @@ fn get_metadata_provider(tab_state: &TabState) -> Option<Arc<GameMetadataProvide
 
 /// The overview's pane-wide figures, read in one pass over the filtered games.
 struct OverviewTotals {
-    wins: usize,
-    losses: usize,
-    draws: usize,
-    win_rate: f64,
-    personal_rating: Option<PersonalRatingResult>,
-    total_frags: i64,
-    max_frags: Option<(GameParamId, i64)>,
-    max_damage: Option<(GameParamId, u64)>,
+    totals: SessionTotals,
     /// Each achievement once, with its count summed across the games.
     achievements: Vec<SerializableAchievement>,
 }
@@ -502,17 +495,7 @@ impl OverviewTotals {
             }
         }
 
-        Self {
-            wins: stats.games_won(),
-            losses: stats.games_lost(),
-            draws: stats.games_drawn(),
-            win_rate: stats.win_rate().unwrap_or_default(),
-            personal_rating: stats.calculate_pr(pr_data),
-            total_frags: stats.total_frags(),
-            max_frags: stats.max_frags(),
-            max_damage: stats.max_damage(),
-            achievements,
-        }
+        Self { totals: stats.totals(pr_data), achievements }
     }
 }
 
@@ -525,28 +508,29 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
     else {
         return;
     };
-    let OverviewTotals {
-        wins,
-        losses,
-        draws,
-        win_rate,
-        personal_rating,
-        total_frags,
-        max_frags,
-        max_damage,
-        achievements: mut all_achievements,
-    } = totals;
+    let OverviewTotals { totals: SessionTotals { summary, personal_rating }, achievements: mut all_achievements } =
+        totals;
     let locale = tab_state.persisted.read().settings.app.locale.clone();
     let locale_ref = locale.as_deref();
 
     ui.horizontal_wrapped(|ui| {
-        // Win rate
-        let wld = if draws > 0 { format!("{wins}W/{losses}L/{draws}D") } else { format!("{wins}W/{losses}L") };
-        ui.strong(format!("{wld} ({win_rate:.01}%)"));
+        // The Random and Ranked record and win rate, broken down on hover. Left
+        // out with neither: the rate is the one the rating sits beside.
+        let rated = summary.records.rated();
+        let mut led = false;
+        if let Some(win_rate) = rated.win_rate() {
+            ui.strong(format!("{} ({win_rate:.01}%)", rated.label())).on_hover_ui(|ui| {
+                ui.label(summary.records.hover_text());
+            });
+            led = true;
+        }
 
         // PR
         if let Some(pr_result) = personal_rating {
-            ui.separator();
+            if led {
+                ui.separator();
+            }
+            led = true;
             ui.label(t!("ui.stats.pr"));
             crate::ui::widgets::pr_chip(
                 ui,
@@ -557,18 +541,20 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
         }
 
         // Total frags
-        ui.separator();
-        ui.label(t!("ui.stats.frags_count", count = total_frags));
+        if led {
+            ui.separator();
+        }
+        ui.label(t!("ui.stats.frags_count", count = summary.total_frags));
 
         // Max frags
-        if let Some((ship_id, max_frags)) = max_frags {
+        if let Some((ship_id, max_frags)) = summary.best_frags {
             let ship = resolve_ship_name(ship_id, provider_ref);
             ui.separator();
             ui.label(t!("ui.stats.best_frags", ship = ship, count = max_frags));
         }
 
         // Max damage
-        if let Some((ship_id, max_damage)) = max_damage {
+        if let Some((ship_id, max_damage)) = summary.best_damage {
             let ship = resolve_ship_name(ship_id, provider_ref);
             ui.separator();
             ui.label(t!("ui.stats.max_damage", ship = ship, damage = separate_number(max_damage, locale_ref)));
@@ -670,31 +656,20 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
         // timestamp do not swap places from frame to frame.
         battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()).then_with(|| a.0.raw().cmp(&b.0.raw())));
         for (ship_id, perf_info) in &battle_results {
-            let Some(win_rate) = perf_info.win_rate() else {
-                continue;
-            };
-
             let ship_name = resolve_ship_name(*ship_id, provider_ref);
             let locale = tab_state.persisted.read().settings.app.locale.clone();
             let locale_ref2 = locale.as_deref();
             let pr_stats = pr_stats_by_ship.get(ship_id);
-
-            let wld = if perf_info.draws() > 0 {
-                format!("{}W/{}L/{}D", perf_info.wins(), perf_info.losses(), perf_info.draws())
-            } else {
-                format!("{}W/{}L", perf_info.wins(), perf_info.losses())
-            };
-            let header = match pr_stats {
-                Some(pr) => format!("{ship_name} {wld} ({win_rate:.0}%) - PR: {:.0}", pr.average.pr),
-                None => format!("{ship_name} {wld} ({win_rate:.0}%)"),
-            };
+            let header = stats_table::ship_header(&ship_name, perf_info, pr_stats);
 
             let table_rows = stats_table::ship_rows(perf_info, pr_stats, locale_ref2);
 
             let collapsing_id = ui.make_persistent_id(("ship_stats_collapse", ship_id));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), collapsing_id, false)
                 .show_header(ui, |ui| {
-                    ui.label(&header);
+                    ui.label(&header).on_hover_ui(|ui| {
+                        ui.label(perf_info.records().hover_text());
+                    });
                     ui.menu_button(icons::COPY, |ui| {
                         if ui.button(t!("ui.stats.copy_markdown")).clicked() {
                             ui.ctx().copy_text(stats_table::to_markdown(
@@ -774,7 +749,6 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
     };
     let ship_stats: Vec<(GameParamId, String, PerformanceInfo)> = ship_stats
         .into_iter()
-        .filter(|(_, perf)| perf.win_rate().is_some())
         .map(|(id, perf)| {
             let name = resolve_ship_name(id, provider_ref);
             (id, name, perf)

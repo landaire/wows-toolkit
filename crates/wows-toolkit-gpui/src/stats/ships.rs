@@ -312,22 +312,15 @@ impl Render for StatsShipsPanel {
                 let species = param.species()?.known()?;
                 self.icons.get(*species, crate::replay_inspector::icons::UNTINTED)
             });
+            let all = super::overview::every_mode(section.performance.records());
             let record = h_flex()
                 .flex_wrap()
                 .gap_1()
                 .text_xs()
-                .child(
-                    div()
-                        .text_color(rgb(crate::theme::semantic().win))
-                        .child(format!("{}W", section.performance.wins())),
-                )
-                .child(
-                    div()
-                        .text_color(rgb(crate::theme::semantic().loss))
-                        .child(format!("{}L", section.performance.losses())),
-                )
-                .when(section.performance.draws() > 0, |row| row.child(format!("{}D", section.performance.draws())))
-                .when_some(section.performance.win_rate(), |row, rate| row.child(format!("({rate:.0}%)")))
+                .child(div().text_color(rgb(crate::theme::semantic().win)).child(format!("{}W", all.wins)))
+                .child(div().text_color(rgb(crate::theme::semantic().loss)).child(format!("{}L", all.losses)))
+                .when(all.draws > 0, |row| row.child(format!("{}D", all.draws)))
+                .when_some(all.win_rate(), |row, rate| row.child(format!("({rate:.0}%)")))
                 .when_some(section.rating.as_ref(), |row, rating| {
                     row.child(
                         div()

@@ -1,0 +1,6 @@
+---
+source: crates/wows-toolkit-viewmodel/src/stats/mod.rs
+expression: summary.records.hover_text()
+---
+Win rate counts only Random and Ranked battles
+Other: 50.0% (battles: 2)

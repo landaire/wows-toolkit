@@ -774,6 +774,11 @@ axis_game = "Bitva"
 series_average = "%{stat} (průměr)"
 series_running = "%{stat} (klouzavý)"
 series_more = "+%{count} dalších"
+mode_random = "Náhodné"
+mode_ranked = "Hodnocené"
+mode_other = "Ostatní"
+win_rate_rated_only = "Míra výher zahrnuje pouze náhodné a hodnocené bitvy"
+win_rate_breakdown_line = "%{mode}: %{rate} (bitev: %{battles})"
 
 [ui.stats.table]
 min = "Min"

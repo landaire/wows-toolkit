@@ -808,6 +808,11 @@ axis_game = "게임"
 series_average = "%{stat} (평균)"
 series_running = "%{stat} (이동 평균)"
 series_more = "+%{count}개 더"
+mode_random = "랜덤 전투"
+mode_ranked = "랭크 전투"
+mode_other = "기타"
+win_rate_rated_only = "승률은 랜덤 전투와 랭크 전투만 집계합니다"
+win_rate_breakdown_line = "%{mode}: %{rate} (%{battles}전)"
 
 [ui.stats.table]
 min = "최소"

@@ -774,6 +774,11 @@ axis_game = "Gra"
 series_average = "%{stat} (średnia)"
 series_running = "%{stat} (krocząca)"
 series_more = "+%{count} więcej"
+mode_random = "Losowe"
+mode_ranked = "Rankingowe"
+mode_other = "Inne"
+win_rate_rated_only = "Wskaźnik wygranych obejmuje tylko bitwy losowe i rankingowe"
+win_rate_breakdown_line = "%{mode}: %{rate} (bitwy: %{battles})"
 
 [ui.stats.table]
 min = "Min"

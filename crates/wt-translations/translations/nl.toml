@@ -808,6 +808,11 @@ axis_game = "Spel"
 series_average = "%{stat} (gemiddelde)"
 series_running = "%{stat} (voortschrijdend)"
 series_more = "+%{count} meer"
+mode_random = "Willekeurig"
+mode_ranked = "Gerangschikt"
+mode_other = "Overig"
+win_rate_rated_only = "Het winstpercentage telt alleen willekeurige en gerangschikte gevechten"
+win_rate_breakdown_line = "%{mode}: %{rate} (gevechten: %{battles})"
 
 [ui.stats.table]
 min = "Min"

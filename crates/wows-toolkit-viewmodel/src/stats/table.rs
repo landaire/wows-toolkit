@@ -275,7 +275,8 @@ pub struct ShipSummary {
     pub performance: PerformanceInfo,
     /// `None` without an expected-values table, or when no game rated.
     pub rating: Option<PrStats>,
-    /// The collapsed line: name, record, win rate, and the rating when there is one.
+    /// The collapsed line: name, Random and Ranked record and win rate when
+    /// there are any, and the rating when there is one.
     pub header: String,
     pub rows: Vec<StatRow>,
 }
@@ -330,19 +331,22 @@ pub fn ship_summaries(
     summaries
 }
 
-fn ship_header(ship: &str, performance: &PerformanceInfo, rating: Option<&PrStats>) -> String {
-    let record = if performance.draws() > 0 {
-        format!("{}W/{}L/{}D", performance.wins(), performance.losses(), performance.draws())
-    } else {
-        format!("{}W/{}L", performance.wins(), performance.losses())
-    };
-    // A summary exists only because a game made it, so there is always a win rate.
-    let win_rate = performance.win_rate().unwrap_or_default();
-
-    match rating {
-        Some(rating) => format!("{ship} {record} ({win_rate:.0}%) - PR: {:.0}", rating.average.pr),
-        None => format!("{ship} {record} ({win_rate:.0}%)"),
+/// A ship's collapsed line, as every front end shows and copies it.
+///
+/// The record and win rate count Random and Ranked battles, the ones the
+/// rating counts; a ship played in neither shows no record rather than a
+/// rate over battles it does not describe.
+pub fn ship_header(ship: &str, performance: &PerformanceInfo, rating: Option<&PrStats>) -> String {
+    let rated = performance.records().rated();
+    let mut header = ship.to_string();
+    if let Some(win_rate) = rated.win_rate() {
+        header.push_str(&format!(" {} ({win_rate:.0}%)", rated.label()));
     }
+    if let Some(rating) = rating {
+        header.push_str(&format!(" - PR: {:.0}", rating.average.pr));
+    }
+
+    header
 }
 
 #[cfg(test)]

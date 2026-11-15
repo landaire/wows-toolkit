@@ -808,6 +808,11 @@ axis_game = "Gefecht"
 series_average = "%{stat} (Durchschnitt)"
 series_running = "%{stat} (gleitend)"
 series_more = "+%{count} weitere"
+mode_random = "Zufallsgefechte"
+mode_ranked = "Ranglistengefechte"
+mode_other = "Andere"
+win_rate_rated_only = "Die Siegrate zählt nur Zufalls- und Ranglistengefechte"
+win_rate_breakdown_line = "%{mode}: %{rate} (Gefechte: %{battles})"
 
 [ui.stats.table]
 min = "Min"

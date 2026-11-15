@@ -161,6 +161,11 @@ const CSS: &str = css!(
         gap: 4px;
         font-size: 0.85em;
     }
+    .wt-stats-ship__rated {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+    }
     .wt-stats-ship__win { color: var(--wt-color-win); }
     .wt-stats-ship__loss { color: var(--wt-color-loss); }
     .wt-stats-chevron {
@@ -212,7 +217,7 @@ impl SortKey {
         match self {
             Self::Ship => a.ship.cmp(&b.ship),
             Self::Battles => a.performance.total_games().cmp(&b.performance.total_games()),
-            Self::WinRate => partial(a.performance.win_rate(), b.performance.win_rate()),
+            Self::WinRate => partial(a.performance.rated_win_rate(), b.performance.rated_win_rate()),
             Self::AvgDamage => partial(a.performance.avg_damage(), b.performance.avg_damage()),
             Self::AvgFrags => partial(a.performance.avg_frags(), b.performance.avg_frags()),
         }
@@ -476,13 +481,11 @@ fn ship_grid(
         .sizing(number)
         .align(ColumnAlign::End)
         .sortable(true),
-        GridColumn::new(SortKey::WinRate.id(), t!("ui.stats.column_win_rate").into_owned(), |row: &ShipRow| {
-            optional_percent(row.performance.win_rate())
-        })
-        .text(|row| optional_percent(row.performance.win_rate()))
-        .sizing(number)
-        .align(ColumnAlign::End)
-        .sortable(true),
+        GridColumn::new(SortKey::WinRate.id(), t!("ui.stats.column_win_rate").into_owned(), win_rate_cell)
+            .text(|row| optional_percent(row.performance.rated_win_rate()))
+            .sizing(number)
+            .align(ColumnAlign::End)
+            .sortable(true),
         GridColumn::new(
             SortKey::AvgDamage.id(),
             t!("ui.stats.column_avg_damage").into_owned(),
@@ -527,6 +530,22 @@ fn ship_grid(
     })
 }
 
+/// A ship's Random and Ranked win rate, broken down by battle kind on hover.
+fn win_rate_cell(row: &ShipRow) -> AnyView {
+    let rate = optional_percent(row.performance.rated_win_rate());
+    let hover = row.performance.records().hover_text();
+    let ship = row.ship_id;
+
+    AnyView::new(view! {
+        Tooltip {
+            TooltipTrigger {
+                text(attr:data-testid = format!("ship-win-rate-{ship}")) {{rate}}
+            }
+            TooltipContent {{hover.clone()}}
+        }
+    })
+}
+
 /// The disclosure chevron, the ship's flag and class, its name and its record.
 fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
     let ship = row.ship_id;
@@ -550,18 +569,35 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
         )),
         Some(Art::Raster(_)) | None => None,
     };
-    let performance = &row.performance;
-    let draws = (performance.draws() > 0).then(|| format!("{}D", performance.draws()));
-    let rate = performance.win_rate().map(|rate| format!("({rate:.0}%)"));
+    // The Random and Ranked record, left out with none; the hover breaks it down by battle kind.
+    let rated = row.performance.records().rated();
+    let record = rated.win_rate().map(|rate| {
+        let draws = (rated.draws > 0).then(|| format!("{}D", rated.draws));
+        let wins = format!("{}W", rated.wins);
+        let losses = format!("{}L", rated.losses);
+        let rate = format!("({rate:.0}%)");
+        let hover = row.performance.records().hover_text();
+        AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger {
+                    row(class = "wt-stats-ship__rated", attr:data-testid = format!("ship-record-{ship}")) {
+                        text(class = "wt-stats-ship__win") {{wins}}
+                        text(class = "wt-stats-ship__loss") {{losses}}
+                        {draws.map(|draws| AnyView::new(view! { text {{draws}} }))}
+                        text {{rate}}
+                    }
+                }
+                TooltipContent {{hover.clone()}}
+            }
+        })
+    });
     let rating = row.rating.as_ref().map(|rating| {
         let color = rating::text_color(rating.average.category);
         let text = format!("PR: {:.0}", rating.average.pr);
         AnyView::new(view! { text(style:color = color) {{text}} })
     });
-    let wins = format!("{}W", performance.wins());
     let name = row.ship.clone();
     let filter = cx.filter;
-    let losses = format!("{}L", performance.losses());
     let header = row.header.clone();
 
     AnyView::new(view! {
@@ -589,10 +625,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
                     view! { MarkedText(class = "wt-stats-ship__name", text = name.clone(), ranges = ranges) }
                 }}
                 row(class = "wt-stats-ship__record", class = TABULAR_CLASS) {
-                    text(class = "wt-stats-ship__win") {{wins}}
-                    text(class = "wt-stats-ship__loss") {{losses}}
-                    {draws.map(|draws| AnyView::new(view! { text {{draws}} }))}
-                    {rate.map(|rate| AnyView::new(view! { text {{rate}} }))}
+                    {record}
                     {rating}
                 }
             }

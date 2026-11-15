@@ -223,7 +223,7 @@ impl Computed {
     }
 
     fn is_empty(&self) -> bool {
-        self.summary.games_played() == 0 && self.ships.is_empty()
+        self.ships.is_empty()
     }
 
     /// The name of the ship `ship` names. A record is set in a game of the session, so its ship
@@ -288,19 +288,35 @@ pub(super) fn loaded_build(services: Services) -> Option<Arc<wows_toolkit_replay
 }
 
 /// The record, the rating and the session's best games on one wrapping line.
+///
+/// The record and its win rate count Random and Ranked battles, broken down on hover, and are
+/// left out with none: a rate over the other modes would not be the one the rating sits beside.
 fn summary_line(computed: &Computed) -> AnyView {
     let summary = &computed.summary;
     let locale = wows_toolkit_viewmodel::locale();
-    let record = match summary.win_rate() {
-        Some(rate) => format!("{} ({rate:.1}%)", summary.record_label()),
-        None => summary.record_label(),
-    };
+    let rated = summary.records.rated();
+    let record = rated.win_rate().map(|rate| {
+        let record = format!("{} ({rate:.1}%)", rated.label());
+        let hover = summary.records.hover_text();
+        AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger {
+                    text(class = "wt-stats-summary__record", class = TABULAR_CLASS, attr:data-testid = "stats-overview-record") {{record}}
+                }
+                TooltipContent {{hover.clone()}}
+            }
+        })
+    });
+    // Each fact after the first is set off by a rule.
+    let mut led = record.is_some();
     let rating = computed.rating.as_ref().map(|rating| {
         let chip = format!("{:.0} ({})", rating.pr, rating.category.name());
         let category = rating.category;
+        let rule = separator(led);
+        led = true;
         AnyView::new(view! {
             row(class = "wt-stats-summary__fact", attr:data-testid = "stats-overview-rating") {
-                box(class = "wt-stats-rule") {}
+                {rule}
                 text {{t!("ui.stats.pr").into_owned()}}
                 RatingChip(text = chip, category = category)
             }
@@ -318,9 +334,11 @@ fn summary_line(computed: &Computed) -> AnyView {
         .into_iter()
         .flatten()
         .map(|fact| {
+            let rule = separator(led);
+            led = true;
             AnyView::new(view! {
                 row(class = "wt-stats-summary__fact") {
-                    box(class = "wt-stats-rule") {}
+                    {rule}
                     text {{fact}}
                 }
             })
@@ -329,11 +347,16 @@ fn summary_line(computed: &Computed) -> AnyView {
 
     AnyView::new(view! {
         row(class = "wt-stats-summary", attr:data-testid = "stats-overview-summary") {
-            text(class = "wt-stats-summary__record", class = TABULAR_CLASS) {{record}}
+            {record}
             {rating}
             {facts}
         }
     })
+}
+
+/// The rule between two facts, absent before the first.
+fn separator(shown: bool) -> Option<AnyView> {
+    shown.then(|| AnyView::new(view! { box(class = "wt-stats-rule") {} }))
 }
 
 /// One achievement as the panel lists it, named in the build's language when a build is loaded.
@@ -462,7 +485,7 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
         .text(|ship| ship.info.total_games().to_string())
         .sizing(number_width),
         GridColumn::new("win_rate", t!("ui.stats.column_win_rate").into_owned(), win_rate_cell)
-            .text(|ship| optional_percent(ship.info.win_rate()))
+            .text(|ship| optional_percent(ship.info.rated_win_rate()))
             .sizing(number_width),
         GridColumn::new("pr", t!("ui.replay.column.personal_rating").into_owned(), rating_cell)
             .text(|ship| {
@@ -495,26 +518,46 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
     })
 }
 
-/// A win rate in the colour of the band the rate falls in, as the Player Tracker draws one.
+/// A ship's Random and Ranked win rate in the colour of the band the rate falls in, as the
+/// Player Tracker draws one, broken down by battle kind on hover.
 fn win_rate_cell(ship: &OverviewShip) -> AnyView {
-    let rate = ship.info.win_rate();
+    let rate = ship.info.rated_win_rate();
     let band = rate.map(PersonalRatingCategory::from_win_rate);
+    let hover = ship.info.records().hover_text();
+    let test_id = ship.info.ship_id().map(|id| format!("stats-overview-win-rate-{id}"));
+    let band_name = band.map(|band| rating_band_name(band).to_owned());
+    let color = band.map(rating::text_color);
+    let text = optional_percent(rate);
 
     AnyView::new(view! {
-        text(
-            attr:data-testid = ship.info.ship_id().map(|id| format!("stats-overview-win-rate-{id}")),
-            attr:data-band = band.map(|band| rating_band_name(band).to_owned()),
-            style:color = band.map(rating::text_color)
-        ) {{optional_percent(rate)}}
+        Tooltip {
+            TooltipTrigger {
+                text(attr:data-testid = test_id, attr:data-band = band_name, style:color = color) {{text}}
+            }
+            TooltipContent {{hover.clone()}}
+        }
     })
 }
 
-/// A ship's rating on its band's chip, or a dash when nothing rates it.
+/// A ship's rating on its band's chip, or a dash when nothing rates it. A ship played only in
+/// battle kinds a rating does not apply to says so on hover.
 fn rating_cell(ship: &OverviewShip) -> AnyView {
     let test_id = ship.info.ship_id().map(|id| format!("stats-overview-pr-{id}"));
     let Some(rating) = ship.rating.as_ref() else {
+        if ship.info.is_rated() {
+            return AnyView::new(view! {
+                text(attr:data-testid = test_id) {"-"}
+            });
+        }
+        let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+        let label = hover.clone();
         return AnyView::new(view! {
-            text(attr:data-testid = test_id) {"-"}
+            Tooltip {
+                TooltipTrigger {
+                    text(attr:data-testid = test_id, attr:data-unrated = String::new(), a11y:label = label) {"-"}
+                }
+                TooltipContent {{hover.clone()}}
+            }
         });
     };
     let category = rating.category;

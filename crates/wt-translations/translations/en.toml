@@ -987,6 +987,11 @@ axis_game = "Game"
 series_average = "%{stat} (average)"
 series_running = "%{stat} (running)"
 series_more = "+%{count} more"
+mode_random = "Random"
+mode_ranked = "Ranked"
+mode_other = "Other"
+win_rate_rated_only = "Win rate counts only Random and Ranked battles"
+win_rate_breakdown_line = "%{mode}: %{rate} (battles: %{battles})"
 
 [ui.stats.table]
 min = "Min"

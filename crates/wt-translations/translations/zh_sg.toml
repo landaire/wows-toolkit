@@ -808,6 +808,11 @@ axis_game = "场次"
 series_average = "%{stat}（平均）"
 series_running = "%{stat}（累计）"
 series_more = "还有 %{count} 项"
+mode_random = "随机战"
+mode_ranked = "排位战"
+mode_other = "其他"
+win_rate_rated_only = "胜率仅统计随机战和排位战"
+win_rate_breakdown_line = "%{mode}：%{rate}（%{battles} 场）"
 
 [ui.stats.table]
 min = "最小"

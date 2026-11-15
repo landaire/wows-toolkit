@@ -73,5 +73,8 @@ workspace_test(
     version = "0.1.0",
     features = ["test-support"],
     deps = TEST_SUPPORT_DEPS + VIEWMODEL_PLATFORM_DEPS,
-    test_deps = ["//third-party/rust:tokio"],
+    test_deps = [
+        "//third-party/rust:insta",
+        "//third-party/rust:tokio",
+    ],
 )

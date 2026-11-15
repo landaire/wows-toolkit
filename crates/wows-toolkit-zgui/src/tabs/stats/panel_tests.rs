@@ -14,6 +14,7 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
@@ -56,6 +57,9 @@ const YAMATO: u64 = FIXTURE_PR_SHIP_ID;
 const SHIMAKAZE: u64 = 4_181_604_048;
 const DES_MOINES: u64 = 4_179_605_200;
 const HALLAND: u64 = 4_076_746_448;
+
+/// A ship the evening plays only in co-op.
+const KLEBER: u64 = 4_074_729_040;
 
 fn game(ship: &str, ship_id: u64, sort_key: &str, damage: u64, frags: i64, win: bool) -> PerGameStat {
     PerGameStat {
@@ -106,6 +110,46 @@ fn evening() -> Arc<[PerGameStat]> {
         vec![achievement(2, "High Caliber", "MAIN_CALIBER", 1), achievement(3, "Confederate", "SUPPORT", 1)];
 
     games.into()
+}
+
+/// `game` played in `match_group`.
+fn in_mode(match_group: &str, game: PerGameStat) -> PerGameStat {
+    PerGameStat { match_group: match_group.to_owned(), ..game }
+}
+
+/// The evening's Random games, 4W/4L, with four games in other modes that would lift the win
+/// rate to 7W/5L if they counted.
+fn mixed_evening() -> Arc<[PerGameStat]> {
+    let mut games = evening().to_vec();
+    games.extend([
+        in_mode("cooperative", game("Yamato", YAMATO, "2026-02-13 22:10:00", 150_000, 5, true)),
+        in_mode("cooperative", game("Kleber", KLEBER, "2026-02-13 22:30:00", 90_000, 3, true)),
+        in_mode("clan", game("Des Moines", DES_MOINES, "2026-02-13 22:50:00", 30_000, 0, false)),
+        in_mode("event", game("Kleber", KLEBER, "2026-02-13 23:10:00", 70_000, 2, true)),
+    ]);
+
+    games.into()
+}
+
+/// Only the Yamato, which the fixture rates, and only in co-op.
+fn coop_evening() -> Arc<[PerGameStat]> {
+    vec![
+        in_mode("cooperative", game("Yamato", YAMATO, "2026-02-13 18:02:11", 150_000, 5, true)),
+        in_mode("cooperative", game("Yamato", YAMATO, "2026-02-13 18:40:00", 40_000, 0, false)),
+    ]
+    .into()
+}
+
+/// The tooltip text shown after resting on `test_id`.
+fn tooltip_of(window: &mut HeadlessWindow, test_id: &str) -> Vec<String> {
+    let target = window.by_test_id(test_id).expect("the element is drawn");
+    window.hover(target).expect("the element takes the pointer");
+    window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
+    window.texts_by_class("lui-tooltip")
+}
+
+fn breakdown_line(mode_key: &str, battles: usize, rate: &str) -> String {
+    t!("ui.stats.win_rate_breakdown_line", mode = t!(mode_key), battles = battles, rate = rate).into_owned()
 }
 
 /// What a test drives the panel through after it is open.
@@ -492,6 +536,71 @@ fn the_overview_colours_each_win_rate_and_rating_by_its_band() {
     let rated = PerformanceInfo::from_games(&yamato).personal_rating(&table).expect("the fixture rates the Yamato");
     assert_eq!(band_of(&window, &format!("stats-overview-pr-{YAMATO}")), Some(rating_band_name(rated.category)));
     assert_eq!(band_of(&window, &format!("stats-overview-pr-{HALLAND}")), None, "the fixture knows only the Yamato");
+}
+
+#[test]
+fn the_overview_win_rate_counts_random_and_ranked_and_breaks_down_on_hover() {
+    let Opened { mut window, handles, .. } = open(Panel::Overview, Drawing::Recorded, Appearance::Dark, None);
+    handles.games.set(mixed_evening());
+    settle(&mut window);
+
+    assert_eq!(window.texts_by_class("wt-stats-summary__record"), ["4W/4L (50.0%)"], "the other modes are left out");
+    let expected = [
+        t!("ui.stats.win_rate_rated_only").into_owned(),
+        breakdown_line("ui.stats.mode_random", 8, "50.0%"),
+        breakdown_line("ui.stats.mode_other", 4, "75.0%"),
+    ]
+    .join("\n");
+    assert_eq!(tooltip_of(&mut window, "stats-overview-record"), [expected]);
+
+    // Kleber was played only in other modes: no rate, and a rating cell that says why.
+    assert_eq!(band_of(&window, &format!("stats-overview-win-rate-{KLEBER}")), None);
+    let kleber_rating = window.by_test_id(&format!("stats-overview-pr-{KLEBER}")).expect("the cell is drawn");
+    assert!(window.attribute(kleber_rating, "data-unrated").is_some(), "the dash is marked as unrated");
+    let yamato_rating = window.by_test_id(&format!("stats-overview-pr-{YAMATO}")).expect("the cell is drawn");
+    assert!(window.attribute(yamato_rating, "data-unrated").is_none(), "the Yamato played Random");
+}
+
+#[test]
+fn an_overview_of_only_other_modes_shows_no_win_rate_and_no_rating() {
+    let rating = Some(Arc::new(fixture_personal_rating_data()));
+    let Opened { mut window, handles, .. } = open(Panel::Overview, Drawing::Recorded, Appearance::Dark, rating);
+    assert!(window.by_test_id("stats-overview-rating").is_some(), "the evening's Random games rate");
+
+    handles.games.set(coop_evening());
+    settle(&mut window);
+
+    assert!(window.by_test_id("stats-overview-summary").is_some(), "the frag facts still show");
+    assert!(window.by_test_id("stats-overview-record").is_none(), "no win-rate line, not 0%");
+    assert!(window.by_test_id("stats-overview-rating").is_none(), "no rating line");
+}
+
+#[test]
+fn a_ship_played_only_in_other_modes_shows_no_record_and_no_rating() {
+    let Opened { mut window, handles, .. } = open_ships(false);
+    handles.rating.set(Some(Arc::new(fixture_personal_rating_data())));
+    handles.games.set(coop_evening());
+    settle(&mut window);
+
+    assert!(window.by_test_id(&format!("ship-record-{YAMATO}")).is_none(), "no record for unrated battles");
+    let toggle = window.by_test_id(&format!("ship-toggle-{YAMATO}")).expect("the ship is listed");
+    window.click(toggle).expect("the toggle is drawn");
+    settle(&mut window);
+    assert!(window.by_test_id(&format!("ship-detail-{YAMATO}")).is_some(), "its table opens");
+    assert!(window.by_test_id(&format!("ship-row-{YAMATO}-PersonalRating")).is_none(), "and carries no rating");
+
+    handles.games.set(mixed_evening());
+    settle(&mut window);
+    assert!(window.by_test_id(&format!("ship-record-{YAMATO}")).is_some(), "its Random games give it a record");
+    assert!(window.by_test_id(&format!("ship-record-{KLEBER}")).is_none());
+    let hover = tooltip_of(&mut window, &format!("ship-win-rate-{YAMATO}"));
+    let expected = [
+        t!("ui.stats.win_rate_rated_only").into_owned(),
+        breakdown_line("ui.stats.mode_random", 3, "66.7%"),
+        breakdown_line("ui.stats.mode_other", 1, "100.0%"),
+    ]
+    .join("\n");
+    assert_eq!(hover, [expected]);
 }
 
 /// Writes `window` to `target/zgui-shots/<name>.png`.

@@ -774,6 +774,11 @@ axis_game = "Maç"
 series_average = "%{stat} (ortalama)"
 series_running = "%{stat} (hareketli)"
 series_more = "+%{count} daha"
+mode_random = "Rastgele"
+mode_ranked = "Dereceli"
+mode_other = "Diğer"
+win_rate_rated_only = "Kazanma oranı yalnızca rastgele ve dereceli savaşları sayar"
+win_rate_breakdown_line = "%{mode}: %{rate} (%{battles} savaş)"
 
 [ui.stats.table]
 min = "Min"

@@ -16833,6 +16833,7 @@ dependencies = [
  "escaper",
  "fontdb",
  "glob",
+ "insta",
  "jiff",
  "language-tags",
  "levenshtein",

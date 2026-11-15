@@ -87,7 +87,8 @@ impl ChartableStat {
     }
 
     /// This ship's value over the games it played, absent when the aggregate
-    /// has no games to average.
+    /// has no games to average. Win rate counts its Random and Ranked games
+    /// alone, and is absent without one.
     pub fn of_ship(self, info: &PerformanceInfo) -> Option<f64> {
         match self {
             Self::Damage => info.avg_damage(),
@@ -95,7 +96,7 @@ impl ChartableStat {
             Self::Frags => info.avg_frags(),
             Self::RawXp => info.avg_xp(),
             Self::BaseXp => info.avg_win_adjusted_xp(),
-            Self::WinRate => info.win_rate(),
+            Self::WinRate => info.rated_win_rate(),
             Self::PersonalRating => None,
         }
     }
@@ -339,7 +340,8 @@ pub fn line_chart_series(
 ///
 /// Win rate counts the wins so far over the games so far, and personal rating
 /// is recomputed from everything played so far rather than averaged, since a
-/// rating is not the mean of the ratings it is made of.
+/// rating is not the mean of the ratings it is made of. Both count Random and
+/// Ranked games alone: any other game adds no point and moves neither.
 fn accumulated_points(
     games: &[&PerGameStat],
     stat: ChartableStat,
@@ -350,6 +352,7 @@ fn accumulated_points(
             let mut wins = 0u64;
             games
                 .iter()
+                .filter(|game| game.rating_scope().is_rated())
                 .enumerate()
                 .map(|(index, game)| {
                     wins += u64::from(game.is_win);
@@ -362,6 +365,7 @@ fn accumulated_points(
             let mut played: HashMap<GameParamId, ShipBattleStats> = HashMap::new();
             games
                 .iter()
+                .filter(|game| game.rating_scope().is_rated())
                 .filter_map(|game| {
                     let entry = played.entry(game.ship_id).or_insert(ShipBattleStats {
                         ship_id: game.ship_id,
@@ -428,8 +432,9 @@ pub fn bar_chart_series(
                 Some(_) => colors.next().unwrap_or(COMBINED_COLOR),
                 None => COMBINED_COLOR,
             };
-            // A ship's rating is computed from its whole record, not averaged
-            // out of its games, so it is not one of `of_ship`'s aggregates.
+            // A ship's rating is computed from its whole rated record, not
+            // averaged out of its games, so it is not one of `of_ship`'s
+            // aggregates.
             let value = match stat {
                 ChartableStat::PersonalRating => info.personal_rating(rating?).map(|result| result.pr)?,
                 _ => stat.of_ship(info)?,

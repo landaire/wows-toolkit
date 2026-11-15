@@ -39,6 +39,8 @@ use wows_toolkit_viewmodel::stats::SerializableAchievement;
 use wows_toolkit_viewmodel::stats::SessionSummary;
 use wows_toolkit_viewmodel::stats::aggregate_achievements;
 use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
+use wows_toolkit_viewmodel::stats::record::Record;
+use wows_toolkit_viewmodel::stats::record::RecordBreakdown;
 use wows_toolkit_viewmodel::stats::session_personal_rating;
 
 const ROW_HEIGHT: Pixels = px(24.);
@@ -211,7 +213,7 @@ impl Render for StatsOverviewPanel {
         let locale = wows_toolkit_viewmodel::locale();
         let summary = &self.computed.summary;
 
-        if summary.games_played() == 0 && self.computed.ships.is_empty() {
+        if self.computed.ships.is_empty() {
             return v_flex()
                 .id("stats-overview")
                 .size_full()
@@ -221,9 +223,10 @@ impl Render for StatsOverviewPanel {
                 .into_any_element();
         }
 
-        let record = match summary.win_rate() {
-            Some(rate) => format!("{} ({rate:.1}%)", summary.record_label()),
-            None => summary.record_label(),
+        let all = every_mode(&summary.records);
+        let record = match all.win_rate() {
+            Some(rate) => format!("{} ({rate:.1}%)", all.label()),
+            None => all.label(),
         };
 
         let summary_row = h_flex()
@@ -344,7 +347,12 @@ impl Render for StatsOverviewPanel {
                 .when_some(crate::ui::stripe(ix, cx), |row, color| row.bg(color))
                 .child(div().w(SHIP_COLUMN_WIDTH).text_sm().child(ship.clone()))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(info.total_games().to_string()))
-                .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_percent(info.win_rate())))
+                .child(
+                    div()
+                        .w(NUMBER_COLUMN_WIDTH)
+                        .text_sm()
+                        .child(optional_percent(every_mode(info.records()).win_rate())),
+                )
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_number(info.avg_damage(), &locale)))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_decimal(info.avg_frags())))
                 .into_any_element()
@@ -484,6 +492,18 @@ impl Render for StatsOverviewPanel {
 /// Uses the shared formatter so this panel follows the selected locale.
 fn separate_thousands(value: u64, locale: &str) -> String {
     wows_toolkit_viewmodel::formatting::separate_number(value, Some(locale))
+}
+
+/// Every battle kind's record combined. This panel shows the record across
+/// all modes, not the Random and Ranked one the other front ends show.
+pub(super) fn every_mode(records: &RecordBreakdown) -> Record {
+    let kinds = [records.random, records.ranked, records.other];
+
+    Record {
+        wins: kinds.iter().map(|record| record.wins).sum(),
+        losses: kinds.iter().map(|record| record.losses).sum(),
+        draws: kinds.iter().map(|record| record.draws).sum(),
+    }
 }
 
 /// A dash for an absent value, so an empty cell is never read as a zero.

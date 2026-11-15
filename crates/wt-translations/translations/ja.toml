@@ -808,6 +808,11 @@ axis_game = "試合"
 series_average = "%{stat} (平均)"
 series_running = "%{stat} (移動平均)"
 series_more = "他 %{count} 件"
+mode_random = "ランダム戦"
+mode_ranked = "ランク戦"
+mode_other = "その他"
+win_rate_rated_only = "勝率はランダム戦とランク戦のみを集計します"
+win_rate_breakdown_line = "%{mode}: %{rate}（%{battles} 戦）"
 
 [ui.stats.table]
 min = "最小"

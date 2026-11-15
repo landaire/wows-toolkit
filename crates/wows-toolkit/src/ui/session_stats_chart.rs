@@ -78,6 +78,16 @@ pub fn render_line_chart(
         return None;
     }
 
+    // Personal rating and win rate count Random and Ranked games alone: any
+    // other game adds no point rather than a zero.
+    let rated_games: Vec<&PerGameStat>;
+    let per_game_data = if matches!(stat, ChartableStat::PersonalRating | ChartableStat::WinRate) {
+        rated_games = per_game_data.iter().copied().filter(|game| game.rating_scope().is_rated()).collect();
+        rated_games.as_slice()
+    } else {
+        per_game_data
+    };
+
     // Prepare data for each series
     let mut ship_data: Vec<(String, Vec<[f64; 2]>, Color32)> = Vec::new();
 
@@ -303,22 +313,32 @@ pub fn render_bar_chart(
     // Collect bar data with values for later text labels
     let mut bar_data: Vec<(usize, String, f64, Color32)> = Vec::new();
 
-    for (i, (ship_name, perf_info)) in ship_stats.iter().enumerate() {
+    for (ship_name, perf_info) in ship_stats {
+        // A ship with no Random or Ranked game, or none that reached a result
+        // for win rate, draws no bar rather than one at zero.
         let value = match stat {
             ChartableStat::Damage => perf_info.avg_damage().unwrap_or_default(),
             ChartableStat::SpottingDamage => perf_info.avg_spotting_damage().unwrap_or_default(),
             ChartableStat::Frags => perf_info.avg_frags().unwrap_or_default(),
             ChartableStat::RawXp => perf_info.avg_xp().unwrap_or_default(),
             ChartableStat::BaseXp => perf_info.avg_win_adjusted_xp().unwrap_or_default(),
-            ChartableStat::WinRate => perf_info.win_rate().unwrap_or_default(),
-            ChartableStat::PersonalRating => perf_info.personal_rating(pr_data).map(|r| r.pr).unwrap_or_default(),
+            ChartableStat::WinRate => {
+                let Some(rate) = perf_info.rated_win_rate() else { continue };
+                rate
+            }
+            ChartableStat::PersonalRating => {
+                if !perf_info.is_rated() {
+                    continue;
+                }
+                perf_info.personal_rating(pr_data).map(|r| r.pr).unwrap_or_default()
+            }
         };
 
         let color = crate::ui::theme::contrast::readable_on(
             perf_info.ship_id().map(color_from_id).unwrap_or(Color32::from_rgb(100, 180, 255)),
             ui.visuals().panel_fill,
         );
-        bar_data.push((i, ship_name.to_string(), value, color));
+        bar_data.push((bar_data.len(), ship_name.to_string(), value, color));
     }
 
     let y_label: String = match stat {

@@ -7,12 +7,15 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::rating_scope::RatingScope;
 
 use crate::tab_state::ChartableStat;
 use crate::ui::replay_parser::Replay;
 use crate::util::personal_rating::PersonalRatingData;
 use crate::util::personal_rating::PersonalRatingResult;
 use crate::util::personal_rating::ShipBattleStats;
+use wows_toolkit_viewmodel::stats::SessionSummary;
+use wows_toolkit_viewmodel::stats::session_personal_rating;
 
 /// Division filter for session stats.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,9 +236,20 @@ impl PerGameStat {
         }
     }
 
-    /// Calculate Personal Rating for this single game
+    /// Whether a rating applies to this game. The stored games keep only the
+    /// match group, so that is what classifies it.
+    pub fn rating_scope(&self) -> RatingScope {
+        RatingScope::of_match_group(&self.match_group)
+    }
+
+    /// Calculate Personal Rating for this single game. `None` without a
+    /// table, and for a battle kind the rating does not apply to.
     pub fn calculate_pr(&self, pr_data: Option<&PersonalRatingData>) -> Option<f64> {
         let pr_data = pr_data?;
+        if !self.rating_scope().is_rated() {
+            return None;
+        }
+
         let stats = ShipBattleStats {
             ship_id: self.ship_id,
             battles: 1,
@@ -403,102 +417,25 @@ impl SessionStats {
         by_ship.into_iter().map(|(id, games)| (id, PerformanceInfo::from_games(&games))).collect()
     }
 
-    /// Returns the win rate percentage for this session. Will return `None`
-    /// if no games with results have been played.
-    pub fn win_rate(&self) -> Option<f64> {
-        let played = self.games_played();
-        if played == 0 {
-            return None;
+    /// The overview's session-wide figures over the filtered games. The
+    /// record, win rate and rating count Random and Ranked games alone.
+    pub fn totals(&self, pr_data: &PersonalRatingData) -> SessionTotals {
+        let games: Vec<wows_toolkit_viewmodel::stats::PerGameStat> =
+            self.filtered_games().into_iter().map(PerGameStat::to_shared).collect();
+        let refs: Vec<&wows_toolkit_viewmodel::stats::PerGameStat> = games.iter().collect();
+
+        SessionTotals {
+            summary: SessionSummary::from_games(&refs),
+            personal_rating: session_personal_rating(&refs, Some(pr_data)),
         }
-
-        Some((self.games_won() as f64 / played as f64) * 100.0)
     }
+}
 
-    /// Total number of games with a result (win, loss, or draw) in the current session
-    pub fn games_played(&self) -> usize {
-        self.filtered_games().iter().filter(|g| g.is_win || g.is_loss || g.is_draw).count()
-    }
-
-    /// Total number of games won in the current session
-    pub fn games_won(&self) -> usize {
-        self.filtered_games().iter().filter(|g| g.is_win).count()
-    }
-
-    /// Total number of games lost in the current session
-    pub fn games_lost(&self) -> usize {
-        self.filtered_games().iter().filter(|g| g.is_loss).count()
-    }
-
-    /// Total number of games drawn in the current session
-    pub fn games_drawn(&self) -> usize {
-        self.filtered_games().iter().filter(|g| g.is_draw).count()
-    }
-
-    pub fn max_damage(&self) -> Option<(GameParamId, u64)> {
-        self.filtered_games().into_iter().map(|g| (g.ship_id, g.damage)).max_by_key(|r| r.1)
-    }
-
-    pub fn max_frags(&self) -> Option<(GameParamId, i64)> {
-        self.filtered_games().into_iter().map(|g| (g.ship_id, g.frags)).max_by_key(|r| r.1)
-    }
-
-    pub fn total_frags(&self) -> i64 {
-        self.filtered_games().iter().map(|g| g.frags).sum()
-    }
-
-    /// Calculate overall Personal Rating for this session
-    pub fn calculate_pr(&self, pr_data: &PersonalRatingData) -> Option<PersonalRatingResult> {
-        // Group stats by ship_id for proper PR calculation
-        let mut ship_stats: HashMap<GameParamId, ShipBattleStats> = HashMap::new();
-
-        for game in self.filtered_games() {
-            let entry = ship_stats.entry(game.ship_id).or_insert(ShipBattleStats {
-                ship_id: game.ship_id,
-                battles: 0,
-                damage: 0,
-                wins: 0,
-                frags: 0,
-            });
-            entry.battles += 1;
-            entry.damage += game.damage;
-            entry.wins += if game.is_win { 1 } else { 0 };
-            entry.frags += game.frags;
-        }
-
-        let stats: Vec<_> = ship_stats.into_values().collect();
-        pr_data.calculate_pr(&stats)
-    }
-
-    /// Calculate Personal Rating per ship for this session
-    /// Returns a map of ship_id -> PR result
-    #[allow(dead_code)]
-    pub fn calculate_pr_per_ship(&self, pr_data: &PersonalRatingData) -> HashMap<GameParamId, PersonalRatingResult> {
-        // Group stats by ship_id
-        let mut ship_stats: HashMap<GameParamId, ShipBattleStats> = HashMap::new();
-
-        for game in self.filtered_games() {
-            let entry = ship_stats.entry(game.ship_id).or_insert(ShipBattleStats {
-                ship_id: game.ship_id,
-                battles: 0,
-                damage: 0,
-                wins: 0,
-                frags: 0,
-            });
-            entry.battles += 1;
-            entry.damage += game.damage;
-            entry.wins += if game.is_win { 1 } else { 0 };
-            entry.frags += game.frags;
-        }
-
-        // Calculate PR for each ship
-        ship_stats
-            .into_iter()
-            .filter_map(|(ship_id, stats)| {
-                let pr = pr_data.calculate_pr(&[stats])?;
-                Some((ship_id, pr))
-            })
-            .collect()
-    }
+/// What [`SessionStats::totals`] reads off the filtered games.
+pub struct SessionTotals {
+    pub summary: SessionSummary,
+    /// `None` without a table or a Random or Ranked game.
+    pub personal_rating: Option<PersonalRatingResult>,
 }
 
 #[cfg(test)]
@@ -608,9 +545,10 @@ mod tests {
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
         ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 1, 1500));
         assert_eq!(ss.games.len(), 2);
-        assert_eq!(ss.games_played(), 2);
-        assert_eq!(ss.games_won(), 1);
-        assert_eq!(ss.games_lost(), 1);
+        let rated = totals(&ss).summary.records.rated();
+        assert_eq!(rated.battles(), 2);
+        assert_eq!(rated.wins, 1);
+        assert_eq!(rated.losses, 1);
     }
 
     #[test]
@@ -638,19 +576,53 @@ mod tests {
         assert_eq!(ss.games.len(), 2, "different player_ids should not be deduped");
     }
 
+    fn totals(ss: &SessionStats) -> SessionTotals {
+        ss.totals(&PersonalRatingData::new())
+    }
+
     #[test]
     fn session_stats_win_rate() {
         let mut ss = SessionStats::default();
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
         ss.add_game(pvp_loss("Vermont", 1, "13.02.2026 15:00:00", 80000, 0, 1000));
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 16:00:00", 120000, 3, 2500));
-        assert!((ss.win_rate().unwrap() - 66.66666666666667).abs() < 0.01);
+        let rate = totals(&ss).summary.records.rated().win_rate().unwrap();
+        assert!((rate - 66.66666666666667).abs() < 0.01);
     }
 
     #[test]
     fn session_stats_win_rate_empty() {
         let ss = SessionStats::default();
-        assert!(ss.win_rate().is_none());
+        assert!(totals(&ss).summary.records.rated().win_rate().is_none());
+    }
+
+    /// Co-op games are left out of the win rate and the rating, not counted
+    /// as anything.
+    #[test]
+    fn session_stats_win_rate_and_rating_count_random_and_ranked_only() {
+        let pr_data = fixture_pr_data();
+        let rated_ship = 3374266064u64;
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Yamato", rated_ship, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(pvp_loss("Yamato", rated_ship, "13.02.2026 15:00:00", 40000, 0, 1000));
+        let rated_only = ss.totals(&pr_data);
+
+        for time in ["13.02.2026 16:00:00", "13.02.2026 17:00:00"] {
+            let mut coop = pvp_win("Yamato", rated_ship, time, 200000, 6, 3000);
+            coop.match_group = "cooperative".to_string();
+            ss.add_game(coop);
+        }
+        let mixed = ss.totals(&pr_data);
+
+        assert_eq!(mixed.summary.records.rated().win_rate(), Some(50.0));
+        assert_eq!(mixed.summary.records.other.wins, 2);
+        assert_eq!(mixed.personal_rating, rated_only.personal_rating);
+        assert!(mixed.personal_rating.is_some());
+
+        ss.game_mode_filter = HashSet::from(["cooperative".to_string()]);
+        let coop_only = ss.totals(&pr_data);
+        assert_eq!(coop_only.summary.records.rated().win_rate(), None);
+        assert!(coop_only.personal_rating.is_none());
     }
 
     #[test]
@@ -658,7 +630,7 @@ mod tests {
         let mut ss = SessionStats::default();
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
         ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 200000, 1, 1500));
-        let (ship, dmg) = ss.max_damage().unwrap();
+        let (ship, dmg) = totals(&ss).summary.best_damage.unwrap();
         assert_eq!(ship, GameParamId::from(2u64));
         assert_eq!(dmg, 200000);
     }
@@ -668,7 +640,7 @@ mod tests {
         let mut ss = SessionStats::default();
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 5, 2000));
         ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 2, 1000));
-        let (ship, frags) = ss.max_frags().unwrap();
+        let (ship, frags) = totals(&ss).summary.best_frags.unwrap();
         assert_eq!(ship, GameParamId::from(1u64));
         assert_eq!(frags, 5);
     }
@@ -678,7 +650,7 @@ mod tests {
         let mut ss = SessionStats::default();
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 3, 2000));
         ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 2, 1000));
-        assert_eq!(ss.total_frags(), 5);
+        assert_eq!(totals(&ss).summary.total_frags, 5);
     }
 
     #[test]
@@ -868,8 +840,8 @@ mod tests {
         assert!(stats.contains_key(&marceau_id));
 
         let vermont = &stats[&vermont_id];
-        assert_eq!(vermont.wins(), 1);
-        assert_eq!(vermont.losses(), 1);
+        assert_eq!(vermont.records().rated().wins, 1);
+        assert_eq!(vermont.records().rated().losses, 1);
         assert_eq!(vermont.total_damage(), 150000);
     }
 
@@ -891,10 +863,11 @@ mod tests {
             false,
             "pvp",
         ));
-        assert_eq!(ss.games_drawn(), 1);
-        assert_eq!(ss.games_won(), 0);
-        assert_eq!(ss.games_lost(), 0);
-        assert_eq!(ss.games_played(), 1);
+        let rated = totals(&ss).summary.records.rated();
+        assert_eq!(rated.draws, 1);
+        assert_eq!(rated.wins, 0);
+        assert_eq!(rated.losses, 0);
+        assert_eq!(rated.battles(), 1);
     }
 
     // -- Per-game PR --
@@ -930,6 +903,16 @@ mod tests {
         assert!(game.calculate_pr(None).is_none());
     }
 
+    #[test]
+    fn per_game_stat_calculate_pr_skips_unrated_battles() {
+        let pr_data = fixture_pr_data();
+        let mut game = pvp_win("TestShip", 3374266064, "13.02.2026 14:00:00", 100000, 2, 2000);
+        assert!(game.calculate_pr(Some(&pr_data)).is_some());
+
+        game.match_group = "cooperative".to_string();
+        assert!(game.calculate_pr(Some(&pr_data)).is_none(), "a co-op game carries no rating");
+    }
+
     // -- SessionStats PR --
 
     #[test]
@@ -957,7 +940,7 @@ mod tests {
             ss.add_game(game);
         }
 
-        let result = ss.calculate_pr(&pr_data);
+        let result = ss.totals(&pr_data).personal_rating;
         assert!(result.is_some(), "session PR should be calculable");
     }
 }

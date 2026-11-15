@@ -808,6 +808,11 @@ axis_game = "เกม"
 series_average = "%{stat} (เฉลี่ย)"
 series_running = "%{stat} (สะสม)"
 series_more = "+%{count} เพิ่มเติม"
+mode_random = "การรบแบบสุ่ม"
+mode_ranked = "การรบจัดอันดับ"
+mode_other = "อื่นๆ"
+win_rate_rated_only = "อัตราชนะนับเฉพาะการรบแบบสุ่มและการรบจัดอันดับ"
+win_rate_breakdown_line = "%{mode}: %{rate} (%{battles} การรบ)"
 
 [ui.stats.table]
 min = "ต่ำสุด"
