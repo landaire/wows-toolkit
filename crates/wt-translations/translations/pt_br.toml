@@ -1852,6 +1852,20 @@ use_backup_code = "Usar código de backup"
 submit_code = "Enviar código"
 captcha = "Este login exige um CAPTCHA, que este inicializador ainda não consegue exibir. Entre uma vez pelo Wargaming Game Center oficial ou pelo wargaming.net em um navegador e tente novamente."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "E-mail ou senha incorretos."
+two_factor_required = "Esta conta exige aprovação em duas etapas. Aprove o login no Wargaming Auth ou com o código enviado por e-mail e entre novamente."
+two_factor_invalid = "O código de duas etapas está incorreto ou expirou. Digite um código novo."
+captcha_required = "A Wargaming pede um CAPTCHA. Entre uma vez no Game Center oficial ou em wargaming.net e tente novamente."
+rate_limited = "Muitas tentativas de login. Aguarde alguns minutos e tente novamente."
+account_banned = "Esta conta está banida."
+network_unreachable = "Não foi possível acessar a Wargaming. Verifique sua conexão com a internet."
+service_unavailable = "O serviço de login da Wargaming está indisponível. Tente novamente mais tarde."
+session_expired = "O login salvo expirou. Entre novamente."
+keyring_locked = "O chaveiro do sistema está bloqueado. Desbloqueie-o e entre novamente."
+not_saved = "Conectado, mas o login não pôde ser salvo. Você precisará entrar novamente após reiniciar."
+unexpected = "Falha no login. O log tem os detalhes."
+
 [ui.launcher.options]
 heading = "Opções de inicialização"
 extra_args = "Argumentos extras de inicialização (um por linha)"
@@ -2138,10 +2152,10 @@ continue = "Continuar"
 cancel = "Cancelar"
 
 [ui.launcher.keyring]
-not_saved = "Esta sessão não será salva. Você precisará entrar novamente após reiniciar o toolkit."
-missing = "Nenhum chaveiro do sistema (Secret Service) está disponível."
-how = "Como ativar um"
-how_detail = "Ative a API Secret Service do KDE Wallet (Configurações do Sistema, KDE Wallet) ou instale e inicie o gnome-keyring. Depois reinicie o toolkit."
+unencrypted = "Seu login é salvo sem criptografia na pasta de dados do app porque nenhum provedor Secret Service (como GNOME Keyring, KeePassXC ou KDE Wallet) está disponível."
+how = "Como mantê-lo criptografado"
+how_detail = "Instale e inicie um provedor Secret Service como GNOME Keyring, KeePassXC ou KDE Wallet e reinicie o toolkit. Os logins salvos são movidos para ele."
+unlock_hint = "O chaveiro do sistema pode pedir para ser desbloqueado para que o toolkit possa ler seu login salvo."
 
 [ui.launcher.play]
 play = "Jogar"
@@ -2169,6 +2183,7 @@ default = "Padrão"
 ready = "Pronta"
 restoring = "Verificando..."
 not_saved = "Não salva"
+unencrypted = "Salvo sem criptografia"
 keyring_locked = "Chaveiro bloqueado: desbloqueie-o para restaurar os logins salvos"
 forget = "Remover"
 play_anyway = "Jogar mesmo assim"

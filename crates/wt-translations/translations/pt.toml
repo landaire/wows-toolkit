@@ -1852,6 +1852,20 @@ use_backup_code = "Usar código de cópia de segurança"
 submit_code = "Enviar código"
 captcha = "Este início de sessão requer um CAPTCHA, que este iniciador ainda não consegue mostrar. Inicie sessão uma vez através do Wargaming Game Center oficial ou de wargaming.net num navegador e tente novamente."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "E-mail ou palavra-passe incorretos."
+two_factor_required = "Esta conta requer aprovação de dois fatores. Aprove o início de sessão no Wargaming Auth ou com o código enviado por e-mail e inicie sessão novamente."
+two_factor_invalid = "O código de dois fatores está incorreto ou expirou. Introduza um código novo."
+captcha_required = "A Wargaming pede um CAPTCHA. Inicie sessão uma vez no Game Center oficial ou em wargaming.net e tente novamente."
+rate_limited = "Demasiadas tentativas de início de sessão. Aguarde alguns minutos e tente novamente."
+account_banned = "Esta conta está banida."
+network_unreachable = "Não foi possível contactar a Wargaming. Verifique a ligação à Internet."
+service_unavailable = "O serviço de início de sessão da Wargaming está indisponível. Tente novamente mais tarde."
+session_expired = "A sessão guardada expirou. Inicie sessão novamente."
+keyring_locked = "O porta-chaves do sistema está bloqueado. Desbloqueie-o e inicie sessão novamente."
+not_saved = "Sessão iniciada, mas não foi possível guardá-la. Terá de iniciar sessão novamente após reiniciar."
+unexpected = "Falha ao iniciar sessão. O registo tem os detalhes."
+
 [ui.launcher.options]
 heading = "Opções de arranque"
 extra_args = "Argumentos de arranque adicionais (um por linha)"
@@ -2138,10 +2152,10 @@ continue = "Continuar"
 cancel = "Cancelar"
 
 [ui.launcher.keyring]
-not_saved = "Esta sessão não será guardada. Terá de iniciar sessão novamente após reiniciar o toolkit."
-missing = "Não está disponível nenhum porta-chaves do sistema (Secret Service)."
-how = "Como ativar um"
-how_detail = "Ative a API Secret Service do KDE Wallet (Definições do Sistema, KDE Wallet) ou instale e inicie o gnome-keyring. Depois reinicie o toolkit."
+unencrypted = "A sua sessão é guardada sem encriptação na pasta de dados da aplicação, porque não está disponível nenhum fornecedor Secret Service (como GNOME Keyring, KeePassXC ou KDE Wallet)."
+how = "Como mantê-la encriptada"
+how_detail = "Instale e inicie um fornecedor Secret Service como GNOME Keyring, KeePassXC ou KDE Wallet e reinicie o toolkit. As sessões guardadas passam para lá."
+unlock_hint = "O porta-chaves do sistema pode pedir para ser desbloqueado para que o toolkit possa ler a sua sessão guardada."
 
 [ui.launcher.play]
 play = "Jogar"
@@ -2169,6 +2183,7 @@ default = "Predefinida"
 ready = "Pronta"
 restoring = "A verificar..."
 not_saved = "Não guardada"
+unencrypted = "Guardada sem encriptação"
 keyring_locked = "Porta-chaves bloqueado: desbloqueie-o para restaurar as sessões guardadas"
 forget = "Remover"
 play_anyway = "Jogar mesmo assim"

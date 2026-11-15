@@ -1898,6 +1898,20 @@ use_backup_code = "Usa codice di backup"
 submit_code = "Invia codice"
 captcha = "Questo accesso richiede un CAPTCHA, che questo launcher non può ancora mostrare. Accedi una volta tramite il Wargaming Game Center ufficiale o wargaming.net in un browser, poi riprova."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "E-mail o password errata."
+two_factor_required = "Questo account richiede l'approvazione a due fattori. Approva l'accesso in Wargaming Auth o con il codice ricevuto via e-mail, poi accedi di nuovo."
+two_factor_invalid = "Il codice a due fattori è errato o scaduto. Inserisci un nuovo codice."
+captcha_required = "Wargaming richiede un CAPTCHA. Accedi una volta dal Game Center ufficiale o su wargaming.net, poi riprova."
+rate_limited = "Troppi tentativi di accesso. Attendi qualche minuto, poi riprova."
+account_banned = "Questo account è bannato."
+network_unreachable = "Impossibile raggiungere Wargaming. Controlla la connessione a Internet."
+service_unavailable = "Il servizio di accesso di Wargaming non è disponibile. Riprova più tardi."
+session_expired = "L'accesso salvato è scaduto. Accedi di nuovo."
+keyring_locked = "Il portachiavi di sistema è bloccato. Sbloccalo, poi accedi di nuovo."
+not_saved = "Accesso effettuato, ma non è stato possibile salvarlo. Dovrai accedere di nuovo dopo un riavvio."
+unexpected = "Accesso non riuscito. I dettagli sono nel log."
+
 [ui.launcher.options]
 heading = "Opzioni di avvio"
 extra_args = "Argomenti di avvio aggiuntivi (uno per riga)"
@@ -2184,10 +2198,10 @@ continue = "Continua"
 cancel = "Annulla"
 
 [ui.launcher.keyring]
-not_saved = "Questa sessione non verrà salvata. Dovrai accedere di nuovo dopo aver riavviato il toolkit."
-missing = "Nessun portachiavi di sistema (Secret Service) disponibile."
-how = "Come abilitarne uno"
-how_detail = "Abilita l'API Secret Service di KDE Wallet (Impostazioni di sistema, KDE Wallet), oppure installa e avvia gnome-keyring. Poi riavvia il toolkit."
+unencrypted = "Il tuo accesso è salvato senza cifratura nella cartella dati dell'app perché non è disponibile alcun provider Secret Service (come GNOME Keyring, KeePassXC o KDE Wallet)."
+how = "Come mantenerlo cifrato"
+how_detail = "Installa e avvia un provider Secret Service come GNOME Keyring, KeePassXC o KDE Wallet, poi riavvia il toolkit. Gli accessi salvati vengono spostati lì."
+unlock_hint = "Il portachiavi di sistema potrebbe chiedere di essere sbloccato perché il toolkit possa leggere il tuo accesso salvato."
 
 [ui.launcher.play]
 play = "Gioca"
@@ -2215,6 +2229,7 @@ default = "Predefinito"
 ready = "Pronto"
 restoring = "Verifica..."
 not_saved = "Non salvato"
+unencrypted = "Salvato senza cifratura"
 keyring_locked = "Portachiavi bloccato: sbloccalo per ripristinare gli accessi salvati"
 forget = "Rimuovi"
 play_anyway = "Gioca comunque"

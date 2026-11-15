@@ -1898,6 +1898,20 @@ use_backup_code = "バックアップコードを使用"
 submit_code = "コードを送信"
 captcha = "このログインには CAPTCHA が必要ですが、このランチャーではまだ表示できません。公式の Wargaming Game Center またはブラウザーで wargaming.net に一度サインインしてから、再試行してください。"
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "メールアドレスまたはパスワードが正しくありません。"
+two_factor_required = "このアカウントには二要素認証の承認が必要です。Wargaming Auth またはメールで届いたコードでサインインを承認してから、もう一度サインインしてください。"
+two_factor_invalid = "二要素認証コードが正しくないか、期限切れです。新しいコードを入力してください。"
+captcha_required = "Wargaming が CAPTCHA を求めています。公式の Game Center または wargaming.net で一度サインインしてから、もう一度お試しください。"
+rate_limited = "サインインの試行回数が多すぎます。数分待ってから、もう一度お試しください。"
+account_banned = "このアカウントは BAN されています。"
+network_unreachable = "Wargaming に接続できません。インターネット接続を確認してください。"
+service_unavailable = "Wargaming のサインインサービスを利用できません。しばらくしてからもう一度お試しください。"
+session_expired = "保存済みのサインインの有効期限が切れました。もう一度サインインしてください。"
+keyring_locked = "システムキーリングがロックされています。ロックを解除してから、もう一度サインインしてください。"
+not_saved = "サインインしましたが、保存できませんでした。再起動後に再度サインインが必要です。"
+unexpected = "サインインに失敗しました。詳細はログを確認してください。"
+
 [ui.launcher.options]
 heading = "起動オプション"
 extra_args = "追加の起動引数 (1 行に 1 つ)"
@@ -2184,10 +2198,10 @@ continue = "続行"
 cancel = "キャンセル"
 
 [ui.launcher.keyring]
-not_saved = "このセッションは保存されません。ツールキットを再起動した後、再度サインインが必要です。"
-missing = "利用可能なシステムキーリング (Secret Service) がありません。"
-how = "有効にする方法"
-how_detail = "KDE Wallet の Secret Service API を有効にする (システム設定、KDE Wallet) か、gnome-keyring をインストールして起動してください。その後、ツールキットを再起動してください。"
+unencrypted = "Secret Service プロバイダー (GNOME Keyring、KeePassXC、KDE Wallet など) が利用できないため、サインインはアプリのデータフォルダーに暗号化されずに保存されます。"
+how = "暗号化して保存する方法"
+how_detail = "GNOME Keyring、KeePassXC、KDE Wallet などの Secret Service プロバイダーをインストールして起動し、ツールキットを再起動してください。保存済みのサインインはそちらに移されます。"
+unlock_hint = "ツールキットが保存済みのサインインを読み取るために、システムキーリングがロック解除を求めることがあります。"
 
 [ui.launcher.play]
 play = "プレイ"
@@ -2215,6 +2229,7 @@ default = "デフォルト"
 ready = "準備完了"
 restoring = "確認中..."
 not_saved = "未保存"
+unencrypted = "暗号化せずに保存"
 keyring_locked = "キーリングがロックされています: 保存済みのサインインを復元するにはロックを解除してください"
 forget = "削除"
 play_anyway = "このままプレイ"

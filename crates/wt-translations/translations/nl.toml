@@ -1898,6 +1898,20 @@ use_backup_code = "Back-upcode gebruiken"
 submit_code = "Code verzenden"
 captcha = "Deze aanmelding vereist een CAPTCHA, die deze launcher nog niet kan tonen. Meld u eenmalig aan via het officiële Wargaming Game Center of via wargaming.net in een browser en probeer het daarna opnieuw."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "Onjuist e-mailadres of wachtwoord."
+two_factor_required = "Voor dit account is tweestapsgoedkeuring nodig. Keur de aanmelding goed in Wargaming Auth of met de gemailde code en meld u daarna opnieuw aan."
+two_factor_invalid = "De tweestapscode is onjuist of verlopen. Voer een nieuwe code in."
+captcha_required = "Wargaming vraagt om een CAPTCHA. Meld u eenmaal aan in het officiële Game Center of op wargaming.net en probeer het daarna opnieuw."
+rate_limited = "Te veel aanmeldpogingen. Wacht een paar minuten en probeer het daarna opnieuw."
+account_banned = "Dit account is verbannen."
+network_unreachable = "Wargaming is niet bereikbaar. Controleer uw internetverbinding."
+service_unavailable = "De aanmelddienst van Wargaming is niet beschikbaar. Probeer het later opnieuw."
+session_expired = "De opgeslagen aanmelding is verlopen. Meld u opnieuw aan."
+keyring_locked = "Uw systeemsleutelbos is vergrendeld. Ontgrendel het en meld u daarna opnieuw aan."
+not_saved = "Aangemeld, maar de aanmelding kon niet worden opgeslagen. Na een herstart moet u zich opnieuw aanmelden."
+unexpected = "Aanmelden mislukt. Het logboek bevat de details."
+
 [ui.launcher.options]
 heading = "Startopties"
 extra_args = "Extra startargumenten (één per regel)"
@@ -2184,10 +2198,10 @@ continue = "Doorgaan"
 cancel = "Annuleren"
 
 [ui.launcher.keyring]
-not_saved = "Deze sessie wordt niet opgeslagen. U moet zich opnieuw aanmelden nadat u de toolkit opnieuw hebt gestart."
-missing = "Er is geen systeemsleutelbos (Secret Service) beschikbaar."
-how = "Hoe u er een inschakelt"
-how_detail = "Schakel de Secret Service-API van KDE Wallet in (Systeeminstellingen, KDE Wallet), of installeer en start gnome-keyring. Start daarna de toolkit opnieuw."
+unencrypted = "Uw aanmelding wordt onversleuteld opgeslagen in de gegevensmap van de app, omdat er geen Secret Service-aanbieder (zoals GNOME Keyring, KeePassXC of KDE Wallet) beschikbaar is."
+how = "Zo blijft deze versleuteld"
+how_detail = "Installeer en start een Secret Service-aanbieder zoals GNOME Keyring, KeePassXC of KDE Wallet en start de toolkit daarna opnieuw. Opgeslagen aanmeldingen worden daarnaartoe verplaatst."
+unlock_hint = "Uw systeemsleutelbos kan vragen om ontgrendeld te worden, zodat de toolkit uw opgeslagen aanmelding kan lezen."
 
 [ui.launcher.play]
 play = "Spelen"
@@ -2215,6 +2229,7 @@ default = "Standaard"
 ready = "Gereed"
 restoring = "Controleren..."
 not_saved = "Niet opgeslagen"
+unencrypted = "Onversleuteld opgeslagen"
 keyring_locked = "Sleutelbos vergrendeld: ontgrendel deze om opgeslagen aanmeldingen te herstellen"
 forget = "Verwijderen"
 play_anyway = "Toch spelen"

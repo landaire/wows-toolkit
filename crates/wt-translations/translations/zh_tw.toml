@@ -1898,6 +1898,20 @@ use_backup_code = "使用備用驗證碼"
 submit_code = "提交驗證碼"
 captcha = "此次登入需要驗證碼（CAPTCHA），但本啟動器目前無法顯示。請先透過官方 Wargaming Game Center 或在瀏覽器中登入 wargaming.net 一次，然後重試。"
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "電子郵件或密碼錯誤。"
+two_factor_required = "此帳號需要雙重驗證核准。請在 Wargaming Auth 中或使用郵件中的驗證碼核准登入，然後再次登入。"
+two_factor_invalid = "雙重驗證碼錯誤或已過期。請輸入新的驗證碼。"
+captcha_required = "Wargaming 要求完成驗證碼（CAPTCHA）。請先在官方 Game Center 或 wargaming.net 登入一次，然後再試一次。"
+rate_limited = "登入嘗試次數過多。請等待幾分鐘後再試一次。"
+account_banned = "此帳號已被停權。"
+network_unreachable = "無法連線至 Wargaming。請檢查您的網路連線。"
+service_unavailable = "Wargaming 登入服務無法使用。請稍後再試。"
+session_expired = "已儲存的登入已過期。請再次登入。"
+keyring_locked = "系統金鑰圈已鎖定。請將其解鎖後再次登入。"
+not_saved = "已登入，但無法儲存登入資訊。重新啟動後需要再次登入。"
+unexpected = "登入失敗。詳細資訊請查看記錄。"
+
 [ui.launcher.options]
 heading = "啟動選項"
 extra_args = "額外啟動參數（每行一個）"
@@ -2184,10 +2198,10 @@ continue = "繼續"
 cancel = "取消"
 
 [ui.launcher.keyring]
-not_saved = "本次工作階段不會被儲存。重新啟動 Toolkit 後，您需要再次登入。"
-missing = "沒有可用的系統金鑰圈（Secret Service）。"
-how = "如何啟用"
-how_detail = "啟用 KDE Wallet 的 Secret Service API（系統設定 > KDE Wallet），或安裝並啟動 gnome-keyring。然後重新啟動 Toolkit。"
+unencrypted = "由於沒有可用的 Secret Service 提供者（例如 GNOME Keyring、KeePassXC 或 KDE Wallet），您的登入資訊以未加密方式儲存在應用程式的資料夾中。"
+how = "如何保持加密"
+how_detail = "請安裝並啟動 Secret Service 提供者，例如 GNOME Keyring、KeePassXC 或 KDE Wallet，然後重新啟動 Toolkit。已儲存的登入會移至其中。"
+unlock_hint = "系統金鑰圈可能會要求解鎖，以便 Toolkit 讀取您已儲存的登入。"
 
 [ui.launcher.play]
 play = "開始遊戲"
@@ -2215,6 +2229,7 @@ default = "預設"
 ready = "就緒"
 restoring = "正在檢查..."
 not_saved = "未儲存"
+unencrypted = "未加密儲存"
 keyring_locked = "金鑰圈已鎖定：請將其解鎖以還原已儲存的登入"
 forget = "移除"
 play_anyway = "仍要開始遊戲"

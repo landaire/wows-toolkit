@@ -1898,6 +1898,20 @@ use_backup_code = "Utiliser un code de secours"
 submit_code = "Envoyer le code"
 captcha = "Cette connexion nécessite un CAPTCHA, que ce lanceur ne peut pas encore afficher. Connectez-vous une fois via le Wargaming Game Center officiel ou wargaming.net dans un navigateur, puis réessayez."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "Adresse e-mail ou mot de passe incorrect."
+two_factor_required = "Ce compte exige une validation à deux facteurs. Approuvez la connexion dans Wargaming Auth ou avec le code reçu par e-mail, puis reconnectez-vous."
+two_factor_invalid = "Le code à deux facteurs est incorrect ou expiré. Saisissez un nouveau code."
+captcha_required = "Wargaming demande un CAPTCHA. Connectez-vous une fois dans le Game Center officiel ou sur wargaming.net, puis réessayez."
+rate_limited = "Trop de tentatives de connexion. Patientez quelques minutes, puis réessayez."
+account_banned = "Ce compte est banni."
+network_unreachable = "Impossible de joindre Wargaming. Vérifiez votre connexion Internet."
+service_unavailable = "Le service de connexion de Wargaming est indisponible. Réessayez plus tard."
+session_expired = "La connexion enregistrée a expiré. Reconnectez-vous."
+keyring_locked = "Votre trousseau système est verrouillé. Déverrouillez-le, puis reconnectez-vous."
+not_saved = "Connecté, mais la connexion n'a pas pu être enregistrée. Vous devrez vous reconnecter après un redémarrage."
+unexpected = "Échec de la connexion. Le journal contient les détails."
+
 [ui.launcher.options]
 heading = "Options de lancement"
 extra_args = "Arguments de lancement supplémentaires (un par ligne)"
@@ -2184,10 +2198,10 @@ continue = "Continuer"
 cancel = "Annuler"
 
 [ui.launcher.keyring]
-not_saved = "Cette session ne sera pas enregistrée. Vous devrez vous reconnecter après avoir redémarré le toolkit."
-missing = "Aucun trousseau système (Secret Service) n'est disponible."
-how = "Comment en activer un"
-how_detail = "Activez l'API Secret Service de KDE Wallet (Configuration du système, KDE Wallet), ou installez et démarrez gnome-keyring. Redémarrez ensuite le toolkit."
+unencrypted = "Votre connexion est enregistrée sans chiffrement dans le dossier de données de l'application, car aucun fournisseur Secret Service (comme GNOME Keyring, KeePassXC ou KDE Wallet) n'est disponible."
+how = "Comment la garder chiffrée"
+how_detail = "Installez et lancez un fournisseur Secret Service comme GNOME Keyring, KeePassXC ou KDE Wallet, puis redémarrez le toolkit. Les connexions enregistrées y sont transférées."
+unlock_hint = "Votre trousseau système peut demander à être déverrouillé pour que le toolkit lise votre connexion enregistrée."
 
 [ui.launcher.play]
 play = "Jouer"
@@ -2215,6 +2229,7 @@ default = "Par défaut"
 ready = "Prêt"
 restoring = "Vérification..."
 not_saved = "Non enregistré"
+unencrypted = "Enregistré sans chiffrement"
 keyring_locked = "Trousseau verrouillé : déverrouillez-le pour restaurer les connexions enregistrées"
 forget = "Retirer"
 play_anyway = "Jouer quand même"

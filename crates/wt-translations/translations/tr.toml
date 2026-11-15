@@ -1852,6 +1852,20 @@ use_backup_code = "Yedek kod kullan"
 submit_code = "Kodu gönder"
 captcha = "Bu oturum açma işlemi CAPTCHA gerektiriyor ve bu başlatıcı henüz bunu gösteremiyor. Resmi Wargaming Game Center veya tarayıcıda wargaming.net üzerinden bir kez oturum açın, ardından tekrar deneyin."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "E-posta veya parola yanlış."
+two_factor_required = "Bu hesap iki aşamalı onay gerektiriyor. Oturum açmayı Wargaming Auth'ta veya e-postayla gelen kodla onaylayın, ardından tekrar oturum açın."
+two_factor_invalid = "İki aşamalı kod yanlış veya süresi dolmuş. Yeni bir kod girin."
+captcha_required = "Wargaming bir CAPTCHA istiyor. Resmi Game Center'da veya wargaming.net'te bir kez oturum açın, ardından tekrar deneyin."
+rate_limited = "Çok fazla oturum açma denemesi. Birkaç dakika bekleyin, ardından tekrar deneyin."
+account_banned = "Bu hesap yasaklanmış."
+network_unreachable = "Wargaming'e ulaşılamıyor. İnternet bağlantınızı kontrol edin."
+service_unavailable = "Wargaming oturum açma hizmeti kullanılamıyor. Daha sonra tekrar deneyin."
+session_expired = "Kaydedilen oturumun süresi doldu. Tekrar oturum açın."
+keyring_locked = "Sistem anahtarlığınız kilitli. Kilidini açın, ardından tekrar oturum açın."
+not_saved = "Oturum açıldı ancak kaydedilemedi. Yeniden başlattıktan sonra tekrar oturum açmanız gerekecek."
+unexpected = "Oturum açılamadı. Ayrıntılar günlükte."
+
 [ui.launcher.options]
 heading = "Başlatma seçenekleri"
 extra_args = "Ek başlatma argümanları (her satıra bir tane)"
@@ -2138,10 +2152,10 @@ continue = "Devam"
 cancel = "İptal"
 
 [ui.launcher.keyring]
-not_saved = "Bu oturum kaydedilmeyecek. Toolkit'i yeniden başlattıktan sonra tekrar oturum açmanız gerekecek."
-missing = "Kullanılabilir bir sistem anahtarlığı (Secret Service) yok."
-how = "Nasıl etkinleştirilir"
-how_detail = "KDE Wallet'ın Secret Service API'sini etkinleştirin (Sistem Ayarları, KDE Wallet) veya gnome-keyring'i kurup başlatın. Ardından toolkit'i yeniden başlatın."
+unencrypted = "Hiçbir Secret Service sağlayıcısı (GNOME Keyring, KeePassXC veya KDE Wallet gibi) kullanılamadığından oturumunuz uygulamanın veri klasörüne şifrelenmeden kaydedilir."
+how = "Şifreli tutmanın yolu"
+how_detail = "GNOME Keyring, KeePassXC veya KDE Wallet gibi bir Secret Service sağlayıcısı kurup başlatın, ardından Toolkit'i yeniden başlatın. Kaydedilen oturumlar oraya taşınır."
+unlock_hint = "Toolkit'in kaydedilen oturumunuzu okuyabilmesi için sistem anahtarlığınız kilidi açmanızı isteyebilir."
 
 [ui.launcher.play]
 play = "Oyna"
@@ -2169,6 +2183,7 @@ default = "Varsayılan"
 ready = "Hazır"
 restoring = "Denetleniyor..."
 not_saved = "Kaydedilmedi"
+unencrypted = "Şifrelenmeden kaydedildi"
 keyring_locked = "Anahtarlık kilitli: kaydedilen oturumları geri yüklemek için kilidini açın"
 forget = "Kaldır"
 play_anyway = "Yine de oyna"

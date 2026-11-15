@@ -1898,6 +1898,20 @@ use_backup_code = "Backup-Code verwenden"
 submit_code = "Code senden"
 captcha = "Diese Anmeldung erfordert ein CAPTCHA, das dieser Launcher noch nicht anzeigen kann. Melden Sie sich einmal über das offizielle Wargaming Game Center oder wargaming.net im Browser an und versuchen Sie es dann erneut."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "Falsche E-Mail-Adresse oder falsches Passwort."
+two_factor_required = "Dieses Konto erfordert eine Zwei-Faktor-Bestätigung. Bestätigen Sie die Anmeldung in Wargaming Auth oder mit dem per E-Mail gesendeten Code und melden Sie sich dann erneut an."
+two_factor_invalid = "Der Zwei-Faktor-Code ist falsch oder abgelaufen. Geben Sie einen neuen Code ein."
+captcha_required = "Wargaming verlangt ein CAPTCHA. Melden Sie sich einmal im offiziellen Game Center oder auf wargaming.net an und versuchen Sie es dann erneut."
+rate_limited = "Zu viele Anmeldeversuche. Warten Sie einige Minuten und versuchen Sie es dann erneut."
+account_banned = "Dieses Konto ist gesperrt."
+network_unreachable = "Wargaming ist nicht erreichbar. Prüfen Sie Ihre Internetverbindung."
+service_unavailable = "Der Anmeldedienst von Wargaming ist nicht verfügbar. Versuchen Sie es später erneut."
+session_expired = "Die gespeicherte Anmeldung ist abgelaufen. Melden Sie sich erneut an."
+keyring_locked = "Ihr System-Schlüsselbund ist gesperrt. Entsperren Sie ihn und melden Sie sich dann erneut an."
+not_saved = "Angemeldet, aber die Anmeldung konnte nicht gespeichert werden. Nach einem Neustart müssen Sie sich erneut anmelden."
+unexpected = "Anmeldung fehlgeschlagen. Details stehen im Protokoll."
+
 [ui.launcher.options]
 heading = "Startoptionen"
 extra_args = "Zusätzliche Startargumente (eines pro Zeile)"
@@ -2184,10 +2198,10 @@ continue = "Weiter"
 cancel = "Abbrechen"
 
 [ui.launcher.keyring]
-not_saved = "Diese Sitzung wird nicht gespeichert. Sie müssen sich nach einem Neustart des Toolkits erneut anmelden."
-missing = "Kein System-Schlüsselbund (Secret Service) verfügbar."
-how = "So aktivieren Sie einen"
-how_detail = "Aktivieren Sie die Secret-Service-API von KDE Wallet (Systemeinstellungen, KDE Wallet) oder installieren und starten Sie gnome-keyring. Starten Sie anschließend das Toolkit neu."
+unencrypted = "Ihre Anmeldung wird unverschlüsselt im Datenordner der App gespeichert, weil kein Secret-Service-Anbieter (etwa GNOME Keyring, KeePassXC oder KDE Wallet) verfügbar ist."
+how = "So bleibt sie verschlüsselt"
+how_detail = "Installieren und starten Sie einen Secret-Service-Anbieter wie GNOME Keyring, KeePassXC oder KDE Wallet und starten Sie das Toolkit dann neu. Gespeicherte Anmeldungen werden dorthin übernommen."
+unlock_hint = "Ihr System-Schlüsselbund fragt möglicherweise nach dem Entsperren, damit das Toolkit Ihre gespeicherte Anmeldung lesen kann."
 
 [ui.launcher.play]
 play = "Spielen"
@@ -2215,6 +2229,7 @@ default = "Standard"
 ready = "Bereit"
 restoring = "Wird geprüft..."
 not_saved = "Nicht gespeichert"
+unencrypted = "Unverschlüsselt gespeichert"
 keyring_locked = "Schlüsselbund gesperrt: Entsperren Sie ihn, um gespeicherte Anmeldungen wiederherzustellen"
 forget = "Entfernen"
 play_anyway = "Trotzdem spielen"

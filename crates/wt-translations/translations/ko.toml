@@ -1898,6 +1898,20 @@ use_backup_code = "백업 코드 사용"
 submit_code = "코드 제출"
 captcha = "이 로그인에는 CAPTCHA가 필요하지만 이 런처에서는 아직 표시할 수 없습니다. 공식 Wargaming Game Center 또는 브라우저에서 wargaming.net에 한 번 로그인한 후 다시 시도하세요."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "이메일 또는 비밀번호가 올바르지 않습니다."
+two_factor_required = "이 계정은 2단계 인증 승인이 필요합니다. Wargaming Auth 또는 이메일로 받은 코드로 로그인을 승인한 후 다시 로그인하세요."
+two_factor_invalid = "2단계 인증 코드가 올바르지 않거나 만료되었습니다. 새 코드를 입력하세요."
+captcha_required = "Wargaming에서 CAPTCHA를 요구합니다. 공식 Game Center 또는 wargaming.net에서 한 번 로그인한 후 다시 시도하세요."
+rate_limited = "로그인 시도가 너무 많습니다. 몇 분 기다린 후 다시 시도하세요."
+account_banned = "이 계정은 정지되었습니다."
+network_unreachable = "Wargaming에 연결할 수 없습니다. 인터넷 연결을 확인하세요."
+service_unavailable = "Wargaming 로그인 서비스를 사용할 수 없습니다. 나중에 다시 시도하세요."
+session_expired = "저장된 로그인이 만료되었습니다. 다시 로그인하세요."
+keyring_locked = "시스템 키링이 잠겨 있습니다. 잠금을 해제한 후 다시 로그인하세요."
+not_saved = "로그인했지만 저장하지 못했습니다. 다시 시작한 후 다시 로그인해야 합니다."
+unexpected = "로그인하지 못했습니다. 자세한 내용은 로그를 확인하세요."
+
 [ui.launcher.options]
 heading = "실행 옵션"
 extra_args = "추가 실행 인수 (한 줄에 하나)"
@@ -2184,10 +2198,10 @@ continue = "계속"
 cancel = "취소"
 
 [ui.launcher.keyring]
-not_saved = "이 세션은 저장되지 않습니다. Toolkit을 다시 시작한 후 다시 로그인해야 합니다."
-missing = "사용 가능한 시스템 키링 (Secret Service)이 없습니다."
-how = "활성화 방법"
-how_detail = "KDE Wallet의 Secret Service API를 활성화하거나 (시스템 설정, KDE Wallet), gnome-keyring을 설치하고 시작하세요. 그런 다음 Toolkit을 다시 시작하세요."
+unencrypted = "Secret Service 제공자(GNOME Keyring, KeePassXC, KDE Wallet 등)를 사용할 수 없어 로그인이 앱 데이터 폴더에 암호화되지 않은 상태로 저장됩니다."
+how = "암호화된 상태로 유지하는 방법"
+how_detail = "GNOME Keyring, KeePassXC, KDE Wallet 같은 Secret Service 제공자를 설치하고 실행한 후 Toolkit을 다시 시작하세요. 저장된 로그인이 그곳으로 옮겨집니다."
+unlock_hint = "Toolkit이 저장된 로그인을 읽을 수 있도록 시스템 키링이 잠금 해제를 요청할 수 있습니다."
 
 [ui.launcher.play]
 play = "플레이"
@@ -2215,6 +2229,7 @@ default = "기본"
 ready = "준비됨"
 restoring = "확인 중..."
 not_saved = "저장되지 않음"
+unencrypted = "암호화 없이 저장됨"
 keyring_locked = "키링이 잠겨 있음: 저장된 로그인을 복원하려면 잠금을 해제하세요"
 forget = "제거"
 play_anyway = "그래도 플레이"

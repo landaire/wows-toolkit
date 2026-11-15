@@ -1852,6 +1852,20 @@ use_backup_code = "Użyj kodu zapasowego"
 submit_code = "Wyślij kod"
 captcha = "To logowanie wymaga CAPTCHA, której ten launcher nie potrafi jeszcze wyświetlić. Zaloguj się raz przez oficjalne Wargaming Game Center lub wargaming.net w przeglądarce, a następnie spróbuj ponownie."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "Nieprawidłowy e-mail lub hasło."
+two_factor_required = "To konto wymaga zatwierdzenia dwuskładnikowego. Zatwierdź logowanie w Wargaming Auth lub kodem z e-maila, a następnie zaloguj się ponownie."
+two_factor_invalid = "Kod dwuskładnikowy jest nieprawidłowy lub wygasł. Wpisz nowy kod."
+captcha_required = "Wargaming wymaga CAPTCHA. Zaloguj się raz w oficjalnym Game Center lub na wargaming.net, a następnie spróbuj ponownie."
+rate_limited = "Zbyt wiele prób logowania. Odczekaj kilka minut i spróbuj ponownie."
+account_banned = "To konto jest zbanowane."
+network_unreachable = "Nie można połączyć się z Wargaming. Sprawdź połączenie z internetem."
+service_unavailable = "Usługa logowania Wargaming jest niedostępna. Spróbuj ponownie później."
+session_expired = "Zapisane logowanie wygasło. Zaloguj się ponownie."
+keyring_locked = "Systemowy pęk kluczy jest zablokowany. Odblokuj go i zaloguj się ponownie."
+not_saved = "Zalogowano, ale nie udało się zapisać logowania. Po ponownym uruchomieniu trzeba będzie zalogować się ponownie."
+unexpected = "Logowanie nie powiodło się. Szczegóły są w dzienniku."
+
 [ui.launcher.options]
 heading = "Opcje uruchamiania"
 extra_args = "Dodatkowe argumenty uruchamiania (jeden w wierszu)"
@@ -2138,10 +2152,10 @@ continue = "Kontynuuj"
 cancel = "Anuluj"
 
 [ui.launcher.keyring]
-not_saved = "Ta sesja nie zostanie zapisana. Po ponownym uruchomieniu Toolkit trzeba będzie zalogować się ponownie."
-missing = "Brak dostępnego systemowego pęku kluczy (Secret Service)."
-how = "Jak go włączyć"
-how_detail = "Włącz interfejs Secret Service w KDE Wallet (Ustawienia systemowe, KDE Wallet) albo zainstaluj i uruchom gnome-keyring. Następnie uruchom ponownie Toolkit."
+unencrypted = "Twoje logowanie jest zapisywane bez szyfrowania w folderze danych aplikacji, ponieważ nie jest dostępny żaden dostawca Secret Service (np. GNOME Keyring, KeePassXC lub KDE Wallet)."
+how = "Jak zachować szyfrowanie"
+how_detail = "Zainstaluj i uruchom dostawcę Secret Service, np. GNOME Keyring, KeePassXC lub KDE Wallet, a następnie uruchom ponownie Toolkit. Zapisane logowania zostaną do niego przeniesione."
+unlock_hint = "Systemowy pęk kluczy może poprosić o odblokowanie, aby Toolkit mógł odczytać zapisane logowanie."
 
 [ui.launcher.play]
 play = "Graj"
@@ -2169,6 +2183,7 @@ default = "Domyślne"
 ready = "Gotowe"
 restoring = "Sprawdzanie..."
 not_saved = "Niezapisane"
+unencrypted = "Zapisano bez szyfrowania"
 keyring_locked = "Pęk kluczy zablokowany: odblokuj go, aby przywrócić zapisane logowania"
 forget = "Usuń"
 play_anyway = "Graj mimo to"

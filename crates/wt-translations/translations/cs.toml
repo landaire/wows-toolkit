@@ -1852,6 +1852,20 @@ use_backup_code = "Použít záložní kód"
 submit_code = "Odeslat kód"
 captcha = "Toto přihlášení vyžaduje CAPTCHA, kterou tento spouštěč zatím neumí zobrazit. Přihlaste se jednou přes oficiální Wargaming Game Center nebo wargaming.net v prohlížeči a zkuste to znovu."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "Nesprávný e-mail nebo heslo."
+two_factor_required = "Tento účet vyžaduje dvoufázové schválení. Schvalte přihlášení ve Wargaming Auth nebo kódem z e-mailu a pak se přihlaste znovu."
+two_factor_invalid = "Dvoufázový kód je nesprávný nebo vypršel. Zadejte nový kód."
+captcha_required = "Wargaming vyžaduje CAPTCHA. Přihlaste se jednou v oficiálním Game Center nebo na wargaming.net a pak to zkuste znovu."
+rate_limited = "Příliš mnoho pokusů o přihlášení. Počkejte několik minut a pak to zkuste znovu."
+account_banned = "Tento účet je zablokován."
+network_unreachable = "Wargaming není dostupný. Zkontrolujte připojení k internetu."
+service_unavailable = "Přihlašovací služba Wargaming není dostupná. Zkuste to později."
+session_expired = "Uložené přihlášení vypršelo. Přihlaste se znovu."
+keyring_locked = "Systémová klíčenka je zamčená. Odemkněte ji a pak se přihlaste znovu."
+not_saved = "Přihlášeno, ale přihlášení se nepodařilo uložit. Po restartu se budete muset přihlásit znovu."
+unexpected = "Přihlášení se nezdařilo. Podrobnosti jsou v protokolu."
+
 [ui.launcher.options]
 heading = "Možnosti spuštění"
 extra_args = "Další argumenty spuštění (jeden na řádek)"
@@ -2138,10 +2152,10 @@ continue = "Pokračovat"
 cancel = "Zrušit"
 
 [ui.launcher.keyring]
-not_saved = "Tato relace nebude uložena. Po restartu toolkitu se budete muset přihlásit znovu."
-missing = "Není k dispozici žádná systémová klíčenka (Secret Service)."
-how = "Jak ji povolit"
-how_detail = "Povolte rozhraní Secret Service API v KDE Wallet (Nastavení systému, KDE Wallet), nebo nainstalujte a spusťte gnome-keyring. Poté restartujte toolkit."
+unencrypted = "Vaše přihlášení se ukládá nešifrovaně do datové složky aplikace, protože není k dispozici žádný poskytovatel Secret Service (například GNOME Keyring, KeePassXC nebo KDE Wallet)."
+how = "Jak ho ponechat šifrované"
+how_detail = "Nainstalujte a spusťte poskytovatele Secret Service, například GNOME Keyring, KeePassXC nebo KDE Wallet, a pak toolkit restartujte. Uložená přihlášení se do něj přesunou."
+unlock_hint = "Systémová klíčenka může požádat o odemčení, aby toolkit mohl načíst vaše uložené přihlášení."
 
 [ui.launcher.play]
 play = "Hrát"
@@ -2169,6 +2183,7 @@ default = "Výchozí"
 ready = "Připraveno"
 restoring = "Kontrola..."
 not_saved = "Neuloženo"
+unencrypted = "Uloženo nešifrovaně"
 keyring_locked = "Klíčenka je zamčená: odemkněte ji pro obnovení uložených přihlášení"
 forget = "Odebrat"
 play_anyway = "Přesto hrát"
