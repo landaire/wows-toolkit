@@ -713,7 +713,8 @@ impl PrStats {
 }
 
 /// Match contribution across the games in view: the worst, the best and the mean
-/// of the rated games.
+/// of the rated games. Games of a battle type MC does not apply to are left
+/// out, not counted as nothing.
 ///
 /// Unlike PR, MC is not recomputed from summed totals: it rates one whole
 /// battle, so the mean of the battles is the session's figure. Ships may be
@@ -728,9 +729,11 @@ pub struct McStats {
 }
 
 impl McStats {
-    /// `None` when no game in `games` was rated.
+    /// `None` when no game in `games` was a rated battle with an MC.
     pub fn from_games(games: &[&PerGameStat]) -> Option<Self> {
-        Self::from_ratings(games.iter().filter_map(|game| game.match_contribution))
+        Self::from_ratings(
+            games.iter().filter(|game| game.rating_scope().is_rated()).filter_map(|game| game.match_contribution),
+        )
     }
 
     /// `None` when `ratings` is empty.
@@ -851,6 +854,34 @@ mod tests {
             game("Yamato", "2026-01-02 10:00:00", 50_000, 0, false, true, "ranked"),
             game("Shimakaze", "2026-01-03 10:00:00", 80_000, 3, true, false, "pvp"),
         ]
+    }
+
+    fn rated_game(mode: &str, mc: i64) -> PerGameStat {
+        PerGameStat { match_contribution: Some(mc), ..game("Yamato", "2026-01-01 10:00:00", 1, 0, true, false, mode) }
+    }
+
+    /// A stored MC from a battle type MC does not apply to is left out of the
+    /// figures, rather than counted.
+    #[test]
+    fn match_contribution_counts_only_random_and_ranked_games() {
+        let games = [
+            rated_game("pvp", 1_000),
+            rated_game("ranked", 1_600),
+            rated_game("cooperative", 3_000),
+            rated_game("pve", 0),
+        ];
+        let games: Vec<&PerGameStat> = games.iter().collect();
+
+        let stats = McStats::from_games(&games).expect("two games are rated");
+        assert_eq!(stats, McStats { min: 1_000.0, max: 1_600.0, average: 1_300.0, rated_games: 2 });
+    }
+
+    #[test]
+    fn match_contribution_is_absent_without_a_random_or_ranked_game() {
+        let games = [rated_game("cooperative", 3_000), rated_game("clan", 1_200), rated_game("event", 900)];
+        let games: Vec<&PerGameStat> = games.iter().collect();
+
+        assert_eq!(McStats::from_games(&games), None);
     }
 
     #[test]

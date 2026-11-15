@@ -13,6 +13,7 @@ use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::personal_rating::BattleRating;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use zgui::component;
 use zgui::view;
 use zgui::view::AnyView;
@@ -88,12 +89,13 @@ fn tier_color(category: PersonalRatingCategory) -> String {
 
 /// The recording player's figures, Personal Rating and Match Contribution as tiles, counted up from
 /// nothing when `counting`. A figure the replay does not carry has no tile; an unrated battle's
-/// rating tile says so.
+/// rating tiles are a dash that says why.
 #[component]
 pub fn StatTiles(
     own: Option<OwnFigures>,
     rating: Option<BattleRating>,
     match_contribution: Option<MatchContributionResult>,
+    match_contribution_withheld: Option<MatchContributionWithheld>,
     counting: bool,
 ) -> impl IntoView {
     let from = counting.then_some(0.0);
@@ -179,6 +181,10 @@ pub fn StatTiles(
         });
     }
 
+    if match_contribution_withheld == Some(MatchContributionWithheld::UnratedBattle) {
+        tiles.push(unrated_tile());
+    }
+
     tiles
 }
 
@@ -191,6 +197,27 @@ struct RatingTile {
     said: String,
     /// What the hover explains; `None` for a PR read back from storage, which kept no parts.
     figure: Option<RatedFigure>,
+}
+
+/// The MC tile of a battle MC does not apply to.
+fn unrated_tile() -> AnyView {
+    let label = t!("ui.replay.column.match_contribution").into_owned();
+    let explained = MatchContributionWithheld::UnratedBattle.explanation();
+    let said = explained.clone();
+
+    AnyView::new(view! {
+        Tooltip {
+            TooltipTrigger(class = "wt-rp-tile-trigger") {
+                column(class = "wt-rp-tile", attr:data-testid = BI_TILE_ID, a11y:label = said) {
+                    text(class = "wt-rp-tile__label") {{label}}
+                    text(class = "wt-rp-tile__value") {"-"}
+                }
+            }
+            TooltipContent {
+                text(class = "wt-rp-unrated-hover") {{explained.clone()}}
+            }
+        }
+    })
 }
 
 /// Each side's total either side of a bar split in proportion to them, allies on the left.

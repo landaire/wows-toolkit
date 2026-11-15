@@ -442,7 +442,7 @@
         },
         "mc": 66.32372479152804,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "Turkish",
       "observed_results": {
@@ -1248,7 +1248,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 5
+        "version": 6
       },
       "name": "0ldGrump",
       "observed_results": {
@@ -1992,7 +1992,7 @@
         },
         "mc": 234.83569369890782,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "lizardhunter",
       "observed_results": {
@@ -2829,7 +2829,7 @@
           "threat_weight": 3.4524710178375244,
           "threatening": 6
         },
-        "version": 5
+        "version": 6
       },
       "name": "Elk310",
       "observed_results": {
@@ -3637,7 +3637,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 5
+        "version": 6
       },
       "name": "Alpine_Mustache",
       "observed_results": {
@@ -4517,7 +4517,7 @@
           "threat_weight": 9.041138231754303,
           "threatening": 10
         },
-        "version": 5
+        "version": 6
       },
       "name": "G3th62",
       "observed_results": {
@@ -5256,7 +5256,7 @@
         },
         "mc": 538.6965900207832,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "usersap",
       "observed_results": {
@@ -6021,7 +6021,7 @@
         },
         "mc": 364.49037539294494,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "hollowpoint58",
       "observed_results": {
@@ -6844,7 +6844,7 @@
         },
         "mc": 2170.695340354086,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "MJR_HOOPTIE",
       "observed_results": {
@@ -7617,7 +7617,7 @@
         },
         "mc": 334.2560567570235,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "SQREHD",
       "observed_results": {
@@ -8369,7 +8369,7 @@
         },
         "mc": 1517.6101582210858,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "EvilOcean",
       "observed_results": {
@@ -9128,7 +9128,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 465202,
-          "ships_spotted": 0.6547190946851855,
+          "ships_spotted": 0.6547190946851854,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 58952,
@@ -9149,7 +9149,7 @@
           "threat_weight": 3.9115312099456787,
           "threatening": 8
         },
-        "version": 5
+        "version": 6
       },
       "name": "Thatdidinthurt",
       "observed_results": {
@@ -9905,7 +9905,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 5
+        "version": 6
       },
       "name": "leo_ascue",
       "observed_results": {
@@ -10647,7 +10647,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 1224650,
-          "ships_spotted": 0.7500854851775959,
+          "ships_spotted": 0.750085485177596,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 58319,
@@ -10668,7 +10668,7 @@
           "threat_weight": 4.0,
           "threatening": 4
         },
-        "version": 5
+        "version": 6
       },
       "name": "duck46",
       "observed_results": {
@@ -11510,7 +11510,7 @@
           "threat_weight": 4.115402519702911,
           "threatening": 11
         },
-        "version": 5
+        "version": 6
       },
       "name": "Kitty_Mel",
       "observed_results": {
@@ -12380,7 +12380,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 446668,
-          "ships_spotted": 0.6621752228209798,
+          "ships_spotted": 0.66217522282098,
           "ships_spotted_baseline": 1.1538461538461537,
           "spotting_baseline": 75000.0,
           "spotting_damage": 33596,
@@ -12397,7 +12397,7 @@
         },
         "mc": 1263.741109448069,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "nastypatty21",
       "observed_results": {
@@ -13268,7 +13268,7 @@
           "threat_weight": 0.0,
           "threatening": 0
         },
-        "version": 5
+        "version": 6
       },
       "name": "nikos176",
       "observed_results": {
@@ -14119,7 +14119,7 @@
         },
         "mc": 1285.53231971046,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "VeroDHero",
       "observed_results": {
@@ -14944,7 +14944,7 @@
           "threat_weight": 0.32859671115875244,
           "threatening": 1
         },
-        "version": 5
+        "version": 6
       },
       "name": "Waether",
       "observed_results": {
@@ -15666,7 +15666,7 @@
         },
         "mc": 25.830957833006874,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "tanktastic03",
       "observed_results": {
@@ -16326,7 +16326,7 @@
             "torpedo_bombers": 0
           },
           "potential_damage": 1047850,
-          "ships_spotted": 1.1163382585465889,
+          "ships_spotted": 1.116338258546589,
           "ships_spotted_baseline": 0.5384615384615384,
           "spotting_baseline": 35000.0,
           "spotting_damage": 42854,
@@ -16343,7 +16343,7 @@
         },
         "mc": 787.6434063662275,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "Corum4547",
       "observed_results": {
@@ -17154,7 +17154,7 @@
         },
         "mc": 1244.3908522696183,
         "torpedo_detection": null,
-        "version": 5
+        "version": 6
       },
       "name": "VITORRITIELIBR",
       "observed_results": {
@@ -18002,7 +18002,7 @@
           "threat_weight": 4.6813467144966125,
           "threatening": 12
         },
-        "version": 5
+        "version": 6
       },
       "name": "pancakesandradar",
       "observed_results": {
@@ -18890,7 +18890,7 @@
           "threat_weight": 0.4937678575515747,
           "threatening": 2
         },
-        "version": 5
+        "version": 6
       },
       "name": "Caferata",
       "observed_results": {

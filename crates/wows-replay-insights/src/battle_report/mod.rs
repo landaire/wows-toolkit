@@ -317,13 +317,17 @@ impl NormalizedBattleReport {
     /// rating already present. Unlike PR, MC is recomputed whenever asked:
     /// a stored MC from an older formula is meant to be replaced.
     ///
+    /// Only Random and Ranked battles are rated: the expected values come from
+    /// Random battles, and other battle types change the opponents, the ships
+    /// or the objective.
+    ///
     /// A recording that did not reach the battle's end rates nobody. Its
     /// player left early and was sent nothing after that, so two recordings
     /// of one battle would rate the same player differently. The version is
     /// still stamped: the replay was rated, and no later pass can do better.
     pub fn populate_match_contribution(&mut self, table: &crate::personal_rating::PersonalRatingData) {
         let saw_battle_end = self.metadata.battle_result.is_some();
-        let ratings = if saw_battle_end {
+        let ratings = if saw_battle_end && self.metadata.rating_scope().is_rated() {
             rate_battle(&self.players, table, &self.torpedo_detections, self.critical_bursts.as_ref())
         } else {
             vec![None; self.players.len()]

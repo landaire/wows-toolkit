@@ -513,7 +513,7 @@ pub fn sample_model() -> ReplayReportModel {
         self_team: TeamId::from(0i64),
         rows,
         battle_result: None,
-        match_contribution_withheld: false,
+        match_contribution_withheld: None,
         columns: ReplayColumn::ALL.to_vec(),
         map: "Fault Line".to_string(),
         chat: sample_chat_messages(),

@@ -293,7 +293,16 @@ async fn store_battle(
         ConstantsFit::Matched => ResultsWrite::Store,
         ConstantsFit::Mismatched => ResultsWrite::Keep,
     };
-    query::write_indexed_replay(pool, &rows.objective, &rows.vehicles, &rows.record, stored.mode, results).await?;
+    query::write_indexed_replay(
+        pool,
+        &rows.objective,
+        &rows.vehicles,
+        &rows.record,
+        stored.mode,
+        results,
+        rows.rating_scope,
+    )
+    .await?;
 
     Ok(())
 }
@@ -466,6 +475,7 @@ mod tests {
     use wows_replays::analyzer::battle_controller::BattleResult;
     use wows_replays::types::ArenaId;
     use wows_replays::types::GameParamId;
+    use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 
     use super::*;
     use crate::test_support::FIXTURE_PR_SHIP_ID;
@@ -581,6 +591,78 @@ mod tests {
             let refilled = repair_missing_pr(&pool, &expected_values(50.0)).await.expect("the repair runs");
             assert_eq!(refilled, 0, "a stored rating is not replaced");
             assert_eq!(listed_rating(&pool, source, path).await, Some(rating));
+        });
+    }
+
+    /// [`rated_battle`] as a battle of `game_type` in `match_group`.
+    fn battle_of_type(game_type: &str, match_group: &str) -> IndexableBattle {
+        let mut battle = rated_battle();
+        battle.normalized.metadata.game_type = game_type.to_owned();
+        battle.normalized.metadata.match_group = match_group.to_owned();
+        battle
+    }
+
+    /// MC is rated for Random and Ranked battles only, read from `gameType`,
+    /// or from `matchGroup` in a replay too old to carry one.
+    #[test]
+    fn match_contribution_is_rated_only_for_random_and_ranked_battles() {
+        let cases = [
+            ("RandomBattle", "pvp", true),
+            ("RankedBattle", "ranked", true),
+            ("", "ranked", true),
+            ("CooperativeBattle", "cooperative", false),
+            ("PVEBattle", "pve", false),
+            ("ClanBattle", "clan", false),
+            ("EventBattle", "event", false),
+            ("BrawlBattle", "brawl", false),
+            ("TrainingBattle", "training", false),
+            ("", "cooperative", false),
+        ];
+        let table = expected_values(100.0);
+
+        for (game_type, match_group, rated) in cases {
+            let mut normalized = battle_of_type(game_type, match_group).normalized;
+            normalized.populate_match_contribution(&table);
+
+            let own = normalized.players.iter().find(|player| player.is_self).expect("the report has a self player");
+            assert_eq!(own.match_contribution.is_some(), rated, "{game_type:?} in {match_group:?}");
+            let withheld = MatchContributionWithheld::of_report(&normalized);
+            let expected = (!rated).then_some(MatchContributionWithheld::UnratedBattle);
+            assert_eq!(withheld, expected, "{game_type:?} in {match_group:?}");
+        }
+    }
+
+    /// The owner's MC as the listing reads it.
+    async fn listed_match_contribution(pool: &SqlitePool, source: SourceId, path: &Path) -> Option<f64> {
+        let summaries = query::row_summaries_for_source(pool, source).await.expect("the summaries read");
+        summaries.get(path).expect("the battle is indexed").self_mc
+    }
+
+    /// An MC stored for an arena is cleared once the arena is indexed as a
+    /// battle type MC does not apply to, even by a pass whose constants do
+    /// not fit and that keeps the stored results.
+    #[test]
+    fn indexing_an_unrated_battle_clears_a_stored_match_contribution() {
+        runtime().block_on(async {
+            let pool = wows_toolkit_config::test_pool().await;
+            let path = Path::new("G:/wows/replays/coop.wowsreplay");
+            let table = expected_values(100.0);
+            let source = store_rated_battle(&pool, path, Some(&table)).await;
+            let rated = listed_match_contribution(&pool, source, path).await;
+            assert!(rated.is_some(), "the Random battle was rated");
+
+            let mut unrated = battle_of_type("CooperativeBattle", "cooperative");
+            unrated.constants_fit = ConstantsFit::Mismatched;
+            let stored = StoredReplay {
+                path,
+                file_mtime: None,
+                source_id: source,
+                indexed_at: Timestamp::now(),
+                mode: IndexWriteMode::Incremental,
+            };
+            store_battle(&pool, unrated, Some(&table), &stored).await.expect("the battle is written");
+
+            assert_eq!(listed_match_contribution(&pool, source, path).await, None);
         });
     }
 

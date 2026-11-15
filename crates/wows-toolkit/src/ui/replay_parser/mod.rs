@@ -132,6 +132,7 @@ use wows_toolkit_viewmodel::fire_chance::TallyRow;
 use wows_toolkit_viewmodel::fire_chance::fire_chance_battle_tally_rows;
 use wows_toolkit_viewmodel::fire_chance::fire_chance_formula_lines;
 use wows_toolkit_viewmodel::fire_chance::fire_chance_ribbon_rows;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 
 use itertools::Itertools;
 use wowsunpack::data::ResourceLoader;
@@ -1914,8 +1915,8 @@ impl UiReport {
                                 &format!("{:.0}", mc.mc),
                                 self.rating_hover(report),
                             );
-                        } else if self.rated_without_battle_end() {
-                            ui.label("-").on_hover_text(t!("ui.rating.unrated_early_exit"));
+                        } else if let Some(reason) = self.match_contribution_withheld() {
+                            ui.label("-").on_hover_text(reason.explanation());
                         } else {
                             ui.label("-");
                         }
@@ -2519,10 +2520,9 @@ impl UiReport {
         }
     }
 
-    /// MC was rated, and rated nobody because the recording stopped before
-    /// the battle ended.
-    fn rated_without_battle_end(&self) -> bool {
-        self.normalized.match_contribution_version.is_some() && self.normalized.metadata.battle_result.is_none()
+    /// Why nobody in this replay has an MC, when that is known.
+    fn match_contribution_withheld(&self) -> Option<MatchContributionWithheld> {
+        MatchContributionWithheld::of_report(&self.normalized)
     }
 
     /// A row that hides its stats shows only the band: a breakdown's inputs
@@ -3379,6 +3379,10 @@ impl ToolkitTabViewer<'_> {
                         &format!("MC: {:.0} ({})", mc_result.mc, mc_result.category.name()),
                         hover,
                     );
+                } else if replay_file.ui_report.as_ref().and_then(|report| report.match_contribution_withheld())
+                    == Some(MatchContributionWithheld::UnratedBattle)
+                {
+                    ui.label("MC: -").on_hover_text(MatchContributionWithheld::UnratedBattle.explanation());
                 }
 
                 ui.menu_button(t!("ui.replay.actions"), |ui| {

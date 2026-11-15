@@ -12,6 +12,7 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::BattleType;
 use wows_core::game_types::GameParamId;
+use wows_core::game_types::MatchContributionVersion;
 use wows_core::rating_scope::RatingScope;
 use wows_core::version::Version;
 use wows_toolkit_config::index::query;
@@ -357,11 +358,9 @@ fn every_battle_type() -> Vec<BattleType> {
     all.to_vec()
 }
 
-/// The migration that clears ratings stored for unrated battles has to select
-/// exactly the battles `RatingScope::of_battle` calls unrated: SQL cannot call
-/// the classifier, so the two are kept in step by this test.
-#[tokio::test]
-async fn the_unrated_rating_migration_agrees_with_the_rating_scope() {
+/// Each battle type under several match groups, plus the `gameType` values of
+/// old and unknown replays, as (`game_type`, `match_group`).
+fn scope_cases() -> Vec<(String, String)> {
     let mut cases: Vec<(String, String)> = Vec::new();
     for battle_type in every_battle_type() {
         for match_group in ["pvp", "ranked", "cooperative"] {
@@ -373,7 +372,15 @@ async fn the_unrated_rating_migration_agrees_with_the_rating_scope() {
             cases.push((game_type.to_string(), match_group.to_string()));
         }
     }
+    cases
+}
 
+/// The migration that clears ratings stored for unrated battles has to select
+/// exactly the battles `RatingScope::of_battle` calls unrated: SQL cannot call
+/// the classifier, so the two are kept in step by this test.
+#[tokio::test]
+async fn the_unrated_rating_migration_agrees_with_the_rating_scope() {
+    let cases = scope_cases();
     let pool = mem_pool().await;
     let src = source(&pool).await;
     for (arena, (game_type, match_group)) in (1..).zip(&cases) {
@@ -395,4 +402,75 @@ async fn the_unrated_rating_migration_agrees_with_the_rating_scope() {
             "roster row of {game_type:?}/{match_group:?}"
         );
     }
+}
+
+/// A roster row holding an MC from an earlier formula revision, as the
+/// recording player of `arena`.
+fn a_vehicle_with_mc(arena: i64) -> IndexedVehicleRow {
+    IndexedVehicleRow {
+        mc: Some(1400.0),
+        mc_version: Some(MatchContributionVersion(5)),
+        mc_torpedoes_observed: true,
+        ..a_vehicle(arena, 7, Some(1200.0))
+    }
+}
+
+async fn stored_mc(pool: &sqlx::SqlitePool, arena: i64) -> (Option<f64>, bool) {
+    let row =
+        sqlx::query("SELECT mc, mc_torpedoes_observed FROM indexed_vehicle WHERE arena_id = ?1 AND account_id = 7")
+            .bind(arena)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    (row.try_get("mc").unwrap(), row.try_get("mc_torpedoes_observed").unwrap())
+}
+
+/// Each case's stored MC once stored MC has been cleared, against what the
+/// classifier says should be left.
+async fn assert_mc_left_by_scope(pool: &sqlx::SqlitePool, cases: &[(String, String)]) {
+    for (arena, (game_type, match_group)) in (1..).zip(cases) {
+        let scope = RatingScope::of_battle(&BattleType::from_value(game_type, Version::default()), match_group);
+        let expected = if scope.is_rated() { (Some(1400.0), true) } else { (None, false) };
+        assert_eq!(stored_mc(pool, arena).await, expected, "roster row of {game_type:?}/{match_group:?}");
+    }
+}
+
+/// The migration that clears MC stored for unrated battles has to select
+/// exactly the battles `RatingScope::of_battle` calls unrated.
+#[tokio::test]
+async fn the_unrated_mc_migration_agrees_with_the_rating_scope() {
+    let cases = scope_cases();
+    let pool = mem_pool().await;
+    let src = source(&pool).await;
+    for (arena, (game_type, match_group)) in (1..).zip(&cases) {
+        query::upsert_match(&pool, &a_match_of(arena, game_type, match_group)).await.unwrap();
+        query::upsert_record(&pool, &a_record(arena, src, None)).await.unwrap();
+        query::upsert_vehicles(&pool, &[a_vehicle_with_mc(arena)]).await.unwrap();
+    }
+
+    sqlx::raw_sql(include_str!("../migrations/020_unrated_battle_mc.sql")).execute(&pool).await.unwrap();
+
+    assert_mc_left_by_scope(&pool, &cases).await;
+}
+
+/// Marking replays that could not be reparsed as current stamps the new MC
+/// revision without keeping an MC the battle type rules out, by the same
+/// rule as the classifier.
+#[tokio::test]
+async fn marking_records_current_clears_mc_by_the_rating_scope() {
+    let cases = scope_cases();
+    let pool = mem_pool().await;
+    let root = Path::new("C:/wows/replays");
+    let src = source(&pool).await;
+    for (arena, (game_type, match_group)) in (1..).zip(&cases) {
+        query::upsert_match(&pool, &a_match_of(arena, game_type, match_group)).await.unwrap();
+        let record =
+            ReplayRecord { replay_path: root.join(format!("{arena}.wowsreplay")), ..a_record(arena, src, None) };
+        query::upsert_record(&pool, &record).await.unwrap();
+        query::upsert_vehicles(&pool, &[a_vehicle_with_mc(arena)]).await.unwrap();
+    }
+
+    query::mark_replay_records_current(&pool, src, root, Some(MatchContributionVersion(6))).await.unwrap();
+
+    assert_mc_left_by_scope(&pool, &cases).await;
 }

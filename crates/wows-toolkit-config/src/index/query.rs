@@ -13,8 +13,8 @@ use sqlx::SqlitePool;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
-use wows_core::rating_scope::RatingScope;
 use wows_core::game_types::MatchContributionVersion;
+use wows_core::rating_scope::RatingScope;
 
 use super::query_ast::MatchExpr;
 use super::query_sql::CompileCtx;
@@ -598,7 +598,9 @@ struct StoredVehicleFacts {
 /// primary key. Each account's stored facts are read by account before its
 /// rows are deleted, so retained facts move onto the corrected identity
 /// instead of leaving a stale row behind. Retained ratings merge as
-/// [`upsert_vehicles_with_mode`] describes.
+/// [`upsert_vehicles_with_mode`] describes, except that an `Unrated`
+/// `rating_scope` clears every `mc` whatever the modes: the battle type alone
+/// rules MC out, so no pass can be short of the facts to say so.
 pub async fn write_indexed_replay(
     pool: &SqlitePool,
     objective: &ObjectiveMatch,
@@ -606,6 +608,7 @@ pub async fn write_indexed_replay(
     record: &ReplayRecord,
     mode: IndexWriteMode,
     results: ResultsWrite,
+    rating_scope: RatingScope,
 ) -> Result<(), IndexError> {
     let arena_id = record.arena_id;
     debug_assert_eq!(objective.arena_id, arena_id);
@@ -683,6 +686,11 @@ pub async fn write_indexed_replay(
                 vehicle.is_stream_sniper = old.is_stream_sniper;
                 vehicle.sniper_twitch_login.clone_from(&old.sniper_twitch_login);
             }
+        }
+
+        if !rating_scope.is_rated() {
+            vehicle.mc = None;
+            vehicle.mc_torpedoes_observed = false;
         }
 
         sqlx::query("DELETE FROM indexed_vehicle WHERE arena_id = ?1 AND account_id = ?2")
@@ -887,11 +895,24 @@ pub async fn has_stale_replay_records(
     Ok(!stale_paths_under(pool, source, root, rateable_mc).await?.is_empty())
 }
 
+/// Clears the stored MC of the arena of record (`?1` source, `?2` path) when
+/// the battle is one no rating applies to. The predicate mirrors
+/// `RatingScope::of_battle` as migration `020_unrated_battle_mc.sql` does: a
+/// `game_type` decides, and an empty one falls back to the match group. A test
+/// in `tests/index_pr_repair.rs` checks it against the classifier.
+const CLEAR_UNRATED_MC_OF_RECORD: &str = "UPDATE indexed_vehicle SET mc = NULL, mc_torpedoes_observed = 0 \
+     WHERE arena_id = (SELECT arena_id FROM replay_record WHERE source_id = ?1 AND replay_path = ?2) \
+       AND (mc IS NOT NULL OR mc_torpedoes_observed <> 0) \
+       AND arena_id IN (SELECT arena_id FROM indexed_match \
+         WHERE NOT (game_type IN ('RandomBattle', 'RankedBattle', 'OldRankedBattle') \
+                    OR (game_type = '' AND match_group IN ('pvp', 'ranked'))))";
+
 /// Marks the rows under a completely scanned `root` as handled by the current
 /// parser, so a replay that could not be reparsed does not start the scan again.
 ///
 /// Under `rateable_mc` the roster rows of those replays' arenas are stamped
-/// with that MC revision too, keeping whatever `mc` they hold.
+/// with that MC revision too, keeping whatever `mc` they hold, except in a
+/// battle MC does not apply to, whose `mc` is cleared whatever the revision.
 pub async fn mark_replay_records_current(
     pool: &SqlitePool,
     source: SourceId,
@@ -901,6 +922,7 @@ pub async fn mark_replay_records_current(
     let stale = stale_paths_under(pool, source, root, rateable_mc).await?;
     let mut tx = pool.begin().await?;
     for path in stale {
+        sqlx::query(CLEAR_UNRATED_MC_OF_RECORD).bind(source.0).bind(&path).execute(&mut *tx).await?;
         if let Some(version) = rateable_mc {
             sqlx::query(
                 "UPDATE indexed_vehicle SET mc_version = ?1 \

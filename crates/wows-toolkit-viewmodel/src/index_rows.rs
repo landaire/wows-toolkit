@@ -28,6 +28,7 @@ use wows_toolkit_config::index::rows::PrRepair;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::VehicleRelation;
+use wowsunpack::rating_scope::RatingScope;
 
 /// Whether the constants file matches the build the replay was recorded on.
 ///
@@ -126,11 +127,13 @@ pub struct IndexContext {
     pub fit: ConstantsFit,
 }
 
-/// The three row sets one replay produces.
+/// The three row sets one replay produces, and whether a rating applies to
+/// its battle, which decides what the write keeps of a stored MC.
 pub struct MappedRows {
     pub objective: ObjectiveMatch,
     pub vehicles: Vec<IndexedVehicleRow>,
     pub record: ReplayRecord,
+    pub rating_scope: RatingScope,
 }
 
 /// The verdict as the index stores it.
@@ -238,7 +241,7 @@ pub fn map_rows(report: &NormalizedBattleReport, context: &IndexContext) -> Mapp
         indexed_at: context.indexed_at,
     };
 
-    let mut rows = MappedRows { objective, vehicles, record };
+    let mut rows = MappedRows { objective, vehicles, record, rating_scope: metadata.rating_scope() };
     if context.fit == ConstantsFit::Mismatched {
         suppress_untrusted_results(&mut rows);
     }

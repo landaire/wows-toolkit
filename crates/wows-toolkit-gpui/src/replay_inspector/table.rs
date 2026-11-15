@@ -90,6 +90,7 @@ use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::vfs::VfsPath;
 
@@ -721,6 +722,10 @@ impl PlayerTable {
 
     pub fn self_match_contribution(&self) -> Option<MatchContributionResult> {
         self.model.rows.iter().find(|row| row.is_self)?.match_contribution.clone()
+    }
+
+    pub fn match_contribution_withheld(&self) -> Option<MatchContributionWithheld> {
+        self.model.match_contribution_withheld
     }
 
     /// The id of the self row's PR or MC cell, which carries the rating's
@@ -2425,7 +2430,8 @@ fn damage_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
 /// A PR or MC chip whose hover breaks the rating into its parts. A PR read
 /// back from storage has no parts, and a hidden player's parts would give
 /// away the figures their stats hide, so both keep the band's name. An MC
-/// withheld for a recording that ended early is a dash that says why.
+/// withheld for an unrated battle type or a recording that ended early is a
+/// dash that says why.
 fn rating_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyElement {
     let mut cell = cell_value(row, col, layout.debug);
     let hidden = row.should_hide_stats() && !layout.debug;
@@ -2438,9 +2444,9 @@ fn rating_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     let Some(figure) = figure.filter(|_| !hidden) else {
         if col == ReplayColumn::MatchContribution
             && row.match_contribution.is_none()
-            && layout.match_contribution_withheld
+            && let Some(reason) = layout.match_contribution_withheld
         {
-            cell.hover = Some(t!("ui.rating.unrated_early_exit").into_owned());
+            cell.hover = Some(reason.explanation());
         }
         return cell_element(ix, row.db_id, col, cell, None, width, &layout.entity);
     };
@@ -2637,8 +2643,8 @@ struct RowLayout<'a> {
     /// Which side the row's player is on, for the stripe in its gutter.
     mark: RowMark,
     alt_held: bool,
-    /// Whether MC was withheld because the recording ended before the battle.
-    match_contribution_withheld: bool,
+    /// Why the battle has no MC for anyone.
+    match_contribution_withheld: Option<MatchContributionWithheld>,
     /// How far each column is drawn from its place while the columns slide.
     column_shift: &'a [Pixels],
     /// The column being moved by its header, whose cells mark its slot.
@@ -3080,7 +3086,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![base_row(1, Relation::new(0), true), base_row(2, Relation::new(2), false)],
             battle_result: Some(BattleResult::Win(0)),
-            match_contribution_withheld: false,
+            match_contribution_withheld: None,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Ocean".to_string(),
             chat: Vec::new(),

@@ -15,6 +15,8 @@ use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::VehicleRelation;
+use wowsunpack::rating_scope::RatedBattle;
+use wowsunpack::rating_scope::RatingScope;
 
 #[tokio::test]
 async fn write_index_persists_all_three_tables() {
@@ -68,6 +70,7 @@ async fn write_index_persists_all_three_tables() {
             mc_version: None,
             mc_torpedoes_observed: false,
         }],
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
         record: ReplayRecord {
             arena_id: ArenaId::new(500),
             source_id: src,
@@ -123,6 +126,7 @@ async fn reindexing_with_results_upgrades_a_results_absent_row() {
     let pending_rows = MappedRows {
         objective: objective.clone(),
         vehicles: vec![],
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
         record: ReplayRecord {
             arena_id: ArenaId::new(600),
             source_id: src,
@@ -152,6 +156,7 @@ async fn reindexing_with_results_upgrades_a_results_absent_row() {
     let complete_rows = MappedRows {
         objective,
         vehicles: vec![],
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
         record: ReplayRecord {
             arena_id: ArenaId::new(600),
             source_id: src,
@@ -297,6 +302,7 @@ fn poisoned_rows(src: wows_toolkit_config::index::rows::SourceId) -> MappedRows 
             mc_version: None,
             mc_torpedoes_observed: false,
         }],
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
         record: ReplayRecord {
             arena_id: ArenaId::new(501),
             source_id: src,

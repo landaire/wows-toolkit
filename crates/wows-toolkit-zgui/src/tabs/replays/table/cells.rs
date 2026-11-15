@@ -314,7 +314,7 @@ fn damage_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
 
 /// A PR or MC figure over its team-share bar, with the rating's parts drawn on hover. The plain
 /// figure and its band's name when the rating kept no parts or the row's stats are hidden, and
-/// an MC dash says why when the recording ended before the battle did.
+/// an MC dash says why when the battle was not rated or the recording ended before it did.
 fn rating_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
     // The parts carry the damage and spotting figures a hidden row keeps back.
     let hidden = row.row.should_hide_stats() && !row.debug;
@@ -328,12 +328,11 @@ fn rating_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
 
     match figure.filter(|_| !hidden) {
         Some(figure) => with_rating_hover(figure_cell(col, row, cx, &cell, None), figure, "wt-pt-trigger"),
-        None if col == ReplayColumn::MatchContribution
-            && row.row.match_contribution.is_none()
-            && row.match_contribution_withheld =>
-        {
-            let hover = t!("ui.rating.unrated_early_exit").into_owned();
-            with_hover(figure_cell(col, row, cx, &cell, None), Some(hover))
+        None if col == ReplayColumn::MatchContribution && row.row.match_contribution.is_none() => {
+            match row.match_contribution_withheld {
+                Some(reason) => with_hover(figure_cell(col, row, cx, &cell, None), Some(reason.explanation())),
+                None => number_cell(col, row, cx),
+            }
         }
         None => number_cell(col, row, cx),
     }

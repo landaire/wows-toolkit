@@ -440,7 +440,12 @@ impl SessionStats {
 
     /// Match contribution across the filtered games.
     pub fn match_contribution(&self) -> Option<McStats> {
-        McStats::from_ratings(self.filtered_games().into_iter().filter_map(|game| game.match_contribution))
+        McStats::from_ratings(
+            self.filtered_games()
+                .into_iter()
+                .filter(|game| game.rating_scope().is_rated())
+                .filter_map(|game| game.match_contribution),
+        )
     }
 }
 

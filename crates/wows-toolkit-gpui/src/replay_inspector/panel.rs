@@ -1433,6 +1433,7 @@ impl Render for ReplayPanel {
                 let battle_result = loaded.battle_result;
                 let personal_rating = loaded.table.read(cx).self_personal_rating();
                 let match_contribution = loaded.table.read(cx).self_match_contribution();
+                let match_contribution_withheld = loaded.table.read(cx).match_contribution_withheld();
                 let team_damage = loaded.table.read(cx).team_damage();
                 let border = cx.theme().border;
 
@@ -1509,6 +1510,7 @@ impl Render for ReplayPanel {
                         own_figures,
                         personal_rating.as_ref(),
                         match_contribution.as_ref(),
+                        match_contribution_withheld,
                         progress,
                         cx,
                     ))
@@ -1606,7 +1608,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![self_row, enemy],
             battle_result: Some(BattleResult::Win(0)),
-            match_contribution_withheld: false,
+            match_contribution_withheld: None,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Ocean".to_string(),
             chat: Vec::new(),

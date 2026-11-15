@@ -4,6 +4,7 @@
 //! battle's data, largest part first.
 
 use rust_i18n::t;
+use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::match_contribution::FactorBasis;
 use wows_replay_insights::match_contribution::FactorScore;
 use wows_replay_insights::match_contribution::MatchContributionFactor;
@@ -27,6 +28,39 @@ impl RatingKind {
         match self {
             Self::Personal => t!("ui.rating.personal_rating").into(),
             Self::MatchContribution => t!("ui.rating.match_contribution").into(),
+        }
+    }
+}
+
+/// Why every player of a replay is without a match contribution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchContributionWithheld {
+    /// The battle type is not Random or Ranked, which the expected values do
+    /// not describe.
+    UnratedBattle,
+    /// MC was rated, but the recording ended before the battle did.
+    EarlyExit,
+}
+
+impl MatchContributionWithheld {
+    /// `None` when MC applies to the battle and the recording reached its
+    /// end, or when MC was never attempted, which a missing MC alone cannot
+    /// tell apart.
+    pub fn of_report(normalized: &NormalizedBattleReport) -> Option<Self> {
+        if !normalized.metadata.rating_scope().is_rated() {
+            return Some(Self::UnratedBattle);
+        }
+
+        let rated_early_exit =
+            normalized.match_contribution_version.is_some() && normalized.metadata.battle_result.is_none();
+        rated_early_exit.then_some(Self::EarlyExit)
+    }
+
+    /// The explanation an MC dash carries.
+    pub fn explanation(self) -> String {
+        match self {
+            Self::UnratedBattle => t!("ui.rating.mc_unrated_battle_type").into(),
+            Self::EarlyExit => t!("ui.rating.unrated_early_exit").into(),
         }
     }
 }

@@ -712,6 +712,7 @@ anti_air = "Anti-air"
 torpedo_warnings = "Torpedo warnings"
 critical_bursts = "Critical bursts"
 unrated_early_exit = "No MC: the recording ended before the battle did"
+mc_unrated_battle_type = "No MC: match contribution applies only to Random and Ranked battles"
 
 [ui.rating.detail]
 versus_expected = "%{actual} vs %{expected} expected"

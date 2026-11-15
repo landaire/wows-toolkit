@@ -29,6 +29,7 @@ use wows_toolkit_replay_data::test_support::base_row;
 use wows_toolkit_replay_data::test_support::fixture_empty_battle_report;
 use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wowsunpack::rating_scope::RatingScope;
@@ -94,7 +95,7 @@ fn model_at_expected_values() -> ReplayReportModel {
         self_team: TeamId::from(0i64),
         rows: vec![self_row, enemy],
         battle_result: Some(BattleResult::Win(0)),
-        match_contribution_withheld: false,
+        match_contribution_withheld: None,
         columns: ReplayColumn::ALL.to_vec(),
         map: "Ocean".to_string(),
         chat: Vec::new(),
@@ -336,6 +337,23 @@ fn the_mc_badge_reports_the_self_rows_match_contribution_and_explains_it() {
     let legend = window.texts_by_class("wt-rh__legend");
     assert_eq!(legend.len(), 2, "one explanation per basis shown: {legend:?}");
     assert!(legend[0].starts_with("Dynamic:") && legend[1].starts_with("Static:"), "{legend:?}");
+}
+
+/// A battle type MC does not apply to has a dash in place of the MC figure, which says why.
+#[test]
+fn an_unrated_battles_mc_badge_is_a_dash_that_says_why() {
+    let mut model = rated();
+    model.match_contribution_withheld = Some(MatchContributionWithheld::UnratedBattle);
+    let explained = t!("ui.rating.mc_unrated_battle_type").into_owned();
+    let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
+
+    let tile = window.by_test_id(BI_TILE_ID).expect("the MC tile is shown");
+    assert_eq!(window.a11y(tile).and_then(|state| state.label), Some(explained.clone()));
+    assert!(window.texts_by_class("wt-rp-tile__value").iter().any(|value| value == "-"), "the figure is a dash");
+    window.hover(tile).expect("the tile has a box");
+    window.advance(Duration::from_millis(800));
+    assert_eq!(window.texts_by_class("wt-rp-unrated-hover"), [explained], "the hover says why");
+    assert!(window.by_test_id("rating-mc-hover").is_none(), "there are no parts to list");
 }
 
 /// A rating table that lands after the battle is read still rates it.

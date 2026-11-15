@@ -3678,7 +3678,7 @@ impl MatchContributionVersion {
     /// The revision `wows_replay_insights::match_contribution` computes. Raise it
     /// with any change to that formula that alters the rating a battle gets,
     /// so stored ratings from the older formula are recomputed.
-    pub const CURRENT: MatchContributionVersion = MatchContributionVersion(5);
+    pub const CURRENT: MatchContributionVersion = MatchContributionVersion(6);
 }
 
 #[cfg(test)]

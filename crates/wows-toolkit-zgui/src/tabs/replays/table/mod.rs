@@ -42,6 +42,7 @@ use wows_toolkit_replay_data::team_totals::TeamShare;
 use wows_toolkit_replay_data::team_totals::TeamSide;
 use wows_toolkit_replay_data::team_totals::TeamTotals;
 use wows_toolkit_replay_data::team_totals::team_runs;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use zgui::component;
 use zgui::prelude::AnyView;
@@ -109,8 +110,8 @@ struct TableRow {
     /// The heading over the row's team, while the order keeps each team's rows together.
     team: Option<TeamHeading>,
     debug: bool,
-    /// The battle had a match contribution computed but withheld, since the recording ended early.
-    match_contribution_withheld: bool,
+    /// Why the battle has no match contribution for anyone.
+    match_contribution_withheld: Option<MatchContributionWithheld>,
 }
 
 impl PartialEq for TableRow {
@@ -142,7 +143,7 @@ struct TeamHeading {
 struct ModelRows {
     all: Arc<[PlayerRow]>,
     by_player: Arc<HashMap<AccountId, Arc<PlayerRow>>>,
-    match_contribution_withheld: bool,
+    match_contribution_withheld: Option<MatchContributionWithheld>,
 }
 
 impl PartialEq for ModelRows {

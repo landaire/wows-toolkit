@@ -194,7 +194,8 @@ pub async fn write_index(
     mode: IndexWriteMode,
     results: ResultsWrite,
 ) -> Result<(), IndexError> {
-    query::write_indexed_replay(pool, &rows.objective, &rows.vehicles, &rows.record, mode, results).await?;
+    query::write_indexed_replay(pool, &rows.objective, &rows.vehicles, &rows.record, mode, results, rows.rating_scope)
+        .await?;
     INDEX_GENERATION.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
@@ -337,6 +338,8 @@ mod tests {
     use wows_replays::types::ArenaId;
     use wows_replays::types::GameParamId;
     use wows_replays::types::Relation;
+    use wowsunpack::rating_scope::RatedBattle;
+    use wowsunpack::rating_scope::RatingScope;
 
     fn vehicle_row(account_id: i64, player_name: &str) -> IndexedVehicleRow {
         IndexedVehicleRow {
@@ -474,6 +477,7 @@ mod tests {
                 version_build: Some(1234),
             },
             vehicles: vec![vehicle],
+            rating_scope: RatingScope::Rated(RatedBattle::Random),
             record: ReplayRecord {
                 arena_id,
                 source_id: SourceId(1),
@@ -603,6 +607,7 @@ mod tests {
                 mc_version: None,
                 mc_torpedoes_observed: false,
             }],
+            rating_scope: RatingScope::Rated(RatedBattle::Random),
             record: ReplayRecord {
                 arena_id: ArenaId::new(7),
                 source_id: SourceId(1),

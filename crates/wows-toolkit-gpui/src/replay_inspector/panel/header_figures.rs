@@ -20,6 +20,7 @@ use gpui_kit::Window;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::div;
 use gpui_kit::linear_color_stop;
@@ -36,6 +37,7 @@ use wows_toolkit_replay_data::columns::ColorRole;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 
 use crate::replay_inspector::rating_hover;
 use crate::replay_inspector::rating_hover::RatedFigure;
@@ -103,8 +105,15 @@ struct Tile {
     /// What the tile reads as to assistive technology.
     said: String,
     tone: Option<Hsla>,
-    /// The rating's parts, shown on hover.
-    breakdown: Option<RatedFigure>,
+    hover: Option<TileHover>,
+}
+
+/// What a stat tile's hover shows.
+enum TileHover {
+    /// The rating's parts.
+    Breakdown(RatedFigure),
+    /// Why the tile has no figure.
+    Explanation(SharedString),
 }
 
 /// The header band's background: the result's tone at the leading edge,
@@ -152,7 +161,7 @@ fn counted(target: i128, progress: f32) -> i128 {
 
 /// One figure as a small card: its name over its value.
 fn stat_tile(tile: Tile, cx: &App) -> AnyElement {
-    let Tile { id, label, value, said, tone, breakdown } = tile;
+    let Tile { id, label, value, said, tone, hover } = tile;
 
     crate::ui::card_surface(v_flex(), cx)
         .id(id)
@@ -167,17 +176,24 @@ fn stat_tile(tile: Tile, cx: &App) -> AnyElement {
         .child(crate::ui::tabular(
             div().text_sm().font_weight(FontWeight::BOLD).when_some(tone, |el, tone| el.text_color(tone)).child(value),
         ))
-        .when_some(breakdown, |tile, breakdown| tile.tooltip(rating_hover::tooltip(Rc::new(breakdown))))
+        .when_some(hover, |tile, hover| match hover {
+            TileHover::Breakdown(figure) => tile.tooltip(rating_hover::tooltip(Rc::new(figure))),
+            TileHover::Explanation(text) => {
+                tile.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
+            }
+        })
         .into_any_element()
 }
 
 /// The recording player's figures, PR and MC as tiles, counted up to
-/// `progress`. A figure the replay does not carry has no tile; `own` is
+/// `progress`. A figure the replay does not carry has no tile, except an MC
+/// the battle type rules out, whose tile is a dash that says why; `own` is
 /// `None` when the player's own figures are hidden or absent.
 pub(super) fn stat_tiles(
     own: Option<OwnFigures>,
     rating: Option<&PersonalRatingResult>,
     match_contribution: Option<&MatchContributionResult>,
+    match_contribution_withheld: Option<MatchContributionWithheld>,
     progress: f32,
     cx: &App,
 ) -> Vec<AnyElement> {
@@ -199,7 +215,7 @@ pub(super) fn stat_tiles(
             value: shown.clone(),
             said: shown,
             tone: None,
-            breakdown: None,
+            hover: None,
         };
         tiles.push(stat_tile(tile, cx));
     }
@@ -211,8 +227,8 @@ pub(super) fn stat_tiles(
         let label = format!("{} - {}", t!("ui.replay.column.personal_rating"), rating.category.name());
         // Read as the final rating whatever the count has reached.
         let said = personal_rating_label(rating);
-        let breakdown = RatedFigure::personal(rating);
-        let tile = Tile { id: PR_TILE_ID.into(), label, value: shown, said, tone: Some(tone), breakdown };
+        let hover = RatedFigure::personal(rating).map(TileHover::Breakdown);
+        let tile = Tile { id: PR_TILE_ID.into(), label, value: shown, said, tone: Some(tone), hover };
         tiles.push(stat_tile(tile, cx));
     }
 
@@ -221,8 +237,21 @@ pub(super) fn stat_tiles(
         let shown = format!("{:.0}", rating.mc * progress);
         let label = format!("{} - {}", t!("ui.replay.column.match_contribution"), rating.category.name());
         let said = match_contribution_label(rating);
-        let breakdown = Some(RatedFigure::MatchContribution(Box::new(rating.clone())));
-        let tile = Tile { id: BI_TILE_ID.into(), label, value: shown, said, tone: Some(tone), breakdown };
+        let hover = Some(TileHover::Breakdown(RatedFigure::MatchContribution(Box::new(rating.clone()))));
+        let tile = Tile { id: BI_TILE_ID.into(), label, value: shown, said, tone: Some(tone), hover };
+        tiles.push(stat_tile(tile, cx));
+    }
+
+    if match_contribution_withheld == Some(MatchContributionWithheld::UnratedBattle) {
+        let explained: SharedString = MatchContributionWithheld::UnratedBattle.explanation().into();
+        let tile = Tile {
+            id: BI_TILE_ID.into(),
+            label: t!("ui.replay.column.match_contribution").into_owned(),
+            value: "-".to_owned(),
+            said: explained.to_string(),
+            tone: None,
+            hover: Some(TileHover::Explanation(explained)),
+        };
         tiles.push(stat_tile(tile, cx));
     }
 

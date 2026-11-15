@@ -14,6 +14,7 @@ use crate::formatting::separate_number;
 use crate::name_lookup::PlayerLookup;
 use crate::name_lookup::ShipLookup;
 use crate::query_bar::suggest::ValueOption;
+use crate::rating_breakdown::MatchContributionWithheld;
 use crate::text_filter::FilterQuery;
 
 /// Results asked for per run, rather than pulling an unbounded set into memory.
@@ -90,6 +91,7 @@ pub fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
         SortColumn::Kills => hit.self_kills.map(|k| k.to_string()).unwrap_or_else(|| "-".into()),
         SortColumn::Pr if !hit.rating_scope().is_rated() => "-".into(),
         SortColumn::Pr => hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_else(|| "-".into()),
+        SortColumn::Mc if !hit.rating_scope().is_rated() => "-".into(),
         SortColumn::Mc => hit.self_mc.map(|mc| format!("{mc:.0}")).unwrap_or_else(|| "-".into()),
     }
 }
@@ -98,6 +100,9 @@ pub fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
 pub fn cell_hover(hit: &MatchHit, column: SortColumn) -> Option<String> {
     match column {
         SortColumn::Pr if !hit.rating_scope().is_rated() => Some(t!("ui.personal_rating.unrated_hover").into_owned()),
+        SortColumn::Mc if !hit.rating_scope().is_rated() => {
+            Some(MatchContributionWithheld::UnratedBattle.explanation())
+        }
         _ => None,
     }
 }
@@ -205,8 +210,15 @@ pub async fn look_up_sources(pool: &sqlx::SqlitePool) -> Vec<ValueOption> {
 
 #[cfg(test)]
 mod tests {
+    use rust_i18n::t;
+    use wows_toolkit_config::index::rows::MatchHit;
+    use wows_toolkit_config::index::rows::MatchOutcome;
+
     use super::ResultColumn;
+    use super::cell_hover;
+    use super::cell_text;
     use super::game_mode_gap_hint;
+    use crate::rating_breakdown::MatchContributionWithheld;
     use wows_toolkit_config::index::query::SortColumn;
 
     #[test]
@@ -215,6 +227,51 @@ mod tests {
         let mode = columns.iter().position(|column| *column == ResultColumn::Sortable(SortColumn::Mode));
         assert_eq!(columns.get(mode.expect("mode is drawn") + 1), Some(&ResultColumn::Ship));
         assert_eq!(columns.len(), SortColumn::ALL.len() + 1);
+    }
+
+    fn hit(game_type: &str, match_group: &str) -> MatchHit {
+        MatchHit {
+            arena_id: wows_replays::types::ArenaId::new(1),
+            timestamp: "2026-07-28T14:23:05Z".parse().expect("a fixed instant"),
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: Some(7),
+            game_type: game_type.into(),
+            match_group: match_group.into(),
+            version_build: Some(12_830_008),
+            source_id: wows_toolkit_config::index::rows::SourceId(1),
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: None,
+            self_ship_name: Some("Yamato".into()),
+            self_survived: Some(true),
+            self_damage: Some(114_230),
+            self_kills: Some(3),
+            self_pr: Some(1500.0),
+            self_mc: Some(1300.0),
+            results_available: true,
+            replay_path: std::path::PathBuf::from("a.wowsreplay"),
+            file_mtime: Some(42),
+        }
+    }
+
+    /// An unrated battle's rating cells are dashes that say why, whatever the
+    /// index still holds; a rated battle's show the figures and need no hover.
+    #[test]
+    fn unrated_rating_cells_are_explained_dashes() {
+        let unrated = hit("CooperativeBattle", "cooperative");
+        for column in [SortColumn::Pr, SortColumn::Mc] {
+            assert_eq!(cell_text(&unrated, column), "-", "{column:?}");
+        }
+        assert_eq!(cell_hover(&unrated, SortColumn::Pr), Some(t!("ui.personal_rating.unrated_hover").into_owned()));
+        assert_eq!(cell_hover(&unrated, SortColumn::Mc), Some(MatchContributionWithheld::UnratedBattle.explanation()));
+
+        let rated = hit("RandomBattle", "pvp");
+        assert_eq!(cell_text(&rated, SortColumn::Pr), "1500");
+        assert_eq!(cell_text(&rated, SortColumn::Mc), "1300");
+        for column in [SortColumn::Pr, SortColumn::Mc] {
+            assert_eq!(cell_hover(&rated, column), None, "{column:?}");
+        }
     }
 
     #[test]

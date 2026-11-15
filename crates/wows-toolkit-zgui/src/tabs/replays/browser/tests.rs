@@ -42,6 +42,7 @@ use super::folders::MADE;
 use super::listing::Listing;
 use super::listing::ListingWatch;
 use super::tree::BrowserTree;
+use super::tree::LeafMc;
 use super::tree::NodeKey;
 use super::tree::TreeInputs;
 use crate::interaction_tests::open_shell;
@@ -868,14 +869,17 @@ fn a_rated_row_carries_its_rating_and_outcome() {
         panic!("the index rated the battle: {:?}", rated.personal_rating);
     };
     assert_eq!(format!("{:.0}", rating.pr), "1650");
-    assert_eq!(rated.match_contribution.map(|mc| format!("{mc:.0}")).as_deref(), Some("1450"));
+    let Some(LeafMc::Rated(mc)) = rated.match_contribution else {
+        panic!("the index rated the battle's MC: {:?}", rated.match_contribution);
+    };
+    assert_eq!(format!("{mc:.0}"), "1450");
     assert_eq!(rated.outcome, MatchOutcome::Win);
     let missing = tree.leaf(&missing).expect("the replay is listed");
     assert!(missing.personal_rating.is_none(), "a battle the index has not rated has no chip");
     assert_eq!(missing.outcome, MatchOutcome::Unknown);
     let unrated = tree.leaf(&unrated).expect("the replay is listed");
     assert_eq!(unrated.personal_rating, Some(BattleRating::Unrated), "an unrated battle says so");
-    assert!(unrated.match_contribution.is_none(), "an unrated battle has no MC chip");
+    assert_eq!(unrated.match_contribution, Some(LeafMc::Unrated), "an unrated battle says so for MC too");
 }
 
 #[test]

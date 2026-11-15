@@ -37,6 +37,8 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::rating_scope::RatedBattle;
+use wowsunpack::rating_scope::RatingScope;
 
 struct Entry {
     version_label: &'static str,
@@ -48,6 +50,8 @@ struct Entry {
     /// gates the bot-specific structural assertions that guard the builder
     /// against collapsing them.
     expect_bots: bool,
+    /// Whether the battle's type is one MC applies to.
+    rating_scope: RatingScope,
 }
 
 const MATRIX: &[Entry] = &[
@@ -56,42 +60,49 @@ const MATRIX: &[Entry] = &[
         replay_filename: "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay",
         build: 9251401,
         expect_bots: false,
+        rating_scope: RatingScope::Unrated,
     },
     Entry {
         version_label: "14.5.0",
         replay_filename: "1005_1751197418_20250629_132500_PHSC010-Utrecht_54_Faroe.wowsreplay",
         build: 10087791,
         expect_bots: false,
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
     },
     Entry {
         version_label: "14.11.0",
         replay_filename: "10000_1767829698_20260107_182737_PJSB018-Yamato-1944_50_Gold_harbor.wowsreplay",
         build: 11189791,
         expect_bots: false,
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
     },
     Entry {
         version_label: "15.1.0",
         replay_filename: "10000_1773241614_20260214_215653_PVSB719-Valparaiso_42_Neighbors.wowsreplay",
         build: 11965230,
         expect_bots: false,
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
     },
     Entry {
         version_label: "15.4.0",
         replay_filename: "1003_1780609677_20260604_172336_PASD008-Benson-1945_52_Britain.wowsreplay",
         build: 12506899,
         expect_bots: false,
+        rating_scope: RatingScope::Rated(RatedBattle::Random),
     },
     Entry {
         version_label: "15.5.0",
         replay_filename: "1148_1782049673_20260619_175139_PRSB909-East-Navarin_44_Path_warrior.wowsreplay",
         build: 12668706,
         expect_bots: false,
+        rating_scope: RatingScope::Unrated,
     },
     Entry {
         version_label: "13.11.0-coop",
         replay_filename: "1852_1736026132_20250104_225447_PRSD103-Derzky_04_Archipelago.wowsreplay",
         build: 9251401,
         expect_bots: true,
+        rating_scope: RatingScope::Unrated,
     },
 ];
 
@@ -237,6 +248,7 @@ fn run_entry(entry: &Entry) {
     assert_structural_invariants(entry, &report, &normalized);
     assert_translations_are_rebuilt(&report, &normalized, loaded.provider, &loaded.version);
     assert_early_exit_rates_nobody(&normalized);
+    assert_rated_only_where_mc_applies(entry, &normalized);
 
     let mut produced = serde_json::to_value(&normalized).expect("normalized report serializes");
     sort_players(&mut produced);
@@ -436,4 +448,26 @@ fn assert_early_exit_rates_nobody(normalized: &NormalizedBattleReport) {
 
     assert!(left_early.players.iter().all(|player| player.match_contribution.is_none()));
     assert!(left_early.match_contribution_version.is_some());
+}
+
+/// MC is rated for a Random or Ranked battle and for nobody in any other,
+/// whose report still records that it was rated.
+fn assert_rated_only_where_mc_applies(entry: &Entry, normalized: &NormalizedBattleReport) {
+    let ctx = entry.version_label;
+    assert_eq!(normalized.metadata.rating_scope(), entry.rating_scope, "{ctx}: the battle's scope");
+    let anyone_rated = normalized.players.iter().any(|player| player.match_contribution.is_some());
+    assert_eq!(anyone_rated, entry.rating_scope.is_rated(), "{ctx}: MC is rated only where it applies");
+    assert!(normalized.match_contribution_version.is_some(), "{ctx}: the report records that it was rated");
+
+    // The same battle retyped: whether it is rated turns on the type alone.
+    let ratings = |game_type: &str| {
+        let mut retyped = normalized.clone();
+        retyped.metadata.game_type = game_type.to_owned();
+        retyped.populate_match_contribution(&expected_values());
+        retyped.players.into_iter().map(|player| player.match_contribution).collect::<Vec<_>>()
+    };
+    assert_eq!(ratings("RankedBattle"), ratings("RandomBattle"), "{ctx}: Ranked rates as Random does");
+    for unrated in ["CooperativeBattle", "PVEBattle", "ClanBattle", "EventBattle", "BrawlBattle", "TrainingBattle"] {
+        assert!(ratings(unrated).iter().all(Option::is_none), "{ctx}: a {unrated} is not rated");
+    }
 }

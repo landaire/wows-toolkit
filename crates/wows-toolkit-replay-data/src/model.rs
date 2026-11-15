@@ -48,6 +48,7 @@ use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
 use wows_toolkit_viewmodel::breakdown;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
@@ -204,9 +205,9 @@ pub struct PlayerRow {
     pub rating_scope: RatingScope,
 
     /// Match contribution, rated with the whole battle when the replay is parsed.
-    /// `None` when no expected values were loaded then, or when the
-    /// recording ended before the battle did. Unlike PR it cannot be filled
-    /// in later from the row alone.
+    /// `None` when no expected values were loaded then, when the battle is
+    /// not Random or Ranked, or when the recording ended before the battle
+    /// did. Unlike PR it cannot be filled in later from the row alone.
     pub match_contribution: Option<MatchContributionResult>,
 
     /// The Actions column's ship-config "Open in browser"/"Copy link" menu
@@ -404,10 +405,9 @@ pub struct ReplayReportModel {
     pub self_team: TeamId,
     pub rows: Vec<PlayerRow>,
     pub battle_result: Option<BattleResult>,
-    /// MC was rated for this replay and withheld from everyone because the
-    /// recording ended before the battle did. False when MC was never
-    /// attempted, which a missing MC alone cannot tell apart.
-    pub match_contribution_withheld: bool,
+    /// `None` when MC applies to the battle and either was rated or was never
+    /// attempted.
+    pub match_contribution_withheld: Option<MatchContributionWithheld>,
     pub columns: Vec<ReplayColumn>,
     /// Translated map name (`NormalizedBattleReport::metadata.map`), used by
     /// the per-replay dock panel's tab title ("{ship} - {map}").
@@ -549,8 +549,7 @@ impl ReplayReportModel {
             self_team,
             rows,
             battle_result: normalized.metadata.resolved_battle_result(),
-            match_contribution_withheld: normalized.match_contribution_version.is_some()
-                && normalized.metadata.battle_result.is_none(),
+            match_contribution_withheld: MatchContributionWithheld::of_report(normalized),
             columns: ReplayColumn::ALL.to_vec(),
             map: normalized.metadata.map.clone(),
             timestamp: normalized.metadata.timestamp,
@@ -1104,7 +1103,7 @@ mod tests {
                 },
             ],
             battle_result: None,
-            match_contribution_withheld: false,
+            match_contribution_withheld: None,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),
@@ -1145,7 +1144,7 @@ mod tests {
                 },
             ],
             battle_result: None,
-            match_contribution_withheld: false,
+            match_contribution_withheld: None,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),
@@ -1251,7 +1250,7 @@ mod tests {
             self_team: TeamId::from(0i64),
             rows: vec![row],
             battle_result: Some(BattleResult::Win(0)),
-            match_contribution_withheld: false,
+            match_contribution_withheld: None,
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),

@@ -632,12 +632,14 @@ fn a_hidden_rows_rating_names_only_its_band() {
 
 #[test]
 fn a_withheld_match_contribution_says_why_it_is_missing() {
-    let mut model = sample_model();
-    model.match_contribution_withheld = true;
-    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
+    for reason in [MatchContributionWithheld::EarlyExit, MatchContributionWithheld::UnratedBattle] {
+        let mut model = sample_model();
+        model.match_contribution_withheld = Some(reason);
+        let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
 
-    let hover = plain_hover(&mut window, ReplayColumn::MatchContribution);
-    assert_eq!(hover, [t!("ui.rating.unrated_early_exit").into_owned()]);
+        let hover = plain_hover(&mut window, ReplayColumn::MatchContribution);
+        assert_eq!(hover, [reason.explanation()], "{reason:?}");
+    }
 }
 
 /// Writes the table in both appearances, with one row open, to `target/zgui-shots`.

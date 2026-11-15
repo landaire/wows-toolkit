@@ -1062,11 +1062,18 @@ fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
         let own_row = model.rows.iter().find(|row| row.is_self).filter(|_| !hidden);
         let rating = own_row.and_then(|row| BattleRating::new(row.rating_scope, row.personal_rating.clone()));
         let match_contribution = own_row.and_then(|row| row.match_contribution.clone());
+        let match_contribution_withheld = model.match_contribution_withheld;
         let (allies, enemies) = figures::team_damage(&model.rows);
         let counting = count_next.get_value();
         count_next.set_value(false);
         Some(AnyView::new(view! {
-            StatTiles(own = own, rating = rating, match_contribution = match_contribution, counting = counting)
+            StatTiles(
+                own = own,
+                rating = rating,
+                match_contribution = match_contribution,
+                match_contribution_withheld = match_contribution_withheld,
+                counting = counting
+            )
             DamageSplit(allies = allies, enemies = enemies)
         }))
     };

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use landaire_ui::TreeModel;
 use wows_core::pseudonym::NameDisplay;
+use wows_core::rating_scope::RatingScope;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -67,8 +68,27 @@ pub struct LeafRow {
     /// The reader's rating in the battle, once the index has scored it, or
     /// that the battle is unrated.
     pub personal_rating: Option<BattleRating>,
-    /// The reader's match contribution, once the index has scored a battle the recording saw to its end.
-    pub match_contribution: Option<f64>,
+    /// The reader's match contribution, once the index has scored a battle the recording saw to its
+    /// end, or that the battle is unrated.
+    pub match_contribution: Option<LeafMc>,
+}
+
+/// The reader's match contribution as the index stored it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LeafMc {
+    Rated(f64),
+    /// The battle is of a type MC does not apply to.
+    Unrated,
+}
+
+impl LeafMc {
+    /// `None` when the battle is rated but no MC is stored.
+    fn from_stored(scope: RatingScope, mc: Option<f64>) -> Option<Self> {
+        match scope {
+            RatingScope::Rated(_) => mc.map(Self::Rated),
+            RatingScope::Unrated => Some(Self::Unrated),
+        }
+    }
 }
 
 /// What a row for a replay that could not be read draws.
@@ -152,7 +172,8 @@ impl BrowserTree {
                     let summary = inputs.summaries.get(&path);
                     let personal_rating =
                         summary.and_then(|summary| BattleRating::from_stored(summary.rating_scope, summary.self_pr));
-                    let match_contribution = summary.and_then(|summary| summary.self_mc);
+                    let match_contribution =
+                        summary.and_then(|summary| LeafMc::from_stored(summary.rating_scope, summary.self_mc));
                     let leaf = LeafRow {
                         label,
                         battle,

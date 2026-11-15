@@ -15,6 +15,7 @@ use wowsunpack::game_params::translations::translate_achievement_name;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::ParamData;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::rating_scope::RatingScope;
 
 use crate::personal_rating::PersonalRatingData;
 use crate::stats::PerGameStat;
@@ -260,6 +261,9 @@ fn sample_game(
         + 230.0 * (spotting_damage / spotting_baseline).min(2.5)
         + 120.0 * form;
     let game_time = at.strftime("%d.%m.%Y %H:%M:%S").to_string();
+    let match_group = pick_mode(rng);
+    let match_contribution =
+        RatingScope::of_match_group(match_group).is_rated().then(|| match_contribution.round() as i64);
     PerGameStat {
         ship_name: ship.name.clone(),
         ship_id: ship.id,
@@ -275,9 +279,9 @@ fn sample_game(
         is_loss,
         is_draw,
         is_div,
-        match_group: pick_mode(rng).to_owned(),
+        match_group: match_group.to_owned(),
         achievements: earned_achievements,
-        match_contribution: Some(match_contribution.round() as i64),
+        match_contribution,
     }
 }
 

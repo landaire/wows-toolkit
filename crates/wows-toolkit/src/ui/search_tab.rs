@@ -40,6 +40,7 @@ use crate::ui::replay_parser::preview_popup;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::ui::widgets::pr_chip;
 use crate::util::personal_rating::PersonalRatingCategory;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 
 /// Rows a single search reads. `search_by_ast` fetches one more so the count can
 /// say "at least this many" rather than reporting a truncated total.
@@ -728,7 +729,9 @@ impl ResultsTable<'_> {
                 }
             }
             ResultColumn::Mc => {
-                if let Some(mc) = hit.self_mc {
+                if !hit.rating_scope().is_rated() {
+                    ui.label("-").on_hover_text(MatchContributionWithheld::UnratedBattle.explanation());
+                } else if let Some(mc) = hit.self_mc {
                     pr_chip(ui, PersonalRatingCategory::from_pr(mc), &format!("{mc:.0}"), false);
                 }
             }

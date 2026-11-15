@@ -9,6 +9,8 @@ use wows_core::game_types::AccountId;
 use wows_core::game_types::ArenaId;
 use wows_core::game_types::GameParamId;
 use wows_core::game_types::MatchContributionVersion;
+use wows_core::rating_scope::RatedBattle;
+use wows_core::rating_scope::RatingScope;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::IndexWriteMode;
@@ -34,7 +36,7 @@ fn sample_match(arena: i64) -> ObjectiveMatch {
         map: "Ocean".into(),
         game_mode: "Domination".into(),
         game_mode_id: None,
-        game_type: "pvp".into(),
+        game_type: "RandomBattle".into(),
         match_group: "pvp".into(),
         version_build: Some(1234),
     }
@@ -292,9 +294,21 @@ async fn store_stale_ship(pool: &SqlitePool) {
 }
 
 async fn write_corrected(pool: &SqlitePool, vehicle: IndexedVehicleRow, mode: IndexWriteMode, results: ResultsWrite) {
+    write_replay(pool, vehicle, mode, results, RatingScope::Rated(RatedBattle::Random)).await;
+}
+
+async fn write_replay(
+    pool: &SqlitePool,
+    vehicle: IndexedVehicleRow,
+    mode: IndexWriteMode,
+    results: ResultsWrite,
+    rating_scope: RatingScope,
+) {
     let source = query::ensure_default_source(pool, Path::new("C:/wows/replays"), Timestamp::now()).await.unwrap();
     let record = sample_record(100, source, "C:/wows/replays/a.wowsreplay");
-    query::write_indexed_replay(pool, &sample_match(100), &[vehicle], &record, mode, results).await.unwrap();
+    query::write_indexed_replay(pool, &sample_match(100), &[vehicle], &record, mode, results, rating_scope)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1061,34 +1075,22 @@ struct MergeCase {
     expected: StoredBi,
 }
 
-/// Stores `case.stored` as an earlier pass left it, writes `case.incoming` over
-/// it incrementally through `write`, and reads the merged MC back.
-async fn mc_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWrite) -> StoredBi {
-    let pool = mem_pool().await;
-    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+/// Stores `stored` as an earlier pass left it in arena 100.
+async fn store_earlier_mc(pool: &SqlitePool, stored: StoredBi) {
+    query::upsert_match(pool, &sample_match(100)).await.unwrap();
     let earlier = IndexedVehicleRow {
-        mc: case.stored.mc,
-        mc_version: case.stored.version,
-        mc_torpedoes_observed: case.stored.torpedoes_observed,
+        mc: stored.mc,
+        mc_version: stored.version,
+        mc_torpedoes_observed: stored.torpedoes_observed,
         ..sample_vehicle(100)
     };
-    query::upsert_vehicles_with_mode(&pool, &[earlier], IndexWriteMode::Replace, ResultsWrite::Store).await.unwrap();
+    query::upsert_vehicles_with_mode(pool, &[earlier], IndexWriteMode::Replace, ResultsWrite::Store).await.unwrap();
+}
 
-    let later = IndexedVehicleRow {
-        mc: case.incoming.mc,
-        mc_version: case.incoming.version,
-        mc_torpedoes_observed: case.incoming.torpedoes_observed,
-        ..sample_vehicle(100)
-    };
-    match write {
-        RosterWrite::Upsert => {
-            query::upsert_vehicles_with_mode(&pool, &[later], IndexWriteMode::Incremental, results).await.unwrap()
-        }
-        RosterWrite::Replay => write_corrected(&pool, later, IndexWriteMode::Incremental, results).await,
-    }
-
+/// The roster row's MC in arena 100 as stored.
+async fn read_stored_mc(pool: &SqlitePool) -> StoredBi {
     let row = sqlx::query("SELECT mc, mc_version, mc_torpedoes_observed FROM indexed_vehicle WHERE arena_id = 100")
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
     let version: Option<i64> = row.get("mc_version");
@@ -1097,6 +1099,32 @@ async fn mc_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWr
         version: version.map(|version| MatchContributionVersion(u32::try_from(version).unwrap())),
         torpedoes_observed: row.get("mc_torpedoes_observed"),
     }
+}
+
+fn incoming_row(incoming: StoredBi) -> IndexedVehicleRow {
+    IndexedVehicleRow {
+        mc: incoming.mc,
+        mc_version: incoming.version,
+        mc_torpedoes_observed: incoming.torpedoes_observed,
+        ..sample_vehicle(100)
+    }
+}
+
+/// Stores `case.stored` as an earlier pass left it, writes `case.incoming` over
+/// it incrementally through `write`, and reads the merged MC back.
+async fn mc_after_merge(write: RosterWrite, case: &MergeCase, results: ResultsWrite) -> StoredBi {
+    let pool = mem_pool().await;
+    store_earlier_mc(&pool, case.stored).await;
+
+    let later = incoming_row(case.incoming);
+    match write {
+        RosterWrite::Upsert => {
+            query::upsert_vehicles_with_mode(&pool, &[later], IndexWriteMode::Incremental, results).await.unwrap()
+        }
+        RosterWrite::Replay => write_corrected(&pool, later, IndexWriteMode::Incremental, results).await,
+    }
+
+    read_stored_mc(&pool).await
 }
 
 async fn assert_mc_merges(cases: &[MergeCase], results: ResultsWrite) {
@@ -1215,6 +1243,28 @@ async fn an_untrusted_write_fills_only_a_missing_mc_and_takes_its_revision() {
         },
     ];
     assert_mc_merges(&cases, ResultsWrite::Keep).await;
+}
+
+/// A battle type MC does not apply to keeps no MC from an earlier pass, even
+/// where the write could not vouch for its results or rated nothing at all.
+#[tokio::test]
+async fn a_replay_write_of_an_unrated_battle_clears_its_stored_mc() {
+    let passes = [("rated", stored_mc(None, Some(2))), ("without expected values", stored_mc(None, None))];
+    for results in [ResultsWrite::Store, ResultsWrite::Keep] {
+        for mode in [IndexWriteMode::Incremental, IndexWriteMode::Replace] {
+            for (name, incoming) in passes {
+                let pool = mem_pool().await;
+                store_earlier_mc(&pool, observed_mc(1500.0, 1)).await;
+
+                write_replay(&pool, incoming_row(incoming), mode, results, RatingScope::Unrated).await;
+
+                let stored = read_stored_mc(&pool).await;
+                let context = format!("{name}, {mode:?}, {results:?}");
+                assert_eq!(stored.mc, None, "{context}");
+                assert!(!stored.torpedoes_observed, "{context}");
+            }
+        }
+    }
 }
 
 async fn store_rated_replay(

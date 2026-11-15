@@ -36,6 +36,7 @@ use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::chip_hue;
 use wows_toolkit_viewmodel::personal_rating::chip_text;
+use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -89,6 +90,7 @@ use crate::tabs::replays::browser::listing::ScanStatus;
 use crate::tabs::replays::browser::thumbnails::Thumbnail;
 use crate::tabs::replays::browser::thumbnails::Thumbnails;
 use crate::tabs::replays::browser::tree::BrowserTree;
+use crate::tabs::replays::browser::tree::LeafMc;
 use crate::tabs::replays::browser::tree::LeafRow;
 use crate::tabs::replays::browser::tree::NodeKey;
 use crate::theme::rating_band_name;
@@ -97,6 +99,9 @@ const SHEET: &str = "wt-replay-listing";
 
 /// The dash a leaf shows in place of a rating for a battle no rating applies to.
 pub const UNRATED_LEAF_ID: &str = "replay-row-unrated";
+
+/// The dash a leaf shows in place of an MC for a battle MC does not apply to.
+pub const UNRATED_MC_LEAF_ID: &str = "replay-row-unrated-mc";
 
 // The row is the theme's font size (12.5px) times 2.8, as the other front end draws it: the
 // identity line, the smaller stats line under it, and a little space around both. The
@@ -481,31 +486,37 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
             ) {{said.clone()}}
         })
     };
+    let unrated_chip = |id: &'static str, test_id: &'static str, hover: String| {
+        let said = hover.clone();
+        AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger {
+                    text(
+                        class = format!("wt-row__pr {TABULAR_CLASS}"),
+                        attr:data-testid = test_id,
+                        attr:data-rating = id,
+                        a11y:label = said
+                    ) {"-"}
+                }
+                TooltipContent {{hover.clone()}}
+            }
+        })
+    };
     let pr_name = t!("ui.replay.column.personal_rating");
     let mut chips: Vec<AnyView> = Vec::new();
     match leaf.personal_rating {
         Some(BattleRating::Rated(rating)) => chips.push(rating_chip("pr", &pr_name, rating.pr)),
         Some(BattleRating::Unrated) => {
-            let hover = t!("ui.personal_rating.unrated_hover").into_owned();
-            let said = hover.clone();
-            chips.push(AnyView::new(view! {
-                Tooltip {
-                    TooltipTrigger {
-                        text(
-                            class = format!("wt-row__pr {TABULAR_CLASS}"),
-                            attr:data-testid = UNRATED_LEAF_ID,
-                            attr:data-rating = "pr",
-                            a11y:label = said
-                        ) {"-"}
-                    }
-                    TooltipContent {{hover.clone()}}
-                }
-            }));
+            chips.push(unrated_chip("pr", UNRATED_LEAF_ID, t!("ui.personal_rating.unrated_hover").into_owned()))
         }
         None => {}
     }
-    if let Some(value) = leaf.match_contribution {
-        chips.push(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value));
+    match leaf.match_contribution {
+        Some(LeafMc::Rated(value)) => chips.push(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value)),
+        Some(LeafMc::Unrated) => {
+            chips.push(unrated_chip("mc", UNRATED_MC_LEAF_ID, MatchContributionWithheld::UnratedBattle.explanation()))
+        }
+        None => {}
     }
     let rating = (!chips.is_empty()).then(|| view! { box(class = "wt-row__spacer") {} {chips} });
     let stats: Vec<AnyView> = leaf
