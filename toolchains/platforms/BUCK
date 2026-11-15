@@ -32,3 +32,15 @@ platform(
     ],
     visibility = ["PUBLIC"],
 )
+
+# The Windows executables the Linux launcher runs under Wine. Nothing builds for
+# it by default: they reach it through //build-support/buck/windows_cross:transition.
+platform(
+    name = "windows_x86_64_gnu",
+    constraint_values = [
+        "config//os/constraints:windows",
+        "config//cpu/constraints:x86_64",
+        "prelude//abi/constraints:gnu",
+    ],
+    visibility = ["PUBLIC"],
+)

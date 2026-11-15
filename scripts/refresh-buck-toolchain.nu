@@ -44,6 +44,14 @@ for tool in $required {
 
 let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-out-paths .#buck-system-libs | str trim)
 
+# The Windows executables the Linux launcher runs under Wine. Other hosts leave
+# the section out, which makes those targets incompatible there.
+let windows_cross_root = if $nu.os-info.name == "linux" {
+    ^nix build --out-link .tools/buck-windows-cross --print-out-paths .#buck-windows-cross | str trim
+} else {
+    null
+}
+
 # Buck reads these instead of resolving any tool through PATH.
 [
     "[nix_toolchain]"
@@ -62,6 +70,11 @@ let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-ou
     "[nix_system_libs]"
     $"root = ($system_libs_root)"
     ""
+    ...(if $windows_cross_root != null {
+        ["[nix_windows_cross]" $"root = ($windows_cross_root)" ""]
+    } else {
+        []
+    })
     # Nothing reads debug info out of a CI artifact, and carrying all of it is
     # what makes linking the GUI binary expensive. Line tables are kept so a
     # panic in a Buck test still names a file and line.

@@ -1,0 +1,9 @@
+load("//build-support/buck:wasm_rules.bzl", "platform_transition")
+
+# Builds whatever carries it for x86_64-pc-windows-gnu, whatever platform it was
+# asked for.
+platform_transition(
+    name = "transition",
+    platform = "toolchains//platforms:windows_x86_64_gnu",
+    visibility = ["PUBLIC"],
+)

@@ -237,12 +237,18 @@ def workspace_integration_tests(package, version, library, deps = [], test_deps 
             run_env = run_env,
         )
 
-def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
+def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = [], incoming_transition = None, target_compatible_with = []):
     env = _cargo_env(crate, package, version)
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
     rustc_flags = rustc_flags + _profile_rustc_flags()
+
+    kwargs = {}
+    if incoming_transition != None:
+        kwargs["incoming_transition"] = incoming_transition
+    if target_compatible_with:
+        kwargs["target_compatible_with"] = target_compatible_with
 
     # See workspace_library: the cargo wrapper would cap lints to allow.
     native.rust_binary(
@@ -257,4 +263,5 @@ def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAU
         resources = resources,
         visibility = ["PUBLIC"],
         deps = deps,
+        **kwargs
     )

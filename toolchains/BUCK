@@ -26,6 +26,14 @@ nix_cxx_toolchain(
     visibility = ["PUBLIC"],
 )
 
+# wgc-relay and the wgc.exe placeholder, which the Linux launcher runs under
+# Wine. Only Linux hosts publish the cross toolchain.
+nix_cxx_toolchain(
+    name = "nix_cxx_windows_gnu",
+    os = "windows-gnu",
+    visibility = ["PUBLIC"],
+)
+
 hermetic_python_bootstrap_toolchain(
     name = "python_bootstrap",
     visibility = ["PUBLIC"],
@@ -74,12 +82,33 @@ hermetic_rust_toolchain(
     visibility = ["PUBLIC"],
 )
 
+hermetic_rust_toolchain(
+    name = "nix_rust_windows_gnu",
+    default_edition = "2024",
+    dlltool = "x86_64-w64-mingw32-dlltool",
+    rustc_target_triple = "x86_64-pc-windows-gnu",
+    toolchain_root_section = "nix_windows_cross",
+    visibility = ["PUBLIC"],
+)
+
+# Refines the plain Windows key below, so the GNU ABI selects the cross
+# toolchain and every other Windows configuration keeps MSVC.
+config_setting(
+    name = "windows_gnu",
+    constraint_values = [
+        "config//os/constraints:windows",
+        "prelude//abi/constraints:gnu",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 selected_toolchain(
     name = "cxx",
     actual = select({
         "config//os/constraints:linux": ":nix_cxx_linux",
         "config//os/constraints:macos": ":nix_cxx_macos",
         "config//os/constraints:windows": "//windows:cxx",
+        ":windows_gnu": ":nix_cxx_windows_gnu",
         # wt-web. The Nix toolchain builds it, so it needs a Linux or macOS host.
         "config//cpu/constraints:cpu[wasm32]": ":nix_cxx_wasm32",
     }),
@@ -92,6 +121,7 @@ selected_toolchain(
         "config//os/constraints:linux": ":nix_rust_linux",
         "config//os/constraints:macos": ":nix_rust_macos",
         "config//os/constraints:windows": "//windows:rust",
+        ":windows_gnu": ":nix_rust_windows_gnu",
         "config//cpu/constraints:cpu[wasm32]": ":nix_rust_wasm32",
     }),
     visibility = ["PUBLIC"],
