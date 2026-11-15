@@ -131,8 +131,10 @@ impl AuthClient {
         // (older/other shapes), cross-check it as a consistency guard.
         let user_id = success.user;
         let access_token = AccessToken::new(success.access_token);
-        let expiry = expiry_from(success.expires_in);
-        let exchange_code = self.request_token_exchange(&access_token).await?;
+        // The password grant issues a short-lived token that only serves the
+        // exchange (WGC's step is `QueryOAuthShortTokenFromBasicCreds`); the
+        // session's lifetime is the exchanged token's.
+        let (exchange_code, expiry) = self.request_token_exchange(&access_token).await?;
         let tokens = TokenPair { access_token, exchange_code };
         let (account_id, nickname) = self.request_account_info(&tokens).await?;
         if let Some(user_id) = user_id
@@ -263,7 +265,10 @@ impl AuthClient {
         self.post_form_expect_token(&url, &form).await
     }
 
-    async fn request_token_exchange(&self, access_token: &AccessToken) -> rootcause::Result<ExchangeCode, AuthError> {
+    async fn request_token_exchange(
+        &self,
+        access_token: &AccessToken,
+    ) -> rootcause::Result<(ExchangeCode, TokenExpiry), AuthError> {
         let exchange_code = ExchangeCode::from_raw(generate_exchange_code());
         let url = self.endpoint("account/credentials/create/oauth/token/");
         let realm_config = self.realm.config();
@@ -274,8 +279,9 @@ impl AuthClient {
             ("exchange_code", exchange_code.as_str()),
             ("tid", self.tracking_id.as_str()),
         ];
-        self.post_form_expect_token(&url, &form).await?;
-        Ok(exchange_code)
+        let exchanged = self.post_form_expect_token(&url, &form).await?;
+
+        Ok((exchange_code, expiry_from(exchanged.expires_in)))
     }
 
     async fn request_account_info(&self, tokens: &TokenPair) -> rootcause::Result<(AccountId, Nickname), AuthError> {
@@ -765,7 +771,7 @@ mod tests {
         assert_eq!(rejection.error.as_deref(), Some("account_not_found"));
     }
 
-    mod game_token1 {
+    mod scripted {
         use std::sync::Arc;
         use std::sync::Mutex;
 
@@ -916,6 +922,78 @@ mod tests {
 
         fn wows_na() -> GameTitle {
             GameTitle::wows(AccountRealm::Na)
+        }
+
+        /// A password login as WGNI answers it: the PoW challenge, the password grant's
+        /// short-lived token, the exchange grant's session token, then account/info. Each grant
+        /// answers 202 and settles on its first poll.
+        fn login_script(short_token: &'static str, exchanged_token: &'static str) -> Vec<Reply> {
+            const CHALLENGE: &str = r#"{"pow": {"random_string": "sPRKpI4WyRa0oAsE", "complexity": 1,
+                "timestamp": 1787286513, "algorithm": {"name": "hashcash", "version": 1, "resourse": "wgni",
+                "extension": ""}, "type": "pow"}}"#;
+
+            vec![
+                Reply::Respond { status: 200, location: None, body: CHALLENGE },
+                Reply::Respond {
+                    status: 202,
+                    location: Some(
+                        "/id/api/v2/account/credentials/create/oauth/token/af77067b23b4329fae1d7ddb5f9e70b0/",
+                    ),
+                    body: "{}",
+                },
+                Reply::Respond { status: 200, location: None, body: short_token },
+                Reply::Respond {
+                    status: 202,
+                    location: Some(
+                        "/id/api/v2/account/credentials/create/oauth/token/cabbe5c3d2f4e26932420e051cd9efd9/",
+                    ),
+                    body: "{}",
+                },
+                Reply::Respond { status: 200, location: None, body: exchanged_token },
+                Reply::Respond {
+                    status: 200,
+                    location: None,
+                    body: r#"{"sub": 1034874630, "nickname": "TestPlayer"}"#,
+                },
+            ]
+        }
+
+        fn credentials() -> AccountCredentials {
+            AccountCredentials {
+                username: "captain@example.com".to_string(),
+                password: SecretPassword::new("hunter2".to_string()),
+            }
+        }
+
+        #[tokio::test]
+        async fn login_takes_the_session_expiry_from_the_exchanged_token() {
+            let server = ScriptedServer::start(login_script(
+                r#"{"access_token": "short-token", "token_type": "Bearer", "expires_in": 60}"#,
+                r#"{"access_token": "short-token", "token_type": "Bearer", "expires_in": 1209600}"#,
+            ))
+            .await;
+            let before = SystemTime::now();
+
+            let session = client(&server, fast_timing()).login(credentials()).await.expect("signed in");
+
+            let TokenExpiry::KnownAt(expires_at) = session.expiry else {
+                panic!("expected a known expiry, got {:?}", session.expiry);
+            };
+            assert!(expires_at >= before + Duration::from_secs(1_209_600), "expiry came from the short-lived token");
+            assert_eq!(server.requests().len(), 6);
+        }
+
+        #[tokio::test]
+        async fn login_without_an_exchanged_expiry_leaves_it_unknown() {
+            let server = ScriptedServer::start(login_script(
+                r#"{"access_token": "short-token", "token_type": "Bearer", "expires_in": 60}"#,
+                r#"{"access_token": "short-token", "token_type": "Bearer"}"#,
+            ))
+            .await;
+
+            let session = client(&server, fast_timing()).login(credentials()).await.expect("signed in");
+
+            assert_eq!(session.expiry, TokenExpiry::Unknown);
         }
 
         #[tokio::test]
