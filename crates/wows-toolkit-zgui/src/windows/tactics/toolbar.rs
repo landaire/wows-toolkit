@@ -1,5 +1,6 @@
-//! The board's two toolbar rows: what it is set on, the ship picker, the range circles, the presets
-//! and the scan above; the capture point and drawing tools below.
+//! The board's toolbar rows: what it is set on, the ship picker, the range circles, the presets
+//! and the scan above; the capture point and drawing tools below; and the picked ship's own hull,
+//! modifiers and circles while one placed ship is picked out alone.
 
 use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
@@ -18,6 +19,9 @@ use wows_toolkit_replay_data::tactics::MapEntry;
 use wows_toolkit_replay_data::tactics::RADIUS_STEP_KM;
 use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
 use wows_toolkit_replay_data::tactics::RangeCircle;
+use wows_toolkit_replay_data::tactics::SHIP_MODIFIERS;
+use wows_toolkit_replay_data::tactics::ShipModifier;
+use wows_toolkit_replay_data::tactics::board::PickedShip;
 use wows_toolkit_replay_data::tactics::map_entries;
 use wows_toolkit_replay_data::tactics::mode_value;
 use wows_toolkit_replay_data::tactics::radius_km;
@@ -28,6 +32,7 @@ use wows_toolkit_replay_data::tactics::team_color;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RwSignal;
@@ -95,6 +100,7 @@ const CSS: &str = css!(
         gap: 12px;
         border-top: 1px solid var(--lui-color-border);
     }
+    .wt-tactics-toolbar__row--ship { border-top: 1px solid var(--lui-color-border); }
     .wt-tactics-toolbar__group {
         display: flex;
         flex-direction: row;
@@ -240,6 +246,7 @@ pub fn BoardToolbar(model: BoardModel) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let may_steer = Memo::new(move |_| model.with(|board| board.may_steer()));
     let has_map = Memo::new(move |_| model.with(|board| board.map().is_some()));
+    let ship_picked = Memo::new(move |_| model.with(|board| board.picked_ship().is_some()));
     let locale = Services::current().locale;
 
     view! {
@@ -273,6 +280,9 @@ pub fn BoardToolbar(model: BoardModel) -> impl IntoView {
                 } else {}
                 DrawTools(model = model)
             }
+            if move || ship_picked.get() {
+                ShipConfig(model = model)
+            } else {}
         }
     }
 }
@@ -620,6 +630,185 @@ fn RangeCheck(
                 on:click = move |_| toggle()
             ) {
                 {label}
+            }
+        }
+    }
+}
+
+/// The picked ship's hull, modifiers and range circles, each changed on that ship alone.
+#[component]
+fn ShipConfig(model: BoardModel) -> impl IntoView {
+    let locked = Signal::derive_local(move || model.with(|board| board.annotations_locked()));
+    let picked = Memo::new(move |_| model.with(|board| board.picked_ship()));
+    // Empty only for the moment the pick goes, before this row does.
+    let name = move || picked.with(|ship| ship.as_ref().map(|ship| ship.config.ship_name.clone()).unwrap_or_default());
+    // A ship with one hull has nothing to choose, which the egui board leaves out as well.
+    let has_hulls = Memo::new(move |_| picked.with(|ship| ship.as_ref().is_some_and(|ship| ship.hulls.len() > 1)));
+    let filter_is = move |on: bool| {
+        Signal::derive_local(move || {
+            picked.with(|ship| {
+                ship.as_ref().is_some_and(|ship| {
+                    RANGE_CIRCLES.iter().all(|(circle, _)| circle.is_on(&ship.config.range_filter) == on)
+                })
+            })
+        })
+    };
+    let all_on = filter_is(true);
+    let all_off = filter_is(false);
+    let all = RANGE_CIRCLES.map(|(circle, _)| circle);
+
+    view! {
+        row(class = "wt-tactics-toolbar__row wt-tactics-toolbar__row--ship", attr:data-testid = "tactics-ship-config") {
+            row(class = "wt-tactics-toolbar__group") {
+                text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.ship_config").into_owned()}}
+                text(class = "wt-tactics-panel__text", attr:data-testid = "tactics-ship-config-name") {{name}}
+            }
+            if move || has_hulls.get() {
+                Rule()
+                HullPicker(model = model, picked = picked, locked = locked)
+            } else {}
+            Rule()
+            row(class = "wt-tactics-toolbar__group") {
+                text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.modifiers").into_owned()}}
+                for entry in move || SHIP_MODIFIERS.to_vec(), key = |entry: &(ShipModifier, &str)| entry.0 as u8 {
+                    ShipCheck(
+                        checked = Signal::derive_local(move || {
+                            picked.with(|ship| ship.as_ref().is_some_and(|ship| entry.0.is_on(&ship.config)))
+                        }),
+                        set = UnsyncCallback::new(move |on: bool| model.update(|board| board.set_picked_modifier(entry.0, on))),
+                        key = entry.1,
+                        test_id = format!("tactics-ship-modifier-{}", entry.0 as u8),
+                        locked = locked
+                    )
+                }
+            }
+            Rule()
+            row(class = "wt-tactics-toolbar__group") {
+                text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.ship_ranges").into_owned()}}
+                Button(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Xs,
+                    disabled = Signal::derive_local(move || locked.get() || all_on.get()),
+                    attr:data-testid = "tactics-ship-ranges-all",
+                    on:click = move |_| model.update(|board| board.set_picked_range_circles(&all, true))
+                ) {
+                    {t!("ui.renderer.context.enable_all").into_owned()}
+                }
+                Button(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Xs,
+                    disabled = Signal::derive_local(move || locked.get() || all_off.get()),
+                    attr:data-testid = "tactics-ship-ranges-none",
+                    on:click = move |_| model.update(|board| board.set_picked_range_circles(&all, false))
+                ) {
+                    {t!("ui.renderer.context.disable_all").into_owned()}
+                }
+                for entry in move || RANGE_CIRCLES.to_vec(), key = |entry: &(RangeCircle, &str)| entry.0 as u8 {
+                    ShipCheck(
+                        checked = Signal::derive_local(move || {
+                            picked.with(|ship| ship.as_ref().is_some_and(|ship| entry.0.is_on(&ship.config.range_filter)))
+                        }),
+                        set = UnsyncCallback::new(move |on: bool| {
+                            model.update(|board| board.set_picked_range_circles(&[entry.0], on))
+                        }),
+                        key = entry.1,
+                        test_id = format!("tactics-ship-range-{}", entry.0 as u8),
+                        locked = locked
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// The picked ship's hull upgrade, by its param name as the egui board lists it.
+#[component]
+fn HullPicker(
+    model: BoardModel,
+    picked: Memo<Option<PickedShip>>,
+    locked: Signal<bool, LocalStorage>,
+) -> impl IntoView {
+    let open = RwSignal::new_local(false);
+    let hulls =
+        Memo::new(move |_| picked.with(|ship| ship.as_ref().map(|ship| ship.hulls.clone()).unwrap_or_default()));
+    let current = Memo::new(move |_| picked.with(|ship| ship.as_ref().and_then(|ship| ship.config.hull_name.clone())));
+    // No hull named leaves the choice to the params, which the egui board calls the default.
+    let trigger = move || current.get().unwrap_or_else(|| t!("ui.tactics.hull_default").into_owned());
+    let choose = move |hull: String| {
+        open.set(false);
+        model.update(|board| board.set_picked_hull(hull));
+    };
+
+    view! {
+        row(class = "wt-tactics-toolbar__group") {
+            text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.hull").into_owned()}}
+            Popover(open = open) {
+                PopoverTrigger(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Xs,
+                    a11y:label = t!("ui.tactics.hull").into_owned(),
+                    attr:data-testid = "tactics-ship-hull"
+                ) {
+                    {trigger}
+                }
+                PopoverContent(class = "wt-tactics-panel", attr:data-testid = "tactics-ship-hull-menu") {
+                    for entry in move || hulls.get().into_iter().enumerate().collect::<Vec<_>>(), key = |entry: &(usize, String)| entry.1.clone() {
+                        Button(
+                            variant = ButtonVariant::Ghost,
+                            size = ButtonSize::Xs,
+                            disabled = locked,
+                            attr:data-chosen = {
+                                let hull = entry.1.clone();
+                                move || (current.get().as_ref() == Some(&hull)).then(|| format!("tactics-ship-hull-{}", entry.0))
+                            },
+                            attr:data-testid = format!("tactics-ship-hull-{}", entry.0),
+                            on:click = {
+                                let hull = entry.1.clone();
+                                move |_| choose(hull.clone())
+                            }
+                        ) {
+                            {entry.1.clone()}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One of the picked ship's checkboxes, whose name toggles it as well.
+#[component]
+fn ShipCheck(
+    checked: Signal<bool, LocalStorage>,
+    set: UnsyncCallback<bool>,
+    key: &'static str,
+    test_id: String,
+    locked: Signal<bool, LocalStorage>,
+) -> impl IntoView {
+    let control = NodeRef::new();
+    let ticked = Signal::derive_local(move || Checked::from(checked.get()));
+    let toggle = move || {
+        if !locked.get_untracked() {
+            set.run(!checked.get_untracked());
+        }
+    };
+
+    view! {
+        row(class = "wt-tactics-panel__row") {
+            Checkbox(
+                checked = Binding::controlled(ticked, move |next: Checked| set.run(next == Checked::Yes)),
+                disabled = locked,
+                node_ref = control,
+                attr:data-testid = test_id.clone(),
+                a11y:label = t!(key).into_owned()
+            )
+            Label(
+                control = control,
+                class = "wt-tactics-panel__text",
+                attr:data-testid = format!("{test_id}-name"),
+                on:click = move |_| toggle()
+            ) {
+                {t!(key).into_owned()}
             }
         }
     }

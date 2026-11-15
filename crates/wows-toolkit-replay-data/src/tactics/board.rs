@@ -62,6 +62,7 @@ use crate::tactics::RANGE_CIRCLES;
 use crate::tactics::RangeCircle;
 use crate::tactics::SHAPE_REACH_PX;
 use crate::tactics::ScanProgress;
+use crate::tactics::ShipModifier;
 use crate::tactics::WORLD_UNITS_PER_KM;
 use crate::tactics::ZOOM_PER_NOTCH;
 use crate::tactics::band_in_world;
@@ -102,6 +103,14 @@ pub struct PlacedShip {
     species: Species,
     /// Whether it is on the reader's side, which is what colours the marker.
     pub friendly: bool,
+}
+
+/// A placed ship the reader has picked out alone, as its controls show it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PickedShip {
+    pub config: AnnotationShipConfig,
+    /// The hull upgrades the ship's params offer, by name.
+    pub hulls: Vec<String>,
 }
 
 /// A message for the reader, which the front end words and shows.
@@ -414,6 +423,15 @@ impl Board {
         })))
     }
 
+    /// The range circles a frame of the board draws on a map `space_size` world units across, by
+    /// the path [`FrameRequest::rasterise`] takes.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn range_circles(&self, space_size: f32) -> Vec<wows_minimap_renderer::draw_command::DrawCommand> {
+        let Some(game_data) = &self.game_data else { return Vec::new() };
+
+        crate::tactics::render::ship_ranges(&self.shapes(), game_data, self.version, space_size)
+    }
+
     /// Takes the size of the frame a rasterisation produced, or `None` for a map with no art.
     pub fn drawn(&mut self, frame: Option<(f32, f32)>) {
         let no_art = frame.is_none();
@@ -572,6 +590,28 @@ impl Board {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The placed ship picked out alone, with its config. `None` when nothing, more than one shape
+    /// or a shape other than a named ship is picked.
+    pub fn picked_ship(&self) -> Option<PickedShip> {
+        let index = self.picked.single()?;
+        let Annotation::Ship { config: Some(config), .. } = self.collab.annotation_at(index)? else { return None };
+        // A ship this build cannot resolve offers no hull choice, which is how the egui board
+        // shows it.
+        let mut hulls: Vec<String> = self
+            .game_data
+            .as_ref()
+            .and_then(GameDataCache::newest_loaded)
+            .and_then(|loaded| {
+                let param = loaded.provider().game_param_by_id(config.param_id)?;
+                let hulls = param.vehicle()?.hull_upgrades()?.keys().cloned().collect();
+                Some(hulls)
+            })
+            .unwrap_or_default();
+        hulls.sort();
+
+        Some(PickedShip { config, hulls })
     }
 
     /// Saves the board under `name`.
@@ -1432,6 +1472,44 @@ impl Board {
     pub fn set_all_range_circles(&mut self, on: bool) {
         let all = RANGE_CIRCLES.map(|(circle, _)| circle);
         self.set_range_circles(&all, on);
+    }
+
+    /// Puts the picked ship on the hull upgrade `hull`.
+    pub fn set_picked_hull(&mut self, hull: String) {
+        self.change_picked_ship(|config| config.hull_name = Some(hull));
+    }
+
+    /// Turns a modifier of the picked ship on or off.
+    pub fn set_picked_modifier(&mut self, modifier: ShipModifier, on: bool) {
+        self.change_picked_ship(|config| modifier.set(config, on));
+    }
+
+    /// Turns circles of the picked ship on or off, leaving every other ship's as they are.
+    pub fn set_picked_range_circles(&mut self, circles: &[RangeCircle], on: bool) {
+        self.change_picked_ship(|config| {
+            for circle in circles {
+                circle.set(&mut config.range_filter, on);
+            }
+        });
+    }
+
+    /// Changes the config of the picked ship, telling the session when it changed.
+    fn change_picked_ship(&mut self, change: impl FnOnce(&mut AnnotationShipConfig)) {
+        if self.collab.annotations_locked() {
+            return;
+        }
+        let Some(index) = self.picked.single() else { return };
+        let Some(mut annotation) = self.collab.annotation_at(index) else { return };
+        let Annotation::Ship { config: Some(config), .. } = &mut annotation else { return };
+
+        let was = config.clone();
+        change(config);
+        if *config == was {
+            return;
+        }
+
+        self.collab.update_annotation(index, annotation);
+        self.redraw();
     }
 
     /// Draws in a different ink from here on. What is already drawn keeps its ink.

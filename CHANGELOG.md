@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Choose a placed ship's hull, Concealment Expert and range mods, and its own range circles on the tactics board when it is picked alone
 - *(zgui)* Follow the collab host's layers, per-ship ranges and hidden trails in the renderer and the watched window, tell the session of layer and per-ship changes made here, and send web peers the recording player's silhouette and watchers the host's trails. A peer locked out of the settings keeps the host's layers, and a peer that joins late is sent what the host shows now
 - *(zgui)* Choose which layers a watched collab playback draws from its own display toggles
 - *(zgui)* Draw trails in the replay renderer and exported videos from every recorded position, as the egui renderer does, rather than from the frames the bake kept

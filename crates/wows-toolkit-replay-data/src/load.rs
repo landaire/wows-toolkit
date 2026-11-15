@@ -479,6 +479,19 @@ impl GameDataCache {
         Self::with_install(None)
     }
 
+    /// A cache with no install that holds `data` as already loaded, for a test that names what a
+    /// build holds.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn holding_for_test(data: Arc<LoadedGameData>) -> Self {
+        let cache = Self::without_install();
+        let slot: BuildSlot = OnceLock::new();
+        let build = data.build();
+        let _ = slot.set(Ok(data));
+        cache.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(build, Arc::new(slot));
+
+        cache
+    }
+
     fn with_install(wows_dir: Option<PathBuf>) -> Self {
         Self {
             wows_dir,

@@ -1,6 +1,7 @@
 //! The board's window driven headlessly.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,9 +15,39 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use tokio::runtime::Runtime;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
+use wows_replays::types::GameParamId;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::tactics::BoardTool;
+use wows_toolkit_replay_data::tactics::ElementPos;
+use wows_toolkit_replay_data::tactics::ElementSize;
 use wows_toolkit_replay_data::tactics::MapChoice;
 use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
+use wows_toolkit_replay_data::tactics::RangeCircle;
+use wows_toolkit_replay_data::tactics::ShipModifier;
+use wows_toolkit_replay_data::tactics::board::BoardKey;
+use wows_toolkit_replay_data::tactics::board::Modifiers as BoardModifiers;
+use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::HullUpgradeConfig;
+use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Meters;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::ParamData;
+use wowsunpack::game_params::types::ShipConfigData;
+use wowsunpack::game_params::types::Species;
+use wowsunpack::game_params::types::Vehicle;
+use wowsunpack::recognized::Recognized;
+use wowsunpack::vfs::MemoryFS;
+use wowsunpack::vfs::VfsPath;
+use wt_collab_client::peer::LocalAnnotationEvent;
+use wt_collab_client::peer::LocalEvent;
+use wt_collab_client::types::Annotation;
+use wt_collab_client::types::AnnotationShipConfig;
 use zgui::component;
 use zgui::reactive::Signal;
 use zgui::view;
@@ -89,6 +120,19 @@ impl BoardWindow {
 
     pub(crate) fn settle(&mut self) {
         self.window.advance(Duration::from_millis(300));
+    }
+
+    /// Runs the window in real time until `done` holds: work handed to another thread lands only
+    /// as time passes.
+    fn wait_until(&mut self, done: impl Fn() -> bool) {
+        for _ in 0..100 {
+            if done() {
+                return;
+            }
+            self.window.advance(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the board did not get there in time");
     }
 
     fn has(&self, test_id: &str) -> bool {
@@ -280,4 +324,127 @@ fn the_board_renders_in_dark_and_light() {
         let path = crate::interaction_tests::save_shot(&mut board.window, name);
         println!("{}", path.display());
     }
+}
+
+const HULL_A: &str = "PRUH610_Moskva_A";
+const HULL_B: &str = "PRUH610_Moskva_B";
+
+/// A build whose only ship is a cruiser with a main battery and two hulls that see differently
+/// far.
+fn two_hull_build() -> GameDataCache {
+    let hull = |km: f32| HullUpgradeConfig { detection_km: Some(Km::new(km)), ..HullUpgradeConfig::default() };
+    let config = ShipConfigData {
+        hull_upgrades: HashMap::from([(HULL_A.to_owned(), hull(12.0)), (HULL_B.to_owned(), hull(10.0))]),
+        main_battery_m: Some(Meters::new(15_000.0)),
+        ..ShipConfigData::default()
+    };
+    let vehicle = Vehicle::builder()
+        .level(10)
+        .group("cruiser".to_owned())
+        .maybe_abilities(None)
+        .upgrades(Vec::new())
+        .maybe_config_data(Some(config))
+        .maybe_model_path(None)
+        .maybe_armor(None)
+        .maybe_hit_locations(None)
+        .permoflages(Vec::new())
+        .camera_trajectories(Vec::new())
+        .maybe_ttx_components(None)
+        .innate_skills(Vec::new())
+        .build();
+    let param = Param::builder()
+        .id(GameParamId::from(1u32))
+        .index("PRSC610".to_owned())
+        .name("PRSC610_Moskva".to_owned())
+        .species(Recognized::Known(Species::Cruiser))
+        .nation("Russia".to_owned())
+        .data(ParamData::Vehicle(vehicle))
+        .build();
+    let provider = GameMetadataProvider::from_params_no_specs(vec![param]).expect("a one-ship provider builds");
+    let vfs: VfsPath = MemoryFS::new().into();
+
+    GameDataCache::holding_for_test(Arc::new(LoadedGameData::for_test(provider, vfs, 1)))
+}
+
+/// A placed ship picked out alone is given its own hull, modifiers and circles through the
+/// toolbar. Each change goes to the session and moves the circles drawn for that ship.
+#[test]
+fn a_picked_ship_takes_its_own_hull_modifiers_and_circles() {
+    // The map's width in world units, which is what turns a range into a radius.
+    const SPACE: f32 = 800.0;
+
+    let mut board = BoardWindow::open();
+    let cache = two_hull_build();
+    board.model.update(move |board| {
+        board.set_game_data(Some(cache));
+        board.set_install(None, Some(Version::base(15, 0, 0)));
+    });
+    board.set_map();
+
+    let state = Arc::default();
+    let (link, sent) = CollabLink::for_test(Arc::clone(&state));
+    board.model.update(|board| board.set_collab(link));
+    // The board speaks to the session once it has told it which map it is on.
+    board.wait_until(|| !state.lock().tactics_boards.is_empty());
+
+    let ship = board
+        .model
+        .change(|board| board.matching_ships(&FilterQuery::new("moskva")))
+        .and_then(|found| found.into_iter().next())
+        .expect("the ship is found");
+    // A build with no map art draws no frame, so the board is told the size of one.
+    let at = ElementPos { x: 384.0, y: 384.0 };
+    board.model.update(|board| {
+        board.set_element(ElementSize { width: 768.0, height: 768.0 });
+        board.drawn(Some((768.0, 768.0)));
+        board.pick_ship(&ship);
+        board.pointer_down(at, BoardModifiers::default());
+        board.pointer_up(at);
+        board.key(BoardKey::Escape, BoardModifiers::default());
+        board.pointer_down(at, BoardModifiers::default());
+        board.pointer_up(at);
+    });
+    board.settle();
+    assert_eq!(board.model.with_untracked(|board| board.annotation_count()), 1, "the ship is placed");
+    assert!(board.has("tactics-ship-config"), "the ship picked out alone shows its own controls");
+
+    let radius = |board: &BoardWindow, kind: ShipConfigCircleKind| {
+        board.model.with_untracked(|board| board.range_circles(SPACE)).into_iter().find_map(|command| match command {
+            DrawCommand::ShipConfigCircle { kind: drawn, radius_px, .. } if drawn == kind => Some(radius_px),
+            _ => None,
+        })
+    };
+    assert_eq!(radius(&board, ShipConfigCircleKind::Detection), None, "a ship placed with every circle off draws none");
+
+    board.press(&format!("tactics-ship-range-{}", RangeCircle::Detection as u8));
+    board.press("tactics-ship-hull");
+    board.press("tactics-ship-hull-1");
+    let on_b = radius(&board, ShipConfigCircleKind::Detection).expect("the detection circle is drawn");
+    board.press("tactics-ship-hull");
+    board.press("tactics-ship-hull-0");
+    let on_a = radius(&board, ShipConfigCircleKind::Detection).expect("the detection circle is drawn");
+    assert!((on_b / on_a - 10.0 / 12.0).abs() < 1e-4, "the circle follows the hull: {on_b} against {on_a}");
+
+    board.press(&format!("tactics-ship-range-{}", RangeCircle::MainBattery as u8));
+    let stock = radius(&board, ShipConfigCircleKind::MainBattery).expect("the main battery circle is drawn");
+    board.press(&format!("tactics-ship-modifier-{}", ShipModifier::GunRange as u8));
+    let modded = radius(&board, ShipConfigCircleKind::MainBattery).expect("the main battery circle is drawn");
+    assert!((modded / stock - 1.16).abs() < 1e-4, "the gun range mod widens the circle: {modded} against {stock}");
+
+    let config = board.model.with_untracked(|board| board.picked_ship()).expect("the ship is still picked").config;
+    assert_eq!(config.hull_name.as_deref(), Some(HULL_A));
+    assert!(ShipModifier::GunRange.is_on(&config));
+    assert!(!ShipModifier::ConcealmentExpert.is_on(&config));
+    assert!(config.range_filter.detection && config.range_filter.main_battery);
+    let told: Vec<AnnotationShipConfig> = sent
+        .try_iter()
+        .filter_map(|event| match event {
+            LocalEvent::Annotation(LocalAnnotationEvent::Set {
+                annotation: Annotation::Ship { config, .. }, ..
+            }) => config,
+            _ => None,
+        })
+        .collect();
+    assert!(told.iter().any(|told| told.hull_name.as_deref() == Some(HULL_B)), "the session heard of each hull");
+    assert_eq!(told.last(), Some(&config), "and the last thing it heard is the ship as it stands");
 }

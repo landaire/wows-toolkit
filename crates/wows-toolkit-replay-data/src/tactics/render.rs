@@ -69,7 +69,7 @@ impl FrameRequest {
 ///
 /// Read from each ship's own params, so what is drawn is what that ship sees and shoots rather
 /// than a figure typed in.
-fn ship_ranges(
+pub(super) fn ship_ranges(
     annotations: &[Annotation],
     game_data: &GameDataCache,
     version: Option<Version>,

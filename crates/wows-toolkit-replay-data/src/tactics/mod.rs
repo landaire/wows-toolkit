@@ -34,6 +34,7 @@ use wt_collab_client::drawing::Tool;
 use wt_collab_client::protocol::WireCapPoint;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationRangeFilter;
+use wt_collab_client::types::AnnotationShipConfig;
 
 use crate::load::GameDataCache;
 
@@ -671,6 +672,60 @@ impl RangeCircle {
             Self::Radar => filter.radar = on,
             Self::Hydro => filter.hydro = on,
         }
+    }
+}
+
+/// The build choices a placed ship can be given, with their translation keys.
+pub const SHIP_MODIFIERS: [(ShipModifier, &str); 3] = [
+    (ShipModifier::ConcealmentExpert, "ui.tactics.concealment_expert"),
+    (ShipModifier::GunRange, "ui.tactics.gun_range_mod"),
+    (ShipModifier::SecondaryRange, "ui.tactics.secondary_range_mod"),
+];
+
+/// A captain skill or upgrade that moves one of a placed ship's circles.
+///
+/// Each is on or off at the one coefficient the egui board applies, rather than a figure typed in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShipModifier {
+    /// Shrinks the detection circle.
+    ConcealmentExpert,
+    /// Widens the main battery circle.
+    GunRange,
+    /// Widens the secondary battery circle.
+    SecondaryRange,
+}
+
+impl ShipModifier {
+    /// The coefficient the modifier applies to its circle while it is on.
+    fn coefficient(self) -> f32 {
+        match self {
+            Self::ConcealmentExpert => 0.9,
+            Self::GunRange => 1.16,
+            Self::SecondaryRange => 1.05,
+        }
+    }
+
+    fn coefficient_mut(self, config: &mut AnnotationShipConfig) -> &mut f32 {
+        match self {
+            Self::ConcealmentExpert => &mut config.vis_coeff,
+            Self::GunRange => &mut config.gm_coeff,
+            Self::SecondaryRange => &mut config.gs_coeff,
+        }
+    }
+
+    /// Whether this modifier is on, in a ship's config. Read as any departure from stock in the
+    /// modifier's direction, as the egui board reads it, so a peer's own figure still shows as on.
+    pub fn is_on(self, config: &AnnotationShipConfig) -> bool {
+        match self {
+            Self::ConcealmentExpert => config.vis_coeff < 1.0,
+            Self::GunRange => config.gm_coeff > 1.0,
+            Self::SecondaryRange => config.gs_coeff > 1.0,
+        }
+    }
+
+    /// Turns this modifier on or off in a ship's config.
+    pub fn set(self, config: &mut AnnotationShipConfig, on: bool) {
+        *self.coefficient_mut(config) = if on { self.coefficient() } else { 1.0 };
     }
 }
 
