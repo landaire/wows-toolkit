@@ -32,6 +32,7 @@ pub mod firing_arcs;
 pub mod firing_range;
 pub mod game_modes;
 pub mod gameparams;
+pub mod gameparams_search;
 pub mod gun_module_matchups;
 pub mod healing;
 pub mod hit_locations;

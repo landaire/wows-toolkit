@@ -28,6 +28,7 @@ use crate::dispersion::DispersionAtRangeArgs;
 use crate::firing_arcs::FiringArcsArgs;
 use crate::game_modes::GameModeBuffsArgs;
 use crate::gameparams::GameParamsQueryArgs;
+use crate::gameparams_search::GameParamsSearchArgs;
 use crate::gun_module_matchups::GunModuleMatchupsArgs;
 use crate::healing::HealingSourcesArgs;
 use crate::hit_locations::ShipHitLocationsArgs;
@@ -364,6 +365,12 @@ const TOOLS: &[Tool] = &[
         description: "Run a jq filter (jaq dialect) over raw GameParams entries, for values the other tools do not report. select is one entry {\"param\": \"PASC020\"} (name, index or id), one ship {\"ship\": \"Des Moines\"}, or a set {\"set\": {\"type\": \"Ship\", \"nation\": \"USA\", \"species\": \"Cruiser\", \"tier\": 10}} of at most limit entries. The filter runs once per entry with the entry object as input; entries without output are omitted. Entries are large: start with `keys` (no leading dot; `.keys` reads a field named keys), then `.Field | keys`, then pick fields. Output is cut to max_bytes; when truncated, hint says how to narrow the filter. The filter has 5 seconds; env is not available. A ship's costGold is a nominal value, not what the ship sells for; never quote it as a price.",
         schema: input_schema::<GameParamsQueryArgs>,
         call: |game, arguments| run(arguments, |args| game.gameparams_query(args)),
+    },
+    Tool {
+        name: "gameparams_search",
+        description: "Find raw GameParams entries by any name: param name (PASC020_Des_Moines_1948), index (PASC020), numeric id, English name (\"Des Moines\", \"Damage Control Party\"), community name (\"DM\", \"GK\"), or a part, misspelling or abbreviation of one (\"des moins\", \"moines\"). Results are ranked best first with how each matched and a score; pass a result's param to gameparams_query. type limits results to one typeinfo.type, e.g. Ship, Modernization, Ability, Crew.",
+        schema: input_schema::<GameParamsSearchArgs>,
+        call: |game, arguments| run(arguments, |args| game.gameparams_search(args)),
     },
 ];
 

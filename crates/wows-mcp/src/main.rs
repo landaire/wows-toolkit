@@ -27,8 +27,9 @@ struct Cli {
 
     /// Cache root for a rebuilt GameParams cache, used when the dump's own
     /// cache was written by another version, and for the raw GameParams that
-    /// gameparams_query reads. Each lives in `<kind>/<build>/` below it, where
-    /// `<kind>` (`game-params-v<N>`, `raw-params-v<N>`) names the format.
+    /// gameparams_query and gameparams_search read. Each lives in a
+    /// `<kind>/` directory below it whose name (`game-params-v<N>`,
+    /// `raw-params-v<N>`) names the format, one directory per build.
     #[arg(long)]
     cache_dir: Option<PathBuf>,
 

@@ -1,0 +1,7 @@
+---
+source: crates/wows-query/tests/gameparams_search.rs
+expression: output
+---
+matched: 0
+results: []
+hint: "no entry matches; try fewer words, the English name or the GameParams index, or leave out type"

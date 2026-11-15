@@ -30,7 +30,7 @@ If the dump's GameParams cache was written by another version of the toolkit, th
 wows-mcp --data ~/wows-game-data --cache-dir ~/.cache/wows-mcp
 ```
 
-`gameparams_query` needs `--cache-dir`. Its first call writes the raw GameParams of the build there, about 40 MB, which takes about ten seconds. `ship_comparison` reads anti-aircraft auras from the same store and leaves them out without `--cache-dir`.
+`gameparams_query` and `gameparams_search` need `--cache-dir`. The first call of either writes the raw GameParams of the build there, about 30 MB, which takes about ten seconds. `ship_comparison` reads anti-aircraft auras from the same store and leaves them out without `--cache-dir`.
 
 To serve streamable HTTP instead of stdio, give an address:
 
@@ -65,7 +65,7 @@ For a client that launches stdio servers from a JSON config:
 
 ## Tools
 
-`find_ships`, `ship_overview`, `tech_tree_lines`, `ship_armor`, `ship_aircraft`, `ship_shells`, `ship_concealment`, `penetration_search`, `armor_trace`, `citadel_profile`, `gun_module_matchups`, `module_comparison`, `armor_assessment`, `ship_comparison`, `turtleback_search`, `ship_stats`, `ship_firing_arcs`, `dispersion_at_range`, `stat_names`, `stat_search`, `quantity_search`, `quantity_values`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `unique_upgrades`, `ship_consumables`, `healing_sources`, `commander`, `commander_search`, `game_mode_buffs`, `gameparams_query`, `replay_summary`.
+`find_ships`, `ship_overview`, `tech_tree_lines`, `ship_armor`, `ship_aircraft`, `ship_shells`, `ship_concealment`, `penetration_search`, `armor_trace`, `citadel_profile`, `gun_module_matchups`, `module_comparison`, `armor_assessment`, `ship_comparison`, `turtleback_search`, `ship_stats`, `ship_firing_arcs`, `dispersion_at_range`, `stat_names`, `stat_search`, `quantity_search`, `quantity_values`, `captain_skill`, `skill_tree`, `upgrade`, `ship_upgrades`, `unique_upgrades`, `ship_consumables`, `healing_sources`, `commander`, `commander_search`, `game_mode_buffs`, `gameparams_query`, `gameparams_search`, `replay_summary`.
 
 `armor_trace`, `citadel_profile`, `gun_module_matchups`, `armor_assessment`, `ship_comparison`, `turtleback_search` and `ship_firing_arcs` read the ship armor models in the game data dump. `ship_firing_arcs` takes the mount facings from them. These tools need a dump that carries the armor extract. `wows-data-mgr dump-renderer-data` writes it unless you pass `--no-armor`.
 

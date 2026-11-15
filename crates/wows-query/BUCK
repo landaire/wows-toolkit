@@ -25,6 +25,7 @@ WOWS_QUERY_DEPS = [
     "//third-party/rust:jaq-json",
     "//third-party/rust:jaq-std",
     "//third-party/rust:memmap2",
+    "//third-party/rust:nucleo-matcher",
     "//third-party/rust:reqwest",
     "//third-party/rust:rootcause",
     "//third-party/rust:schemars",

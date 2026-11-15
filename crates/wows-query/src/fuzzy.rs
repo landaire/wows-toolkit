@@ -35,9 +35,9 @@ impl<'a> Candidate<'a> {
 /// matched, then whether it is secondary. "Kitakaze" beats "STAR Kitakaze"
 /// for "kitakazee".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Nearness {
-    edits: usize,
-    partial: bool,
+pub(crate) struct Nearness {
+    pub(crate) edits: usize,
+    pub(crate) partial: bool,
     secondary: bool,
 }
 
@@ -82,13 +82,21 @@ pub(crate) fn closest<'a>(query: &str, candidates: impl IntoIterator<Item = Cand
 
 /// Edits a query may differ by and still name one thing. Queries of three
 /// characters or fewer must match exactly.
-fn edit_budget(query: &str) -> Option<usize> {
+pub(crate) fn edit_budget(query: &str) -> Option<usize> {
     match query.len() {
         0..=3 => None,
         4..=7 => Some(1),
         8..=11 => Some(2),
         _ => Some(3),
     }
+}
+
+/// How near the search key `key` is to `query`: its whole text, or the run
+/// of its words nearest the query. `None` beyond `budget` edits.
+pub(crate) fn nearness(query: &str, key: &str, budget: usize) -> Option<Nearness> {
+    let nearness = key_nearness(query, key, budget, false);
+
+    (nearness.edits <= budget).then_some(nearness)
 }
 
 /// The nearer of the whole key and any run of the key's words as long as the

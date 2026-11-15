@@ -30,6 +30,7 @@ use crate::jq_worker;
 use crate::jq_worker::StoreFailure;
 use crate::names::Interpretations;
 use crate::raw_params::EntryPosition;
+use crate::raw_params::Localization;
 use crate::raw_params::RawParamEntry;
 use crate::raw_params::RawParams;
 use crate::ships::Tier;
@@ -60,7 +61,7 @@ pub struct GameParamsQueryArgs {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParamSelection {
     /// One entry by param name (PASC020_Des_Moines_1948), index (PASC020)
-    /// or numeric id.
+    /// or numeric id; gameparams_search finds them from other names.
     Param(String),
     /// One ship by English name, as the ship tools resolve it.
     Ship(String),
@@ -184,7 +185,7 @@ impl RawParamsSlot {
         }
     }
 
-    fn get(&self) -> Result<Arc<RawParams>, Arc<RawParamsError>> {
+    fn get(&self, localization: Localization<'_>) -> Result<Arc<RawParams>, Arc<RawParamsError>> {
         // A build takes seconds and hundreds of MB; repeating a failed one
         // on every call would stall every query behind it.
         const RETRY_AFTER: Duration = Duration::from_secs(5 * 60);
@@ -205,7 +206,8 @@ impl RawParamsSlot {
             SlotState::Open(_) | SlotState::Failed { .. } | SlotState::Empty => {}
         }
 
-        match RawParams::open_or_build(cache_root, self.build.raw(), || read_game_params(&self.dump_dir)) {
+        match RawParams::open_or_build(cache_root, self.build.raw(), localization, || read_game_params(&self.dump_dir))
+        {
             Ok(store) => {
                 *state = SlotState::Open(Arc::clone(&store));
                 Ok(store)
@@ -248,17 +250,23 @@ impl RawParamsSlot {
 }
 
 impl GameData {
-    /// The raw GameParams store, opened or built under the cache directory
-    /// on first use. Building takes about ten seconds and up to 1 GB of
-    /// memory while it runs; call this at startup to take that cost before
-    /// the first query.
+    /// The raw GameParams store with English display names, opened or built
+    /// under the cache directory on first use. Building takes about ten
+    /// seconds and up to 1 GB of memory while it runs; call this at startup
+    /// to take that cost before the first query.
     pub fn raw_params(&self) -> Result<Arc<RawParams>, QueryError> {
-        self.raw_params.get().map_err(|source| QueryError::RawParams { source })
+        // Game data loads the English catalog.
+        const ENGLISH: &str = "en";
+
+        let localization = Localization { language: ENGLISH, names: self.provider() };
+
+        self.raw_params.get(localization).map_err(|source| QueryError::RawParams { source })
     }
 
     /// Uses `store`, which another owner such as the desktop app opened for
     /// the same build, instead of opening this game data's own. The store is
-    /// shared, not copied.
+    /// shared, not copied; `gameparams_search` matches the display names of
+    /// its language.
     pub fn share_raw_params(&self, store: Arc<RawParams>) -> Result<(), QueryError> {
         self.raw_params.share(store).map_err(|error| QueryError::RawParams { source: Arc::new(error) })
     }
@@ -388,7 +396,7 @@ impl GameData {
         }
     }
 
-    fn param_display_name(&self, param_name: &str) -> Option<String> {
+    pub(crate) fn param_display_name(&self, param_name: &str) -> Option<String> {
         let param = self.provider().game_param_by_name(param_name)?;
 
         self.provider().localized_name_from_param(&param)

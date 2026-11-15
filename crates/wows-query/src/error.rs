@@ -256,6 +256,9 @@ pub enum QueryError {
     #[error("no GameParams entry has the name, index or id {query:?}")]
     ParamNotFound { query: String },
 
+    #[error("the search query is {len} characters long; give at most {max}")]
+    SearchQueryTooLong { len: usize, max: usize },
+
     /// Shared because a failed build is reported to every call until it is
     /// retried.
     #[error("raw GameParams are not available: {source}")]
@@ -403,6 +406,12 @@ pub enum RawParamsError {
     #[error("{path} belongs to build {found}, not {expected}")]
     WrongBuild { path: PathBuf, expected: u32, found: u32 },
 
+    #[error("{path} holds display names in {found:?}, not {expected:?}")]
+    WrongLanguage { path: PathBuf, expected: String, found: String },
+
+    #[error("language code {language:?} is not ASCII letters, digits, '-' and '_'")]
+    Language { language: String },
+
     #[error("the store published at {dir} was removed before it could be opened")]
     Vanished { dir: PathBuf },
 }
@@ -425,6 +434,8 @@ pub enum StoreDamage {
     Entry,
     #[error("an order table is invalid")]
     Order,
+    #[error("a name index record is invalid")]
+    Term,
 }
 
 /// A jq filter that does not compile. Messages are written for the model

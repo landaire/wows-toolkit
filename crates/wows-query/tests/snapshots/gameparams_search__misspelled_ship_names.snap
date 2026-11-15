@@ -1,0 +1,31 @@
+---
+source: crates/wows-query/tests/gameparams_search.rs
+expression: "rankings(&[(\"des moins\", None), (\"yamto\", None), (\"shimakze\", Some(\"Ship\")),\n(\"Gross Kurfurst\", Some(\"Ship\")), (\"montanna\", None),])"
+---
+- - des moins
+  - - "PASC020_Des_Moines_1948 [Ship] Des Moines community_name:fuzzy 550 \"Des Moines\""
+    - "PAUH901_Des_Moines_1948 [Unit] - display_name:misspelling 400 \"Des Moines\""
+    - "PCZC520_BD098_Des_Moines [Collection] - display_name:misspelling 400 \"Des Moines\""
+    - "PCZC187_AA_Des_Moines [Collection] - display_name:misspelling 350 \"USS Des Moines during Sea Trials, 1948\""
+    - "PXSC121_Des_Moines_Borg_V1 [Ship] Assimilator-2 name:subsequence 300 \"PXSC121_Des_Moines_Borg_V1\""
+- - yamto
+  - - "PJSB018_Yamato_1944 [Ship] Yamato community_name:fuzzy 550 \"Yamato\""
+    - "PJSB918_Yamato_1944 [Ship] [Yamato] display_name:misspelling 400 \"[Yamato]\""
+    - "PJW418_Yamato [Crew] - display_name:misspelling 400 \"Yamato\""
+    - "PCZC519_BD098_Yamato [Collection] - display_name:misspelling 400 \"Yamato\""
+    - "PJUH907_HULL_ARP_YAMATO [Unit] - display_name:misspelling 400 \"Yamato\""
+- - shimakze (type Ship)
+  - - "PJSD012_Shimakaze_1943 [Ship] Shimakaze community_name:fuzzy 550 \"Shimakaze\""
+    - "PJSD912_Shimakaze_1943 [Ship] [Shimakaze] display_name:misspelling 400 \"[Shimakaze]\""
+    - "PJSD890_AZUR_Shimakaze [Ship] AL Shimakaze display_name:misspelling 350 \"AL Shimakaze\""
+    - "PXSD012_Shimakaze2 [Ship] Rover name:subsequence 300 \"PXSD012_Shimakaze2\""
+    - "PXSD016_Shimakaze_PA [Ship] Sea Devil name:subsequence 300 \"PXSD016_Shimakaze_PA\""
+- - Gross Kurfurst (type Ship)
+  - - "PGSB110_Grossdeutschland [Ship] G. Kurfürst community_name:fuzzy 550 \"G. Kurfürst\""
+    - "PGSB910_Grossdeutschland [Ship] [G. Kurfürst] display_name:misspelling 300 \"[Grosser Kurfürst]\""
+- - montanna
+  - - "PASB017_Montana_1945 [Ship] Montana community_name:fuzzy 550 \"Montana\""
+    - "PASB917_Montana_1945 [Ship] [Montana] display_name:misspelling 400 \"[Montana]\""
+    - "PAUH931_Montana_1945 [Unit] - display_name:misspelling 400 \"Montana\""
+    - "PAUH974_MONTANA [Unit] - display_name:misspelling 400 \"Montana\""
+    - "PASB810_TST_MONTANA [Ship] Montana P display_name:misspelling 350 \"Montana P\""

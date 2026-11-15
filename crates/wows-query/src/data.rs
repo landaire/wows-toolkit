@@ -97,6 +97,7 @@ impl GameData {
     /// seconds when the dump's `game_params.rkyv` was written by another
     /// wowsunpack. `cache_root`, when given, holds per-build artifacts in
     /// `<cache_root>/<kind>/<build>/` for [`game_params_cache_kind`] and
+    /// `<cache_root>/<kind>/<build>-en/` for
     /// [`crate::raw_params::raw_params_kind`], each marked with `.complete`
     /// and `.last-used`.
     pub fn load_dump(dump_dir: &Path, cache_root: Option<&Path>) -> Result<Self, Report<LoadError>> {

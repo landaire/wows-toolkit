@@ -1,17 +1,19 @@
 //! Raw GameParams entries of one build: one tree in which every distinct
 //! array and object is stored once (see [`format`]), read in place from a
 //! memory map, so processes and threads that open one build share its
-//! pages.
+//! pages, and an index of entry names for [`RawParams::search`].
 //!
-//! A store lives in `<cache_root>/raw-params-v<N>/<build>/params.bin`. It is
-//! built in a sibling staging directory, marked with `.complete` and renamed
-//! into place; a directory without the marker is treated as absent. Every
-//! open and query updates the modification time of `.last-used`, which cache
+//! A store lives in `<cache_root>/raw-params-v<N>/<build>-<language>/params.bin`,
+//! where `<language>` is that of the display names it indexes. It is built
+//! in a sibling staging directory, marked with `.complete` and renamed into
+//! place; a directory without the marker is treated as absent. Every open
+//! and query updates the modification time of `.last-used`, which cache
 //! eviction reads.
 
 mod builder;
 mod format;
 mod json;
+mod search;
 
 use std::cmp::Ordering;
 use std::fs::File;
@@ -24,6 +26,7 @@ use std::time::SystemTime;
 
 use memmap2::Mmap;
 use wows_core::game_types::GameParamId;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::convert::base_params_json;
 use wowsunpack::game_params::convert::game_params_to_pickle;
 
@@ -35,6 +38,7 @@ use format::ENTRY_WORDS;
 use format::HeaderError;
 use format::Layout;
 use format::Section;
+use format::TERM_WORDS;
 
 pub use format::EntryPosition;
 pub use format::FORMAT_VERSION;
@@ -43,6 +47,11 @@ pub(crate) use format::StringId;
 pub(crate) use format::Tables;
 pub(crate) use format::Value;
 pub(crate) use format::ValueRef;
+pub use search::MatchMethod;
+pub use search::MatchScore;
+pub use search::SearchHit;
+pub use search::TermField;
+pub(crate) use search::kind_rank;
 
 const STORE_FILE: &str = "params.bin";
 pub(crate) const COMPLETE_MARKER: &str = ".complete";
@@ -53,6 +62,30 @@ pub(crate) const LAST_USED_MARKER: &str = ".last-used";
 /// sharing a cache root do not replace each other's stores.
 pub fn raw_params_kind() -> String {
     format!("raw-params-v{FORMAT_VERSION}")
+}
+
+/// Display names of GameParams entries in one language, which a store
+/// indexes for search. A store is identified by build and language alone, so
+/// `names` must be the catalog the client ships with that build.
+#[derive(Clone, Copy)]
+pub struct Localization<'a> {
+    /// Language code of `names`, e.g. `en`: ASCII letters, digits, `-` and
+    /// `_`. It names the store's cache directory.
+    pub language: &'a str,
+    /// Translates `IDS_*` keys; a catalog for `language`.
+    pub names: &'a dyn ResourceLoader,
+}
+
+impl Localization<'_> {
+    fn check(&self) -> Result<(), RawParamsError> {
+        let valid = !self.language.is_empty()
+            && self.language.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+        if !valid {
+            return Err(RawParamsError::Language { language: self.language.to_owned() });
+        }
+
+        Ok(())
+    }
 }
 
 /// Raw GameParams of one build. Immutable once opened; share it as
@@ -72,15 +105,16 @@ pub struct RawParamEntry<'a> {
 }
 
 impl RawParams {
-    /// Opens the store for `build` under `cache_root`, building it from
-    /// `game_params_data`, the bytes of `content/GameParams.data`, when absent
-    /// or damaged.
+    /// Opens the store for `build` with display names in `localization`
+    /// under `cache_root`, building it from `game_params_data`, the bytes of
+    /// `content/GameParams.data`, when absent or damaged.
     pub fn open_or_build(
         cache_root: &Path,
         build: u32,
+        localization: Localization<'_>,
         game_params_data: impl FnOnce() -> Result<Vec<u8>, RawParamsError>,
     ) -> Result<Arc<Self>, RawParamsError> {
-        Self::open_or_build_from(cache_root, build, || {
+        Self::open_or_build_from(cache_root, build, localization, || {
             let root = game_params_to_pickle(game_params_data()?).map_err(RawParamsError::Decode)?;
 
             base_params_json(&root).map_err(RawParamsError::Decode)
@@ -92,25 +126,30 @@ impl RawParams {
     pub fn open_or_build_from<P>(
         cache_root: &Path,
         build: u32,
+        localization: Localization<'_>,
         params: impl FnOnce() -> Result<P, RawParamsError>,
     ) -> Result<Arc<Self>, RawParamsError>
     where
         P: IntoIterator<Item = (String, serde_json::Value)>,
     {
+        localization.check()?;
+
         let kind_dir = cache_root.join(raw_params_kind());
-        let dir = kind_dir.join(build.to_string());
-        match Self::open(&dir, build) {
+        let dir = kind_dir.join(store_name(build, localization.language));
+        match Self::open(&dir, build, localization.language) {
             Ok(Some(store)) => return Ok(store),
             // Absent: build it below.
             Ok(None) => {}
             Err(error) => tracing::warn!(dir = %dir.display(), %error, "rebuilding damaged raw GameParams store"),
         }
 
-        Self::build(&kind_dir, build, params()?)
+        Self::build(&kind_dir, build, localization, params()?)
     }
 
-    /// Opens a complete store, or `None` when `dir` holds none.
-    pub fn open(dir: &Path, build: u32) -> Result<Option<Arc<Self>>, RawParamsError> {
+    /// Opens a complete store, or `None` when `dir` holds none. The store
+    /// file must not be modified or truncated while the store is open (see
+    /// [`Self::open_file`]); removing it or its directory is safe.
+    pub fn open(dir: &Path, build: u32, language: &str) -> Result<Option<Arc<Self>>, RawParamsError> {
         if !dir.join(COMPLETE_MARKER).is_file() {
             return Ok(None);
         }
@@ -118,6 +157,10 @@ impl RawParams {
         let store = Self::open_file(&dir.join(STORE_FILE))?;
         if store.layout.build != build {
             return Err(RawParamsError::WrongBuild { path: store.path, expected: build, found: store.layout.build });
+        }
+        if store.language() != language {
+            let found = store.language().to_owned();
+            return Err(RawParamsError::WrongLanguage { path: store.path, expected: language.to_owned(), found });
         }
         store.touch();
 
@@ -128,9 +171,14 @@ impl RawParams {
     pub(crate) fn open_file(path: &Path) -> Result<Self, RawParamsError> {
         let io_error = |source| RawParamsError::Io { path: path.to_path_buf(), source };
         let file = File::open(path).map_err(io_error)?;
-        // SAFETY: a store file is written once in a staging directory and
-        // published by renaming that directory; nothing writes it afterwards,
-        // and removing it leaves the mapping valid.
+        // SAFETY: the mapping is sound while no one writes or truncates the
+        // file, which this module guarantees for the stores it publishes: a
+        // store file is written once in a staging directory and published by
+        // renaming that directory, never opened for writing afterwards, and
+        // replaced or evicted only by removing the directory, which leaves
+        // existing mappings valid. Another program writing into the cache
+        // directory breaks this; readers then may fault, as with any mapped
+        // file.
         let map = unsafe { Mmap::map(&file) }.map_err(io_error)?;
         let layout = match Layout::parse(&map) {
             Ok(layout) => layout,
@@ -148,23 +196,27 @@ impl RawParams {
     }
 
     /// Writes the store of `params`, each an entry name and its JSON in
-    /// GameParams dictionary order, for `build` into `kind_dir` and opens
-    /// it. A complete store another process published meanwhile is kept and
-    /// opened instead.
+    /// GameParams dictionary order, for `build` with display names in
+    /// `localization` into `kind_dir` and opens it. A complete store another
+    /// process published meanwhile is kept and opened instead.
     pub fn build(
         kind_dir: &Path,
         build: u32,
+        localization: Localization<'_>,
         params: impl IntoIterator<Item = (String, serde_json::Value)>,
     ) -> Result<Arc<Self>, RawParamsError> {
+        localization.check()?;
+
         let started = std::time::Instant::now();
+        let name = store_name(build, localization.language);
         std::fs::create_dir_all(kind_dir)
             .map_err(|source| RawParamsError::Io { path: kind_dir.to_path_buf(), source })?;
-        remove_stale_staging(kind_dir, build);
+        remove_stale_staging(kind_dir, &name);
 
-        let staging = staging_dir(kind_dir, build);
+        let staging = staging_dir(kind_dir, &name);
         std::fs::create_dir(&staging).map_err(|source| RawParamsError::Io { path: staging.clone(), source })?;
-        let published = write_store(&staging, build, params)
-            .and_then(|()| publish(&staging, &kind_dir.join(build.to_string()), build));
+        let published = write_store(&staging, build, &localization, params)
+            .and_then(|()| publish(&staging, &kind_dir.join(&name), build, localization.language));
         if published.is_err() {
             // The staging directory is private to this build; nothing else reads it.
             let _ = std::fs::remove_dir_all(&staging);
@@ -232,6 +284,11 @@ impl RawParams {
     /// The game build this store holds.
     pub fn game_build(&self) -> u32 {
         self.layout.build
+    }
+
+    /// Language of the display names this store indexes.
+    pub fn language(&self) -> &str {
+        self.tables().string(self.layout.language).expect("the language string is checked when the store opens")
     }
 
     /// Size of the store file, the most it adds to a process's memory.
@@ -312,8 +369,8 @@ impl RawParams {
     }
 
     /// Checks what readers rely on without further checks: string bounds,
-    /// entry records and order sections. Node slots are checked as they are
-    /// read.
+    /// the language, entry records, order sections and the name index. Node
+    /// slots are checked as they are read.
     fn validate(&self) -> Result<(), StoreDamage> {
         let tables = self.tables();
 
@@ -326,6 +383,7 @@ impl RawParams {
             }
             previous = end;
         }
+        tables.string(self.layout.language).map_err(|_| StoreDamage::Header)?;
 
         let entries = tables.count(Section::Entries);
         for position in 0..entries {
@@ -338,25 +396,50 @@ impl RawParams {
             }
         }
 
-        if tables.count(Section::ByName) != entries {
-            return Err(StoreDamage::Order);
-        }
+        // Lookups binary search the order sections: each must list exactly
+        // the entries it covers, once each, sorted by key and then position.
         for section in [Section::ByName, Section::ByIndex, Section::ById] {
+            let covers = |entry: &RawParamEntry<'_>| match section {
+                Section::ByIndex => entry.index().is_some(),
+                Section::ById => entry.id().is_some(),
+                _ => true,
+            };
+            let order = |left: &RawParamEntry<'_>, right: &RawParamEntry<'_>| match section {
+                Section::ByIndex => {
+                    let upper = |entry: &RawParamEntry<'_>| entry.index().map(|index| index.to_ascii_uppercase());
+                    upper(left).cmp(&upper(right))
+                }
+                Section::ById => left.id().map(GameParamId::raw).cmp(&right.id().map(GameParamId::raw)),
+                _ => left.name().cmp(right.name()),
+            };
+
+            if tables.count(section) != self.entries().filter(covers).count() {
+                return Err(StoreDamage::Order);
+            }
+            let mut previous: Option<RawParamEntry<'_>> = None;
             for index in 0..tables.count(section) {
                 let position = tables.word(section, index).ok_or(StoreDamage::Order)? as usize;
-                let base = position * ENTRY_WORDS;
-                let present = match section {
-                    Section::ByIndex => tables.word(Section::Entries, base + 2).is_some_and(|word| word != ABSENT),
-                    Section::ById => tables
-                        .word(Section::Entries, base + 7)
-                        .zip(tables.word(Section::Entries, base + 8))
-                        .is_some_and(|(low, high)| low != ABSENT || high != ABSENT),
-                    _ => position < entries,
-                };
-                if position >= entries || !present {
+                if position >= entries {
                     return Err(StoreDamage::Order);
                 }
+                let entry = self.entry_at(EntryPosition(position as u32));
+                let ascending = |previous: RawParamEntry<'_>| {
+                    order(&previous, &entry).then(previous.position().cmp(&entry.position())) == Ordering::Less
+                };
+                if !covers(&entry) || !previous.is_none_or(ascending) {
+                    return Err(StoreDamage::Order);
+                }
+                previous = Some(entry);
             }
+        }
+
+        for index in 0..tables.count(Section::Terms) {
+            let word = |offset| tables.word(Section::Terms, index * TERM_WORDS + offset).ok_or(StoreDamage::Term);
+            if word(0)? as usize >= entries || TermField::from_word(word(1)?).is_none() {
+                return Err(StoreDamage::Term);
+            }
+            tables.string(StringId(word(2)?))?;
+            tables.string(StringId(word(3)?))?;
         }
 
         Ok(())
@@ -431,26 +514,33 @@ pub(crate) fn touch(path: &Path) {
     }
 }
 
-fn staging_prefix(build: u32) -> String {
-    format!(".staging-{build}-")
+/// Directory name of the store of `build` with display names in `language`.
+fn store_name(build: u32, language: &str) -> String {
+    format!("{build}-{language}")
 }
 
-fn staging_dir(kind_dir: &Path, build: u32) -> PathBuf {
+/// Prefix of the staging directories of the store `name`. Store names hold
+/// no `.`, so no store's prefix starts another's.
+fn staging_prefix(name: &str) -> String {
+    format!(".staging-{name}.")
+}
+
+fn staging_dir(kind_dir: &Path, name: &str) -> PathBuf {
     let nanos = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_nanos());
 
-    kind_dir.join(format!("{}{}-{nanos}", staging_prefix(build), std::process::id()))
+    kind_dir.join(format!("{}{}-{nanos}", staging_prefix(name), std::process::id()))
 }
 
-/// Removes staging directories of `build` left by interrupted builds. A
-/// build finishes well within the age limit, so a younger directory may
-/// belong to a build still running in another process.
-fn remove_stale_staging(kind_dir: &Path, build: u32) {
+/// Removes staging directories of the store `name` left by interrupted
+/// builds. A build finishes well within the age limit, so a younger
+/// directory may belong to a build still running in another process.
+fn remove_stale_staging(kind_dir: &Path, name: &str) {
     const STALE_AFTER: Duration = Duration::from_secs(60 * 60);
 
     let Ok(listing) = std::fs::read_dir(kind_dir) else {
         return;
     };
-    let prefix = staging_prefix(build);
+    let prefix = staging_prefix(name);
     for entry in listing.flatten() {
         let is_staging = entry.file_name().to_str().is_some_and(|name| name.starts_with(&prefix));
         let is_stale = entry
@@ -470,11 +560,12 @@ fn remove_stale_staging(kind_dir: &Path, build: u32) {
 fn write_store(
     dir: &Path,
     build: u32,
+    localization: &Localization<'_>,
     params: impl IntoIterator<Item = (String, serde_json::Value)>,
 ) -> Result<(), RawParamsError> {
-    let mut builder = Builder::new();
+    let mut builder = Builder::new(localization.language)?;
     for (name, value) in params {
-        builder.add_entry(&name, &value)?;
+        builder.add_entry(&name, &value, localization)?;
     }
 
     let path = dir.join(STORE_FILE);
@@ -494,11 +585,11 @@ fn write_store(
 /// and opens it. A complete store already at `final_dir`, published by
 /// another process, is kept and opened instead; anything else there is
 /// replaced.
-fn publish(staging: &Path, final_dir: &Path, build: u32) -> Result<Arc<RawParams>, RawParamsError> {
+fn publish(staging: &Path, final_dir: &Path, build: u32, language: &str) -> Result<Arc<RawParams>, RawParamsError> {
     let marker = staging.join(COMPLETE_MARKER);
     File::create(&marker).map_err(|source| RawParamsError::Io { path: marker, source })?;
 
-    if let Ok(Some(existing)) = RawParams::open(final_dir, build) {
+    if let Ok(Some(existing)) = RawParams::open(final_dir, build, language) {
         let _ = std::fs::remove_dir_all(staging);
         return Ok(existing);
     }
@@ -509,15 +600,16 @@ fn publish(staging: &Path, final_dir: &Path, build: u32) -> Result<Arc<RawParams
 
     if let Err(source) = std::fs::rename(staging, final_dir) {
         // Another process published between the removal and the rename.
-        if let Ok(Some(existing)) = RawParams::open(final_dir, build) {
+        if let Ok(Some(existing)) = RawParams::open(final_dir, build, language) {
             let _ = std::fs::remove_dir_all(staging);
             return Ok(existing);
         }
         return Err(RawParamsError::Io { path: final_dir.to_path_buf(), source });
     }
 
-    RawParams::open(final_dir, build)?.ok_or_else(|| RawParamsError::Vanished { dir: final_dir.to_path_buf() })
+    RawParams::open(final_dir, build, language)?
+        .ok_or_else(|| RawParamsError::Vanished { dir: final_dir.to_path_buf() })
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

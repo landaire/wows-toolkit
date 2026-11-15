@@ -16565,6 +16565,7 @@ dependencies = [
  "jaq-std",
  "landlock",
  "memmap2",
+ "nucleo-matcher",
  "replayshark",
  "reqwest 0.12.28",
  "rootcause",

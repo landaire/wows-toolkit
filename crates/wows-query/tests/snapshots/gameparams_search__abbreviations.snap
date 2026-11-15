@@ -1,0 +1,28 @@
+---
+source: crates/wows-query/tests/gameparams_search.rs
+expression: "rankings(&[(\"DM\", None), (\"GK\", None), (\"DCP\", None), (\"dsmoins\", None),])"
+---
+- - DM
+  - - "PASC020_Des_Moines_1948 [Ship] Des Moines community_name:exact-alias 950 \"Des Moines\""
+    - "PXY605_Minefield_AFD2024 [Ability] - community_name:initialism 950 \"Drop Minefield\""
+    - "PXY630_TacticalMinefield [Ability] - community_name:initialism 950 \"Drop Minefield\""
+    - "PRSC109_Dmitry_Donskoy [Ship] Dm. Donskoi display_name:words 792 \"Dm. Donskoi\""
+    - "PRF047_DM_6 [Finder] - name:words 791 \"PRF047_DM_6\""
+- - GK
+  - - "PGSB110_Grossdeutschland [Ship] G. Kurfürst community_name:exact-alias 950 \"G. Kurfürst\""
+    - "PZSC105_Chung_King [Ship] Chungking display_name:substring 593 \"Chungking\""
+    - "PCZC718_PA_3_4 [Collection] - display_name:substring 593 \"Chungking\""
+    - "PGK015_Odin [BattleCard] - name:substring 591 \"PGK015_Odin\""
+    - "PGK023_Roon [BattleCard] - name:substring 591 \"PGK023_Roon\""
+- - DCP
+  - - "PCY001_CrashCrew [Ability] - community_name:initialism 950 \"Damage Control Party\""
+    - "PCY009_CrashCrewPremium [Ability] - community_name:initialism 950 \"Damage Control Party\""
+    - "PCY037_CrashCrewAuto [Ability] - community_name:initialism 950 \"Damage Control Party\""
+    - "PCY058_CrashCrewPremium_TimeBased [Ability] - community_name:initialism 950 \"Damage Control Party\""
+    - "PXY021_CrashCrew [Ability] - community_name:initialism 950 \"Damage Control Party\""
+- - dsmoins
+  - - "PASC020_Des_Moines_1948 [Ship] Des Moines name:subsequence 250 \"PASC020_Des_Moines_1948\""
+    - "PXSC121_Des_Moines_Borg_V1 [Ship] Assimilator-2 name:subsequence 250 \"PXSC121_Des_Moines_Borg_V1\""
+    - "PXSC122_Des_Moines_Borg_V2 [Ship] Disruptor-2 name:subsequence 250 \"PXSC122_Des_Moines_Borg_V2\""
+    - "PCM052_Special_Mod_I_Des_Moines [Modernization] - name:subsequence 250 \"PCM052_Special_Mod_I_Des_Moines\""
+    - "PAES460_SPACE_DES_MOINES [Exterior] - name:subsequence 250 \"PAES460_SPACE_DES_MOINES\""

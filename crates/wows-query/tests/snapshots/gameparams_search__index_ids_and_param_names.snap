@@ -1,0 +1,20 @@
+---
+source: crates/wows-query/tests/gameparams_search.rs
+expression: "rankings(&[(\"PASC020\", None), (\"pasc02\", None), (\"4273911792\", None),\n(\"PJSB018_Yamato_1944\", None),])"
+---
+- - PASC020
+  - - "PASC020_Des_Moines_1948 [Ship] Des Moines index:exact 1000 \"PASC020\""
+    - "PASC002_Chester_1908 [Ship] Chester name:subsequence 250 \"PASC002_Chester_1908\""
+    - "PASC909_250TH_Fort_Worth [Ship] Fort Worth G name:subsequence 250 \"PASC909_250TH_Fort_Worth\""
+    - "PXY401_CrashCrew_H2020 [Ability] - name:subsequence 150 \"PXY401_CrashCrew_H2020\""
+    - "PCVE047_Classic_2020 [BattleScript] - name:subsequence 150 \"PCVE047_Classic_2020\""
+- - pasc02
+  - - "PASC020_Des_Moines_1948 [Ship] Des Moines index:prefix 699 \"PASC020\""
+    - "PASC024_Phoenix_1917 [Ship] Phoenix index:prefix 699 \"PASC024\""
+    - "PASC002_Chester_1908 [Ship] Chester name:subsequence 300 \"PASC002_Chester_1908\""
+    - "PASC012_Pensacola_1944 [Ship] Pensacola (old) name:subsequence 300 \"PASC012_Pensacola_1944\""
+    - "PASC005_Omaha_1923 [Ship] Omaha name:subsequence 250 \"PASC005_Omaha_1923\""
+- - "4273911792"
+  - - "PASC020_Des_Moines_1948 [Ship] Des Moines id:exact 1000 \"PASC020_Des_Moines_1948\""
+- - PJSB018_Yamato_1944
+  - - "PJSB018_Yamato_1944 [Ship] Yamato name:exact 1000 \"PJSB018_Yamato_1944\""

@@ -1229,7 +1229,7 @@ expression: specs()
             required:
               - param
             additionalProperties: false
-            description: "One entry by param name (PASC020_Des_Moines_1948), index (PASC020)\nor numeric id."
+            description: "One entry by param name (PASC020_Des_Moines_1948), index (PASC020)\nor numeric id; gameparams_search finds them from other names."
           - type: object
             properties:
               ship:
@@ -1282,3 +1282,24 @@ expression: specs()
     required:
       - select
       - filter
+- name: gameparams_search
+  description: "Find raw GameParams entries by any name: param name (PASC020_Des_Moines_1948), index (PASC020), numeric id, English name (\"Des Moines\", \"Damage Control Party\"), community name (\"DM\", \"GK\"), or a part, misspelling or abbreviation of one (\"des moins\", \"moines\"). Results are ranked best first with how each matched and a score; pass a result's param to gameparams_query. type limits results to one typeinfo.type, e.g. Ship, Modernization, Ability, Crew."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      query:
+        type: string
+        description: "A param name (PASC020_Des_Moines_1948), index (PASC020), numeric id,\nEnglish name (\"Des Moines\", \"Damage Control Party\"), community name\n(\"DM\", \"GK\") or a part or misspelling of one. At most 100 characters."
+        minLength: 1
+        maxLength: 100
+      type:
+        type: string
+        description: "Only entries of this `typeinfo.type`, e.g. Ship, Modernization,\nAbility, Crew, Exterior, Projectile. Text matches without regard to\ncase."
+      limit:
+        type: integer
+        maximum: 50
+        minimum: 1
+        description: "Most entries listed, 1 to 50, default 10."
+    required:
+      - query

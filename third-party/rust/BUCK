@@ -27813,6 +27813,12 @@ cargo.rust_library(
     visibility = [],
 )
 
+alias(
+    name = "nucleo-matcher",
+    actual = ":nucleo-matcher-0.3",
+    visibility = ["PUBLIC"],
+)
+
 http_archive(
     name = "nucleo-matcher-0.3.1.crate",
     sha256 = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85",

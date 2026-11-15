@@ -1,0 +1,27 @@
+---
+source: crates/wows-query/tests/gameparams_search.rs
+expression: "rankings(&[(\"Yamamoto\", None), (\"hydro\", None), (\"radar\", Some(\"Ability\")),\n(\"super colombo\", None),])"
+---
+- - Yamamoto
+  - - "PJW018_Yamamoto [Crew] - name:words 793 \"PJW018_Yamamoto\""
+    - "PCEE130_Yamamoto_collection [Exterior] - display_name:words 792 \"Yamamoto Isoroku\""
+    - "PCQC006_Yamamoto [Campaign] - name:words 792 \"PCQC006_Yamamoto\""
+    - "PCZA004_Yamamoto [Collection] - name:words 792 \"PCZA004_Yamamoto\""
+    - "PCZC074_Yamamoto_Seva [Collection] - name:words 787 \"PCZC074_Yamamoto_Seva\""
+- - hydro
+  - - "PCY008_SonarSearch [Ability] - community_name:exact-alias 950 \"Hydroacoustic Search\""
+    - "PCY016_SonarSearchPremium [Ability] - community_name:exact-alias 950 \"Hydroacoustic Search\""
+    - "PCY065_SonarSearchPremium_TimeBased [Ability] - community_name:exact-alias 950 \"Hydroacoustic Search\""
+    - "PXY317_SonarSearch_PVP [Ability] - community_name:exact-alias 950 \"Hydroacoustic Search\""
+    - "PCY045_Hydrophone [Ability] - display_name:prefix 695 \"Hydrophone\""
+- - radar (type Ability)
+  - - "PCY019_RLSSearch [Ability] - community_name:exact-alias 950 \"Surveillance Radar\""
+    - "PCY020_RLSSearchPremium [Ability] - community_name:exact-alias 950 \"Surveillance Radar\""
+    - "PCY066_RLSSearchPremium_TimeBased [Ability] - community_name:exact-alias 950 \"Surveillance Radar\""
+    - "PXY110_RLSSearchPremium [Ability] - community_name:exact-alias 950 \"Surveillance Radar\""
+    - "PXY318_RLSSearch_PVP [Ability] - community_name:exact-alias 950 \"Surveillance Radar\""
+- - super colombo
+  - - "PISB011_Affondatore [Ship] Affondatore community_name:supership 950 \"Affondatore\""
+    - "PCY084_SupportHealConsumableReload [Ability] - name:subsequence 100 \"PCY084_SupportHealConsumableReload\""
+    - "PCOM912_SupportHealConsumableReload [Other] - name:subsequence 100 \"PCOM912_SupportHealConsumableReload\""
+    - "PCOM920_SupportHealConsumableReloadOnSelf [Other] - name:subsequence 100 \"PCOM920_SupportHealConsumableReloadOnSelf\""

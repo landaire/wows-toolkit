@@ -22,6 +22,8 @@ jaq-json = { version = "2.0", features = ["serde"] }
 jaq-std = "3.0"
 # Maps raw GameParams stores, so every process opening a build shares its pages.
 memmap2 = "0.9"
+# Scores scattered-letter matches in GameParams name search.
+nucleo-matcher = "0.3"
 reqwest = { version = "0.12", default-features = false, optional = true }
 rootcause = { workspace = true }
 schemars = { workspace = true }

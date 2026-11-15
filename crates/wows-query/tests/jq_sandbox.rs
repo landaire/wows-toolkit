@@ -11,7 +11,14 @@ use serde::Serialize;
 use serde_json::json;
 use wows_query::jq_worker::Limits;
 use wows_query::raw_params::EntryPosition;
+use wows_query::raw_params::Localization;
 use wows_query::raw_params::RawParams;
+use wowsunpack::Rc;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_types::GameParamId;
+use wowsunpack::rpc::entitydefs::EntitySpec;
 
 const SENTINEL_ENV: &str = "WOWS_QUERY_CANARY";
 const SENTINEL: &str = "canary-3f9b1c";
@@ -40,6 +47,27 @@ struct Probe {
     outcome: Result<Vec<String>, String>,
 }
 
+/// A catalog without translations.
+struct NoNames;
+
+impl ResourceLoader for NoNames {
+    fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
+        None
+    }
+
+    fn localized_name_from_id(&self, _id: &TranslationKey) -> Option<String> {
+        None
+    }
+
+    fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+        None
+    }
+
+    fn entity_specs(&self) -> &[EntitySpec] {
+        &[]
+    }
+}
+
 fn worker() -> PathBuf {
     std::env::var_os("WOWS_QUERY_JQ_WORKER_BIN")
         .map(PathBuf::from)
@@ -52,7 +80,8 @@ fn worker() -> PathBuf {
 fn store(name: &str, values: Vec<serde_json::Value>) -> (Arc<RawParams>, Vec<EntryPosition>) {
     let kind_dir = std::env::temp_dir().join(format!("wows-query-jq-sandbox-{name}-{}", std::process::id()));
     let entries = values.into_iter().enumerate().map(|(position, value)| (format!("entry{position}"), value));
-    let store = RawParams::build(&kind_dir, 1, entries).expect("the store builds");
+    let localization = Localization { language: "en", names: &NoNames };
+    let store = RawParams::build(&kind_dir, 1, localization, entries).expect("the store builds");
     let positions = store.entries().map(|entry| entry.position()).collect();
 
     (store, positions)

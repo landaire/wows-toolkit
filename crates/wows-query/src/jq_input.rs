@@ -301,7 +301,7 @@ mod tests {
     fn build(name: &str, entries: Vec<(String, serde_json::Value)>) -> (PathBuf, Arc<RawParams>) {
         let dir = std::env::temp_dir().join(format!("wows-query-jq-input-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let store = RawParams::build(&dir, 1, entries).expect("the store builds");
+        let store = RawParams::build(&dir, 1, crate::raw_params::tests::english(), entries).expect("the store builds");
 
         (dir, store)
     }

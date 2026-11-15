@@ -1,6 +1,6 @@
 //! Layout of `params.bin`, read in place from a memory map.
 //!
-//! A header names ten sections, each an array of little-endian words.
+//! A header names eleven sections, each an array of little-endian words.
 //! Strings are interned. Arrays and objects are nodes: runs of slot words in
 //! one arena, each distinct run stored once however often it occurs. A node's
 //! children are nodes written before it, so every walk ends. A value is one
@@ -17,7 +17,7 @@ pub(crate) const MAGIC: [u8; 4] = *b"WQRP";
 
 /// Bump on any change to the layout or to what is stored; files of any
 /// other version are rebuilt.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Marks an absent string or level in an entry record.
 pub(crate) const ABSENT: u32 = u32::MAX;
@@ -25,6 +25,12 @@ pub(crate) const ABSENT: u32 = u32::MAX;
 /// Words of one entry record: name, root, index, type, species, nation,
 /// level, and the id's low and high halves.
 pub(crate) const ENTRY_WORDS: usize = 9;
+
+/// Words of one name index record: entry position, [`TermField`], the name
+/// as stored and its search key.
+///
+/// [`TermField`]: super::TermField
+pub(crate) const TERM_WORDS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Section {
@@ -47,10 +53,12 @@ pub(crate) enum Section {
     ByIndex,
     /// Entry positions ordered by id.
     ById,
+    /// Names of entries for search, in entry order.
+    Terms,
 }
 
 impl Section {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::StringBytes,
         Self::StringEnds,
         Self::Ints,
@@ -61,6 +69,7 @@ impl Section {
         Self::ByName,
         Self::ByIndex,
         Self::ById,
+        Self::Terms,
     ];
 
     /// Bytes per element; a section's length is a multiple of it.
@@ -69,13 +78,14 @@ impl Section {
             Self::StringBytes => 1,
             Self::Ints | Self::Floats => 8,
             Self::Entries => 4 * ENTRY_WORDS,
+            Self::Terms => 4 * TERM_WORDS,
             Self::StringEnds | Self::NodeEnds | Self::Slots | Self::ByName | Self::ByIndex | Self::ById => 4,
         }
     }
 }
 
-/// Magic, format version, build, a reserved word, then each section's
-/// offset and length as 8-byte words.
+/// Magic, format version, build, the language of display names as a string
+/// id, then each section's offset and length as 8-byte words.
 pub(crate) const HEADER_LEN: usize = 16 + 16 * Section::ALL.len();
 
 /// Sections start on 8-byte boundaries.
@@ -207,6 +217,8 @@ impl<'a> Node<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct Layout {
     pub(crate) build: u32,
+    /// Language of the display names in the name index.
+    pub(crate) language: StringId,
     sections: [Range<usize>; Section::ALL.len()],
 }
 
@@ -218,8 +230,8 @@ pub(crate) enum HeaderError {
 }
 
 impl Layout {
-    pub(crate) fn new(build: u32, sections: [Range<usize>; Section::ALL.len()]) -> Self {
-        Self { build, sections }
+    pub(crate) fn new(build: u32, language: StringId, sections: [Range<usize>; Section::ALL.len()]) -> Self {
+        Self { build, language, sections }
     }
 
     pub(crate) fn parse(bytes: &[u8]) -> Result<Self, HeaderError> {
@@ -232,6 +244,7 @@ impl Layout {
             return Err(HeaderError::Version { found: version });
         }
         let build = word(bytes, 2).ok_or(damaged(StoreDamage::Header))?;
+        let language = StringId(word(bytes, 3).ok_or(damaged(StoreDamage::Header))?);
 
         let mut sections: [Range<usize>; Section::ALL.len()] = Default::default();
         for (position, section) in Section::ALL.into_iter().enumerate() {
@@ -248,7 +261,7 @@ impl Layout {
             sections[position] = range;
         }
 
-        Ok(Self { build, sections })
+        Ok(Self { build, language, sections })
     }
 
     /// The header bytes of this layout.
@@ -257,7 +270,7 @@ impl Layout {
         header.extend_from_slice(&MAGIC);
         header.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         header.extend_from_slice(&self.build.to_le_bytes());
-        header.extend_from_slice(&0u32.to_le_bytes());
+        header.extend_from_slice(&self.language.0.to_le_bytes());
         for range in &self.sections {
             header.extend_from_slice(&(range.start as u64).to_le_bytes());
             header.extend_from_slice(&(range.len() as u64).to_le_bytes());

@@ -1,7 +1,44 @@
 use serde_json::Value;
 use serde_json::json;
+use wowsunpack::Rc;
+use wowsunpack::data::TranslationKey;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::rpc::entitydefs::EntitySpec;
 
 use super::*;
+
+/// A catalog of a few translation keys.
+pub(crate) struct Catalog(pub(crate) &'static [(&'static str, &'static str)]);
+
+impl ResourceLoader for Catalog {
+    fn localized_name_from_param(&self, _param: &Param) -> Option<String> {
+        None
+    }
+
+    fn localized_name_from_id(&self, id: &TranslationKey) -> Option<String> {
+        self.0.iter().find(|(key, _)| *key == id.as_str()).map(|(_, name)| (*name).to_owned())
+    }
+
+    fn game_param_by_id(&self, _id: GameParamId) -> Option<Rc<Param>> {
+        None
+    }
+
+    fn entity_specs(&self) -> &[EntitySpec] {
+        &[]
+    }
+}
+
+/// English names of the sample entries.
+pub(crate) fn english() -> Localization<'static> {
+    const NAMES: Catalog = Catalog(&[
+        ("IDS_PASC020", "Des Moines"),
+        ("IDS_PASC020_FULL", "Des Moines"),
+        ("IDS_PAPA001", "AP shell"),
+        ("IDS_PAPA001_FULL", "Armor-piercing shell"),
+    ]);
+
+    Localization { language: "en", names: &NAMES }
+}
 
 /// A cache root private to one test.
 struct TempRoot(PathBuf);
@@ -53,7 +90,7 @@ fn sample() -> Vec<(String, Value)> {
 }
 
 fn build(root: &TempRoot, build: u32) -> Arc<RawParams> {
-    RawParams::build(&root.kind_dir(), build, sample()).expect("the store builds")
+    RawParams::build(&root.kind_dir(), build, english(), sample()).expect("the store builds")
 }
 
 #[test]
@@ -126,12 +163,12 @@ fn a_store_of_another_format_version_is_rebuilt() {
 
     let dir = path.parent().unwrap();
     assert!(matches!(
-        RawParams::open(dir, 7),
+        RawParams::open(dir, 7, "en"),
         Err(RawParamsError::FormatVersion { found, .. }) if found == FORMAT_VERSION - 1
     ));
 
     let mut rebuilt = false;
-    let store = RawParams::open_or_build_from(&root.0, 7, || {
+    let store = RawParams::open_or_build_from(&root.0, 7, english(), || {
         rebuilt = true;
         Ok(sample())
     })
@@ -142,13 +179,49 @@ fn a_store_of_another_format_version_is_rebuilt() {
 }
 
 #[test]
-fn a_store_of_another_build_is_refused() {
+fn a_store_of_another_build_or_language_is_refused() {
     let root = TempRoot::new("build");
     let store = build(&root, 7);
     let dir = store.path().parent().unwrap().to_path_buf();
+    assert_eq!((store.language(), dir.file_name().unwrap().to_str()), ("en", Some("7-en")));
     drop(store);
 
-    assert!(matches!(RawParams::open(&dir, 8), Err(RawParamsError::WrongBuild { expected: 8, found: 7, .. })));
+    assert!(matches!(RawParams::open(&dir, 8, "en"), Err(RawParamsError::WrongBuild { expected: 8, found: 7, .. })));
+    assert!(matches!(
+        RawParams::open(&dir, 7, "de"),
+        Err(RawParamsError::WrongLanguage { expected, found, .. }) if expected == "de" && found == "en"
+    ));
+
+    let outside = Localization { language: "../en", ..english() };
+    assert!(matches!(
+        RawParams::open_or_build_from(&root.0, 7, outside, || Ok(sample())),
+        Err(RawParamsError::Language { .. })
+    ));
+}
+
+#[test]
+fn names_indexes_and_display_names_are_searchable() {
+    let root = TempRoot::new("search");
+    let store = build(&root, 7);
+
+    let best = |query: &str| {
+        store.search(query, |_| true).first().map(|hit| (hit.entry.name(), hit.field, hit.text, hit.method))
+    };
+    assert_eq!(
+        best("des moins"),
+        Some(("PASC020_Des_Moines_1948", TermField::DisplayName, "Des Moines", MatchMethod::Misspelling))
+    );
+    assert_eq!(
+        best("armor piercing"),
+        Some(("PAPA001_AP", TermField::DisplayName, "Armor-piercing shell", MatchMethod::Words))
+    );
+    assert_eq!(best("pasc0"), Some(("PASC020_Des_Moines_1948", TermField::Index, "PASC020", MatchMethod::Prefix)));
+    assert_eq!(
+        best("4273911792"),
+        Some(("PASC020_Des_Moines_1948", TermField::Id, "PASC020_Des_Moines_1948", MatchMethod::Exact))
+    );
+    assert_eq!(best("plain"), Some(("Plain", TermField::Name, "Plain", MatchMethod::Exact)));
+    assert_eq!(best("zzzz"), None);
 }
 
 #[test]
@@ -158,6 +231,7 @@ fn damaged_stores_report_damage_instead_of_misreading() {
     let path = store.path().to_path_buf();
     let len = store.file_len();
     let slots = store.layout.range(Section::Slots);
+    let by_index = store.layout.range(Section::ByIndex);
     drop(store);
     let original = std::fs::read(&path).unwrap();
 
@@ -165,12 +239,20 @@ fn damaged_stores_report_damage_instead_of_misreading() {
     std::fs::write(&path, &original[..len - 8]).unwrap();
     assert!(matches!(RawParams::open_file(&path), Err(RawParamsError::Damaged { damage: StoreDamage::Section, .. })));
 
+    // One entry listed twice in place of another: lookups would miss one.
+    let mut bytes = original.clone();
+    for position in bytes[by_index].as_chunks_mut::<4>().0 {
+        *position = 0u32.to_le_bytes();
+    }
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(RawParams::open_file(&path), Err(RawParamsError::Damaged { damage: StoreDamage::Order, .. })));
+
     // Every slot of every node points at the newest node, which no node
     // precedes; reads must refuse rather than loop.
     let mut bytes = original.clone();
     let newest = ValueRef::new(format::Tag::Array, u32::MAX >> 4).unwrap();
-    for slot in bytes[slots].chunks_exact_mut(4) {
-        slot.copy_from_slice(&newest.0.to_le_bytes());
+    for slot in bytes[slots].as_chunks_mut::<4>().0 {
+        *slot = newest.0.to_le_bytes();
     }
     std::fs::write(&path, &bytes).unwrap();
     let store = RawParams::open_file(&path).expect("headers and entries are intact");

@@ -1,5 +1,5 @@
-//! Builds `params.bin` from GameParams entries, interning strings and
-//! storing each distinct array and object once.
+//! Builds `params.bin` from GameParams entries, interning strings, storing
+//! each distinct array and object once and indexing entry names for search.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -9,7 +9,10 @@ use std::io::Write;
 use std::ops::Range;
 
 use serde_json::Value;
+use wowsunpack::data::TranslationKey;
 
+use super::Localization;
+use super::TermField;
 use super::format::ABSENT;
 use super::format::ENTRY_WORDS;
 use super::format::HEADER_LEN;
@@ -18,13 +21,17 @@ use super::format::NodeId;
 use super::format::SECTION_ALIGN;
 use super::format::Section;
 use super::format::StringId;
+use super::format::TERM_WORDS;
 use super::format::Tag;
 use super::format::ValueRef;
 use crate::error::RawParamsError;
+use crate::names::search_key;
+use crate::text::clean;
 
 /// Store contents held in memory until written.
-#[derive(Default)]
 pub(crate) struct Builder {
+    language: StringId,
+
     string_ids: HashMap<Box<str>, StringId>,
     string_bytes: Vec<u8>,
     string_ends: Vec<u32>,
@@ -42,18 +49,45 @@ pub(crate) struct Builder {
     node_chain: Vec<Option<NodeId>>,
 
     entries: Vec<[u32; ENTRY_WORDS]>,
+    terms: Vec<[u32; TERM_WORDS]>,
 
     /// Slots of the nodes being interned, innermost last.
     scratch: Vec<u32>,
 }
 
 impl Builder {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    /// A builder for display names in `language`.
+    pub(crate) fn new(language: &str) -> Result<Self, RawParamsError> {
+        let mut builder = Self {
+            language: StringId(0),
+            string_ids: HashMap::new(),
+            string_bytes: Vec::new(),
+            string_ends: Vec::new(),
+            int_ids: HashMap::new(),
+            ints: Vec::new(),
+            float_ids: HashMap::new(),
+            floats: Vec::new(),
+            node_ends: Vec::new(),
+            slots: Vec::new(),
+            node_heads: HashMap::new(),
+            node_chain: Vec::new(),
+            entries: Vec::new(),
+            terms: Vec::new(),
+            scratch: Vec::new(),
+        };
+        builder.language = builder.string(language)?;
+
+        Ok(builder)
     }
 
-    /// Adds one GameParams entry.
-    pub(crate) fn add_entry(&mut self, name: &str, value: &Value) -> Result<(), RawParamsError> {
+    /// Adds one GameParams entry and indexes its param name, index and
+    /// display names in `localization`.
+    pub(crate) fn add_entry(
+        &mut self,
+        name: &str,
+        value: &Value,
+        localization: &Localization<'_>,
+    ) -> Result<(), RawParamsError> {
         let root = self.intern(value)?;
 
         let typeinfo = value.get("typeinfo");
@@ -62,6 +96,7 @@ impl Builder {
         let id = value.get("id").and_then(Value::as_u64);
         let level = value.get("level").and_then(Value::as_u64).and_then(|level| u32::try_from(level).ok());
 
+        let position = u32::try_from(self.entries.len()).map_err(|_| RawParamsError::TooLarge)?;
         let name_id = self.string(name)?;
         let record = [
             name_id.0,
@@ -76,6 +111,29 @@ impl Builder {
             id.map_or(ABSENT, |id| (id >> 32) as u32),
         ];
         self.entries.push(record);
+
+        self.add_term(position, TermField::Name, name)?;
+        if let Some(index) = index {
+            self.add_term(position, TermField::Index, index)?;
+        }
+        for display_name in display_names(name, index, value, localization) {
+            self.add_term(position, TermField::DisplayName, &display_name)?;
+        }
+
+        Ok(())
+    }
+
+    /// Indexes `text` as a name of the entry at `position`. Names without
+    /// letters or digits match no query and are left out.
+    fn add_term(&mut self, position: u32, field: TermField, text: &str) -> Result<(), RawParamsError> {
+        let key = search_key(text);
+        if key.is_empty() {
+            return Ok(());
+        }
+
+        let text = self.string(text)?;
+        let key = self.string(&key)?;
+        self.terms.push([position, field as u32, text.0, key.0]);
 
         Ok(())
     }
@@ -106,6 +164,7 @@ impl Builder {
             4 * by_name.len(),
             4 * by_index.len(),
             4 * by_id.len(),
+            4 * TERM_WORDS * self.terms.len(),
         ];
         let mut sections: [Range<usize>; Section::ALL.len()] = Default::default();
         let mut offset = HEADER_LEN.next_multiple_of(SECTION_ALIGN);
@@ -113,7 +172,7 @@ impl Builder {
             *range = offset..offset + len;
             offset = range.end.next_multiple_of(SECTION_ALIGN);
         }
-        let layout = Layout::new(build, sections.clone());
+        let layout = Layout::new(build, self.language, sections.clone());
 
         output.write_all(&layout.header())?;
         let mut written = HEADER_LEN;
@@ -132,6 +191,7 @@ impl Builder {
                 Section::ByName => write_words(output, &by_name)?,
                 Section::ByIndex => write_words(output, &by_index)?,
                 Section::ById => write_words(output, &by_id)?,
+                Section::Terms => write_words(output, self.terms.as_flattened())?,
             }
             written = range.end;
         }
@@ -331,6 +391,44 @@ impl Builder {
 
 fn text(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str)
+}
+
+/// Names the client shows for an entry, distinct and cleaned: ships and
+/// most entries by index (`IDS_<index>`, a longer `IDS_<index>_FULL`),
+/// upgrades by `IDS_TITLE_<NAME>`, consumables by
+/// `IDS_DOCK_CONSUME_TITLE_<NAME>`, modules and signals by `IDS_<NAME>`,
+/// and commanders by their person name.
+fn display_names(name: &str, index: Option<&str>, value: &Value, localization: &Localization<'_>) -> Vec<String> {
+    let upper = name.to_ascii_uppercase();
+    let person = value
+        .get("CrewPersonality")
+        .and_then(|personality| text(personality.get("personName")))
+        .filter(|person| !person.is_empty());
+
+    let mut keys = Vec::new();
+    if let Some(index) = index {
+        keys.push(format!("IDS_{index}"));
+        keys.push(format!("IDS_{index}_FULL"));
+    }
+    keys.push(format!("IDS_TITLE_{upper}"));
+    keys.push(format!("IDS_DOCK_CONSUME_TITLE_{upper}"));
+    keys.push(format!("IDS_{upper}"));
+    if let Some(person) = person {
+        keys.push(format!("IDS_{}", person.to_ascii_uppercase()));
+    }
+
+    let mut found: Vec<String> = Vec::new();
+    for key in keys {
+        let Some(display_name) = localization.names.localized_name_from_id(&TranslationKey::new(key)) else {
+            continue;
+        };
+        let display_name = clean(&display_name);
+        if !display_name.is_empty() && !found.contains(&display_name) {
+            found.push(display_name);
+        }
+    }
+
+    found
 }
 
 fn write_words(output: &mut (impl Write + ?Sized), words: &[u32]) -> std::io::Result<()> {
