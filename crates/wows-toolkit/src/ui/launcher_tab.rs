@@ -832,8 +832,15 @@ fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, 
                     ui.label("Signed in");
                 }
             }
-            if storage == SessionStorage::MemoryOnly {
-                ui.weak("not saved to keyring; you'll sign in again next launch");
+            match storage {
+                SessionStorage::Keyring => {}
+                SessionStorage::PlaintextFile => {
+                    ui.colored_label(WARN_COLOR, t!("ui.launcher.popover.unencrypted"))
+                        .on_hover_text(t!("ui.launcher.keyring.unencrypted"));
+                }
+                SessionStorage::MemoryOnly => {
+                    ui.weak(t!("ui.launcher.account.memory_only"));
+                }
             }
         }
         AccountStatus::Expired => {
@@ -843,7 +850,7 @@ fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, 
             ui.weak("Signed out");
         }
         AccountStatus::KeyringLocked => {
-            ui.colored_label(WARN_COLOR, "Keyring unavailable");
+            ui.colored_label(WARN_COLOR, t!("ui.launcher.popover.keyring_locked"));
         }
     }
 }

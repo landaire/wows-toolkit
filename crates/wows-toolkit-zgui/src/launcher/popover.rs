@@ -300,17 +300,21 @@ fn AccountRowView(
                 TooltipTrigger {
                     text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.not_saved")}}
                 }
+                TooltipContent {{locale.text("ui.launcher.account.memory_only")}}
+            }
+        }),
+        AccountStatus::Ready(SessionStorage::PlaintextFile) => AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger {
+                    text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.unencrypted")}}
+                }
                 TooltipContent {
                     column(class = "wt-launcher__column") {
-                        text {{locale.text("ui.launcher.keyring.not_saved")}}
-                        text {{locale.text("ui.launcher.keyring.missing")}}
+                        text {{locale.text("ui.launcher.keyring.unencrypted")}}
                         text {{locale.text("ui.launcher.keyring.how_detail")}}
                     }
                 }
             }
-        }),
-        AccountStatus::Ready(SessionStorage::PlaintextFile) => AnyView::new(view! {
-            text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.unencrypted")}}
         }),
         AccountStatus::NotLoaded | AccountStatus::Restoring => AnyView::new(view! {
             text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.restoring")}}

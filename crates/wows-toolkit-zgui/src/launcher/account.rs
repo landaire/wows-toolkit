@@ -367,8 +367,8 @@ fn CaptchaNotice(model: LauncherModel) -> impl IntoView {
     }
 }
 
-/// Says, while the OS has no secret store, that a session signed in now lasts until the toolkit
-/// closes, and how to get a store.
+/// Says, while the OS has no secret store, that a session signed in now is saved unencrypted,
+/// and how to get a store.
 #[component]
 pub fn KeyringNotice(model: LauncherModel) -> impl IntoView {
     let locale = Services::current().locale;
@@ -377,15 +377,12 @@ pub fn KeyringNotice(model: LauncherModel) -> impl IntoView {
     view! {
         Show(when = move || missing.get()) {
             column(class = "wt-launcher__column wt-launcher__keyring", attr:data-testid = "launcher-keyring-missing") {
-                text(class = "wt-launcher__warn") {{locale.text("ui.launcher.keyring.not_saved")}}
-                row(class = "wt-launcher__row wt-launcher__row--tight") {
-                    text(class = "wt-launcher__dim") {{locale.text("ui.launcher.keyring.missing")}}
-                    Tooltip {
-                        TooltipTrigger {
-                            text(class = "wt-launcher__link", attr:data-testid = "launcher-keyring-help") {{locale.text("ui.launcher.keyring.how")}}
-                        }
-                        TooltipContent {{locale.text("ui.launcher.keyring.how_detail")}}
+                text(class = "wt-launcher__warn") {{locale.text("ui.launcher.keyring.unencrypted")}}
+                Tooltip {
+                    TooltipTrigger {
+                        text(class = "wt-launcher__link", attr:data-testid = "launcher-keyring-help") {{locale.text("ui.launcher.keyring.how")}}
                     }
+                    TooltipContent {{locale.text("ui.launcher.keyring.how_detail")}}
                 }
             }
         }

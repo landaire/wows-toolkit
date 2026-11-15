@@ -377,8 +377,14 @@ impl LauncherView {
                         ))),
                 )
                 .child(expiry)
-                .when(launcher.account_status(key) != AccountStatus::Ready(SessionStorage::Keyring), |this| {
-                    this.child(dim(t!("ui.launcher.account.not_persisted")))
+                .children(match launcher.account_status(key) {
+                    AccountStatus::Ready(SessionStorage::PlaintextFile) => {
+                        Some(colored(t!("ui.launcher.keyring.unencrypted"), cx.theme().warning))
+                    }
+                    AccountStatus::Ready(SessionStorage::MemoryOnly) => {
+                        Some(dim(t!("ui.launcher.account.memory_only")))
+                    }
+                    _ => None,
                 })
                 .child(
                     h_flex().child(

@@ -2009,7 +2009,6 @@ region = "Region: %{region}"
 expires_in = "Signed in (expires in %{duration})"
 expired = "Session expired - sign in again"
 expiry_unknown = "Signed in (expiry unknown; verified on launch)"
-not_persisted = "Not saved to keyring; you'll sign in again next launch."
 sign_out = "Sign out"
 sign_in = "Sign in"
 signed_out = "Not signed in."
@@ -2063,10 +2062,9 @@ continue = "Continue"
 cancel = "Cancel"
 
 [ui.launcher.keyring]
-not_saved = "This session will not be saved. You will need to sign in again after you restart the toolkit."
-missing = "No system keyring (Secret Service) is available."
-how = "How to enable one"
-how_detail = "Enable the Secret Service API of KDE Wallet (System Settings, KDE Wallet), or install and start gnome-keyring. Then restart the toolkit."
+unencrypted = "Your sign-in is saved unencrypted in the app's data folder because no Secret Service provider (such as GNOME Keyring, KeePassXC or KDE Wallet) is available."
+how = "How to keep it encrypted"
+how_detail = "Install and start a Secret Service provider such as GNOME Keyring, KeePassXC or KDE Wallet, then restart the toolkit. Saved sign-ins move into it."
 unlock_hint = "Your system keyring may ask to unlock so the toolkit can read your saved sign-in."
 
 [ui.launcher.play]
