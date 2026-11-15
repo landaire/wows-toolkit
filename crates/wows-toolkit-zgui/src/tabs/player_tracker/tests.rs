@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
+use landaire_ui::FoldingRegion;
+use landaire_ui::RegionExtent;
+use landaire_ui::SavedLayout;
+use landaire_ui::Share;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use sqlx::sqlite::SqlitePool;
@@ -35,7 +39,10 @@ use crate::interaction_tests::returning_reader;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::tabs::player_tracker::built_dock;
 use crate::tabs::player_tracker::built_model;
+use crate::tabs::player_tracker::layout::DOCK_LAYOUT_KEY;
+use crate::tabs::player_tracker::layout::allow_persistence;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::roster::sniper_hover_text;
 
@@ -417,6 +424,35 @@ fn the_current_match_opens_on_the_saved_view() {
         assert_eq!(tracker.model.view_mode.get_untracked(), mode, "the saved view is read back");
         assert_eq!(tracker.has(SHIP_STATS), detailed, "and drawn: {mode:?}");
     }
+}
+
+#[test]
+fn the_dock_layout_is_saved_and_put_back() {
+    let _persists = allow_persistence();
+    let saved = SavedView::open();
+    let extent = RegionExtent::Share(Share::new(31.0).expect("a valid share"));
+
+    let mut first = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let dock = built_dock().expect("the tab built its dock");
+    dock.set_region_extent(FoldingRegion::Left, extent);
+    let stored = || {
+        let read = queries::try_get_setting::<SavedLayout>(&saved.pool, DOCK_LAYOUT_KEY);
+        saved.runtime.block_on(read).expect("the layout row reads")
+    };
+    for _ in 0..100 {
+        if stored().is_some_and(|layout| layout.extents.left == extent) {
+            break;
+        }
+        first.window.advance(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(stored().map(|layout| layout.extents.left), Some(extent), "the change is saved");
+    drop(first);
+
+    let _second = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let dock = built_dock().expect("the tab built its dock again");
+    assert_eq!(dock.region_extent(FoldingRegion::Left), extent, "the saved layout is put back");
+    assert_eq!(dock.panels_untracked().len(), 3, "with every section");
 }
 
 #[test]

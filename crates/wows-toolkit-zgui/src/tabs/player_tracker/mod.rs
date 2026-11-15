@@ -4,6 +4,7 @@
 //! The three sections are panels of one dock, so they can be split and docked; the status bar
 //! shows and hides the dock's side regions once a section has been moved into one.
 
+mod layout;
 mod live;
 mod model;
 mod roster;
@@ -262,11 +263,18 @@ const DOCK_SIDES: [(DockRegion, PanelSide, &str); 3] = [
 thread_local! {
     /// The model of the tab built last on this thread, for tests to seed.
     static BUILT: std::cell::Cell<Option<TrackerModel>> = const { std::cell::Cell::new(None) };
+    /// The dock of the tab built last on this thread.
+    static BUILT_DOCK: std::cell::Cell<Option<DockState>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(test)]
 pub fn built_model() -> Option<TrackerModel> {
     BUILT.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub fn built_dock() -> Option<DockState> {
+    BUILT_DOCK.with(std::cell::Cell::get)
 }
 
 #[component]
@@ -303,6 +311,9 @@ pub fn PlayerTrackerTab() -> impl IntoView {
     }));
 
     let dock = tracker_dock(model);
+    #[cfg(test)]
+    BUILT_DOCK.with(|built| built.set(Some(dock)));
+    layout::persist(services, dock);
     let chrome = TabChrome::current();
     dock_toggles(dock, chrome);
 
