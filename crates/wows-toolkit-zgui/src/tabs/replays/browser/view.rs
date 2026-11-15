@@ -661,6 +661,13 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
             MenuSeparator()
         }
     });
+    // A batch is rendered from the items above; a lone row renders itself.
+    let single_items = batch.is_empty().then(|| {
+        view! {
+            {item(t!("ui.replay.context.render_to_video").into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
+            {item(t!("ui.replay.context.render_to_clipboard").into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
+        }
+    });
 
     let opened = path.clone();
     let open = {
@@ -746,6 +753,7 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
             {t!("ui.replay.context.open_in_new_tab").into_owned()}
         }
         {item(t!("ui.replay.context.render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
+        {single_items.map(IntoView::into_view)}
         MenuSeparator()
         MenuItem(on_select = set_session) {{set_label}}
         {item(add_label, ReplayBrowserEvent::SessionStats { paths: session.clone(), replace: false })}

@@ -73,6 +73,12 @@ pub enum ReplayBrowserEvent {
     },
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Every event a listing sent on this thread, for a test to read.
+    static SENT: std::cell::RefCell<Vec<ReplayBrowserEvent>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Where a listing sends what the reader asks of it.
 #[derive(Clone)]
 pub struct BrowserEvents {
@@ -82,6 +88,8 @@ pub struct BrowserEvents {
 
 impl BrowserEvents {
     pub fn send(&self, event: ReplayBrowserEvent) {
+        #[cfg(test)]
+        SENT.with(|sent| sent.borrow_mut().push(event.clone()));
         (self.send)(event);
     }
 

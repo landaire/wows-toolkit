@@ -783,6 +783,44 @@ fn a_rows_menu_leaves_the_selection_on_the_selected_replay() {
     assert_eq!(shown.selected_paths(), [paths[0].clone()], "closing the menu leaves the selection");
 }
 
+/// The events the listing sent since the last call.
+fn sent() -> Vec<super::ReplayBrowserEvent> {
+    super::SENT.with(|sent| std::mem::take(&mut *sent.borrow_mut()))
+}
+
+/// Opens `target`'s menu and picks the item labelled `label`.
+fn pick(window: &mut HeadlessWindow, target: landaire_ui::test_support::Element, label: &str) {
+    window.right_click(target).expect("the row has a box");
+    window.advance(Duration::from_millis(300));
+    let item = window.by_role_and_label(Role::MenuItem, label).unwrap_or_else(|| panic!("the menu offers {label}"));
+    window.click(item).expect("the item has a box");
+    window.advance(Duration::from_millis(300));
+}
+
+#[test]
+fn a_lone_rows_menu_renders_it_to_video_or_the_clipboard() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(2);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let paths = listed(listing(control, &root));
+    sent();
+
+    for key in ["ui.replay.context.render_to_video", "ui.replay.context.render_to_clipboard"] {
+        let target = row(&window, &paths[0]);
+        pick(&mut window, target, &t!(key));
+    }
+
+    assert_eq!(
+        sent(),
+        [
+            super::ReplayBrowserEvent::RenderManyToVideo(vec![paths[0].clone()]),
+            super::ReplayBrowserEvent::RenderManyToClipboard(vec![paths[0].clone()]),
+        ]
+    );
+}
+
 #[test]
 fn a_group_header_shows_no_replay_preview() {
     let (mut window, control) = open();
