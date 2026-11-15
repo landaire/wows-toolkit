@@ -8,6 +8,7 @@ use wgc_core::TrackingId;
 use zeroize::Zeroize;
 
 use crate::error::AuthError;
+use crate::error::CredentialParameters;
 use crate::error::TokenRejection;
 use crate::game_token::GameTitle;
 use crate::game_token::GameToken1;
@@ -213,9 +214,12 @@ impl AuthClient {
         }
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(report!(AuthError::BadResponse {
-                detail: format!("challenge endpoint returned HTTP {}: {}", status.as_u16(), body),
-            }));
+            let detail = format!("challenge endpoint returned HTTP {}: {}", status.as_u16(), body);
+            return Err(match status.as_u16() {
+                429 => report!(AuthError::RateLimited).attach(detail),
+                code @ 500.. => report!(AuthError::ServiceUnavailable { status: code }).attach(detail),
+                _ => report!(AuthError::BadResponse { detail }),
+            });
         }
         let body: models::ChallengeResponse = response.json().await.map_err(|source| {
             report!(AuthError::Request { url: url.clone(), source }).attach("parsing the WGNI challenge response body")
@@ -553,7 +557,12 @@ fn classify_known_code(
         "twofactor_invalid" => report!(AuthError::TwoFactorInvalidCode).attach(rejection.clone()),
         "twofactor_login_locked" => report!(AuthError::TwoFactorLoginLocked).attach(rejection.clone()),
         "twofactor_banned" => report!(AuthError::TwoFactorBanned).attach(rejection.clone()),
+        "account_banned" => report!(AuthError::AccountBanned).attach(rejection.clone()),
         "account_not_found" => report!(AuthError::AccountNotFound).attach(rejection.clone()),
+        // RFC 6749's code for an overloaded or maintained authorization server.
+        "temporarily_unavailable" => {
+            report!(AuthError::ServiceUnavailable { status: rejection.status }).attach(rejection.clone())
+        }
         _ => return None,
     })
 }
@@ -563,10 +572,10 @@ fn classify_known_code(
 /// per RFC 6749, so it is tried first; the only live capture on hand carries a
 /// generic bucket there ("invalid_grant") and puts WG's specific reason in
 /// `error_description` instead, so `error_description` is tried next against
-/// the same known-code table. A last-resort fallback matches a short list of
-/// `error_description` human sentences observed on the live endpoint (not
-/// machine codes -- WG has not been seen to expose a distinct `error` value
-/// for these). `rejection` (built here, once) is always attached so the raw
+/// the same known-code table. A last-resort fallback matches the
+/// `error_description` sentences WGC's own classifier knows (game_center.dll's
+/// `query_oauth_token.cpp` strings; WG exposes no distinct `error` value for
+/// these). `rejection` (built here, once) is always attached so the raw
 /// HTTP status/error/error_description are recoverable structurally even
 /// from an unrecognized response.
 fn classify_token_error(
@@ -581,6 +590,9 @@ fn classify_token_error(
         error_description: error_description.map(str::to_string),
     };
 
+    if http_status == 429 {
+        return report!(AuthError::RateLimited).attach(rejection);
+    }
     if let Some(error) = error
         && let Some(report) = classify_known_code(error, &rejection, twofactor_token.clone())
     {
@@ -592,19 +604,24 @@ fn classify_token_error(
         return report;
     }
     if let Some(description) = error_description {
-        match description {
+        let parameters = match description {
             "Invalid otp_code parameter value."
             | "Invalid twofactor token."
             | "Invalid backup_code parameter value." => {
                 return report!(AuthError::TwoFactorInvalidCode).attach(rejection);
             }
-            "Invalid username parameter value."
-            | "Invalid password parameter value."
-            | "Request is missing password parameter." => {
-                return report!(AuthError::InvalidCredentials).attach(rejection);
-            }
-            _ => {}
+            "Invalid username, password parameters values." => Some(CredentialParameters::UsernameOrPassword),
+            "Invalid username parameter value." => Some(CredentialParameters::Username),
+            "Invalid password parameter value." => Some(CredentialParameters::Password),
+            "Request is missing password parameter." => Some(CredentialParameters::MissingPassword),
+            _ => None,
+        };
+        if let Some(parameters) = parameters {
+            return report!(AuthError::InvalidCredentials { parameters }).attach(rejection);
         }
+    }
+    if http_status >= 500 {
+        return report!(AuthError::ServiceUnavailable { status: http_status }).attach(rejection);
     }
     if error.is_none() && error_description.is_none() {
         return report!(AuthError::BadResponse {
@@ -697,18 +714,46 @@ mod tests {
 
     #[test]
     fn classify_invalid_credentials_variants() {
-        for description in [
+        let classified: Vec<String> = [
+            "Invalid username, password parameters values.",
             "Invalid username parameter value.",
             "Invalid password parameter value.",
             "Request is missing password parameter.",
-        ] {
-            let report = classify_token_error(400, None, Some(description), None);
-            assert!(
-                matches!(report.current_context(), AuthError::InvalidCredentials),
-                "description {description} misclassified: {:?}",
-                report.current_context()
-            );
-        }
+        ]
+        .into_iter()
+        .map(|description| format!("{:?}", classify_token_error(400, None, Some(description), None).current_context()))
+        .collect();
+
+        insta::assert_debug_snapshot!(classified, @r#"
+        [
+            "InvalidCredentials { parameters: UsernameOrPassword }",
+            "InvalidCredentials { parameters: Username }",
+            "InvalidCredentials { parameters: Password }",
+            "InvalidCredentials { parameters: MissingPassword }",
+        ]
+        "#);
+    }
+
+    #[test]
+    fn classify_rate_limits_and_outages() {
+        let classified: Vec<String> = [
+            classify_token_error(429, Some("invalid_request"), None, None),
+            classify_token_error(503, None, None, None),
+            classify_token_error(400, Some("temporarily_unavailable"), None, None),
+            classify_token_error(400, Some("account_banned"), None, None),
+        ]
+        .iter()
+        .map(|report| format!("{:?}", report.current_context()))
+        .collect();
+
+        insta::assert_debug_snapshot!(classified, @r#"
+        [
+            "RateLimited",
+            "ServiceUnavailable { status: 503 }",
+            "ServiceUnavailable { status: 400 }",
+            "AccountBanned",
+        ]
+        "#);
     }
 
     #[test]
@@ -739,7 +784,7 @@ mod tests {
 
     #[test]
     fn classify_missing_body_is_bad_response() {
-        let report = classify_token_error(500, None, None, None);
+        let report = classify_token_error(400, None, None, None);
         assert!(matches!(report.current_context(), AuthError::BadResponse { .. }));
     }
 
@@ -994,6 +1039,25 @@ mod tests {
             let session = client(&server, fast_timing()).login(credentials()).await.expect("signed in");
 
             assert_eq!(session.expiry, TokenExpiry::Unknown);
+        }
+
+        #[tokio::test]
+        async fn wrong_password_is_invalid_credentials() {
+            let mut script = login_script("{}", "{}");
+            script.truncate(1);
+            script.push(Reply::Respond {
+                status: 400,
+                location: None,
+                body: r#"{"error": "invalid_request", "error_description": "Invalid username, password parameters values."}"#,
+            });
+            let server = ScriptedServer::start(script).await;
+
+            let report = client(&server, fast_timing()).login(credentials()).await.expect_err("wrong password");
+
+            assert!(matches!(
+                report.current_context(),
+                AuthError::InvalidCredentials { parameters: CredentialParameters::UsernameOrPassword }
+            ));
         }
 
         #[tokio::test]

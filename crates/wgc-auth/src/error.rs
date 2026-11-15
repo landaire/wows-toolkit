@@ -55,8 +55,8 @@ pub enum AuthError {
     #[error("WGNI rejected the request: {0}")]
     Rejected(TokenRejection),
 
-    #[error("invalid username or password")]
-    InvalidCredentials,
+    #[error("WGNI rejected the {parameters}")]
+    InvalidCredentials { parameters: CredentialParameters },
 
     #[error("account not found")]
     AccountNotFound,
@@ -83,6 +83,12 @@ pub enum AuthError {
         "login is awaiting a second factor; approve it in Wargaming Auth or via the emailed code, then sign in again"
     )]
     VerificationPending,
+
+    #[error("WGNI is limiting sign-in requests; try again later")]
+    RateLimited,
+
+    #[error("WGNI is unavailable (HTTP {status})")]
+    ServiceUnavailable { status: u16 },
 
     #[error("proof-of-work challenge could not be solved before timeout")]
     ProofOfWorkTimeout,
@@ -135,4 +141,25 @@ pub enum AuthError {
 
     #[error("request is for realm {requested:?} but the client targets realm {client:?}")]
     RealmMismatch { client: AccountRealm, requested: AccountRealm },
+}
+
+/// Which sign-in parameters WGNI reported invalid, from its `error_description`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialParameters {
+    Username,
+    Password,
+    /// WGNI's answer to a wrong password for an existing account: it does not say which.
+    UsernameOrPassword,
+    MissingPassword,
+}
+
+impl std::fmt::Display for CredentialParameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            CredentialParameters::Username => "username",
+            CredentialParameters::Password => "password",
+            CredentialParameters::UsernameOrPassword => "username or password",
+            CredentialParameters::MissingPassword => "missing password",
+        })
+    }
 }

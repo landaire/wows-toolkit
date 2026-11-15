@@ -19,6 +19,7 @@ pub use client::AccountCredentials;
 pub use client::AuthClient;
 pub use client::TwoFactorCode;
 pub use error::AuthError;
+pub use error::CredentialParameters;
 pub use game_token::GameName;
 pub use game_token::GameTitle;
 pub use game_token::GameToken1;
