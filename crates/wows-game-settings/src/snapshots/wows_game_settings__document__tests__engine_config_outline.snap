@@ -1,0 +1,168 @@
+---
+source: crates/wows-game-settings/src/document.rs
+expression: outline(&document)
+---
+engine_config.xml
+  renderer
+    cacheEffects = "false"
+    gammaCorrectionOutside = "1.0"
+    gammaCorrectionInside = "1.0"
+    gammaCorrectionSpeed = "0.2"
+    tripleBuffering = "true"
+    maxFrameRate = "0"
+    maxDockFrameRate = "75"
+    enableTextureStreaming = "true"
+    textureStreamingMode = "0"
+    useAsyncRenderThread = "true"
+  animation
+    optimize = "false"
+    lod
+      distance = "20"
+      frames = "2"
+    lod
+      distance = "50"
+      frames = "3"
+    lod
+      distance = "125"
+      frames = "4"
+    lod
+      distance = "312"
+      frames = "5"
+    lod
+      distance = "781"
+      frames = "6"
+  inputDevices
+    exclusive = "true"
+  accessMonitor = "false"
+  alertsEnabled = "false"
+  entities
+    disablePreloads = "false"
+    enforcePreloads = "false"
+    entityCollision = "true"
+    particlesActive = "true"
+  ui
+    loadingScreen = "gui/gameface/build/game_loading/index.html"
+    alertTexture = "system/maps/icon_tex_frame.bmp"
+    alertTexture = "system/maps/icon_poly.bmp"
+    alertTexture = "system/maps/icon_tex_total.bmp"
+    alertTexture = "system/maps/icon_anim.bmp"
+    alertTexture = "system/maps/icon_mesh.bmp"
+    alertTexture = "system/maps/icon_framerate_warning.bmp"
+    straferate = "5.0"
+    loadingText = "151 231 233"
+    enableLanguageBar = "false"
+    maxInLoadingFrameSkip = "-1"
+    maxInDockFrameSkip = "50"
+    maxInBattleFrameSkip = "0"
+    forcePromoFlow = "false"
+    currentLoadingVideo = "gui/video/login/main.webm"
+    currentPromoVideoAudioTracks = (self-closing)
+    currentStaticScreen = "gui/game_loading/static_screen.jpg"
+    autoSkipLoadingVideo = "false"
+    enableAccountTransfer = "true"
+  camera
+    lookTable = "0.00\t0.00"
+    lookTable = "0.10\t0.05"
+    lookTable = "0.30\t0.10"
+    lookTable = "0.50\t0.15"
+    lookTable = "0.70\t0.30"
+    lookTable = "0.90\t1.00"
+    lookAxisMin = "0.10"
+    lookAxisMax = "0.91"
+    cameraYawSpeed = "90"
+    cameraPitchSpeed = "60"
+    accelerateStart = "0.00"
+    accelerateRate = "2.00"
+    accelerateEnd = "1.00"
+  directionCursor
+    invertVerticalMovement = "false"
+    mouseSensitivity = "0.005"
+    mouseHVBias = "0.667"
+    maxPitch = "50.0"
+    minPitch = "-65.0"
+    yaw = "0.000"
+    pitch = "0.000"
+    lookSpring = "false"
+    lookSpringRate = "0.75"
+    lookSpringIdleTime = "3600.0"
+    lookSpringOnMove = "true"
+  soundSettings
+    muteEnabled = "true"
+  xmppSettings
+    releaseLogs = "false"
+  hangDetector
+    enable = "false"
+    hangUpdateDelay = "4000"
+    hangFailCount = "10"
+  fpsgathering = "true"
+  customization
+    currentRealm = "ww"
+  webBrowser
+    userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.134 Safari/537.36 WOWS/1.0"
+    cachePath = "cef_cache"
+    maxFrameRate = "60"
+    logVerbosity = "info"
+    enableStatistics = (self-closing)
+    debugLog = "debug.log"
+    debugLogMaxFilesCount = "4"
+    debugLogMaxFileSizeMB = "10"
+    pathBase = "CWD"
+    dirPath = "profile"
+    autoPlayVideo = "true"
+  window
+    iconBlinkPeriod = "0"
+  scriptLogger
+    fileSizeInMb = "2"
+    volumesCount = "4"
+    dirPath = "profile"
+    pathBase = "CWD"
+  memleaks
+    dirPath = "profile"
+    name = "memleaks.log"
+    pathBase = "CWD"
+  allocations
+    dirPath = "allocations"
+    name = "allocation_stats.log"
+    pathBase = "CWD"
+  crashes
+    dirPath = "crashes"
+    pathBase = "CWD"
+    reportScriptExceptions = "false"
+    crashDumpLevel = "1"
+  debug
+    profilerBufferSize = "54331648"
+    statisticsLog = "false"
+    battleLogOnly = "false"
+    postBattleAllocationsLogs = "False"
+    profilerPort = "39999"
+    dxdiag_file = "dxdiag.exe /whql:off /t"
+    errorsLogPath = "errors.log"
+    enableErrorsLogging = "true"
+    enableScaleformStats = "false"
+    enableActionscriptLeaksTracking = "false"
+    enableScaleformFrameNumberInLog = "false"
+    enableMemGroupMetrics = "false"
+    dirPath = "profile"
+    pathBase = "CWD"
+  preferences
+    pathBase = "CWD"
+  currentrealm
+    pathBase = "CWD"
+  screenShot
+    extension = "jpg"
+    name = "shot"
+    dirPath = "screenshot"
+    pathBase = "CWD"
+  profile
+    pathBase = "CWD"
+  replays
+    dirPath = "replays"
+    pathBase = "CWD"
+    versioned = "false"
+    maxReplaysToSave = "30"
+    skipBattleResults = "false"
+  platformParameters
+    msStore
+      uwpShell
+        protocol = "net.wargaming.launcher"
+        appService = "CommunicationService"

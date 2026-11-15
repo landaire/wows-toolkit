@@ -1,0 +1,15 @@
+---
+source: crates/wows-game-settings/src/document.rs
+expression: "results.join(\"\\n\")"
+---
+"": NoRootElement
+"<a>": UnclosedElement { name: "a" }
+"<a></b>": MismatchedCloseTag { offset: ByteOffset(3), expected: "a", found: "b" }
+"<a/><b/>": MultipleRoots { offset: ByteOffset(4) }
+"</a>": UnexpectedCloseTag { offset: ByteOffset(0) }
+"text<a/>": TextOutsideRoot { offset: ByteOffset(0) }
+"<a x></a>": MalformedTag { offset: ByteOffset(0) }
+"<a x=1></a>": MalformedTag { offset: ByteOffset(0) }
+"<a x=\"1></a>": UnexpectedEnd { offset: ByteOffset(0) }
+"<a/x></a>": MalformedTag { offset: ByteOffset(0) }
+"<a><!-- open</a>": UnexpectedEnd { offset: ByteOffset(3) }

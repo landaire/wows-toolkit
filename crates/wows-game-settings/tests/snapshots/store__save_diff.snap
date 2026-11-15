@@ -1,0 +1,24 @@
+---
+source: crates/wows-game-settings/tests/store.rs
+expression: "[changed_lines(&fixture(\"preferences.xml\"), &preferences),\nchanged_lines(&fixture(\"user_preferences.xml\"), &user_preferences),\nchanged_lines(&fixture(\"engine_config.xml\"), &engine_config),].join(\"\\n\\n\")"
+---
+- <maxFrameRate>	0	</maxFrameRate>
++ <maxFrameRate>	144	</maxFrameRate>
+
+- <device version="2" windowMode="BORDERLESS" monitorIndex="0" userGamma="1.0000" colorblindIntensity="1.0000" guid="00000000.00000000.00000000.00000000">
++ <device version="2" windowMode="FULLSCREEN" monitorIndex="0" userGamma="1.0000" colorblindIntensity="1.0000" guid="00000000.00000000.00000000.00000000">
+- <fullscreen width="2560" height="1440" aspectRatio="1.7778" waitVSync="false" tripleBuffering="false" refresh="0"/>
++ <fullscreen width="1920" height="1200" aspectRatio="1.6000" waitVSync="false" tripleBuffering="false" refresh="0"/>
+- <skipVideo>true</skipVideo>
++ <skipVideo>false</skipVideo>
+- <master>0.3800</master>
++ <master>0.5000</master>
+- <shoot>1.0000</shoot>
++ <shoot>0.2500</shoot>
+- <monitor windowMode="BORDERLESS" borderlessBehaviour="FULLSCREEN">
++ <monitor windowMode="FULLSCREEN" borderlessBehaviour="FULLSCREEN">
+
+- <versioned>false</versioned>
++ <versioned>true</versioned>
+- <maxReplaysToSave>30</maxReplaysToSave>
++ <maxReplaysToSave>200</maxReplaysToSave>

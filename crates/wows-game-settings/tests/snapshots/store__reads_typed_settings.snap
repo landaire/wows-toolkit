@@ -1,0 +1,173 @@
+---
+source: crates/wows-game-settings/tests/store.rs
+expression: snapshot.settings()
+---
+GameSettings {
+    display: Available(
+        DisplaySettings {
+            window_mode: Known(
+                Borderless,
+            ),
+            monitor_index: Known(
+                MonitorIndex(
+                    0,
+                ),
+            ),
+            monitor_name: Known(
+                "2 - Example Display(DisplayPort) (primary)",
+            ),
+            fullscreen_resolution: Known(
+                Resolution {
+                    width: PixelCount(
+                        2560,
+                    ),
+                    height: PixelCount(
+                        1440,
+                    ),
+                },
+            ),
+            refresh_rate: Known(
+                RefreshRate(
+                    None,
+                ),
+            ),
+            vsync: Known(
+                false,
+            ),
+            ui_scale: Known(
+                UiScale(
+                    1.25,
+                ),
+            ),
+        },
+    ),
+    frame_rate: Available(
+        FrameRateLimits {
+            battle: Known(
+                FrameRateLimit(
+                    None,
+                ),
+            ),
+            port: Known(
+                FrameRateLimit(
+                    Some(
+                        75,
+                    ),
+                ),
+            ),
+        },
+    ),
+    interface: Available(
+        InterfaceSettings {
+            skip_intro_video: Known(
+                true,
+            ),
+        },
+    ),
+    sound: Available(
+        SoundSettings {
+            master: Known(
+                Volume(
+                    0.38,
+                ),
+            ),
+            music_port: Known(
+                Volume(
+                    0.0,
+                ),
+            ),
+            music_battle: Known(
+                Volume(
+                    0.0,
+                ),
+            ),
+            mixing_preset: Known(
+                Custom,
+            ),
+            channels: {
+                Interface: Known(
+                    Volume(
+                        1.0,
+                    ),
+                ),
+                Engines: Known(
+                    Volume(
+                        1.0,
+                    ),
+                ),
+                Voice: Known(
+                    Volume(
+                        1.0,
+                    ),
+                ),
+                World: Known(
+                    Volume(
+                        0.4,
+                    ),
+                ),
+                Gunfire: Known(
+                    Volume(
+                        1.0,
+                    ),
+                ),
+                Damage: Known(
+                    Volume(
+                        0.55,
+                    ),
+                ),
+            },
+            voice_language: Known(
+                LanguageCode(
+                    "EN",
+                ),
+            ),
+        },
+    ),
+    graphics: Available(
+        GraphicsSettings {
+            preset: Known(
+                Custom,
+            ),
+            antialiasing: Known(
+                Samples4,
+            ),
+            texture_quality: Known(
+                High,
+            ),
+            texture_filtering: Known(
+                Anisotropic16x,
+            ),
+            shadow_quality: Known(
+                High,
+            ),
+        },
+    ),
+    replays: Available(
+        ReplaySettings {
+            build: BuildNumber(
+                13533378,
+            ),
+            source: GameDefault,
+            kept: Known(
+                ReplayCount(
+                    30,
+                ),
+            ),
+            versioned: Known(
+                false,
+            ),
+            directory: Known(
+                "replays",
+            ),
+        },
+    ),
+    language: Available(
+        LanguageSettings {
+            client: Known(
+                LanguageCode(
+                    "EN",
+                ),
+            ),
+        },
+    ),
+}

@@ -1,0 +1,124 @@
+---
+source: crates/wows-game-settings/src/document.rs
+expression: outline(&document)
+---
+user_preferences.xml
+  local
+    hardware version="3"
+      CPU score="11487712" = (self-closing)
+      GPU memory="10053" score="29163" = (self-closing)
+      memory physical="64654" = (self-closing)
+    device version="2" windowMode="BORDERLESS" monitorIndex="0" userGamma="1.0000" colorblindIntensity="1.0000" guid="00000000.00000000.00000000.00000000"
+      windowed x="32" y="124" width="1924" height="1061" isMaximized="true" = (self-closing)
+      borderless x="0" y="0" width="2560" height="1440" behaviour="FULLSCREEN" windowMode="BORDERLESS" = (self-closing)
+      fullscreen width="2560" height="1440" aspectRatio="1.7778" waitVSync="false" tripleBuffering="false" refresh="0" = (self-closing)
+    graphics version="5" preset="USER"
+      armor quality="HIGH" = (self-closing)
+      camera farPlane="FAR" = (self-closing)
+      decals quality="HIGH" = (self-closing)
+      flags quality="HIGH" = (self-closing)
+      forest quality="OFF" = (self-closing)
+      gameLogic preset="ON"
+        misc quality="HIGH" = (self-closing)
+      GUI quality="OFF" effects="ON" blur="ON" contrast="OFF" = (self-closing)
+      lighting quality="HIGH"
+        dynamic quality="HIGH" = (self-closing)
+      msaa
+        quality = "SAMPLES_4"
+      object lod="MAX" = (self-closing)
+      particle quality="HIGH" preset="HIGH"
+        shadow quality="OFF" = (self-closing)
+      postFX quality="VERY_HIGH" aaMode="HIGH" fidelityFX_CAS="OFF"
+        fxaa quality="HIGH" = (self-closing)
+        txaa = "ON"
+        colorblind mode="OFF"
+          intensity = "1.0000"
+      sea
+        simulation quality="VERY_LOW" = (self-closing)
+        reflection quality="OFF"
+          screenSpace quality="OFF" = (self-closing)
+      shadow quality="HIGH" = (self-closing)
+      sound quality="HIGH" = (self-closing)
+      texture quality="HIGH" filtering="ANISOTROPIC_16X" = (self-closing)
+      volumetrics quality="HIGH" = (self-closing)
+      browser hardwareAcceleration="ON" = (self-closing)
+      gamma = "1.0000"
+    ui version="1" selectedLootboxType="CREDITS"
+      size
+        contactsAndChannelsHeight = "350"
+        notificationsInboxHeight = "350"
+        formationWidgetHeight = "410"
+        divisionPlayersListWidth = "280"
+      carousel
+        rowCountIndex = "0"
+      mouse
+        sensivity = "0.6500"
+        wheelSensivity = "0.6500"
+      shipStats sortIndex="WINRATE" = (self-closing)
+      operations difficulty="NORMAL"
+        selectedId = "0"
+      trainingInfotip
+        tabInset = "0"
+        bot AILevel="MEDIUM"
+          shipId = "0"
+      crewOption hire="BASE" purchase="BASE" assign="NO" retrain="NO" firing="TO_OPS" = (self-closing)
+      achievements sortOrder="DEFAULT" = (self-closing)
+      battleChat enabledChannels="EVERYONE" nameDisplay="BOTH" = (self-closing)
+      showPerformance = "true"
+      alwaysShowModifiersTimers = "true"
+      skipVideo = "true"
+      enableLanguageBar = "0"
+    commands version="2"
+      CMD_CINEMATIC_SHOOT
+        VALUE1
+          KEY = "KEY_NULL"
+      CMD_HIDE_INTERFACE
+        VALUE2
+          KEY = "KEY_MOUSE4"
+    sound version="1" source="SPEAKERS" mixingPreset="CUSTOM"
+      volume
+        master = "0.3800"
+        ui = "1.0000"
+        engines = "1.0000"
+        voice = "1.0000"
+        world = "0.4000"
+        shoot = "1.0000"
+        damage = "0.5500"
+      music mod="MIXED"
+        dockVolume = "0.0000"
+        battleVolume = "0.0000"
+      voiceOverEffect = "0.0000"
+      voice
+        package = "EN"
+        chat activationMethod="PUSH_TO_TALK"
+          inputVolume = "50"
+          outputVolume = "50"
+    monitor windowMode="BORDERLESS" borderlessBehaviour="FULLSCREEN"
+      index = "2 - Example Display(DisplayPort) (primary)"
+      uiScale = "1.2500"
+      window
+        width = "3424"
+        height = "1401"
+  remote version="1" revision="12" key="0000000000000000"
+    graphics
+      fog
+        alpha = "1.0000"
+    battle
+      altVision mode="ENABLED" = (self-closing)
+      autoPilot mode="DISABLED" = (self-closing)
+      ui
+        crosshair
+          isDynamic = "true"
+          indexStatic = "8"
+        crosshairIndicators visibilityPenaltyTimer="NEVER" = (self-closing)
+      camera
+        fov = "0.9750"
+        height = "0.7000"
+      terrain
+        shooting mode="ENABLED" = (self-closing)
+      tutorial
+        submarine
+          shown = "true"
+      weapon
+        indicator
+          simultaneousReload = "true"

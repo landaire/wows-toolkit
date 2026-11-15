@@ -16532,6 +16532,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-game-settings"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "jiff",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "wows-mcp"
 version = "0.1.0"
 dependencies = [

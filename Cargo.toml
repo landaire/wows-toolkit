@@ -11,6 +11,7 @@ members = [
     "crates/wows-toolkit-services",
     "crates/wows-toolkit-armor",
     "crates/wows-toolkit-launcher",
+    "crates/wows-game-settings",
     "crates/wows-toolkit-icons",
     "crates/wows-toolkit-notices",
     "crates/wows-core",
@@ -84,6 +85,7 @@ wgc-catalog = { version = "0.1.0", path = "crates/wgc-catalog", default-features
 wgc-download = { version = "0.1.0", path = "crates/wgc-download", default-features = false }
 wgc-launch = { version = "0.1.0", path = "crates/wgc-launch", default-features = false }
 wgc-auth = { version = "0.1.0", path = "crates/wgc-auth", default-features = false }
+wows-game-settings = { version = "0.1.0", path = "crates/wows-game-settings" }
 steamroom = "0.3"
 steamroom-client = "0.3"
 # Shared UI dependencies

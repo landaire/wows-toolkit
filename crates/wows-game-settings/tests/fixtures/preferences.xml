@@ -1,0 +1,1150 @@
+<preferences.xml>
+	<scriptsPreferences>
+		<renderer>
+			<maxDockFrameRate>	75	</maxDockFrameRate>
+			<maxFrameRate>	0	</maxFrameRate>
+		</renderer>
+		<ui>
+			<locale>	en	</locale>
+			<premShownCommon>	false	</premShownCommon>
+			<premShownWOWS>	false	</premShownWOWS>
+			<curRowCountIndex>	1.0000	</curRowCountIndex>
+			<wgncMessagePositionX>
+				<WGNC>	40.0000	</WGNC>
+			</wgncMessagePositionX>
+			<wgncMessagePositionY>
+				<WGNC>	305.0000	</WGNC>
+			</wgncMessagePositionY>
+			<seenAlmanacs>
+				<acc1000000001_2402>	2	</acc1000000001_2402>
+				<acc1000000001_2403>	26	</acc1000000001_2403>
+				<acc1000000001_2404>	29	</acc1000000001_2404>
+				<acc1000000001_2405>	7	</acc1000000001_2405>
+				<acc1000000001_2406>	2	</acc1000000001_2406>
+				<acc1000000001_2407>	3	</acc1000000001_2407>
+				<acc1000000001_2408>	1	</acc1000000001_2408>
+				<acc1000000002_2408>	5	</acc1000000002_2408>
+				<acc1000000002_2409>	22	</acc1000000002_2409>
+				<acc1000000001_2409>	2	</acc1000000001_2409>
+				<acc1000000003_2409>	19	</acc1000000003_2409>
+				<acc1000000004_2409>	4	</acc1000000004_2409>
+				<acc1000000001_2410>	1	</acc1000000001_2410>
+				<acc1000000003_2410>	22	</acc1000000003_2410>
+				<acc1000000001_2411>	1	</acc1000000001_2411>
+				<acc100000005_2501>	1	</acc100000005_2501>
+				<acc1000000001_2501>	1	</acc1000000001_2501>
+				<acc1000000001_2502>	24	</acc1000000001_2502>
+				<acc100000005_2502>	12	</acc100000005_2502>
+				<acc1000000003_2503>	27	</acc1000000003_2503>
+				<acc1000000003_2504>	29	</acc1000000003_2504>
+				<acc100000005_2505>	6	</acc100000005_2505>
+				<acc100000005_2506>	4	</acc100000005_2506>
+				<acc100000005_2507>	6	</acc100000005_2507>
+				<acc100000005_2508>	8	</acc100000005_2508>
+				<acc100000005_2509>	1	</acc100000005_2509>
+				<acc1000000003_2510>	31	</acc1000000003_2510>
+				<acc100000005_2510>	1	</acc100000005_2510>
+				<acc100000005_2601>	4	</acc100000005_2601>
+				<acc1000000001_2601>	18	</acc1000000001_2601>
+				<acc1000000001_2602>	14	</acc1000000001_2602>
+				<acc100000005_2602>	6	</acc100000005_2602>
+				<acc100000005_2603>	3	</acc100000005_2603>
+				<acc1000000003_2604>	24	</acc1000000003_2604>
+				<acc100000005_2604>	3	</acc100000005_2604>
+				<acc100000005_2605>	1	</acc100000005_2605>
+				<acc100000005_2606>	28	</acc100000005_2606>
+				<acc1000000001_2606>	13	</acc1000000001_2606>
+				<acc100000005_2607>	7	</acc100000005_2607>
+				<acc1000000001_2607>	11	</acc1000000001_2607>
+				<acc100000005_2608>	13	</acc100000005_2608>
+				<acc1000000001_2608>	20	</acc1000000001_2608>
+				<acc100000005_2609>	21	</acc100000005_2609>
+				<acc100000005_2610>	24	</acc100000005_2610>
+				<acc1000000001_2611>	27	</acc1000000001_2611>
+			</seenAlmanacs>
+			<isSmallCarouselView>	true	</isSmallCarouselView>
+			<contactsInset>	0	</contactsInset>
+			<commentWantTo_division />
+			<battleLoadingTabIndex>	1	</battleLoadingTabIndex>
+			<seenTutorialHints>
+				<pushAllyTarget>	3	</pushAllyTarget>
+				<saveAllyTarget>	3	</saveAllyTarget>
+				<pushBothTargets>	3	</pushBothTargets>
+				<aaPrioritySectorHint>	3	</aaPrioritySectorHint>
+				<shipModifiersHint>	3	</shipModifiersHint>
+				<battleAgainstSubmarineHint>	3	</battleAgainstSubmarineHint>
+				<enemySubmarineWavedUsHint>	3	</enemySubmarineWavedUsHint>
+				<enemySubmarineWavedResetHint>	2	</enemySubmarineWavedResetHint>
+				<newRocketsUnderAttackHint>	3	</newRocketsUnderAttackHint>
+				<scoutCameraHint>	3	</scoutCameraHint>
+				<movementHint>	3	</movementHint>
+				<zoomInHint>	3	</zoomInHint>
+				<zoomOutHint>	3	</zoomOutHint>
+				<repairBurnHint>	3	</repairBurnHint>
+				<repairFloodHint>	3	</repairFloodHint>
+				<keyTargetInBattleHint>	2	</keyTargetInBattleHint>
+				<newRocketsFirstAttackHint>	3	</newRocketsFirstAttackHint>
+			</seenTutorialHints>
+			<tutorialHintsRepeatCount>
+				<pushAllyTarget>	3	</pushAllyTarget>
+				<saveAllyTarget>	3	</saveAllyTarget>
+				<pushBothTargets>	3	</pushBothTargets>
+				<aaPrioritySectorHint>	2	</aaPrioritySectorHint>
+				<battleAgainstSubmarineHint>	1	</battleAgainstSubmarineHint>
+				<enemySubmarineWavedUsHint>	3	</enemySubmarineWavedUsHint>
+				<enemySubmarineWavedResetHint>	2	</enemySubmarineWavedResetHint>
+				<newRocketsUnderAttackHint>	2	</newRocketsUnderAttackHint>
+				<scoutCameraHint>	3	</scoutCameraHint>
+				<movementHint>	4	</movementHint>
+				<repairBurnHint>	1	</repairBurnHint>
+				<repairFloodHint>	1	</repairFloodHint>
+				<keyTargetInBattleHint>	21	</keyTargetInBattleHint>
+				<newRocketsFirstAttackHint>	2	</newRocketsFirstAttackHint>
+			</tutorialHintsRepeatCount>
+			<selectedLootboxType>	3.0000	</selectedLootboxType>
+			<chatBoxPositionX>
+				<1000000006@wowsna.loc>	278.0000	</1000000006@wowsna.loc>
+				<1000000007@wowsna.loc>	520.0000	</1000000007@wowsna.loc>
+				<1000000008@wowsna.loc>	999.0000	</1000000008@wowsna.loc>
+				<1000000009@wowsna.loc>	952.0000	</1000000009@wowsna.loc>
+				<1000000010@wowsna.loc>	409.0000	</1000000010@wowsna.loc>
+				<1000000011@wowsna.loc>	489.0000	</1000000011@wowsna.loc>
+				<clan-1000000012@clans.wows.wowsna.loc>	2095.0000	</clan-1000000012@clans.wows.wowsna.loc>
+				<1000000013@wowsna.loc>	652.0000	</1000000013@wowsna.loc>
+				<1000000014@wowsna.loc>	1778.0000	</1000000014@wowsna.loc>
+				<1000000015@wowsna.loc>	199.0000	</1000000015@wowsna.loc>
+				<1000000016@wowsna.loc>	983.0000	</1000000016@wowsna.loc>
+				<1000000017@wowsna.loc>	278.0000	</1000000017@wowsna.loc>
+				<1000000018@wowsna.loc>	610.0000	</1000000018@wowsna.loc>
+				<1000000019@wowsna.loc>	1116.0000	</1000000019@wowsna.loc>
+				<1000000020@wowsna.loc>	488.0000	</1000000020@wowsna.loc>
+				<1000000021@wowsna.loc>	376.0000	</1000000021@wowsna.loc>
+				<1000000022@wowsna.loc>	1324.0000	</1000000022@wowsna.loc>
+				<1000000023@wowsna.loc>	1157.0000	</1000000023@wowsna.loc>
+				<1000000024@wowsna.loc>	553.0000	</1000000024@wowsna.loc>
+				<1000000025@wowsna.loc>	701.0000	</1000000025@wowsna.loc>
+				<1000000026@wowsna.loc>	2202.0000	</1000000026@wowsna.loc>
+				<1000000027@wowsasia.loc>	1592.0000	</1000000027@wowsasia.loc>
+				<1000000028@wowsna.loc>	1845.0000	</1000000028@wowsna.loc>
+				<1000000029@wowsna.loc>	913.0000	</1000000029@wowsna.loc>
+				<1000000030@wowsna.loc>	1498.0000	</1000000030@wowsna.loc>
+				<1000000031@wowsna.loc>	1638.0000	</1000000031@wowsna.loc>
+				<1000000032@wowsna.loc>	500.0000	</1000000032@wowsna.loc>
+				<1000000033@wowsna.loc>	1021.0000	</1000000033@wowsna.loc>
+				<1000000034@wowsna.loc>	1155.0000	</1000000034@wowsna.loc>
+				<clan-1000000035@clans.wows.wowsna.loc>	222.0000	</clan-1000000035@clans.wows.wowsna.loc>
+				<1000000036@wowsna.loc>	1788.0000	</1000000036@wowsna.loc>
+				<1000000037@wowsna.loc>	802.0000	</1000000037@wowsna.loc>
+				<1000000038@wowsna.loc>	378.0000	</1000000038@wowsna.loc>
+				<1000000039@wowsna.loc>	2102.0000	</1000000039@wowsna.loc>
+				<1000000040@wowsna.loc>	1960.0000	</1000000040@wowsna.loc>
+				<1000000041@wowsna.loc>	1417.0000	</1000000041@wowsna.loc>
+				<1000000042@wowsna.loc>	1426.0000	</1000000042@wowsna.loc>
+				<1000000043@wowsna.loc>	884.0000	</1000000043@wowsna.loc>
+				<1000000044@wowsna.loc>	971.0000	</1000000044@wowsna.loc>
+				<1000000045@wowsna.loc>	1473.0000	</1000000045@wowsna.loc>
+				<1000000046@wowsna.loc>	1145.0000	</1000000046@wowsna.loc>
+				<1000000047@wowsna.loc>	420.0000	</1000000047@wowsna.loc>
+				<1000000048@wowsna.loc>	332.0000	</1000000048@wowsna.loc>
+				<100000049@wowseu.loc>	1825.0000	</100000049@wowseu.loc>
+				<1000000050@wowsna.loc>	870.0000	</1000000050@wowsna.loc>
+				<100000051@wowseu.loc>	242.0000	</100000051@wowseu.loc>
+				<100000052@wowseu.loc>	1473.0000	</100000052@wowseu.loc>
+				<100000053@wowseu.loc>	563.0000	</100000053@wowseu.loc>
+				<1000000054@wowsna.loc>	638.0000	</1000000054@wowsna.loc>
+				<100000055@wowseu.loc>	1574.0000	</100000055@wowseu.loc>
+				<1000000056@wowsna.loc>	854.0000	</1000000056@wowsna.loc>
+				<1000000057@wowsna.loc>	1536.0000	</1000000057@wowsna.loc>
+				<1000000058@wowsna.loc>	453.0000	</1000000058@wowsna.loc>
+				<1000000059@wowsna.loc>	701.0000	</1000000059@wowsna.loc>
+				<1000000060@wowsna.loc>	278.0000	</1000000060@wowsna.loc>
+				<100000061@wowseu.loc>	891.0000	</100000061@wowseu.loc>
+				<100000062@wowseu.loc>	1498.0000	</100000062@wowseu.loc>
+				<100000063@wowseu.loc>	412.0000	</100000063@wowseu.loc>
+				<100000064@wowseu.loc>	1342.0000	</100000064@wowseu.loc>
+				<100000065@wowseu.loc>	319.0000	</100000065@wowseu.loc>
+				<clan-100000066@clans.wows.wowseu.loc>	1097.0000	</clan-100000066@clans.wows.wowseu.loc>
+				<1000000067@wowsna.loc>	414.0000	</1000000067@wowsna.loc>
+				<1000000068@wowsna.loc>	1485.0000	</1000000068@wowsna.loc>
+				<1000000069@wowsna.loc>	1261.0000	</1000000069@wowsna.loc>
+				<100000070@wowseu.loc>	601.0000	</100000070@wowseu.loc>
+				<1000000071@wowsna.loc>	5.0000	</1000000071@wowsna.loc>
+				<prebattle>	662.0000	</prebattle>
+			</chatBoxPositionX>
+			<chatBoxPositionY>
+				<1000000006@wowsna.loc>	382.0000	</1000000006@wowsna.loc>
+				<1000000007@wowsna.loc>	602.0000	</1000000007@wowsna.loc>
+				<1000000008@wowsna.loc>	704.0000	</1000000008@wowsna.loc>
+				<1000000009@wowsna.loc>	551.0000	</1000000009@wowsna.loc>
+				<1000000010@wowsna.loc>	808.0000	</1000000010@wowsna.loc>
+				<1000000011@wowsna.loc>	392.0000	</1000000011@wowsna.loc>
+				<clan-1000000012@clans.wows.wowsna.loc>	582.0000	</clan-1000000012@clans.wows.wowsna.loc>
+				<1000000013@wowsna.loc>	458.0000	</1000000013@wowsna.loc>
+				<1000000014@wowsna.loc>	451.0000	</1000000014@wowsna.loc>
+				<1000000015@wowsna.loc>	495.0000	</1000000015@wowsna.loc>
+				<1000000016@wowsna.loc>	651.0000	</1000000016@wowsna.loc>
+				<1000000017@wowsna.loc>	259.0000	</1000000017@wowsna.loc>
+				<1000000018@wowsna.loc>	661.0000	</1000000018@wowsna.loc>
+				<1000000019@wowsna.loc>	581.0000	</1000000019@wowsna.loc>
+				<1000000020@wowsna.loc>	570.0000	</1000000020@wowsna.loc>
+				<1000000021@wowsna.loc>	588.0000	</1000000021@wowsna.loc>
+				<1000000022@wowsna.loc>	706.0000	</1000000022@wowsna.loc>
+				<1000000023@wowsna.loc>	485.0000	</1000000023@wowsna.loc>
+				<1000000024@wowsna.loc>	482.0000	</1000000024@wowsna.loc>
+				<1000000025@wowsna.loc>	329.0000	</1000000025@wowsna.loc>
+				<1000000026@wowsna.loc>	626.0000	</1000000026@wowsna.loc>
+				<1000000027@wowsasia.loc>	606.0000	</1000000027@wowsasia.loc>
+				<1000000028@wowsna.loc>	651.0000	</1000000028@wowsna.loc>
+				<1000000029@wowsna.loc>	673.0000	</1000000029@wowsna.loc>
+				<1000000030@wowsna.loc>	626.0000	</1000000030@wowsna.loc>
+				<1000000031@wowsna.loc>	652.0000	</1000000031@wowsna.loc>
+				<1000000032@wowsna.loc>	467.0000	</1000000032@wowsna.loc>
+				<1000000033@wowsna.loc>	379.0000	</1000000033@wowsna.loc>
+				<1000000034@wowsna.loc>	544.0000	</1000000034@wowsna.loc>
+				<clan-1000000035@clans.wows.wowsna.loc>	658.0000	</clan-1000000035@clans.wows.wowsna.loc>
+				<1000000036@wowsna.loc>	340.0000	</1000000036@wowsna.loc>
+				<1000000037@wowsna.loc>	677.0000	</1000000037@wowsna.loc>
+				<1000000038@wowsna.loc>	496.0000	</1000000038@wowsna.loc>
+				<1000000039@wowsna.loc>	304.0000	</1000000039@wowsna.loc>
+				<1000000040@wowsna.loc>	393.0000	</1000000040@wowsna.loc>
+				<1000000041@wowsna.loc>	545.0000	</1000000041@wowsna.loc>
+				<1000000042@wowsna.loc>	626.0000	</1000000042@wowsna.loc>
+				<1000000043@wowsna.loc>	543.0000	</1000000043@wowsna.loc>
+				<1000000044@wowsna.loc>	500.0000	</1000000044@wowsna.loc>
+				<1000000045@wowsna.loc>	756.0000	</1000000045@wowsna.loc>
+				<1000000046@wowsna.loc>	766.0000	</1000000046@wowsna.loc>
+				<1000000047@wowsna.loc>	559.0000	</1000000047@wowsna.loc>
+				<1000000048@wowsna.loc>	501.0000	</1000000048@wowsna.loc>
+				<100000049@wowseu.loc>	449.0000	</100000049@wowseu.loc>
+				<1000000050@wowsna.loc>	410.0000	</1000000050@wowsna.loc>
+				<100000051@wowseu.loc>	99.0000	</100000051@wowseu.loc>
+				<100000052@wowseu.loc>	444.0000	</100000052@wowseu.loc>
+				<100000053@wowseu.loc>	661.0000	</100000053@wowseu.loc>
+				<1000000054@wowsna.loc>	458.0000	</1000000054@wowsna.loc>
+				<100000055@wowseu.loc>	435.0000	</100000055@wowseu.loc>
+				<1000000056@wowsna.loc>	486.0000	</1000000056@wowsna.loc>
+				<1000000057@wowsna.loc>	77.0000	</1000000057@wowsna.loc>
+				<1000000058@wowsna.loc>	439.0000	</1000000058@wowsna.loc>
+				<1000000059@wowsna.loc>	455.0000	</1000000059@wowsna.loc>
+				<1000000060@wowsna.loc>	222.0000	</1000000060@wowsna.loc>
+				<100000061@wowseu.loc>	607.0000	</100000061@wowseu.loc>
+				<100000062@wowseu.loc>	130.0000	</100000062@wowseu.loc>
+				<100000063@wowseu.loc>	360.0000	</100000063@wowseu.loc>
+				<100000064@wowseu.loc>	520.0000	</100000064@wowseu.loc>
+				<100000065@wowseu.loc>	511.0000	</100000065@wowseu.loc>
+				<clan-100000066@clans.wows.wowseu.loc>	423.0000	</clan-100000066@clans.wows.wowseu.loc>
+				<1000000067@wowsna.loc>	410.0000	</1000000067@wowsna.loc>
+				<1000000068@wowsna.loc>	276.0000	</1000000068@wowsna.loc>
+				<1000000069@wowsna.loc>	257.0000	</1000000069@wowsna.loc>
+				<100000070@wowseu.loc>	556.0000	</100000070@wowseu.loc>
+				<1000000071@wowsna.loc>	613.0000	</1000000071@wowsna.loc>
+				<prebattle>	393.0000	</prebattle>
+			</chatBoxPositionY>
+			<contactsAndChannelsHeight>	527.0000	</contactsAndChannelsHeight>
+			<chatBoxWidth>
+				<1000000006@wowsna.loc>	462.0000	</1000000006@wowsna.loc>
+				<prebattle>	744.0000	</prebattle>
+				<1000000007@wowsna.loc>	462.0000	</1000000007@wowsna.loc>
+				<1000000008@wowsna.loc>	507.0000	</1000000008@wowsna.loc>
+				<1000000009@wowsna.loc>	462.0000	</1000000009@wowsna.loc>
+				<1000000010@wowsna.loc>	462.0000	</1000000010@wowsna.loc>
+				<1000000011@wowsna.loc>	462.0000	</1000000011@wowsna.loc>
+				<clan-1000000012@clans.wows.wowsna.loc>	601.0000	</clan-1000000012@clans.wows.wowsna.loc>
+				<1000000013@wowsna.loc>	462.0000	</1000000013@wowsna.loc>
+				<1000000014@wowsna.loc>	462.0000	</1000000014@wowsna.loc>
+				<1000000015@wowsna.loc>	462.0000	</1000000015@wowsna.loc>
+				<1000000016@wowsna.loc>	462.0000	</1000000016@wowsna.loc>
+				<1000000017@wowsna.loc>	633.0000	</1000000017@wowsna.loc>
+				<1000000018@wowsna.loc>	462.0000	</1000000018@wowsna.loc>
+				<1000000019@wowsna.loc>	462.0000	</1000000019@wowsna.loc>
+				<1000000020@wowsna.loc>	462.0000	</1000000020@wowsna.loc>
+				<1000000021@wowsna.loc>	462.0000	</1000000021@wowsna.loc>
+				<1000000022@wowsna.loc>	462.0000	</1000000022@wowsna.loc>
+				<1000000058@wowsna.loc>	462.0000	</1000000058@wowsna.loc>
+				<1000000024@wowsna.loc>	601.0000	</1000000024@wowsna.loc>
+				<1000000023@wowsna.loc>	651.0000	</1000000023@wowsna.loc>
+				<1000000025@wowsna.loc>	462.0000	</1000000025@wowsna.loc>
+				<1000000026@wowsna.loc>	462.0000	</1000000026@wowsna.loc>
+				<1000000027@wowsasia.loc>	462.0000	</1000000027@wowsasia.loc>
+				<1000000060@wowsna.loc>	462.0000	</1000000060@wowsna.loc>
+				<1000000028@wowsna.loc>	462.0000	</1000000028@wowsna.loc>
+				<1000000029@wowsna.loc>	462.0000	</1000000029@wowsna.loc>
+				<1000000030@wowsna.loc>	462.0000	</1000000030@wowsna.loc>
+				<1000000032@wowsna.loc>	462.0000	</1000000032@wowsna.loc>
+				<1000000031@wowsna.loc>	462.0000	</1000000031@wowsna.loc>
+				<1000000072@wowsasia.loc>	462.0000	</1000000072@wowsasia.loc>
+				<1000000073@wowsna.loc>	462.0000	</1000000073@wowsna.loc>
+				<1000000034@wowsna.loc>	462.0000	</1000000034@wowsna.loc>
+				<1000000033@wowsna.loc>	462.0000	</1000000033@wowsna.loc>
+				<clan-1000000035@clans.wows.wowsna.loc>	780.0000	</clan-1000000035@clans.wows.wowsna.loc>
+				<1000000050@wowsna.loc>	462.0000	</1000000050@wowsna.loc>
+				<1000000036@wowsna.loc>	494.0000	</1000000036@wowsna.loc>
+				<1000000037@wowsna.loc>	462.0000	</1000000037@wowsna.loc>
+				<1000000038@wowsna.loc>	462.0000	</1000000038@wowsna.loc>
+				<1000000039@wowsna.loc>	462.0000	</1000000039@wowsna.loc>
+				<1000000040@wowsna.loc>	462.0000	</1000000040@wowsna.loc>
+				<1000000041@wowsna.loc>	462.0000	</1000000041@wowsna.loc>
+				<1000000074_1000000075@user-rooms.wows.wowsna.loc>	462.0000	</1000000074_1000000075@user-rooms.wows.wowsna.loc>
+				<1000000042@wowsna.loc>	462.0000	</1000000042@wowsna.loc>
+				<1000000043@wowsna.loc>	462.0000	</1000000043@wowsna.loc>
+				<1000000076@wowsna.loc>	462.0000	</1000000076@wowsna.loc>
+				<1000000077@wowsna.loc>	462.0000	</1000000077@wowsna.loc>
+				<1000000044@wowsna.loc>	462.0000	</1000000044@wowsna.loc>
+				<1000000045@wowsna.loc>	462.0000	</1000000045@wowsna.loc>
+				<1000000046@wowsna.loc>	462.0000	</1000000046@wowsna.loc>
+				<1000000047@wowsna.loc>	462.0000	</1000000047@wowsna.loc>
+				<1000000048@wowsna.loc>	462.0000	</1000000048@wowsna.loc>
+				<100000049@wowseu.loc>	462.0000	</100000049@wowseu.loc>
+				<100000051@wowseu.loc>	462.0000	</100000051@wowseu.loc>
+				<clan-100000066@clans.wows.wowseu.loc>	593.0000	</clan-100000066@clans.wows.wowseu.loc>
+				<100000052@wowseu.loc>	462.0000	</100000052@wowseu.loc>
+				<100000053@wowseu.loc>	462.0000	</100000053@wowseu.loc>
+				<1000000054@wowsna.loc>	462.0000	</1000000054@wowsna.loc>
+				<100000055@wowseu.loc>	462.0000	</100000055@wowseu.loc>
+				<1000000056@wowsna.loc>	390.0000	</1000000056@wowsna.loc>
+				<1000000057@wowsna.loc>	903.0000	</1000000057@wowsna.loc>
+				<1000000059@wowsna.loc>	462.0000	</1000000059@wowsna.loc>
+				<100000061@wowseu.loc>	462.0000	</100000061@wowseu.loc>
+				<100000062@wowseu.loc>	462.0000	</100000062@wowseu.loc>
+				<100000063@wowseu.loc>	614.0000	</100000063@wowseu.loc>
+				<100000064@wowseu.loc>	462.0000	</100000064@wowseu.loc>
+				<100000065@wowseu.loc>	462.0000	</100000065@wowseu.loc>
+				<100000078@wowseu.loc>	462.0000	</100000078@wowseu.loc>
+				<1000000067@wowsna.loc>	462.0000	</1000000067@wowsna.loc>
+				<1000000068@wowsna.loc>	462.0000	</1000000068@wowsna.loc>
+				<1000000069@wowsna.loc>	462.0000	</1000000069@wowsna.loc>
+				<100000070@wowseu.loc>	462.0000	</100000070@wowseu.loc>
+				<1000000071@wowsna.loc>	462.0000	</1000000071@wowsna.loc>
+				<100000079@wowseu.loc>	462.0000	</100000079@wowseu.loc>
+			</chatBoxWidth>
+			<chatBoxHeight>
+				<1000000006@wowsna.loc>	412.0000	</1000000006@wowsna.loc>
+				<prebattle>	400.0000	</prebattle>
+				<1000000007@wowsna.loc>	310.0000	</1000000007@wowsna.loc>
+				<1000000008@wowsna.loc>	260.0000	</1000000008@wowsna.loc>
+				<1000000009@wowsna.loc>	260.0000	</1000000009@wowsna.loc>
+				<1000000010@wowsna.loc>	310.0000	</1000000010@wowsna.loc>
+				<1000000011@wowsna.loc>	280.0000	</1000000011@wowsna.loc>
+				<clan-1000000012@clans.wows.wowsna.loc>	368.0000	</clan-1000000012@clans.wows.wowsna.loc>
+				<1000000013@wowsna.loc>	310.0000	</1000000013@wowsna.loc>
+				<1000000014@wowsna.loc>	310.0000	</1000000014@wowsna.loc>
+				<1000000015@wowsna.loc>	373.0000	</1000000015@wowsna.loc>
+				<1000000016@wowsna.loc>	310.0000	</1000000016@wowsna.loc>
+				<1000000017@wowsna.loc>	367.0000	</1000000017@wowsna.loc>
+				<1000000018@wowsna.loc>	310.0000	</1000000018@wowsna.loc>
+				<1000000019@wowsna.loc>	310.0000	</1000000019@wowsna.loc>
+				<1000000020@wowsna.loc>	310.0000	</1000000020@wowsna.loc>
+				<1000000021@wowsna.loc>	310.0000	</1000000021@wowsna.loc>
+				<1000000022@wowsna.loc>	310.0000	</1000000022@wowsna.loc>
+				<1000000058@wowsna.loc>	310.0000	</1000000058@wowsna.loc>
+				<1000000024@wowsna.loc>	310.0000	</1000000024@wowsna.loc>
+				<1000000023@wowsna.loc>	310.0000	</1000000023@wowsna.loc>
+				<1000000025@wowsna.loc>	310.0000	</1000000025@wowsna.loc>
+				<1000000026@wowsna.loc>	310.0000	</1000000026@wowsna.loc>
+				<1000000027@wowsasia.loc>	310.0000	</1000000027@wowsasia.loc>
+				<1000000060@wowsna.loc>	310.0000	</1000000060@wowsna.loc>
+				<1000000028@wowsna.loc>	310.0000	</1000000028@wowsna.loc>
+				<1000000029@wowsna.loc>	310.0000	</1000000029@wowsna.loc>
+				<1000000030@wowsna.loc>	310.0000	</1000000030@wowsna.loc>
+				<1000000032@wowsna.loc>	310.0000	</1000000032@wowsna.loc>
+				<1000000031@wowsna.loc>	310.0000	</1000000031@wowsna.loc>
+				<1000000072@wowsasia.loc>	310.0000	</1000000072@wowsasia.loc>
+				<1000000073@wowsna.loc>	310.0000	</1000000073@wowsna.loc>
+				<1000000034@wowsna.loc>	310.0000	</1000000034@wowsna.loc>
+				<1000000033@wowsna.loc>	310.0000	</1000000033@wowsna.loc>
+				<clan-1000000035@clans.wows.wowsna.loc>	704.0000	</clan-1000000035@clans.wows.wowsna.loc>
+				<1000000050@wowsna.loc>	310.0000	</1000000050@wowsna.loc>
+				<1000000036@wowsna.loc>	356.0000	</1000000036@wowsna.loc>
+				<1000000037@wowsna.loc>	310.0000	</1000000037@wowsna.loc>
+				<1000000038@wowsna.loc>	310.0000	</1000000038@wowsna.loc>
+				<1000000039@wowsna.loc>	293.0000	</1000000039@wowsna.loc>
+				<1000000040@wowsna.loc>	310.0000	</1000000040@wowsna.loc>
+				<1000000041@wowsna.loc>	310.0000	</1000000041@wowsna.loc>
+				<1000000074_1000000075@user-rooms.wows.wowsna.loc>	310.0000	</1000000074_1000000075@user-rooms.wows.wowsna.loc>
+				<1000000042@wowsna.loc>	506.0000	</1000000042@wowsna.loc>
+				<1000000043@wowsna.loc>	310.0000	</1000000043@wowsna.loc>
+				<1000000076@wowsna.loc>	310.0000	</1000000076@wowsna.loc>
+				<1000000077@wowsna.loc>	310.0000	</1000000077@wowsna.loc>
+				<1000000044@wowsna.loc>	310.0000	</1000000044@wowsna.loc>
+				<1000000045@wowsna.loc>	310.0000	</1000000045@wowsna.loc>
+				<1000000046@wowsna.loc>	310.0000	</1000000046@wowsna.loc>
+				<1000000047@wowsna.loc>	310.0000	</1000000047@wowsna.loc>
+				<1000000048@wowsna.loc>	310.0000	</1000000048@wowsna.loc>
+				<100000049@wowseu.loc>	310.0000	</100000049@wowseu.loc>
+				<100000051@wowseu.loc>	310.0000	</100000051@wowseu.loc>
+				<clan-100000066@clans.wows.wowseu.loc>	461.0000	</clan-100000066@clans.wows.wowseu.loc>
+				<100000052@wowseu.loc>	310.0000	</100000052@wowseu.loc>
+				<100000053@wowseu.loc>	310.0000	</100000053@wowseu.loc>
+				<1000000054@wowsna.loc>	310.0000	</1000000054@wowsna.loc>
+				<100000055@wowseu.loc>	310.0000	</100000055@wowseu.loc>
+				<1000000056@wowsna.loc>	343.0000	</1000000056@wowsna.loc>
+				<1000000057@wowsna.loc>	417.0000	</1000000057@wowsna.loc>
+				<1000000059@wowsna.loc>	310.0000	</1000000059@wowsna.loc>
+				<100000061@wowseu.loc>	310.0000	</100000061@wowseu.loc>
+				<100000062@wowseu.loc>	310.0000	</100000062@wowseu.loc>
+				<100000063@wowseu.loc>	470.0000	</100000063@wowseu.loc>
+				<100000064@wowseu.loc>	310.0000	</100000064@wowseu.loc>
+				<100000065@wowseu.loc>	310.0000	</100000065@wowseu.loc>
+				<100000078@wowseu.loc>	310.0000	</100000078@wowseu.loc>
+				<1000000067@wowsna.loc>	310.0000	</1000000067@wowsna.loc>
+				<1000000068@wowsna.loc>	706.0000	</1000000068@wowsna.loc>
+				<1000000069@wowsna.loc>	310.0000	</1000000069@wowsna.loc>
+				<100000070@wowseu.loc>	310.0000	</100000070@wowseu.loc>
+				<1000000071@wowsna.loc>	260.0000	</1000000071@wowsna.loc>
+				<100000079@wowseu.loc>	310.0000	</100000079@wowseu.loc>
+			</chatBoxHeight>
+			<crewResetSkillType>	1.0000	</crewResetSkillType>
+			<divisionPlayersListWidth>	368.0000	</divisionPlayersListWidth>
+			<isEconomicsExpanded>	true	</isEconomicsExpanded>
+			<seenPriorLoadingHints>
+				<IDS_TIPS_AIR_DEFENSE_SECTOR_GAIN>	true	</IDS_TIPS_AIR_DEFENSE_SECTOR_GAIN>
+				<IDS_TIPS_SHIP_MANAGEMENT>	true	</IDS_TIPS_SHIP_MANAGEMENT>
+				<IDS_TIPS_DEFENSE>	true	</IDS_TIPS_DEFENSE>
+				<IDS_TIPS_BINOCULARS>	true	</IDS_TIPS_BINOCULARS>
+				<IDS_TIPS_SHIP_MOVEMENT>	true	</IDS_TIPS_SHIP_MOVEMENT>
+				<IDS_TIPS_FIRE_AND_FLOODING>	true	</IDS_TIPS_FIRE_AND_FLOODING>
+				<IDS_TIPS_POINTING_GUNS>	true	</IDS_TIPS_POINTING_GUNS>
+			</seenPriorLoadingHints>
+			<aaPrioritySectorActivateCount>	3217	</aaPrioritySectorActivateCount>
+			<armsRaceInstructionsSeen>	true	</armsRaceInstructionsSeen>
+			<defaultRoute>
+				<profile>	summary	</profile>
+				<exterior>	permoflage	</exterior>
+			</defaultRoute>
+			<summaryInset>	1	</summaryInset>
+			<crewAssignRetrainingOption>	3	</crewAssignRetrainingOption>
+			<switchPurchaseShipBuyCommander>	false	</switchPurchaseShipBuyCommander>
+			<crewRecruitmentOnPurchaseOption>	0	</crewRecruitmentOnPurchaseOption>
+			<formationWidgetHeight>	410.0000	</formationWidgetHeight>
+			<trainingRoomMapGPName>	00_CO_ocean	</trainingRoomMapGPName>
+			<shipPanelExpanded>	true	</shipPanelExpanded>
+			<shipStatsSortIndex>	2	</shipStatsSortIndex>
+			<trainingInfotipTabInset>	1	</trainingInfotipTabInset>
+			<switchBattleLoadingTabForEvent>	true	</switchBattleLoadingTabForEvent>
+			<notificationsInboxHeight>	975	</notificationsInboxHeight>
+			<shipSortStatsDirection>	true	</shipSortStatsDirection>
+			<PBSEconomicsExpand>
+				<creditsTakenTillDamage>	true	</creditsTakenTillDamage>
+				<creditsModifiers>	true	</creditsModifiers>
+				<creditsSpentPerBattle>	true	</creditsSpentPerBattle>
+			</PBSEconomicsExpand>
+			<achievementsGroupExpand>
+				<BATTLE_ACHIEVEMENT>	true	</BATTLE_ACHIEVEMENT>
+			</achievementsGroupExpand>
+			<crewFiringOption>	2	</crewFiringOption>
+			<shipSellAllModulesFlag>	1	</shipSellAllModulesFlag>
+			<isLootboxAnimationFullyVisible>	false	</isLootboxAnimationFullyVisible>
+			<trainingInfotipBotShipId>	1000000080	</trainingInfotipBotShipId>
+		</ui>
+		<version>	28	</version>
+		<net_credentials>
+			<active_server>	WOWS NA	</active_server>
+			<last_server_version>	15,10,0,10000081	</last_server_version>
+			<demo />
+			<external />
+		</net_credentials>
+		<peculiarities>	10000000082	</peculiarities>
+		<lobby_values>
+			<ship>	1000000083	</ship>
+			<port_preset>	basic	</port_preset>
+			<game_type>	RandomBattle	</game_type>
+			<game_type_game_param_id>	0	</game_type_game_param_id>
+			<shipBattleHistory>	1000000084,1000000085,1000000086,1000000087,1000000088,1000000089,1000000090,1000000091,1000000092,1000000093,1000000094,1000000095,1000000096,646,1000000097,1000000098,1000000099,1000000100,1000000101,1000000102,1000000103,1000000104,1000000105,1000000106,1000000107,1000000108,1000000109,1000000110,1000000111,1000000112,1000000113,1000000114,1000000115,1000000116,1000000117,1000000118,1000000119,1000000120,1000000121,1000000122,1000000123,1000000124,1000000125,1000000126,1000000127,1000000128,1000000129,1000000130,1000000131,1000000132,1000000133,1000000134,1000000135,1000000136,1000000137,1000000138,1000000139,1000000140,1000000141,1000000142,1000000143,1000000144,1000000145,1000000146,1000000147,1000000148,1000000149,1000000150,1000000151,1000000152,1000000153,1000000154,1000000155,1000000156,1000000157,1000000158,1000000159,1000000160,1000000161,1000000162,1000000163,93,1000000164,1000000165,1000000166,1000000167,1000000168,1000000169,1000000170,1000000171,1000000172,1000000173,1000000174,1000000175,1000000176,1000000177,1000000178,1000000179,1000000180,1000000181,1000000182,1000000183,1000000184,1000000185,1000000186,1000000187,1000000188,1000000189,1000000190,1000000191,1000000192,1000000193,1000000194,1000000195,1000000196,1000000197,1000000198,1000000199,1000000200,162,1000000201,1000000202,1000000203,1000000204,1000000205,1000000206,1000000207,1000000208,1000000209,1000000210,1000000211,1000000212,1000000213,1000000214,1000000083,1000000215,1000000216,1000000217,1000000218,1000000219,1000000220,1000000221,1000000222,1000000223,1000000224,1000000225,1000000226,1551,1000000227,1000000228,1000000229,1000000230,1000000231,1000000232,1000000233,1000000234,1000000235,1000000236,1000000237,1000000238,1000000239,1000000240,1000000241,1000000242,1000000243,1000000244,1000000245,1000000246,1000000247,1000000248,1000000249,1000000250,1000000251,1000000252,1000000253,1000000254,1000000255,1000000256,1000000257,4454,1000000258,1000000259,1000000260,1000000261,1000000262,1000000263,1000000264,1000000265,1000000266,1000000267,1000000268,1000000269,1000000270,1000000271,1000000272,1000000273,1000000274,1000000275,1000000276,1000000277,1000000278,1000000279,1000000280,1000000281,1000000282,1000000283,1000000284,1000000285	</shipBattleHistory>
+			<port_preset_custom />
+			<sub_port_preset>	basic	</sub_port_preset>
+			<event_hub_saved_port>	fjords	</event_hub_saved_port>
+		</lobby_values>
+		<common_filters>
+			<search_string />
+			<item>	0,Cruiser	</item>
+			<item>	1,10	</item>
+		</common_filters>
+		<minimapOptions>
+			<minimapSizeIndex>	5	</minimapSizeIndex>
+			<waterAlpha>	54	</waterAlpha>
+			<shipNamesDisplayEnabled>	1	</shipNamesDisplayEnabled>
+			<PISC510_Napoli>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<atbaRangeEnabled>	1	</atbaRangeEnabled>
+			</PISC510_Napoli>
+			<PHSC110_Gouden_Leeuw>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PHSC110_Gouden_Leeuw>
+			<PFSC210_Marseille>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PFSC210_Marseille>
+			<PRSC110_Pr_66_Moskva>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PRSC110_Pr_66_Moskva>
+			<PBSD110_Daring>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PBSD110_Daring>
+			<PASC020_Des_Moines_1948>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PASC020_Des_Moines_1948>
+			<PWSD610_Smaland>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PWSD610_Smaland>
+			<PBSC110_Minotaur>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PBSC110_Minotaur>
+			<PRSC210_Pr_84_Alexander_Nevsky>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PRSC210_Pr_84_Alexander_Nevsky>
+			<PZSD510_Lushun>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+			</PZSD510_Lushun>
+			<PASC210_Worcester>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PASC210_Worcester>
+			<PASD610_Forrest_Sherman>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PASD610_Forrest_Sherman>
+			<PFSC209_Brest>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PFSC209_Brest>
+			<PASD508_Kidd>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PASD508_Kidd>
+			<PASB730_Wisconsin>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+			</PASB730_Wisconsin>
+			<PRSC310_Petropavlovsk>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PRSC310_Petropavlovsk>
+			<PASC810_Austin>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PASC810_Austin>
+			<PRSC510_Stalingrad>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PRSC510_Stalingrad>
+			<PASC710_Salem>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PASC710_Salem>
+			<PASB720_Rhode_Island>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PASB720_Rhode_Island>
+			<PWSD710_Ragnar>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PWSD710_Ragnar>
+			<PWSD510_Friesland>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<aaRangeMaxEnabled>	0	</aaRangeMaxEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PWSD510_Friesland>
+			<PUSC010_Cerberus>
+				<submarineLocatorRangeEnabled>	1	</submarineLocatorRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PUSC010_Cerberus>
+			<PJSC598_Black_Atago>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PJSC598_Black_Atago>
+			<PUSD517_Huron>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PUSD517_Huron>
+			<PFSC105_Emile_Bertin>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PFSC105_Emile_Bertin>
+			<PFSC108_Charles_Martel>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PFSC108_Charles_Martel>
+			<PASC108_Baltimore_1944>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PASC108_Baltimore_1944>
+			<PWSD508_Orkan>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PWSD508_Orkan>
+			<PRSB528_Borodino>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PRSB528_Borodino>
+			<PSSC108_Cataluna>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PSSC108_Cataluna>
+			<PSSC109_Andalucia>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PSSC109_Andalucia>
+			<PSSC719_Almirante_Oquendo>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PSSC719_Almirante_Oquendo>
+			<PVSB010_Libertad>
+				<atbaRangeEnabled>	1	</atbaRangeEnabled>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+			</PVSB010_Libertad>
+			<PFSD508_Le_Terrible>
+				<aaRangeMaxEnabled>	0	</aaRangeMaxEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PFSD508_Le_Terrible>
+			<PSSC110_Castilla>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PSSC110_Castilla>
+			<PVSC110_San_Martin>
+				<rlsRangeEnabled>	0	</rlsRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PVSC110_San_Martin>
+			<PWSC506_Elli>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PWSC506_Elli>
+			<PGSD710_Georg_Hoffmann>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PGSD710_Georg_Hoffmann>
+			<PASD709_Black>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PASD709_Black>
+			<PWSD208_Split>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PWSD208_Split>
+			<PHSC710_Prins_Van_Oranje>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+			</PHSC710_Prins_Van_Oranje>
+			<PSSD510_Alvaro_de_Bazan>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PSSD510_Alvaro_de_Bazan>
+			<PUSC510_Brisbane>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PUSC510_Brisbane>
+			<PASD509_Benham>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PASD509_Benham>
+			<PRSC610_Smolensk>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PRSC610_Smolensk>
+			<PBSD717_Jupiter_1942>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PBSD717_Jupiter_1942>
+			<PFSD210_Marceau>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PFSD210_Marceau>
+			<PWSC710_Svea>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PWSC710_Svea>
+			<PFSC510_Colbert>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PFSC510_Colbert>
+			<PWSD210_Gdansk>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PWSD210_Gdansk>
+			<PRSC111_Novosibirsk>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+			</PRSC111_Novosibirsk>
+			<PUSD510_Vampire_2>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PUSD510_Vampire_2>
+			<PZSC110_Jinan>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+			</PZSC110_Jinan>
+			<PGSD720_Gold_Georg_Hoffmann>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PGSD720_Gold_Georg_Hoffmann>
+			<PHSD610_Tromp>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<aaRangeMaxEnabled>	1	</aaRangeMaxEnabled>
+			</PHSD610_Tromp>
+			<PASB729_Georgia>
+				<atbaRangeEnabled>	1	</atbaRangeEnabled>
+			</PASB729_Georgia>
+			<PHSC720_Gold_Prins_Van_Oranje>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PHSC720_Gold_Prins_Van_Oranje>
+			<PWSD519_Jager>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PWSD519_Jager>
+			<PASC510_Alaska>
+				<rlsRangeEnabled>	1	</rlsRangeEnabled>
+				<sonarRangeEnabled>	1	</sonarRangeEnabled>
+			</PASC510_Alaska>
+			<PASD719_Johnston>
+				<visibilityPlaneRangeEnabled>	1	</visibilityPlaneRangeEnabled>
+			</PASD719_Johnston>
+		</minimapOptions>
+		<trainRoom>
+			<trainingRoomMap>	0	</trainingRoomMap>
+			<trainingRoomScenario>	ST_Test	</trainingRoomScenario>
+			<trainingRoomTeamSize>	12	</trainingRoomTeamSize>
+			<trainingRoomDuration>	600	</trainingRoomDuration>
+		</trainRoom>
+		<actionPanel>
+			<id_1000000001>
+				<ship_1000000268>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000268>
+				<ship_1000000178>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000178>
+				<ship_1000000083>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000083>
+				<ship_1000000094>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000094>
+				<ship_1000000115>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000115>
+				<ship_1000000203>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000203>
+				<ship_1000000153>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000153>
+				<ship_1000000127>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000127>
+				<ship_1000000278>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000278>
+				<ship_1000000096>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000096>
+				<ship_1000000262>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000262>
+				<ship_1000000245>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000245>
+				<ship_1000000207>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000207>
+				<ship_1000000174>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000174>
+				<ship_1000000284>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000284>
+				<ship_1000000119 />
+				<ship_1000000129>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000129>
+				<ship_1000000188>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000188>
+				<ship_1000000239>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000239>
+				<ship_1000000143>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000143>
+				<ship_1000000161>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000161>
+				<ship_1000000274>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000274>
+				<ship_1000000090>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000090>
+				<ship_1000000184>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000184>
+				<ship_1000000247>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000247>
+				<ship_1000000243>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000243>
+				<ship_1000000180>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000180>
+				<ship_1000000255>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000255>
+				<ship_1000000231>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000231>
+				<ship_1000000151>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000151>
+				<ship_1000000141>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000141>
+				<ship_1000000264>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000264>
+				<ship_1000000222>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000222>
+				<ship_1000000282>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000282>
+				<ship_1000000097>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000097>
+				<ship_1000000229>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000229>
+				<ship_1000000111>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000111>
+				<ship_1000000159>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000159>
+				<ship_1000000270>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000270>
+				<ship_1000000113>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000113>
+				<ship_1000000168>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000168>
+				<ship_1000000107>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000107>
+				<ship_1000000103>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000103>
+				<ship_1000000253>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000253>
+				<ship_1000000121>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000121>
+				<ship_1000000182>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000182>
+				<ship_1000000276 />
+				<ship_1000000226>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000226>
+				<ship_1000000213>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000213>
+				<ship_1000000170>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000170>
+				<ship_1000000176 />
+				<ship_1000000099>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000099>
+				<ship_1000000227>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000227>
+				<ship_1000000266>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000266>
+				<ship_1000000211>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000211>
+				<ship_1000000092>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000092>
+				<ship_1000000280>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000280>
+				<ship_1000000216>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000216>
+				<ship_1000000125>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000125>
+				<ship_1000000196>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000196>
+				<ship_1000000258>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000258>
+				<ship_1000000235>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000235>
+				<ship_1000000220>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000220>
+				<ship_1000000109>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000109>
+				<ship_1000000186>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000186>
+				<ship_1000000139>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000139>
+				<ship_1000000172>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000172>
+				<ship_1000000149>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000149>
+				<ship_1000000157>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000157>
+				<ship_1000000205>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000205>
+				<ship_1000000241>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000241>
+				<ship_1000000117>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000117>
+				<ship_1000000088>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000088>
+			</id_1000000001>
+			<id_0>
+				<ship_1000000268>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000268>
+				<ship_1000000153>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000153>
+				<ship_1000000115>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000115>
+				<ship_1000000262>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000262>
+				<ship_1000000203 />
+				<ship_1000000247 />
+				<ship_1000000094>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000094>
+				<ship_1000000083>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000083>
+				<ship_1000000127 />
+				<ship_1000000096>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000096>
+				<ship_1000000163 />
+				<ship_1000000200>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000200>
+				<ship_1000000226>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000226>
+				<ship_1000000257>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000257>
+				<ship_1000000180>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000180>
+			</id_0>
+			<id_1000000002>
+				<ship_1000000184>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000184>
+			</id_1000000002>
+			<id_1000000003>
+				<ship_1000000192 />
+				<ship_1000000272 />
+				<ship_1000000137>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000137>
+				<ship_1000000249>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000249>
+				<ship_1000000237>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000237>
+				<ship_1000000224>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000224>
+				<ship_1000000184>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000184>
+			</id_1000000003>
+			<id_1000000004>
+				<ship_1000000192 />
+				<ship_1000000233>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000233>
+				<ship_1000000272 />
+				<ship_1000000137>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000137>
+				<ship_1000000190>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000190>
+				<ship_1000000218>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000218>
+				<ship_1000000198>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000198>
+				<ship_1000000184>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000184>
+			</id_1000000004>
+			<id_100000005>
+				<ship_1000000209 />
+				<ship_1000000194 />
+				<ship_1000000164>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000164>
+				<ship_1000000133>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000133>
+				<ship_1000000094>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000094>
+				<ship_1000000166>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000166>
+				<ship_1000000101>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000101>
+				<ship_1000000084>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000084>
+				<ship_1000000147>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000147>
+				<ship_1000000251>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000251>
+				<ship_1000000247>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000247>
+				<ship_1000000125>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000125>
+				<ship_1000000155>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000155>
+				<ship_1000000282>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000282>
+				<ship_1000000153>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000153>
+				<ship_1000000135>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000135>
+				<ship_1000000243>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000243>
+				<ship_1000000131>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000131>
+				<ship_1000000205>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000205>
+				<ship_1000000180>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000180>
+				<ship_1000000092>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000092>
+				<ship_1000000145>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	1,0	</wt_1>
+				</ship_1000000145>
+				<ship_1000000260>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000260>
+				<ship_1000000105 />
+				<ship_1000000196>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000196>
+				<ship_1000000241>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000241>
+				<ship_1000000086>
+					<wt_0>	1,0	</wt_0>
+				</ship_1000000086>
+				<ship_1000000123>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000123>
+				<ship_1000000097>
+					<wt_0>	0,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000097>
+				<ship_1000000211>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000211>
+				<ship_1000000201>
+					<wt_1>	1,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000201>
+				<ship_1000000083>
+					<wt_0>	1,0	</wt_0>
+					<wt_1>	0,0	</wt_1>
+				</ship_1000000083>
+				<ship_1000000168>
+					<wt_1>	0,0	</wt_1>
+					<wt_0>	0,0	</wt_0>
+				</ship_1000000168>
+			</id_100000005>
+		</actionPanel>
+	</scriptsPreferences>
+	<clientVersion>	15,10,0,0	</clientVersion>
+</preferences.xml>

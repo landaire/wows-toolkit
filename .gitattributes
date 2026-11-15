@@ -4,3 +4,5 @@
 *.jpg binary
 *.exe binary
 *.pdb binary
+# Game settings fixtures keep the CRLF line endings and BOM the game writes.
+crates/wows-game-settings/tests/fixtures/** -text

@@ -1,0 +1,8 @@
+---
+source: crates/wows-game-settings/tests/store.rs
+expression: errors
+---
+[
+    "Changed in this game version.",
+    "Channel volumes can only be changed with the custom sound mix.",
+]

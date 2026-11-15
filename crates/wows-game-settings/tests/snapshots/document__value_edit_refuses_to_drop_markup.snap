@@ -1,0 +1,16 @@
+---
+source: crates/wows-game-settings/tests/document.rs
+expression: errors
+---
+[
+    HasMarkup {
+        path: PrefsPath(
+            "a",
+        ),
+    },
+    HasMarkup {
+        path: PrefsPath(
+            "b",
+        ),
+    },
+]
