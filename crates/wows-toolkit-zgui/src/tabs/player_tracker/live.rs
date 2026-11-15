@@ -19,6 +19,7 @@ use std::time::Instant;
 
 use futures::StreamExt;
 use jiff::Timestamp;
+use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
 #[cfg(test)]
@@ -26,6 +27,7 @@ use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::live_match::LivePoll;
 use wows_toolkit_replay_data::live_match::LiveSource;
+use wows_toolkit_replay_data::live_match::RosterSource;
 use wows_toolkit_replay_data::live_match::scan_arena_retrying;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
@@ -300,7 +302,8 @@ impl LiveModel {
             // Held by the task, so cancelling it ends the poll.
             let _poll = poll;
             while let Some(live) = changes.next().await {
-                self.adopt(services, &config, live);
+                let roster = RosterSource::InProgress(LiveSource::in_dir(&config.replay_dir));
+                self.adopt(services, &config, live, roster);
             }
         });
         self.watch.set_value(Some(task));
@@ -317,9 +320,35 @@ impl LiveModel {
         self.gate.update_value(StatsLookupGate::clear);
     }
 
-    /// Adopts what a poll found, and loads the roster's build when the loaded data does not
-    /// already cover it.
-    fn adopt(self, services: Services, config: &LiveSourceConfig, live: Option<LiveMatch>) {
+    /// Takes the finished replay at `replay` as the battle in progress, so the roster scan and the
+    /// stats lookup can be exercised outside a battle. A debug tool: the next battle the poll
+    /// reports replaces it.
+    pub fn adopt_finished_replay(self, services: Services, replay: PathBuf) {
+        let Some(config) = self.source.get_untracked() else {
+            tracing::warn!("live match: no replays directory is known, so no replay is taken as the battle");
+            return;
+        };
+        self.spawn(async move {
+            let read = replay.clone();
+            let meta = blocking(move || ReplayFile::meta_from_file(&read)).await;
+            let live = match meta {
+                Ok(meta) => LiveMatch::from_meta(&meta),
+                Err(err) => {
+                    tracing::warn!(path = %replay.display(), "live match: the replay's header did not read: {err}");
+                    return;
+                }
+            };
+            let Some(live) = live else {
+                tracing::warn!(path = %replay.display(), "live match: the replay's header carries no date");
+                return;
+            };
+            self.adopt(services, &config, Some(live), RosterSource::Finished(replay));
+        });
+    }
+
+    /// Adopts what a poll found, or a replay taken as the battle, and loads the roster's build
+    /// when the loaded data does not already cover it. `roster` is where the scan reads it from.
+    fn adopt(self, services: Services, config: &LiveSourceConfig, live: Option<LiveMatch>, roster: RosterSource) {
         self.checked.set(true);
         let started_at = live.as_ref().map(|live| live.started_at);
         let build = live.as_ref().and_then(|live| live.build);
@@ -334,7 +363,7 @@ impl LiveModel {
 
         let Some(build) = build else { return };
         if self.metadata_build.get_value() == Some(build) && self.metadata.with_untracked(Option::is_some) {
-            self.start_scan(services, config, started_at);
+            self.start_scan(services, config, roster, started_at);
             return;
         }
 
@@ -353,7 +382,7 @@ impl LiveModel {
             match loaded {
                 Ok(data) => {
                     self.metadata.set(Some(data));
-                    self.start_scan(services, &config, started_at);
+                    self.start_scan(services, &config, roster, started_at);
                 }
                 // The roster still lists names and relations; the ship columns and the statistics
                 // have nothing to resolve against, which is a failure rather than a wait.
@@ -469,12 +498,11 @@ impl LiveModel {
         })
     }
 
-    /// Reads the roster off the live packet stream, retrying while the game flushes it, then
+    /// Reads the roster off `source`, retrying while the game flushes a battle in progress, then
     /// offers the stats lookup.
-    fn start_scan(self, services: Services, config: &LiveSourceConfig, started_at: Timestamp) {
+    fn start_scan(self, services: Services, config: &LiveSourceConfig, source: RosterSource, started_at: Timestamp) {
         let Some(metadata) = self.metadata.get_untracked() else { return };
         self.stats.set(StatsState::Scanning);
-        let source = LiveSource::in_dir(&config.replay_dir);
         let game_data = config.game_data.clone();
         let task = self.spawn(async move {
             // Dropped with this task, which stops the retries between attempts.

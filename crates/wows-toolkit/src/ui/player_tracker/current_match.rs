@@ -15,11 +15,10 @@ use egui_taffy::taffy::prelude::fr;
 use egui_taffy::taffy::prelude::length;
 use egui_taffy::taffy::prelude::percent;
 use jiff::Timestamp;
-use jiff::civil::DateTime;
-use jiff::tz::TimeZone;
 use rust_i18n::t;
 use wows_replays::ReplayFile;
 use wows_replays::types::AccountId;
+use wows_toolkit_viewmodel::player_tracker::live::debug_replay_choices;
 use wowsunpack::data::Version;
 
 use crate::app::ToolkitTabViewer;
@@ -226,45 +225,27 @@ impl ToolkitTabViewer<'_> {
             return;
         }
 
-        // `date_time` is `dd.mm.yyyy HH:MM:SS`, which does not order lexically, so
-        // it is parsed before sorting. A row whose stamp will not parse sorts last
-        // rather than being dropped: it is still a replay the picker can load.
-        let mut replays: Vec<(PathBuf, String, Option<Timestamp>)> = self
-            .tab_state
-            .all_workspaces()
-            .filter_map(|workspace| workspace.replay_files())
-            .flatten()
-            .map(|(path, listed)| {
-                let stamp = parse_replay_list_timestamp(&listed.date_time);
-                let label = format!("{} - {} - {}", listed.date_time, listed.map_name, listed.scenario);
-                (path.clone(), label, stamp)
-            })
-            .collect();
-        replays.sort_by(|a, b| {
-            match (a.2, b.2) {
-                (Some(a), Some(b)) => b.cmp(&a),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-            .then_with(|| a.1.cmp(&b.1))
-        });
+        let replays = debug_replay_choices(
+            self.tab_state
+                .all_workspaces()
+                .filter_map(|workspace| workspace.replay_files())
+                .flatten()
+                .map(|(path, listed)| (path.as_path(), listed.as_ref())),
+        );
 
         let id = egui::Id::unique("current_match_debug_replay");
         let selected: Option<PathBuf> = ui.data(|d| d.get_temp(id));
         let label = selected
             .as_ref()
-            .and_then(|path| {
-                replays.iter().find(|(candidate, ..)| candidate == path).map(|(_, label, _)| label.clone())
-            })
+            .and_then(|path| replays.iter().find(|choice| choice.path == *path).map(|choice| choice.label.clone()))
             .unwrap_or_else(|| t!("ui.player_tracker.debug_replay_none").to_string());
 
         let mut picked = None;
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt(id).selected_text(label).show_ui(ui, |ui| {
-                for (path, label, _) in &replays {
-                    if ui.selectable_label(selected.as_ref() == Some(path), label).clicked() {
-                        picked = Some(path.clone());
+                for choice in &replays {
+                    if ui.selectable_label(selected.as_ref() == Some(&choice.path), &choice.label).clicked() {
+                        picked = Some(choice.path.clone());
                     }
                 }
             });
@@ -291,13 +272,6 @@ impl ToolkitTabViewer<'_> {
             })
         });
     }
-}
-
-/// Parses the `dd.mm.yyyy HH:MM:SS` stamp `replay_timestamp` uses, without
-/// panicking on a row it cannot parse.
-fn parse_replay_list_timestamp(date_time: &str) -> Option<Timestamp> {
-    const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
-    DateTime::strptime(REPLAY_DATE_FORMAT, date_time).ok()?.to_zoned(TimeZone::system()).ok().map(Into::into)
 }
 
 /// Everything both team tables read. Bundled because the two calls differ only

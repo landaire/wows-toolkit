@@ -82,6 +82,15 @@ impl LiveSource {
     }
 }
 
+/// Where a roster scan reads the battle from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RosterSource {
+    /// A battle in progress, whose stream may not hold the roster yet.
+    InProgress(LiveSource),
+    /// A finished replay, read once. Debug tooling drives the live path from one.
+    Finished(PathBuf),
+}
+
 /// What one poll found.
 ///
 /// Size and modified time together distinguish one battle from the next: the
@@ -267,16 +276,21 @@ pub fn read(source: &LiveSource) -> Result<LiveMatch, LiveMatchError> {
     LiveMatch::from_meta(&replay.meta).ok_or(LiveMatchError::NoTimestamp)
 }
 
-/// Reads the arena roster off the live packet stream.
+/// Reads the arena roster off `source`.
 ///
-/// `None` means "not yet": the stream is short, still being written, or the
-/// packet carrying the roster has not been flushed. Retried by the caller.
-pub fn scan_arena(source: &LiveSource, loaded: &LoadedGameData, game_data: &GameDataCache) -> Option<ArenaState> {
-    let meta = std::fs::read(&source.arena_info).ok()?;
-    let packets = std::fs::read(&source.stream).ok()?;
-    // Both halves are re-read per attempt, so an attempt that raced the game
-    // mid-write is corrected by the next one.
-    let replay = ReplayFile::from_decrypted_parts(meta, packets).ok()?;
+/// `None` for a battle in progress means "not yet": the stream is short, still being written, or
+/// the packet carrying the roster has not been flushed. Retried by the caller.
+pub fn scan_arena(source: &RosterSource, loaded: &LoadedGameData, game_data: &GameDataCache) -> Option<ArenaState> {
+    let replay = match source {
+        // Both halves are re-read per attempt, so an attempt that raced the game mid-write is
+        // corrected by the next one.
+        RosterSource::InProgress(live) => {
+            let meta = std::fs::read(&live.arena_info).ok()?;
+            let packets = std::fs::read(&live.stream).ok()?;
+            ReplayFile::from_decrypted_parts(meta, packets).ok()?
+        }
+        RosterSource::Finished(path) => ReplayFile::from_file(path).ok()?,
+    };
 
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
     // Constants are versioned by build; without one the parser's built-in layout applies.
@@ -288,11 +302,12 @@ pub fn scan_arena(source: &LiveSource, loaded: &LoadedGameData, game_data: &Game
     scan_arena_state(loaded.provider().entity_specs(), version, &replay, &constants)
 }
 
-/// [`scan_arena`] retried every [`SCAN_RETRY_INTERVAL`] until the roster is
-/// read or [`SCAN_RETRY_BUDGET`] runs out. `None` when it runs out, or when
-/// `cancelled` is set, which is checked between attempts.
+/// [`scan_arena`] retried every [`SCAN_RETRY_INTERVAL`] until the roster is read or
+/// [`SCAN_RETRY_BUDGET`] runs out. A finished replay is read once, since it will not change.
+/// `None` when the roster is not read, or when `cancelled` is set, which is checked between
+/// attempts.
 pub fn scan_arena_retrying(
-    source: &LiveSource,
+    source: &RosterSource,
     loaded: &LoadedGameData,
     game_data: &GameDataCache,
     cancelled: &AtomicBool,
@@ -305,7 +320,7 @@ pub fn scan_arena_retrying(
         if let Some(state) = scan_arena(source, loaded, game_data) {
             return Some(state);
         }
-        if Instant::now() >= deadline {
+        if matches!(source, RosterSource::Finished(_)) || Instant::now() >= deadline {
             return None;
         }
         std::thread::sleep(SCAN_RETRY_INTERVAL);
@@ -512,7 +527,8 @@ mod scan_tests {
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
         let loaded = game_data.get_or_load_build(build).expect("the build's game data loads");
 
-        let state = scan_arena(&LiveSource::in_dir(&dir), &loaded, &game_data).expect("the roster scans");
+        let source = RosterSource::InProgress(LiveSource::in_dir(&dir));
+        let state = scan_arena(&source, &loaded, &game_data).expect("the roster scans");
         let humans = state.players.iter().filter(|player| !player.is_bot()).count();
         println!("arena {:?}: {} players, {humans} of them human", state.arena_id, state.players.len());
 

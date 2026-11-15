@@ -4,9 +4,13 @@
 //! tracked history, and the identities a packet scan recovers. All of that is
 //! the same work in both front ends; only the drawing differs.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
 
 use jiff::Timestamp;
+use jiff::civil::DateTime;
 use wows_replay_insights::battle_report::try_replay_timestamp;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::decoder::PlayerStateData;
@@ -24,6 +28,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::listing_row::ListedReplay;
 use crate::match_stats::PlayerStatsOut;
 use crate::match_stats::Region;
 use crate::personal_rating::PersonalRatingCategory;
@@ -576,6 +581,43 @@ impl StatsState {
     }
 }
 
+/// One finished replay the debug picker offers to treat as the current match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugReplayChoice {
+    pub path: PathBuf,
+    /// The recorded time, map and scenario, as the picker lists them.
+    pub label: String,
+}
+
+/// `replays` as the debug picker lists them: newest first by the time each header records, then
+/// by label. The header time is `dd.mm.yyyy HH:MM:SS`, which does not order as text. A replay
+/// whose time does not parse is listed last rather than dropped, since it can still be loaded.
+pub fn debug_replay_choices<'a>(
+    replays: impl IntoIterator<Item = (&'a Path, &'a ListedReplay)>,
+) -> Vec<DebugReplayChoice> {
+    const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
+
+    let mut dated: Vec<(Option<DateTime>, DebugReplayChoice)> = replays
+        .into_iter()
+        .map(|(path, listed)| {
+            let recorded = DateTime::strptime(REPLAY_DATE_FORMAT, &listed.date_time).ok();
+            let label = format!("{} - {} - {}", listed.date_time, listed.map_name, listed.scenario);
+            (recorded, DebugReplayChoice { path: path.to_path_buf(), label })
+        })
+        .collect();
+    dated.sort_by(|(a_recorded, a), (b_recorded, b)| {
+        let by_time = match (a_recorded, b_recorded) {
+            (Some(a_recorded), Some(b_recorded)) => b_recorded.cmp(a_recorded),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        };
+        by_time.then_with(|| a.label.cmp(&b.label))
+    });
+
+    dated.into_iter().map(|(_, choice)| choice).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -959,5 +1001,48 @@ mod stats_lookup_gate_tests {
         gate.clear();
 
         assert_eq!(gate.set_shown(true), None);
+    }
+}
+
+#[cfg(test)]
+mod debug_replay_choice_tests {
+    use super::*;
+
+    fn listed(date_time: &str, map_name: &str) -> ListedReplay {
+        ListedReplay {
+            ship_id: None,
+            map_name: map_name.to_owned(),
+            game_type: String::new(),
+            scenario: "Domination".to_owned(),
+            date_time: date_time.to_owned(),
+            build: None,
+        }
+    }
+
+    /// A later day sorts first even where its text sorts lower, ties go by label, and a replay
+    /// whose time does not parse is listed last.
+    #[test]
+    fn choices_list_the_newest_first_and_the_undated_last() {
+        let replays = [
+            (Path::new("a"), listed("31.12.2023 23:00:00", "ocean")),
+            (Path::new("b"), listed("garbled", "ocean")),
+            (Path::new("c"), listed("01.01.2024 08:00:00", "north")),
+            (Path::new("d"), listed("01.01.2024 08:00:00", "fault_line")),
+        ];
+
+        let labels: Vec<String> = debug_replay_choices(replays.iter().map(|(path, listed)| (*path, listed)))
+            .into_iter()
+            .map(|choice| choice.label)
+            .collect();
+
+        assert_eq!(
+            labels,
+            [
+                "01.01.2024 08:00:00 - fault_line - Domination",
+                "01.01.2024 08:00:00 - north - Domination",
+                "31.12.2023 23:00:00 - ocean - Domination",
+                "garbled - ocean - Domination",
+            ]
+        );
     }
 }

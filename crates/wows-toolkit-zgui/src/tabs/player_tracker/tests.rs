@@ -1,6 +1,7 @@
 //! The Player Tracker tab driven in the headless shell, with its state seeded through its model.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
@@ -33,6 +34,7 @@ use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -567,6 +569,42 @@ fn the_live_watch_runs_without_the_tab_and_looks_up_stats_once_shown() {
     settle_in_real_time(&mut tracker.window);
     assert_eq!(take_stats_lookups(), [arena], "showing the section sends the held lookup once");
     assert!(matches!(tracker.model.live.stats.get_untracked(), StatsState::Ready(_)), "and its answer is shown");
+}
+
+/// In debug mode the Current Match section offers the replays in the watched directory, and the
+/// one chosen is taken as the battle in progress. Outside debug mode it is not offered.
+#[test]
+fn the_debug_replay_picker_shows_in_debug_mode_and_seeds_the_battle() {
+    const REPLAY: &str = "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay";
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../wows-replay-insights/tests/fixtures/replays").join(REPLAY);
+    let bytes = std::fs::read(&fixture).expect("the fixture reads");
+    let meta = ReplayFile::meta_from_file(&fixture).expect("the fixture's header reads");
+    let expected = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
+
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let _install = adopt_install(&[(REPLAY, &bytes)]);
+    settle_in_real_time(&mut tracker.window);
+    tracker.show_current_match();
+    assert!(!tracker.has("tracker-debug-replay"), "the picker is hidden outside debug mode");
+
+    shell().debug_mode.set(true);
+    // The directory is listed off the UI thread.
+    settle_in_real_time(&mut tracker.window);
+    assert!(tracker.has("tracker-debug-replay"), "debug mode shows the picker");
+    assert!(shell().live.live_match.get_untracked().is_none(), "no battle is under way");
+
+    tracker.press("tracker-debug-replay-trigger");
+    tracker.press("tracker-debug-replay-0");
+    settle_in_real_time(&mut tracker.window);
+    let live = shell().live.live_match.get_untracked().expect("the chosen replay is taken as the battle");
+    assert_eq!(live.started_at, expected.started_at);
+    assert_eq!(live.players.len(), expected.players.len());
+    assert!(tracker.has("tracker-roster-ally-0"), "its roster is listed");
+
+    shell().debug_mode.set(false);
+    tracker.settle();
+    assert!(!tracker.has("tracker-debug-replay"), "leaving debug mode hides the picker");
 }
 
 #[test]

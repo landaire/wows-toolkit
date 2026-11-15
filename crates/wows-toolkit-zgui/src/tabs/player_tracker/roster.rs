@@ -3,6 +3,7 @@
 //! possible-stream-sniper chip.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use jiff::Timestamp;
 use landaire_ui::LoadingLineProps;
@@ -15,17 +16,20 @@ use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::replay_dir::scan_replay_files;
 use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::player_tracker::history;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
+use wows_toolkit_viewmodel::player_tracker::live::DebugReplayChoice;
 use wows_toolkit_viewmodel::player_tracker::live::LiveRosterRow;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::RowStats;
 use wows_toolkit_viewmodel::player_tracker::live::StatsState;
 use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
+use wows_toolkit_viewmodel::player_tracker::live::debug_replay_choices;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating;
 use wows_toolkit_viewmodel::player_tracker::live::team_average_win_rate;
@@ -37,17 +41,25 @@ use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use zgui::component;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::Task;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::blocking;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
+use zgui::reactive::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::ShowProps;
 use zgui_image::ImageBytes;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -56,6 +68,13 @@ use zgui_ui::DropdownMenuContentProps;
 use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::MenuItemProps;
+use zgui_ui::SelectContentProps;
+use zgui_ui::SelectItemProps;
+use zgui_ui::SelectProps;
+use zgui_ui::SelectTriggerProps;
+use zgui_ui::SelectTriggerSize;
+use zgui_ui::SelectValueProps;
+use zgui_ui::prelude::Binding;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::ui::ELLIPSIS;
@@ -65,6 +84,7 @@ use crate::game_art::ClassIconKey;
 use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::tabs::player_tracker::live::LiveModel;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::tables::HoverTextProps;
 use crate::tabs::player_tracker::tables::severity;
@@ -161,9 +181,103 @@ pub fn CurrentMatchSection(model: TrackerModel) -> impl IntoView {
 
     view! {
         column(class = "wt-tracker-section", attr:data-testid = "tracker-current-match") {
+            Show(when = move || shell.debug_mode.get()) {
+                DebugReplayPicker(live = live)
+            }
             ModeBar(model = model)
             box(class = "wt-tracker-fill") {
                 {body}
+            }
+        }
+    }
+}
+
+/// Debug mode's picker of a finished replay to take as the battle in progress, so the roster scan
+/// and the stats lookup can be exercised outside a battle. Lists the watched replays directory,
+/// read again whenever the watch moves to another one.
+#[component]
+fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
+    let services = Services::current();
+    let choices = RwSignal::new_local(Vec::<DebugReplayChoice>::new());
+    let chosen = RwSignal::new_local(None::<PathBuf>);
+    let listing = StoredValue::new_local(None::<Task>);
+
+    let list = RenderEffect::new(move |_| {
+        if let Some(previous) = listing.get_value() {
+            previous.cancel();
+        }
+        let dir = live.source.with(|source| source.as_ref().map(|config| config.replay_dir.clone()));
+        let Some(dir) = dir else {
+            choices.set(Vec::new());
+            listing.set_value(None);
+            return;
+        };
+        let task = spawn_local(async move {
+            let scanned = blocking(move || {
+                // Nothing shows the scan's progress.
+                let (reports, _) = futures::channel::mpsc::unbounded();
+                scan_replay_files(&dir, &reports)
+            })
+            .await;
+            choices.set(debug_replay_choices(scanned.files.iter().map(|file| (file.path.as_path(), &file.listed))));
+        });
+        listing.set_value(Some(task));
+    });
+    on_cleanup_local(move || {
+        if let Some(task) = listing.get_value() {
+            task.cancel();
+        }
+        drop(list);
+    });
+
+    // The choice is kept by path, so a list read again keeps it chosen wherever it moved to.
+    let value = Signal::derive_local(move || {
+        chosen
+            .with(|chosen| {
+                let chosen = chosen.as_ref()?;
+                choices.with(|choices| choices.iter().position(|choice| choice.path == *chosen))
+            })
+            .map(|index| index.to_string())
+            .unwrap_or_default()
+    });
+    let choose = move |value: String| {
+        let Ok(index) = value.parse::<usize>() else { return };
+        let Some(path) = choices.with_untracked(|choices| choices.get(index).map(|choice| choice.path.clone())) else {
+            return;
+        };
+        chosen.set(Some(path.clone()));
+        live.adopt_finished_replay(services, path);
+    };
+
+    view! {
+        row(class = "wt-tracker-modes", attr:data-testid = "tracker-debug-replay") {
+            Select(value = Binding::controlled(value, choose)) {
+                SelectTrigger(
+                    size = SelectTriggerSize::Sm,
+                    label = t!("ui.player_tracker.debug_replay_picker").into_owned(),
+                    attr:data-testid = "tracker-debug-replay-trigger"
+                ) {
+                    SelectValue(placeholder = t!("ui.player_tracker.debug_replay_none").into_owned())
+                }
+                SelectContent {
+                    for entry in move || choices.get().into_iter().enumerate().collect::<Vec<_>>(),
+                        key = |entry: &(usize, DebugReplayChoice)| (entry.0, entry.1.path.clone())
+                    {
+                        SelectItem(
+                            value = entry.0.to_string(),
+                            text = entry.1.label.clone(),
+                            attr:data-testid = format!("tracker-debug-replay-{}", entry.0)
+                        ) {
+                            {entry.1.label.clone()}
+                        }
+                    }
+                }
+            }
+            Tooltip {
+                TooltipTrigger {
+                    text(class = "wt-tracker-small wt-tracker-dim") {{t!("ui.player_tracker.debug_replay_picker").into_owned()}}
+                }
+                TooltipContent {{t!("ui.player_tracker.debug_replay_picker_hover").into_owned()}}
             }
         }
     }

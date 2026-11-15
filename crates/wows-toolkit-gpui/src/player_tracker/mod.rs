@@ -1165,7 +1165,9 @@ impl PlayerTrackerView {
         cx.notify();
 
         self._live_scan = Some(cx.spawn(async move |this, cx| {
-            let source = wows_toolkit_replay_data::live_match::LiveSource::in_dir(&replay_dir);
+            let source = wows_toolkit_replay_data::live_match::RosterSource::InProgress(
+                wows_toolkit_replay_data::live_match::LiveSource::in_dir(&replay_dir),
+            );
             // Set when this task is dropped, which ends the retries with it.
             let cancel = ScanCancel::default();
             let cancelled = Arc::clone(&cancel.0);
