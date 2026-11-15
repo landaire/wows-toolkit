@@ -5,9 +5,13 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
 
 use serde::Serialize;
+use serde_json::json;
 use wows_query::jq_worker::Limits;
+use wows_query::raw_params::EntryPosition;
+use wows_query::raw_params::RawParams;
 
 const SENTINEL_ENV: &str = "WOWS_QUERY_CANARY";
 const SENTINEL: &str = "canary-3f9b1c";
@@ -43,10 +47,20 @@ fn worker() -> PathBuf {
         .expect("the jq worker binary is built with the tests")
 }
 
-fn probe(filter: &'static str) -> Probe {
+/// A store of `values`, built under the temporary directory, and the
+/// positions of its entries.
+fn store(name: &str, values: Vec<serde_json::Value>) -> (Arc<RawParams>, Vec<EntryPosition>) {
+    let kind_dir = std::env::temp_dir().join(format!("wows-query-jq-sandbox-{name}-{}", std::process::id()));
+    let entries = values.into_iter().enumerate().map(|(position, value)| (format!("entry{position}"), value));
+    let store = RawParams::build(&kind_dir, 1, entries).expect("the store builds");
+    let positions = store.entries().map(|entry| entry.position()).collect();
+
+    (store, positions)
+}
+
+fn probe(filter: &'static str, store: &RawParams, positions: &[EntryPosition]) -> Probe {
     let limits = Limits { steps_per_input: 10_000, time: std::time::Duration::from_secs(5), output_bytes: 1 << 16 };
-    let inputs = [b"{\"a\": 1}".to_vec(), b"{\"b\": 2}".to_vec()];
-    let outcome = match wows_query::jq_worker::evaluate(filter, inputs.into_iter(), limits) {
+    let outcome = match wows_query::jq_worker::evaluate(filter, store, positions, limits) {
         Ok(evaluation) => {
             assert_eq!(evaluation.stopped, None, "{filter} stopped early");
             let first = evaluation.inputs.into_iter().next().expect("the first input was evaluated");
@@ -70,7 +84,8 @@ fn host() {
     }
 
     wows_query::jq_worker::set_worker_program(worker());
-    let probes: Vec<Probe> = PROBES.iter().map(|filter| probe(filter)).collect();
+    let (store, positions) = store("host", vec![json!({"a": 1}), json!({"b": 2})]);
+    let probes: Vec<Probe> = PROBES.iter().map(|filter| probe(filter, &store, &positions)).collect();
     println!("PROBES {}", serde_json::to_string(&probes).expect("probes serialize"));
 }
 
@@ -78,8 +93,9 @@ fn host() {
 fn unbounded_recursion_ends_only_the_worker() {
     wows_query::jq_worker::set_worker_program(worker());
     let limits = Limits { steps_per_input: 10_000, time: std::time::Duration::from_secs(5), output_bytes: 1 << 16 };
-    let evaluation = wows_query::jq_worker::evaluate("def f: 1 + f; f", [b"null".to_vec()].into_iter(), limits)
-        .expect("the worker starts");
+    let (store, positions) = store("recursion", vec![json!(null)]);
+    let evaluation =
+        wows_query::jq_worker::evaluate("def f: 1 + f; f", &store, &positions, limits).expect("the worker starts");
 
     assert_eq!(evaluation.stopped, Some(wows_query::jq_worker::Stop::Crashed));
 }

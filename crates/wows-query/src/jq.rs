@@ -1,4 +1,4 @@
-//! The jq engine: compiles a filter with jaq and runs it over JSON records.
+//! The jq engine: compiles a filter with jaq and runs it over jaq values.
 //!
 //! This runs inside the jq worker process (see [`crate::jq_worker`]), which
 //! the caller kills at a deadline. The engine itself bounds what it can:
@@ -113,23 +113,16 @@ impl Program {
         Ok(Self(filter))
     }
 
-    /// Runs the filter on one JSON text. `output_left` is the output the
+    /// Runs the filter on one value. `output_left` is the output the
     /// evaluation may still produce; it shrinks by what this input produced.
     pub(crate) fn run(
         &self,
-        input: &[u8],
+        value: Val,
         steps: u64,
         deadline: Instant,
         output_left: &mut usize,
     ) -> (InputOutputs, Option<Stop>) {
         let mut outputs = InputOutputs::default();
-        let value = match jaq_json::read::parse_single(input) {
-            Ok(value) => value,
-            Err(error) => {
-                outputs.error = Some(format!("record is not JSON: {error}"));
-                return (outputs, None);
-            }
-        };
 
         let mut stop = None;
         BUDGET.set(Some(Budget { steps_left: steps, deadline }));
@@ -327,11 +320,15 @@ pub(crate) fn floor_char_boundary(text: &str, max: usize) -> usize {
 mod tests {
     use super::*;
 
+    fn parse(input: &str) -> Val {
+        jaq_json::read::parse_single(input.as_bytes()).expect("test input is JSON")
+    }
+
     fn run(program: &str, input: &str) -> Result<Vec<String>, String> {
         let program = Program::compile(program).map_err(|error| error.to_string())?;
         let mut output_left = 1 << 20;
         let deadline = Instant::now() + Duration::from_secs(5);
-        let (outputs, _stop) = program.run(input.as_bytes(), 10_000, deadline, &mut output_left);
+        let (outputs, _stop) = program.run(parse(input), 10_000, deadline, &mut output_left);
 
         match outputs.error {
             Some(error) => Err(error),
@@ -381,7 +378,7 @@ mod tests {
     fn output_limit_cuts_the_last_value() {
         let program = Program::compile("\"abcdef\", 1").expect("compiles");
         let mut output_left = 4;
-        let (outputs, stop) = program.run(b"null", 10, Instant::now() + Duration::from_secs(5), &mut output_left);
+        let (outputs, stop) = program.run(parse("null"), 10, Instant::now() + Duration::from_secs(5), &mut output_left);
 
         assert_eq!(stop, Some(Stop::OutputLimit));
         assert_eq!(outputs.values, ["\"abc"]);
@@ -393,7 +390,7 @@ mod tests {
         let program = Program::compile("last(range(1e12))").expect("compiles");
         let mut output_left = 100;
         let deadline = Instant::now() + Duration::from_millis(50);
-        let (outputs, stop) = program.run(b"null", u64::MAX, deadline, &mut output_left);
+        let (outputs, stop) = program.run(parse("null"), u64::MAX, deadline, &mut output_left);
 
         assert_eq!(stop, Some(Stop::TimeLimit));
         assert_eq!(outputs.error.as_deref(), Some("the filter ran out of time"));

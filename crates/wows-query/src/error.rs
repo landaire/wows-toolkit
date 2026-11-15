@@ -474,8 +474,8 @@ pub enum JqError {
     #[error("the jq worker exited before it read the request ({}); check that main calls wows_query::jq_worker::init() first", exit_description(.status.as_ref()))]
     Exited { status: Option<std::process::ExitStatus> },
 
-    #[error("a jq input of {bytes} bytes exceeds the 4 GiB record limit")]
-    InputTooLarge { bytes: usize },
+    #[error("the jq worker could not read the raw GameParams store: {0}")]
+    Store(crate::jq_worker::StoreFailure),
 
     #[error("the jq worker sent an unreadable reply")]
     Reply(#[source] serde_json::Error),

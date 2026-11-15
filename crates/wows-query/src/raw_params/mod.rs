@@ -35,12 +35,14 @@ use format::ENTRY_WORDS;
 use format::HeaderError;
 use format::Layout;
 use format::Section;
-use format::StringId;
-use format::Tables;
-use format::ValueRef;
 
 pub use format::EntryPosition;
 pub use format::FORMAT_VERSION;
+pub(crate) use format::Node;
+pub(crate) use format::StringId;
+pub(crate) use format::Tables;
+pub(crate) use format::Value;
+pub(crate) use format::ValueRef;
 
 const STORE_FILE: &str = "params.bin";
 pub(crate) const COMPLETE_MARKER: &str = ".complete";

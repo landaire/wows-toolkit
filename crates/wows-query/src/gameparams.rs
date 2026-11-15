@@ -20,13 +20,16 @@ use wowsunpack::game_params::types::GameParamProvider;
 use crate::GameData;
 use crate::data::BuildNumber;
 use crate::data::GAME_PARAMS_DATA;
+use crate::error::JqError;
 use crate::error::QueryError;
 use crate::error::RawParamsError;
 use crate::jq::Limits;
 use crate::jq::Stop;
 use crate::jq::floor_char_boundary;
 use crate::jq_worker;
+use crate::jq_worker::StoreFailure;
 use crate::names::Interpretations;
+use crate::raw_params::EntryPosition;
 use crate::raw_params::RawParamEntry;
 use crate::raw_params::RawParams;
 use crate::ships::Tier;
@@ -230,10 +233,10 @@ impl RawParamsSlot {
         Ok(())
     }
 
-    /// Drops `store` after a read failed, so the next call reopens or
-    /// rebuilds it. A damaged record also unmarks the store on disk.
-    fn discard(&self, store: &Arc<RawParams>, error: &RawParamsError) {
-        if matches!(error, RawParamsError::DamagedEntry { .. }) {
+    /// Drops `store` after the worker could not read it, so the next call
+    /// reopens or rebuilds it. Damage also unmarks the store on disk.
+    fn discard(&self, store: &Arc<RawParams>, failure: &StoreFailure) {
+        if matches!(failure, StoreFailure::Damaged(_) | StoreFailure::DamagedEntry { .. }) {
             store.invalidate();
         }
 
@@ -261,7 +264,7 @@ impl GameData {
     }
 
     /// Runs a jq filter over selected raw GameParams entries in a worker
-    /// process (see [`crate::jq_worker`]).
+    /// process (see [`crate::jq_worker`]), which reads them from the store.
     pub fn gameparams_query(&self, args: &GameParamsQueryArgs) -> Result<GameParamsQueryOutput, QueryError> {
         const DEFAULT_PARAM_LIMIT: u32 = 20;
         const MAX_PARAM_LIMIT: u32 = 200;
@@ -288,19 +291,15 @@ impl GameData {
         let limit = args.limit.unwrap_or(DEFAULT_PARAM_LIMIT).clamp(1, MAX_PARAM_LIMIT) as usize;
         let selected = &selected[..matched.min(limit)];
 
-        let mut read_error = None;
-        let records = selected.iter().map_while(|entry| match store.entry_json(entry) {
-            Ok(json) => Some(json),
-            Err(error) => {
-                read_error = Some(error);
-                None
+        let positions: Vec<EntryPosition> = selected.iter().map(RawParamEntry::position).collect();
+        let evaluation = match jq_worker::evaluate(&args.filter, &store, &positions, LIMITS) {
+            Ok(evaluation) => evaluation,
+            Err(JqError::Store(failure)) => {
+                self.raw_params.discard(&store, &failure);
+                return Err(QueryError::Jq(JqError::Store(failure)));
             }
-        });
-        let evaluation = jq_worker::evaluate(&args.filter, records, LIMITS)?;
-        if let Some(error) = read_error {
-            self.raw_params.discard(&store, &error);
-            return Err(QueryError::RawParams { source: Arc::new(error) });
-        }
+            Err(error) => return Err(error.into()),
+        };
 
         let stopped = evaluation.stopped.map(|stop| match stop {
             Stop::OutputLimit => StopReason::OutputLimit,
@@ -445,7 +444,7 @@ impl Budget {
     }
 }
 
-fn read_game_params(dump_dir: &Path) -> Result<Vec<u8>, RawParamsError> {
+pub(crate) fn read_game_params(dump_dir: &Path) -> Result<Vec<u8>, RawParamsError> {
     let dump = Dump::open(dump_dir);
     let mut file = dump
         .vfs()

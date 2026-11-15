@@ -64,6 +64,7 @@ pub mod upgrades;
 
 mod fuzzy;
 mod jq;
+mod jq_input;
 mod sandbox;
 mod text;
 mod torpedoes;
