@@ -82,6 +82,7 @@ use crate::replay_render::export::must_use_cpu;
 use crate::replay_render::hover::advantage_hover;
 use crate::replay_render::hover::consumable_at;
 use crate::replay_render::options::adopt_saved_defaults;
+use crate::replay_render::options::adopt_saved_self_ranges;
 use crate::replay_render::options::batch_options;
 use crate::replay_render::options::defaults_to_save;
 use crate::replay_render::options::playback_options;
@@ -96,6 +97,7 @@ use crate::replay_render::ships::NO_RANGES;
 use crate::replay_render::ships::ShipChoices;
 use crate::replay_render::ships::ShipMenu;
 use crate::replay_render::ships::per_ship_allows;
+use crate::replay_render::ships::self_player;
 use crate::replay_render::ships::ship_at;
 use crate::replay_render::timeline::BattleEvents;
 use crate::replay_render::track::BAKE_INTERVAL;
@@ -362,13 +364,45 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
     assert!(export.prefer_cpu);
 
     options.show_smoke = false;
-    let saved = defaults_to_save(&stored, &options, show_dead_ships, &export);
+    let saved = defaults_to_save(&stored, &options, show_dead_ships, &export, None);
 
     assert!(!saved.show_smoke, "what the viewport shows is what is saved");
     assert!(!saved.show_torpedoes);
     assert!(saved.show_self_radar_range, "the ranges this app does not read are left as they were");
     assert!(saved.include_pre_battle, "as are the export settings it did not change");
     assert!(saved.show_stats_panel, "and the panel this viewport holds off is not turned off for the egui renderer");
+}
+
+/// The self ranges the egui renderer saves go on the recording player's ship when a viewport
+/// opens, and what that ship shows is saved back as them.
+#[test]
+fn the_saved_self_ranges_follow_the_recording_players_ship() {
+    let stored = SavedRenderOptions {
+        show_self_detection_range: true,
+        show_self_main_battery_range: true,
+        ..SavedRenderOptions::default()
+    };
+    let mut track = track(vec![0.0, 0.5]);
+    track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), drawn_ship(2, "me", 20.0, true)];
+    let own = self_player(&track.frames);
+    assert_eq!(own.as_deref(), Some("me"));
+    let mut options = playback_options_hidden();
+    let mut choices = ShipChoices::new();
+
+    adopt_saved_self_ranges(&stored, own.as_deref(), &mut choices, &mut options);
+
+    let mine = choices.ranges_for("me");
+    assert!(mine.detection && mine.main_battery, "the saved ranges are on the recording player's ship");
+    assert!(!mine.secondary_battery && !mine.torpedo, "and only those");
+    assert_eq!(choices.ranges_for("someone"), NO_RANGES, "nobody else's");
+    assert!(options.show_ship_config, "so the range layer is drawn");
+
+    choices.set_ranges_for("me", |filter| filter.torpedo = true, &mut options);
+    let saved =
+        defaults_to_save(&stored, &options, true, &ExportSettings::default(), own.map(|me| choices.ranges_for(&me)));
+    assert!(saved.show_self_torpedo_range, "what the ship shows is saved");
+    assert!(saved.show_self_detection_range);
+    assert!(!saved.show_self_radar_range);
 }
 
 /// A ship drawn at `x` along the top of the map.

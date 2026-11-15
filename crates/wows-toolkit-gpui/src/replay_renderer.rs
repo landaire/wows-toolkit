@@ -1136,7 +1136,7 @@ impl ReplayRendererPanel {
     /// Writes what this viewport is showing back as what a viewport opens with.
     fn remember_defaults(&self, window: &mut Window, cx: &mut Context<Self>) {
         let stored = crate::render_defaults::defaults(cx);
-        let saved = defaults_to_save(&stored, &self.options, self.show_dead_ships, &self.export_settings);
+        let saved = defaults_to_save(&stored, &self.options, self.show_dead_ships, &self.export_settings, None);
 
         if crate::render_defaults::remember(saved, cx) {
             crate::toast::ok(t!("ui.renderer.settings.save_defaults_done").into_owned(), window, cx);

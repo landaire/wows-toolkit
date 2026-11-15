@@ -50,6 +50,7 @@ use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
 use wows_toolkit_replay_data::replay_render::hover::consumable_at;
 use wows_toolkit_replay_data::replay_render::hover::hover_changed;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
+use wows_toolkit_replay_data::replay_render::options::adopt_saved_self_ranges;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
 use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
@@ -62,6 +63,7 @@ use wows_toolkit_replay_data::replay_render::raster::raster_commands;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_replay_data::replay_render::ships::ShipMenu;
 use wows_toolkit_replay_data::replay_render::ships::drawn_ships;
+use wows_toolkit_replay_data::replay_render::ships::self_player;
 use wows_toolkit_replay_data::replay_render::ships::ship_at;
 use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
 use wows_toolkit_replay_data::replay_render::track::FrameIndex;
@@ -531,6 +533,8 @@ impl RendererSession {
         };
         self.export.update(|export| export.settings = export_settings_of(&saved));
         self.set_layers(|layers| adopt_saved_defaults(&saved, &mut layers.options, &mut layers.show_dead_ships));
+        let own = self.track_untracked().and_then(|track| self_player(&track.frames));
+        self.choose(|choices, _, options| adopt_saved_self_ranges(&saved, own.as_deref(), choices, options));
     }
 
     /// Writes what this viewport shows back as what a viewport opens with. Resolves to whether it
@@ -544,9 +548,11 @@ impl RendererSession {
             .await
             .unwrap_or_default();
         let settings = self.export.with_untracked(|export| export.settings);
-        let saved = self
-            .layers
-            .with_untracked(|layers| defaults_to_save(&stored, &layers.options, layers.show_dead_ships, &settings));
+        let own = self.track_untracked().and_then(|track| self_player(&track.frames));
+        let self_ranges = own.map(|player| self.choices.with_untracked(|choices| choices.ranges_for(&player)));
+        let saved = self.layers.with_untracked(|layers| {
+            defaults_to_save(&stored, &layers.options, layers.show_dead_ships, &settings, self_ranges)
+        });
         let json = match wows_toolkit_replay_data::render_defaults::serialize(&saved) {
             Ok(json) => json,
             Err(err) => {
