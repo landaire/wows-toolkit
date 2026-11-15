@@ -1,6 +1,8 @@
 //! A ship's torpedo options and torpedo damage by the distance run
 //! (`distanceOfDamage`), shared by ship_comparison and quantity_values.
 
+use std::cmp::Ordering;
+
 use wows_core::units::Km;
 use wowsunpack::game_params::ttx::constants::BW_TO_BALLISTIC;
 use wowsunpack::game_params::ttx::constants::KM_TO_M;
@@ -80,21 +82,32 @@ pub(crate) fn torpedo_options(planner: &Planner<'_>) -> Result<Vec<CarriedTorped
     Ok(options)
 }
 
-/// "100% of full damage up to 8 km, 50% from 8.1 km".
+/// "100% of full damage up to 8 km, decreasing linearly to 50% at 8.1 km,
+/// then 50% past 8.1 km": the shares [`damage_share`] interpolates.
 pub(crate) fn describe_falloff(points: &[FalloffPoint]) -> String {
-    let parts: Vec<String> = points
-        .iter()
-        .enumerate()
-        .map(|(index, point)| {
-            let share = number(point.coefficient * 100.0);
-            let distance = number(point.distance.value());
-            if index == 0 {
-                format!("{share}% of full damage up to {distance} km")
-            } else {
-                format!("{share}% from {distance} km")
-            }
-        })
-        .collect();
+    let Some((first, rest)) = points.split_first() else {
+        return String::new();
+    };
+    let percent = |point: &FalloffPoint| number(point.coefficient * 100.0);
+    let km = |point: &FalloffPoint| number(point.distance.value());
+
+    let Some(last) = rest.last() else {
+        return format!("{}% of full damage at every distance", percent(first));
+    };
+
+    let mut parts = vec![format!("{}% of full damage up to {} km", percent(first), km(first))];
+    for pair in points.windows(2) {
+        let [near, far] = pair else {
+            continue;
+        };
+        let change = match far.coefficient.total_cmp(&near.coefficient) {
+            Ordering::Less => "decreasing linearly to",
+            Ordering::Greater => "increasing linearly to",
+            Ordering::Equal => "staying at",
+        };
+        parts.push(format!("{change} {}% at {} km", percent(far), km(far)));
+    }
+    parts.push(format!("then {}% past {} km", percent(last), km(last)));
 
     parts.join(", ")
 }

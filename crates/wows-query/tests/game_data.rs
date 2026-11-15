@@ -1650,9 +1650,6 @@ fn chateaurenault_against_tier_10_destroyers() {
             ..Default::default()
         })
         .expect("tier 10 destroyers compare");
-    let chateaurenault = &comparison.ships[0];
-    let torpedo = chateaurenault.torpedoes.first().expect("Chateaurenault carries torpedoes");
-    assert!(torpedo.damage_by_distance.as_deref().is_some_and(|falloff| falloff.contains("50% from")), "{torpedo:?}");
     assert!(comparison.ships.iter().all(|ship| ship.matchups.is_empty()));
     assert!(comparison.factors.iter().all(|factor| !factor.starts_with("bb_ap") && !factor.contains("overmatch")));
     insta::assert_yaml_snapshot!(comparison);

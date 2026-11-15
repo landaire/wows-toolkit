@@ -53,6 +53,7 @@ All notable changes to this project will be documented in this file.
 - *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
 - *(wows-query)* Direct total side armor questions to full citadel plate stacks
 - *(toolkit)* Offer beta updates only to beta builds, and on Windows only once the release's archive is uploaded
+- *(wows-query)* Describe torpedo damage falloff as linear between distanceOfDamage points
 
 ## [1.0.1] - 2026-08-12
 

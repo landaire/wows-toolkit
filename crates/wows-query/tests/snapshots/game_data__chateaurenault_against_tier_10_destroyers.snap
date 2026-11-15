@@ -459,7 +459,7 @@ ships:
           detectability: "1.8 (rank 36/43, p2)"
           reaction_time: "8.11 (rank 34/43, p12)"
           damage_per_minute: "91922 (rank 25/43, p43)"
-        damage_by_distance: "100% of full damage up to 8 km, 50% from 8.1 km"
+        damage_by_distance: "100% of full damage up to 8 km, decreasing linearly to 50% at 8.1 km, then 50% past 8.1 km"
         builds:
           - "speed 82.69 kn with Swift Fish, Torpedo Tubes Modification 1; 75 kn without"
           - "reaction_time 8.11 s with Swift Fish, Torpedo Tubes Modification 1; 8.94 s without"

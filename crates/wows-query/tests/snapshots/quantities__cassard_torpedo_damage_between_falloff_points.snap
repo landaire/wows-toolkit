@@ -1,0 +1,19 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: output
+---
+ships:
+  - ship: "T10 Cassard (destroyer, France)"
+    quantities:
+      - quantity: torpedo.damage_at_distance
+        unit: HP
+        values:
+          - option: 550 mm 44V Mle 3 (stock)
+            build: base
+            value: 13769
+            note: "full damage 22233 HP; 100% of full damage up to 7 km, decreasing linearly to 70% at 10.25 km, decreasing linearly to 55% at 13.5 km, then 55% past 13.5 km"
+          - option: 550 mm 44V Mle 3 (stock)
+            build: "with Swift Fish, Torpedo Tubes Modification 1"
+            value: 13790
+            note: "full damage 22233 HP; 100% of full damage up to 7.02 km, decreasing linearly to 70% at 10.27 km, decreasing linearly to 55% at 13.52 km, then 55% past 13.52 km"
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

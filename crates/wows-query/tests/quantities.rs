@@ -70,7 +70,8 @@ fn shimakaze_torpedo_travel_time_to_10_km() {
     insta::assert_yaml_snapshot!(output);
 }
 
-/// 100% up to 8 km, 50% from 8.1 km: half of 19533 at 12 km.
+/// 100% up to 8 km, decreasing linearly to 50% at 8.1 km: half of 19533 at
+/// 12 km.
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn chateaurenault_torpedo_damage_at_12_km() {
@@ -80,6 +81,20 @@ fn chateaurenault_torpedo_damage_at_12_km() {
     }));
 
     assert_eq!(first_value(&output), 9767.0);
+    insta::assert_yaml_snapshot!(output);
+}
+
+/// Cassard's torpedo keeps losing damage between points: 70% at 10.25 km
+/// and 55% at 13.5 km give 61.9% of 22233 at 12 km, not 70%.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn cassard_torpedo_damage_between_falloff_points() {
+    let output = values(json!({
+        "quantities": [{ "name": "torpedo.damage_at_distance", "params": { "distance_km": 12 } }],
+        "ships": ["Cassard"],
+    }));
+
+    assert_eq!(first_value(&output), 13769.0);
     insta::assert_yaml_snapshot!(output);
 }
 
