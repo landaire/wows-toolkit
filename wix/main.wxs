@@ -36,6 +36,16 @@
                 Source="$(var.BinDir)\wows_toolkit.pdb"/>
         </Component>
 
+        <Component Id="License">
+          <File Id="license0"
+                Source="$(var.BinDir)\LICENSE"/>
+        </Component>
+
+        <Component Id="ThirdPartyNotices">
+          <File Id="notices0"
+                Source="$(var.BinDir)\THIRD_PARTY_NOTICES.txt"/>
+        </Component>
+
       </Directory>
     </StandardDirectory>
 
@@ -58,6 +68,8 @@
     <Feature Id="Main" Title="Application" Level="1">
       <ComponentRef Id="MainExecutable"/>
       <ComponentRef Id="DebugSymbols"/>
+      <ComponentRef Id="License"/>
+      <ComponentRef Id="ThirdPartyNotices"/>
       <ComponentRef Id="ApplicationShortcut"/>
     </Feature>
 

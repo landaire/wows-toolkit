@@ -71,6 +71,8 @@ jobs:
         run: |
           mkdir -p _deploy/tactics _deploy/replay-demo
           cp -r site/* _deploy/
+          # The web clients are compiled from crates whose licenses require their notices.
+          cp LICENSE THIRD_PARTY_NOTICES.txt _deploy/
           if [ ! -f _tactics/index.html ]; then
             echo "::error::The tactics build produced no index.html in _tactics."
             exit 1
