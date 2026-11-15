@@ -63,7 +63,7 @@ use crate::ships::Tier;
 use crate::ships::TierRange;
 
 /// Cache kind directory of peer comparison tables under a cache root, laid
-/// out `<kind>/<build>/` like [`crate::raw_params::RAW_PARAMS_KIND`]. The
+/// out `<kind>/<build>/` like [`crate::raw_params::raw_params_kind`]. The
 /// suffix is the table format.
 pub const ARMOR_COMPARISONS_KIND: &str = "armor-comparisons-v1";
 

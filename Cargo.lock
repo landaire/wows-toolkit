@@ -16564,6 +16564,7 @@ dependencies = [
  "jaq-json",
  "jaq-std",
  "landlock",
+ "memmap2",
  "replayshark",
  "reqwest 0.12.28",
  "rootcause",

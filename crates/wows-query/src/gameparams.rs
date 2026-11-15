@@ -82,15 +82,15 @@ pub struct ParamSet {
 }
 
 impl ParamSet {
-    fn matches(&self, entry: &RawParamEntry) -> bool {
+    fn matches(&self, entry: &RawParamEntry<'_>) -> bool {
         let same = |wanted: Option<&str>, found: Option<&str>| {
             wanted.is_none_or(|wanted| found.is_some_and(|found| found.eq_ignore_ascii_case(wanted)))
         };
 
-        same(Some(&self.kind), entry.kind.as_deref())
-            && same(self.nation.as_deref(), entry.nation.as_deref())
-            && same(self.species.as_deref(), entry.species.as_deref())
-            && self.tier.is_none_or(|tier| entry.level == Some(tier.0))
+        same(Some(&self.kind), entry.kind())
+            && same(self.nation.as_deref(), entry.nation())
+            && same(self.species.as_deref(), entry.species())
+            && self.tier.is_none_or(|tier| entry.level() == Some(tier.0))
     }
 }
 
@@ -204,7 +204,6 @@ impl RawParamsSlot {
 
         match RawParams::open_or_build(cache_root, self.build.raw(), || read_game_params(&self.dump_dir)) {
             Ok(store) => {
-                let store = Arc::new(store);
                 *state = SlotState::Open(Arc::clone(&store));
                 Ok(store)
             }
@@ -216,10 +215,25 @@ impl RawParamsSlot {
         }
     }
 
+    /// Serves `store`, built elsewhere for the same build, from now on.
+    fn share(&self, store: Arc<RawParams>) -> Result<(), RawParamsError> {
+        if store.game_build() != self.build.raw() {
+            return Err(RawParamsError::WrongBuild {
+                path: store.path().to_path_buf(),
+                expected: self.build.raw(),
+                found: store.game_build(),
+            });
+        }
+
+        *self.state.lock().unwrap_or_else(PoisonError::into_inner) = SlotState::Open(store);
+
+        Ok(())
+    }
+
     /// Drops `store` after a read failed, so the next call reopens or
     /// rebuilds it. A damaged record also unmarks the store on disk.
     fn discard(&self, store: &Arc<RawParams>, error: &RawParamsError) {
-        if matches!(error, RawParamsError::DamagedRecord { .. }) {
+        if matches!(error, RawParamsError::DamagedEntry { .. }) {
             store.invalidate();
         }
 
@@ -239,6 +253,13 @@ impl GameData {
         self.raw_params.get().map_err(|source| QueryError::RawParams { source })
     }
 
+    /// Uses `store`, which another owner such as the desktop app opened for
+    /// the same build, instead of opening this game data's own. The store is
+    /// shared, not copied.
+    pub fn share_raw_params(&self, store: Arc<RawParams>) -> Result<(), QueryError> {
+        self.raw_params.share(store).map_err(|error| QueryError::RawParams { source: Arc::new(error) })
+    }
+
     /// Runs a jq filter over selected raw GameParams entries in a worker
     /// process (see [`crate::jq_worker`]).
     pub fn gameparams_query(&self, args: &GameParamsQueryArgs) -> Result<GameParamsQueryOutput, QueryError> {
@@ -250,7 +271,7 @@ impl GameData {
         let store = self.raw_params()?;
         let mut interpretations = Interpretations::default();
 
-        let selected: Vec<&RawParamEntry> = match &args.select {
+        let selected: Vec<RawParamEntry<'_>> = match &args.select {
             ParamSelection::Param(key) => {
                 let entry = store.find(key).ok_or_else(|| QueryError::ParamNotFound { query: key.clone() })?;
                 vec![entry]
@@ -261,14 +282,14 @@ impl GameData {
                 let entry = store.find(param).ok_or_else(|| QueryError::ParamNotFound { query: param.to_owned() })?;
                 vec![entry]
             }
-            ParamSelection::Set(set) => store.entries().iter().filter(|entry| set.matches(entry)).collect(),
+            ParamSelection::Set(set) => store.entries().filter(|entry| set.matches(entry)).collect(),
         };
         let matched = selected.len();
         let limit = args.limit.unwrap_or(DEFAULT_PARAM_LIMIT).clamp(1, MAX_PARAM_LIMIT) as usize;
         let selected = &selected[..matched.min(limit)];
 
         let mut read_error = None;
-        let records = selected.iter().map_while(|entry| match store.read(entry) {
+        let records = selected.iter().map_while(|entry| match store.entry_json(entry) {
             Ok(json) => Some(json),
             Err(error) => {
                 read_error = Some(error);
@@ -313,16 +334,22 @@ impl GameData {
         Ok(output)
     }
 
-    fn add_failure(&self, output: &mut GameParamsQueryOutput, budget: &mut Budget, entry: &RawParamEntry, error: &str) {
+    fn add_failure(
+        &self,
+        output: &mut GameParamsQueryOutput,
+        budget: &mut Budget,
+        entry: &RawParamEntry<'_>,
+        error: &str,
+    ) {
         // jaq errors can quote the whole input value.
         const MAX_ERROR_BYTES: usize = 300;
         const MAX_LISTED_ERRORS: usize = 5;
 
         output.failed += 1;
         let error = &error[..floor_char_boundary(error, MAX_ERROR_BYTES)];
-        let cost = json_string_len(&entry.name) + json_string_len(error) + Budget::RECORD_COST;
+        let cost = json_string_len(entry.name()) + json_string_len(error) + Budget::RECORD_COST;
         if output.errors.len() < MAX_LISTED_ERRORS && budget.spend(cost) {
-            output.errors.push(ParamFailure { param: entry.name.clone(), error: error.to_owned() });
+            output.errors.push(ParamFailure { param: entry.name().to_owned(), error: error.to_owned() });
         } else {
             output.truncated = true;
         }
@@ -332,11 +359,11 @@ impl GameData {
         &self,
         output: &mut GameParamsQueryOutput,
         budget: &mut Budget,
-        entry: &RawParamEntry,
+        entry: &RawParamEntry<'_>,
         texts: Vec<String>,
     ) {
-        let name = self.param_display_name(&entry.name);
-        let header = json_string_len(&entry.name) + name.as_deref().map_or(0, json_string_len) + Budget::RECORD_COST;
+        let name = self.param_display_name(entry.name());
+        let header = json_string_len(entry.name()) + name.as_deref().map_or(0, json_string_len) + Budget::RECORD_COST;
         if !budget.spend(header) {
             output.truncated = true;
             return;
@@ -347,10 +374,10 @@ impl GameData {
             if !budget.spend(text.len() + 1) {
                 output.truncated = true;
                 // The partial value is a JSON string in a record of its own.
-                let room = budget.left().saturating_sub(json_string_len(&entry.name) + Budget::RECORD_COST);
+                let room = budget.left().saturating_sub(json_string_len(entry.name()) + Budget::RECORD_COST);
                 let text = escaped_prefix(&text, room);
                 if !text.is_empty() {
-                    output.partial = Some(PartialValue { param: entry.name.clone(), text: text.to_owned() });
+                    output.partial = Some(PartialValue { param: entry.name().to_owned(), text: text.to_owned() });
                 }
                 break;
             }
@@ -358,7 +385,7 @@ impl GameData {
             values.push(serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text)));
         }
         if !values.is_empty() {
-            output.results.push(ParamResult { param: entry.name.clone(), name, values });
+            output.results.push(ParamResult { param: entry.name().to_owned(), name, values });
         }
     }
 

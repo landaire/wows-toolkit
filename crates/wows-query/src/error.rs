@@ -378,15 +378,11 @@ pub enum RawParamsError {
     #[error("failed to decode GameParams.data")]
     Decode(#[source] wowsunpack::error::GameDataError),
 
-    #[error("failed to encode GameParams entry {name} as JSON")]
-    Encode {
-        name: String,
-        #[source]
-        source: serde_json::Error,
-    },
+    #[error("GameParams holds the number {number}, which the raw GameParams store cannot hold")]
+    UnsupportedNumber { number: String },
 
-    #[error("GameParams entry {name} is {len} bytes, more than a record holds")]
-    RecordTooLarge { name: String, len: usize },
+    #[error("GameParams holds more strings or values than the raw GameParams store can index")]
+    TooLarge,
 
     #[error("I/O error on {path}")]
     Io {
@@ -395,24 +391,40 @@ pub enum RawParamsError {
         source: std::io::Error,
     },
 
-    #[error("failed to read or write the index {path}")]
-    Index {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
+    #[error("{path} has format version {found}, not {}", crate::raw_params::FORMAT_VERSION)]
+    FormatVersion { path: PathBuf, found: u32 },
 
-    #[error("{path} is {found} bytes; its index expects {expected}")]
-    Truncated { path: PathBuf, expected: u64, found: u64 },
+    #[error("{path} is damaged: {damage}")]
+    Damaged { path: PathBuf, damage: StoreDamage },
 
-    #[error("the stored record of {name} is damaged")]
-    DamagedRecord { name: String },
+    #[error("the stored value of {name} is damaged: {damage}")]
+    DamagedEntry { name: String, damage: StoreDamage },
 
     #[error("{path} belongs to build {found}, not {expected}")]
     WrongBuild { path: PathBuf, expected: u32, found: u32 },
 
     #[error("the store published at {dir} was removed before it could be opened")]
     Vanished { dir: PathBuf },
+}
+
+/// The part of a raw GameParams store that failed its checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+pub enum StoreDamage {
+    #[error("bad header")]
+    Header,
+    #[error("a section lies outside the file")]
+    Section,
+    #[error("a string is out of bounds or not UTF-8")]
+    String,
+    #[error("a value word is invalid")]
+    Value,
+    #[error("an array or object is out of bounds or refers forward")]
+    Node,
+    #[error("an entry record is invalid")]
+    Entry,
+    #[error("an order table is invalid")]
+    Order,
 }
 
 /// A jq filter that does not compile. Messages are written for the model
