@@ -19,7 +19,7 @@ pub mod expanded;
 mod figures;
 mod raw_json;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::path::Path;
 use std::path::PathBuf;

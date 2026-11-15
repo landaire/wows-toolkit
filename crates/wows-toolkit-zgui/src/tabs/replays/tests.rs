@@ -1,3 +1,5 @@
+use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,6 +15,8 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
+use wows_toolkit_replay_data::sample::sample_model;
+use wows_toolkit_replay_data::test_support::fire_chance_result;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -36,6 +40,8 @@ use crate::shell::ReplayRequest;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
 use crate::tabs::replays::panel::expanded::SHARE_MODE;
+use crate::tabs::replays::panel::tests::seed_next_panel;
+use crate::tabs::replays::table::tests as table_tests;
 use crate::windows::renderer::session::RenderRequest;
 use crate::windows::renderer::view::SHORTCUTS_MODE;
 
@@ -325,6 +331,50 @@ fn the_listing_runs_down_the_tab() {
 
     let listing = bounds_of(&window, "replay-browser");
     assert!(listing.size.height.0 > WINDOW.height / 2.0, "the listing runs down the tab, got {listing:?}");
+}
+
+/// Opening every player row grows the table past its pane in both directions. The table's own port
+/// keeps to the pane and scrolls both ways, so neither of its bars sits under an outer scroller.
+#[test]
+fn the_player_table_scrolls_inside_its_pane_once_rows_open() {
+    let mut model = sample_model();
+    for row in &mut model.rows {
+        row.fire_chance = Some(fire_chance_result());
+    }
+    let players: HashSet<AccountId> = model.rows.iter().map(|row| row.db_id).collect();
+    let (mut window, workspace) = open();
+    seed_next_panel(model);
+    workspace.open(PathBuf::from("first.wowsreplay"), OpenTarget::ShowingTab);
+    window.advance(Duration::from_millis(600));
+    let expanded = table_tests::EXPANDED.with(Cell::take).expect("the replay panel built its table");
+
+    expanded.set(players);
+    window.advance(Duration::from_millis(900));
+
+    let port = window.by_class("lui-grid__port").expect("the player table is drawn");
+    let pane = window.by_class("lui-dock__content").expect("the replay is docked");
+    let port_box = window.bounds(port).expect("the table's port has a box");
+    let pane_box = window.bounds(pane).expect("the pane has a box");
+    assert!(
+        pane_box.top() <= port_box.top() && port_box.bottom() <= pane_box.bottom(),
+        "the port {port_box:?} stays inside its pane {pane_box:?}"
+    );
+    assert!(port_box.bottom().0 <= WINDOW.height, "the port {port_box:?} ends inside the window");
+
+    let table = window.scroll_position(port);
+    assert!(table.content_size.height.0 > table.scrollport.height.0, "the open rows overflow the port: {table:?}");
+    assert!(table.content_size.width.0 > table.scrollport.width.0, "the columns overflow the port: {table:?}");
+    assert!(
+        table.scrollport.height.0 < port_box.size.height.0 && table.scrollport.width.0 < port_box.size.width.0,
+        "the port {port_box:?} holds both of its bars: {table:?}"
+    );
+    let outer = window.scroll_position(pane);
+    assert!(outer.content_size.height.0 <= outer.scrollport.height.0, "the pane has nothing to scroll: {outer:?}");
+
+    window.wheel(port, 400.0).expect("the port takes the wheel");
+    window.advance(Duration::from_millis(300));
+    assert!(window.scroll_position(port).offset.y.0 > 0.0, "the wheel scrolls the table");
+    assert_eq!(window.scroll_position(pane).offset.y.0, 0.0, "and leaves the pane where it was");
 }
 
 fn drag_listing_edge(window: &mut HeadlessWindow) -> (f32, f32) {
