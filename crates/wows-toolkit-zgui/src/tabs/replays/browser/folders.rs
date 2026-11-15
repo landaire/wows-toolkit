@@ -88,6 +88,7 @@ use crate::tabs::replays::browser::listing::Listing;
 use crate::tabs::replays::browser::listing::ListingEvent;
 use crate::tabs::replays::browser::listing::ListingSource;
 use crate::tabs::replays::browser::listing::ListingWatch;
+use crate::tabs::replays::browser::listing::ScanStatus;
 use crate::tabs::replays::browser::view::ListingViewProps;
 
 const SHEET: &str = "wt-replay-folders";
@@ -540,6 +541,16 @@ impl BrowserControl {
     /// The install's listing.
     pub fn install_listing(self) -> Option<Listing> {
         self.listing(FolderId::INSTALL)
+    }
+
+    /// Whether the install's directory was listed and holds no replay. `None` while it is being
+    /// listed, or while no game directory is set.
+    pub fn install_listed_empty(self) -> Option<bool> {
+        match self.install_listing()?.status.get() {
+            ScanStatus::Empty(_) => Some(true),
+            ScanStatus::Loaded => Some(false),
+            ScanStatus::NoInstall | ScanStatus::Loading => None,
+        }
     }
 
     /// Every tab's listing, the install's first.

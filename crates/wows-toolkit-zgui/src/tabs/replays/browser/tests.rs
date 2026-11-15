@@ -885,6 +885,37 @@ fn a_battle_landing_in_the_folder_on_screen_is_announced_and_one_elsewhere_is_on
     assert_eq!(control.unseen(folder_id(control, &behind)), 1, "the one behind is counted on its tab");
 }
 
+/// Game data over nothing, held as loaded.
+fn game_data_ready(control: BrowserControl) {
+    let provider = wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+        .expect("an empty provider builds");
+    let vfs: wowsunpack::vfs::VfsPath = wowsunpack::vfs::MemoryFS::new().into();
+    let data = wows_toolkit_replay_data::load::LoadedGameData::for_test(provider, vfs, 1);
+    control.shell().services().game_data.set_ready_for_test(std::sync::Arc::new(data));
+}
+
+#[test]
+fn an_install_with_no_replays_is_warned_of_once_the_game_data_loads() {
+    for (count, warned) in [(0, true), (1, false)] {
+        let (mut window, control) = open();
+        let (_dir, wows) = replay_dir(0);
+        let replays = wows.join("replays");
+        std::fs::create_dir(&replays).expect("the replays directory is made");
+        for name in &FIXTURES[..count] {
+            std::fs::copy(fixture(name), replays.join(name)).expect("the replay is copied");
+        }
+        adopt_game_dir(control, &wows);
+        settle_in_real_time(&mut window);
+        let warning = t!("ui.messages.no_replays_detected").into_owned();
+        assert!(!window.texts_by_class("lui-toasts").concat().contains(&warning), "nothing is said before the load");
+
+        game_data_ready(control);
+        settle_in_real_time(&mut window);
+        let toasts = window.texts_by_class("lui-toasts").concat();
+        assert_eq!(toasts.contains(&warning), warned, "{count} replays: {toasts:?}");
+    }
+}
+
 #[test]
 fn a_group_header_shows_no_replay_preview() {
     let (mut window, control) = open();

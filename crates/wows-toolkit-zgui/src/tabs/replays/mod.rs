@@ -398,6 +398,27 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
             arrivals.sweep(workspace);
         }
     });
+    // As the egui and gpui apps report once a load of the install finishes: an install that loads
+    // but lists no replays is likely the wrong directory. Said once per load.
+    let checked_install = zgui::reactive::StoredValue::new(false);
+    let warning_empty = RenderEffect::new(move |_| {
+        match services.game_data.state() {
+            GameDataState::Ready(_) => {}
+            GameDataState::Loading { .. } => {
+                checked_install.set_value(false);
+                return;
+            }
+            GameDataState::NoInstall | GameDataState::Failed(_) => return,
+        }
+        if checked_install.get_value() {
+            return;
+        }
+        let Some(empty) = control.install_listed_empty() else { return };
+        checked_install.set_value(true);
+        if empty {
+            shell.toasts().warn(t!("ui.messages.no_replays_detected").into_owned());
+        }
+    });
     let downloading = RenderEffect::new(move |was_busy: Option<bool>| {
         let busy = shell.cache.busy();
         if was_busy == Some(true) && !busy {
@@ -414,6 +435,7 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
     on_cleanup_local(move || {
         drop(arriving);
         drop(sweeping);
+        drop(warning_empty);
         drop(downloading);
     });
 }
