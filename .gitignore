@@ -20,6 +20,8 @@ dump_out/
 game_data/
 .steam-user
 /armor_backfill.json
+# Builds scripts/bulk_archive.py finds, to copy into game_versions.toml.
+/game_versions_discovered.toml
 .wix
 wix/banner.bmp
 wix/license.rtf
