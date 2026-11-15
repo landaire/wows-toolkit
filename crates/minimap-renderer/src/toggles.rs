@@ -18,10 +18,8 @@ pub struct Toggle {
 /// What the viewport can be told to draw.
 ///
 /// Only the commands the track actually holds. A playback bake adds the team
-/// rosters and every ship's range circles to `bake_options`; the stats panel
-/// is still left out, because its silhouettes are one of the loads a bake
-/// skips to stay cheap, so a switch for it would draw an empty gutter and is
-/// not offered. Position trails are derived at raster time rather than baked.
+/// rosters, the stats panel and every ship's range circles to `bake_options`.
+/// Position trails are derived at raster time rather than baked.
 pub const TOGGLES: &[Toggle] = &[
     Toggle {
         id: "renderer-opt-hp-bars",
@@ -190,6 +188,18 @@ pub const TOGGLES: &[Toggle] = &[
             o.show_team_rosters = v;
             if v {
                 o.show_stats_panel = false;
+            }
+        },
+    },
+    Toggle {
+        id: "renderer-opt-stats-panel",
+        label_key: "ui.renderer.settings.stats_panel",
+        read: |o, _| o.show_stats_panel,
+        // Shares the rosters' gutter, as the egui checkboxes do.
+        write: |o, _, v| {
+            o.show_stats_panel = v;
+            if v {
+                o.show_team_rosters = false;
             }
         },
     },

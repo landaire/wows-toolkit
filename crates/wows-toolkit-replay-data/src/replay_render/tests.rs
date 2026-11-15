@@ -343,8 +343,6 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
         show_player_names: true,
         include_pre_battle: true,
         prefer_cpu_encoder: true,
-        // Saved by the egui renderer, which has the silhouettes for it; a
-        // bake here does not.
         show_stats_panel: true,
         // Kept for the egui renderer rather than read here, so a save from
         // this app must not clear it.
@@ -359,18 +357,19 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
 
     assert!(!options.show_torpedoes, "a layer turned off stays off");
     assert!(options.show_player_names, "and one turned on comes back on");
-    assert!(!options.show_stats_panel, "the panel a bake cannot fill is not drawn");
+    assert!(options.show_stats_panel, "the saved stats panel is drawn");
     assert!(export.include_pre_battle);
     assert!(export.prefer_cpu);
 
     options.show_smoke = false;
+    options.show_stats_panel = false;
     let saved = defaults_to_save(&stored, &options, show_dead_ships, &export, None);
 
     assert!(!saved.show_smoke, "what the viewport shows is what is saved");
     assert!(!saved.show_torpedoes);
     assert!(saved.show_self_radar_range, "the ranges this app does not read are left as they were");
     assert!(saved.include_pre_battle, "as are the export settings it did not change");
-    assert!(saved.show_stats_panel, "and the panel this viewport holds off is not turned off for the egui renderer");
+    assert!(!saved.show_stats_panel, "and the stats panel is saved as the viewport shows it");
 }
 
 /// The self ranges the egui renderer saves go on the recording player's ship when a viewport
@@ -501,12 +500,11 @@ fn a_batch_says_which_replay_it_has_reached() {
     );
 }
 
-/// A batch draws the reader's saved layers, less the stats panel it cannot fill.
+/// A batch draws the reader's saved layers, the stats panel among them.
 #[test]
-fn a_batch_draws_the_saved_layers_without_the_panel_it_cannot_fill() {
+fn a_batch_draws_the_saved_layers() {
     let saved = SavedRenderOptions {
         show_torpedoes: false,
-        // On in the egui renderer, which has what it takes to fill it.
         show_stats_panel: true,
         show_ship_config: true,
         show_dead_ships: false,
@@ -516,11 +514,12 @@ fn a_batch_draws_the_saved_layers_without_the_panel_it_cannot_fill() {
 
     assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
     assert!(!show_dead_ships);
-    assert!(!options.show_stats_panel, "the panel a bake cannot fill is left out");
+    assert!(options.stats_panel_visible(), "the saved stats panel is filmed");
+    assert_eq!(crate::minimap_preview::layout_for(&options), SidePanelLayout::StatsPanel, "on its own canvas");
     assert!(options.show_ship_config, "the saved range circles are filmed");
     assert!(
-        should_draw_command(&DrawCommand::KillFeed { entries: Vec::new() }, &options, show_dead_ships),
-        "so the kill feed, which shares the panel's gutter, is still filmed"
+        !should_draw_command(&DrawCommand::KillFeed { entries: Vec::new() }, &options, show_dead_ships),
+        "and the kill feed it replaces is not"
     );
 }
 
@@ -1245,6 +1244,7 @@ fn a_roster_icon_reads_what_the_frame_drew() {
 #[test]
 fn the_rosters_and_the_stats_panel_do_not_share_the_gutters() {
     let rosters = toggle("renderer-opt-team-rosters");
+    let stats = toggle("renderer-opt-stats-panel");
     let mut options = RenderOptions { show_stats_panel: true, ..playback_options() };
     let mut dead = true;
 
@@ -1255,10 +1255,15 @@ fn the_rosters_and_the_stats_panel_do_not_share_the_gutters() {
     (rosters.write)(&mut options, &mut dead, false);
     assert!(!options.show_team_rosters);
     assert!(!options.show_stats_panel, "and turning the rosters off does not bring it back");
+
+    (rosters.write)(&mut options, &mut dead, true);
+    (stats.write)(&mut options, &mut dead, true);
+    assert!(options.show_stats_panel);
+    assert!(!options.show_team_rosters, "the rosters give the gutter up to the stats panel");
 }
 
-/// Turning the rosters on is a wider canvas rather than another layer, so the
-/// layout has to follow the switch.
+/// Turning the rosters or the stats panel on is a wider canvas rather than
+/// another layer, so the layout has to follow the switch.
 #[test]
 fn the_canvas_follows_the_gutter_layer_that_is_on() {
     let plain = playback_options_hidden();
@@ -1271,12 +1276,49 @@ fn the_canvas_follows_the_gutter_layer_that_is_on() {
     assert_eq!(crate::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
 }
 
-/// A playback bake carries the rosters, or the switch would have nothing to
-/// show.
+/// A playback bake carries the rosters and the stats panel, or their switches
+/// would have nothing to show.
 #[test]
-fn a_playback_bake_carries_the_rosters() {
+fn a_playback_bake_carries_the_rosters_and_the_stats_panel() {
     assert!(playback_options().show_team_rosters);
+    assert!(playback_options().show_stats_panel);
     assert!(!playback_options_hidden().show_team_rosters, "but a viewport opens without them");
+    assert!(!playback_options_hidden().show_stats_panel);
+}
+
+/// Both panels are baked into every frame, and the switches decide which one
+/// reaches it: the stats panel's commands, and the kill feed and chat it
+/// replaces, follow whether the panel is drawn rather than whether it is baked.
+#[test]
+fn the_stats_panel_switch_decides_what_reaches_the_frame() {
+    let mut track = track(vec![0.0]);
+    track.frames[0] = vec![
+        DrawCommand::StatsPanel { x: 768, width: 250 },
+        DrawCommand::KillFeed { entries: Vec::new() },
+        DrawCommand::TeamRoster { side: RosterSide::Friendly, x: 0, y: 0, width: 200, height: 400, rows: Vec::new() },
+    ];
+    let kinds = |options: &RenderOptions| -> Vec<&'static str> {
+        raster_commands(&track, FrameIndex::FIRST, options, true, &ShipChoices::new(), Vec::new())
+            .expect("the frame is in the track")
+            .iter()
+            .map(|command| match command {
+                DrawCommand::StatsPanel { .. } => "stats",
+                DrawCommand::KillFeed { .. } => "kills",
+                DrawCommand::TeamRoster { .. } => "rosters",
+                _ => "other",
+            })
+            .collect()
+    };
+    let mut options = playback_options_hidden();
+    let mut dead = true;
+
+    assert_eq!(kinds(&options), ["kills"], "neither panel is drawn when a viewport opens");
+
+    (toggle("renderer-opt-stats-panel").write)(&mut options, &mut dead, true);
+    assert_eq!(kinds(&options), ["stats"], "the panel replaces the kill feed");
+
+    (toggle("renderer-opt-team-rosters").write)(&mut options, &mut dead, true);
+    assert_eq!(kinds(&options), ["kills", "rosters"], "the rosters take the gutter and the kill feed returns");
 }
 
 /// What a session has drawn reaches the frame, over the battle rather than

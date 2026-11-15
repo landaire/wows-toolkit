@@ -37,9 +37,9 @@ use wows_toolkit_replay_data::replay_render::options::playback_options;
 const USAGE: &str = "usage: export_demo_track <replay> <game dir> <output> \
                      [--from SECONDS] [--to SECONDS] [--interval SECONDS] [--activity]";
 
-/// The rosters' toggle widens the canvas into gutters the demo does not draw,
-/// and chat is not baked.
-const WITHHELD_TOGGLES: &[&str] = &["renderer-opt-team-rosters", "renderer-opt-chat"];
+/// The rosters' and the stats panel's toggles widen the canvas into gutters the
+/// demo does not draw, and chat is not baked.
+const WITHHELD_TOGGLES: &[&str] = &["renderer-opt-team-rosters", "renderer-opt-stats-panel", "renderer-opt-chat"];
 
 /// The size the desktop egui viewer loads these icon sets at.
 const SMALL_ICON_SIZE: u32 = 16;

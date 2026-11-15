@@ -427,11 +427,12 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
         DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.stats_panel_visible(),
         DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
         DrawCommand::WeatherZone { .. } => opts.show_weather,
+        // The rosters take the gutter when both are on, as the canvas does.
         DrawCommand::StatsPanel { .. }
         | DrawCommand::StatsSilhouette { .. }
         | DrawCommand::StatsDamage { .. }
         | DrawCommand::StatsRibbons { .. }
-        | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
+        | DrawCommand::StatsActivityFeed { .. } => opts.stats_panel_visible(),
         DrawCommand::TeamRoster { .. } => opts.show_team_rosters,
         // Not a layer of the battle but what a reader drew over it, so no
         // display option hides it: they put it there deliberately.

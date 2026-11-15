@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Offer the stats panel in the replay renderer, drawn with the recording player's ship silhouette, and film it in exports. A merged replay opens on the team rosters, as in egui
 - *(zgui)* Open a Match Timeline window from the replay panel's Actions menu, with event filters, search, copy and save to file
 - *(zgui)* Warn once the game data loads when the install folder lists no replays
 - *(zgui)* Autoload and announce a battle that lands in the folder on screen as well as the install folder, and only count one landing in a folder that is not on screen

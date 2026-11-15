@@ -684,9 +684,10 @@ pub enum DrawCommand {
         clan_color: Option<[u8; 3]>,
         /// Ship name to display below the player name.
         ship_name: Option<String>,
+        /// Shared, because a baked track repeats it in every frame.
         #[cfg(feature = "rendering")]
         #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
-        silhouette: Option<RgbaImage>,
+        silhouette: Option<Arc<RgbaImage>>,
     },
     /// Damage breakdown numbers in the stats panel
     StatsDamage {

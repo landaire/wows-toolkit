@@ -13,26 +13,28 @@ use crate::replay_render::ships::ShipChoices;
 /// What a playback viewport draws when it opens.
 ///
 /// Everything it baked except the layers that are asked for rather than
-/// assumed: the rosters take a gutter either side of the map, and the ranges
-/// would cover it.
+/// assumed: the rosters and the stats panel take a gutter beside the map, and
+/// the ranges would cover it.
 pub fn playback_options_hidden() -> RenderOptions {
-    RenderOptions { show_ship_config: false, show_team_rosters: false, ..playback_options() }
+    RenderOptions { show_ship_config: false, show_team_rosters: false, show_stats_panel: false, ..playback_options() }
 }
 
 /// What a playback viewport bakes.
 ///
-/// The hover preview's set plus every ship's range circles. They are per-frame
-/// and small, so keeping them costs little, and a viewport that did not bake
-/// them could not offer them at all. Trails are still left out: a trail
-/// command carries every point so far, so baking one per frame would cost the
-/// square of the track's length.
+/// The hover preview's set plus every ship's range circles, the rosters and
+/// the stats panel. They are per-frame and small, so keeping them costs
+/// little, and a viewport that did not bake them could not offer them at all.
+/// Trails are still left out: a trail command carries every point so far, so
+/// baking one per frame would cost the square of the track's length.
 pub fn playback_options() -> RenderOptions {
     RenderOptions {
         show_ship_config: true,
-        // The rosters' own commands carry fixed coordinates, so baking them
-        // costs a roster per frame and nothing else; the canvas they need is
-        // the target's business, not the bake's.
+        // The panels' own commands carry fixed coordinates, so baking them
+        // costs a roster and a panel per frame and nothing else; the canvas
+        // they need is the target's business, not the bake's. Both are baked
+        // so the reader can switch between them without another walk.
         show_team_rosters: true,
+        show_stats_panel: true,
         // Every ship's, so the reader can choose whose to look at afterwards
         // rather than re-baking to change their mind.
         ship_config_visibility: ShipConfigVisibility::Filtered(Arc::new(|_entity| {
@@ -49,16 +51,11 @@ pub fn playback_options() -> RenderOptions {
     }
 }
 
-/// What a batch draws of what it baked, and whether dead ships are among it.
-///
-/// The reader's saved layers, less the stats panel a viewport holds off for the
-/// same reason: its ship silhouettes are a load the bake skips, so its gutter
-/// would be empty and the kill feed and the chat that share it would go
-/// unfilmed.
+/// What a batch draws of what it baked, and whether dead ships are among it:
+/// the reader's saved layers.
 pub fn batch_options(defaults: &SavedRenderOptions) -> (RenderOptions, bool) {
     let mut options = playback_options();
     defaults.apply_to(&mut options);
-    options.show_stats_panel = false;
 
     (options, defaults.show_dead_ships)
 }
@@ -66,15 +63,19 @@ pub fn batch_options(defaults: &SavedRenderOptions) -> (RenderOptions, bool) {
 /// Applies what the reader last saved as the defaults to a viewport's
 /// options and its dead-ship flag.
 ///
-/// The stats panel's ship silhouettes are one of the loads a bake skips, so
-/// its gutter has nothing to draw in it and the viewport does not offer the
-/// layer at all. A front end applies this once the bake has landed, because
-/// the rosters are a wider canvas rather than a layer and there is nothing to
-/// widen before then.
+/// A front end applies this once the bake has landed, because the rosters and
+/// the stats panel are a wider canvas rather than a layer and there is nothing
+/// to widen before then.
 pub fn adopt_saved_defaults(saved: &SavedRenderOptions, options: &mut RenderOptions, show_dead_ships: &mut bool) {
     saved.apply_to(options);
     *show_dead_ships = saved.show_dead_ships;
+}
+
+/// Switches a merged replay's viewport from the stats panel to the team rosters, as egui opens
+/// one: the rosters are what the alt perspectives add. The saved defaults are not changed.
+pub fn open_merged_on_rosters(options: &mut RenderOptions) {
     options.show_stats_panel = false;
+    options.show_team_rosters = true;
 }
 
 /// Puts the saved self ranges on the recording player's ship, `self_player`, which is where the
@@ -100,9 +101,7 @@ pub fn adopt_saved_self_ranges(
 ///
 /// `self_ranges` are the ranges the recording player's ship shows, saved as
 /// the self range filter; `None` for a recording with no ship of its own,
-/// which leaves the stored filter as it was. The stats panel, which a bake
-/// cannot fill and which this viewport therefore holds off, is also left as
-/// the reader chose it in the egui renderer.
+/// which leaves the stored filter as it was.
 pub fn defaults_to_save(
     stored: &SavedRenderOptions,
     options: &RenderOptions,
@@ -112,7 +111,6 @@ pub fn defaults_to_save(
 ) -> SavedRenderOptions {
     let mut saved = stored.clone();
     saved.read_from(options);
-    saved.show_stats_panel = stored.show_stats_panel;
     saved.show_dead_ships = show_dead_ships;
     saved.prefer_cpu_encoder = export.prefer_cpu;
     saved.video_codec = export.codec;

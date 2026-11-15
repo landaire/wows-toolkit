@@ -52,6 +52,7 @@ use wows_toolkit_replay_data::replay_render::hover::hover_changed;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_self_ranges;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
+use wows_toolkit_replay_data::replay_render::options::open_merged_on_rosters;
 use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
@@ -519,10 +520,14 @@ impl RendererSession {
         });
     }
 
-    /// Opens showing what the reader last saved as the defaults. Runs once the bake has landed,
-    /// because the rosters are a wider canvas rather than a layer.
+    /// Opens showing what the reader last saved as the defaults, and a merged replay on the
+    /// rosters. Runs once the bake has landed, because the rosters are a wider canvas rather than
+    /// a layer.
     async fn adopt_saved_defaults(self) {
-        let Some(services) = self.run.try_with_value(|run| run.services) else { return };
+        let Some((services, merged)) = self.run.try_with_value(|run| (run.services, !run.request.alts.is_empty()))
+        else {
+            return;
+        };
         let saved = match services.settings.pool() {
             Some(pool) => services
                 .on_tokio(async move { wows_toolkit_replay_data::render_defaults::load(&pool).await })
@@ -532,7 +537,12 @@ impl RendererSession {
             None => SavedRenderOptions::default(),
         };
         self.export.update(|export| export.settings = export_settings_of(&saved));
-        self.set_layers(|layers| adopt_saved_defaults(&saved, &mut layers.options, &mut layers.show_dead_ships));
+        self.set_layers(|layers| {
+            adopt_saved_defaults(&saved, &mut layers.options, &mut layers.show_dead_ships);
+            if merged {
+                open_merged_on_rosters(&mut layers.options);
+            }
+        });
         let own = self.track_untracked().and_then(|track| self_player(&track.frames));
         self.choose(|choices, _, options| adopt_saved_self_ranges(&saved, own.as_deref(), choices, options));
     }

@@ -44,6 +44,8 @@ use wows_replays::types::GameClock;
 use wows_toolkit_viewmodel::video_name::video_file_stem;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::frame::BgraFrame;
@@ -574,6 +576,9 @@ pub fn bake_track(
     renderer.set_fonts(assets::load_game_fonts(vfs));
     // With another team's recording merged, an enemy icon no longer implies it was spotted.
     renderer.set_merged_perspectives(!merged.is_empty());
+    if let Some(silhouette) = self_silhouette(&replay, provider, vfs) {
+        renderer.set_self_silhouette(silhouette);
+    }
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
     let constants = decode_constants(&loaded, build.get(), version, game_data);
@@ -629,6 +634,17 @@ pub fn bake_track(
         map_origin,
         video_stem,
     })
+}
+
+/// The silhouette of the recording player's ship, which the stats panel draws.
+///
+/// The image target tints it per region, so it is used as the game ships it.
+fn self_silhouette(replay: &ReplayFile, provider: &GameMetadataProvider, vfs: &VfsPath) -> Option<image::RgbaImage> {
+    let vehicle = replay.meta.vehicles.iter().find(|vehicle| vehicle.relation == 0)?;
+    let param = GameParamProvider::game_param_by_id(provider, vehicle.shipId)?;
+    let path = format!("gui/ships_silhouettes/{}.png", param.index());
+
+    Some(assets::load_packed_image(&path, vfs)?.into_rgba8())
 }
 
 /// The map `map_name` names, with nothing drawn over it.

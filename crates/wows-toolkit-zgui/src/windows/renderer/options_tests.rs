@@ -168,6 +168,21 @@ fn the_gear_opens_and_its_switches_reach_the_frame() {
     );
 }
 
+/// The gear offers the stats panel. Like the rosters it is a wider canvas, so with no game data to
+/// build that canvas from the switch is refused rather than drawing an empty gutter.
+#[test]
+fn the_gear_offers_the_stats_panel_and_refuses_it_without_a_canvas() {
+    let (mut window, session) = open(track(&[0.0, 30.0], 0.0));
+    click(&mut window, "replay-renderer-settings-toggle");
+    // The panel switches sit at the bottom of the scrolled gear; the focus brings them into view.
+    tab_to(&mut window, "renderer-opt-stats-panel");
+
+    click(&mut window, "renderer-opt-stats-panel");
+    let panels =
+        session.layers.with_untracked(|layers| (layers.options.show_stats_panel, layers.options.show_team_rosters));
+    assert_eq!(panels, (false, false), "no canvas can be built for it without game data");
+}
+
 /// The export settings under the switches reach what the next export is encoded with.
 #[test]
 fn the_export_settings_reach_the_next_export() {

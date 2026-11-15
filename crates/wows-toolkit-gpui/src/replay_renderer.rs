@@ -3332,9 +3332,6 @@ mod tests {
                     show_player_names: true,
                     include_pre_battle: true,
                     prefer_cpu_encoder: true,
-                    // Saved by the egui renderer, which has the silhouettes for
-                    // it; a bake here does not.
-                    show_stats_panel: true,
                     // Kept for the egui renderer rather than read here, so a
                     // save from this app must not clear it.
                     show_self_radar_range: true,
@@ -3354,7 +3351,6 @@ mod tests {
 
                 assert!(!panel.options().show_torpedoes, "a layer turned off stays off");
                 assert!(panel.options().show_player_names, "and one turned on comes back on");
-                assert!(!panel.options().show_stats_panel, "the panel a bake cannot fill is not drawn");
                 assert!(panel.export_settings().include_pre_battle);
                 assert!(panel.export_settings().prefer_cpu);
 
@@ -3366,10 +3362,6 @@ mod tests {
                 assert!(!saved.show_torpedoes);
                 assert!(saved.show_self_radar_range, "the ranges this app does not read are left as they were");
                 assert!(saved.include_pre_battle, "as are the export settings it did not change");
-                assert!(
-                    saved.show_stats_panel,
-                    "and the panel this viewport holds off is not turned off for the egui renderer"
-                );
             })
             .expect("the window is open");
     }

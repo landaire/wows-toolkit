@@ -16,6 +16,7 @@ use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::VideoEncoder;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::error::VideoError;
 use wows_minimap_renderer::map_data::MinimapPos;
@@ -27,6 +28,8 @@ use wows_replays::types::EntityId;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
+use crate::minimap_preview::layout_for;
+use crate::minimap_preview::renderer_for_replay;
 use crate::replay_render::options::batch_options;
 use crate::replay_render::raster::shown_commands;
 use crate::replay_render::ships::ShipChoices;
@@ -498,13 +501,25 @@ pub fn batch_export(
         let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
         report(BatchStep { done: index, total, replay: named.clone(), frames: None });
 
-        let (track, renderer) = match bake(&path, &[], game_data, &cancel, bake_options.clone()) {
+        let (track, baked_on) = match bake(&path, &[], game_data, &cancel, bake_options.clone()) {
             Ok(baked) => baked,
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "batch render: the replay did not bake");
                 outcome.failed.push(path);
                 continue;
             }
+        };
+        // The bake draws on the bare map; the saved panels need a wider canvas.
+        let renderer = match layout_for(&options) {
+            SidePanelLayout::None => baked_on,
+            layout => match renderer_for_replay(&path, game_data, layout) {
+                Ok((renderer, _)) => renderer,
+                Err(err) => {
+                    tracing::warn!(path = %path.display(), error = %err, "batch render: no canvas for {layout:?}");
+                    outcome.failed.push(path);
+                    continue;
+                }
+            },
         };
         let output = out_dir.join(suggested_name(&track.video_stem));
 

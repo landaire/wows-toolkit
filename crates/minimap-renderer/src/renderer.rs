@@ -421,7 +421,7 @@ pub struct MinimapRenderer<'a> {
     flag_icons: HashMap<String, RgbaImage>,
 
     /// Ship silhouette for the self player's stats panel.
-    self_silhouette: Option<RgbaImage>,
+    self_silhouette: Option<Arc<RgbaImage>>,
     /// Cached self player entity ID (populated from controller state).
     self_entity_id: Option<EntityId>,
 
@@ -562,7 +562,7 @@ impl<'a> MinimapRenderer<'a> {
 
     /// Set the ship silhouette image for the self player's stats panel.
     pub fn set_self_silhouette(&mut self, silhouette: RgbaImage) {
-        self.self_silhouette = Some(silhouette);
+        self.self_silhouette = Some(Arc::new(silhouette));
     }
 
     /// Install a pre-scanned per-entity facts cache. Driven by
@@ -2217,9 +2217,10 @@ impl<'a> MinimapRenderer<'a> {
         }
 
         // 12. Stats panel (right side panel with ship HP, damage, ribbons, activity).
-        // When team rosters are enabled they replace the self-perspective stats;
-        // this branch is skipped entirely so the panel doesn't double up.
-        if self.options.show_stats_panel && !self.options.show_team_rosters {
+        // Emitted beside the rosters when both are asked for, so a baked track
+        // holds both and the viewer picks one; `stats_panel_visible` decides
+        // which is drawn.
+        if self.options.show_stats_panel {
             let panel_x = MINIMAP_SIZE as i32;
             let panel_w = STATS_PANEL_WIDTH as i32;
             // The score bar spans only the minimap width, not this side strip, so
