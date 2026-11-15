@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Rate replays indexed without a personal rating table once the table arrives
 - *(zgui)* Show a newly landed battle's personal rating and match contribution without a relist
 - *(zgui)* Stop treating every enemy icon as spotted in a playback merged with another team's recording
 - *(zgui)* Keep folder checks, listings and thumbnails responsive while replay bakes, indexing passes, downloads and other long jobs run

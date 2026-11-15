@@ -17,6 +17,7 @@ use wows_toolkit_replay_data::replay_dir::ScannedReplay;
 use wows_toolkit_replay_data::replay_dir::read_replay;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
@@ -440,7 +441,7 @@ fn store_unrated_battle(control: BrowserControl, install: &tempfile::TempDir) ->
             map: "Ocean".into(),
             game_mode: "Domination".into(),
             game_mode_id: None,
-            game_type: "pvp".into(),
+            game_type: "RandomBattle".into(),
             match_group: "pvp".into(),
             version_build: None,
         };
@@ -477,9 +478,27 @@ fn a_landed_battles_row_reads_the_index_once_it_is_written() {
     let listing = control.install_listing().expect("the install has a listing");
 
     let path = store_unrated_battle(control, &install);
-    landed_indexed(control, FolderId::INSTALL);
+    landed_indexed(control, FolderId::INSTALL, true);
 
     settle_until(&mut window, "the row reads the stored battle", |_| {
         listing.summaries.with_untracked(|summaries| summaries.contains_key(&path))
+    });
+}
+
+/// A battle stored without a rating is rated once the table arrives, and its row reads the
+/// rating.
+#[test]
+fn a_battle_stored_unrated_is_rated_when_the_table_arrives() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    let listing = control.install_listing().expect("the install has a listing");
+    let path = store_unrated_battle(control, &install);
+
+    control.adopt_personal_rating(Arc::new(fixture_personal_rating_data()));
+
+    settle_until(&mut window, "the stored battle is rated", |_| {
+        listing.summaries.with_untracked(|summaries| summaries.get(&path).and_then(|summary| summary.self_pr)).is_some()
     });
 }

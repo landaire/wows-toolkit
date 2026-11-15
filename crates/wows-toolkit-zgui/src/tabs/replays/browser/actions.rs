@@ -49,6 +49,7 @@ use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_replay_data::replay_index::build_index;
 use wows_toolkit_replay_data::replay_index::index_one;
 use wows_toolkit_replay_data::replay_index::reindex_replays;
+use wows_toolkit_replay_data::replay_index::repair_missing_pr;
 use wows_toolkit_services::game_data_cache;
 use wows_toolkit_services::game_data_cache::CacheOutcome;
 use wows_toolkit_services::upload;
@@ -57,6 +58,7 @@ use wows_toolkit_services::upload::LedgerUse;
 use wows_toolkit_services::upload::Outcome;
 use wows_toolkit_services::upload::Sender;
 use wows_toolkit_viewmodel::palette::PaletteMode;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::query_bar::seed;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use zgui::css;
@@ -187,6 +189,20 @@ impl Drop for FolderPass {
     }
 }
 
+/// Whether a repair of the index rows stored without a rating is running, and whether another
+/// was asked for while it ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RatingRepair {
+    Idle,
+    Running { again: bool },
+}
+
+/// What an index write answered, and whether it had a rating table to rate its rows with.
+struct IndexWrite<T> {
+    outcome: T,
+    rated: bool,
+}
+
 /// The browser's background work, as a `Copy` handle the [`BrowserControl`] holds.
 #[derive(Clone, Copy)]
 pub struct BrowserWork {
@@ -199,6 +215,9 @@ pub struct BrowserWork {
     /// Where the browser's events go, once the panel is up.
     events: StoredValue<Option<BrowserEvents>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
+    /// The expected-values table the replays tab read, which rates rows a write stored unrated.
+    personal_rating: StoredValue<Option<Arc<PersonalRatingData>>, LocalStorage>,
+    rating_repair: StoredValue<RatingRepair, LocalStorage>,
     /// The shell's own build over the install's directory, which no pass here runs beside.
     shell_index: ReplayIndexJobs,
 }
@@ -213,6 +232,8 @@ impl BrowserWork {
             reindexing: RwSignal::new_local(false),
             contributing: RwSignal::new_local(false),
             events: StoredValue::new_local(None),
+            personal_rating: StoredValue::new_local(None),
+            rating_repair: StoredValue::new_local(RatingRepair::Idle),
             owner: StoredValue::new_local(Owner::current().expect("the browser's work is made inside a component")),
             shell_index,
         }
@@ -259,6 +280,49 @@ impl BrowserWork {
 /// Hands the work the panel's events, for what it reports once it is done.
 pub fn adopt_events(control: BrowserControl, events: BrowserEvents) {
     control.work.events.set_value(Some(events));
+}
+
+/// Rates every index row stored without a rating, then reads the listings' summaries again so
+/// their chips show. A request made while a repair runs is served by one more repair after it,
+/// which also covers rows written while the first one read.
+fn repair_personal_ratings(control: BrowserControl) {
+    let work = control.work;
+    if let RatingRepair::Running { .. } = work.rating_repair.get_value() {
+        work.rating_repair.set_value(RatingRepair::Running { again: true });
+        return;
+    }
+    let Some(table) = work.personal_rating.get_value() else { return };
+    let services = control.shell().services();
+    let Some(pool) = services.settings.pool() else { return };
+
+    work.rating_repair.set_value(RatingRepair::Running { again: false });
+    let repairing = services.on_tokio(async move { repair_missing_pr(&pool, &table).await });
+    work.spawn(async move {
+        match repairing.await {
+            Ok(Ok(0)) => {}
+            Ok(Ok(filled)) => {
+                tracing::info!(filled, "personal rating: rated the index rows stored without a rating");
+                for listing in control.all_listings() {
+                    listing.load_summaries();
+                }
+            }
+            Ok(Err(err)) => tracing::warn!("personal rating: the unrated index rows were not rated: {err}"),
+            Err(err) => tracing::warn!("personal rating: the repair of unrated index rows did not complete: {err}"),
+        }
+
+        let again = work.rating_repair.get_value() == RatingRepair::Running { again: true };
+        work.rating_repair.set_value(RatingRepair::Idle);
+        if again {
+            repair_personal_ratings(control);
+        }
+    });
+}
+
+/// Rates what an index write stored unrated because it had no table of its own.
+fn index_write_rated(control: BrowserControl, rated: bool) {
+    if !rated {
+        repair_personal_ratings(control);
+    }
 }
 
 /// Offers the listing's commands on the palette for as long as the browser is up, and indexes
@@ -309,6 +373,7 @@ pub fn offer(control: BrowserControl) {
                 for listing in control.all_listings() {
                     listing.load_summaries();
                 }
+                index_write_rated(control, !shell_index.take_wrote_unrated());
                 run_next_pass(control);
             });
         }
@@ -809,6 +874,12 @@ impl BrowserControl {
     pub fn relist(self) {
         relist_listed(self);
     }
+
+    /// Takes the replays tab's rating table, and rates the index rows stored without one.
+    pub fn adopt_personal_rating(self, table: Arc<PersonalRatingData>) {
+        self.work.personal_rating.set_value(Some(table));
+        repair_personal_ratings(self);
+    }
 }
 
 /// Reads `replays` again through the status bar's progress line. `skipped` is what the run left
@@ -847,9 +918,20 @@ async fn read_again(
         let report = |step| {
             let _ = reports.unbounded_send(step);
         };
-        reindex_replays(&runtime, &pool, &live_root, &replays, write_mode, &game_data, rating.as_ref(), &cancel, report)
+        let outcome = reindex_replays(
+            &runtime,
+            &pool,
+            &live_root,
+            &replays,
+            write_mode,
+            &game_data,
+            rating.as_ref(),
+            &cancel,
+            report,
+        );
+        IndexWrite { outcome, rated: rating.is_some() }
     });
-    let ran = follow(reading, steps, |step| {
+    let IndexWrite { outcome: ran, rated } = follow(reading, steps, |step| {
         job.report(Job { name: name.clone(), progress: Progress::new(step.done, step.total) });
     })
     .await;
@@ -868,6 +950,7 @@ async fn read_again(
     for listing in control.all_listings() {
         listing.load_summaries();
     }
+    index_write_rated(control, rated);
     run_next_pass(control);
 }
 
@@ -1044,7 +1127,18 @@ fn run_next_pass(control: BrowserControl) {
             let report = |step| {
                 let _ = reports.unbounded_send(step);
             };
-            build_index(&runtime, &pool, source, &root, &game_data, rating.as_ref(), &stop, IndexMode::FillGaps, report)
+            let outcome = build_index(
+                &runtime,
+                &pool,
+                source,
+                &root,
+                &game_data,
+                rating.as_ref(),
+                &stop,
+                IndexMode::FillGaps,
+                report,
+            );
+            IndexWrite { outcome, rated: rating.is_some() }
         });
         let built = follow(walking, steps, |step| {
             job.report(Job { name: name.clone(), progress: Progress::new(step.done, step.total) });
@@ -1060,8 +1154,9 @@ fn run_next_pass(control: BrowserControl) {
     work.publish_busy();
 }
 
-fn pass_finished(control: BrowserControl, id: FolderId, built: Result<IndexProgress, IndexError>) {
-    match built {
+fn pass_finished(control: BrowserControl, id: FolderId, built: IndexWrite<Result<IndexProgress, IndexError>>) {
+    let IndexWrite { outcome, rated } = built;
+    match outcome {
         Ok(progress) => tracing::info!(
             indexed = progress.indexed,
             skipped = progress.skipped,
@@ -1085,6 +1180,7 @@ fn pass_finished(control: BrowserControl, id: FolderId, built: Result<IndexProgr
     if let Some(listing) = control.listing(id) {
         listing.load_summaries();
     }
+    index_write_rated(control, rated);
     run_next_pass(control);
 }
 
@@ -1112,15 +1208,16 @@ pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
     let proxy = proxy_url(services);
 
     control.work.spawn(async move {
-        let indexed = long_job(move || -> Result<(), IndexOneError> {
+        let indexed = long_job(move || -> Result<bool, IndexOneError> {
             let now = jiff::Timestamp::now();
             let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
             let rating = owner_rating(&runtime, &proxy);
-            index_one(&runtime, &pool, &path, &game_data, rating.as_ref(), source, now, IndexWriteMode::Incremental)
+            index_one(&runtime, &pool, &path, &game_data, rating.as_ref(), source, now, IndexWriteMode::Incremental)?;
+            Ok(rating.is_some())
         })
         .await;
         match indexed {
-            Ok(()) => landed_indexed(control, id),
+            Ok(rated) => landed_indexed(control, id, rated),
             Err(err) => tracing::warn!("replay index: the battle that just landed was not indexed: {err}"),
         }
     });
@@ -1128,10 +1225,11 @@ pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
 
 /// Shows what the index learned of a battle that landed in tab `id`, whose row is listed already
 /// but reads its chips from the summaries.
-fn landed_indexed(control: BrowserControl, id: FolderId) {
+fn landed_indexed(control: BrowserControl, id: FolderId, rated: bool) {
     if let Some(listing) = control.listing(id) {
         listing.load_summaries();
     }
+    index_write_rated(control, rated);
 }
 
 /// Takes a result mapping the reader points at as the loaded build's own.

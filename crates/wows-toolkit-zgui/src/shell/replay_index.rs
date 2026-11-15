@@ -11,6 +11,7 @@ use std::sync::atomic::Ordering;
 
 use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionVersion;
+use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
@@ -24,6 +25,7 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::task::spawn_detached;
@@ -46,6 +48,9 @@ pub struct ReplayIndexJobs {
     cancel: StoredValue<Option<Arc<AtomicBool>>>,
     /// Whether a pass the replays tab started is reading replays.
     folder_pass: RwSignal<bool, LocalStorage>,
+    /// Whether the last build stored its rows without a rating table, until the replays tab
+    /// takes it to rate them.
+    wrote_unrated: StoredValue<bool>,
 }
 
 impl ReplayIndexJobs {
@@ -55,6 +60,7 @@ impl ReplayIndexJobs {
             outcome: RwSignal::new_local(None),
             cancel: StoredValue::new(None),
             folder_pass: RwSignal::new_local(false),
+            wrote_unrated: StoredValue::new(false),
         }
     }
 
@@ -92,6 +98,11 @@ impl ReplayIndexJobs {
     /// Forgets the replays tab's pass, as the tab goes. `try_`, since the shell may be going too.
     pub fn clear_folder_pass(self) {
         let _ = self.folder_pass.try_set(false);
+    }
+
+    /// Whether the last build stored its rows unrated, clearing it.
+    pub fn take_wrote_unrated(self) -> bool {
+        self.wrote_unrated.try_update_value(std::mem::take).unwrap_or(false)
     }
 }
 
@@ -141,7 +152,7 @@ impl Shell {
                     wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
                 let source = runtime.block_on(live)?;
                 let rating = owner_rating(&runtime, &proxy);
-                wows_toolkit_replay_data::replay_index::build_index(
+                let outcome = wows_toolkit_replay_data::replay_index::build_index(
                     &runtime,
                     &pool,
                     source,
@@ -153,7 +164,8 @@ impl Shell {
                     |step| {
                         let _ = reports.unbounded_send(step);
                     },
-                )
+                );
+                Ok::<_, IndexError>((outcome?, rating.is_some()))
             });
             let built = progress::follow(working, received, |step| {
                 index.progress.set(Some(step));
@@ -166,10 +178,14 @@ impl Shell {
                 return;
             }
 
+            // Before the progress clears, since the replays tab reads it as the build ends.
+            if let Ok((_, rated)) = built {
+                index.wrote_unrated.set_value(!rated);
+            }
             index.progress.set(None);
             index.cancel.set_value(None);
             let said = match built {
-                Ok(progress) => {
+                Ok((progress, _)) => {
                     let said = if progress.skipped > 0 {
                         t!(
                             "ui.settings.index.built_with_skipped",
