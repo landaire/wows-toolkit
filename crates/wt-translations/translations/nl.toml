@@ -69,6 +69,7 @@ file = "Bestand"
 check_updates = "Controleren op updates"
 about = "Over"
 quit = "Afsluiten"
+licenses = "Licenties"
 
 # -- Venstertitels --
 
@@ -85,6 +86,7 @@ software_encode = "Geen GPU-video-encoder"
 about = "Over"
 refresh_persisted_data = "Opgeslagen replaygegevens vernieuwen"
 tactics_board = "Tactiekbord"
+licenses = "Licenties"
 
 # -- Dialoog- / berichttekst --
 
@@ -126,6 +128,11 @@ and = " en "
 suppress_warning = "Niet meer weergeven"
 more_info = "Meer informatie"
 loading_replays = "%{count} replays laden..."
+app_version = "Versie %{version}"
+project_license = "WoWs Toolkit wordt verspreid onder de %{license}-licentie."
+third_party_notices = "Kennisgevingen van derden"
+notices_search_hint = "Kennisgevingen doorzoeken"
+no_matching_notices = "Geen kennisgevingen komen overeen met de zoekopdracht."
 
 # -- Toastberichten --
 
@@ -1563,6 +1570,11 @@ token = "Aanmeldtoken"
 monitored_channel_description = "Te volgen kanaal. Laat leeg om je eigen kanaal te volgen."
 armor_defaults = "Opgeslagen standaarden"
 armor_saved_description = "Opgeslagen vanuit de opties van de Modelweergave"
+
+[ui.settings.licenses]
+title = "Over en licenties"
+back = "Terug naar instellingen"
+third_party_intro = "Deze toepassing bevat de onderstaande componenten van derden. Selecteer een item om de pakketten die het gebruiken en de volledige licentietekst te tonen."
 
 [ui.settings.armor]
 no_defaults = "(geen opgeslagen standaarden)"

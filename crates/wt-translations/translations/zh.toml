@@ -69,6 +69,7 @@ file = "文件"
 check_updates = "检查更新"
 about = "关于"
 quit = "退出"
+licenses = "许可证"
 
 # -- 窗口标题 --
 
@@ -85,6 +86,7 @@ software_encode = "没有 GPU 视频编码器"
 about = "关于"
 refresh_persisted_data = "刷新已保存的回放数据"
 tactics_board = "战术板"
+licenses = "许可证"
 
 # -- 对话框消息 --
 
@@ -126,6 +128,11 @@ and = " 和 "
 suppress_warning = "不再显示"
 more_info = "更多信息"
 loading_replays = "正在加载 %{count} 个回放..."
+app_version = "版本 %{version}"
+project_license = "WoWs Toolkit 依据 %{license} 许可证分发。"
+third_party_notices = "第三方声明"
+notices_search_hint = "搜索声明"
+no_matching_notices = "没有与搜索匹配的声明。"
 
 # -- 提示消息 --
 
@@ -1563,6 +1570,11 @@ token = "登录令牌"
 monitored_channel_description = "要监视的频道。留空则监视您自己的频道。"
 armor_defaults = "已保存的默认设置"
 armor_saved_description = "从模型查看器选项中保存"
+
+[ui.settings.licenses]
+title = "关于与许可证"
+back = "返回设置"
+third_party_intro = "本应用程序包含以下列出的第三方组件。选择一个条目可显示使用它的软件包及其完整许可证文本。"
 
 [ui.settings.armor]
 no_defaults = "（没有已保存的默认设置）"

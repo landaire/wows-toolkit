@@ -5,6 +5,7 @@
 mod cache;
 mod controls;
 mod faults;
+mod licenses;
 #[cfg(test)]
 pub(crate) mod tests;
 mod zoom_anchor;
@@ -74,6 +75,7 @@ use crate::shell::settings::controls::SettingNoteProps;
 use crate::shell::settings::faults::any_faulted;
 use crate::shell::settings::faults::section_faulted;
 use crate::shell::settings::faults::setting_faults;
+use crate::shell::settings::licenses::LicensesPageProps;
 use crate::shell::settings::zoom_anchor::ZoomAnchor;
 use crate::text_marks::marks;
 
@@ -262,6 +264,14 @@ const CSS: &str = css!(
         font-size: 13px;
         color: var(--lui-color-text-dim);
     }
+    .wt-settings__foot {
+        display: flex;
+        flex-direction: row;
+        flex: none;
+        padding: 8px 16px;
+        border-top: 1px solid var(--lui-color-border);
+    }
+    .wt-settings__foot .wt-icon { color: var(--lui-color-text-dim); }
     .wt-settings-open[data-error] .wt-icon { color: var(--wt-color-error); }
     .wt-settings-open[data-open] { background-color: var(--lui-color-selection); }"
 );
@@ -517,9 +527,37 @@ enum SettingsRead {
     Loaded,
 }
 
-/// The header, the search, and the list for what is typed in it.
+/// Which page of the drawer is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DrawerPage {
+    Settings,
+    Licenses,
+}
+
+/// The page the drawer shows. A new drawer opens on the settings, and a jump to a place in the
+/// settings brings them back.
 #[component]
 fn DrawerContent(shell: Shell) -> impl IntoView {
+    let page = RwSignal::new_local(DrawerPage::Settings);
+    let jump = shell.settings_drawer.jump;
+    let returning = RenderEffect::new(move |_| {
+        if jump.with(Option::is_some) && page.get_untracked() != DrawerPage::Settings {
+            page.set(DrawerPage::Settings);
+        }
+    });
+    on_cleanup_local(move || drop(returning));
+
+    view! {
+        {move || match page.get() {
+            DrawerPage::Settings => AnyView::new(view! { SettingsPage(shell = shell, page = page) }),
+            DrawerPage::Licenses => AnyView::new(view! { LicensesPage(shell = shell, page = page) }),
+        }}
+    }
+}
+
+/// The header, the search, the list for what is typed in it, and the way to the licenses page.
+#[component]
+fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl IntoView {
     let services = Services::current();
     let locale = services.locale;
     let control = shell.settings_drawer;
@@ -632,6 +670,17 @@ fn DrawerContent(shell: Shell) -> impl IntoView {
             }),
             SettingsRead::Loaded => AnyView::new(view! { SettingsBody(shell = shell, query = query) }),
         }}
+        row(class = "wt-settings__foot") {
+            Button(
+                variant = ButtonVariant::Ghost,
+                size = ButtonSize::Sm,
+                attr:data-testid = "settings-licenses-open",
+                on:click = move |_| page.set(DrawerPage::Licenses)
+            ) {
+                AppIcon(glyph = Glyph::FileText)
+                text {{locale.text("ui.settings.licenses.title")}}
+            }
+        }
     }
 }
 

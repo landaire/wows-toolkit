@@ -18,6 +18,7 @@ TOOLKIT_COMMON_DEPS = [
     "//crates/wows-replay-insights:wows_replay_insights",
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//crates/wows-toolkit-notices:wows_toolkit_notices",
     "//crates/wowsunpack:wowsunpack",
     "//crates/wt-collab-egui:wt_collab_egui",
     "//crates/wt-collab-client:wt_collab_client",

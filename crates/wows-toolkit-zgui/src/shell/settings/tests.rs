@@ -15,6 +15,7 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_notices::Notices;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -166,6 +167,24 @@ fn in_view_of_scroll(window: &HeadlessWindow, id: &str) -> bool {
     let port = window.bounds(scroll).expect("the list is laid out");
 
     row.top().0 >= port.top().0 - 1.0 && row.bottom().0 <= port.bottom().0 + 1.0
+}
+
+/// Scrolls the licenses page to its first notice, as a reader does, and opens it.
+fn open_first_notice(window: &mut HeadlessWindow) {
+    let first = window.all_by_class("wt-licenses__entry-trigger")[0];
+    let scroll = find(window, "licenses-scroll");
+    for _ in 0..40 {
+        let row = window.bounds(first).expect("the notice is laid out");
+        let port = window.bounds(scroll).expect("the page is laid out");
+        if row.top().0 >= port.top().0 - 1.0 && row.bottom().0 <= port.bottom().0 + 1.0 {
+            window.click(first).expect("a notice's title can be clicked");
+            settle(window);
+            return;
+        }
+        window.wheel(scroll, 200.0).expect("the page can be scrolled");
+        settle(window);
+    }
+    panic!("the first notice never scrolled into view");
 }
 
 /// The search reads names and descriptions across every section, and says how many settings it
@@ -355,6 +374,59 @@ fn a_category_button_scrolls_its_section_to_the_top() {
     assert!(at_top_of_scroll(&window, &heading), "its heading is at the top of the list");
     let button = find(&window, &category_test_id(section));
     assert_eq!(window.a11y(button).and_then(|state| state.selected), Some(true), "and its button is marked");
+}
+
+/// The licenses page names this build and its license, lists every notice with its text folded
+/// away, opens one on a click, and its search narrows the list.
+#[test]
+fn the_licenses_page_shows_and_searches_the_notices() {
+    let mut window = open_unsaved();
+    open_drawer(&mut window);
+    click(&mut window, "settings-licenses-open");
+    assert!(window.by_test_id("settings-drawer-scroll").is_none(), "the page replaces the settings list");
+
+    let version = t!("ui.labels.app_version", version = env!("CARGO_PKG_VERSION")).into_owned();
+    assert_eq!(window.texts_by_class("wt-licenses__version"), vec![version]);
+    let project = window.texts_by_class("wt-licenses__project");
+    assert!(
+        project.iter().any(|text| text.contains("Permission is hereby granted, free of charge")),
+        "the MIT license text is shown: {project:?}"
+    );
+
+    let notices = Notices::embedded();
+    let titles = window.texts_by_class("wt-licenses__entry-title");
+    assert_eq!(titles.len(), notices.entries().len(), "every notice is listed");
+    assert!(titles.iter().any(|title| title.starts_with("MIT License")), "{titles:?}");
+    assert!(
+        window.texts_by_class("wt-licenses__entry-body").is_empty(),
+        "no notice text is laid out before one is opened"
+    );
+
+    let search = find(&window, "licenses-search");
+    assert_eq!(window.a11y(search).map(|state| state.focused), Some(true), "the search is ready for typing");
+    window.type_text("Apache License");
+    settle(&mut window);
+    let kept = window.texts_by_class("wt-licenses__entry-title");
+    let expected: Vec<String> = notices.matching("Apache License").map(|notice| notice.title().to_owned()).collect();
+    assert!(!kept.is_empty() && kept.len() < titles.len(), "the search narrows the list: {kept:?}");
+    assert_eq!(kept, expected);
+    assert!(
+        window.texts_by_class("wt-licenses__project").is_empty(),
+        "the matches come first, without the project's license"
+    );
+
+    open_first_notice(&mut window);
+    let opened = notices.matching("Apache License").next().expect("a notice matched");
+    assert_eq!(window.texts_by_class("wt-licenses__entry-body"), vec![opened.body().to_owned()], "its text is shown");
+
+    click(&mut window, "licenses-search-clear");
+    window.type_text("no notice holds this text");
+    settle(&mut window);
+    assert!(window.texts_by_class("wt-licenses__entry-title").is_empty());
+    assert!(window.by_test_id("licenses-no-match").is_some(), "an empty result says so");
+
+    click(&mut window, "settings-licenses-back");
+    assert!(window.by_test_id("settings-drawer-scroll").is_some(), "the back button returns to the settings");
 }
 
 /// Ctrl+, opens and shuts the drawer. Escape in the search empties typed text first, then shuts
@@ -716,6 +788,8 @@ enum Shot {
     Top,
     Searched(&'static str),
     At(Setting),
+    /// The licenses page, searched for the text when there is one, with the first notice opened.
+    Licenses(Option<&'static str>),
 }
 
 /// Opens the drawer over settings read from the database and writes it to
@@ -740,6 +814,15 @@ fn shoot(desktop: DesktopAppearance, shot: Shot, name: &str) -> PathBuf {
             settle(&mut window);
             settle(&mut window);
         }
+        Shot::Licenses(typed) => {
+            open_drawer(&mut window);
+            click(&mut window, "settings-licenses-open");
+            if let Some(typed) = typed {
+                window.type_text(typed);
+                settle(&mut window);
+                open_first_notice(&mut window);
+            }
+        }
     }
 
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots").join(format!("{name}.png"));
@@ -755,6 +838,8 @@ fn the_drawer_renders_in_dark_and_light_and_searched() {
         (DesktopAppearance::Light, Shot::Top, "settings-light"),
         (DesktopAppearance::Dark, Shot::Searched("replay"), "settings-search-dark"),
         (DesktopAppearance::Dark, Shot::At(Setting::Theme), "settings-appearance-dark"),
+        (DesktopAppearance::Dark, Shot::Licenses(None), "licenses-dark"),
+        (DesktopAppearance::Light, Shot::Licenses(Some("Apache License")), "licenses-search-light"),
     ] {
         println!("{}", shoot(desktop, shot, name).display());
     }

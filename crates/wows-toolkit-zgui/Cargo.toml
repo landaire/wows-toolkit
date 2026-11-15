@@ -22,6 +22,8 @@ zgui-render-wgpu = { workspace = true }
 landaire-ui = { workspace = true }
 # The icon set, shared with the other desktop front end.
 wows-toolkit-icons = { workspace = true }
+# The project license and third-party notices the settings drawer shows.
+wows-toolkit-notices = { workspace = true }
 # Framework-neutral toolkit logic, game-data loading and the services both desktop front ends run.
 wows-toolkit-config = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }

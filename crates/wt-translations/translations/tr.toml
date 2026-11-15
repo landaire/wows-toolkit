@@ -61,6 +61,7 @@ file = "Dosya"
 check_updates = "Güncellemeleri Kontrol Et"
 about = "Hakkında"
 quit = "Çıkış"
+licenses = "Lisanslar"
 
 [ui.windows]
 build_consent = "Build Toplama İzni"
@@ -75,6 +76,7 @@ software_encode = "GPU Video Kodlayıcı Yok"
 about = "Hakkında"
 refresh_persisted_data = "Kayıtlı Tekrar Verilerini Yenile"
 tactics_board = "Taktik Tahtası"
+licenses = "Lisanslar"
 
 [ui.dialogs]
 build_consent_message = "Dereceli ve rastgele savaşlardan oyuncu build bilgilerini geliştiriciye göndermek ister misiniz? Bu veri toplama, topluluğun oyuncu buildlerini toplu olarak analiz etmesine yardımcı olur. İstediğiniz zaman ayarlardan vazgeçebilirsiniz."
@@ -112,6 +114,11 @@ and = " ve "
 suppress_warning = "Bir daha gösterme"
 more_info = "Daha fazla bilgi"
 loading_replays = "%{count} tekrar yükleniyor..."
+app_version = "Sürüm %{version}"
+project_license = "WoWs Toolkit, %{license} lisansı altında dağıtılmaktadır."
+third_party_notices = "Üçüncü taraf bildirimleri"
+notices_search_hint = "Bildirimlerde ara"
+no_matching_notices = "Aramayla eşleşen bildirim yok."
 
 [ui.messages]
 bug_report_info_copied = "Hata raporu bilgileri kopyalandı."
@@ -1517,6 +1524,11 @@ token = "Oturum Açma Belirteci"
 monitored_channel_description = "İzlenecek kanal. Kendi kanalınızı izlemek için boş bırakın."
 armor_defaults = "Kayıtlı Varsayılanlar"
 armor_saved_description = "Model Görüntüleyici seçeneklerinden kaydedildi"
+
+[ui.settings.licenses]
+title = "Hakkında ve lisanslar"
+back = "Ayarlara dön"
+third_party_intro = "Bu uygulama aşağıda listelenen üçüncü taraf bileşenleri içerir. Onu kullanan paketleri ve lisansın tam metnini göstermek için bir girdi seçin."
 
 [ui.settings.armor]
 no_defaults = "(kayıtlı varsayılan yok)"

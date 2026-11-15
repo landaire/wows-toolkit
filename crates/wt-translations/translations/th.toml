@@ -69,6 +69,7 @@ file = "ไฟล์"
 check_updates = "ตรวจสอบอัปเดต"
 about = "เกี่ยวกับ"
 quit = "ออก"
+licenses = "สัญญาอนุญาต"
 
 # -- ชื่อหน้าต่าง --
 
@@ -85,6 +86,7 @@ software_encode = "ไม่มีตัวเข้ารหัสวิดี�
 about = "เกี่ยวกับ"
 refresh_persisted_data = "รีเฟรชข้อมูลรีเพลย์ที่จัดเก็บไว้"
 tactics_board = "กระดานยุทธวิธี"
+licenses = "สัญญาอนุญาต"
 
 # -- ข้อความในกล่องโต้ตอบ --
 
@@ -126,6 +128,11 @@ and = " และ "
 suppress_warning = "ไม่ต้องแสดงอีก"
 more_info = "ข้อมูลเพิ่มเติม"
 loading_replays = "กำลังโหลดรีเพลย์ %{count} รายการ..."
+app_version = "เวอร์ชัน %{version}"
+project_license = "WoWs Toolkit เผยแพร่ภายใต้สัญญาอนุญาต %{license}"
+third_party_notices = "ประกาศของบุคคลที่สาม"
+notices_search_hint = "ค้นหาประกาศ"
+no_matching_notices = "ไม่มีประกาศที่ตรงกับการค้นหา"
 
 # -- ข้อความแจ้งเตือน --
 
@@ -1563,6 +1570,11 @@ token = "โทเค็นเข้าสู่ระบบ"
 monitored_channel_description = "ช่องที่จะติดตาม เว้นว่างไว้เพื่อติดตามช่องของคุณเอง"
 armor_defaults = "ค่าเริ่มต้นที่บันทึกไว้"
 armor_saved_description = "บันทึกจากตัวเลือกของตัวดูโมเดล"
+
+[ui.settings.licenses]
+title = "เกี่ยวกับและสัญญาอนุญาต"
+back = "กลับไปที่การตั้งค่า"
+third_party_intro = "แอปพลิเคชันนี้มีคอมโพเนนต์ของบุคคลที่สามตามรายการด้านล่าง เลือกรายการเพื่อแสดงแพ็กเกจที่ใช้รายการนั้นและข้อความสัญญาอนุญาตฉบับเต็ม"
 
 [ui.settings.armor]
 no_defaults = "(ไม่มีค่าเริ่มต้นที่บันทึกไว้)"

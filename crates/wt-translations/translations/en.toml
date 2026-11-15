@@ -76,6 +76,7 @@ file = "File"
 check_updates = "Check for Updates"
 about = "About"
 quit = "Quit"
+licenses = "Licenses"
 
 # -- Window titles --
 
@@ -96,6 +97,7 @@ minimize = "Minimize"
 maximize = "Maximize"
 restore = "Restore"
 close = "Close"
+licenses = "Licenses"
 
 # -- Dialog / message text --
 
@@ -137,6 +139,11 @@ and = " and "
 suppress_warning = "Don't show this again"
 more_info = "More info"
 loading_replays = "Loading %{count} replays..."
+app_version = "Version %{version}"
+project_license = "WoWs Toolkit is distributed under the %{license} license."
+third_party_notices = "Third-party notices"
+notices_search_hint = "Search notices"
+no_matching_notices = "No notices match the search."
 
 # -- Toast messages --
 
@@ -390,6 +397,11 @@ token = "Login Token"
 monitored_channel_description = "Channel to watch. Leave empty to watch your own."
 armor_defaults = "Saved Defaults"
 armor_saved_description = "Saved from the Model Viewer options"
+
+[ui.settings.licenses]
+title = "About and licenses"
+back = "Back to settings"
+third_party_intro = "This application contains the third-party components listed below. Select an entry to show the crates that use it and its full license text."
 
 [ui.settings.armor]
 no_defaults = "(no saved defaults)"

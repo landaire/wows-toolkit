@@ -69,6 +69,7 @@ file = "檔案"
 check_updates = "檢查更新"
 about = "關於"
 quit = "結束"
+licenses = "授權條款"
 
 # -- 視窗標題 --
 
@@ -85,6 +86,7 @@ software_encode = "沒有 GPU 影片編碼器"
 about = "關於"
 refresh_persisted_data = "重新整理已儲存的回放資料"
 tactics_board = "戰術板"
+licenses = "授權條款"
 
 # -- 對話框 / 訊息文字 --
 
@@ -126,6 +128,11 @@ and = " 和 "
 suppress_warning = "不再顯示"
 more_info = "更多資訊"
 loading_replays = "正在載入 %{count} 個戰鬥回放..."
+app_version = "版本 %{version}"
+project_license = "WoWs Toolkit 依據 %{license} 授權條款散布。"
+third_party_notices = "第三方聲明"
+notices_search_hint = "搜尋聲明"
+no_matching_notices = "沒有符合搜尋的聲明。"
 
 # -- 通知訊息 --
 
@@ -1563,6 +1570,11 @@ token = "登入權杖"
 monitored_channel_description = "要監看的頻道。留空則監看您自己的頻道。"
 armor_defaults = "已儲存的預設設定"
 armor_saved_description = "從模型檢視器選項儲存"
+
+[ui.settings.licenses]
+title = "關於與授權條款"
+back = "返回設定"
+third_party_intro = "本應用程式包含以下列出的第三方元件。選擇一個項目可顯示使用它的套件及其完整授權條款文字。"
 
 [ui.settings.armor]
 no_defaults = "（沒有已儲存的預設設定）"

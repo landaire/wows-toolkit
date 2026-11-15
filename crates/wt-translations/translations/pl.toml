@@ -61,6 +61,7 @@ file = "Plik"
 check_updates = "Sprawdź aktualizacje"
 about = "O programie"
 quit = "Zakończ"
+licenses = "Licencje"
 
 [ui.windows]
 build_consent = "Zgoda na zbieranie buildów"
@@ -75,6 +76,7 @@ software_encode = "Brak kodera wideo GPU"
 about = "O programie"
 refresh_persisted_data = "Odśwież zapisane dane powtórek"
 tactics_board = "Tablica taktyczna"
+licenses = "Licencje"
 
 [ui.dialogs]
 build_consent_message = "Czy chcesz wysyłać informacje o buildach graczy z bitew rankingowych i losowych do dewelopera? Zbieranie tych danych pomaga społeczności w masowej analizie buildów graczy. Możesz zrezygnować w każdej chwili w ustawieniach."
@@ -112,6 +114,11 @@ and = " i "
 suppress_warning = "Nie pokazuj ponownie"
 more_info = "Więcej informacji"
 loading_replays = "Wczytywanie %{count} powtórek..."
+app_version = "Wersja %{version}"
+project_license = "WoWs Toolkit jest rozpowszechniany na licencji %{license}."
+third_party_notices = "Informacje o komponentach innych firm"
+notices_search_hint = "Szukaj w informacjach"
+no_matching_notices = "Żadna informacja nie pasuje do wyszukiwania."
 
 [ui.messages]
 bug_report_info_copied = "Skopiowano informacje do zgłoszenia błędu."
@@ -1517,6 +1524,11 @@ token = "Token logowania"
 monitored_channel_description = "Obserwowany kanał. Pozostaw puste, aby obserwować własny."
 armor_defaults = "Zapisane ustawienia domyślne"
 armor_saved_description = "Zapisane z opcji Przeglądarki modeli"
+
+[ui.settings.licenses]
+title = "Informacje i licencje"
+back = "Wróć do ustawień"
+third_party_intro = "Ta aplikacja zawiera wymienione poniżej komponenty innych firm. Wybierz pozycję, aby wyświetlić pakiety, które z niej korzystają, oraz pełny tekst licencji."
 
 [ui.settings.armor]
 no_defaults = "(brak zapisanych ustawień domyślnych)"

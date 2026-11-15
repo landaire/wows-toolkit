@@ -12,6 +12,7 @@ members = [
     "crates/wows-toolkit-armor",
     "crates/wows-toolkit-launcher",
     "crates/wows-toolkit-icons",
+    "crates/wows-toolkit-notices",
     "crates/wows-core",
     "crates/wowsunpack",
     "crates/wows-replays",
@@ -74,6 +75,7 @@ wows-toolkit-services = { path = "crates/wows-toolkit-services" }
 wows-toolkit-armor = { path = "crates/wows-toolkit-armor" }
 wows-toolkit-launcher = { path = "crates/wows-toolkit-launcher" }
 wows-toolkit-icons = { path = "crates/wows-toolkit-icons" }
+wows-toolkit-notices = { path = "crates/wows-toolkit-notices" }
 landaire-ui = { path = "crates/landaire-ui" }
 wgc-core = { version = "0.1.0", path = "crates/wgc-core", default-features = false }
 wgc-install = { version = "0.1.0", path = "crates/wgc-install", default-features = false }

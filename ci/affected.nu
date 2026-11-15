@@ -132,7 +132,7 @@ def select_affected [base: string] {
     let old = ($before | select label hash | rename label old)
     let affected = ($after | join --left $old label | where {|t| $t.old? != $t.hash })
 
-    let aliases = ($affected | where {|t| $t.label | str starts-with "root//:" } | get label)
+    let aliases = ($affected | where {|t| ($t.label | str starts-with "root//:") and $t.type == "alias" } | get label)
     let crates = ($affected | where {|t| $t.label | str starts-with "root//crates/" })
     # A test can read files from its crate at run time that it never declares,
     # such as fixtures, so any change in a crate runs all of that crate's tests.

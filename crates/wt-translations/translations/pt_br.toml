@@ -61,6 +61,7 @@ file = "Arquivo"
 check_updates = "Verificar atualizações"
 about = "Sobre"
 quit = "Sair"
+licenses = "Licenças"
 
 [ui.windows]
 build_consent = "Consentimento de coleta de builds"
@@ -75,6 +76,7 @@ software_encode = "Sem codificador de vídeo por GPU"
 about = "Sobre"
 refresh_persisted_data = "Atualizar dados persistidos dos replays"
 tactics_board = "Quadro tático"
+licenses = "Licenças"
 
 [ui.dialogs]
 build_consent_message = "Você gostaria de enviar informações de builds de jogadores de batalhas ranqueadas e aleatórias para o desenvolvedor? Essa coleta de dados ajuda a comunidade a analisar builds de jogadores em massa. Você pode cancelar a qualquer momento nas configurações."
@@ -112,6 +114,11 @@ and = " e "
 suppress_warning = "Não mostrar novamente"
 more_info = "Mais informações"
 loading_replays = "Carregando %{count} replays..."
+app_version = "Versão %{version}"
+project_license = "O WoWs Toolkit é distribuído sob a licença %{license}."
+third_party_notices = "Avisos de terceiros"
+notices_search_hint = "Pesquisar avisos"
+no_matching_notices = "Nenhum aviso corresponde à pesquisa."
 
 [ui.messages]
 bug_report_info_copied = "Informações para o relatório de bug copiadas."
@@ -1517,6 +1524,11 @@ token = "Token de login"
 monitored_channel_description = "Canal a observar. Deixe vazio para observar o seu."
 armor_defaults = "Padrões salvos"
 armor_saved_description = "Salvo a partir das opções do Visualizador de modelos"
+
+[ui.settings.licenses]
+title = "Sobre e licenças"
+back = "Voltar às configurações"
+third_party_intro = "Este aplicativo contém os componentes de terceiros listados abaixo. Selecione uma entrada para mostrar os pacotes que a utilizam e o texto completo da licença."
 
 [ui.settings.armor]
 no_defaults = "(nenhum padrão salvo)"

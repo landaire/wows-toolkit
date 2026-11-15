@@ -16747,6 +16747,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-notices"
+version = "0.1.0"
+
+[[package]]
 name = "wows-toolkit-replay-data"
 version = "0.1.0"
 dependencies = [
@@ -16898,6 +16902,7 @@ dependencies = [
  "wows-toolkit-hardening",
  "wows-toolkit-icons",
  "wows-toolkit-launcher",
+ "wows-toolkit-notices",
  "wows-toolkit-replay-data",
  "wows-toolkit-services",
  "wows-toolkit-viewmodel",
@@ -17083,6 +17088,7 @@ dependencies = [
  "wows-toolkit-config",
  "wows-toolkit-hardening",
  "wows-toolkit-launcher",
+ "wows-toolkit-notices",
  "wows-toolkit-services",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",

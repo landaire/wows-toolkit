@@ -2,6 +2,7 @@ pub mod command_palette;
 pub mod file_unpacker;
 #[cfg(feature = "launcher")]
 pub mod launcher_tab;
+pub(crate) mod licenses;
 pub mod mod_manager;
 pub(crate) mod plaintext_viewer;
 pub mod player_tracker;
