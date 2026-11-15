@@ -1,5 +1,6 @@
 //! Encoding a baked battle to a video file, one replay or a batch of them.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,20 +12,24 @@ use rust_i18n::t;
 use wows_minimap_renderer::EncoderKind;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
+use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::VideoEncoder;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::error::VideoError;
+use wows_minimap_renderer::map_data::MinimapPos;
 use wows_minimap_renderer::trail::TrailHistory;
 use wows_minimap_renderer::video::CodecChoice;
+use wows_minimap_renderer::video::FPS;
+use wows_minimap_renderer::video::OUTPUT_DURATION;
+use wows_replays::types::EntityId;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
 use crate::replay_render::options::batch_options;
 use crate::replay_render::raster::shown_commands;
 use crate::replay_render::ships::ShipChoices;
-use crate::replay_render::track::BAKE_INTERVAL;
 use crate::replay_render::track::Track;
 use crate::replay_render::track::bake;
 
@@ -165,6 +170,10 @@ pub fn suggested_name(video_stem: &str) -> String {
     format!("{video_stem}.mp4")
 }
 
+/// How many frames every export writes: a fixed length at a fixed rate, the battle compressed to
+/// fit, as the egui renderer writes it.
+pub const EXPORT_FRAME_COUNT: usize = (OUTPUT_DURATION * FPS) as usize;
+
 /// What an export draws of a battle: the layers and per-ship choices on screen, and what was
 /// drawn over the battle rather than by it (annotations and placed ranges).
 pub struct ExportLayers {
@@ -174,9 +183,11 @@ pub struct ExportLayers {
     pub drawn_on: Vec<DrawCommand>,
 }
 
-/// The frames an export writes, drawn one at a time as the encoder takes them: one per baked
-/// frame of the exported stretch of the battle.
+/// The frames an export writes, drawn one at a time as the encoder takes them.
 ///
+/// [`EXPORT_FRAME_COUNT`] frames spread evenly over the exported stretch of the battle. A track
+/// keeps fewer frames than that, and a long battle's are further apart, so each written frame is
+/// the baked frame before it with the ships moved the matching part of the way to the next.
 /// What is on screen is what is written: a layer the reader turned off does not come back in the
 /// file, and trails are derived from the baked frames behind, as the viewport derives them.
 pub struct ExportFrames {
@@ -184,8 +195,12 @@ pub struct ExportFrames {
     layers: ExportLayers,
     /// The first baked frame the export covers.
     first: usize,
-    /// The next baked frame to write.
-    next: usize,
+    /// The game time of the first written frame, how much game time the export covers, and the
+    /// game time between written frames.
+    start: f32,
+    duration: f32,
+    step: f32,
+    written: usize,
     trails: TrailHistory,
     /// How many baked frames `trails` has walked.
     walked: usize,
@@ -197,23 +212,37 @@ impl ExportFrames {
         if track.is_empty() {
             return None;
         }
-        let first = track.export_start(include_pre_battle).get();
+        let first = track.export_start(include_pre_battle);
+        let start = track.seconds_at(first);
+        let end = track.seconds_at(track.last());
+        let duration = (end - start).max(0.0);
+        let step = duration / (EXPORT_FRAME_COUNT - 1) as f32;
 
-        Some(Self { track, layers, first, next: first, trails: TrailHistory::new(), walked: 0 })
+        Some(Self {
+            track,
+            layers,
+            first: first.get(),
+            start,
+            duration,
+            step,
+            written: 0,
+            trails: TrailHistory::new(),
+            walked: 0,
+        })
     }
 
     /// How many frames the export writes.
     pub fn len(&self) -> usize {
-        self.track.frames.len() - self.first
+        EXPORT_FRAME_COUNT
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        false
     }
 
     /// How much game time the export covers, in seconds.
     pub fn duration_seconds(&self) -> f32 {
-        self.len().saturating_sub(1) as f32 * BAKE_INTERVAL
+        self.duration
     }
 }
 
@@ -221,29 +250,136 @@ impl Iterator for ExportFrames {
     type Item = Vec<DrawCommand>;
 
     fn next(&mut self) -> Option<Vec<DrawCommand>> {
-        let at = self.next;
-        let commands = self.track.frames.get(at)?;
-        self.next += 1;
+        if self.written >= EXPORT_FRAME_COUNT {
+            return None;
+        }
+        let at = self.start + self.step * self.written as f32;
+        self.written += 1;
+
+        let base = self.track.frame_at(at).get().max(self.first);
+        let wants_trails = self.layers.options.show_trails || self.layers.options.show_speed_trails;
+        while wants_trails && self.walked <= base {
+            self.trails.push(&self.track.frames[self.walked]);
+            self.walked += 1;
+        }
+        let mut trails = self.trails.trails(&self.layers.options);
 
         let layers = &self.layers;
-        if layers.options.show_trails || layers.options.show_speed_trails {
-            while self.walked <= at {
-                self.trails.push(&self.track.frames[self.walked]);
-                self.walked += 1;
-            }
-        }
-        let trails = self.trails.trails(&layers.options);
-
-        let mut shown = shown_commands(
-            trails.into_iter().chain(commands.iter().cloned()),
-            &layers.options,
-            layers.show_dead_ships,
-            &layers.choices,
-        );
+        let between = interpolated(&self.track, base, at);
+        reach_ships(&mut trails, &between);
+        let mut shown =
+            shown_commands(trails.into_iter().chain(between), &layers.options, layers.show_dead_ships, &layers.choices);
         shown.extend(layers.drawn_on.iter().cloned());
 
         Some(shown)
     }
+}
+
+/// Ends each trail where its ship is drawn, part of the way to the next baked frame, so the trail
+/// does not stop short of the ship.
+fn reach_ships(trails: &mut [DrawCommand], frame: &[DrawCommand]) {
+    let drawn: HashMap<EntityId, MinimapPos> = frame
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::Ship { entity_id, pos, .. } => Some((*entity_id, *pos)),
+            _ => None,
+        })
+        .collect();
+    for trail in trails {
+        let DrawCommand::PositionTrail { entity_id, points, .. } = trail else { continue };
+        let (Some(pos), Some(&(last, color))) = (drawn.get(entity_id), points.last()) else { continue };
+        if (last.x, last.y) != (pos.x, pos.y) {
+            points.push((*pos, color));
+        }
+    }
+}
+
+/// Where a ship is drawn in a baked frame.
+#[derive(Clone, Copy, Debug)]
+struct ShipPlace {
+    pos: MinimapPos,
+    yaw: f32,
+    visibility: ShipVisibility,
+}
+
+/// How far one ship moves and turns between a baked frame and an export frame after it.
+#[derive(Clone, Copy, Debug)]
+struct ShipMove {
+    dx: f32,
+    dy: f32,
+    turn: f32,
+}
+
+/// Frame `base`'s commands with each ship moved the part of the way to frame `base + 1` that
+/// game time `at` is, and what is drawn at the ship (its health bar, ranges, consumables and
+/// camera line) moved with it.
+fn interpolated(track: &Track, base: usize, at: f32) -> Vec<DrawCommand> {
+    let commands = &track.frames[base];
+    let (Some(next), Some(from), Some(to)) =
+        (track.frames.get(base + 1), track.clocks.get(base), track.clocks.get(base + 1))
+    else {
+        return commands.clone();
+    };
+    let span = to.seconds() - from.seconds();
+    if span <= 0.0 {
+        return commands.clone();
+    }
+    let fraction = ((at - from.seconds()) / span).clamp(0.0, 1.0);
+
+    let ahead: HashMap<EntityId, ShipPlace> = next
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::Ship { entity_id, pos, yaw, visibility, .. } => {
+                Some((*entity_id, ShipPlace { pos: *pos, yaw: *yaw, visibility: *visibility }))
+            }
+            _ => None,
+        })
+        .collect();
+    let moves: HashMap<EntityId, ShipMove> = commands
+        .iter()
+        .filter_map(|command| {
+            let DrawCommand::Ship { entity_id, pos, yaw, visibility, .. } = command else { return None };
+            let ShipPlace { pos: next_pos, yaw: next_yaw, visibility: next_visibility } = ahead.get(entity_id)?;
+            // A ship coming into or going out of sight jumps between where it was last seen and
+            // where it is, which is not a path it sailed.
+            if next_visibility != visibility {
+                return None;
+            }
+            let turn = (next_yaw - yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            Some((
+                *entity_id,
+                ShipMove {
+                    dx: (next_pos.x - pos.x) * fraction,
+                    dy: (next_pos.y - pos.y) * fraction,
+                    turn: turn * fraction,
+                },
+            ))
+        })
+        .collect();
+
+    commands
+        .iter()
+        .cloned()
+        .map(|mut command| {
+            let (entity_id, pos, yaw) = match &mut command {
+                DrawCommand::Ship { entity_id, pos, yaw, .. } => (*entity_id, pos, Some(yaw)),
+                DrawCommand::HealthBar { entity_id, pos, .. }
+                | DrawCommand::CameraDirection { entity_id, pos, .. }
+                | DrawCommand::ConsumableRadius { entity_id, pos, .. }
+                | DrawCommand::ConsumableIcons { entity_id, pos, .. }
+                | DrawCommand::ShipConfigCircle { entity_id, pos, .. } => (*entity_id, pos, None),
+                _ => return command,
+            };
+            if let Some(step) = moves.get(&entity_id) {
+                pos.x += step.dx;
+                pos.y += step.dy;
+                if let Some(yaw) = yaw {
+                    *yaw += step.turn;
+                }
+            }
+            command
+        })
+        .collect()
 }
 
 /// A place to render to that outlives this process, for the clipboard.

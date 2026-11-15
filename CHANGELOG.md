@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Export every video at 60 seconds and 30 frames per second, moving ships between the frames the bake kept
 - *(zgui)* Write trails, annotations and placed ranges into exported videos
 - *(renderer)* Add speed trail, dead ship trail and score timer toggles
 - *(renderer)* Name exported videos by battle start, player, map and ship so they sort chronologically

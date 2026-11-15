@@ -69,6 +69,7 @@ use crate::replay_render::armor::RealtimeArmorFeed;
 use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
 use crate::replay_render::export::BatchStep;
+use crate::replay_render::export::EXPORT_FRAME_COUNT;
 use crate::replay_render::export::ExportFrames;
 use crate::replay_render::export::ExportLayers;
 use crate::replay_render::export::ExportProgress;
@@ -489,6 +490,21 @@ fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
     );
 }
 
+fn range_circle(entity: u32, player: &str) -> DrawCommand {
+    DrawCommand::ShipConfigCircle {
+        entity_id: EntityId::from(entity),
+        pos: MinimapPos { x: 10.0, y: 0.0 },
+        radius_px: 40.0,
+        color: [255, 255, 255],
+        alpha: 0.5,
+        dashed: true,
+        label: None,
+        kind: ShipConfigCircleKind::Detection,
+        player_name: player.to_owned(),
+        is_self: false,
+    }
+}
+
 /// A toggle changes what is drawn without re-baking: the commands are
 /// filtered as a frame is rasterised, so the track is untouched and the
 /// options are what moved.
@@ -660,6 +676,87 @@ fn an_export_leaves_out_the_pre_battle_phase_unless_it_is_asked_for() {
     assert_eq!(track.export_start(true), FrameIndex::FIRST, "and kept when asked for");
     let whole = ExportFrames::new(Arc::clone(&track), true, layers()).expect("there are frames");
     assert_eq!(whole.duration_seconds(), 99.5, "the video covers the recording");
+}
+
+/// Every export is the same length at the same rate, however few frames the bake kept: a long
+/// battle's track is sampled more coarsely, and the time it covers is read off its own clocks.
+#[test]
+fn an_export_is_a_fixed_length_whatever_the_track_kept() {
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    // A twenty-minute battle decimated to a frame every two seconds.
+    let coarse = Arc::new(track((0..600).map(|frame| frame as f32 * 2.0).collect()));
+    let short = Arc::new(track((0..120).map(|frame| frame as f32 * 0.5).collect()));
+
+    let coarse = ExportFrames::new(coarse, true, layers()).expect("there are frames");
+    assert_eq!(coarse.duration_seconds(), 1198.0, "the time the track's clocks span");
+    assert_eq!(coarse.len(), EXPORT_FRAME_COUNT);
+    assert_eq!(coarse.count(), EXPORT_FRAME_COUNT, "every frame is written");
+
+    let short = ExportFrames::new(short, true, layers()).expect("there are frames");
+    assert_eq!(short.duration_seconds(), 59.5);
+    assert_eq!(short.count(), EXPORT_FRAME_COUNT, "a short battle is stretched to the same length");
+}
+
+/// A written frame between two baked ones has each ship part of the way along, with what is
+/// drawn at the ship moved with it.
+#[test]
+fn an_export_moves_ships_between_the_frames_the_bake_kept() {
+    let mut track = track(vec![0.0, 10.0]);
+    track.frames[0] = vec![drawn_ship(1, "me", 0.0, true), range_circle(1, "me")];
+    track.frames[1] = vec![drawn_ship(1, "me", 100.0, true), range_circle(1, "me")];
+    let mut choices = ShipChoices::new();
+    let mut options = playback_options_hidden();
+    choices.set_ranges_for("me", |filter| filter.detection = true, &mut options);
+    let layers = ExportLayers { options, show_dead_ships: true, choices, drawn_on: Vec::new() };
+
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let middle = &frames[EXPORT_FRAME_COUNT / 2];
+    let ship_x = middle.iter().find_map(|command| match command {
+        DrawCommand::Ship { pos, .. } => Some(pos.x),
+        _ => None,
+    });
+    let circle_x = middle.iter().find_map(|command| match command {
+        DrawCommand::ShipConfigCircle { pos, .. } => Some(pos.x),
+        _ => None,
+    });
+    let ship_x = ship_x.expect("the ship is drawn");
+    assert!((ship_x - 50.0).abs() < 1.0, "halfway along: {ship_x}");
+    assert!(circle_x.is_some_and(|x| (x - (ship_x + 10.0)).abs() < 1e-3), "its range moved with it: {circle_x:?}");
+}
+
+/// A trail in a written frame between two baked ones runs up to the ship, not to where the ship
+/// was in the baked frame before.
+#[test]
+fn an_exported_trail_ends_at_its_ship_between_baked_frames() {
+    let mut track = track(vec![0.0, 10.0, 20.0]);
+    for (frame, x) in [0.0, 100.0, 200.0].into_iter().enumerate() {
+        track.frames[frame] = vec![drawn_ship(1, "me", x, true)];
+    }
+    let layers = ExportLayers {
+        options: RenderOptions { show_trails: true, ..playback_options_hidden() },
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let frame = &frames[EXPORT_FRAME_COUNT * 3 / 4];
+    let ship_x = frame.iter().find_map(|command| match command {
+        DrawCommand::Ship { pos, .. } => Some(pos.x),
+        _ => None,
+    });
+    let trail_end = frame.iter().find_map(|command| match command {
+        DrawCommand::PositionTrail { points, .. } => points.last().map(|(pos, _)| pos.x),
+        _ => None,
+    });
+    let ship_x = ship_x.expect("the ship is drawn");
+    assert!(ship_x > 100.0 && ship_x < 200.0, "between the baked frames: {ship_x}");
+    assert_eq!(trail_end, Some(ship_x));
 }
 
 /// What is on screen is what is written: the trails asked for, and what was drawn over the
