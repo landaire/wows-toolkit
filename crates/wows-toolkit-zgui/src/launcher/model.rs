@@ -5,6 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use wows_toolkit_launcher::AccountKey;
 use wows_toolkit_launcher::Launcher;
 use wows_toolkit_launcher::LauncherEnv;
 use wows_toolkit_launcher::LauncherEvent;
@@ -13,7 +14,9 @@ use wows_toolkit_launcher::LauncherSettings;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
@@ -35,6 +38,36 @@ impl LauncherState {
     }
 }
 
+/// Which account a Play press names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayOrigin {
+    /// The Play control and its popover, which play whichever account is the default.
+    Default,
+    /// An account the user picked by name, as the palette's "Play as" does.
+    Chosen,
+}
+
+/// A Play press that waits for its account's saved session to be read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingPlay {
+    pub account: AccountKey,
+    pub safe_mode: bool,
+    pub origin: PlayOrigin,
+}
+
+impl PendingPlay {
+    /// Whether the press still stands: the launcher is on and its account is kept, and still the
+    /// default when it was pressed as the default.
+    pub fn holds(&self, state: &LauncherState) -> bool {
+        let Some(settings) = state.settings.as_ref().filter(|_| state.is_enabled()) else { return false };
+        settings.accounts.iter().any(|account| account.key == self.account)
+            && match self.origin {
+                PlayOrigin::Default => settings.default_account == Some(self.account),
+                PlayOrigin::Chosen => true,
+            }
+    }
+}
+
 /// The shell's launcher. A `Copy` handle.
 #[derive(Clone, Copy)]
 pub struct LauncherModel {
@@ -43,6 +76,7 @@ pub struct LauncherModel {
     proxy: StoredValue<Option<String>>,
     /// Whether discovery and the catalog checks have been started.
     working: StoredValue<bool>,
+    pending_play: RwSignal<Option<PendingPlay>, LocalStorage>,
     services: Services,
 }
 
@@ -54,6 +88,7 @@ impl LauncherModel {
             state: RwSignal::new_local(LauncherState { launcher, settings: None }),
             proxy: StoredValue::new(None),
             working: StoredValue::new(false),
+            pending_play: RwSignal::new_local(None),
             services,
         };
 
@@ -73,6 +108,20 @@ impl LauncherModel {
     /// Whether the user opted in, subscribing to changes.
     pub fn is_enabled(self) -> bool {
         self.with(LauncherState::is_enabled)
+    }
+
+    /// The Play press waiting on a session read, subscribing to changes.
+    pub fn pending_play(self) -> Option<PendingPlay> {
+        self.pending_play.get()
+    }
+
+    /// Keeps a Play press until its session is read; the Play control then plays it.
+    pub fn defer_play(self, pending: PendingPlay) {
+        self.pending_play.set(Some(pending));
+    }
+
+    pub fn clear_pending_play(self) {
+        self.pending_play.set(None);
     }
 
     /// The app's game directory, which an account's [`InstallChoice::Toolkit`] plays. Subscribes
@@ -151,6 +200,7 @@ impl LauncherModel {
     /// Turns the launcher off. Work already running finishes and its results are kept; nothing
     /// new starts.
     pub fn disable(self) {
+        self.clear_pending_play();
         self.edit_settings(LauncherSettings::disable);
     }
 

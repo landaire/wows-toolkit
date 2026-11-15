@@ -40,6 +40,7 @@ use zgui::vocab::NamedKey;
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::returning_reader;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::model::PlayOrigin;
 use crate::launcher::testing;
 use crate::services::saved_for_test;
 use crate::shell::AppRootProps;
@@ -815,19 +816,124 @@ fn the_keyring_is_read_only_once_the_popover_opens() {
 }
 
 #[test]
-fn play_reads_an_unread_session_instead_of_starting() {
+fn play_waits_for_an_unread_session_beside_the_keyring_hint() {
     let mut launcher = LauncherWindow::open();
     let store = testing::store();
     let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
     launcher.adopt(settings);
     launcher.found(up_to_date());
 
+    store.close();
     launcher.press("launcher-play");
     crate::interaction_tests::settle_in_real_time(&mut launcher.window);
-
     assert_eq!(store.reads(), 1);
+    assert_eq!(launcher.play_state(), "restoring", "the press waits on the read");
+    assert!(launcher.has("launcher-keyring-hint"), "the hint is beside the Play control");
+
+    store.open();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(!launcher.has("launcher-keyring-hint"), "the hint goes once the keyring answers");
     assert_eq!(launcher.play_state(), "sign-in-again", "the store held no session");
-    assert!(!launcher.has("launcher-sign-in-dialog"), "the press only read the session");
+    assert!(launcher.has("launcher-sign-in-dialog"), "the waiting press asks for a sign-in");
+}
+
+/// The launcher with EU and NA accounts, a Play press for the default EU account waiting on a
+/// closed store.
+fn waiting_play() -> (LauncherWindow, std::sync::Arc<testing::TestStore>) {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab"), (na(), "Ishmael")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+
+    store.close();
+    launcher.press("launcher-play");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(launcher.model.pending_play().is_some(), "the press waits on the read");
+    (launcher, store)
+}
+
+#[test]
+fn turning_the_launcher_off_drops_a_waiting_play() {
+    let (mut launcher, store) = waiting_play();
+
+    launcher.model.disable();
+    store.open();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    launcher.model.enable();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+
+    assert_eq!(launcher.model.pending_play(), None);
+    assert!(!launcher.has("launcher-sign-in-dialog"), "turning it back on is not a press");
+}
+
+#[test]
+fn a_new_default_account_drops_a_waiting_play() {
+    let (mut launcher, store) = waiting_play();
+
+    launcher.model.edit_settings(|settings| {
+        settings.set_default_account(na());
+    });
+    store.open();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+
+    assert_eq!(launcher.model.pending_play(), None);
+    assert!(!launcher.has("launcher-sign-in-dialog"), "the old default is not played");
+}
+
+#[test]
+fn a_new_default_keeps_a_waiting_play_for_a_chosen_account() {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab"), (na(), "Ishmael")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+
+    // "Play as" for the account that is the default when pressed.
+    store.close();
+    crate::launcher::play::play(launcher.shell, launcher.model, eu(), false, PlayOrigin::Chosen);
+    launcher.model.edit_settings(|settings| {
+        settings.set_default_account(na());
+    });
+    store.open();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+
+    assert_eq!(launcher.model.pending_play(), None, "the read answered");
+    assert!(launcher.has("launcher-sign-in-dialog"), "the chosen account is still played");
+}
+
+#[test]
+fn forgetting_the_account_drops_a_waiting_play() {
+    let (mut launcher, store) = waiting_play();
+
+    launcher.model.edit_settings(|settings| settings.accounts.retain(|account| account.key != eu()));
+    launcher.settle();
+    assert_eq!(launcher.model.pending_play(), None, "nothing waits on the forgotten account");
+    store.open();
+}
+
+#[test]
+fn adding_the_first_account_says_the_keyring_may_ask() {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+
+    store.close();
+    crate::launcher::account::open_sign_in(
+        launcher.shell,
+        launcher.model,
+        wows_toolkit_launcher::LoginTarget::NewAccount,
+    );
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(launcher.has("launcher-sign-in-dialog"));
+    assert_eq!(store.reads(), 1, "the dialog asks the store where a sign-in will be kept");
+    assert!(launcher.has("launcher-keyring-hint"), "the hint is up while the store waits");
+
+    store.open();
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(!launcher.has("launcher-keyring-hint"), "the hint goes once the keyring answers");
 }
 
 #[test]
@@ -1040,6 +1146,18 @@ fn the_launcher_surfaces_render() {
         crate::launcher::opt_in::ask_to_enable(launcher.shell, launcher.model);
         launcher.settle();
         save(&mut launcher, "opt-in", suffix);
+        drop(launcher);
+
+        let mut launcher = LauncherWindow::open_drawn(appearance);
+        let store = testing::store();
+        let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
+        launcher.adopt(settings);
+        launcher.found(up_to_date());
+        store.close();
+        launcher.press("launcher-play");
+        crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+        save(&mut launcher, "keyring-hint", suffix);
+        store.open();
     }
 }
 

@@ -18,8 +18,10 @@ use zgui::component;
 use zgui::prelude::try_use_window;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
@@ -43,10 +45,13 @@ use zgui_ui_primitives::Side;
 use crate::icons::AppIconProps;
 use crate::launcher::CSS;
 use crate::launcher::SHEET;
+use crate::launcher::account::KeyringHintProps;
 use crate::launcher::account::open_sign_in;
 use crate::launcher::display::PlayState;
 use crate::launcher::display::realm_badge;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::model::PendingPlay;
+use crate::launcher::model::PlayOrigin;
 use crate::launcher::palette::LauncherOffersProps;
 use crate::launcher::popover::AccountPopoverProps;
 use crate::launcher::realm::RealmGlyphProps;
@@ -104,6 +109,10 @@ const PLAY_CSS: &str = zgui::css!(
     }
     .zui-popover.wt-account-popover {
         width: 400px;
+    }
+    .wt-play__hint {
+        max-width: 320px;
+        font-size: 11px;
     }"
 );
 
@@ -134,6 +143,24 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
     });
     let window = try_use_window().map(|window| window.size());
     let collapsed = Memo::new(move |_| window.is_some_and(|size| size.get().width.0 < COLLAPSE_BELOW));
+    let resuming = RenderEffect::new(move |_| {
+        let Some(pending) = model.pending_play() else { return };
+        let (holds, reading) = model.with(|state| {
+            let reading = matches!(
+                state.launcher.account_status(pending.account),
+                AccountStatus::NotLoaded | AccountStatus::Restoring
+            );
+            (pending.holds(state), reading)
+        });
+        if !holds {
+            model.clear_pending_play();
+        } else if !reading {
+            model.clear_pending_play();
+            play(shell, model, pending.account, pending.safe_mode, pending.origin);
+        }
+    });
+    on_cleanup_local(move || drop(resuming));
+    let waiting = Memo::new(move |_| model.pending_play().is_some());
     let open = RwSignal::new_local(false);
     let primary = move || state.with(PlayState::is_primary);
     let tip = move || {
@@ -181,6 +208,11 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
                     attr:data-testid = "launcher-popover"
                 ) {
                     AccountPopover(shell = shell, model = model, open = open)
+                }
+            }
+            Show(when = move || waiting.get()) {
+                box(class = "wt-play__hint") {
+                    KeyringHint(model = model)
                 }
             }
         }
@@ -272,7 +304,7 @@ fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal
         PlayState::SignInAgain(account) => open_sign_in(shell, model, LoginTarget::Reauthenticate(account.key)),
         PlayState::Update { install, .. } => start_update(shell, model, install),
         PlayState::Updating { .. } | PlayState::Paused { .. } => popover.set(true),
-        PlayState::Play(account) => play(shell, model, account.key, false),
+        PlayState::Play(account) => play(shell, model, account.key, false, PlayOrigin::Default),
         PlayState::InBattle { .. } => shell.select(TabKey::App(AppTab::PlayerTracker)),
         // Nothing to do until the state moves on.
         PlayState::Loading | PlayState::Restoring(_) | PlayState::Starting { .. } | PlayState::Running { .. } => {}
@@ -280,9 +312,14 @@ fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal
 }
 
 /// Starts the game for `account`, saying in a message why it could not.
-pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool) {
-    // An unread session is read first; the control waits on it, and a second press plays.
-    if model.with_untracked(|state| state.launcher.account_status(account) == AccountStatus::NotLoaded) {
+pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool, origin: PlayOrigin) {
+    // An unread session is read first. The press waits on it beside the keyring hint, and the
+    // Play control plays once the read answers.
+    let unread = model.with_untracked(|state| {
+        matches!(state.launcher.account_status(account), AccountStatus::NotLoaded | AccountStatus::Restoring)
+    });
+    if unread {
+        model.defer_play(PendingPlay { account, safe_mode, origin });
         model.ensure_sessions();
         return;
     }

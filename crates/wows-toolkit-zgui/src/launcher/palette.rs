@@ -15,6 +15,7 @@ use crate::launcher::account::open_sign_in;
 use crate::launcher::display::AccountLabel;
 use crate::launcher::display::PlayState;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::model::PlayOrigin;
 use crate::launcher::play::play;
 use crate::launcher::play::start_update;
 use crate::launcher::realm::realm_glyph;
@@ -80,7 +81,7 @@ fn PlayAsOffer(shell: Shell, model: LauncherModel, account: AccountLabel) -> imp
         RootCommand::Launcher(LauncherCommand::PlayAs(key)),
         label,
         Some(glyph),
-        PaletteRun::action(move || play(shell, model, key, false)),
+        PaletteRun::action(move || play(shell, model, key, false, PlayOrigin::Chosen)),
     );
 }
 

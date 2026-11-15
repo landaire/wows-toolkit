@@ -51,6 +51,7 @@ use crate::launcher::display::PlayState;
 use crate::launcher::download::DownloadStatusProps;
 use crate::launcher::installs::add_install;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::model::PlayOrigin;
 use crate::launcher::play::play;
 use crate::launcher::realm::RealmGlyphProps;
 use crate::launcher::replay;
@@ -130,7 +131,8 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
     });
     on_cleanup_local(move || drop(reading));
 
-    let extra_play = move || match state.get() {
+    let extra_play = move || {
+        match state.get() {
         PlayState::Update { account, .. } => Some(
             view! {
                 Button(
@@ -138,7 +140,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                     size = ButtonSize::Sm,
                     class = "wt-account-popover__link",
                     attr:data-testid = "launcher-play-anyway",
-                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, false)))
+                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, false, PlayOrigin::Default)))
                 ) {
                     {t!("ui.launcher.popover.play_anyway").into_owned()}
                 }
@@ -152,7 +154,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                     size = ButtonSize::Sm,
                     class = "wt-account-popover__link",
                     attr:data-testid = "launcher-play-safe-mode",
-                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, true)))
+                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, true, PlayOrigin::Default)))
                 ) {
                     {t!("ui.launcher.popover.play_safe_mode").into_owned()}
                 }
@@ -160,6 +162,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
             .into_view(),
         ),
         _ => None,
+    }
     };
 
     view! {
