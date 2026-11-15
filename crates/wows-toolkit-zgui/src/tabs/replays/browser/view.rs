@@ -769,12 +769,11 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         view! {
             MenuItem(on_select = UnsyncCallback::new(move |()| {
                 let (dir, replay) = (PathBuf::from(&dir), replay.clone());
-                let toasts = shell.toasts();
                 confirm(
                     shell,
                     t!("ui.replay.context.open_in_game").into_owned(),
                     t!("confirm.open_in_game").into_owned(),
-                    move || files::open_replay_in_game(toasts, &dir, &replay),
+                    move || files::open_replay_in_game(shell, &dir, &replay),
                 );
             })) {
                 {t!("ui.replay.context.open_in_game").into_owned()}

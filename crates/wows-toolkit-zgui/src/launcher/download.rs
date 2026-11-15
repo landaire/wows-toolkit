@@ -17,12 +17,12 @@ use zgui_ui::ButtonVariant;
 use zgui_ui::ProgressProps;
 use zgui_ui::SpinnerProps;
 
+use crate::launcher::display::DownloadStage;
+use crate::launcher::display::DownloadTarget;
+use crate::launcher::display::RunningDownload;
+use crate::launcher::model::LauncherModel;
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::tabs::launcher::display::DownloadStage;
-use crate::tabs::launcher::display::DownloadTarget;
-use crate::tabs::launcher::display::RunningDownload;
-use crate::tabs::launcher::model::LauncherModel;
 
 /// The status line of `target`'s download. Shows nothing until one is started.
 #[component]

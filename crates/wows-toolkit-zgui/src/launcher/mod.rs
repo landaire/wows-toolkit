@@ -1,14 +1,24 @@
-//! The Launcher tab: discover, launch and manage WoWs installs, sign in, and install a game fresh.
-//! The state and background work are shared with the other front ends through
-//! `wows_toolkit_launcher`; this is the view over them.
+//! The game launcher, Linux only and behind an opt-in: the Play control at the end of the tab
+//! strip, its account popover, the sign-in, setup, opt-in and game settings dialogs, the Settings
+//! drawer's launcher rows and the palette's launcher entries. The state and background work are
+//! shared with the other front ends through `wows_toolkit_launcher`; the model lives at shell
+//! scope so discovery, update checks and downloads run whichever tab is open.
 
 mod account;
 mod display;
 mod download;
+pub mod drawer;
+mod game_settings;
 mod games;
 mod installs;
 mod model;
+mod opt_in;
 mod options;
+mod palette;
+mod play;
+mod popover;
+pub mod replay;
+mod setup;
 #[cfg(test)]
 pub mod testing;
 #[cfg(test)]
@@ -19,26 +29,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use landaire_ui::LoadingPlacement;
-use landaire_ui::LoadingProps;
 use wows_toolkit_launcher::LauncherEvents;
 use wows_toolkit_launcher::LauncherSettings;
-use zgui::component;
 use zgui::css;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
-use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::SetValue;
 use zgui::task::spawn_local;
-use zgui::view;
-use zgui::view::Children;
-use zgui::view::IntoView;
-use zgui::view::ShowProps;
-use zgui::view::install_stylesheet;
 
 use crate::services::Job;
 use crate::services::JobHandle;
@@ -46,53 +47,22 @@ use crate::services::Jobs;
 use crate::services::Progress;
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::tabs::launcher::account::AccountSectionProps;
-use crate::tabs::launcher::display::DownloadJob;
-use crate::tabs::launcher::games::GamesSectionProps;
-use crate::tabs::launcher::installs::InstallsSectionProps;
-use crate::tabs::launcher::model::LauncherModel;
-use crate::tabs::launcher::options::OptionsSectionProps;
+
+use self::display::DownloadJob;
+
+pub use self::model::LauncherModel;
+pub use self::play::PlayControlProps;
 
 const SHEET: &str = "wt-launcher";
 
 const CSS: &str = css!(
-    ".wt-launcher {
-        flex: 1 1 auto;
-        min-width: 0;
-        min-height: 0;
-    }
-    .wt-launcher__page {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        padding: 12px 16px;
-    }
-    .wt-launcher__section {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    }
-    .wt-launcher__heading {
-        font-size: var(--zui-type-size-sm);
-        font-weight: var(--zui-type-weight-bold);
-        color: var(--lui-color-text-bright);
-    }
-    .wt-launcher__card {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 8px 12px;
-        border: 1px solid var(--lui-color-border);
-        border-radius: 6px;
-        background-color: var(--lui-color-surface);
-    }
-    .wt-launcher__column {
+    ".wt-launcher__column {
         display: flex;
         flex-direction: column;
         gap: 4px;
         min-width: 0;
     }
-    .wt-launcher__column--wide { gap: 6px; }
+    .wt-launcher__column--wide { gap: 8px; }
     .wt-launcher__row {
         display: flex;
         flex-direction: row;
@@ -120,6 +90,21 @@ const CSS: &str = css!(
         color: var(--wt-color-ok);
     }
     .wt-launcher__strong { font-weight: var(--zui-type-weight-bold); }
+    .wt-launcher__heading {
+        font-size: var(--zui-type-size-sm);
+        font-weight: var(--zui-type-weight-bold);
+        color: var(--lui-color-text-bright);
+    }
+    .wt-launcher__link {
+        font-size: var(--zui-type-size-sm);
+        color: var(--lui-color-accent);
+        text-decoration: underline;
+    }
+    .wt-launcher__keyring {
+        padding: 6px 8px;
+        border: 1px solid var(--wt-color-warn);
+        border-radius: 4px;
+    }
     .wt-launcher__mono { font-family: var(--lui-font-family-mono); }
     .wt-launcher__truncate {
         min-width: 0;
@@ -127,10 +112,16 @@ const CSS: &str = css!(
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .wt-launcher__row > .wt-launcher__input {
-        width: 240px;
-        flex: none;
+    .wt-launcher__card {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 12px;
+        border: 1px solid var(--lui-color-border);
+        border-radius: 6px;
+        background-color: var(--lui-color-surface);
     }
+    .wt-launcher__input { width: 240px; flex: none; }
     .wt-launcher__textarea.wt-launcher__textarea { min-height: 48px; }
     .wt-launcher__path-label { width: 60px; flex: none; }
     .wt-launcher__meter {
@@ -141,68 +132,31 @@ const CSS: &str = css!(
     }
     .wt-launcher__meter .zui-progress { width: 100%; }
     .wt-launcher__nowrap { flex: none; white-space: nowrap; }
-    .wt-launcher .zui-spinner {
+    .wt-launcher__badge {
+        flex: none;
+        padding: 0 5px;
+        border-radius: 3px;
+        background-color: var(--lui-color-panel);
+        border: 1px solid var(--lui-color-border);
+        font-size: 11px;
+        font-weight: var(--zui-type-weight-bold);
+    }
+    .wt-launcher .zui-spinner,
+    .wt-launcher__row .zui-spinner {
         width: 12px;
         height: 12px;
         flex: none;
     }"
 );
 
-/// The tab. Its settings row is read once the app's settings have opened the database.
-#[component]
-pub fn LauncherTab() -> impl IntoView {
-    install_stylesheet(SHEET, CSS);
-    let services = Services::current();
-    let shell = Shell::current();
-    let (model, events) = LauncherModel::new(services);
-
+/// Starts the launcher with the shell: follows the proxy setting, reads the launcher's settings
+/// row once the app's settings are loaded, applies its background work's results, keeps a status
+/// bar job per running download. The work itself waits for the opt-in.
+pub fn begin(shell: Shell, model: LauncherModel, events: LauncherEvents) {
+    let services = shell.services();
     listen(model, events);
     start(model, services);
-    check_games(model);
     report_downloads(model, services.jobs);
-    #[cfg(test)]
-    testing::mounted(model);
-
-    let locale = services.locale;
-    let loaded = Memo::new(move |_| model.with(|state| state.settings.is_some()));
-
-    view! {
-        scroll(class = "wt-launcher", attr:data-testid = "launcher-tab") {
-            if move || loaded.get() {
-                column(class = "wt-launcher__page") {
-                    AccountSection(model = model)
-                    InstallsSection(model = model, shell = shell)
-                    OptionsSection(model = model, shell = shell)
-                    GamesSection(model = model, shell = shell)
-                }
-            } else {
-                Loading(
-                    label = Signal::derive_local(locale.text("ui.launcher.loading")),
-                    placement = LoadingPlacement::Top,
-                    attr:data-testid = "launcher-loading"
-                )
-            }
-        }
-    }
-}
-
-/// A titled card.
-#[component]
-fn Section(
-    /// The translation key of the title.
-    heading: &'static str,
-    children: Children,
-) -> impl IntoView {
-    let locale = Services::current().locale;
-
-    view! {
-        column(class = "wt-launcher__section") {
-            text(class = "wt-launcher__heading") {{locale.text(heading)}}
-            column(class = "wt-launcher__card") {
-                {children.into_view_once()}
-            }
-        }
-    }
 }
 
 /// Applies each result of the launcher's background work as it arrives.
@@ -247,27 +201,11 @@ fn start(model: LauncherModel, services: Services) {
     on_cleanup_local(move || drop(following));
 }
 
-/// Asks what each known game would install, once the settings are read. A game whose check
-/// failed is asked again only by its retry button.
-fn check_games(model: LauncherModel) {
-    let unchecked =
-        Memo::new(move |_| model.with(|state| state.settings.is_some() && !state.launcher.available_games_checked()));
-    let checking = RenderEffect::new(move |_| {
-        if unchecked.get() {
-            model.op(|launcher, _, env| {
-                launcher.start_available_games_check(env);
-                false
-            });
-        }
-    });
-    on_cleanup_local(move || drop(checking));
-}
-
 /// Keeps one status bar job per running download.
 fn report_downloads(model: LauncherModel, jobs: Jobs) {
     let running = Memo::new(move |_| model.with(|state| DownloadJob::all(&state.launcher)));
     // Outside the reactive arena: a dropped handle writes the jobs signal, which the arena must not
-    // be locked for while it disposes of the tab.
+    // be locked for while it disposes of the shell.
     let handles: Rc<RefCell<HashMap<PathBuf, JobHandle>>> = Rc::default();
     let reported = Rc::clone(&handles);
     let reporting = RenderEffect::new(move |_| {

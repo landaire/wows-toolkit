@@ -55,7 +55,7 @@ use crate::tabs::player_tracker::live::take_stats_lookups;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::roster::sniper_hover_text;
 
-const ARENA_INFO: &str = r#"{
+pub(crate) const ARENA_INFO: &str = r#"{
     "gameMode": 7,
     "matchGroup": "pvp",
     "gameType": "RandomBattle",

@@ -4,72 +4,223 @@
 use std::num::NonZeroU64;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 use wgc_catalog::known_games::KnownGame;
 use wgc_install::GameInstall;
+use wows_toolkit_launcher::AccountKey;
+use wows_toolkit_launcher::AccountStatus;
 use wows_toolkit_launcher::CatalogCheckState;
 use wows_toolkit_launcher::CatalogSummary;
 use wows_toolkit_launcher::DownloadPhase;
 use wows_toolkit_launcher::DownloadState;
+use wows_toolkit_launcher::GameState;
+use wows_toolkit_launcher::InstallChoice;
 use wows_toolkit_launcher::Launcher;
+use wows_toolkit_launcher::SavedAccount;
 
-/// Which form of the account section shows.
-#[derive(Clone, Debug, PartialEq)]
-pub enum AccountMode {
-    SignedIn(SessionView),
+use crate::launcher::model::LauncherState;
+
+/// Which step of the sign-in form shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignInStep {
+    Credentials,
     /// A sign-in waits on a two-factor code.
     TwoFactor,
     /// WGNI asked for a CAPTCHA this launcher cannot show.
     Captcha,
-    SignedOut,
 }
 
-impl AccountMode {
-    pub fn of(launcher: &Launcher, now: SystemTime) -> Self {
-        if let Some(session) = launcher.session() {
-            let expiry = match session.expiry {
-                wgc_auth::TokenExpiry::KnownAt(at) => match at.duration_since(now) {
-                    Ok(remaining) => Expiry::In(wows_toolkit_launcher::format_duration(remaining)),
-                    Err(_) => Expiry::Passed,
-                },
-                wgc_auth::TokenExpiry::Unknown => Expiry::Unknown,
-            };
-            return Self::SignedIn(SessionView {
-                nickname: session.nickname.as_str().to_owned(),
-                region: wows_toolkit_launcher::realm_label(session.realm),
-                expiry,
-                persisted: launcher.session_persisted(),
-            });
-        }
-
+impl SignInStep {
+    pub fn of(launcher: &Launcher) -> Self {
         if launcher.two_factor_pending() {
             Self::TwoFactor
         } else if launcher.captcha_blocked() {
             Self::Captcha
         } else {
-            Self::SignedOut
+            Self::Credentials
         }
     }
 }
 
-/// The signed-in account.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SessionView {
+/// A saved account as the Play control and the popover name it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AccountLabel {
+    pub key: AccountKey,
+    /// The realm's short name, as the badge shows it.
+    pub realm: &'static str,
     pub nickname: String,
-    pub region: &'static str,
-    pub expiry: Expiry,
-    /// False when the session lives only in memory.
-    pub persisted: bool,
 }
 
-/// When the session's token expires.
+impl AccountLabel {
+    pub fn of(account: &SavedAccount) -> Self {
+        Self { key: account.key, realm: realm_badge(account.key.realm), nickname: account.nickname.as_str().to_owned() }
+    }
+}
+
+/// The realm as a badge: short and upper case.
+pub fn realm_badge(realm: wgc_auth::AccountRealm) -> &'static str {
+    match realm {
+        wgc_auth::AccountRealm::Eu => "EU",
+        wgc_auth::AccountRealm::Na => "NA",
+        wgc_auth::AccountRealm::Asia => "ASIA",
+    }
+}
+
+/// What the Play control says and does.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Expiry {
-    /// After this long, already formatted.
-    In(String),
-    Passed,
-    Unknown,
+pub enum PlayState {
+    /// The launcher's settings are not read yet.
+    Loading,
+    /// No install to play, or its game files are missing.
+    SetUpGame,
+    /// Linux, and no runner for a non-Steam install.
+    SetUpRunner,
+    /// No account is saved; Play asks for one.
+    AddAccount,
+    /// The default account's session is being restored.
+    Restoring(AccountLabel),
+    /// The default account has no usable session.
+    SignInAgain(AccountLabel),
+    Update {
+        install: PathBuf,
+        size: u64,
+        account: AccountLabel,
+    },
+    Updating {
+        install: PathBuf,
+        percent: Option<u8>,
+    },
+    Paused {
+        install: PathBuf,
+    },
+    Play(AccountLabel),
+    Starting {
+        realm: Option<&'static str>,
+    },
+    Running {
+        realm: Option<&'static str>,
+    },
+    InBattle {
+        realm: Option<&'static str>,
+    },
+}
+
+impl PlayState {
+    /// `in_battle`: the live match watcher sees a battle.
+    pub fn of(state: &LauncherState, wows_dir: Option<&Path>, in_battle: bool) -> Self {
+        let Some(settings) = &state.settings else {
+            return Self::Loading;
+        };
+        let launcher = &state.launcher;
+
+        let realm = |game: &GameState| {
+            game.account().and_then(|key| settings.account(key)).map(|account| realm_badge(account.key.realm))
+        };
+        match launcher.game_state() {
+            GameState::Idle => {}
+            game @ GameState::Starting { .. } => return Self::Starting { realm: realm(game) },
+            game @ GameState::Running { .. } if in_battle => return Self::InBattle { realm: realm(game) },
+            game @ GameState::Running { .. } => return Self::Running { realm: realm(game) },
+        }
+
+        let account = settings.default_account().or_else(|| settings.accounts.first());
+        let install = match account {
+            Some(account) => account.install.resolve(wows_dir),
+            None => wows_dir.map(Path::to_path_buf),
+        };
+        let Some(install) = install.filter(|install| install.join("WorldOfWarships.exe").is_file()) else {
+            return Self::SetUpGame;
+        };
+        let found = launcher
+            .installs()
+            .iter()
+            .find(|found| found.path == install)
+            .cloned()
+            .unwrap_or_else(|| GameInstall::manual(install.clone()));
+        if wows_toolkit_launcher::proton::needs_setup(&found, settings) {
+            return Self::SetUpRunner;
+        }
+
+        match launcher.download_state(&install) {
+            Some(DownloadState::Running { done_bytes, total_bytes, .. }) => {
+                let percent =
+                    Transferred::new(*done_bytes, *total_bytes).map(|transferred| transferred.percent() as u8);
+                return Self::Updating { install, percent };
+            }
+            Some(DownloadState::Paused) => return Self::Paused { install },
+            _ => {}
+        }
+
+        let Some(account) = account else {
+            return Self::AddAccount;
+        };
+        let label = AccountLabel::of(account);
+        if let Some(size) = launcher.update_size(&install) {
+            return Self::Update { install, size, account: label };
+        }
+
+        match launcher.account_status(account.key) {
+            AccountStatus::Ready(_) => Self::Play(label),
+            AccountStatus::Restoring => Self::Restoring(label),
+            AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::StoreUnavailable => {
+                Self::SignInAgain(label)
+            }
+        }
+    }
+
+    /// Whether the main part of the button is pressed in the accent color.
+    pub fn is_primary(&self) -> bool {
+        matches!(self, Self::Play(_) | Self::Update { .. } | Self::AddAccount)
+    }
+
+    /// The realm badge the collapsed button keeps.
+    pub fn realm(&self) -> Option<&'static str> {
+        match self {
+            Self::Restoring(account) | Self::SignInAgain(account) | Self::Play(account) => Some(account.realm),
+            Self::Update { account, .. } => Some(account.realm),
+            Self::Starting { realm } | Self::Running { realm } | Self::InBattle { realm } => *realm,
+            _ => None,
+        }
+    }
+
+    /// The nickname the button names, which the collapsed button keeps for its tooltip.
+    pub fn nickname(&self) -> Option<&str> {
+        match self {
+            Self::Restoring(account) | Self::SignInAgain(account) | Self::Play(account) => Some(&account.nickname),
+            Self::Update { account, .. } => Some(&account.nickname),
+            _ => None,
+        }
+    }
+}
+
+/// How an account row of the popover reads.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AccountRow {
+    pub label: AccountLabel,
+    pub is_default: bool,
+    pub status: AccountStatus,
+    /// The install the account plays, when it is not the app's game directory.
+    pub other_install: Option<PathBuf>,
+}
+
+impl AccountRow {
+    pub fn all(state: &LauncherState) -> Vec<Self> {
+        let Some(settings) = &state.settings else { return Vec::new() };
+
+        settings
+            .accounts
+            .iter()
+            .map(|account| Self {
+                label: AccountLabel::of(account),
+                is_default: settings.default_account == Some(account.key),
+                status: state.launcher.account_status(account.key),
+                other_install: match &account.install {
+                    InstallChoice::Toolkit => None,
+                    InstallChoice::Path(path) => Some(path.clone()),
+                },
+            })
+            .collect()
+    }
 }
 
 /// One install's header, which keys its row.

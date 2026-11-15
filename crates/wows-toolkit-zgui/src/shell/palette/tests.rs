@@ -149,7 +149,6 @@ fn the_root_list_offers_every_tab_and_the_shells_commands() {
 
     for id in [
         "go-to-replay-inspector",
-        "go-to-launcher",
         "go-to-stats",
         "go-to-player-tracker",
         "go-to-armor-viewer",
@@ -186,7 +185,7 @@ fn enter_runs_the_highlighted_entry_and_the_arrows_walk() {
     press(&mut window, NamedKey::ArrowDown);
     press(&mut window, NamedKey::Enter);
     assert!(!shown(&window, PALETTE), "Enter runs the highlighted entry");
-    assert!(shown(&window, "tab-page-launcher"), "the second entry, one step down from the first");
+    assert!(shown(&window, "tab-page-stats"), "the second entry, one step down from the first");
 
     shortcut(&mut window, 'k');
     press(&mut window, NamedKey::Enter);
@@ -203,7 +202,7 @@ fn typing_narrows_the_root_list_and_enter_runs_the_entry() {
     shortcut(&mut window, 'k');
     type_text(&mut window, "STATS");
     assert!(shown(&window, "palette-item-go-to-stats"));
-    assert!(!shown(&window, "palette-item-go-to-launcher"), "an entry that does not hold the query goes");
+    assert!(!shown(&window, "palette-item-go-to-unpacker"), "an entry that does not hold the query goes");
     assert!(!shown(&window, "palette-item-set-theme-dark"));
 
     press(&mut window, NamedKey::Enter);

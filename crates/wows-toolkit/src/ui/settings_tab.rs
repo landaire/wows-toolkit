@@ -235,6 +235,8 @@ impl ToolkitTabViewer<'_> {
                             (!trimmed.is_empty()).then(|| trimmed.to_string());
                     }
                 });
+                #[cfg(all(feature = "launcher", target_os = "linux"))]
+                self.build_launcher_opt_in(ui);
             });
 
             ui.add_space(12.0);
@@ -645,6 +647,51 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
+    }
+
+    /// The launcher toggle. Turning it on shows the opt-in notice first.
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    fn build_launcher_opt_in(&mut self, ui: &mut egui::Ui) {
+        let mut enabled = self.tab_state.persisted.read().settings.launcher.is_enabled();
+        if ui
+            .checkbox(&mut enabled, t!("ui.launcher.opt_in.setting"))
+            .on_hover_text(t!("ui.launcher.opt_in.description"))
+            .changed()
+        {
+            if enabled {
+                self.tab_state.launcher_opt_in_open = true;
+            } else {
+                self.tab_state.persisted.write().settings.launcher.disable();
+                self.tab_state.request_save();
+            }
+        }
+
+        if !self.tab_state.launcher_opt_in_open {
+            return;
+        }
+
+        let mut accepted = false;
+        let mut cancelled = false;
+        let modal = egui::Modal::new(egui::Id::unique("launcher_opt_in")).show(ui.ctx(), |ui| {
+            ui.set_max_width(480.0);
+            ui.heading(t!("ui.launcher.opt_in.title"));
+            ui.add_space(4.0);
+            ui.label(t!("ui.launcher.opt_in.notice_account"));
+            ui.add_space(4.0);
+            ui.label(t!("ui.launcher.opt_in.notice_reports"));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                accepted = ui.button(t!("ui.launcher.opt_in.continue")).clicked();
+                cancelled = ui.button(t!("ui.launcher.opt_in.cancel")).clicked();
+            });
+        });
+        if accepted {
+            self.tab_state.persisted.write().settings.launcher.enable();
+            self.tab_state.request_save();
+        }
+        if accepted || cancelled || modal.should_close() {
+            self.tab_state.launcher_opt_in_open = false;
+        }
     }
 }
 

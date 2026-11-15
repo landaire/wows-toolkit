@@ -72,6 +72,13 @@ pub enum Setting {
     Theme,
     Zoom,
     WowsDirectory,
+    /// The opt-in that turns the game launcher on. Linux only.
+    GameLauncher,
+    GameInstalls,
+    GameRunner,
+    GameLaunchArgs,
+    GameEnvironment,
+    GameSafeModeArgs,
     AutoDump,
     CacheDirectory,
     CachedBuilds,
@@ -101,7 +108,7 @@ pub enum Setting {
 
 impl Setting {
     /// Every setting, in the order the drawer lists them.
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 40] = [
         Self::Language,
         Self::DataSharing,
         Self::CodeIntegrity,
@@ -112,6 +119,12 @@ impl Setting {
         Self::Theme,
         Self::Zoom,
         Self::WowsDirectory,
+        Self::GameLauncher,
+        Self::GameInstalls,
+        Self::GameRunner,
+        Self::GameLaunchArgs,
+        Self::GameEnvironment,
+        Self::GameSafeModeArgs,
         Self::AutoDump,
         Self::CacheDirectory,
         Self::CachedBuilds,
@@ -148,7 +161,13 @@ impl Setting {
             | Self::EnableLogging
             | Self::DataFolder => SettingsSection::General,
             Self::Theme | Self::Zoom => SettingsSection::Appearance,
-            Self::WowsDirectory => SettingsSection::Game,
+            Self::WowsDirectory
+            | Self::GameLauncher
+            | Self::GameInstalls
+            | Self::GameRunner
+            | Self::GameLaunchArgs
+            | Self::GameEnvironment
+            | Self::GameSafeModeArgs => SettingsSection::Game,
             Self::AutoDump | Self::CacheDirectory | Self::CachedBuilds => SettingsSection::GameDataCache,
             Self::ReplayIndex => SettingsSection::ReplayIndex,
             Self::CurrentReplayPath
@@ -177,6 +196,12 @@ impl Setting {
             Self::Theme => t!("ui.settings.app.theme"),
             Self::Zoom => t!("ui.settings.panel.zoom"),
             Self::WowsDirectory => t!("ui.settings.wows.directory_hint"),
+            Self::GameLauncher => t!("ui.launcher.opt_in.setting"),
+            Self::GameInstalls => t!("ui.settings.launcher.installs"),
+            Self::GameRunner => t!("ui.settings.launcher.runner"),
+            Self::GameLaunchArgs => t!("ui.settings.launcher.launch_args"),
+            Self::GameEnvironment => t!("ui.settings.launcher.environment"),
+            Self::GameSafeModeArgs => t!("ui.settings.launcher.safe_mode_args"),
             Self::AutoDump => t!("ui.settings.wows.cache.auto_dump"),
             Self::CacheDirectory => t!("ui.settings.panel.cache_directory"),
             Self::CachedBuilds => t!("ui.settings.panel.cached_builds"),
@@ -216,6 +241,12 @@ impl Setting {
             Self::Theme => t!("ui.settings.panel.theme_description"),
             Self::Zoom => t!("ui.settings.panel.zoom_description"),
             Self::WowsDirectory => t!("ui.settings.wows.description"),
+            Self::GameLauncher => t!("ui.launcher.opt_in.description"),
+            Self::GameInstalls => t!("ui.settings.launcher.installs_description"),
+            Self::GameRunner => t!("ui.settings.launcher.runner_description"),
+            Self::GameLaunchArgs => t!("ui.settings.launcher.launch_args_description"),
+            Self::GameEnvironment => t!("ui.settings.launcher.environment_description"),
+            Self::GameSafeModeArgs => t!("ui.settings.launcher.safe_mode_args_description"),
             Self::AutoDump => t!("ui.settings.wows.cache.description"),
             Self::CacheDirectory => t!("ui.settings.panel.cache_directory_description"),
             Self::CachedBuilds => t!("ui.settings.wows.cache.actions_tooltip"),
@@ -253,6 +284,11 @@ impl Setting {
                 | Self::Theme
                 | Self::Zoom
                 | Self::WowsDirectory
+                | Self::GameInstalls
+                | Self::GameRunner
+                | Self::GameLaunchArgs
+                | Self::GameEnvironment
+                | Self::GameSafeModeArgs
                 | Self::CacheDirectory
                 | Self::CachedBuilds
                 | Self::ReplayIndex
@@ -263,6 +299,19 @@ impl Setting {
                 | Self::TwitchChannel
                 | Self::McpBindAddress
                 | Self::McpPort
+        )
+    }
+
+    /// Whether the row belongs to the game launcher, which exists on Linux only.
+    pub const fn is_launcher(self) -> bool {
+        matches!(
+            self,
+            Self::GameLauncher
+                | Self::GameInstalls
+                | Self::GameRunner
+                | Self::GameLaunchArgs
+                | Self::GameEnvironment
+                | Self::GameSafeModeArgs
         )
     }
 

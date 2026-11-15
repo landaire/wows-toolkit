@@ -77,6 +77,8 @@ pub enum RootCommand {
     CopyLatestLog,
     CopyBugReportInfo,
     SetTheme(PaletteTheme),
+    /// One of the game launcher's commands. Offered on Linux only, once the launcher is enabled.
+    Launcher(LauncherCommand),
     /// Shows generated games in the Stats tab in place of the recorded session. Debug mode only.
     SampleStats,
     /// Shows the recorded session again after [`RootCommand::SampleStats`]. Debug mode only.
@@ -104,6 +106,7 @@ impl RootCommand {
             Self::IndexAllReplays => "ui.settings.replay.index_all_replays",
             Self::ReindexAll => "ui.reindex.palette_all",
             Self::RefreshPersistedData => "ui.replay.refresh_persisted_data",
+            Self::Launcher(command) => command.label_key(),
             Self::ImportConstants => "ui.replay.import_constants",
             Self::SendAllReplays => "ui.palette.send_all_replays",
             Self::SendAllReplaysAgain => "ui.palette.send_all_replays_again",
@@ -114,6 +117,39 @@ impl RootCommand {
         };
 
         t!(key).into_owned()
+    }
+}
+
+/// The game launcher's palette commands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LauncherCommand {
+    /// Plays the saved account. Its entry is labelled by its offer, which knows the nickname.
+    PlayAs(wows_toolkit_launcher::AccountKey),
+    GameSettings,
+    AddAccount,
+    UpdateGame,
+    OpenReplayInGame,
+}
+
+impl LauncherCommand {
+    const fn label_key(self) -> &'static str {
+        match self {
+            Self::PlayAs(_) => "ui.launcher.palette.play",
+            Self::GameSettings => "ui.launcher.palette.game_settings",
+            Self::AddAccount => "ui.launcher.palette.add_account",
+            Self::UpdateGame => "ui.launcher.palette.update",
+            Self::OpenReplayInGame => "ui.launcher.palette.open_replay",
+        }
+    }
+
+    const fn position(self) -> u16 {
+        match self {
+            Self::PlayAs(_) => 12,
+            Self::UpdateGame => 13,
+            Self::GameSettings => 14,
+            Self::AddAccount => 15,
+            Self::OpenReplayInGame => 16,
+        }
     }
 }
 
@@ -171,6 +207,7 @@ impl RootItem {
             }
             Self::Command(RootCommand::OpenSettings) => 10,
             Self::Command(RootCommand::AdvancedSearch) => 11,
+            Self::Command(RootCommand::Launcher(command)) => command.position(),
             Self::Mode(PaletteMode::Players) => 20,
             Self::Mode(PaletteMode::MyShips) => 21,
             Self::Mode(PaletteMode::ArmorShips) => 22,
@@ -208,6 +245,9 @@ impl RootItem {
         match self {
             Self::Command(RootCommand::GoTo(tab)) => format!("go-to-{}", tab.name()),
             Self::Command(RootCommand::SetTheme(theme)) => format!("set-theme-{}", theme.name()),
+            Self::Command(RootCommand::Launcher(LauncherCommand::PlayAs(key))) => {
+                format!("launcher-play-as-{}", key.account_id.get())
+            }
             Self::Command(command) => command_name(command).to_owned(),
             Self::Mode(mode) => format!("mode-{}", mode_name(mode)),
         }
@@ -243,6 +283,11 @@ fn command_name(command: RootCommand) -> &'static str {
         RootCommand::SendAllReplaysAgain => "send-all-replays-again",
         RootCommand::CopyLatestLog => "copy-latest-log",
         RootCommand::CopyBugReportInfo => "copy-bug-report-info",
+        RootCommand::Launcher(LauncherCommand::PlayAs(_)) => "launcher-play-as",
+        RootCommand::Launcher(LauncherCommand::GameSettings) => "launcher-game-settings",
+        RootCommand::Launcher(LauncherCommand::AddAccount) => "launcher-add-account",
+        RootCommand::Launcher(LauncherCommand::UpdateGame) => "launcher-update",
+        RootCommand::Launcher(LauncherCommand::OpenReplayInGame) => "launcher-open-replay",
         RootCommand::SampleStats => "sample-stats",
         RootCommand::RestoreStats => "restore-stats",
     }
@@ -389,6 +434,13 @@ struct Offered<K, V> {
     value: V,
 }
 
+/// A command's run, and the label its offer gives it in place of the command's own.
+#[derive(Clone)]
+struct CommandOffer {
+    run: PaletteRun,
+    label: Option<String>,
+}
+
 /// One root entry as the list shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct RootRow {
@@ -402,7 +454,7 @@ struct RootRow {
 pub struct PaletteControl {
     /// `None` while closed.
     opening: RwSignal<Option<Opening>, LocalStorage>,
-    commands: RwSignal<Vec<Offered<RootCommand, PaletteRun>>, LocalStorage>,
+    commands: RwSignal<Vec<Offered<RootCommand, CommandOffer>>, LocalStorage>,
     modes: RwSignal<Vec<Offered<PaletteMode, ModeSpec>>, LocalStorage>,
     requests: RwSignal<Vec<TabRequest>, LocalStorage>,
     next: StoredValue<u64>,
@@ -479,8 +531,18 @@ impl PaletteControl {
     /// Lists `command` on the root list until the calling scope is cleaned up. A later offer of
     /// the same command is the one run while both stand.
     pub fn offer(self, command: RootCommand, run: PaletteRun) {
+        self.offer_with_label(command, None, run);
+    }
+
+    /// [`Self::offer`], with the entry saying `label` in place of the command's own words.
+    pub fn offer_labelled(self, command: RootCommand, label: String, run: PaletteRun) {
+        self.offer_with_label(command, Some(label), run);
+    }
+
+    fn offer_with_label(self, command: RootCommand, label: Option<String>, run: PaletteRun) {
         let id = OfferId(self.next());
-        self.commands.update(|commands| commands.push(Offered { id, key: command, value: run }));
+        self.commands
+            .update(|commands| commands.push(Offered { id, key: command, value: CommandOffer { run, label } }));
         on_cleanup_local(move || {
             self.commands.try_update(|commands| commands.retain(|offered| offered.id != id));
         });
@@ -525,9 +587,17 @@ impl PaletteControl {
         })
     }
 
+    /// The label the latest offer of `item` gives it, if it gives one.
+    fn offered_label(self, item: RootItem) -> Option<String> {
+        let RootItem::Command(command) = item else { return None };
+        self.commands.with(|commands| {
+            commands.iter().rev().find(|offered| offered.key == command).and_then(|offered| offered.value.label.clone())
+        })
+    }
+
     fn command_run(self, command: RootCommand) -> Option<PaletteRun> {
         self.commands.with_untracked(|commands| {
-            commands.iter().rev().find(|offered| offered.key == command).map(|offered| offered.value.clone())
+            commands.iter().rev().find(|offered| offered.key == command).map(|offered| offered.value.run.clone())
         })
     }
 
@@ -548,7 +618,7 @@ impl PaletteControl {
 
         let query = FilterQuery::new(query);
         let keyed = items.into_iter().map(|item| {
-            let label = item.label();
+            let label = self.offered_label(item).unwrap_or_else(|| item.label());
             (FilterKey::new(&label), RootRow { item, label, marks: Marks::default() })
         });
         query

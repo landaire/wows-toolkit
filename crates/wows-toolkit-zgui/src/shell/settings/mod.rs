@@ -802,7 +802,19 @@ fn present(shell: Shell, setting: Setting) -> bool {
         }
         Setting::ArmorPlateEdges | Setting::ArmorOpaqueHull => armor_saved,
         Setting::ArmorNoDefaults => !armor_saved,
+        setting if setting.is_launcher() => launcher_present(shell, setting),
         _ => true,
+    }
+}
+
+/// Whether the launcher row `setting` is listed. The launcher exists on Linux only.
+fn launcher_present(shell: Shell, setting: Setting) -> bool {
+    #[cfg(target_os = "linux")]
+    return crate::launcher::drawer::present(shell, setting);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (shell, setting);
+        false
     }
 }
 

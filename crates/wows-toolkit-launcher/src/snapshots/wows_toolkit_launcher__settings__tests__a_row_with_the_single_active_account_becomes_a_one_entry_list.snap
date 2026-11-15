@@ -1,0 +1,24 @@
+---
+source: crates/wows-toolkit-launcher/src/settings.rs
+expression: loaded
+---
+manual_installs:
+  - /games/WoWs
+wgc_data_dir_override: ~
+proton_prefix: ~
+proton_binary: ~
+extra_args: []
+env_vars: []
+safe_mode_args: []
+tracking_id: "1755792000000000000"
+accounts:
+  - key:
+      realm: Eu
+      account_id: 697769785
+    nickname: gapedd
+    install: Toolkit
+default_account:
+  realm: Eu
+  account_id: 697769785
+sign_in_realm: Eu
+consent: ~

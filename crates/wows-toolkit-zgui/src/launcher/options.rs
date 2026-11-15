@@ -1,4 +1,4 @@
-//! The launch options section: extra arguments, environment variables and the Proton setup.
+//! The launch option fields and the Proton setup, as Settings drawer controls.
 
 use std::path::PathBuf;
 
@@ -20,11 +20,10 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::TextareaProps;
 
+use crate::launcher::model::LauncherModel;
 use crate::long_job::long_job;
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::tabs::launcher::SectionProps;
-use crate::tabs::launcher::model::LauncherModel;
 
 /// Which Proton path a row shows and sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,56 +85,88 @@ impl ProtonPath {
     }
 }
 
+/// Which one-per-line launch option a field edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaunchText {
+    Args,
+    Env,
+    SafeModeArgs,
+}
+
+impl LaunchText {
+    fn read(self, settings: &LauncherSettings) -> String {
+        match self {
+            Self::Args => settings.extra_args_text(),
+            Self::Env => settings.env_vars_text(),
+            Self::SafeModeArgs => settings.safe_mode_args_text(),
+        }
+    }
+
+    fn write(self, settings: &mut LauncherSettings, text: &str) {
+        match self {
+            Self::Args => settings.set_extra_args_text(text),
+            Self::Env => settings.set_env_vars_text(text),
+            Self::SafeModeArgs => settings.set_safe_mode_args_text(text),
+        }
+    }
+
+    fn test_id(self) -> &'static str {
+        match self {
+            Self::Args => "launcher-extra-args",
+            Self::Env => "launcher-env-vars",
+            Self::SafeModeArgs => "launcher-safe-mode-args",
+        }
+    }
+
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::Args => "ui.settings.launcher.launch_args",
+            Self::Env => "ui.settings.launcher.environment",
+            Self::SafeModeArgs => "ui.settings.launcher.safe_mode_args",
+        }
+    }
+}
+
+/// A one-per-line launch option, saved when the field is left.
 #[component]
-pub fn OptionsSection(model: LauncherModel, shell: Shell) -> impl IntoView {
+pub fn LaunchTextField(model: LauncherModel, which: LaunchText) -> impl IntoView {
     let locale = Services::current().locale;
-    // The section is built once the settings are read, so they are there to start the fields from.
-    let (args, env) = model
-        .with_untracked(|state| {
-            state.settings.as_ref().map(|settings| (settings.extra_args_text(), settings.env_vars_text()))
-        })
-        .unwrap_or_default();
-    let extra_args = RwSignal::new_local(args);
-    let env_vars = RwSignal::new_local(env);
+    // The drawer lists launcher rows only once the settings are read, so they are there to start
+    // the field from.
+    let start = model.with_untracked(|state| state.settings.as_ref().map(|settings| which.read(settings)));
+    let text = RwSignal::new_local(start.unwrap_or_default());
 
     view! {
-        Section(heading = "ui.launcher.options.heading") {
-            column(class = "wt-launcher__column wt-launcher__column--wide") {
-                text(class = "wt-launcher__text") {{locale.text("ui.launcher.options.extra_args")}}
-                Textarea(
-                    value = extra_args,
-                    label = locale.text("ui.launcher.options.extra_args")(),
-                    class = "wt-launcher__textarea",
-                    attr:data-testid = "launcher-extra-args",
-                    on:focus_out = move |_| {
-                        let text = extra_args.get_untracked();
-                        model.edit_settings(|settings| settings.set_extra_args_text(&text));
-                    }
-                )
-                text(class = "wt-launcher__text") {{locale.text("ui.launcher.options.env_vars")}}
-                Textarea(
-                    value = env_vars,
-                    label = locale.text("ui.launcher.options.env_vars")(),
-                    class = "wt-launcher__textarea",
-                    attr:data-testid = "launcher-env-vars",
-                    on:focus_out = move |_| {
-                        let text = env_vars.get_untracked();
-                        model.edit_settings(|settings| settings.set_env_vars_text(&text));
-                    }
-                )
-                text(class = "wt-launcher__strong") {{locale.text("ui.launcher.proton.heading")}}
-                text(class = "wt-launcher__dim") {{locale.text("ui.launcher.proton.description")}}
-                ProtonPathRow(model = model, shell = shell, which = ProtonPath::Binary)
-                ProtonPathRow(model = model, shell = shell, which = ProtonPath::Prefix)
-                row(class = "wt-launcher__row") {
-                    Button(
-                        variant = ButtonVariant::Outline,
-                        size = ButtonSize::Sm,
-                        attr:data-testid = "launcher-proton-detect",
-                        on:click = move |_| autodetect_proton(model, shell)
-                    ) {
-                        {locale.text("ui.launcher.proton.detect")}
-                    }
+        Textarea(
+            value = text,
+            label = locale.text(which.label_key())(),
+            class = "wt-launcher__textarea",
+            attr:data-testid = which.test_id(),
+            on:focus_out = move |_| {
+                let text = text.get_untracked();
+                model.edit_settings(|settings| which.write(settings, &text));
+            }
+        )
+    }
+}
+
+/// The Proton binary and prefix, each with Browse, and Auto-detect.
+#[component]
+pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
+    let locale = Services::current().locale;
+
+    view! {
+        column(class = "wt-launcher__column wt-launcher__column--wide") {
+            ProtonPathRow(model = model, shell = shell, which = ProtonPath::Binary)
+            ProtonPathRow(model = model, shell = shell, which = ProtonPath::Prefix)
+            row(class = "wt-launcher__row") {
+                Button(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Sm,
+                    attr:data-testid = "launcher-proton-detect",
+                    on:click = move |_| autodetect_proton(model, shell)
+                ) {
+                    {locale.text("ui.launcher.proton.detect")}
                 }
             }
         }

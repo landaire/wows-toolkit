@@ -641,6 +641,10 @@ impl App {
     /// is there to show.
     fn setting_present(&self, setting: Setting) -> bool {
         let armor_saved = self.settings().is_some_and(|settings| settings.armor_defaults.is_some());
+        // The game launcher is a zgui feature.
+        if setting.is_launcher() {
+            return false;
+        }
         match setting {
             Setting::CodeIntegrity => cfg!(windows),
             Setting::CachedBuilds => {
@@ -939,6 +943,12 @@ impl App {
             Setting::McpEnabled | Setting::McpStartOnLaunch | Setting::McpBindAddress | Setting::McpPort => {
                 (None, None)
             }
+            Setting::GameLauncher
+            | Setting::GameInstalls
+            | Setting::GameRunner
+            | Setting::GameLaunchArgs
+            | Setting::GameEnvironment
+            | Setting::GameSafeModeArgs => (None, None),
         }
     }
 

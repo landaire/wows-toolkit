@@ -43,6 +43,8 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::WorkspaceInsetProps;
 use tokio::runtime::Runtime;
+#[cfg(target_os = "linux")]
+use wows_toolkit_launcher::LauncherEvents;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -91,6 +93,10 @@ use zgui_ui::prelude::Binding;
 
 use crate::i18n::LanguageCode;
 use crate::icons::AppIconProps;
+#[cfg(target_os = "linux")]
+use crate::launcher::LauncherModel;
+#[cfg(target_os = "linux")]
+use crate::launcher::PlayControlProps;
 use crate::services::Services;
 use crate::shell::collab::CollabHost;
 pub(crate) use crate::shell::dialogs::DialogHostProps;
@@ -302,6 +308,12 @@ pub struct Shell {
     pub armor: ArmorLibrary,
     /// The battle in progress, watched from startup whether or not the Player Tracker is open.
     pub live: LiveModel,
+    /// The game launcher, whichever tab is open. Its surfaces show only once the user opts in.
+    #[cfg(target_os = "linux")]
+    pub launcher: LauncherModel,
+    /// Its background work's results, until [`ShellFrame`] starts listening to them.
+    #[cfg(target_os = "linux")]
+    launcher_events: StoredValue<Option<LauncherEvents>, LocalStorage>,
     drop_scrim: DropScrimState,
     toasts: Toasts,
     services: Services,
@@ -314,6 +326,8 @@ pub struct Shell {
 impl Shell {
     fn new(services: Services, appearance: Appearance, toasts: Toasts, clipboard: Option<Clipboards>) -> Self {
         let first = TabKey::App(AppTab::ReplayInspector);
+        #[cfg(target_os = "linux")]
+        let (launcher, launcher_events) = LauncherModel::new(services);
         Self {
             selected: RwSignal::new_local(first.value()),
             directory_stats: RwSignal::new_local(Vec::new()),
@@ -336,6 +350,10 @@ impl Shell {
             collab: CollabHost::new(),
             armor: ArmorLibrary::new(),
             live: LiveModel::new(),
+            #[cfg(target_os = "linux")]
+            launcher,
+            #[cfg(target_os = "linux")]
+            launcher_events: StoredValue::new_local(Some(launcher_events)),
             drop_scrim: DropScrimState::new(),
             toasts,
             services,
@@ -694,6 +712,10 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     shell.collab.begin(shell);
     shell.armor.begin(services);
     shell.live.follow_install(services);
+    #[cfg(target_os = "linux")]
+    if let Some(events) = shell.launcher_events.try_update_value(Option::take).flatten() {
+        crate::launcher::begin(shell, shell.launcher, events);
+    }
     shell.begin_mcp();
     follow_selection(shell);
     let root = NodeRef::new();
@@ -774,6 +796,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                     }
                 }
                 row(class = "wt-shell__strip-end") {
+                    {strip_play_control(shell)}
                     SettingsButton(shell = shell)
                     AppMenu(shell = shell)
                 }
@@ -802,6 +825,17 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
             CommandPalette(shell = shell)
             RememberGeometry(kind = wows_toolkit_config::WindowKind::Main)
         }
+    }
+}
+
+/// The launcher's Play control, on Linux; nothing elsewhere.
+fn strip_play_control(shell: Shell) -> AnyView {
+    #[cfg(target_os = "linux")]
+    return AnyView::new(view! { PlayControl(shell = shell, model = shell.launcher) });
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = shell;
+        AnyView::new(())
     }
 }
 

@@ -470,18 +470,18 @@ pub enum SearchOpenTarget {
 /// `Debug` is hand-written to redact `password`, which is plaintext only
 /// because `egui::TextEdit` binds to a `String`; it is taken the moment a
 /// sign-in starts.
-#[cfg(feature = "launcher")]
+#[cfg(all(feature = "launcher", target_os = "linux"))]
 pub struct LoginForm {
     pub realm: wgc_auth::AccountRealm,
     pub username: String,
     pub password: String,
-    /// Whether the sign-in fields are expanded (signed-out state only).
+    /// Whether the sign-in fields are expanded.
     pub show: bool,
     pub two_factor_code: String,
     pub use_backup_code: bool,
 }
 
-#[cfg(feature = "launcher")]
+#[cfg(all(feature = "launcher", target_os = "linux"))]
 impl std::fmt::Debug for LoginForm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoginForm")
@@ -494,7 +494,7 @@ impl std::fmt::Debug for LoginForm {
     }
 }
 
-#[cfg(feature = "launcher")]
+#[cfg(all(feature = "launcher", target_os = "linux"))]
 impl Default for LoginForm {
     fn default() -> Self {
         LoginForm {
@@ -724,16 +724,22 @@ pub struct TabState {
     /// Locked because replay views and windows draw through `&self`.
     pub replay_dialogs: parking_lot::Mutex<crate::ui::replay_parser::ReplayDialogs>,
 
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub launcher: wows_toolkit_launcher::Launcher,
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub launcher_events: wows_toolkit_launcher::LauncherEvents,
+    /// Whether session restore and install discovery ran since the launcher was last enabled.
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    pub launcher_started: bool,
+    /// Whether the opt-in notice is shown, waiting for the user to accept or cancel.
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    pub launcher_opt_in_open: bool,
     /// Transient Safe Mode toggle for the next launch.
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub launch_safe_mode: bool,
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub login_form: LoginForm,
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub launcher_dialogs: crate::ui::launcher_tab::LauncherDialogs,
 }
 
@@ -741,7 +747,7 @@ impl Default for TabState {
     fn default() -> Self {
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = egui_inbox::UiInbox::channel();
-        #[cfg(feature = "launcher")]
+        #[cfg(all(feature = "launcher", target_os = "linux"))]
         let (launcher, launcher_events) = wows_toolkit_launcher::Launcher::new();
         Self {
             persisted: Arc::new(TrackedPersistedState::default()),
@@ -840,15 +846,19 @@ impl Default for TabState {
             save_notify: Arc::new(tokio::sync::Notify::new()),
             settings_dialogs: Default::default(),
             replay_dialogs: Default::default(),
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             launcher,
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             launcher_events,
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
+            launcher_started: false,
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
+            launcher_opt_in_open: false,
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             launch_safe_mode: false,
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             login_form: LoginForm::default(),
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             launcher_dialogs: Default::default(),
         }
     }
@@ -1776,7 +1786,7 @@ impl TabState {
 
     /// What the launcher's background work runs on. `None` until the tokio
     /// runtime is installed at startup.
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub fn launcher_env(&self) -> Option<wows_toolkit_launcher::LauncherEnv> {
         let Some(runtime) = self.tokio_runtime.as_ref() else {
             warn!("launcher: tokio runtime is not available");
@@ -1792,7 +1802,7 @@ impl TabState {
 
     /// Run a launcher operation against the persisted launcher settings,
     /// saving them when `op` reports it changed them.
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub fn launcher_op(
         &mut self,
         op: impl FnOnce(
@@ -1810,9 +1820,23 @@ impl TabState {
         }
     }
 
-    /// Apply every launcher event delivered since the last frame.
-    #[cfg(feature = "launcher")]
-    pub fn drain_launcher_events(&mut self) {
+    /// Starts the launcher's background work once it is enabled, and applies every launcher
+    /// event delivered since the last frame.
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    pub fn update_launcher(&mut self) {
+        let enabled = self.persisted.read().settings.launcher.is_enabled();
+        if !enabled {
+            self.launcher_started = false;
+        } else if !self.launcher_started {
+            self.launcher_started = true;
+            self.launcher_op(|launcher, settings, env| {
+                let changed = launcher.start_session_restore(settings, env);
+                launcher.start_install_discovery(settings, env);
+                changed
+            });
+        }
+
+        // Work started before the launcher was turned off still reports back.
         while let Some(event) = self.launcher_events.try_next() {
             self.launcher_op(|launcher, settings, env| launcher.apply(event, settings, env));
         }

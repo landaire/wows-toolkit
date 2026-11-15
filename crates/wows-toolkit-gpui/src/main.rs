@@ -23,6 +23,7 @@ mod http;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+#[cfg(target_os = "linux")]
 mod launcher;
 mod loading;
 mod motion;

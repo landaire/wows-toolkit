@@ -1,0 +1,164 @@
+﻿<user_preferences.xml>
+    <local>
+        <hardware version="3">
+            <CPU score="11487712"/>
+            <GPU memory="10053" score="29163"/>
+            <memory physical="64654"/>
+        </hardware>
+        <device version="2" windowMode="BORDERLESS" monitorIndex="0" userGamma="1.0000" colorblindIntensity="1.0000" guid="00000000.00000000.00000000.00000000">
+            <windowed x="32" y="124" width="1924" height="1061" isMaximized="true"/>
+            <borderless x="0" y="0" width="2560" height="1440" behaviour="FULLSCREEN" windowMode="BORDERLESS"/>
+            <fullscreen width="2560" height="1440" aspectRatio="1.7778" waitVSync="false" tripleBuffering="false" refresh="0"/>
+        </device>
+        <graphics version="5" preset="USER">
+            <armor quality="HIGH"/>
+            <camera farPlane="FAR"/>
+            <decals quality="HIGH"/>
+            <flags quality="HIGH"/>
+            <forest quality="OFF"/>
+            <gameLogic preset="ON">
+                <misc quality="HIGH"/>
+            </gameLogic>
+            <GUI quality="OFF" effects="ON" blur="ON" contrast="OFF"/>
+            <lighting quality="HIGH">
+                <dynamic quality="HIGH"/>
+            </lighting>
+            <msaa>
+                <quality>SAMPLES_4</quality>
+            </msaa>
+            <object lod="MAX"/>
+            <particle quality="HIGH" preset="HIGH">
+                <shadow quality="OFF"/>
+            </particle>
+            <postFX quality="VERY_HIGH" aaMode="HIGH" fidelityFX_CAS="OFF">
+                <fxaa quality="HIGH"/>
+                <txaa>ON</txaa>
+                <colorblind mode="OFF">
+                    <intensity>1.0000</intensity>
+                </colorblind>
+            </postFX>
+            <sea>
+                <simulation quality="VERY_LOW"/>
+                <reflection quality="OFF">
+                    <screenSpace quality="OFF"/>
+                </reflection>
+            </sea>
+            <shadow quality="HIGH"/>
+            <sound quality="HIGH"/>
+            <texture quality="HIGH" filtering="ANISOTROPIC_16X"/>
+            <volumetrics quality="HIGH"/>
+            <browser hardwareAcceleration="ON"/>
+            <gamma>1.0000</gamma>
+        </graphics>
+        <ui version="1" selectedLootboxType="CREDITS">
+            <size>
+                <contactsAndChannelsHeight>350</contactsAndChannelsHeight>
+                <notificationsInboxHeight>350</notificationsInboxHeight>
+                <formationWidgetHeight>410</formationWidgetHeight>
+                <divisionPlayersListWidth>280</divisionPlayersListWidth>
+            </size>
+            <carousel>
+                <rowCountIndex>0</rowCountIndex>
+            </carousel>
+            <mouse>
+                <sensivity>0.6500</sensivity>
+                <wheelSensivity>0.6500</wheelSensivity>
+            </mouse>
+            <shipStats sortIndex="WINRATE"/>
+            <operations difficulty="NORMAL">
+                <selectedId>0</selectedId>
+            </operations>
+            <trainingInfotip>
+                <tabInset>0</tabInset>
+                <bot AILevel="MEDIUM">
+                    <shipId>0</shipId>
+                </bot>
+            </trainingInfotip>
+            <crewOption hire="BASE" purchase="BASE" assign="NO" retrain="NO" firing="TO_OPS"/>
+            <achievements sortOrder="DEFAULT"/>
+            <battleChat enabledChannels="EVERYONE" nameDisplay="BOTH"/>
+            <showPerformance>true</showPerformance>
+            <alwaysShowModifiersTimers>true</alwaysShowModifiersTimers>
+            <skipVideo>true</skipVideo>
+            <enableLanguageBar>0</enableLanguageBar>
+        </ui>
+        <commands version="2">
+            <CMD_CINEMATIC_SHOOT>
+                <VALUE1>
+                    <KEY>KEY_NULL</KEY>
+                </VALUE1>
+            </CMD_CINEMATIC_SHOOT>
+            <CMD_HIDE_INTERFACE>
+                <VALUE2>
+                    <KEY>KEY_MOUSE4</KEY>
+                </VALUE2>
+            </CMD_HIDE_INTERFACE>
+        </commands>
+        <sound version="1" source="SPEAKERS" mixingPreset="CUSTOM">
+            <volume>
+                <master>0.3800</master>
+                <ui>1.0000</ui>
+                <engines>1.0000</engines>
+                <voice>1.0000</voice>
+                <world>0.4000</world>
+                <shoot>1.0000</shoot>
+                <damage>0.5500</damage>
+            </volume>
+            <music mod="MIXED">
+                <dockVolume>0.0000</dockVolume>
+                <battleVolume>0.0000</battleVolume>
+            </music>
+            <voiceOverEffect>0.0000</voiceOverEffect>
+            <voice>
+                <package>EN</package>
+                <chat activationMethod="PUSH_TO_TALK">
+                    <inputVolume>50</inputVolume>
+                    <outputVolume>50</outputVolume>
+                </chat>
+            </voice>
+        </sound>
+        <monitor windowMode="BORDERLESS" borderlessBehaviour="FULLSCREEN">
+            <index>2 - Example Display(DisplayPort) (primary)</index>
+            <uiScale>1.2500</uiScale>
+            <window>
+                <width>3424</width>
+                <height>1401</height>
+            </window>
+        </monitor>
+    </local>
+    <remote version="1" revision="12" key="0000000000000000">
+        <graphics>
+            <fog>
+                <alpha>1.0000</alpha>
+            </fog>
+        </graphics>
+        <battle>
+            <altVision mode="ENABLED"/>
+            <autoPilot mode="DISABLED"/>
+            <ui>
+                <crosshair>
+                    <isDynamic>true</isDynamic>
+                    <indexStatic>8</indexStatic>
+                </crosshair>
+                <crosshairIndicators visibilityPenaltyTimer="NEVER"/>
+            </ui>
+            <camera>
+                <fov>0.9750</fov>
+                <height>0.7000</height>
+            </camera>
+            <terrain>
+                <shooting mode="ENABLED"/>
+            </terrain>
+            <tutorial>
+                <submarine>
+                    <shown>true</shown>
+                </submarine>
+            </tutorial>
+            <weapon>
+                <indicator>
+                    <simultaneousReload>true</simultaneousReload>
+                </indicator>
+            </weapon>
+        </battle>
+    </remote>
+</user_preferences.xml>

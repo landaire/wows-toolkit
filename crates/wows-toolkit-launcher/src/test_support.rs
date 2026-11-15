@@ -1,31 +1,78 @@
-//! Events a front end's tests feed to [`Launcher::apply`](crate::Launcher::apply) to put the
-//! launcher in a state that otherwise needs the network, the OS keyring or a scan of this machine.
+//! Events and state changes a front end's tests use to put the launcher in a state that
+//! otherwise needs the network, the OS keyring, a scan of this machine or a running game.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use wgc_install::GameInstall;
 
+use crate::AccountKey;
+use crate::AccountSession;
 use crate::CatalogCheckState;
 use crate::DownloadState;
-use crate::Event;
+use crate::GameState;
+use crate::KeyringState;
 use crate::Launcher;
 use crate::LauncherEvent;
-use crate::LoginMsg;
-use crate::LoginState;
-use crate::PendingLogin;
+use crate::LoginTarget;
+use crate::SessionStorage;
+use crate::accounts::LoginMsg;
+use crate::accounts::LoginState;
+use crate::accounts::PendingLogin;
+use crate::launcher::Event;
+
+/// A session for `key` with placeholder tokens.
+pub fn session(key: AccountKey, nickname: &str) -> wgc_auth::StoredSession {
+    wgc_auth::StoredSession {
+        realm: key.realm,
+        account_id: key.account_id,
+        nickname: wgc_auth::Nickname::new(nickname),
+        tokens: wgc_auth::TokenPair {
+            access_token: wgc_auth::AccessToken::new("token".into()),
+            exchange_code: wgc_auth::ExchangeCode::from_raw("code".into()),
+        },
+        expiry: wgc_auth::TokenExpiry::Unknown,
+    }
+}
 
 /// Puts `launcher` where [`Launcher::start_login`] does, without the request it sends.
-pub fn begin_sign_in(launcher: &mut Launcher, realm: wgc_auth::AccountRealm, username: String) {
-    launcher.login = LoginState {
-        in_progress: true,
-        pending: Some(PendingLogin {
-            realm,
-            username,
-            password: wgc_auth::SecretPassword::new(String::new()),
-            twofactor_token: None,
-        }),
-        ..LoginState::default()
+pub fn begin_sign_in(launcher: &mut Launcher, target: LoginTarget, realm: wgc_auth::AccountRealm, username: String) {
+    launcher.login = LoginState::new(target);
+    launcher.login.in_progress = true;
+    launcher.login.pending = Some(PendingLogin {
+        realm,
+        username,
+        password: wgc_auth::SecretPassword::new(String::new()),
+        twofactor_token: None,
+    });
+}
+
+/// Sets the session state of `key` as a restore would.
+pub fn set_session(launcher: &mut Launcher, key: AccountKey, state: TestSession) {
+    let session = match state {
+        TestSession::Restoring => AccountSession::Restoring,
+        TestSession::SignedIn(nickname) => {
+            AccountSession::SignedIn { session: Arc::new(session(key, &nickname)), storage: SessionStorage::Keyring }
+        }
+        TestSession::Expired => AccountSession::Expired,
+        TestSession::SignedOut => AccountSession::SignedOut,
+        TestSession::StoreUnavailable => AccountSession::StoreUnavailable,
     };
+    launcher.sessions.insert(key, session);
+}
+
+/// The session states [`set_session`] can set.
+pub enum TestSession {
+    Restoring,
+    SignedIn(String),
+    Expired,
+    SignedOut,
+    StoreUnavailable,
+}
+
+/// Sets the game state as a launch and the client's progress would.
+pub fn set_game_state(launcher: &mut Launcher, state: GameState) {
+    launcher.game = state;
 }
 
 /// A finished install discovery that found `installs`.
@@ -48,14 +95,33 @@ pub fn download_reported(key: PathBuf, state: DownloadState) -> LauncherEvent {
     LauncherEvent(Event::Download(key, state))
 }
 
-/// A sign-in that succeeded with `session`. `persisted`: whether it reached the OS keyring.
-pub fn signed_in(session: wgc_auth::StoredSession, persisted: bool) -> LauncherEvent {
-    LauncherEvent(Event::Login(LoginMsg::Success { session: Box::new(session), persisted }))
+/// A sign-in that succeeded with `session`, kept in `storage`.
+pub fn signed_in(session: wgc_auth::StoredSession, storage: SessionStorage) -> LauncherEvent {
+    LauncherEvent(Event::Login(LoginMsg::Success { session: Box::new(session), storage, no_store: false }))
+}
+
+/// A sign-in that succeeded while the OS had no secret store, so the session lives in memory.
+pub fn signed_in_without_store(session: wgc_auth::StoredSession) -> LauncherEvent {
+    LauncherEvent(Event::Login(LoginMsg::Success {
+        session: Box::new(session),
+        storage: SessionStorage::MemoryOnly,
+        no_store: true,
+    }))
+}
+
+/// A probe of the OS secret store that found `state`.
+pub fn keyring_probed(state: KeyringState) -> LauncherEvent {
+    LauncherEvent(Event::KeyringProbed(state))
 }
 
 /// A sign-in that WGNI answered with a two-factor challenge.
 pub fn two_factor_required(twofactor_token: String) -> LauncherEvent {
     LauncherEvent(Event::Login(LoginMsg::TwoFactorRequired { twofactor_token }))
+}
+
+/// A two-factor code WGNI refused while keeping the challenge open.
+pub fn two_factor_rejected(error: String) -> LauncherEvent {
+    LauncherEvent(Event::Login(LoginMsg::TwoFactorRetry(error)))
 }
 
 /// A sign-in that WGNI refused until a CAPTCHA is solved.
@@ -66,4 +132,65 @@ pub fn captcha_required() -> LauncherEvent {
 /// A sign-in that failed, saying `error`.
 pub fn sign_in_failed(error: String) -> LauncherEvent {
     LauncherEvent(Event::Login(LoginMsg::Failed(error)))
+}
+
+/// What a scripted sign-in answers, in place of WGNI.
+pub enum ScriptedSignIn {
+    Succeed(wgc_auth::StoredSession),
+    /// Succeed with no OS secret store, so the session lives in memory.
+    SucceedWithoutStore(wgc_auth::StoredSession),
+    TwoFactor,
+    WrongCode,
+    Fail(String),
+}
+
+/// One sign-in a front end sent while scripted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignInAttempt {
+    pub realm: wgc_auth::AccountRealm,
+    pub email: String,
+    /// The two-factor code, for a code's submission.
+    pub code: Option<String>,
+}
+
+/// The answers queued for the next sign-ins, and the sign-ins sent.
+#[derive(Default)]
+pub struct SignInScript {
+    answers: std::collections::VecDeque<ScriptedSignIn>,
+    attempts: Vec<SignInAttempt>,
+}
+
+impl SignInScript {
+    /// The next answer, when one is scripted, noting the attempt either way.
+    pub(crate) fn answer(
+        &mut self,
+        realm: wgc_auth::AccountRealm,
+        email: &str,
+        code: Option<String>,
+    ) -> Option<LoginMsg> {
+        self.attempts.push(SignInAttempt { realm, email: email.to_owned(), code });
+        let answer = self.answers.pop_front()?;
+
+        Some(match answer {
+            ScriptedSignIn::Succeed(session) => {
+                LoginMsg::Success { session: Box::new(session), storage: SessionStorage::Keyring, no_store: false }
+            }
+            ScriptedSignIn::SucceedWithoutStore(session) => {
+                LoginMsg::Success { session: Box::new(session), storage: SessionStorage::MemoryOnly, no_store: true }
+            }
+            ScriptedSignIn::TwoFactor => LoginMsg::TwoFactorRequired { twofactor_token: "challenge".into() },
+            ScriptedSignIn::WrongCode => LoginMsg::TwoFactorRetry("two-factor code was invalid".into()),
+            ScriptedSignIn::Fail(error) => LoginMsg::Failed(error),
+        })
+    }
+}
+
+/// Queues `answer` for the next sign-in or code `launcher` sends, which then reaches no server.
+pub fn script_sign_in(launcher: &mut Launcher, answer: ScriptedSignIn) {
+    launcher.script.answers.push_back(answer);
+}
+
+/// The sign-ins and codes `launcher` sent, oldest first.
+pub fn sign_in_attempts(launcher: &Launcher) -> Vec<SignInAttempt> {
+    launcher.script.attempts.clone()
 }

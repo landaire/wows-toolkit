@@ -105,7 +105,7 @@ fn the_session_control_is_on_the_replay_tab_only() {
     let (mut window, shell) = open();
     assert!(window.by_test_id("collab-session-toggle").is_some(), "the session control is on the bar");
 
-    shell.select(TabKey::App(AppTab::Launcher));
+    shell.select(TabKey::App(AppTab::Stats));
     window.advance(Duration::from_millis(100));
     assert!(window.by_test_id("collab-session-toggle").is_none(), "no session control away from the replays");
 

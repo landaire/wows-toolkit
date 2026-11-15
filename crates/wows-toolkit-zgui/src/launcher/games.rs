@@ -1,4 +1,4 @@
-//! The install-a-game section: each known game, the version a fresh install gets, and the install
+//! Installing a game fresh: each known game, the version a fresh install gets, and the install
 //! itself.
 
 use rust_i18n::t;
@@ -16,23 +16,24 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::SpinnerProps;
 
+use crate::launcher::display::DownloadTarget;
+use crate::launcher::display::GameVersion;
+use crate::launcher::download::DownloadStatusProps;
+use crate::launcher::model::LauncherModel;
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::tabs::launcher::SectionProps;
-use crate::tabs::launcher::display::DownloadTarget;
-use crate::tabs::launcher::display::GameVersion;
-use crate::tabs::launcher::download::DownloadStatusProps;
-use crate::tabs::launcher::model::LauncherModel;
 
+/// Every known game, each with the version a fresh install gets and its Install button.
 #[component]
-pub fn GamesSection(model: LauncherModel, shell: Shell) -> impl IntoView {
+pub fn GamesList(model: LauncherModel, shell: Shell) -> impl IntoView {
     let locale = Services::current().locale;
     let games: Vec<AnyView> = (0..wgc_catalog::known_games::known_games().len())
         .map(|index| AnyView::new(view! { GameRow(model = model, shell = shell, index = index) }))
         .collect();
 
     view! {
-        Section(heading = "ui.launcher.install_heading") {
+        column(class = "wt-launcher__column wt-launcher__column--wide") {
+            text(class = "wt-launcher__heading") {{locale.text("ui.launcher.install_heading")}}
             text(class = "wt-launcher__dim") {{locale.text("ui.launcher.install_hint")}}
             {games}
         }

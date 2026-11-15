@@ -1,9 +1,10 @@
-//! The launcher's state and the settings it runs on, as one handle the tab's views share.
+//! The launcher's state and the settings it runs on, as one handle the shell and its surfaces
+//! share.
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use wgc_install::GameInstall;
 use wows_toolkit_launcher::Launcher;
 use wows_toolkit_launcher::LauncherEnv;
 use wows_toolkit_launcher::LauncherEvent;
@@ -20,19 +21,28 @@ use zgui::reactive::prelude::WithUntracked;
 
 use crate::services::Services;
 
-/// What the tab shows.
+/// What the launcher surfaces show.
 pub struct LauncherState {
     pub launcher: Launcher,
     /// `None` until the settings row has been read, which needs the database.
     pub settings: Option<LauncherSettings>,
 }
 
-/// The tab's launcher, shared by its views. A `Copy` handle.
+impl LauncherState {
+    /// Whether the settings are read and the user opted in.
+    pub fn is_enabled(&self) -> bool {
+        self.settings.as_ref().is_some_and(LauncherSettings::is_enabled)
+    }
+}
+
+/// The shell's launcher. A `Copy` handle.
 #[derive(Clone, Copy)]
 pub struct LauncherModel {
     state: RwSignal<LauncherState, LocalStorage>,
     /// The resolved proxy the launcher's own requests go through. `None` is a direct connection.
     proxy: StoredValue<Option<String>>,
+    /// Whether discovery, the catalog checks and the session restore have been started.
+    working: StoredValue<bool>,
     services: Services,
 }
 
@@ -43,6 +53,7 @@ impl LauncherModel {
         let model = Self {
             state: RwSignal::new_local(LauncherState { launcher, settings: None }),
             proxy: StoredValue::new(None),
+            working: StoredValue::new(false),
             services,
         };
 
@@ -59,25 +70,75 @@ impl LauncherModel {
         self.state.with_untracked(read)
     }
 
+    /// Whether the user opted in, subscribing to changes.
+    pub fn is_enabled(self) -> bool {
+        self.with(LauncherState::is_enabled)
+    }
+
+    /// The app's game directory, which an account's [`InstallChoice::Toolkit`] plays. Subscribes
+    /// to the app's settings.
+    ///
+    /// [`InstallChoice::Toolkit`]: wows_toolkit_launcher::InstallChoice::Toolkit
+    pub fn wows_dir(self) -> Option<PathBuf> {
+        self.services
+            .settings
+            .read(|settings| settings.wows_dir.clone())
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// [`Self::wows_dir`] without subscribing.
+    pub fn wows_dir_untracked(self) -> Option<PathBuf> {
+        self.services
+            .settings
+            .read_untracked(|settings| settings.wows_dir.clone())
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+    }
+
     /// Adopts the app's proxy setting. Empty is no manual proxy, which leaves the environment's.
     pub fn set_proxy(self, proxy_url: &str) {
         self.proxy.set_value(wows_toolkit_viewmodel::proxy::resolve_proxy(Some(proxy_url)).map(|proxy| proxy.url));
     }
 
-    /// Takes the stored settings, then restores the signed-in session and looks for installs.
+    /// Takes the stored settings, and starts the launcher's work when the user opted in.
     pub fn adopt(self, settings: LauncherSettings) {
         self.state.update(|state| state.settings = Some(settings));
-        self.op(|launcher, settings, env| {
-            launcher.start_session_restore(settings, env);
-            launcher.start_install_discovery(settings, env);
-            false
-        });
+        self.start_work();
     }
 
     /// Takes settings without starting any work, as a test does before it sets the state.
     #[cfg(test)]
     pub fn adopt_quietly(self, settings: LauncherSettings) {
+        self.working.set_value(true);
         self.state.update(|state| state.settings = Some(settings));
+    }
+
+    /// Restores the saved sessions and looks for installs, once, while the launcher is enabled.
+    fn start_work(self) {
+        if self.working.get_value() || !self.with_untracked(LauncherState::is_enabled) {
+            return;
+        }
+        self.working.set_value(true);
+
+        self.op(|launcher, settings, env| {
+            let minted = launcher.start_session_restore(settings, env);
+            launcher.start_install_discovery(settings, env);
+            launcher.start_available_games_check(env);
+            launcher.start_keyring_probe(env);
+            minted
+        });
+    }
+
+    /// Turns the launcher on, after the user accepted the notice, and starts its work.
+    pub fn enable(self) {
+        self.edit_settings(LauncherSettings::enable);
+        self.start_work();
+    }
+
+    /// Turns the launcher off. Work already running finishes; nothing new starts.
+    pub fn disable(self) {
+        self.edit_settings(LauncherSettings::disable);
     }
 
     /// Runs `operation` against the launcher and the settings, and saves the settings when it
@@ -145,12 +206,6 @@ impl LauncherModel {
         self.state.with_untracked(|state| state.launcher.cancel_download(key));
     }
 
-    /// The install at `path`, as the last discovery found it.
-    pub fn install(self, path: &Path) -> Option<GameInstall> {
-        self.state
-            .with_untracked(|state| state.launcher.installs().iter().find(|install| install.path == path).cloned())
-    }
-
     fn env(self) -> Option<LauncherEnv> {
         let Some(runtime) = self.services.runtime() else {
             tracing::warn!("launcher: tokio runtime is not available");
@@ -160,7 +215,7 @@ impl LauncherModel {
         Some(LauncherEnv {
             runtime: runtime.handle().clone(),
             proxy_url: self.proxy.get_value(),
-            // The tab's event task awaits the channel, and its wake-up is the channel's own.
+            // The shell's event task awaits the channel, and its wake-up is the channel's own.
             wake: Arc::new(|| {}),
         })
     }

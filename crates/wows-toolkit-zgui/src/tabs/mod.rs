@@ -3,7 +3,6 @@
 
 pub mod armor_viewer;
 mod directory_stats;
-pub(crate) mod launcher;
 pub(crate) mod player_tracker;
 pub(crate) mod replays;
 pub(crate) mod search;
@@ -25,7 +24,6 @@ use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
 use crate::tabs::armor_viewer::ArmorViewerTabProps;
 use crate::tabs::directory_stats::DirectoryStatsTabProps;
-use crate::tabs::launcher::LauncherTabProps;
 use crate::tabs::player_tracker::PlayerTrackerTabProps;
 use crate::tabs::replays::ReplaysTabProps;
 use crate::tabs::search::SearchTabProps;
@@ -48,7 +46,6 @@ pub fn TabBody(tab: TabKey) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     match tab {
         TabKey::App(AppTab::ReplayInspector) => AnyView::new(view! { ReplaysTab() }),
-        TabKey::App(AppTab::Launcher) => AnyView::new(view! { LauncherTab() }),
         TabKey::App(AppTab::Stats) => AnyView::new(view! { StatsTab() }),
         TabKey::App(AppTab::PlayerTracker) => AnyView::new(view! { PlayerTrackerTab() }),
         TabKey::App(AppTab::Search) => AnyView::new(view! { SearchTab() }),

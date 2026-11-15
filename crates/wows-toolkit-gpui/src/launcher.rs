@@ -27,6 +27,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wgc_catalog::known_games::KnownGame;
 use wgc_install::GameInstall;
+use wows_toolkit_launcher::AccountStatus;
 use wows_toolkit_launcher::CatalogCheckState;
 use wows_toolkit_launcher::CatalogSummary;
 use wows_toolkit_launcher::DownloadState;
@@ -34,6 +35,8 @@ use wows_toolkit_launcher::Launcher;
 use wows_toolkit_launcher::LauncherEnv;
 use wows_toolkit_launcher::LauncherError;
 use wows_toolkit_launcher::LauncherSettings;
+use wows_toolkit_launcher::LoginTarget;
+use wows_toolkit_launcher::SessionStorage;
 use wows_toolkit_launcher::proton::ProtonSetup;
 use wows_toolkit_launcher::proton::Severity;
 
@@ -86,7 +89,7 @@ impl LauncherView {
             }
         });
         let username =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.launcher.account.username").to_string()));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.launcher.account.email").to_string()));
         let password = cx.new(|cx| {
             InputState::new(window, cx).masked(true).placeholder(t!("ui.launcher.account.password").to_string())
         });
@@ -168,9 +171,9 @@ impl LauncherView {
         self.env_vars.update(cx, |state, cx| state.set_value(env, window, cx));
         self.settings = Some(settings);
         self.op(cx, |launcher, settings, env| {
-            launcher.start_session_restore(settings, env);
+            let changed = launcher.start_session_restore(settings, env);
             launcher.start_install_discovery(settings, env);
-            false
+            changed
         });
     }
 
@@ -320,10 +323,16 @@ impl LauncherView {
         Self::report(result, window, cx);
     }
 
+    /// Plays the default account. An account set to the toolkit's install plays `install`.
     fn launch(&mut self, install: GameInstall, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(settings) = self.settings.as_ref() else { return };
-        let launched = self.launcher.launch(&install, settings, self.safe_mode, |command| {
-            wows_toolkit_services::child_process::prepare(command);
+        let Some(key) = self.settings.as_ref().and_then(|settings| settings.default_account) else { return };
+        let safe_mode = self.safe_mode;
+        let mut launched = Ok(());
+        self.op(cx, |launcher, settings, env| {
+            launched = launcher.play(key, Some(&install.path), safe_mode, settings, env, |command| {
+                wows_toolkit_services::child_process::prepare(command);
+            });
+            false
         });
         if let Err(err) = launched {
             crate::toast::failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned(), window, cx);
@@ -336,7 +345,9 @@ impl LauncherView {
         let password = wgc_auth::SecretPassword::new(self.password.read(cx).value().to_string());
         self.password.update(cx, |state, cx| state.set_value("", window, cx));
         let realm = self.realm;
-        self.op(cx, |launcher, settings, env| launcher.start_login(realm, username, password, settings, env));
+        self.op(cx, |launcher, settings, env| {
+            launcher.start_login(LoginTarget::NewAccount, realm, username, password, settings, env)
+        });
     }
 
     fn submit_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -352,7 +363,9 @@ impl LauncherView {
 
     fn render_account(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let launcher = &self.launcher;
-        let body = if let Some(session) = launcher.session() {
+        let default_account = self.settings.as_ref().and_then(|settings| settings.default_account);
+        let signed_in = default_account.and_then(|key| launcher.session(key).map(|session| (key, session)));
+        let body = if let Some((key, session)) = signed_in {
             let expiry = match session.expiry {
                 wgc_auth::TokenExpiry::KnownAt(at) => match at.duration_since(std::time::SystemTime::now()) {
                     Ok(remaining) => dim(t!(
@@ -375,14 +388,19 @@ impl LauncherView {
                         ))),
                 )
                 .child(expiry)
-                .when(!launcher.session_persisted(), |this| this.child(dim(t!("ui.launcher.account.not_persisted"))))
+                .when(launcher.account_status(key) != AccountStatus::Ready(SessionStorage::Keyring), |this| {
+                    this.child(dim(t!("ui.launcher.account.not_persisted")))
+                })
                 .child(
                     h_flex().child(
                         Button::new("launcher-sign-out")
                             .label(t!("ui.launcher.account.sign_out").to_string())
                             .compact()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.op(cx, |launcher, settings, env| launcher.sign_out(settings, env))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.op(cx, |launcher, settings, env| {
+                                    launcher.sign_out(key, settings, env);
+                                    false
+                                })
                             })),
                     ),
                 )

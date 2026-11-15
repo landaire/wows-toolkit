@@ -73,6 +73,22 @@ pub(crate) fn returning_reader(runtime: &Runtime) {
 pub(crate) fn open_shell(options: HeadlessOptions) -> HeadlessWindow {
     let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
     returning_reader(&runtime);
+    // Launcher tests on this process save their own launcher row and hold its startup; an
+    // ordinary shell opens on a launcher that was never configured.
+    #[cfg(target_os = "linux")]
+    {
+        crate::launcher::testing::release_startup();
+        runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+            wows_toolkit_config::queries::set_setting(
+                &pool,
+                wows_toolkit_launcher::SETTINGS_KEY,
+                &wows_toolkit_launcher::LauncherSettings::default(),
+            )
+            .await
+            .expect("a setting is written");
+        });
+    }
     // As `main` does: anything that fetches over TLS needs a provider.
     let _ = rustls::crypto::ring::default_provider().install_default();
 

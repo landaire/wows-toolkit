@@ -162,8 +162,8 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = search.clone() {
         s.search = v;
     }
-    // Startup uses `launcher.active_account` to decide which keyring session
-    // to restore.
+    // `launcher.accounts` lists which keyring sessions the launcher restores
+    // once it is enabled.
     #[cfg(feature = "launcher")]
     if let Some(v) =
         queries::get_setting::<crate::data::settings::LauncherSettings>(pool, wows_toolkit_launcher::SETTINGS_KEY).await

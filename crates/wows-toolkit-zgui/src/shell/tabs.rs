@@ -17,7 +17,6 @@ use zgui::reactive::use_local_context;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AppTab {
     ReplayInspector,
-    Launcher,
     Stats,
     PlayerTracker,
     Search,
@@ -27,15 +26,8 @@ pub enum AppTab {
 
 impl AppTab {
     /// Left to right. Settings are not a tab but the drawer the gear at the end of the strip opens.
-    pub const ALL: [Self; 7] = [
-        Self::ReplayInspector,
-        Self::Launcher,
-        Self::Stats,
-        Self::PlayerTracker,
-        Self::Search,
-        Self::ArmorViewer,
-        Self::Unpacker,
-    ];
+    pub const ALL: [Self; 6] =
+        [Self::ReplayInspector, Self::Stats, Self::PlayerTracker, Self::Search, Self::ArmorViewer, Self::Unpacker];
 
     pub const fn label_key(self) -> &'static str {
         match self {
@@ -45,7 +37,6 @@ impl AppTab {
             Self::Search => "ui.tabs.search",
             Self::ArmorViewer => "ui.tabs.model_viewer",
             Self::Unpacker => "ui.tabs.unpacker",
-            Self::Launcher => "ui.tabs.launcher",
         }
     }
 
@@ -62,7 +53,6 @@ impl AppTab {
             Self::Search => Glyph::Search,
             Self::ArmorViewer => Glyph::Box,
             Self::Unpacker => Glyph::Archive,
-            Self::Launcher => Glyph::Rocket,
         }
     }
 
@@ -70,7 +60,6 @@ impl AppTab {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ReplayInspector => "replay-inspector",
-            Self::Launcher => "launcher",
             Self::Stats => "stats",
             Self::PlayerTracker => "player-tracker",
             Self::Search => "search",

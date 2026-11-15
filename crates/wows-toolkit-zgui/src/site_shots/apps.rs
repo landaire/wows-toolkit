@@ -30,14 +30,12 @@ use super::save;
 use super::show_appearance;
 use super::use_site_storage;
 use crate::interaction_tests::settle_in_real_time;
+use crate::launcher::tests::LauncherWindow;
+use crate::launcher::tests::eu;
+use crate::launcher::tests::na;
+use crate::launcher::tests::up_to_date;
 use crate::services::GameDataRequest;
 use crate::tabs::armor_viewer::options::OptionSection;
-use crate::tabs::launcher::tests::LauncherWindow;
-use crate::tabs::launcher::tests::configured;
-use crate::tabs::launcher::tests::session;
-use crate::tabs::launcher::tests::up_to_date;
-use crate::tabs::launcher::tests::update_available;
-use crate::tabs::launcher::tests::wgc_install;
 use crate::tabs::player_tracker::built_model;
 use crate::tabs::unpacker::pane::PaneState;
 use crate::windows::tactics::tests::BoardWindow;
@@ -250,18 +248,15 @@ fn site_shots_unpacker() {
 #[test]
 #[ignore = "site screenshot; reads the install named in site_shots/mod.rs"]
 fn site_shots_launcher() {
-    let wows = PathBuf::from("/games/World_of_Warships");
-    let pts = PathBuf::from("/games/World_of_Warships_PT");
     for (appearance, suffix) in APPEARANCES {
         use_site_storage();
         let mut launcher = LauncherWindow::open_with(options(appearance));
         show_appearance(&mut launcher.window, appearance);
-        launcher.adopt(configured());
-        launcher.found(vec![wgc_install(&wows), wgc_install(&pts)], |install| {
-            if install.path == pts { update_available() } else { up_to_date() }
-        });
-        launcher.model.apply(test_support::signed_in(session(Duration::from_secs(5 * 3600 + 20 * 60)), true));
-        launcher.settle();
+        let settings = launcher.enabled_settings(&[(na(), "Captain_Ahab"), (eu(), "Queequeg")]);
+        launcher.adopt(settings);
+        launcher.found(up_to_date());
+        launcher.set_session(na(), test_support::TestSession::SignedIn("Captain_Ahab".into()));
+        launcher.press("launcher-play-menu");
         save(&mut launcher.window, "launcher", suffix);
     }
 }

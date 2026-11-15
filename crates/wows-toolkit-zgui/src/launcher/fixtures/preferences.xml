@@ -1,0 +1,9 @@
+<preferences.xml>
+	<scriptsPreferences>
+		<renderer>
+			<maxDockFrameRate>	75	</maxDockFrameRate>
+			<maxFrameRate>	0	</maxFrameRate>
+		</renderer>
+		<version>	28	</version>
+	</scriptsPreferences>
+</preferences.xml>

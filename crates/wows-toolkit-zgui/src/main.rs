@@ -91,6 +91,8 @@ mod i18n;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+#[cfg(target_os = "linux")]
+mod launcher;
 mod long_job;
 mod preview;
 mod services;

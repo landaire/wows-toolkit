@@ -670,7 +670,7 @@ impl Render for ModeDialog {
 pub fn entries() -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
 
-    for tab in AppTab::ALL {
+    for &tab in AppTab::ALL {
         if tab == AppTab::Search {
             continue;
         }
@@ -892,7 +892,7 @@ mod tests {
             })
             .collect();
         for tab in AppTab::ALL {
-            assert!(offered.contains(&tab), "{tab:?} is not in the palette");
+            assert!(offered.contains(tab), "{tab:?} is not in the palette");
         }
         assert!(entries().iter().any(|entry| entry.action == PaletteAction::OpenSettings), "the settings are not");
     }

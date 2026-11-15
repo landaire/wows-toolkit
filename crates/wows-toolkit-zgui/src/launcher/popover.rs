@@ -1,0 +1,360 @@
+//! The account popover under the Play chevron: the install line, the saved accounts and their
+//! sessions, and the ways to the rarer launcher tasks.
+
+use std::path::PathBuf;
+
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
+use rust_i18n::t;
+use wows_toolkit_launcher::AccountStatus;
+use wows_toolkit_launcher::LoginTarget;
+use wows_toolkit_launcher::SessionStorage;
+use wows_toolkit_viewmodel::settings_drawer::Setting;
+use zgui::component;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::With;
+use zgui::view;
+use zgui::view::AnyView;
+use zgui::view::ForProps;
+use zgui::view::IntoView;
+use zgui::view::ShowProps;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
+use zgui_ui::SeparatorProps;
+
+use crate::launcher::account::open_sign_in;
+use crate::launcher::display::AccountRow;
+use crate::launcher::display::CatalogView;
+use crate::launcher::display::DownloadTarget;
+use crate::launcher::display::PlayState;
+use crate::launcher::download::DownloadStatusProps;
+use crate::launcher::model::LauncherModel;
+use crate::launcher::play::play;
+use crate::launcher::replay;
+use crate::shell::Shell;
+
+const POPOVER_CSS: &str = zgui::css!(
+    ".wt-account-popover__body {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .wt-account-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 4px;
+        min-width: 0;
+    }
+    .wt-account-row[data-default] {
+        background-color: var(--lui-color-selection);
+    }
+    .wt-account-row__name {
+        flex: 1 1 auto;
+        min-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .wt-account-popover__link {
+        justify-content: flex-start;
+    }"
+);
+
+/// The popover's content. `open` is the popover's own, so an action that leaves it can close it.
+#[component]
+pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalStorage>) -> impl IntoView {
+    zgui::view::install_stylesheet("wt-account-popover", POPOVER_CSS);
+    let locale = shell.services().locale;
+    let rows = Memo::new(move |_| model.with(AccountRow::all));
+    let running = Memo::new(move |_| model.with(|state| !state.launcher.game_state().is_idle()));
+    let state = Memo::new(move |_| {
+        let wows_dir = model.wows_dir();
+        model.with(|state| PlayState::of(state, wows_dir.as_deref(), false))
+    });
+    let close_then = move |action: Box<dyn Fn()>| {
+        open.set(false);
+        action();
+    };
+
+    let extra_play = move || match state.get() {
+        PlayState::Update { account, .. } => Some(
+            view! {
+                Button(
+                    variant = ButtonVariant::Ghost,
+                    size = ButtonSize::Sm,
+                    class = "wt-account-popover__link",
+                    attr:data-testid = "launcher-play-anyway",
+                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, false)))
+                ) {
+                    {t!("ui.launcher.popover.play_anyway").into_owned()}
+                }
+            }
+            .into_view(),
+        ),
+        PlayState::Play(account) => Some(
+            view! {
+                Button(
+                    variant = ButtonVariant::Ghost,
+                    size = ButtonSize::Sm,
+                    class = "wt-account-popover__link",
+                    attr:data-testid = "launcher-play-safe-mode",
+                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, true)))
+                ) {
+                    {t!("ui.launcher.popover.play_safe_mode").into_owned()}
+                }
+            }
+            .into_view(),
+        ),
+        _ => None,
+    };
+
+    view! {
+        column(class = "wt-account-popover__body") {
+            InstallLine(shell = shell, model = model)
+            Separator()
+            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.accounts")}}
+            if move || rows.with(Vec::is_empty) {
+                text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-accounts") {{locale.text("ui.launcher.popover.no_accounts")}}
+            } else {}
+            if move || running.get() {
+                text(class = "wt-launcher__dim", attr:data-testid = "launcher-close-to-switch") {{locale.text("ui.launcher.popover.close_to_switch")}}
+            } else {}
+            for row in move || rows.get(), key = |row: &AccountRow| row.clone() {
+                AccountRowView(shell = shell, model = model, row = row, running = running, open = open)
+            }
+            Separator()
+            column(class = "wt-launcher__column") {{extra_play}}
+            Button(
+                variant = ButtonVariant::Ghost,
+                size = ButtonSize::Sm,
+                class = "wt-account-popover__link",
+                attr:data-testid = "launcher-add-account",
+                on:click = move |_| close_then(Box::new(move || open_sign_in(shell, model, LoginTarget::NewAccount)))
+            ) {
+                {locale.text("ui.launcher.popover.add_account")}
+            }
+            Button(
+                variant = ButtonVariant::Ghost,
+                size = ButtonSize::Sm,
+                class = "wt-account-popover__link",
+                attr:data-testid = "launcher-open-game-settings",
+                on:click = move |_| close_then(Box::new(move || crate::launcher::game_settings::open(shell, model)))
+            ) {
+                {locale.text("ui.launcher.popover.game_settings")}
+            }
+            Button(
+                variant = ButtonVariant::Ghost,
+                size = ButtonSize::Sm,
+                class = "wt-account-popover__link",
+                attr:data-testid = "launcher-open-setup",
+                on:click = move |_| close_then(Box::new(move || shell.settings_drawer.open_at(Setting::GameInstalls)))
+            ) {
+                {locale.text("ui.launcher.popover.installs")}
+            }
+            Button(
+                variant = ButtonVariant::Ghost,
+                size = ButtonSize::Sm,
+                class = "wt-account-popover__link",
+                disabled = Signal::derive_local(move || running.get()),
+                attr:data-testid = "launcher-open-replay",
+                on:click = move |_| close_then(Box::new(move || replay::pick_and_open(shell, model)))
+            ) {
+                {locale.text("ui.launcher.popover.open_replay")}
+            }
+        }
+    }
+}
+
+/// The default account's install: its version, its update check and its download.
+#[component]
+fn InstallLine(shell: Shell, model: LauncherModel) -> impl IntoView {
+    let locale = shell.services().locale;
+    let install: Memo<Option<(usize, PathBuf)>> = Memo::new(move |_| {
+        let wows_dir = model.wows_dir();
+        model.with(|state| {
+            let settings = state.settings.as_ref()?;
+            let account = settings.default_account().or_else(|| settings.accounts.first());
+            let path = match account {
+                Some(account) => account.install.resolve(wows_dir.as_deref()),
+                None => wows_dir,
+            }?;
+            let slot = state.launcher.installs().iter().position(|install| install.path == path)?;
+            Some((slot, path))
+        })
+    });
+    let version = Memo::new(move |_| {
+        let (slot, _) = install.get()?;
+        model.with(|state| {
+            let version = state.launcher.installs().get(slot)?.version?;
+            Some(format!("{}.{}.{}", version.major, version.minor, version.patch))
+        })
+    });
+    let catalog = Memo::new(move |_| {
+        let Some((_, path)) = install.get() else { return CatalogView::Nothing };
+        model.with(|state| CatalogView::of(state.launcher.catalog_status(&path)))
+    });
+    let status = move || {
+        locale.track();
+        let version = version.get().unwrap_or_default();
+        let check = match catalog.get() {
+            CatalogView::Checking => t!("ui.launcher.checking_updates").into_owned(),
+            CatalogView::Found { updates, .. } if updates.is_empty() => t!("ui.launcher.up_to_date").into_owned(),
+            CatalogView::Found { .. } => t!("ui.launcher.popover.update_available").into_owned(),
+            CatalogView::Failed(_) => t!("ui.launcher.popover.check_failed").into_owned(),
+            CatalogView::Nothing => String::new(),
+        };
+        format!("{version}   {check}").trim().to_owned()
+    };
+    let failed = Memo::new(move |_| matches!(catalog.get(), CatalogView::Failed(_)));
+
+    view! {
+        column(class = "wt-launcher__column", attr:data-testid = "launcher-install-line") {
+            row(class = "wt-launcher__row") {
+                text(class = "wt-launcher__strong") {{locale.text("ui.launcher.popover.game")}}
+                box(class = "wt-launcher__spacer")
+            }
+            {move || match install.get() {
+                None => AnyView::new(view! {
+                    text(class = "wt-launcher__dim", attr:data-testid = "launcher-install-none") {{locale.text("ui.launcher.popover.no_install")}}
+                }),
+                Some((slot, path)) => AnyView::new(view! {
+                    column(class = "wt-launcher__column") {
+                        text(class = "wt-launcher__dim wt-launcher__truncate") {{path.display().to_string()}}
+                        row(class = "wt-launcher__row") {
+                            text(class = "wt-launcher__text wt-launcher-install-status", attr:data-testid = "launcher-install-status") {{status}}
+                            if move || failed.get() {
+                                Button(
+                                    variant = ButtonVariant::Ghost,
+                                    size = ButtonSize::Xs,
+                                    attr:data-testid = "launcher-recheck",
+                                    on:click = {
+                                        let path = path.clone();
+                                        move |_| {
+                                        let path = path.clone();
+                                        model.op(move |launcher, _, env| {
+                                            launcher.recheck_catalog(&path, env);
+                                            false
+                                        });
+                                        }
+                                    }
+                                ) {
+                                    {t!("ui.launcher.retry").into_owned()}
+                                }
+                            } else {}
+                        }
+                        DownloadStatus(model = model, shell = shell, target = DownloadTarget::Install(slot))
+                    }
+                }),
+            }}
+        }
+    }
+}
+
+/// One saved account: its realm, name and session, a press making it the default.
+#[component]
+fn AccountRowView(
+    shell: Shell,
+    model: LauncherModel,
+    row: AccountRow,
+    running: Memo<bool>,
+    open: RwSignal<bool, LocalStorage>,
+) -> impl IntoView {
+    let locale = shell.services().locale;
+    let AccountRow { label, is_default, status, other_install } = row;
+    let key = label.key;
+    let id = format!("launcher-account-{}-{}", label.realm.to_lowercase(), key.account_id.get());
+    let not_saved_id = format!("{id}-not-saved");
+    let sign_in_id = format!("{id}-sign-in");
+    let choose_id = format!("{id}-choose");
+    let forget_id = format!("{id}-forget");
+    let status_view = match status {
+        AccountStatus::Ready(SessionStorage::Keyring) if is_default => {
+            AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.default")}} })
+        }
+        AccountStatus::Ready(SessionStorage::Keyring) => {
+            AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.ready")}} })
+        }
+        AccountStatus::Ready(SessionStorage::MemoryOnly) => AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger {
+                    text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.not_saved")}}
+                }
+                TooltipContent {
+                    column(class = "wt-launcher__column") {
+                        text {{locale.text("ui.launcher.keyring.not_saved")}}
+                        text {{locale.text("ui.launcher.keyring.missing")}}
+                        text {{locale.text("ui.launcher.keyring.how_detail")}}
+                    }
+                }
+            }
+        }),
+        AccountStatus::Restoring => AnyView::new(view! {
+            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.restoring")}}
+        }),
+        AccountStatus::StoreUnavailable => AnyView::new(view! {
+            text(class = "wt-launcher__warn", attr:data-testid = "launcher-keyring-locked") {{locale.text("ui.launcher.popover.keyring_locked")}}
+        }),
+        AccountStatus::Expired | AccountStatus::SignedOut => AnyView::new(view! {
+            Button(
+                variant = ButtonVariant::Link,
+                size = ButtonSize::Xs,
+                attr:data-testid = sign_in_id,
+                on:click = move |_| {
+                    open.set(false);
+                    open_sign_in(shell, model, LoginTarget::Reauthenticate(key));
+                }
+            ) {
+                {locale.text("ui.launcher.play.sign_in_again")}
+            }
+        }),
+    };
+    let install_note = other_install.map(|path| {
+        view! { text(class = "wt-launcher__dim wt-launcher__truncate") {{path.display().to_string()}} }
+    });
+
+    view! {
+        row(
+            class = "wt-account-row",
+            attr:data-testid = id.clone(),
+            attr:data-default = is_default.then(String::new)
+        ) {
+            text(class = "wt-launcher__badge") {{label.realm}}
+            column(class = "wt-account-row__name") {
+                Button(
+                    variant = ButtonVariant::Ghost,
+                    size = ButtonSize::Xs,
+                    class = "wt-account-popover__link",
+                    disabled = Signal::derive_local(move || running.get()),
+                    attr:data-testid = choose_id,
+                    on:click = move |_| model.edit_settings(|settings| {
+                        settings.set_default_account(key);
+                    })
+                ) {
+                    {label.nickname.clone()}
+                }
+                {install_note}
+            }
+            {status_view}
+            Show(when = move || !running.get()) {
+                Button(
+                    variant = ButtonVariant::Ghost,
+                    size = ButtonSize::Xs,
+                    attr:data-testid = forget_id.clone(),
+                    on:click = move |_| model.op(move |launcher, settings, env| launcher.forget(key, settings, env))
+                ) {
+                    {t!("ui.launcher.popover.forget").into_owned()}
+                }
+            }
+        }
+    }
+}

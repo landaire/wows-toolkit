@@ -55,12 +55,15 @@ wowsdeob = { workspace = true }
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
 # The Unpacker viewer's find, which compares case-folded text.
 unicase = "2.9"
-# The Launcher tab's state and background work, and the launcher crates whose types it shows.
+# The game launcher's state and background work, the launcher crates whose types it shows, and
+# the game settings it edits.
 wows-toolkit-launcher = { workspace = true }
 wgc-auth = { workspace = true }
 wgc-catalog = { workspace = true }
 wgc-download = { workspace = true }
 wgc-install = { workspace = true }
+wgc-launch = { workspace = true }
+wows-game-settings = { workspace = true }
 # The process mitigations, applied before a window exists.
 wows-toolkit-hardening = { workspace = true }
 # Map art for the replay listing's thumbnails, and the replay renderer's draw commands.

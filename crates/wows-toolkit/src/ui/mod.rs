@@ -1,6 +1,6 @@
 pub mod command_palette;
 pub mod file_unpacker;
-#[cfg(feature = "launcher")]
+#[cfg(all(feature = "launcher", target_os = "linux"))]
 pub mod launcher_tab;
 pub(crate) mod licenses;
 pub mod mod_manager;

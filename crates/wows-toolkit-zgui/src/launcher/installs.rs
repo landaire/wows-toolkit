@@ -1,56 +1,45 @@
-//! The installs section: the installs found and added, each with its update check, its download,
-//! and the ways to launch it or use it for the rest of the app.
+//! The installs row of the Settings drawer: the installs found and added, each with its update
+//! check and download, which one the toolkit reads, and which one the default account plays.
 
 use std::path::PathBuf;
 
 use rust_i18n::t;
+use wows_toolkit_launcher::InstallChoice;
 use zgui::component;
-use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
-use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
-use zgui::reactive::prelude::Set;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
-use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
-use zgui_ui::CheckboxProps;
-use zgui_ui::Checked;
-use zgui_ui::LabelProps;
 use zgui_ui::SpinnerProps;
 
+use crate::launcher::display::CatalogView;
+use crate::launcher::display::DownloadTarget;
+use crate::launcher::display::InstallVersion;
+use crate::launcher::display::InstallView;
+use crate::launcher::download::DownloadStatusProps;
+use crate::launcher::games::GamesListProps;
+use crate::launcher::model::LauncherModel;
 use crate::services::Services;
 use crate::shell::Shell;
-use crate::tabs::launcher::SectionProps;
-use crate::tabs::launcher::display::CatalogView;
-use crate::tabs::launcher::display::DownloadTarget;
-use crate::tabs::launcher::display::InstallVersion;
-use crate::tabs::launcher::display::InstallView;
-use crate::tabs::launcher::download::DownloadStatusProps;
-use crate::tabs::launcher::model::LauncherModel;
-use crate::tabs::launcher::options::autodetect_proton;
 
 #[component]
-pub fn InstallsSection(model: LauncherModel, shell: Shell) -> impl IntoView {
+pub fn InstallsControl(model: LauncherModel, shell: Shell) -> impl IntoView {
     let locale = Services::current().locale;
-    // Applies to the next launch only.
-    let safe_mode = RwSignal::new_local(Checked::No);
-    let safe_mode_box = NodeRef::new();
-    let safe_mode_name = NodeRef::new();
     let installs = Memo::new(move |_| model.with(|state| InstallView::all(&state.launcher)));
     let discovering = Memo::new(move |_| model.with(|state| state.launcher.is_discovering()));
 
     view! {
-        Section(heading = "ui.launcher.installs_heading") {
+        column(class = "wt-launcher__column wt-launcher__column--wide", attr:data-testid = "launcher-installs") {
             row(class = "wt-launcher__row") {
                 Button(
                     variant = ButtonVariant::Outline,
@@ -74,36 +63,20 @@ pub fn InstallsSection(model: LauncherModel, shell: Shell) -> impl IntoView {
                 if move || discovering.get() {
                     Spinner(attr:data-testid = "launcher-discovering")
                 }
-                box(class = "wt-launcher__spacer")
-                row(class = "wt-launcher__row wt-launcher__row--tight") {
-                    Checkbox(checked = safe_mode, node_ref = safe_mode_box, labelled_by = safe_mode_name, attr:data-testid = "launcher-safe-mode")
-                    Label(
-                        node_ref = safe_mode_name,
-                        control = safe_mode_box,
-                        attr:data-testid = "launcher-safe-mode-label",
-                        on:click = move |_| safe_mode.set(Checked::from(!safe_mode.get_untracked().is_checked()))
-                    ) {
-                        {locale.text("ui.launcher.safe_mode")}
-                    }
-                }
             }
             if move || installs.get().is_empty() && !discovering.get() {
                 text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-installs") {{locale.text("ui.launcher.no_installs")}}
             }
             for install in move || installs.get(), key = |install: &InstallView| install.clone() {
-                InstallRow(model = model, shell = shell, install = install, safe_mode = safe_mode)
+                InstallRow(model = model, shell = shell, install = install)
             }
+            GamesList(model = model, shell = shell)
         }
     }
 }
 
 #[component]
-fn InstallRow(
-    model: LauncherModel,
-    shell: Shell,
-    install: InstallView,
-    safe_mode: RwSignal<Checked, LocalStorage>,
-) -> impl IntoView {
+fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl IntoView {
     let locale = Services::current().locale;
     let InstallView { slot, path, source, read_only, version, has_content } = install;
     let target = DownloadTarget::Install(slot);
@@ -116,15 +89,21 @@ fn InstallRow(
             state.launcher.has_downloads(&offer_path) && !active
         })
     });
-    let proton_path = path.clone();
-    let needs_proton = Memo::new(move |_| {
-        model.with(|state| {
-            let Some(settings) = &state.settings else { return false };
-            let Some(install) = state.launcher.installs().iter().find(|install| install.path == proton_path) else {
-                return false;
-            };
-            wows_toolkit_launcher::proton::needs_setup(install, settings)
-        })
+    let toolkit_path = path.clone();
+    let is_toolkit = Memo::new(move |_| model.wows_dir().is_some_and(|dir| dir == toolkit_path));
+    let played_path = path.clone();
+    let played = Memo::new(move |_| {
+        let wows_dir = model.wows_dir();
+        model
+            .with(|state| {
+                let settings = state.settings.as_ref()?;
+                let account = settings.default_account()?;
+                (account.install.resolve(wows_dir.as_deref()).as_ref() == Some(&played_path)).then_some(())
+            })
+            .is_some()
+    });
+    let has_default = Memo::new(move |_| {
+        model.with(|state| state.settings.as_ref().is_some_and(|settings| settings.default_account().is_some()))
     });
     let version = version.map(|version| match version {
         InstallVersion::Known(version) => AnyView::new(view! { text {{version}} }),
@@ -139,6 +118,14 @@ fn InstallRow(
                 text(class = "wt-launcher__strong") {{source}}
                 text(class = "wt-launcher__mono wt-launcher__truncate") {{shown_path}}
                 {version}
+            }
+            row(class = "wt-launcher__row") {
+                if move || is_toolkit.get() {
+                    text(class = "wt-launcher__badge", attr:data-testid = format!("launcher-toolkit-{slot}")) {{locale.text("ui.launcher.installs.toolkit")}}
+                } else {}
+                if move || played.get() {
+                    text(class = "wt-launcher__badge", attr:data-testid = format!("launcher-played-{slot}")) {{locale.text("ui.launcher.installs.played")}}
+                } else {}
             }
             if move || !read_only {
                 row(class = "wt-launcher__row") {
@@ -167,40 +154,30 @@ fn InstallRow(
                             attr:data-testid = format!("launcher-download-{slot}"),
                             on:click = move |_| download(model, shell, path.get_value(), has_content)
                         ) {
-                            {locale.text("ui.launcher.download")}
+                            {move || if has_content { locale.text("ui.launcher.installs.update")() } else { locale.text("ui.launcher.download")() }}
                         }
                         text(class = "wt-launcher__dim") {{locale.text("ui.launcher.download_hint")}}
                     }
                 }
             }
-            if move || needs_proton.get() {
-                row(class = "wt-launcher__row") {
-                    text(class = "wt-launcher__warn") {{locale.text("ui.launcher.proton.needed")}}
-                    Button(
-                        variant = ButtonVariant::Outline,
-                        size = ButtonSize::Sm,
-                        attr:data-testid = format!("launcher-set-up-proton-{slot}"),
-                        on:click = move |_| autodetect_proton(model, shell)
-                    ) {
-                        {locale.text("ui.launcher.proton.set_up")}
-                    }
-                }
-            }
             row(class = "wt-launcher__row") {
-                Button(
-                    size = ButtonSize::Sm,
-                    attr:data-testid = format!("launcher-launch-{slot}"),
-                    on:click = move |_| launch(model, shell, &path.get_value(), safe_mode.get_untracked() == Checked::Yes)
-                ) {
-                    {locale.text("ui.launcher.launch")}
-                }
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Sm,
+                    disabled = Signal::derive_local(move || is_toolkit.get()),
                     attr:data-testid = format!("launcher-use-{slot}"),
                     on:click = move |_| shell.apply_wows_dir(path.get_value().to_string_lossy().into_owned())
                 ) {
                     {locale.text("ui.launcher.use_for_toolkit")}
+                }
+                Button(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Sm,
+                    disabled = Signal::derive_local(move || played.get() || !has_default.get()),
+                    attr:data-testid = format!("launcher-play-from-{slot}"),
+                    on:click = move |_| play_from(model, path.get_value())
+                ) {
+                    {locale.text("ui.launcher.installs.play_from")}
                 }
             }
         }
@@ -260,7 +237,7 @@ fn CatalogStatus(catalog: Memo<CatalogView>) -> impl IntoView {
 }
 
 /// Asks for an install directory, adds it, and looks for installs again.
-fn add_install(model: LauncherModel, shell: Shell) {
+pub(crate) fn add_install(model: LauncherModel, shell: Shell) {
     let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
     spawn_local(async move {
         let Some(dir) = shell.chosen_path(asked).await else { return };
@@ -272,11 +249,14 @@ fn add_install(model: LauncherModel, shell: Shell) {
     });
 }
 
-/// Asks where to put the newest build of the install at `install`, and downloads it there.
+/// Updates an install with content in place; for one without, asks where to put the newest build
+/// and downloads it there.
 fn download(model: LauncherModel, shell: Shell, install: PathBuf, has_content: bool) {
-    // An install with no detected version has no content on disk yet, so the picker starts at the
-    // platform default.
-    let start = if has_content { install.clone() } else { wgc_download::default_install_dir() };
+    if has_content {
+        crate::launcher::play::start_update(shell, model, install);
+        return;
+    }
+    let start = wgc_download::default_install_dir();
     let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &start);
     spawn_local(async move {
         let Some(dest) = shell.chosen_path(asked).await else { return };
@@ -287,17 +267,17 @@ fn download(model: LauncherModel, shell: Shell, install: PathBuf, has_content: b
     });
 }
 
-/// Starts the install at `path` for online play.
-fn launch(model: LauncherModel, shell: Shell, path: &std::path::Path, safe_mode: bool) {
-    let Some(install) = model.install(path) else { return };
-    let launched = model.with_untracked(|state| {
-        let settings = state.settings.as_ref()?;
-        Some(state.launcher.launch(&install, settings, safe_mode, |command| {
-            wows_toolkit_services::child_process::prepare(command);
-        }))
+/// Makes the default account play the install at `path`: the app's game directory follows the
+/// toolkit's setting, any other install is pinned.
+fn play_from(model: LauncherModel, path: PathBuf) {
+    let wows_dir = model.wows_dir_untracked();
+    model.edit_settings(|settings| {
+        let Some(key) = settings.default_account else { return };
+        let choice = if wows_dir.as_deref() == Some(path.as_path()) {
+            InstallChoice::Toolkit
+        } else {
+            InstallChoice::Path(path)
+        };
+        settings.set_account_install(key, choice);
     });
-
-    if let Some(Err(err)) = launched {
-        shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
-    }
 }

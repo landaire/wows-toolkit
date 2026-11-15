@@ -455,6 +455,8 @@ pub enum AppTab {
     Search,
     ArmorViewer,
     Unpacker,
+    /// The launcher runs games through Proton, so it exists only on Linux.
+    #[cfg(target_os = "linux")]
     Launcher,
 }
 
@@ -465,8 +467,9 @@ impl AppTab {
     /// always leads with. `Tab::ModManager` is deliberately absent: the egui
     /// app never adds it to its dock either. Settings are not a tab here but
     /// the drawer the gear at the end of the strip opens.
-    pub const ALL: [AppTab; 7] = [
+    pub const ALL: &[AppTab] = &[
         AppTab::ReplayInspector,
+        #[cfg(target_os = "linux")]
         AppTab::Launcher,
         AppTab::Stats,
         AppTab::PlayerTracker,
@@ -483,6 +486,7 @@ impl AppTab {
             AppTab::Search => "ui.tabs.search",
             AppTab::ArmorViewer => "ui.tabs.model_viewer",
             AppTab::Unpacker => "ui.tabs.unpacker",
+            #[cfg(target_os = "linux")]
             AppTab::Launcher => "ui.tabs.launcher",
         }
     }
@@ -502,6 +506,7 @@ impl AppTab {
             AppTab::Search => crate::icons::Glyph::Search,
             AppTab::ArmorViewer => crate::icons::Glyph::Box,
             AppTab::Unpacker => crate::icons::Glyph::Archive,
+            #[cfg(target_os = "linux")]
             AppTab::Launcher => crate::icons::Glyph::Rocket,
         }
     }
@@ -617,6 +622,7 @@ pub struct App {
     /// The Search tab: a query over the replay index.
     search: Entity<SearchView>,
     /// The Launcher tab: installs, sign-in, and fresh installs.
+    #[cfg(target_os = "linux")]
     launcher: Entity<crate::launcher::LauncherView>,
     /// Settings drawer text fields. Held so an edit can be read back and the
     /// saved value can be shown when the drawer first renders.
@@ -705,6 +711,7 @@ impl App {
         let stats = cx.new(|cx| StatsView::new(window, cx));
         let player_tracker = cx.new(|cx| PlayerTrackerView::new(window, cx));
         let search = cx.new(|cx| SearchView::new(window, cx));
+        #[cfg(target_os = "linux")]
         let launcher = cx.new(|cx| crate::launcher::LauncherView::new(window, cx));
         let wows_dir_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.settings.wows.directory_hint").to_string()));
@@ -879,6 +886,7 @@ impl App {
         });
         // An install picked in the Launcher becomes the directory every other
         // tab reads, as picking it in Settings does.
+        #[cfg(target_os = "linux")]
         let use_for_toolkit = cx.subscribe_in(&launcher, window, |this, _launcher, event, window, cx| {
             let crate::launcher::UseForToolkit(path) = event;
             let path = path.to_string_lossy().into_owned();
@@ -890,7 +898,8 @@ impl App {
         let activation = cx.observe_window_activation(window, |_this, window, _cx| window.refresh());
         let modes_reported = crate::status_bar::observe_modes(cx);
 
-        Self {
+        #[cfg_attr(not(target_os = "linux"), expect(unused_mut))]
+        let mut app = Self {
             theme: ThemeChoice::default(),
             theme_preview: None,
             twitch_paste: None,
@@ -916,6 +925,7 @@ impl App {
             stats,
             player_tracker,
             search,
+            #[cfg(target_os = "linux")]
             launcher,
             wows_dir_input,
             proxy_input,
@@ -968,14 +978,17 @@ impl App {
                 collab_name_edited,
                 search_event,
                 tracker_event,
-                use_for_toolkit,
                 language_chosen,
                 activation,
                 modes_reported,
                 zoom_dragged,
                 zoom_set,
             ],
-        }
+        };
+        #[cfg(target_os = "linux")]
+        app._subscriptions.push(use_for_toolkit);
+
+        app
     }
 
     /// Looks for a newer release, and offers to install one.
@@ -1088,7 +1101,7 @@ impl App {
     /// stats beside the session's.
     fn tab_order(&self) -> Vec<AppTab> {
         let mut tabs = Vec::new();
-        for tab in AppTab::ALL {
+        for &tab in AppTab::ALL {
             tabs.push(tab);
             if tab == AppTab::Stats {
                 tabs.extend(self.directory_stats_tabs());
@@ -1131,7 +1144,9 @@ impl App {
             AppTab::DirectoryStats(id) => self.shown_stats(id).read(cx).panel_toggles(cx),
             AppTab::Unpacker => self.unpacker.read(cx).panel_toggles(cx),
             AppTab::PlayerTracker => self.player_tracker.read(cx).panel_toggles(cx),
-            AppTab::Search | AppTab::Launcher => Vec::new(),
+            AppTab::Search => Vec::new(),
+            #[cfg(target_os = "linux")]
+            AppTab::Launcher => Vec::new(),
         };
         // A session belongs to the replay workspace it was started from.
         let session = inspector.map(|view| crate::collab_popover::render(&view, cx));
@@ -2488,6 +2503,7 @@ impl App {
         // Seed the text fields so the tab opens showing what is saved.
         self.wows_dir_input.update(cx, |state, cx| state.set_value(settings.wows_dir.clone(), window, cx));
         self.proxy_input.update(cx, |state, cx| state.set_value(settings.proxy_url.clone(), window, cx));
+        #[cfg(target_os = "linux")]
         self.launcher.update(cx, |launcher, cx| launcher.apply_settings(&settings.proxy_url, window, cx));
 
         let unpacker_dir = settings.wows_dir.clone();
@@ -2721,6 +2737,7 @@ impl App {
         }
         settings.proxy_url = url.clone();
         settings_store::save(keys::PROXY_URL, &url, cx);
+        #[cfg(target_os = "linux")]
         self.launcher.update(cx, |launcher, _| launcher.set_proxy(&url));
     }
 
@@ -3426,6 +3443,7 @@ impl Render for App {
 
         let settings_drawer = self.render_settings_drawer(window, cx);
         let body = match self.active_tab {
+            #[cfg(target_os = "linux")]
             AppTab::Launcher => self.launcher.clone().into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),

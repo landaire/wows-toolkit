@@ -1,14 +1,21 @@
-//! The Launcher tab: discover, launch, and manage WoWs installs.
+//! The Launcher tab: saved accounts, Play, and WoWs install management.
 
 use std::path::Path;
 use std::path::PathBuf;
 
+use rust_i18n::t;
 use wgc_catalog::known_games::KnownGame;
+use wows_toolkit_launcher::AccountKey;
+use wows_toolkit_launcher::AccountStatus;
 use wows_toolkit_launcher::CatalogCheckState;
 use wows_toolkit_launcher::CatalogSummary;
 use wows_toolkit_launcher::DownloadState;
+use wows_toolkit_launcher::GameState;
 use wows_toolkit_launcher::Launcher;
 use wows_toolkit_launcher::LauncherError;
+use wows_toolkit_launcher::LauncherSettings;
+use wows_toolkit_launcher::LoginTarget;
+use wows_toolkit_launcher::SessionStorage;
 use wows_toolkit_launcher::proton::ProtonSetup;
 use wows_toolkit_launcher::proton::Severity;
 
@@ -35,6 +42,16 @@ enum DownloadRowAction {
     Resume(PathBuf),
 }
 
+/// An account row's button press, applied after rendering.
+enum AccountAction {
+    MakeDefault(AccountKey),
+    SignIn(AccountKey),
+    SignOut(AccountKey),
+    Forget(AccountKey),
+    Add,
+    CancelForm,
+}
+
 /// Native dialogs opened from the launcher tab.
 #[derive(Default)]
 pub struct LauncherDialogs {
@@ -54,7 +71,7 @@ enum FolderRequest {
 enum Intent {
     Rescan,
     AddInstall(PathBuf),
-    Launch(usize),
+    Play,
     UseForToolkit(PathBuf),
     Recheck(PathBuf),
     Download { install: PathBuf, default_dir: PathBuf },
@@ -254,7 +271,7 @@ impl ToolkitTabViewer<'_> {
             }
         });
 
-        ui.checkbox(&mut self.tab_state.launch_safe_mode, "Safe mode (disable mods)");
+        self.build_play_row(ui, &mut intents);
 
         ui.collapsing("Launch options", |ui| self.build_launch_options(ui));
 
@@ -262,7 +279,7 @@ impl ToolkitTabViewer<'_> {
 
         let launcher = &self.tab_state.launcher;
         let settings = self.tab_state.persisted.read().settings.launcher.clone();
-        for (i, install) in launcher.installs().iter().enumerate() {
+        for install in launcher.installs() {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.strong(install.source.label());
@@ -314,14 +331,9 @@ impl ToolkitTabViewer<'_> {
                         }
                     });
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Launch").clicked() {
-                        intents.push(Intent::Launch(i));
-                    }
-                    if ui.button("Use for toolkit").clicked() {
-                        intents.push(Intent::UseForToolkit(install.path.clone()));
-                    }
-                });
+                if ui.button("Use for toolkit").clicked() {
+                    intents.push(Intent::UseForToolkit(install.path.clone()));
+                }
             });
         }
 
@@ -449,7 +461,7 @@ impl ToolkitTabViewer<'_> {
                 launcher.start_install_discovery(settings, env);
                 true
             }),
-            Intent::Launch(index) => self.launch_install(index),
+            Intent::Play => self.play_default_account(),
             Intent::UseForToolkit(path) => {
                 self.tab_state.persisted.write().settings.game.wows_dir = path.display().to_string();
                 self.tab_state.revalidate_wows_dir();
@@ -524,61 +536,109 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    /// Sign-in form, or the signed-in account's summary.
+    /// Play for the default account, the Safe Mode toggle, and the running game.
+    fn build_play_row(&mut self, ui: &mut egui::Ui, intents: &mut Vec<Intent>) {
+        let default_account = self.tab_state.persisted.read().settings.launcher.default_account().cloned();
+        let launcher = &self.tab_state.launcher;
+        ui.horizontal(|ui| {
+            match &default_account {
+                Some(account) => {
+                    let ready = matches!(launcher.account_status(account.key), AccountStatus::Ready(_));
+                    let enabled = ready && launcher.game_state().is_idle();
+                    let button = egui::Button::new(format!("Play as {}", account.nickname.as_str()));
+                    if ui.add_enabled(enabled, button).clicked() {
+                        intents.push(Intent::Play);
+                    }
+                }
+                None => {
+                    ui.add_enabled(false, egui::Button::new("Play"));
+                    ui.weak("Sign in to an account to play.");
+                }
+            }
+            ui.checkbox(&mut self.tab_state.launch_safe_mode, "Safe mode (disable mods)");
+        });
+        match launcher.game_state() {
+            GameState::Idle => {}
+            GameState::Starting { install, .. } => {
+                ui.weak(format!("Game starting from {}", install.display()));
+            }
+            GameState::Running { install, .. } => {
+                ui.weak(format!("Game running from {}", install.display()));
+            }
+        }
+    }
+
+    /// The saved accounts with their session status, and the sign-in form.
     fn build_account_section(&mut self, ui: &mut egui::Ui) {
+        let mut actions = Vec::new();
         let mut sign_in = false;
         let mut submit_code = false;
-        let mut sign_out = false;
         let mut dismiss_captcha = false;
 
-        let launcher: &Launcher = &self.tab_state.launcher;
+        let settings = self.tab_state.persisted.read().settings.launcher.clone();
+        let launcher = &self.tab_state.launcher;
         let form = &mut self.tab_state.login_form;
+        if form.show && launcher.login_finished().is_some() {
+            form.show = false;
+        }
         ui.group(|ui| {
-            ui.heading("Account");
-            if let Some(session) = launcher.session() {
+            ui.heading("Accounts");
+            if settings.accounts.is_empty() {
+                ui.weak("No saved accounts.");
+            }
+            for account in &settings.accounts {
+                let key = account.key;
                 ui.horizontal(|ui| {
-                    ui.strong(session.nickname.as_str());
-                    ui.label(format!("Region: {}", wows_toolkit_launcher::realm_label(session.realm)));
-                });
-                match session.expiry {
-                    wgc_auth::TokenExpiry::KnownAt(expires_at) => {
-                        match expires_at.duration_since(std::time::SystemTime::now()) {
-                            Ok(remaining) => {
-                                ui.label(format!(
-                                    "Signed in (expires in {})",
-                                    wows_toolkit_launcher::format_duration(remaining)
-                                ));
-                            }
-                            Err(_) => {
-                                ui.colored_label(ERROR_COLOR, "Session expired - sign in again");
+                    let is_default = settings.default_account == Some(key);
+                    if ui.radio(is_default, account.nickname.as_str()).on_hover_text("Play uses this account").clicked()
+                        && !is_default
+                    {
+                        actions.push(AccountAction::MakeDefault(key));
+                    }
+                    ui.label(wows_toolkit_launcher::realm_label(key.realm));
+                    let status = launcher.account_status(key);
+                    show_account_status(ui, launcher, key, status);
+                    match status {
+                        AccountStatus::Ready(_) => {
+                            if ui.small_button("Sign out").clicked() {
+                                actions.push(AccountAction::SignOut(key));
                             }
                         }
+                        AccountStatus::Expired | AccountStatus::SignedOut | AccountStatus::StoreUnavailable => {
+                            if ui.small_button("Sign in").clicked() {
+                                actions.push(AccountAction::SignIn(key));
+                            }
+                        }
+                        AccountStatus::Restoring => {}
                     }
-                    wgc_auth::TokenExpiry::Unknown => {
-                        ui.weak("Signed in (expiry unknown; verified on launch)");
+                    if ui.small_button("Remove").clicked() {
+                        actions.push(AccountAction::Forget(key));
                     }
-                }
-                if !launcher.session_persisted() {
-                    ui.weak("Not saved to keyring; you'll sign in again next launch.");
-                }
-                if ui.button("Sign out").clicked() {
-                    sign_out = true;
-                }
-            } else if launcher.two_factor_pending() {
+                });
+            }
+            ui.separator();
+
+            if launcher.two_factor_pending() {
                 ui.label("Two-factor code required.");
+                let mut code_entered = false;
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut form.two_factor_code).hint_text("code"));
+                    let field = ui.add(egui::TextEdit::singleline(&mut form.two_factor_code).hint_text("code"));
+                    code_entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.checkbox(&mut form.use_backup_code, "Use backup code");
                 });
                 if let Some(err) = launcher.login_error() {
                     ui.colored_label(ERROR_COLOR, err);
                 }
+                let can_submit = !launcher.login_in_progress() && !form.two_factor_code.trim().is_empty();
                 ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!launcher.login_in_progress(), |ui| {
+                    ui.add_enabled_ui(can_submit, |ui| {
                         if ui.button("Submit code").clicked() {
                             submit_code = true;
                         }
                     });
+                    if can_submit && code_entered {
+                        submit_code = true;
+                    }
                     if launcher.login_in_progress() {
                         ui.spinner();
                     }
@@ -592,37 +652,63 @@ impl ToolkitTabViewer<'_> {
                     dismiss_captcha = true;
                 }
             } else if !form.show {
-                ui.horizontal(|ui| {
-                    ui.weak("Not signed in.");
-                    if ui.button("Sign in").clicked() {
-                        form.show = true;
-                    }
-                });
+                if ui.button("Add account").clicked() {
+                    actions.push(AccountAction::Add);
+                }
             } else {
+                let target = launcher.login_target();
+                match target {
+                    LoginTarget::NewAccount => {
+                        ui.strong("Add account");
+                    }
+                    LoginTarget::Reauthenticate(key) => {
+                        let name = settings.account(key).map_or("", |account| account.nickname.as_str());
+                        ui.strong(format!("Sign in again: {name}"));
+                    }
+                }
+                let mut credentials_entered = false;
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("launcher_account_realm")
-                        .selected_text(wows_toolkit_launcher::realm_label(form.realm))
-                        .show_ui(ui, |ui| {
-                            for realm in wows_toolkit_launcher::REALMS {
-                                ui.selectable_value(&mut form.realm, realm, wows_toolkit_launcher::realm_label(realm));
-                            }
-                        });
-                    ui.label("Username:");
-                    ui.text_edit_singleline(&mut form.username);
+                    // A reauthentication signs in to the account's own realm.
+                    ui.add_enabled_ui(target == LoginTarget::NewAccount, |ui| {
+                        egui::ComboBox::from_id_salt("launcher_account_realm")
+                            .selected_text(wows_toolkit_launcher::realm_label(form.realm))
+                            .show_ui(ui, |ui| {
+                                for realm in wows_toolkit_launcher::REALMS {
+                                    ui.selectable_value(
+                                        &mut form.realm,
+                                        realm,
+                                        wows_toolkit_launcher::realm_label(realm),
+                                    );
+                                }
+                            });
+                    });
+                    ui.label(t!("ui.launcher.account.email"));
+                    let field = ui.text_edit_singleline(&mut form.username);
+                    credentials_entered |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
                 ui.horizontal(|ui| {
                     ui.label("Password:");
-                    ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
+                    let field = ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
+                    credentials_entered |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
                 if let Some(err) = launcher.login_error() {
                     ui.colored_label(ERROR_COLOR, err);
                 }
+                let can_sign_in = !launcher.login_in_progress()
+                    && wows_toolkit_launcher::is_plausible_email(&form.username)
+                    && !form.password.is_empty();
                 ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!launcher.login_in_progress(), |ui| {
+                    ui.add_enabled_ui(can_sign_in, |ui| {
                         if ui.button("Sign in").clicked() {
                             sign_in = true;
                         }
                     });
+                    if can_sign_in && credentials_entered {
+                        sign_in = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        actions.push(AccountAction::CancelForm);
+                    }
                     if launcher.login_in_progress() {
                         ui.spinner();
                     }
@@ -634,9 +720,10 @@ impl ToolkitTabViewer<'_> {
             // Taken out of the non-zeroizing form field the moment it is used.
             let password = wgc_auth::SecretPassword::new(std::mem::take(&mut self.tab_state.login_form.password));
             let realm = self.tab_state.login_form.realm;
-            let username = self.tab_state.login_form.username.clone();
-            self.tab_state
-                .launcher_op(|launcher, settings, env| launcher.start_login(realm, username, password, settings, env));
+            let username = self.tab_state.login_form.username.trim().to_string();
+            self.tab_state.launcher_op(|launcher, settings, env| {
+                launcher.start_login(launcher.login_target(), realm, username, password, settings, env)
+            });
         }
         if submit_code {
             let form = &mut self.tab_state.login_form;
@@ -648,26 +735,116 @@ impl ToolkitTabViewer<'_> {
             };
             self.tab_state.launcher_op(|launcher, settings, env| launcher.submit_two_factor(code, settings, env));
         }
-        if sign_out {
-            self.tab_state.launcher_op(|launcher, settings, env| launcher.sign_out(settings, env));
-        }
         if dismiss_captcha {
             self.tab_state.launcher.dismiss_captcha();
             self.tab_state.login_form.show = true;
         }
+        for action in actions {
+            self.apply_account_action(action, &settings);
+        }
     }
 
-    fn launch_install(&mut self, index: usize) {
-        let Some(install) = self.tab_state.launcher.installs().get(index).cloned() else {
+    fn apply_account_action(&mut self, action: AccountAction, settings: &LauncherSettings) {
+        match action {
+            AccountAction::MakeDefault(key) => {
+                if self.tab_state.persisted.write().settings.launcher.set_default_account(key) {
+                    self.tab_state.request_save();
+                }
+            }
+            AccountAction::SignIn(key) => {
+                self.tab_state.launcher.reset_login(LoginTarget::Reauthenticate(key));
+                let form = &mut self.tab_state.login_form;
+                form.realm = key.realm;
+                form.show = true;
+            }
+            AccountAction::SignOut(key) => self.tab_state.launcher_op(|launcher, settings, env| {
+                launcher.sign_out(key, settings, env);
+                false
+            }),
+            AccountAction::Forget(key) => {
+                self.tab_state.launcher_op(|launcher, settings, env| launcher.forget(key, settings, env));
+            }
+            AccountAction::Add => {
+                self.tab_state.launcher.reset_login(LoginTarget::NewAccount);
+                let form = &mut self.tab_state.login_form;
+                if let Some(realm) = settings.sign_in_realm {
+                    form.realm = realm;
+                }
+                form.show = true;
+            }
+            AccountAction::CancelForm => {
+                self.tab_state.launcher.reset_login(LoginTarget::NewAccount);
+                let form = &mut self.tab_state.login_form;
+                form.password.clear();
+                form.show = false;
+            }
+        }
+    }
+
+    fn play_default_account(&mut self) {
+        let (default_account, wows_dir) = {
+            let persisted = self.tab_state.persisted.read();
+            (persisted.settings.launcher.default_account, persisted.settings.game.wows_dir.clone())
+        };
+        let Some(key) = default_account else {
             return;
         };
-        let settings = self.tab_state.persisted.read().settings.launcher.clone();
-        let launched =
-            self.tab_state.launcher.launch(&install, &settings, self.tab_state.launch_safe_mode, |command| {
+        let safe_mode = self.tab_state.launch_safe_mode;
+
+        let mut played = Ok(());
+        self.tab_state.launcher_op(|launcher, settings, env| {
+            // An empty `wows_dir` means the app has no game directory set.
+            let wows_dir = (!wows_dir.is_empty()).then(|| Path::new(&wows_dir));
+            played = launcher.play(key, wows_dir, safe_mode, settings, env, |command| {
                 crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
             });
-        if let Err(e) = launched {
+            false
+        });
+        if let Err(e) = played {
             self.tab_state.toasts.lock().error(format!("Launch failed: {e}"));
+        }
+    }
+}
+
+/// One account's session status, with its expiry and storage when signed in.
+fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, status: AccountStatus) {
+    match status {
+        AccountStatus::Restoring => {
+            ui.spinner();
+            ui.weak("restoring session");
+        }
+        AccountStatus::Ready(storage) => {
+            let expiry = launcher.session(key).map(|session| &session.expiry);
+            match expiry {
+                Some(wgc_auth::TokenExpiry::KnownAt(expires_at)) => {
+                    match expires_at.duration_since(std::time::SystemTime::now()) {
+                        Ok(remaining) => {
+                            ui.label(format!(
+                                "Signed in (expires in {})",
+                                wows_toolkit_launcher::format_duration(remaining)
+                            ));
+                        }
+                        Err(_) => {
+                            ui.colored_label(ERROR_COLOR, "Session expired - sign in again");
+                        }
+                    }
+                }
+                Some(wgc_auth::TokenExpiry::Unknown) | None => {
+                    ui.label("Signed in");
+                }
+            }
+            if storage == SessionStorage::MemoryOnly {
+                ui.weak("not saved to keyring; you'll sign in again next launch");
+            }
+        }
+        AccountStatus::Expired => {
+            ui.colored_label(ERROR_COLOR, "Session expired - sign in again");
+        }
+        AccountStatus::SignedOut => {
+            ui.weak("Signed out");
+        }
+        AccountStatus::StoreUnavailable => {
+            ui.colored_label(WARN_COLOR, "Keyring unavailable");
         }
     }
 }

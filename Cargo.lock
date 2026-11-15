@@ -16790,6 +16790,7 @@ version = "0.1.0"
 name = "wows-toolkit-launcher"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "rand 0.10.3",
  "reqwest 0.12.28",
  "rootcause",
@@ -16804,6 +16805,7 @@ dependencies = [
  "wgc-download",
  "wgc-install",
  "wgc-launch",
+ "wows-game-settings",
 ]
 
 [[package]]
@@ -16958,10 +16960,12 @@ dependencies = [
  "wgc-catalog",
  "wgc-download",
  "wgc-install",
+ "wgc-launch",
  "windows-sys 0.61.2",
  "winresource",
  "wows-core",
  "wows-data-mgr",
+ "wows-game-settings",
  "wows-mcp",
  "wows-query",
  "wows-replay-insights",

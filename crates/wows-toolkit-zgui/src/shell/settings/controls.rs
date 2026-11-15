@@ -459,6 +459,12 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
         }
         Setting::ArmorOpaqueHull => armor_switch(shell, setting, "armor-hull-opaque", |defaults| defaults.hull_opaque),
         Setting::ArmorNoDefaults => return AnyView::new(()),
+        Setting::GameLauncher
+        | Setting::GameInstalls
+        | Setting::GameRunner
+        | Setting::GameLaunchArgs
+        | Setting::GameEnvironment
+        | Setting::GameSafeModeArgs => launcher_control(shell, setting),
     };
 
     AnyView::new(view! {
@@ -499,6 +505,18 @@ pub fn SettingNote(shell: Shell, setting: Setting, faults: Memo<Vec<SettingFault
         {move || faults.with(Vec::is_empty).then(remark).flatten().map(|remark| view! {
             text(class = "wt-settings__note", attr:data-testid = "settings-row-note") {{remark}}
         }.into_view())}
+    }
+}
+
+/// The control of a launcher row. The launcher exists on Linux only, and its rows are never listed
+/// elsewhere.
+fn launcher_control(shell: Shell, setting: Setting) -> AnyView {
+    #[cfg(target_os = "linux")]
+    return crate::launcher::drawer::control(shell, setting);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (shell, setting);
+        AnyView::new(())
     }
 }
 

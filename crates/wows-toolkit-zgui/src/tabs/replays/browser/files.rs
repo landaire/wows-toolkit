@@ -42,9 +42,18 @@ pub fn copy_replay_files(toasts: Toasts, paths: &[PathBuf]) {
     }
 }
 
-/// Asks the game in `wows_dir` to play `replay`, saying so when it cannot be started.
-pub fn open_replay_in_game(toasts: Toasts, wows_dir: &Path, replay: &Path) {
-    let opened = wows_toolkit_launcher::open_replay_in_game(wows_dir, replay.to_path_buf(), |command| {
+/// Asks the game to play `replay`, saying so when it cannot be started. With the launcher enabled
+/// it picks the install with the replay's build and runs it through the launcher's runner;
+/// otherwise the game in `wows_dir` is started directly.
+pub fn open_replay_in_game(shell: Shell, wows_dir: &Path, replay: &Path) {
+    #[cfg(target_os = "linux")]
+    if shell.launcher.with_untracked(|state| state.is_enabled()) {
+        crate::launcher::replay::open(shell, shell.launcher, replay.to_path_buf());
+        return;
+    }
+
+    let toasts = shell.toasts();
+    let opened = wows_toolkit_launcher::open_replay_natively(wows_dir, replay.to_path_buf(), |command| {
         wows_toolkit_services::child_process::prepare(command);
     });
     if let Err(err) = opened {

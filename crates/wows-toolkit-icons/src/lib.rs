@@ -16,6 +16,7 @@ macro_rules! glyph_list {
             Box => "box",
             CaseSensitive => "case-sensitive",
             Castle => "castle",
+            ChevronDown => "chevron-down",
             ChartColumn => "chart-column",
             ChartLine => "chart-line",
             Circle => "circle",

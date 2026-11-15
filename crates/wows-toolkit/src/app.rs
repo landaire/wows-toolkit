@@ -141,7 +141,7 @@ pub enum Tab {
     /// Stats over the replays under one directory, identified by its pane.
     DirectoryStats(crate::data::directory_stats::DirectoryStatsId),
     Search,
-    #[cfg(feature = "launcher")]
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
     Launcher,
 }
 
@@ -254,7 +254,7 @@ impl ToolkitTabViewer<'_> {
             Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
             Tab::Stats | Tab::DirectoryStats(_) => (icons::CHART_BAR, "ui.tabs.stats"),
             Tab::Search => (icons::MAGNIFYING_GLASS, "ui.tabs.search"),
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             Tab::Launcher => (icons::ROCKET_LAUNCH, "ui.tabs.launcher"),
         };
         wt_translations::icon_t(icon, &t!(key))
@@ -311,7 +311,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Stats => self.build_stats_tab(ui),
             Tab::DirectoryStats(id) => self.build_directory_stats_tab(ui, *id),
             Tab::Search => self.build_search_tab(ui),
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             Tab::Launcher => self.build_launcher_tab(ui),
         }
     }
@@ -359,7 +359,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Unpacker | Tab::Settings | Tab::PlayerTracker | Tab::ModManager | Tab::ArmorViewer | Tab::Stats => {
                 false
             }
-            #[cfg(feature = "launcher")]
+            #[cfg(all(feature = "launcher", target_os = "linux"))]
             Tab::Launcher => false,
         }
     }
@@ -405,9 +405,6 @@ enum PaletteDialog {
 pub struct WowsToolkitApp {
     #[serde(skip)]
     checked_for_updates: bool,
-    #[cfg(feature = "launcher")]
-    #[serde(skip)]
-    started_install_discovery: bool,
     #[serde(skip)]
     manual_update_requested: bool,
     #[serde(skip)]
@@ -1040,8 +1037,6 @@ impl Default for WowsToolkitApp {
     fn default() -> Self {
         Self {
             checked_for_updates: false,
-            #[cfg(feature = "launcher")]
-            started_install_discovery: false,
             manual_update_requested: false,
             update_window_open: false,
             panic_info: None,
@@ -1054,21 +1049,15 @@ impl Default for WowsToolkitApp {
             show_about_window: false,
             licenses_window: LicensesWindow::default(),
             tab_state: Default::default(),
-            dock_state: DockState::new({
-                let mut tabs = Vec::new();
-                #[cfg(feature = "launcher")]
-                tabs.push(Tab::Launcher);
-                tabs.extend([
-                    Tab::Replays(WorkspaceId::LIVE),
-                    Tab::Stats,
-                    Tab::PlayerTracker,
-                    Tab::Search,
-                    Tab::ArmorViewer,
-                    Tab::Unpacker,
-                    Tab::Settings,
-                ]);
-                tabs
-            }),
+            dock_state: DockState::new(vec![
+                Tab::Replays(WorkspaceId::LIVE),
+                Tab::Stats,
+                Tab::PlayerTracker,
+                Tab::Search,
+                Tab::ArmorViewer,
+                Tab::Unpacker,
+                Tab::Settings,
+            ]),
             show_error_window: false,
             error_to_show: None,
             constants_version_mismatch: false,
@@ -1452,14 +1441,6 @@ impl WowsToolkitApp {
         // Share the tokio runtime and DB pool with tab_state for collab sessions and persistence.
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
         state.tab_state.db_pool = state.db_pool.clone();
-
-        // A previously signed-in account's session, from the OS keyring. Expiry
-        // is checked lazily by the launch gate rather than verified here.
-        #[cfg(feature = "launcher")]
-        state.tab_state.launcher_op(|launcher, settings, env| {
-            launcher.start_session_restore(settings, env);
-            false
-        });
 
         // Main window geometry is now restored via the ViewportBuilder in main.rs,
         // which is the only way to set window position. Size, fullscreen, and
@@ -3232,18 +3213,11 @@ impl WowsToolkitApp {
 
         self.tab_state.try_update_replays();
 
-        // Discovery starts once, on first show of the app; later rounds come
-        // from Rescan, Add install, or a finished fresh install.
-        #[cfg(feature = "launcher")]
-        if !self.started_install_discovery {
-            self.started_install_discovery = true;
-            self.tab_state.launcher_op(|launcher, settings, env| {
-                launcher.start_install_discovery(settings, env);
-                false
-            });
+        #[cfg(all(feature = "launcher", target_os = "linux"))]
+        {
+            self.tab_state.update_launcher();
+            self.sync_launcher_tab();
         }
-        #[cfg(feature = "launcher")]
-        self.tab_state.drain_launcher_events();
 
         // Pick up "Add to Session Stats" requests (no confirmation needed).
         // App-wide: feeds the one global session-stats total, not a per-workspace one.
@@ -4133,32 +4107,8 @@ impl WowsToolkitApp {
 
     fn execute_confirmed_action(&mut self, action: crate::tab_state::ConfirmableAction, ctx: &egui::Context) {
         match action {
-            #[cfg(feature = "launcher")]
             crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
-                let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-                let opened = wows_toolkit_launcher::open_replay_in_game(
-                    std::path::Path::new(&wows_dir),
-                    replay_path,
-                    |command| {
-                        crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
-                    },
-                );
-                if let Err(e) = opened {
-                    self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
-                }
-                // Signal the replay parser to open the controls window.
-                // App-wide: opens the single reference window regardless of workspace.
-                ctx.data_mut(|data| {
-                    data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
-                });
-            }
-            #[cfg(not(feature = "launcher"))]
-            crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
-                let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
-                let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
-                let mut command = std::process::Command::new(exe);
-                command.arg(&replay_path);
-                let _ = crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn();
+                self.open_replay_in_game(replay_path);
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {
@@ -4175,6 +4125,64 @@ impl WowsToolkitApp {
                 self.tab_state.clear_before_session_reset = true;
                 self.tab_state.replays_for_session_reset = Some(replays);
             }
+        }
+    }
+
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    fn open_replay_in_game(&mut self, replay_path: PathBuf) {
+        let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+        let prepare = |command: &mut std::process::Command| {
+            crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
+        };
+        if !self.tab_state.persisted.read().settings.launcher.is_enabled() {
+            if let Err(e) = wows_toolkit_launcher::open_replay_natively(Path::new(&wows_dir), replay_path, prepare) {
+                self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
+            }
+            return;
+        }
+
+        let mut opened = Ok(());
+        self.tab_state.launcher_op(|launcher, settings, env| {
+            // An empty `wows_dir` means the app has no game directory set.
+            let wows_dir = (!wows_dir.is_empty()).then(|| Path::new(&wows_dir));
+            opened = launcher.open_replay(replay_path, None, wows_dir, settings, env, prepare);
+            false
+        });
+        if let Err(e) = opened {
+            self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
+        }
+    }
+
+    #[cfg(all(feature = "launcher", not(target_os = "linux")))]
+    fn open_replay_in_game(&mut self, replay_path: PathBuf) {
+        let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+        let opened = wows_toolkit_launcher::open_replay_natively(Path::new(&wows_dir), replay_path, |command| {
+            crate::hardening::prepare_child(command, crate::gpu::PIN_VARS);
+        });
+        if let Err(e) = opened {
+            self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
+        }
+    }
+
+    #[cfg(not(feature = "launcher"))]
+    fn open_replay_in_game(&mut self, replay_path: PathBuf) {
+        let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+        let exe = Path::new(&wows_dir).join("WorldOfWarships.exe");
+        let mut command = std::process::Command::new(exe);
+        command.arg(&replay_path);
+        let _ = crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn();
+    }
+
+    /// Shows the Launcher tab exactly while the launcher is enabled.
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    fn sync_launcher_tab(&mut self) {
+        let enabled = self.tab_state.persisted.read().settings.launcher.is_enabled();
+        match (enabled, self.dock_state.find_tab(&Tab::Launcher)) {
+            (true, None) => self.dock_state.push_to_first_leaf(Tab::Launcher),
+            (false, Some(path)) => {
+                let _ = self.dock_state.remove_tab(path);
+            }
+            _ => {}
         }
     }
 
@@ -4935,7 +4943,7 @@ impl WowsToolkitApp {
     fn poll_file_dialogs(&mut self, ctx: &egui::Context) {
         let mut viewer = ToolkitTabViewer { tab_state: &mut self.tab_state };
         viewer.poll_settings_dialogs();
-        #[cfg(feature = "launcher")]
+        #[cfg(all(feature = "launcher", target_os = "linux"))]
         viewer.poll_launcher_dialogs();
         viewer.poll_unpacker_dialogs();
         viewer.poll_replay_dialogs(ctx);

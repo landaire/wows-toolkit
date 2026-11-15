@@ -1,0 +1,315 @@
+//! The Play split button at the end of the tab strip: the main part does what the launcher's
+//! state calls for, and the chevron opens the account popover.
+
+use std::path::PathBuf;
+
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
+use rust_i18n::t;
+use wows_toolkit_icons::Glyph;
+use wows_toolkit_launcher::AccountKey;
+use wows_toolkit_launcher::LoginTarget;
+use wows_toolkit_launcher::PlayError;
+use wows_toolkit_viewmodel::settings_drawer::Setting;
+use zgui::component;
+use zgui::prelude::try_use_window;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::With;
+use zgui::view;
+use zgui::view::AnyView;
+use zgui::view::IntoView;
+use zgui::view::ShowProps;
+use zgui::view::install_stylesheet;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
+use zgui_ui::PopoverContentProps;
+use zgui_ui::PopoverProps;
+use zgui_ui::PopoverTriggerProps;
+use zgui_ui::SpinnerProps;
+use zgui_ui_primitives::Align;
+use zgui_ui_primitives::Placement;
+use zgui_ui_primitives::Side;
+
+use crate::icons::AppIconProps;
+use crate::launcher::CSS;
+use crate::launcher::SHEET;
+use crate::launcher::account::open_sign_in;
+use crate::launcher::display::PlayState;
+use crate::launcher::model::LauncherModel;
+use crate::launcher::palette::LauncherOffersProps;
+use crate::launcher::popover::AccountPopoverProps;
+use crate::launcher::setup;
+use crate::shell::Shell;
+use crate::shell::tabs::AppTab;
+use crate::shell::tabs::TabKey;
+
+const PLAY_CSS: &str = zgui::css!(
+    ".wt-play {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        flex: none;
+        gap: 1px;
+        margin-right: 4px;
+    }
+    .wt-play__main {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+        gap: 6px;
+    }
+    .wt-play__chevron {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+    .wt-play-primary {
+        background-color: var(--lui-color-accent);
+        border-color: var(--lui-color-accent);
+        color: var(--lui-color-surface);
+    }
+    .wt-play__realm {
+        font-size: 11px;
+        opacity: 0.85;
+    }
+    .wt-play__nickname {
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .wt-play__live {
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background-color: var(--lui-color-accent);
+        flex: none;
+    }
+    .wt-play .zui-spinner {
+        width: 12px;
+        height: 12px;
+        flex: none;
+    }
+    .wt-account-popover {
+        width: 400px;
+    }"
+);
+
+/// Below this window width, in CSS pixels, the button keeps only its glyph and the realm badge.
+const COLLAPSE_BELOW: f32 = 1000.0;
+
+/// The split button, shown while the launcher is enabled.
+#[component]
+pub fn PlayControl(shell: Shell, model: LauncherModel) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
+    install_stylesheet("wt-play", PLAY_CSS);
+    let enabled = Memo::new(move |_| model.is_enabled());
+
+    view! {
+        Show(when = move || enabled.get()) {
+            SplitButton(shell = shell, model = model)
+            LauncherOffers(shell = shell, model = model)
+        }
+    }
+}
+
+#[component]
+fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
+    let state = Memo::new(move |_| {
+        let wows_dir = model.wows_dir();
+        let in_battle = shell.live.live_match.with(Option::is_some);
+        model.with(|state| PlayState::of(state, wows_dir.as_deref(), in_battle))
+    });
+    let window = try_use_window().map(|window| window.size());
+    let collapsed = Memo::new(move |_| window.is_some_and(|size| size.get().width.0 < COLLAPSE_BELOW));
+    let open = RwSignal::new_local(false);
+    let primary = move || state.with(PlayState::is_primary);
+    let tip = move || {
+        let state = state.get();
+        match state.nickname() {
+            Some(nickname) => format!("{} {nickname}", label(&state)),
+            None => label(&state),
+        }
+    };
+
+    view! {
+        row(class = "wt-play", attr:data-testid = "launcher-play-control") {
+            Tooltip {
+                TooltipTrigger {
+                    Button(
+                        variant = ButtonVariant::Outline,
+                        size = ButtonSize::Sm,
+                        class = "wt-play__main",
+                        class:wt-play-primary = primary,
+                        disabled = Signal::derive_local(move || state.with(|state| matches!(state, PlayState::Loading | PlayState::Restoring(_)))),
+                        attr:data-testid = "launcher-play",
+                        attr:data-state = move || Some(state.with(state_name).to_owned()),
+                        a11y:label = tip,
+                        on:click = move |_| press(shell, model, state.get_untracked(), open)
+                    ) {
+                        {move || content(state.get(), collapsed.get())}
+                    }
+                }
+                TooltipContent {{tip}}
+            }
+            Popover(open = open) {
+                PopoverTrigger(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Sm,
+                    class = "wt-play__chevron",
+                    class:wt-play-primary = primary,
+                    attr:data-testid = "launcher-play-menu",
+                    a11y:label = t!("ui.launcher.play.menu").into_owned()
+                ) {
+                    AppIcon(glyph = Glyph::ChevronDown)
+                }
+                PopoverContent(
+                    placement = Placement::new(Side::Bottom, Align::End),
+                    class = "wt-account-popover",
+                    attr:data-testid = "launcher-popover"
+                ) {
+                    AccountPopover(shell = shell, model = model, open = open)
+                }
+            }
+        }
+    }
+}
+
+/// What the main part shows for `state`; collapsed keeps the glyph and the realm badge.
+fn content(state: PlayState, collapsed: bool) -> AnyView {
+    let realm = state.realm();
+    let glyph = match &state {
+        PlayState::Play(_) | PlayState::AddAccount => Some(Glyph::Play),
+        PlayState::Update { .. } => Some(Glyph::Download),
+        PlayState::SetUpGame | PlayState::SetUpRunner => Some(Glyph::Settings),
+        PlayState::Paused { .. } => Some(Glyph::Pause),
+        _ => None,
+    };
+    let busy = matches!(state, PlayState::Starting { .. } | PlayState::Updating { .. } | PlayState::Restoring(_));
+    let live = matches!(state, PlayState::Running { .. } | PlayState::InBattle { .. });
+    let words = (!collapsed).then(|| label(&state));
+    let nickname = (!collapsed).then(|| state.nickname().map(str::to_owned)).flatten();
+
+    AnyView::new(view! {
+        if move || busy {
+            Spinner()
+        } else {}
+        if move || live {
+            box(class = "wt-play__live")
+        } else {}
+        {optional(glyph.map(|glyph| AnyView::new(view! { AppIcon(glyph = glyph) })))}
+        {optional(words.map(|words| AnyView::new(view! { text(class = "wt-play__label", attr:data-testid = "launcher-play-label") {{words}} })))}
+        {optional(realm.map(|realm| AnyView::new(view! { text(class = "wt-play__realm", attr:data-testid = "launcher-play-realm") {{realm}} })))}
+        {optional(nickname.map(|nickname| AnyView::new(view! { text(class = "wt-play__nickname") {{nickname}} })))}
+    })
+}
+
+/// `view`, or nothing.
+fn optional(view: Option<AnyView>) -> AnyView {
+    view.unwrap_or_else(|| AnyView::new(()))
+}
+
+/// The words the main part says for `state`, without the account.
+fn label(state: &PlayState) -> String {
+    match state {
+        PlayState::Loading | PlayState::AddAccount | PlayState::Restoring(_) | PlayState::Play(_) => {
+            t!("ui.launcher.play.play")
+        }
+        PlayState::SetUpGame => t!("ui.launcher.play.set_up_game"),
+        PlayState::SetUpRunner => t!("ui.launcher.play.set_up_runner"),
+        PlayState::SignInAgain(_) => t!("ui.launcher.play.sign_in_again"),
+        PlayState::Update { size, .. } => {
+            t!("ui.launcher.play.update", size = humansize::format_size(*size, humansize::DECIMAL))
+        }
+        PlayState::Updating { percent: Some(percent), .. } => t!("ui.launcher.play.updating", percent = percent),
+        PlayState::Updating { percent: None, .. } => t!("ui.launcher.play.updating_unknown"),
+        PlayState::Paused { .. } => t!("ui.launcher.play.paused"),
+        PlayState::Starting { .. } => t!("ui.launcher.play.starting"),
+        PlayState::Running { .. } => t!("ui.launcher.play.running"),
+        PlayState::InBattle { .. } => t!("ui.launcher.play.in_battle"),
+    }
+    .into_owned()
+}
+
+/// What a test reads the state off the button by.
+fn state_name(state: &PlayState) -> &'static str {
+    match state {
+        PlayState::Loading => "loading",
+        PlayState::SetUpGame => "set-up-game",
+        PlayState::SetUpRunner => "set-up-runner",
+        PlayState::AddAccount => "add-account",
+        PlayState::Restoring(_) => "restoring",
+        PlayState::SignInAgain(_) => "sign-in-again",
+        PlayState::Update { .. } => "update",
+        PlayState::Updating { .. } => "updating",
+        PlayState::Paused { .. } => "paused",
+        PlayState::Play(_) => "play",
+        PlayState::Starting { .. } => "starting",
+        PlayState::Running { .. } => "running",
+        PlayState::InBattle { .. } => "in-battle",
+    }
+}
+
+/// Does what the main part offers in `state`.
+fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal<bool, LocalStorage>) {
+    match state {
+        PlayState::SetUpGame => setup::open(shell, model),
+        PlayState::SetUpRunner => shell.settings_drawer.open_at(Setting::GameRunner),
+        PlayState::AddAccount => open_sign_in(shell, model, LoginTarget::NewAccount),
+        PlayState::SignInAgain(account) => open_sign_in(shell, model, LoginTarget::Reauthenticate(account.key)),
+        PlayState::Update { install, .. } => start_update(shell, model, install),
+        PlayState::Updating { .. } | PlayState::Paused { .. } => popover.set(true),
+        PlayState::Play(account) => play(shell, model, account.key, false),
+        PlayState::InBattle { .. } => shell.select(TabKey::App(AppTab::PlayerTracker)),
+        // Nothing to do until the state moves on.
+        PlayState::Loading | PlayState::Restoring(_) | PlayState::Starting { .. } | PlayState::Running { .. } => {}
+    }
+}
+
+/// Starts the game for `account`, saying in a message why it could not.
+pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool) {
+    let wows_dir = model.wows_dir_untracked();
+    let played = model.run(move |launcher, settings, env| {
+        let played = launcher.play(account, wows_dir.as_deref(), safe_mode, settings, env, |command| {
+            wows_toolkit_services::child_process::prepare(command);
+        });
+        (played, false)
+    });
+    let Some(Err(err)) = played else { return };
+
+    match &err {
+        PlayError::NotSignedIn { key, .. } => open_sign_in(shell, model, LoginTarget::Reauthenticate(*key)),
+        PlayError::NoInstall { .. } | PlayError::Launch(wgc_launch::LaunchError::ExeNotFound { .. }) => {
+            shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+            shell.settings_drawer.open_at(Setting::GameInstalls);
+        }
+        PlayError::Launch(
+            wgc_launch::LaunchError::ProtonNotFound
+            | wgc_launch::LaunchError::ProtonPrefixNotConfigured
+            | wgc_launch::LaunchError::ProtonPrefixCreateFailed { .. },
+        ) => {
+            shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+            shell.settings_drawer.open_at(Setting::GameRunner);
+        }
+        _ => {
+            shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+        }
+    }
+}
+
+/// Updates the install at `install` in place.
+pub fn start_update(shell: Shell, model: LauncherModel, install: PathBuf) {
+    let dest = install.clone();
+    let started = model.run(move |launcher, _, env| (launcher.start_download(install, dest, env), false));
+    if let Some(Err(err)) = started {
+        shell.toasts().failed(t!("ui.launcher.download_failed", error = err.to_string()).into_owned());
+    }
+}

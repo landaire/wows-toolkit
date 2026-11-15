@@ -10,7 +10,7 @@ mod model;
 mod roster;
 mod tables;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use landaire_ui::DockProps;
 use landaire_ui::DockRegion;

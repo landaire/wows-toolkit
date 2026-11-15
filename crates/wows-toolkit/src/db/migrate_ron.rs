@@ -74,7 +74,7 @@ pub async fn migrate_tab_state_to_db(pool: &SqlitePool, tab_state: &TabState) ->
 }
 
 /// The launcher subtree as its settings key and blob. The OS keyring holds
-/// the account's token; this only records which account to restore it for.
+/// the accounts' tokens; this only records which accounts to restore them for.
 #[cfg(feature = "launcher")]
 fn launcher_json(s: &crate::data::settings::AppSettings) -> Option<(&'static str, String)> {
     Some((wows_toolkit_launcher::SETTINGS_KEY, serde_json::to_string(&s.launcher).unwrap_or_default()))

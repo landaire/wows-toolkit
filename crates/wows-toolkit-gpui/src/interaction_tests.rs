@@ -185,7 +185,7 @@ fn the_replay_inspector_tab_is_selected_at_startup(cx: &mut TestAppContext) {
         let tabs = window.within(TAB_BAR);
         // The egui app opens on its replays tab, so this one does too.
         assert_eq!(tabs.find(tab_index(AppTab::ReplayInspector)).selected(), Some(true));
-        for other in AppTab::ALL.into_iter().filter(|tab| *tab != AppTab::ReplayInspector) {
+        for other in AppTab::ALL.iter().copied().filter(|tab| *tab != AppTab::ReplayInspector) {
             assert_eq!(tabs.find(tab_index(other)).selected(), Some(false), "{other:?} is not selected");
         }
     })
@@ -199,9 +199,9 @@ fn clicking_a_tab_moves_the_selection_to_it(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
 
-        for tab in AppTab::ALL {
+        for &tab in AppTab::ALL {
             window.within(TAB_BAR).click(tab_index(tab), cx);
-            for other in AppTab::ALL {
+            for &other in AppTab::ALL {
                 let selected = window.within(TAB_BAR).find(tab_index(other)).selected();
                 assert_eq!(
                     selected,
@@ -718,7 +718,7 @@ fn the_status_bar_holds_the_listing_toggle_and_the_session_on_replay_tabs(cx: &m
         window.render_frame(cx);
         assert!(window.try_find("replay-browser-rows").is_some(), "and brings it back");
 
-        show_tab(window, AppTab::Launcher, cx);
+        show_tab(window, AppTab::Search, cx);
         window.render_frame(cx);
         assert!(window.try_find("collab-session-toggle").is_none(), "no session control away from the replays");
     })
