@@ -30,6 +30,7 @@ use crate::minimap_preview::SharedPreviewRenderer;
 use crate::replay_render::options::batch_options;
 use crate::replay_render::raster::shown_commands;
 use crate::replay_render::ships::ShipChoices;
+use crate::replay_render::ships::track_players;
 use crate::replay_render::track::Track;
 use crate::replay_render::track::bake;
 
@@ -114,7 +115,7 @@ pub enum ExportError {
     Cancelled,
 }
 
-/// Which replay of how many a batch has reached.
+/// Which replay of how many a batch has reached, and how far its encode has got.
 ///
 /// `done` counts the ones behind it, so the first report reads as none done of
 /// however many there are.
@@ -124,6 +125,8 @@ pub struct BatchStep {
     pub total: usize,
     /// The replay being read, by its file stem.
     pub replay: String,
+    /// The encode's progress through this replay's frames. `None` while it is read and baked.
+    pub frames: Option<ExportProgress>,
 }
 
 /// What a batch wrote, and which replays it could not.
@@ -474,8 +477,8 @@ pub fn encode_track(
 /// batch writes what a viewport would have shown rather than the built-in set.
 /// `bake_options` is what each replay is baked with, normally
 /// [`playback_options`](crate::replay_render::options::playback_options).
-/// `report` is told which replay the batch has reached before it is read, so the
-/// reader is not left watching a still line for forty files.
+/// `report` is told which replay the batch has reached before it is read, and
+/// then how far its encode has got after every frame.
 pub fn batch_export(
     paths: Vec<PathBuf>,
     game_data: &GameDataCache,
@@ -493,7 +496,7 @@ pub fn batch_export(
 
     for (index, path) in paths.into_iter().enumerate() {
         let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
-        report(BatchStep { done: index, total, replay: named });
+        report(BatchStep { done: index, total, replay: named.clone(), frames: None });
 
         let (track, renderer) = match bake(&path, &[], game_data, &cancel, bake_options.clone()) {
             Ok(baked) => baked,
@@ -505,21 +508,15 @@ pub fn batch_export(
         };
         let output = out_dir.join(suggested_name(&track.video_stem));
 
-        // The bake holds every layer it could; which of them are drawn is
-        // what the saved defaults decide, as they do in a viewport.
-        let layers = ExportLayers {
-            options: options.clone(),
-            show_dead_ships,
-            choices: ShipChoices::new(),
-            drawn_on: Vec::new(),
-        };
+        let layers = batch_layers(&options, show_dead_ships, &track);
         let Some(frames) = ExportFrames::new(Arc::new(track), settings.include_pre_battle, layers) else {
             outcome.failed.push(path);
             continue;
         };
 
-        // The batch reports per replay rather than per frame.
-        let encoded = encode_track(&renderer, frames, &output, settings, &cancel, |_progress| {});
+        let encoded = encode_track(&renderer, frames, &output, settings, &cancel, |step| {
+            report(BatchStep { done: index, total, replay: named.clone(), frames: Some(step) });
+        });
         match encoded {
             Ok(()) => outcome.written.push(output),
             Err(reason) => {
@@ -530,4 +527,19 @@ pub fn batch_export(
     }
 
     outcome
+}
+
+/// What a batch draws of `track` under its saved `options`.
+///
+/// The bake holds every layer it could; which of them are drawn is what the saved defaults
+/// decide, as they do in a viewport. Saved range circles are every ship's, as the egui batch draws
+/// them, since a batch has no per-ship choices of its own.
+pub(crate) fn batch_layers(options: &RenderOptions, show_dead_ships: bool, track: &Track) -> ExportLayers {
+    let mut options = options.clone();
+    let mut choices = ShipChoices::new();
+    if options.show_ship_config {
+        choices.all_ranges(&track_players(&track.frames), &mut options);
+    }
+
+    ExportLayers { options, show_dead_ships, choices, drawn_on: Vec::new() }
 }

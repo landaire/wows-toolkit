@@ -76,6 +76,7 @@ use crate::replay_render::export::ExportProgress;
 use crate::replay_render::export::ExportSettings;
 use crate::replay_render::export::ExportStage;
 use crate::replay_render::export::batch_export;
+use crate::replay_render::export::batch_layers;
 use crate::replay_render::export::export_settings_of;
 use crate::replay_render::export::must_use_cpu;
 use crate::replay_render::hover::advantage_hover;
@@ -459,20 +460,19 @@ fn a_batch_says_which_replay_it_has_reached() {
     assert_eq!(
         reached,
         vec![
-            BatchStep { done: 0, total: 2, replay: "first".to_owned() },
-            BatchStep { done: 1, total: 2, replay: "second".to_owned() },
+            BatchStep { done: 0, total: 2, replay: "first".to_owned(), frames: None },
+            BatchStep { done: 1, total: 2, replay: "second".to_owned(), frames: None },
         ],
         "each replay is named as the batch reaches it"
     );
 }
 
-/// A batch draws the reader's saved layers, less the two that would leave it
-/// worse off than the built-in set did.
+/// A batch draws the reader's saved layers, less the stats panel it cannot fill.
 #[test]
-fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
+fn a_batch_draws_the_saved_layers_without_the_panel_it_cannot_fill() {
     let saved = SavedRenderOptions {
         show_torpedoes: false,
-        // On in the egui renderer, which has what it takes to fill them.
+        // On in the egui renderer, which has what it takes to fill it.
         show_stats_panel: true,
         show_ship_config: true,
         show_dead_ships: false,
@@ -483,11 +483,37 @@ fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
     assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
     assert!(!show_dead_ships);
     assert!(!options.show_stats_panel, "the panel a bake cannot fill is left out");
-    assert!(!options.show_ship_config, "as are range circles nobody asked for per ship");
+    assert!(options.show_ship_config, "the saved range circles are filmed");
     assert!(
         should_draw_command(&DrawCommand::KillFeed { entries: Vec::new() }, &options, show_dead_ships),
         "so the kill feed, which shares the panel's gutter, is still filmed"
     );
+}
+
+/// A batch with range circles saved on films every ship's, as the egui batch does, and one with
+/// them off films none.
+#[test]
+fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
+    let mut track = track(vec![0.0, 0.5]);
+    track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
+    track.frames[1] = vec![drawn_ship(2, "me", 20.0, true), range_circle(2, "me")];
+    let (on, show_dead_ships) = batch_options(&SavedRenderOptions { show_ship_config: true, ..Default::default() });
+
+    let layers = batch_layers(&on, show_dead_ships, &track);
+    assert!(layers.choices.ranges_for("someone").detection && layers.choices.ranges_for("me").detection);
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let circles = |frame: &[DrawCommand]| {
+        frame.iter().filter(|command| matches!(command, DrawCommand::ShipConfigCircle { .. })).count()
+    };
+    assert_eq!(circles(&frames[0]), 1, "the first ship's ranges are filmed");
+    assert_eq!(circles(frames.last().expect("a last frame")), 1, "and the second's");
+
+    let mut off_track = self::track(vec![0.0]);
+    off_track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
+    let (off, show_dead_ships) = batch_options(&SavedRenderOptions::default());
+    let layers = batch_layers(&off, show_dead_ships, &off_track);
+    let first = ExportFrames::new(Arc::new(off_track), true, layers).and_then(|mut frames| frames.next());
+    assert_eq!(first.map(|frame| circles(&frame)), Some(0), "none while they are saved off");
 }
 
 fn range_circle(entity: u32, player: &str) -> DrawCommand {

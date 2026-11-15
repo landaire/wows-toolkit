@@ -195,6 +195,13 @@ pub fn drawn_ships(commands: &[DrawCommand]) -> Vec<String> {
         .collect()
 }
 
+/// Every ship drawn anywhere in `frames`, by player name, each once, in the order they first
+/// appear.
+pub fn track_players(frames: &[Vec<DrawCommand>]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    frames.iter().flat_map(|commands| drawn_ships(commands)).filter(|name| seen.insert(name.clone())).collect()
+}
+
 /// Whether the reader has asked for this ship's trail or this range.
 ///
 /// The global switches decide whether a layer is drawn at all; this decides
