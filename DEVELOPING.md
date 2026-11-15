@@ -374,6 +374,14 @@ cargo run -p wows-data-mgr -- extract-scripts --build 13533378 --game-dir /path/
 
 The client obfuscates its bytecode differently in every build, so no file is shared between builds and each zip is kept whole. Programs that need scripts fetch them per build with `wows_data_mgr::scripts::fetch`. Downloading a dump does not fetch them.
 
+[wowsdeob](https://github.com/landaire/wowsdeob) writes `constants.json` for an installed build by running the client scripts in an emulated CPython 2.7, so no Python install is needed. The zgui app does this itself, in the background, when neither its cache nor GitHub has current constants for a build. To run it by hand:
+
+```bash
+wowsdeob /path/to/World_of_Warships ./output constants --build 13533378
+```
+
+It needs the installed client, not just `scripts.zip`, because current clients link some script modules into `bin64/WorldOfWarships64.exe`. The emulated interpreter never reads or writes files, opens sockets or starts processes. When the scripts ask for those, it answers with the access-denied error Windows would raise. `--stub-host` answers with unknown values instead, and both give the same constants. `BATTLE_TYPES` is not in the output, because the server sends that table at login.
+
 #### Environment variable
 
 Set `WOWS_GAME_DATA` to override the default `game_data/` directory:
