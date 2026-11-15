@@ -137,6 +137,73 @@ pub(crate) enum RestoreOutcome {
     Unreadable,
 }
 
+/// Why a sign-in did not finish, for the sign-in form to say in words. The report behind it
+/// goes to the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SignInFailure {
+    WrongCredentials,
+    /// WGNI waits on a second factor this form cannot answer.
+    TwoFactorRequired,
+    TwoFactorInvalid,
+    CaptchaRequired,
+    RateLimited,
+    AccountBanned,
+    NetworkUnreachable,
+    ServiceUnavailable,
+    SessionExpired,
+    KeyringLocked,
+    /// Signed in, but the session could not be kept.
+    NotSaved,
+    Unexpected,
+}
+
+impl SignInFailure {
+    pub const ALL: [SignInFailure; 12] = [
+        SignInFailure::WrongCredentials,
+        SignInFailure::TwoFactorRequired,
+        SignInFailure::TwoFactorInvalid,
+        SignInFailure::CaptchaRequired,
+        SignInFailure::RateLimited,
+        SignInFailure::AccountBanned,
+        SignInFailure::NetworkUnreachable,
+        SignInFailure::ServiceUnavailable,
+        SignInFailure::SessionExpired,
+        SignInFailure::KeyringLocked,
+        SignInFailure::NotSaved,
+        SignInFailure::Unexpected,
+    ];
+
+    pub fn of(error: &wgc_auth::AuthError) -> SignInFailure {
+        use wgc_auth::AuthError as E;
+
+        match error {
+            E::InvalidCredentials { .. } | E::AccountNotFound => SignInFailure::WrongCredentials,
+            E::TwoFactorRequired { .. } | E::VerificationPending => SignInFailure::TwoFactorRequired,
+            E::TwoFactorInvalidCode => SignInFailure::TwoFactorInvalid,
+            // WGNI locks two-factor sign-in after too many wrong codes, for a while.
+            E::TwoFactorLoginLocked | E::RateLimited => SignInFailure::RateLimited,
+            E::CaptchaRequired => SignInFailure::CaptchaRequired,
+            E::AccountBanned | E::TwoFactorBanned => SignInFailure::AccountBanned,
+            E::Request { .. } => SignInFailure::NetworkUnreachable,
+            E::ServiceUnavailable { .. } | E::ProofOfWorkTimeout => SignInFailure::ServiceUnavailable,
+            E::SessionExpired => SignInFailure::SessionExpired,
+            E::KeyringLocked => SignInFailure::KeyringLocked,
+            E::Rejected(_)
+            | E::TaskJoin { .. }
+            | E::Keyring { .. }
+            | E::NoSecretStore
+            | E::PlaintextStore { .. }
+            | E::PlaintextStoreFormat { .. }
+            | E::SerializeSession { .. }
+            | E::DeserializeSession { .. }
+            | E::MalformedResponse { .. }
+            | E::BadResponse { .. }
+            | E::GameTokenTimeout { .. }
+            | E::RealmMismatch { .. } => SignInFailure::Unexpected,
+        }
+    }
+}
+
 pub(crate) enum LoginMsg {
     Success {
         session: Box<wgc_auth::StoredSession>,
@@ -149,9 +216,9 @@ pub(crate) enum LoginMsg {
     },
     /// The code was rejected but the challenge is still open: keep it and the pending password
     /// so the user retries the code, not the whole login.
-    TwoFactorRetry(String),
+    TwoFactorRetry,
     CaptchaRequired,
-    Failed(String),
+    Failed(SignInFailure),
 }
 
 /// A login waiting on a two-factor code. WGNI resubmits full credentials alongside the code, so
@@ -166,7 +233,7 @@ pub(crate) struct PendingLogin {
 pub(crate) struct LoginState {
     pub(crate) target: LoginTarget,
     pub(crate) in_progress: bool,
-    pub(crate) error: Option<String>,
+    pub(crate) error: Option<SignInFailure>,
     pub(crate) captcha_blocked: bool,
     pub(crate) pending: Option<PendingLogin>,
     /// The account the last attempt signed in, until the form is reset.
@@ -228,8 +295,8 @@ impl Launcher {
         self.login.in_progress
     }
 
-    pub fn login_error(&self) -> Option<&str> {
-        self.login.error.as_deref()
+    pub fn login_error(&self) -> Option<SignInFailure> {
+        self.login.error
     }
 
     pub fn login_target(&self) -> LoginTarget {
@@ -348,8 +415,8 @@ impl Launcher {
                 }
                 false
             }
-            LoginMsg::TwoFactorRetry(error) => {
-                self.login.error = Some(error);
+            LoginMsg::TwoFactorRetry => {
+                self.login.error = Some(SignInFailure::TwoFactorInvalid);
                 false
             }
             LoginMsg::CaptchaRequired => {
@@ -579,22 +646,26 @@ async fn login_result(
                 }
                 Err(join_err) => {
                     warn!("session save task did not complete: {join_err}");
-                    LoginMsg::Failed("signed in, but could not save the session; sign in again next launch".to_string())
+                    LoginMsg::Failed(SignInFailure::NotSaved)
                 }
             };
         }
         Err(report) => report,
     };
+    refused(&report)
+}
+
+/// The message for a sign-in WGNI refused. The report is logged in full whatever it says.
+pub(crate) fn refused(report: &rootcause::Report<wgc_auth::AuthError>) -> LoginMsg {
+    warn!("sign-in refused: {}", ascii(report));
     match report.current_context() {
         wgc_auth::AuthError::TwoFactorRequired { twofactor_token } => {
             LoginMsg::TwoFactorRequired { twofactor_token: twofactor_token.clone() }
         }
         wgc_auth::AuthError::CaptchaRequired => LoginMsg::CaptchaRequired,
         // A wrong code keeps the challenge open; a lockout or ban does not.
-        error @ wgc_auth::AuthError::TwoFactorInvalidCode => LoginMsg::TwoFactorRetry(error.to_string()),
-        // The full report, so attached diagnostic context reaches the user; none of these error
-        // paths carry a password or token.
-        _ => LoginMsg::Failed(report.to_string()),
+        wgc_auth::AuthError::TwoFactorInvalidCode => LoginMsg::TwoFactorRetry,
+        error => LoginMsg::Failed(SignInFailure::of(error)),
     }
 }
 

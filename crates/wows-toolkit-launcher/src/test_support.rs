@@ -17,6 +17,7 @@ use crate::LauncherEvent;
 use crate::LoginTarget;
 use crate::RunnerState;
 use crate::SessionStorage;
+use crate::SignInFailure;
 use crate::accounts::LoginMsg;
 use crate::accounts::LoginState;
 use crate::accounts::PendingLogin;
@@ -139,8 +140,8 @@ pub fn two_factor_required(twofactor_token: String) -> LauncherEvent {
 }
 
 /// A two-factor code WGNI refused while keeping the challenge open.
-pub fn two_factor_rejected(error: String) -> LauncherEvent {
-    LauncherEvent(Event::Login(LoginMsg::TwoFactorRetry(error)))
+pub fn two_factor_rejected() -> LauncherEvent {
+    LauncherEvent(Event::Login(LoginMsg::TwoFactorRetry))
 }
 
 /// A sign-in that WGNI refused until a CAPTCHA is solved.
@@ -148,9 +149,9 @@ pub fn captcha_required() -> LauncherEvent {
     LauncherEvent(Event::Login(LoginMsg::CaptchaRequired))
 }
 
-/// A sign-in that failed, saying `error`.
-pub fn sign_in_failed(error: String) -> LauncherEvent {
-    LauncherEvent(Event::Login(LoginMsg::Failed(error)))
+/// A sign-in that failed with `failure`.
+pub fn sign_in_failed(failure: SignInFailure) -> LauncherEvent {
+    LauncherEvent(Event::Login(LoginMsg::Failed(failure)))
 }
 
 /// What a scripted sign-in answers, in place of WGNI.
@@ -160,7 +161,8 @@ pub enum ScriptedSignIn {
     SucceedUnencrypted(wgc_auth::StoredSession),
     TwoFactor,
     WrongCode,
-    Fail(String),
+    /// Refused as WGNI refuses with `error`, which the launcher classifies and logs.
+    Fail(wgc_auth::AuthError),
 }
 
 /// One sign-in a front end sent while scripted.
@@ -202,8 +204,8 @@ impl SignInScript {
                 keyring: KeyringState::Unavailable,
             },
             ScriptedSignIn::TwoFactor => LoginMsg::TwoFactorRequired { twofactor_token: "challenge".into() },
-            ScriptedSignIn::WrongCode => LoginMsg::TwoFactorRetry("two-factor code was invalid".into()),
-            ScriptedSignIn::Fail(error) => LoginMsg::Failed(error),
+            ScriptedSignIn::WrongCode => LoginMsg::TwoFactorRetry,
+            ScriptedSignIn::Fail(error) => crate::accounts::refused(&rootcause::report!(error)),
         })
     }
 }

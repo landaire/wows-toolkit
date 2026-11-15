@@ -372,11 +372,12 @@ pub fn KeyringNotice(model: LauncherModel) -> impl IntoView {
 /// Why the last sign-in or code was refused.
 #[component]
 fn LoginError(model: LauncherModel) -> impl IntoView {
-    let error = Memo::new(move |_| model.with(|state| state.launcher.login_error().map(str::to_owned)));
+    let locale = Services::current().locale;
+    let error = Memo::new(move |_| model.with(|state| state.launcher.login_error()));
 
     view! {
-        {move || error.get().map(|error| view! {
-            text(class = "wt-launcher__error", attr:data-testid = "launcher-login-error") {{error}}
+        {move || error.get().map(|failure| view! {
+            text(class = "wt-launcher__error", attr:data-testid = "launcher-login-error") {{locale.text(wows_toolkit_launcher::sign_in_failure_key(failure))}}
         })}
     }
 }

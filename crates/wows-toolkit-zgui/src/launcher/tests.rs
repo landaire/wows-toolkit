@@ -561,11 +561,56 @@ fn enter_signs_in_only_with_a_plausible_email_and_a_password() {
     launcher.enter();
     assert!(launcher.attempts().is_empty(), "not an email");
 
-    launcher.script(ScriptedSignIn::Fail("invalid username or password".into()));
+    launcher.script(ScriptedSignIn::Fail(wrong_password()));
     launcher.type_into("launcher-email", "@example.com");
     launcher.enter();
     assert_eq!(launcher.attempts().len(), 1, "a plausible email and a password sign in");
     assert!(launcher.has("launcher-login-error"), "and the refusal is said on the form");
+}
+
+fn wrong_password() -> wgc_auth::AuthError {
+    wgc_auth::AuthError::InvalidCredentials { parameters: wgc_auth::CredentialParameters::UsernameOrPassword }
+}
+
+/// Signs a new account in, with WGNI answering `refusal`.
+fn refused_sign_in(refusal: wgc_auth::AuthError) -> LauncherWindow {
+    let mut launcher = ready();
+    launcher.press("launcher-play-menu");
+    launcher.press("launcher-add-account");
+    launcher.script(ScriptedSignIn::Fail(refusal));
+    launcher.type_into("launcher-email", "ahab@example.com");
+    launcher.type_into("launcher-password", "hunter2");
+    launcher.enter();
+
+    launcher
+}
+
+#[test]
+fn a_wrong_password_says_so_in_words() {
+    let launcher = refused_sign_in(wrong_password());
+
+    assert_eq!(launcher.text_of("wt-launcher__error"), "Wrong email or password.");
+}
+
+#[test]
+fn an_unclassified_refusal_keeps_the_report_out_of_the_form() {
+    let detail = "status 418 <html>teapot</html>";
+    let launcher = refused_sign_in(wgc_auth::AuthError::BadResponse { detail: detail.into() });
+
+    let shown = launcher.text_of("wt-launcher__error");
+    assert_eq!(shown, "Sign-in failed. The log has the details.");
+    for leaked in [detail, "unexpected response from WGNI", "WGNI"] {
+        assert!(!shown.contains(leaked), "{leaked:?} leaked into {shown:?}");
+    }
+}
+
+#[test]
+fn every_sign_in_failure_has_a_sentence() {
+    for failure in wows_toolkit_launcher::SignInFailure::ALL {
+        let key = wows_toolkit_launcher::sign_in_failure_key(failure);
+        let rendered = rust_i18n::t!(key).into_owned();
+        assert_ne!(rendered, key, "{failure:?} has no catalog entry");
+    }
 }
 
 #[test]

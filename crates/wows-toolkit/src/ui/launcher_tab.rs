@@ -17,6 +17,7 @@ use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::RunnerState;
 use wows_toolkit_launcher::SessionStorage;
+use wows_toolkit_launcher::sign_in_failure_key;
 
 use crate::app::ToolkitTabViewer;
 use crate::update_background_task;
@@ -609,7 +610,7 @@ impl ToolkitTabViewer<'_> {
                     ui.checkbox(&mut form.use_backup_code, "Use backup code");
                 });
                 if let Some(err) = launcher.login_error() {
-                    ui.colored_label(ERROR_COLOR, err);
+                    ui.colored_label(ERROR_COLOR, t!(sign_in_failure_key(err)));
                 }
                 let can_submit = !launcher.login_in_progress() && !form.two_factor_code.trim().is_empty();
                 ui.horizontal(|ui| {
@@ -674,7 +675,7 @@ impl ToolkitTabViewer<'_> {
                     credentials_entered |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
                 if let Some(err) = launcher.login_error() {
-                    ui.colored_label(ERROR_COLOR, err);
+                    ui.colored_label(ERROR_COLOR, t!(sign_in_failure_key(err)));
                 }
                 let can_sign_in = !launcher.login_in_progress()
                     && wows_toolkit_launcher::is_plausible_email(&form.username)

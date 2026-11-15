@@ -2021,6 +2021,20 @@ use_backup_code = "Use backup code"
 submit_code = "Submit code"
 captcha = "This login needs a CAPTCHA, which this launcher can't show yet. Sign in once via the official Wargaming Game Center or wargaming.net in a browser, then try again."
 
+[ui.launcher.sign_in_error]
+wrong_credentials = "Wrong email or password."
+two_factor_required = "This account needs two-factor approval. Approve the sign-in in Wargaming Auth or with the emailed code, then sign in again."
+two_factor_invalid = "The two-factor code is wrong or expired. Enter a new code."
+captcha_required = "Wargaming asks for a CAPTCHA. Sign in once in the official Game Center or at wargaming.net, then try again."
+rate_limited = "Too many sign-in attempts. Wait a few minutes, then try again."
+account_banned = "This account is banned."
+network_unreachable = "Could not reach Wargaming. Check your internet connection."
+service_unavailable = "Wargaming's sign-in service is unavailable. Try again later."
+session_expired = "The saved sign-in has expired. Sign in again."
+keyring_locked = "Your system keyring is locked. Unlock it, then sign in again."
+not_saved = "Signed in, but the sign-in could not be saved. You will sign in again after a restart."
+unexpected = "Sign-in failed. The log has the details."
+
 [ui.launcher.options]
 heading = "Launch options"
 extra_args = "Extra launch args (one per line)"

@@ -37,6 +37,7 @@ use wows_toolkit_launcher::LauncherError;
 use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::SessionStorage;
+use wows_toolkit_launcher::sign_in_failure_key;
 
 use crate::runtime;
 
@@ -390,7 +391,11 @@ impl LauncherView {
                                 })),
                         ),
                 )
-                .children(launcher.login_error().map(|err| colored(err.to_string(), cx.theme().danger)))
+                .children(
+                    launcher
+                        .login_error()
+                        .map(|failure| colored(t!(sign_in_failure_key(failure)).to_string(), cx.theme().danger)),
+                )
                 .child(
                     h_flex()
                         .gap_2()
@@ -462,7 +467,11 @@ impl LauncherView {
                         .child(div().w(INPUT_WIDTH).child(Input::new(&self.username).id("launcher-username").small()))
                         .child(div().w(INPUT_WIDTH).child(Input::new(&self.password).id("launcher-password").small())),
                 )
-                .children(launcher.login_error().map(|err| colored(err.to_string(), cx.theme().danger)))
+                .children(
+                    launcher
+                        .login_error()
+                        .map(|failure| colored(t!(sign_in_failure_key(failure)).to_string(), cx.theme().danger)),
+                )
                 .child(
                     h_flex()
                         .gap_2()
