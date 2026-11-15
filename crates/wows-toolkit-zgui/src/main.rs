@@ -118,6 +118,10 @@ const APPLICATION_ID: &str = "io.github.landaire.WoWsToolkit";
 const MIN_WINDOW_SIZE: (f32, f32) = (640.0, 480.0);
 
 fn main() {
+    // The MCP server's gameparams_query runs jq in a copy of this program; in that copy this
+    // evaluates the filter and exits, before any argument is read.
+    wows_query::jq_worker::init();
+
     // Before anything is opened: an argument this build does not take is reported and the process
     // exits. The update's cleanup step runs first: the binary it replaced is only deletable once
     // the process that spawned this one has exited, and it has.

@@ -254,6 +254,14 @@ impl LoadedGameData {
         Self { provider: Arc::new(provider), base_constants, vfs, assets_vfs: OnceLock::new(), build, version: None }
     }
 
+    /// [`Self::for_test`] for a build that names its version.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_test_with_version(provider: GameMetadataProvider, vfs: VfsPath, version: Version) -> Self {
+        let build = version.build.map_or(0, std::num::NonZeroU32::get);
+
+        Self { version: Some(version), ..Self::for_test(provider, vfs, build) }
+    }
+
     /// Loads `build`'s game data from `wows_dir`. Callers are expected to
     /// have already checked `build` is present under `bin/` (see
     /// [`GameDataCache::get_or_load_build`]); this only reports the errors

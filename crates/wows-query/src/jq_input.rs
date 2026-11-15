@@ -346,7 +346,9 @@ mod tests {
         let index = wows_data_mgr::builds::BuildsIndex::load(&root.join("builds.toml"))
             .expect("dump root has a readable builds.toml");
         let entry = index.find_by_build(13533378).expect("dump root lists build 13533378");
-        let bytes = crate::gameparams::read_game_params(&root.join(&entry.dir)).expect("GameParams.data reads");
+        let dir = root.join(&entry.dir);
+        let bytes = crate::gameparams::read_game_params(&wows_data_mgr::Dump::open(&dir).vfs(), &dir)
+            .expect("GameParams.data reads");
         let pickle = wowsunpack::game_params::convert::game_params_to_pickle(bytes).expect("GameParams decodes");
         let entries: Vec<(String, serde_json::Value)> = wowsunpack::game_params::convert::base_params_json(&pickle)
             .expect("GameParams has base params")

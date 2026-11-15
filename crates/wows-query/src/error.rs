@@ -414,6 +414,12 @@ pub enum RawParamsError {
 
     #[error("the store published at {dir} was removed before it could be opened")]
     Vanished { dir: PathBuf },
+
+    #[error("the shared game data holds no translations to name GameParams entries with")]
+    NoCatalog,
+
+    #[error("the game data's {language:?} names were replaced while the store was built")]
+    CatalogChanged { language: String },
 }
 
 /// The part of a raw GameParams store that failed its checks.

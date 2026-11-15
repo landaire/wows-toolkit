@@ -62,6 +62,7 @@ wows-data-mgr = { version = "0.23.0", path = "crates/wows-data-mgr", default-fea
 wows-replay-insights = { version = "0.15.0", path = "crates/wows-replay-insights", default-features = false }
 replayshark = { path = "crates/replayshark" }
 wows-query = { path = "crates/wows-query" }
+wows-mcp = { path = "crates/wows-mcp" }
 wows-ship-stats = { path = "crates/wows-ship-stats" }
 wt-collab-client = { path = "crates/wt-collab-client" }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }

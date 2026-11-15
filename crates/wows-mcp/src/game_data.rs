@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 use tokio::sync::OnceCell;
+use tokio::sync::watch;
 use wows_query::GameData;
 use wows_query::error::LoadError;
 use wows_query::tools::ToolCallError;
@@ -35,12 +36,15 @@ pub struct ReplaySummaryArgs {
 }
 
 /// Which files `replay_summary` may open.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum ReplayFiles {
     /// Any path the server process can read, apart from network shares and devices.
     Any,
     /// Only files inside these directories.
     Within(PathRoots),
+    /// Only files inside the directories the embedding program names at each call, which it may
+    /// change while the server runs.
+    Current(Arc<dyn Fn() -> PathRoots + Send + Sync>),
 }
 
 /// Where the query tools get their game build.
@@ -52,6 +56,9 @@ pub enum GameDataSource {
         path: PathBuf,
         cache_dir: Option<PathBuf>,
     },
+    /// A build the embedding program holds and may replace, such as the one
+    /// its own views read. `None` while it has none loaded.
+    Shared(watch::Receiver<Option<Arc<GameData>>>),
 }
 
 /// Loads a dump root (holding `builds.toml`, newest build served) or one
@@ -74,6 +81,7 @@ pub struct GameDataTools {
 enum Build {
     Loaded(Arc<GameData>),
     Dump { path: PathBuf, cache_dir: Option<PathBuf>, game: OnceCell<Arc<GameData>> },
+    Shared(watch::Receiver<Option<Arc<GameData>>>),
 }
 
 impl GameDataTools {
@@ -81,6 +89,7 @@ impl GameDataTools {
         let build = match source {
             GameDataSource::Loaded(game) => Build::Loaded(game),
             GameDataSource::Dump { path, cache_dir } => Build::Dump { path, cache_dir, game: OnceCell::new() },
+            GameDataSource::Shared(current) => Build::Shared(current),
         };
 
         Self { build, replay_files }
@@ -91,6 +100,9 @@ impl GameDataTools {
     async fn game(&self) -> Result<Arc<GameData>, String> {
         let (path, cache_dir, game) = match &self.build {
             Build::Loaded(game) => return Ok(Arc::clone(game)),
+            Build::Shared(current) => {
+                return current.borrow().clone().ok_or_else(|| "no game build is loaded yet".to_owned());
+            }
             Build::Dump { path, cache_dir, game } => (path, cache_dir, game),
         };
 
@@ -125,6 +137,9 @@ impl GameDataTools {
             }
             ReplayFiles::Within(roots) => {
                 roots.resolve(args.path.as_ref()).map_err(|error| format!("cannot read replay: {error}"))?
+            }
+            ReplayFiles::Current(roots) => {
+                roots().resolve(args.path.as_ref()).map_err(|error| format!("cannot read replay: {error}"))?
             }
         };
         if !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("wowsreplay")) {

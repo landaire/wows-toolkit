@@ -4,6 +4,7 @@ use std::io::Read;
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use gettext::Catalog;
@@ -53,7 +54,7 @@ pub(crate) const GAME_PARAMS_DATA: &str = "content/GameParams.data";
 /// queries in this crate. Load once and share; every query borrows it.
 pub struct GameData {
     version: Version,
-    provider: GameMetadataProvider,
+    provider: Arc<GameMetadataProvider>,
 
     /// The dump's files, for data read on demand such as ship armor.
     pub(crate) vfs: VfsPath,
@@ -84,6 +85,9 @@ pub struct GameData {
     /// Raw GameParams, opened or built on first use.
     pub(crate) raw_params: RawParamsSlot,
 
+    /// Where the provider's display names come from, which labels the raw GameParams store.
+    pub(crate) names: NamesSource,
+
     /// Peer tables of armor assessments, traced on first use.
     pub(crate) armor_comparisons: ComparisonCache,
 
@@ -108,10 +112,30 @@ impl GameData {
             .map_err(|source| report!(LoadError::GameParams { dir: dump_dir.to_path_buf(), source }))?;
         load_english(&provider, &dump, dump_dir)?;
 
-        let raw_params = RawParamsSlot::new(dump_dir, cache_root, build);
+        let raw_params = RawParamsSlot::new(dump.vfs(), dump_dir, cache_root, build);
         let armor_comparisons = ComparisonCache::new(cache_root, build);
 
-        Ok(Self::index(version, provider, dump.vfs(), raw_params, armor_comparisons))
+        Ok(Self::index(version, Arc::new(provider), NamesSource::English, dump.vfs(), raw_params, armor_comparisons))
+    }
+
+    /// Indexes a build another program has already loaded, sharing its
+    /// provider and files rather than parsing GameParams again. Names are in
+    /// the language of `catalog`, the provider's catalog now; `None` when it
+    /// holds none. `source_dir` names where `vfs` comes from in errors.
+    pub fn from_shared(
+        version: Version,
+        build: u32,
+        provider: Arc<GameMetadataProvider>,
+        catalog: Option<SharedCatalog>,
+        vfs: VfsPath,
+        source_dir: &Path,
+        cache_root: Option<&Path>,
+    ) -> Self {
+        let build = BuildNumber::new(build);
+        let raw_params = RawParamsSlot::new(vfs.clone(), source_dir, cache_root, build);
+        let armor_comparisons = ComparisonCache::new(cache_root, build);
+
+        Self::index(version, provider, NamesSource::Shared(catalog), vfs, raw_params, armor_comparisons)
     }
 
     /// Loads the newest build listed in a wows-replay-data dump root (the
@@ -130,6 +154,20 @@ impl GameData {
     /// The underlying provider, for callers that need wowsunpack directly.
     pub fn provider(&self) -> &GameMetadataProvider {
         &self.provider
+    }
+
+    /// The provider as shared, for checking it is the one another program loaded.
+    pub fn shared_provider(&self) -> &Arc<GameMetadataProvider> {
+        &self.provider
+    }
+
+    /// The shared provider's catalog the names were indexed in. `None` for
+    /// game data loaded from a dump, or a shared provider without a catalog.
+    pub fn shared_catalog(&self) -> Option<&SharedCatalog> {
+        match &self.names {
+            NamesSource::Shared(catalog) => catalog.as_ref(),
+            NamesSource::English => None,
+        }
     }
 
     pub fn ship_count(&self) -> usize {
@@ -159,7 +197,8 @@ impl GameData {
 
     fn index(
         version: Version,
-        provider: GameMetadataProvider,
+        provider: Arc<GameMetadataProvider>,
+        names: NamesSource,
         vfs: VfsPath,
         raw_params: RawParamsSlot,
         armor_comparisons: ComparisonCache,
@@ -205,10 +244,30 @@ impl GameData {
             consumable_names,
             commander_names,
             raw_params,
+            names,
             armor_comparisons,
             ricochet_standards: OnceLock::new(),
         }
     }
+}
+
+/// Where a [`GameData`]'s display names come from.
+pub(crate) enum NamesSource {
+    /// The English catalog [`GameData::load_dump`] read into its own provider.
+    English,
+    /// The catalog of a provider another program shares and may swap.
+    Shared(Option<SharedCatalog>),
+}
+
+/// The catalog a shared provider held when its names were indexed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedCatalog {
+    /// Language code of the catalog, e.g. `de` or `pt_br`, which labels the
+    /// caches built from its names.
+    pub language: String,
+    /// The provider's [`GameMetadataProvider::translation_epoch`] while it
+    /// held the catalog.
+    pub translation_epoch: u64,
 }
 
 /// The skill table most crews share. Crews that share a table share one

@@ -54,7 +54,7 @@ impl McpServerBuilder {
     pub fn game_data(mut self, source: GameDataSource, replay_files: ReplayFiles) -> Self {
         self.description = match &source {
             GameDataSource::Loaded(game) => format!("World of Warships {} game data", game.version().to_path()),
-            GameDataSource::Dump { .. } => "World of Warships game data".to_owned(),
+            GameDataSource::Dump { .. } | GameDataSource::Shared(_) => "World of Warships game data".to_owned(),
         };
         self.tool_sets.insert(0, Arc::new(GameDataTools::new(source, replay_files)));
         self

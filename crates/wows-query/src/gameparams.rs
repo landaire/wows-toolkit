@@ -1,6 +1,7 @@
 //! `gameparams_query`: jq filters over raw GameParams entries, for values the
 //! normalized queries do not report.
 
+use std::cell::Cell;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -13,13 +14,14 @@ use std::time::Instant;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use wows_data_mgr::Dump;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::vfs::VfsPath;
 
 use crate::GameData;
 use crate::data::BuildNumber;
 use crate::data::GAME_PARAMS_DATA;
+use crate::data::NamesSource;
 use crate::error::JqError;
 use crate::error::QueryError;
 use crate::error::RawParamsError;
@@ -168,7 +170,10 @@ pub struct ParamFailure {
 /// The raw GameParams store of a [`GameData`], opened or built on first use
 /// and reopened when cache eviction has removed it.
 pub(crate) struct RawParamsSlot {
-    dump_dir: PathBuf,
+    /// The build's files, which hold `GameParams.data`.
+    vfs: VfsPath,
+    /// Where `vfs` comes from, for errors.
+    source_dir: PathBuf,
     cache_root: Option<PathBuf>,
     build: BuildNumber,
     /// Locked while opening or building, so one process builds a store once.
@@ -176,16 +181,23 @@ pub(crate) struct RawParamsSlot {
 }
 
 impl RawParamsSlot {
-    pub(crate) fn new(dump_dir: &Path, cache_root: Option<&Path>, build: BuildNumber) -> Self {
+    pub(crate) fn new(vfs: VfsPath, source_dir: &Path, cache_root: Option<&Path>, build: BuildNumber) -> Self {
         Self {
-            dump_dir: dump_dir.to_path_buf(),
+            vfs,
+            source_dir: source_dir.to_path_buf(),
             cache_root: cache_root.map(Path::to_path_buf),
             build,
             state: Mutex::new(SlotState::Empty),
         }
     }
 
-    fn get(&self, localization: Localization<'_>) -> Result<Arc<RawParams>, Arc<RawParamsError>> {
+    /// The store for `localization`. `catalog_current` says whether `localization.names` still
+    /// holds the catalog `localization.language` names; a store built while it does not is refused.
+    fn get(
+        &self,
+        localization: Localization<'_>,
+        catalog_current: impl Fn() -> bool,
+    ) -> Result<Arc<RawParams>, Arc<RawParamsError>> {
         // A build takes seconds and hundreds of MB; repeating a failed one
         // on every call would stall every query behind it.
         const RETRY_AFTER: Duration = Duration::from_secs(5 * 60);
@@ -206,8 +218,24 @@ impl RawParamsSlot {
             SlotState::Open(_) | SlotState::Failed { .. } | SlotState::Empty => {}
         }
 
-        match RawParams::open_or_build(cache_root, self.build.raw(), localization, || read_game_params(&self.dump_dir))
-        {
+        let changed = || RawParamsError::CatalogChanged { language: localization.language.to_owned() };
+        let built = Cell::new(false);
+        let opened = RawParams::open_or_build(cache_root, self.build.raw(), localization, || {
+            if !catalog_current() {
+                return Err(changed());
+            }
+            built.set(true);
+            read_game_params(&self.vfs, &self.source_dir)
+        })
+        .and_then(|store| {
+            // The catalog was swapped during the build, so the store's names may be in two languages.
+            if built.get() && !catalog_current() {
+                store.invalidate();
+                return Err(changed());
+            }
+            Ok(store)
+        });
+        match opened {
             Ok(store) => {
                 *state = SlotState::Open(Arc::clone(&store));
                 Ok(store)
@@ -250,17 +278,25 @@ impl RawParamsSlot {
 }
 
 impl GameData {
-    /// The raw GameParams store with English display names, opened or built
-    /// under the cache directory on first use. Building takes about ten
-    /// seconds and up to 1 GB of memory while it runs; call this at startup
-    /// to take that cost before the first query.
+    /// The raw GameParams store with display names in the language of this
+    /// game data's names, opened or built under the cache directory on first
+    /// use. Building takes about ten seconds and up to 1 GB of memory while
+    /// it runs; call this at startup to take that cost before the first query.
     pub fn raw_params(&self) -> Result<Arc<RawParams>, QueryError> {
-        // Game data loads the English catalog.
+        // Game data loaded from a dump reads the English catalog.
         const ENGLISH: &str = "en";
 
-        let localization = Localization { language: ENGLISH, names: self.provider() };
+        let (language, translation_epoch) = match &self.names {
+            NamesSource::English => (ENGLISH, None),
+            NamesSource::Shared(Some(catalog)) => (catalog.language.as_str(), Some(catalog.translation_epoch)),
+            NamesSource::Shared(None) => {
+                return Err(QueryError::RawParams { source: Arc::new(RawParamsError::NoCatalog) });
+            }
+        };
+        let localization = Localization { language, names: self.provider() };
+        let catalog_current = || translation_epoch.is_none_or(|epoch| epoch == self.provider().translation_epoch());
 
-        self.raw_params.get(localization).map_err(|source| QueryError::RawParams { source })
+        self.raw_params.get(localization, catalog_current).map_err(|source| QueryError::RawParams { source })
     }
 
     /// Uses `store`, which another owner such as the desktop app opened for
@@ -457,17 +493,15 @@ impl Budget {
     }
 }
 
-pub(crate) fn read_game_params(dump_dir: &Path) -> Result<Vec<u8>, RawParamsError> {
-    let dump = Dump::open(dump_dir);
-    let mut file = dump
-        .vfs()
+pub(crate) fn read_game_params(vfs: &VfsPath, source_dir: &Path) -> Result<Vec<u8>, RawParamsError> {
+    let mut file = vfs
         .join(GAME_PARAMS_DATA)
         .and_then(|path| path.open_file())
-        .map_err(|source| RawParamsError::Source { dir: dump_dir.to_path_buf(), source })?;
+        .map_err(|source| RawParamsError::Source { dir: source_dir.to_path_buf(), source })?;
 
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
-        .map_err(|source| RawParamsError::Io { path: dump_dir.join(GAME_PARAMS_DATA), source })?;
+        .map_err(|source| RawParamsError::Io { path: source_dir.join(GAME_PARAMS_DATA), source })?;
 
     Ok(bytes)
 }

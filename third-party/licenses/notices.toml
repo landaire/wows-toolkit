@@ -393,6 +393,30 @@ license = "MIT"
 files = ["third-party/licenses/texts/mit.txt"]
 
 [[crate_license]]
+name = "hifijson"
+version = "0.5.0"
+license = "MIT"
+files = ["third-party/licenses/texts/mit.txt"]
+
+[[crate_license]]
+name = "jaq-core"
+version = "3.1.2"
+license = "MIT"
+files = ["third-party/licenses/texts/mit.txt"]
+
+[[crate_license]]
+name = "jaq-json"
+version = "2.0.3"
+license = "MIT"
+files = ["third-party/licenses/texts/mit.txt"]
+
+[[crate_license]]
+name = "jaq-std"
+version = "3.0.4"
+license = "MIT"
+files = ["third-party/licenses/texts/mit.txt"]
+
+[[crate_license]]
 name = "kinded"
 version = "0.5.1"
 license = "MIT"

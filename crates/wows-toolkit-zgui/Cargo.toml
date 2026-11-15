@@ -81,7 +81,7 @@ clap = { workspace = true }
 replayshark = { workspace = true }
 # Only to install the process-wide crypto provider at startup; see `main`.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
@@ -93,6 +93,13 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 # The theme colours a custom element reads from its computed style.
 zgui-css = { workspace = true }
+# The in-app MCP server, its replay tools, and the jq worker its game data queries run in.
+wows-mcp = { workspace = true }
+wows-query = { workspace = true }
+rmcp = { version = "3.9", default-features = false, features = ["server"] }
+schemars = { workspace = true }
+tokio-util = "0.7"
+data-encoding = { workspace = true }
 
 # A release build has no console, so `--help`, `--version` and a refused argument are written to
 # the parent's console or shown in a message box, and `replayshark` writes its output there. The

@@ -8,6 +8,7 @@ pub mod constants;
 mod error;
 mod game_data;
 mod jobs;
+pub mod mcp;
 pub mod progress;
 mod settings;
 mod supervision;
