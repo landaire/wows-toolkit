@@ -32,10 +32,12 @@ use wows_minimap_renderer::frame_track::PREVIEW_FPS;
 use wows_minimap_renderer::frame_track::PREVIEW_MAX_FRAMES;
 use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
 use wows_minimap_renderer::frame_track::TrackSink;
+use wows_minimap_renderer::frame_track::TrailRecording;
 use wows_minimap_renderer::frame_track::build_frame_track;
 use wows_minimap_renderer::frame_track::paint_options;
 use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_minimap_renderer::renderer::MinimapRenderer;
+use wows_minimap_renderer::trail::BakedTrails;
 use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
@@ -462,6 +464,8 @@ pub struct BakedTrack {
     pub map_origin: (u32, u32),
     /// What an exported video of this battle is called, without its extension.
     pub video_stem: String,
+    /// Where every ship went, at a finer step than the kept frames.
+    pub trails: BakedTrails,
 }
 
 /// The events of `path`'s battle, in the order they happened.
@@ -606,13 +610,14 @@ pub fn bake_track(
     }
 
     let mut sink = TrackSink::with_budget(budget);
-    build_frame_track(&mut session, &mut renderer, frame_interval, cancel, &mut sink);
-    let (battle_start, battle_end) = {
+    build_frame_track(&mut session, &mut renderer, frame_interval, cancel, &mut sink, TrailRecording::EveryStep);
+    let (battle_start, battle_end, trails) = {
         let view = session.world_mut().view();
         // A replay with no BattleStart packet was recorded from the loading
         // screen onwards with nothing to offset against, so its clock is
         // already elapsed time.
-        (view.battle_start_clock().unwrap_or(GameClock(0.0)), view.battle_end_clock())
+        let start = view.battle_start_clock().unwrap_or(GameClock(0.0));
+        (start, view.battle_end_clock(), renderer.take_trails(view.dead_ships()))
     };
     session.finish();
 
@@ -633,6 +638,7 @@ pub fn bake_track(
         version,
         map_origin,
         video_stem,
+        trails,
     })
 }
 
@@ -782,7 +788,7 @@ fn walk(
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::new();
-    build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
+    build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink, TrailRecording::Skip);
     session.finish();
 
     if cancel.load(Ordering::Relaxed) {

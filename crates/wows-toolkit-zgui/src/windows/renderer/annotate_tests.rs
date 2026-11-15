@@ -56,6 +56,7 @@ fn Mounted(opened: Rc<Cell<Option<RendererSession>>>) -> impl IntoView {
         version: Version::base(99, 0, 0),
         space: String::new(),
         video_stem: String::new(),
+        trails: Default::default(),
         map_origin: DEFAULT_MAP_ORIGIN,
     };
     let session = RendererSession::ready_for_test(track);

@@ -31,6 +31,7 @@ use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_minimap_renderer::toggles::TOGGLES;
 use wows_minimap_renderer::toggles::Toggle;
+use wows_minimap_renderer::trail::BakedTrails;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::timeline::HealthSnapshot;
 use wows_replay_insights::timeline::KIND_COUNT;
@@ -127,7 +128,17 @@ fn track(clocks: Vec<f32>) -> Track {
         space: String::new(),
         video_stem: String::new(),
         map_origin: DEFAULT_MAP_ORIGIN,
+        trails: BakedTrails::default(),
     }
+}
+
+/// Trails recorded for ship 1, `me`, at each `(clock, x)` along the top edge, as a bake records
+/// them.
+fn recorded_trail(samples: &[(f32, f32)]) -> BakedTrails {
+    let recorded = samples.iter().map(|&(clock, x)| (MinimapPos { x, y: 0.0 }, GameClock(clock), 0)).collect();
+    let history = HashMap::from([(EntityId::from(1u32), recorded)]);
+
+    BakedTrails::from_history(history, |_| Some("me".to_owned()), |_| None)
 }
 
 /// Says when the battle inside a track ran.
@@ -796,6 +807,7 @@ fn an_exported_trail_ends_at_its_ship_between_baked_frames() {
     for (frame, x) in [0.0, 100.0, 200.0].into_iter().enumerate() {
         track.frames[frame] = vec![drawn_ship(1, "me", x, true)];
     }
+    track.trails = recorded_trail(&[(0.0, 0.0), (10.0, 100.0), (20.0, 200.0)]);
     let layers = ExportLayers {
         options: RenderOptions { show_trails: true, ..playback_options_hidden() },
         show_dead_ships: true,
@@ -818,6 +830,32 @@ fn an_exported_trail_ends_at_its_ship_between_baked_frames() {
     assert_eq!(trail_end, Some(ship_x));
 }
 
+/// The viewport's trail turns where the ship turned between two kept frames, because it is read
+/// from the positions the bake recorded at every step rather than from the kept frames.
+#[test]
+fn a_trail_follows_the_ship_between_the_frames_the_bake_kept() {
+    let mut track = track(vec![0.0, 10.0]);
+    track.frames[0] = vec![drawn_ship(1, "me", 0.0, true)];
+    track.frames[1] = vec![drawn_ship(1, "me", 100.0, true)];
+    track.trails = recorded_trail(&[(0.0, 0.0), (2.0, 20.0), (4.0, 60.0), (6.0, 30.0), (8.0, 70.0), (10.0, 100.0)]);
+    let options = RenderOptions { show_trails: true, ..playback_options_hidden() };
+    let trail_xs = |at: FrameIndex| -> Option<Vec<f32>> {
+        raster_commands(&track, at, &options, true, &ShipChoices::new(), Vec::new())?.into_iter().find_map(|command| {
+            match command {
+                DrawCommand::PositionTrail { points, .. } => Some(points.iter().map(|(pos, _)| pos.x).collect()),
+                _ => None,
+            }
+        })
+    };
+
+    assert_eq!(trail_xs(FrameIndex::FIRST), None, "one position is not a trail");
+    assert_eq!(
+        trail_xs(FrameIndex::new(1)),
+        Some(vec![0.0, 20.0, 60.0, 30.0, 70.0, 100.0]),
+        "every recorded turn is drawn, not a straight line between the kept frames"
+    );
+}
+
 /// What is on screen is what is written: the trails asked for, and what was drawn over the
 /// battle.
 #[test]
@@ -826,6 +864,7 @@ fn an_export_writes_the_trails_and_what_was_drawn_over_the_battle() {
     for (frame, x) in [0.0, 10.0, 20.0].into_iter().enumerate() {
         track.frames[frame] = vec![drawn_ship(1, "me", x, true)];
     }
+    track.trails = recorded_trail(&[(0.0, 0.0), (1.0, 10.0), (2.0, 20.0)]);
     let track = Arc::new(track);
     let annotation = DrawCommand::Annotation {
         shape: AnnotationShape::Circle { center: MinimapPos { x: 5.0, y: 5.0 }, radius: 3.0, filled: false },

@@ -1,11 +1,13 @@
-//! Position trails derived from frames already drawn.
+//! Position trails, read back out of frames already drawn or out of the
+//! positions a bake recorded.
 //!
-//! Pure functions of the draw commands, so a viewer with no replay parser (the
-//! web demo) derives trails the same way the desktop viewports do.
+//! Pure functions of their input, so a viewer with no replay parser (the web
+//! demo) derives trails from the frames it has.
 
 use std::collections::HashMap;
 
 use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 
 use crate::config::RenderOptions;
 use crate::draw_command::DrawCommand;
@@ -33,23 +35,18 @@ pub fn hue_to_rgb(hue: f32) -> [u8; 3] {
 /// A trail command carries every point so far, so baking one per frame would
 /// cost the square of the track's length. The positions are already in the
 /// track's own ship commands, so a viewer derives the trails for the frame it
-/// is about to draw instead. Walking frames one at a time lets an export that
-/// draws every frame in order pay for each frame once.
+/// is about to draw instead.
 #[derive(Debug, Default)]
-pub struct TrailHistory {
+struct TrailHistory {
     order: Vec<EntityId>,
     ships: HashMap<EntityId, ShipHistory>,
     walked: usize,
 }
 
 impl TrailHistory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// The history of every frame in `frames`.
-    pub fn walk(frames: &[Vec<DrawCommand>]) -> Self {
-        let mut history = Self::new();
+    fn walk(frames: &[Vec<DrawCommand>]) -> Self {
+        let mut history = Self::default();
         for commands in frames {
             history.push(commands);
         }
@@ -58,7 +55,7 @@ impl TrailHistory {
     }
 
     /// Adds the next frame's ship positions.
-    pub fn push(&mut self, commands: &[DrawCommand]) {
+    fn push(&mut self, commands: &[DrawCommand]) {
         let frame = self.walked;
         self.walked += 1;
 
@@ -101,7 +98,7 @@ impl TrailHistory {
     /// Speed trails colour each point by how fast the ship was moving there against the fastest
     /// it went, and otherwise oldest points are blue and newest red, as the renderer's own
     /// trails are. A sunk ship's trail is left out unless dead-ship trails are on.
-    pub fn trails(&self, options: &RenderOptions) -> Vec<DrawCommand> {
+    fn trails(&self, options: &RenderOptions) -> Vec<DrawCommand> {
         if !options.show_trails && !options.show_speed_trails {
             return Vec::new();
         }
@@ -175,6 +172,149 @@ pub fn trails_through(frames: &[Vec<DrawCommand>], options: &RenderOptions) -> V
     }
 
     TrailHistory::walk(frames).trails(options)
+}
+
+/// Every ship's position across a whole battle, at the resolution the egui renderer records it
+/// (each packet step while the ship is visible and afloat), kept compactly for a baked track.
+///
+/// A track keeps a thinned set of frames, so trails read from those frames turn corners in
+/// straight lines a minute long. These samples are recorded on the forward pass instead.
+/// One sample is 12 bytes, and a ship keeps at most [`BakedTrails::MAX_SAMPLES_PER_SHIP`] of
+/// them, so a ship's trail costs at most about 48 KiB however long the battle ran.
+#[derive(Debug, Default, Clone)]
+pub struct BakedTrails {
+    ships: Vec<ShipTrail>,
+}
+
+impl BakedTrails {
+    /// Most samples one ship keeps. A longer history keeps an evenly spaced subset that starts and
+    /// ends where the recording did.
+    pub const MAX_SAMPLES_PER_SHIP: usize = 4096;
+
+    /// Compacts what a renderer recorded, `(position, clock, server speed)` per sample in the
+    /// order recorded. `player_name` and `sunk_at` say whose each ship is and when it sank.
+    pub fn from_history(
+        history: HashMap<EntityId, Vec<(MinimapPos, GameClock, u16)>>,
+        player_name: impl Fn(EntityId) -> Option<String>,
+        sunk_at: impl Fn(EntityId) -> Option<GameClock>,
+    ) -> Self {
+        let mut ships: Vec<ShipTrail> = history
+            .into_iter()
+            .map(|(entity_id, samples)| {
+                let samples = evenly_spaced(&samples, Self::MAX_SAMPLES_PER_SHIP)
+                    .map(|(pos, clock, speed_raw)| TrailSample::new(*pos, *clock, *speed_raw))
+                    .collect();
+
+                ShipTrail { entity_id, player_name: player_name(entity_id), sunk_at: sunk_at(entity_id), samples }
+            })
+            .collect();
+        // Recorded in a hash map; drawn in a fixed order so overlapping trails do not swap.
+        ships.sort_by_key(|ship| ship.entity_id);
+
+        Self { ships }
+    }
+
+    /// How many samples are kept across every ship.
+    pub fn sample_count(&self) -> usize {
+        self.ships.iter().map(|ship| ship.samples.len()).sum()
+    }
+
+    /// The trails `options` ask for, as they stood at `clock`.
+    ///
+    /// Colored as the egui renderer colors them: by age from blue to red, or for speed trails by
+    /// the server speed against the fastest the ship went so far. A sunk ship's trail is left out
+    /// unless dead-ship trails are on.
+    pub fn trails_at(&self, clock: GameClock, options: &RenderOptions) -> Vec<DrawCommand> {
+        if !options.show_trails && !options.show_speed_trails {
+            return Vec::new();
+        }
+
+        self.ships
+            .iter()
+            .filter_map(|ship| {
+                if !options.show_dead_trails && ship.sunk_at.is_some_and(|sunk| clock >= sunk) {
+                    return None;
+                }
+                let seen = ship.samples.partition_point(|sample| sample.clock <= clock.seconds());
+                let samples = &ship.samples[..seen];
+                // One point is a position, not a trail.
+                if samples.len() < 2 {
+                    return None;
+                }
+                let points = if options.show_speed_trails { by_server_speed(samples) } else { by_sample_age(samples) };
+
+                Some(DrawCommand::PositionTrail {
+                    entity_id: ship.entity_id,
+                    player_name: ship.player_name.clone(),
+                    points,
+                })
+            })
+            .collect()
+    }
+}
+
+/// At most `most` of `items`, evenly spaced, keeping the first and the last.
+fn evenly_spaced<T>(items: &[T], most: usize) -> impl Iterator<Item = &T> {
+    let kept = items.len().min(most);
+    let span = items.len().saturating_sub(1);
+    (0..kept).map(move |index| match kept {
+        1 => &items[0],
+        _ => &items[index * span / (kept - 1)],
+    })
+}
+
+/// One ship's part of a [`BakedTrails`].
+#[derive(Debug, Clone)]
+struct ShipTrail {
+    entity_id: EntityId,
+    player_name: Option<String>,
+    sunk_at: Option<GameClock>,
+    samples: Vec<TrailSample>,
+}
+
+/// One recorded position. The minimap position is held in sixteenths of a pixel, which is finer
+/// than the quarter pixel a ship has to move before another sample is recorded.
+#[derive(Debug, Clone, Copy)]
+struct TrailSample {
+    clock: f32,
+    x: u16,
+    y: u16,
+    speed_raw: u16,
+}
+
+impl TrailSample {
+    const SUBPIXELS: f32 = 16.0;
+
+    fn new(pos: MinimapPos, clock: GameClock, speed_raw: u16) -> Self {
+        // A ship stays on the map, so the clamp only guards the conversion.
+        let fixed = |value: f32| (value * Self::SUBPIXELS).round().clamp(0.0, f32::from(u16::MAX)) as u16;
+
+        Self { clock: clock.seconds(), x: fixed(pos.x), y: fixed(pos.y), speed_raw }
+    }
+
+    fn pos(self) -> MinimapPos {
+        MinimapPos { x: f32::from(self.x) / Self::SUBPIXELS, y: f32::from(self.y) / Self::SUBPIXELS }
+    }
+}
+
+fn by_sample_age(samples: &[TrailSample]) -> Vec<(MinimapPos, [u8; 3])> {
+    let last = (samples.len() - 1) as f32;
+    samples
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| (sample.pos(), hue_to_rgb(240.0 * (1.0 - index as f32 / last))))
+        .collect()
+}
+
+fn by_server_speed(samples: &[TrailSample]) -> Vec<(MinimapPos, [u8; 3])> {
+    let fastest = samples.iter().map(|sample| f32::from(sample.speed_raw)).fold(0.0f32, f32::max);
+    samples
+        .iter()
+        .map(|sample| {
+            let fraction = if fastest > 0.0 { (f32::from(sample.speed_raw) / fastest).clamp(0.0, 1.0) } else { 0.0 };
+            (sample.pos(), hue_to_rgb(240.0 * (1.0 - fraction)))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -307,5 +447,79 @@ mod tests {
         // far, which is what this avoids.
         let baked_points: usize = (1..=200).sum();
         assert!(points.len() < baked_points / 100, "{} against {}", points.len(), baked_points);
+    }
+
+    fn recorded(samples: &[(f32, f32, u16)]) -> Vec<(MinimapPos, GameClock, u16)> {
+        samples.iter().map(|&(clock, x, speed)| (MinimapPos { x, y: 0.0 }, GameClock(clock), speed)).collect()
+    }
+
+    fn baked(samples: &[(f32, f32, u16)], sunk_at: Option<f32>) -> BakedTrails {
+        let history = HashMap::from([(EntityId::from(1u32), recorded(samples))]);
+        BakedTrails::from_history(history, |_| Some("player1".to_owned()), |_| sunk_at.map(GameClock))
+    }
+
+    fn xs(trail: &DrawCommand) -> Vec<f32> {
+        let DrawCommand::PositionTrail { points, .. } = trail else { panic!("expected a trail, got {trail:?}") };
+        points.iter().map(|(pos, _)| pos.x).collect()
+    }
+
+    /// A baked trail holds what was recorded up to the clock asked about, at sub-pixel precision.
+    #[test]
+    fn a_baked_trail_holds_what_was_recorded_up_to_the_clock() {
+        let trails = baked(&[(1.0, 10.25, 0), (2.0, 20.5, 0), (3.0, 30.75, 0)], None);
+
+        assert!(trails.trails_at(GameClock(1.5), &age_trails()).is_empty(), "one sample is not a trail");
+        let trail = &trails.trails_at(GameClock(2.0), &age_trails())[0];
+        assert_eq!(xs(trail), [10.25, 20.5]);
+        assert_eq!(xs(&trails.trails_at(GameClock(9.0), &age_trails())[0]), [10.25, 20.5, 30.75]);
+        let off = RenderOptions { show_trails: false, show_speed_trails: false, ..age_trails() };
+        assert!(trails.trails_at(GameClock(9.0), &off).is_empty(), "nothing while trails are off");
+    }
+
+    /// A long history keeps a bounded, evenly spaced subset that still ends where the ship was last.
+    #[test]
+    fn a_long_history_is_thinned_to_the_per_ship_bound() {
+        let samples: Vec<(f32, f32, u16)> = (0..20_000).map(|step| (step as f32, step as f32 / 16.0, 0)).collect();
+        let trails = baked(&samples, None);
+
+        assert_eq!(trails.sample_count(), BakedTrails::MAX_SAMPLES_PER_SHIP);
+        let last = *xs(&trails.trails_at(GameClock(1e9), &age_trails())[0]).last().expect("points");
+        assert_eq!(last, 1249.9375, "the newest sample is kept");
+    }
+
+    /// Twice the bound, the case where keeping every other sample and the last would overshoot.
+    #[test]
+    fn a_history_of_twice_the_bound_keeps_exactly_the_bound() {
+        // A quarter pixel a step keeps every position inside what a sample can hold.
+        let samples: Vec<(f32, f32, u16)> =
+            (0..2 * BakedTrails::MAX_SAMPLES_PER_SHIP).map(|step| (step as f32, step as f32 / 4.0, 0)).collect();
+        let trails = baked(&samples, None);
+
+        assert_eq!(trails.sample_count(), BakedTrails::MAX_SAMPLES_PER_SHIP);
+        let kept = xs(&trails.trails_at(GameClock(1e9), &age_trails())[0]);
+        assert_eq!(kept.first(), Some(&0.0));
+        assert_eq!(kept.last(), Some(&((2 * BakedTrails::MAX_SAMPLES_PER_SHIP - 1) as f32 / 4.0)));
+    }
+
+    /// A speed trail colours each point by the server speed recorded there against the fastest so
+    /// far, as the egui renderer does.
+    #[test]
+    fn a_baked_speed_trail_is_coloured_by_server_speed() {
+        let trails = baked(&[(1.0, 0.0, 0), (2.0, 10.0, 400), (3.0, 20.0, 200)], None);
+        let speed = RenderOptions { show_speed_trails: true, ..age_trails() };
+
+        let colours = colors(&trails.trails_at(GameClock(3.0), &speed)[0]);
+        assert_eq!(colours, [hue_to_rgb(240.0), hue_to_rgb(0.0), hue_to_rgb(120.0)]);
+    }
+
+    /// A sunk ship's baked trail is drawn while it was afloat, and after only with dead-ship trails.
+    #[test]
+    fn a_baked_trail_of_a_sunk_ship_follows_the_dead_trail_switch() {
+        let trails = baked(&[(1.0, 0.0, 0), (2.0, 10.0, 0)], Some(5.0));
+        let hidden = RenderOptions { show_dead_trails: false, ..age_trails() };
+
+        assert_eq!(trails.trails_at(GameClock(4.0), &hidden).len(), 1, "drawn while afloat");
+        assert!(trails.trails_at(GameClock(5.0), &hidden).is_empty(), "dropped once sunk");
+        assert_eq!(trails.trails_at(GameClock(5.0), &age_trails()).len(), 1, "kept with dead-ship trails on");
     }
 }

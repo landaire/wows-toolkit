@@ -20,11 +20,11 @@ use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::error::VideoError;
 use wows_minimap_renderer::map_data::MinimapPos;
-use wows_minimap_renderer::trail::TrailHistory;
 use wows_minimap_renderer::video::CodecChoice;
 use wows_minimap_renderer::video::FPS;
 use wows_minimap_renderer::video::OUTPUT_DURATION;
 use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
@@ -195,7 +195,7 @@ pub struct ExportLayers {
 /// keeps fewer frames than that, and a long battle's are further apart, so each written frame is
 /// the baked frame before it with the ships moved the matching part of the way to the next.
 /// What is on screen is what is written: a layer the reader turned off does not come back in the
-/// file, and trails are derived from the baked frames behind, as the viewport derives them.
+/// file, and trails are read from the track's recorded positions, as the viewport reads them.
 pub struct ExportFrames {
     track: Arc<Track>,
     layers: ExportLayers,
@@ -207,9 +207,6 @@ pub struct ExportFrames {
     duration: f32,
     step: f32,
     written: usize,
-    trails: TrailHistory,
-    /// How many baked frames `trails` has walked.
-    walked: usize,
 }
 
 impl ExportFrames {
@@ -224,17 +221,7 @@ impl ExportFrames {
         let duration = (end - start).max(0.0);
         let step = duration / (EXPORT_FRAME_COUNT - 1) as f32;
 
-        Some(Self {
-            track,
-            layers,
-            first: first.get(),
-            start,
-            duration,
-            step,
-            written: 0,
-            trails: TrailHistory::new(),
-            walked: 0,
-        })
+        Some(Self { track, layers, first: first.get(), start, duration, step, written: 0 })
     }
 
     /// How many frames the export writes.
@@ -263,12 +250,7 @@ impl Iterator for ExportFrames {
         self.written += 1;
 
         let base = self.track.frame_at(at).get().max(self.first);
-        let wants_trails = self.layers.options.show_trails || self.layers.options.show_speed_trails;
-        while wants_trails && self.walked <= base {
-            self.trails.push(&self.track.frames[self.walked]);
-            self.walked += 1;
-        }
-        let mut trails = self.trails.trails(&self.layers.options);
+        let mut trails = self.track.trails.trails_at(GameClock(at), &self.layers.options);
 
         let layers = &self.layers;
         let between = interpolated(&self.track, base, at);

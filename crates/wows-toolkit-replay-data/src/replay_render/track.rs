@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::config::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::trail::BakedTrails;
 use wows_replays::types::GameClock;
 use wowsunpack::data::Version;
 
@@ -72,6 +73,8 @@ pub struct Track {
     pub space: String,
     /// What an exported video of this battle is called, without its extension.
     pub video_stem: String,
+    /// Where every ship went, recorded at each step of the bake rather than at the kept frames.
+    pub trails: BakedTrails,
 }
 
 impl Track {
@@ -190,6 +193,7 @@ pub fn bake(
         map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
         space: baked.map_name,
         video_stem: baked.video_stem,
+        trails: baked.trails,
     };
 
     Ok((track, baked.renderer))

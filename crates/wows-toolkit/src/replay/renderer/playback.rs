@@ -37,6 +37,7 @@ use super::ReplayRendererAssets;
 use super::SNAPSHOTS_PER_SECOND;
 use super::SharedRendererState;
 use super::frame_pass::FrameSink;
+use super::frame_pass::TrailRecording;
 use super::frame_pass::build_frame_track;
 use crate::replay::timeline::ShipShotTimeline;
 use crate::replay::timeline::extract_timeline_and_shots;
@@ -290,7 +291,14 @@ pub(super) fn playback_thread(
 
     let never_cancelled = AtomicBool::new(false);
     let mut sink = FirstFrameSink { shared_state: &shared_state, estimated_frames, game_duration };
-    let frame_snapshots = build_frame_track(&mut session, &mut renderer, frame_duration, &never_cancelled, &mut sink);
+    let frame_snapshots = build_frame_track(
+        &mut session,
+        &mut renderer,
+        frame_duration,
+        &never_cancelled,
+        &mut sink,
+        TrailRecording::Skip,
+    );
     let vehicle_facts = session.vehicle_facts().clone();
 
     // One-shot build snapshot from the lookahead pass. The merged session
@@ -653,16 +661,7 @@ pub(super) fn playback_thread(
                 renderer.populate_players(&view);
                 renderer.update_squadron_info(&view);
                 renderer.update_ship_abilities(&view);
-                let dead_ships = view.dead_ships();
-                let minimap_positions = view.minimap_positions();
-                renderer.record_positions(&view, prev_clock, |eid| {
-                    if let Some(dead) = dead_ships.get(eid)
-                        && prev_clock >= dead.clock
-                    {
-                        return false;
-                    }
-                    minimap_positions.get(eid).map(|mm| mm.visible).unwrap_or(false)
-                });
+                renderer.record_visible_positions(&view, prev_clock);
             }
             prev_clock = step;
             push_shot_hits_to_staging(session.world(), staging, hit_cursor);

@@ -195,6 +195,17 @@ pub trait FrameSink {
     fn push(&mut self, index: usize, clock: GameClock, commands: Vec<DrawCommand>);
 }
 
+/// Whether the forward pass records every ship's position at each packet step for trails, as
+/// the egui playback does, rather than only at the frames it draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailRecording {
+    /// The frames drawn are all the pass keeps.
+    Skip,
+    /// The renderer's trail history gains the visible ships at every step, for
+    /// [`MinimapRenderer::take_trails`].
+    EveryStep,
+}
+
 /// Step the session to exhaustion, drawing one frame per `frame_duration` of
 /// game time and handing each to `sink`.
 ///
@@ -209,6 +220,7 @@ pub fn build_frame_track<G: ResourceLoader>(
     frame_duration: f32,
     cancel: &AtomicBool,
     sink: &mut dyn FrameSink,
+    trails: TrailRecording,
 ) -> Vec<FrameSnapshot> {
     let mut snapshots: Vec<FrameSnapshot> = Vec::new();
     let mut last_rendered_frame: i64 = -1;
@@ -232,6 +244,10 @@ pub fn build_frame_track<G: ResourceLoader>(
                 renderer.populate_players(&view);
                 renderer.update_squadron_info(&view);
                 renderer.update_ship_abilities(&view);
+                // As the egui playback steps: from the first nonzero clock, labelled with it.
+                if trails == TrailRecording::EveryStep && prev_clock.seconds() > 0.0 {
+                    renderer.record_visible_positions(&view, prev_clock);
+                }
             }
 
             let target_frame = (prev_clock.seconds() / frame_duration) as i64;

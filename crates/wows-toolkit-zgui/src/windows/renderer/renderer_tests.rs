@@ -72,6 +72,7 @@ fn track(clocks: Vec<f32>) -> Track {
         version: Version::base(99, 0, 0),
         space: String::new(),
         video_stem: String::new(),
+        trails: Default::default(),
         map_origin: DEFAULT_MAP_ORIGIN,
     }
 }

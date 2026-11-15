@@ -8,7 +8,7 @@ use wows_minimap_renderer::config::hide_command_parts;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::SidePanelLayout;
-use wows_minimap_renderer::trail::trails_through;
+use wows_replays::types::GameClock;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
@@ -34,11 +34,12 @@ pub enum LayoutChange {
 /// The commands frame `at` is rasterised from.
 ///
 /// Filtered here rather than at bake time: a toggle then costs one frame
-/// rather than another walk of the battle. Trails are derived from the track
-/// so far and go first, so they sit behind everything, as the egui renderer
-/// draws them. `drawn_on` is what is drawn over the battle rather than by it
-/// (annotations, placed ranges): it is not filtered and goes on after the
-/// battle's own map layers, so a drawn line is not buried under a ship.
+/// rather than another walk of the battle. Trails are read from the track's
+/// recorded positions up to the frame's clock and go first, so they sit behind
+/// everything, as the egui renderer draws them. `drawn_on` is what is drawn
+/// over the battle rather than by it (annotations, placed ranges): it is not
+/// filtered and goes on after the battle's own map layers, so a drawn line is
+/// not buried under a ship.
 /// `None` for a frame past the end of the track.
 pub fn raster_commands(
     track: &Track,
@@ -49,7 +50,7 @@ pub fn raster_commands(
     drawn_on: Vec<DrawCommand>,
 ) -> Option<Vec<DrawCommand>> {
     let commands = track.commands(at)?;
-    let trails = trails_through(&track.frames[..=at.get()], options);
+    let trails = track.trails.trails_at(GameClock(track.seconds_at(at)), options);
 
     let mut shown =
         shown_commands(trails.into_iter().chain(commands.iter().cloned()), options, show_dead_ships, choices);

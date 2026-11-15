@@ -17,6 +17,7 @@ use wowsunpack::data::Version;
 use super::RendererAssetCache;
 use super::RgbaAsset;
 use super::SNAPSHOTS_PER_SECOND;
+use super::frame_pass::TrailRecording;
 use super::frame_pass::build_frame_track;
 use crate::data::wows_data::BuildDataCache;
 
@@ -158,7 +159,7 @@ pub(crate) fn bake_preview_track(
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::new();
-    build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
+    build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink, TrailRecording::Skip);
     session.finish();
 
     if let Some(err) = cancelled() {

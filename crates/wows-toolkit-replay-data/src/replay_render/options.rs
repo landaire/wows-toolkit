@@ -24,8 +24,9 @@ pub fn playback_options_hidden() -> RenderOptions {
 /// The hover preview's set plus every ship's range circles, the rosters and
 /// the stats panel. They are per-frame and small, so keeping them costs
 /// little, and a viewport that did not bake them could not offer them at all.
-/// Trails are still left out: a trail command carries every point so far, so
-/// baking one per frame would cost the square of the track's length.
+/// Trail commands are still left out: one carries every point so far, so
+/// baking one per frame would cost the square of the track's length. The bake
+/// records the positions they are drawn from instead.
 pub fn playback_options() -> RenderOptions {
     RenderOptions {
         show_ship_config: true,

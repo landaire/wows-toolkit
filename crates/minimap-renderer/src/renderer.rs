@@ -35,6 +35,7 @@ use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::battle_controller::state::ConsumableInventory;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
+use wows_replays::analyzer::battle_controller::state::DeadShip;
 use wows_replays::analyzer::battle_controller::state::KillRecord;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::types::EntityId;
@@ -65,6 +66,7 @@ use crate::draw_command::STATS_RIBBON_ROW_H;
 use crate::draw_command::ShipConfigCircleKind;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
+use crate::trail::BakedTrails;
 use crate::trail::hue_to_rgb;
 
 use crate::HUD_HEIGHT;
@@ -940,6 +942,31 @@ impl<'a> MinimapRenderer<'a> {
                 self.record_position(*entity_id, px, clock, speed_raw);
             }
         }
+    }
+
+    /// Records the trail positions of every ship that is visible and afloat at `clock`, which is
+    /// what a playback step adds to the trails.
+    pub fn record_visible_positions(&mut self, controller: &BattleView<'_>, clock: GameClock) {
+        let dead_ships = controller.dead_ships();
+        let minimap_positions = controller.minimap_positions();
+        self.record_positions(controller, clock, |entity_id| {
+            if dead_ships.get(entity_id).is_some_and(|dead| clock >= dead.clock) {
+                return false;
+            }
+            minimap_positions.get(entity_id).is_some_and(|placement| placement.visible)
+        });
+    }
+
+    /// Hands over the positions recorded so far as a baked track's trails, emptying the history.
+    /// `dead_ships` says when each sunk ship went down.
+    pub fn take_trails(&mut self, dead_ships: &HashMap<EntityId, DeadShip>) -> BakedTrails {
+        let history = std::mem::take(&mut self.position_history);
+
+        BakedTrails::from_history(
+            history,
+            |entity_id| self.player_names.get(&entity_id).cloned(),
+            |entity_id| dead_ships.get(&entity_id).map(|dead| dead.clock),
+        )
     }
 
     /// Calculate team advantage from current controller state.

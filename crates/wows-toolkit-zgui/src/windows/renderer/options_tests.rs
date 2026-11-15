@@ -59,6 +59,7 @@ fn track(clocks: &[f32], battle_start: f32) -> Track {
         map_origin: DEFAULT_MAP_ORIGIN,
         space: String::new(),
         video_stem: String::new(),
+        trails: Default::default(),
     }
 }
 
