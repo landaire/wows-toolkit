@@ -446,3 +446,97 @@ mod geometry_tests {
         assert_eq!(both.hud_width, rosters_only.hud_width);
     }
 }
+
+#[cfg(test)]
+mod paint_order_tests {
+    use std::collections::HashMap;
+
+    use egui::Shape;
+    use wows_minimap_renderer::ICON_SIZE;
+    use wows_minimap_renderer::MinimapPos;
+    use wows_minimap_renderer::draw_command::CAMERA_DIRECTION_ALPHA;
+    use wows_minimap_renderer::draw_command::ShipVisibility;
+    use wt_translations::DefaultTextResolver;
+
+    use super::*;
+    use crate::draw_commands::color_from_rgba;
+
+    /// A frame painted through the view puts a ship's camera direction
+    /// under its icon.
+    #[test]
+    fn a_camera_direction_is_painted_under_its_ship_icon() {
+        let ctx = egui::Context::default();
+        let icon_size = ICON_SIZE as usize;
+        let icon = ctx.load_texture(
+            "Cruiser",
+            egui::ColorImage::filled([icon_size, icon_size], Color32::WHITE),
+            egui::TextureOptions::default(),
+        );
+        let icon_id = icon.id();
+        let ship_icons = HashMap::from([("Cruiser".to_string(), icon)]);
+        let plane_icons = HashMap::new();
+        let textures = DrawCommandTextures {
+            ship_icons: &ship_icons,
+            ship_icon_outlines: None,
+            plane_icons: &plane_icons,
+            building_icons: None,
+            consumable_icons: None,
+            ribbon_icons: None,
+            subribbon_icons: None,
+            death_cause_icons: None,
+            powerup_icons: None,
+            silhouette_texture: None,
+        };
+        let entity_id = EntityId::from(7u32);
+        let pos = MinimapPos { x: 300.0, y: 300.0 };
+        let commands = [
+            DrawCommand::CameraDirection { entity_id, pos, yaw: 0.0, color: [255, 0, 0], length: ICON_SIZE as i32 },
+            DrawCommand::Ship {
+                entity_id,
+                pos,
+                yaw: 0.0,
+                species: Some("Cruiser".to_string()),
+                color: None,
+                visibility: ShipVisibility::Visible,
+                opacity: 1.0,
+                is_self: false,
+                player_name: None,
+                ship_name: None,
+                is_detected_teammate: false,
+                is_disconnected: false,
+                name_color: None,
+            },
+        ];
+        let options = RenderOptions { show_camera_direction: true, ..RenderOptions::default() };
+
+        let egui::FullOutput { shapes, mut textures_delta, .. } = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let view = MinimapView {
+                commands: &commands,
+                textures: &textures,
+                map_texture: None,
+                options: &options,
+                show_dead_ships: true,
+                zoom: 1.0,
+                pan: Vec2::ZERO,
+                filter: &NoCommandFilter,
+                text_resolver: &DefaultTextResolver,
+                grid: None,
+                background: Color32::BLACK,
+            };
+            view.show(ui, Vec2::splat(800.0), egui::Sense::hover());
+        });
+        // No renderer takes the icon upload.
+        textures_delta.clear();
+
+        let wedge_fill = color_from_rgba([255, 0, 0], CAMERA_DIRECTION_ALPHA);
+        let wedge = shapes
+            .iter()
+            .position(|clipped| matches!(&clipped.shape, Shape::Path(path) if path.fill == wedge_fill))
+            .expect("the wedge is painted");
+        let ship = shapes
+            .iter()
+            .position(|clipped| matches!(&clipped.shape, Shape::Mesh(mesh) if mesh.texture_id == icon_id))
+            .expect("the ship icon is painted");
+        assert!(wedge < ship, "wedge painted at {wedge}, ship icon at {ship}");
+    }
+}

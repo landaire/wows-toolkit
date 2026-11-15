@@ -339,10 +339,17 @@ fn normalize(cmd: &DrawCommand) -> String {
 // Test driver
 // ---------------------------------------------------------------------------
 
+/// The commands of two frames of one replay, in the order they are drawn.
+struct CapturedFrames {
+    packets: usize,
+    mid_packet: usize,
+    mid: Vec<DrawCommand>,
+    last: Vec<DrawCommand>,
+}
+
 /// Drive BattleWorld over the replay, calling draw_frame at the middle packet,
-/// then again at the last packet. Returns the normalized+sorted DrawCommands
-/// from each of those two frames joined with a separator.
-fn capture_frames(filename: &str) -> String {
+/// then again at the last packet.
+fn capture(filename: &str) -> CapturedFrames {
     let path = fixtures_dir().join(filename);
 
     // Count total packets (first pass)
@@ -422,9 +429,15 @@ fn capture_frames(filename: &str) -> String {
     renderer.populate_players(&world.view());
     renderer.update_squadron_info(&world.view());
     renderer.update_ship_abilities(&world.view());
-    let final_frame = renderer.draw_frame(&world.view());
+    let last = renderer.draw_frame(&world.view());
 
-    let mid_cmds = mid_frame.unwrap_or_default();
+    CapturedFrames { packets: count, mid_packet: mid, mid: mid_frame.unwrap_or_default(), last }
+}
+
+/// The normalized and sorted DrawCommands of both captured frames, joined
+/// with a separator.
+fn capture_frames(filename: &str) -> String {
+    let CapturedFrames { packets, mid_packet, mid, last } = capture(filename);
 
     let fmt = |cmds: &[DrawCommand]| -> String {
         let mut lines: Vec<String> = cmds.iter().map(normalize).collect();
@@ -432,7 +445,7 @@ fn capture_frames(filename: &str) -> String {
         lines.join("\n")
     };
 
-    format!("=== mid ({count} pkts, mid={mid}) ===\n{}\n\n=== final ===\n{}", fmt(&mid_cmds), fmt(&final_frame))
+    format!("=== mid ({packets} pkts, mid={mid_packet}) ===\n{}\n\n=== final ===\n{}", fmt(&mid), fmt(&last))
 }
 
 // ---------------------------------------------------------------------------
@@ -458,4 +471,30 @@ fn drawcommand_parity_v170_pvp() {
 #[cfg_attr(not(all(has_game_data, has_build_6359964)), ignore)]
 fn drawcommand_parity_cossack_armsrace() {
     insta::assert_snapshot!(capture_frames("20221101_004346_PBSD517-Cossack_37_Ridge.wowsreplay"));
+}
+
+/// Every camera direction wedge is one icon length and is drawn before any
+/// ship icon, so the icons cover them.
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
+fn camera_directions_precede_ship_icons() {
+    let frames = capture("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+
+    for (name, commands) in [("mid", &frames.mid), ("final", &frames.last)] {
+        let last_wedge = commands
+            .iter()
+            .rposition(|cmd| matches!(cmd, DrawCommand::CameraDirection { .. }))
+            .unwrap_or_else(|| panic!("the {name} frame has a camera direction"));
+        let first_ship = commands
+            .iter()
+            .position(|cmd| matches!(cmd, DrawCommand::Ship { .. }))
+            .unwrap_or_else(|| panic!("the {name} frame has a ship"));
+        assert!(last_wedge < first_ship, "{name}: wedge at {last_wedge}, first ship at {first_ship}");
+
+        for cmd in commands.iter() {
+            if let DrawCommand::CameraDirection { length, .. } = cmd {
+                assert_eq!(*length, wows_minimap_renderer::ICON_SIZE as i32, "{name}: {cmd:?}");
+            }
+        }
+    }
 }

@@ -1552,6 +1552,39 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
+        // Camera/look direction wedges (from targetLocalPos EntityProperty).
+        // Pushed before every ship so each icon covers them.
+        if self.options.show_camera_direction {
+            let target_yaws = controller.target_yaws();
+            for (entity_id, &world_yaw) in &target_yaws {
+                if let Some(dead) = dead_ships.get(entity_id)
+                    && clock >= dead.clock
+                {
+                    continue;
+                }
+                // An undetected ship's aim data is stale.
+                let detected = minimap_positions.get(entity_id).map(|m| m.visible).unwrap_or(false);
+                if !detected {
+                    continue;
+                }
+                let Some(px) = self.resolve_ship_px(*entity_id, &map_info, &ship_positions, &minimap_positions) else {
+                    continue;
+                };
+                // targetLocalPos yaw is compass bearing (0=north, CW positive).
+                // Convert to screen math coords: screen_yaw = PI/2 - compass_yaw
+                let screen_yaw = std::f32::consts::FRAC_PI_2 - world_yaw;
+                let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
+                let color = ship_color_rgb(relation, self.division_mates.contains(entity_id));
+                commands.push(DrawCommand::CameraDirection {
+                    entity_id: *entity_id,
+                    pos: px,
+                    yaw: screen_yaw,
+                    color,
+                    length: crate::ICON_SIZE as i32,
+                });
+            }
+        }
+
         for entity_id in &all_ship_ids {
             // Render any entity that we know is a ship (from arena state, vehicle
             // entity, or previously resolved species) OR that has a minimap position
@@ -1676,39 +1709,6 @@ impl<'a> MinimapRenderer<'a> {
                     is_detected_teammate: false,
                     is_disconnected,
                     name_color: None,
-                });
-            }
-        }
-
-        // 6. Camera/look direction indicators (from targetLocalPos EntityProperty)
-        if self.options.show_camera_direction {
-            let target_yaws = controller.target_yaws();
-            for (entity_id, &world_yaw) in &target_yaws {
-                // Skip dead ships
-                if let Some(dead) = dead_ships.get(entity_id)
-                    && clock >= dead.clock
-                {
-                    continue;
-                }
-                // Skip undetected ships — aim data is stale
-                let detected = minimap_positions.get(entity_id).map(|m| m.visible).unwrap_or(false);
-                if !detected {
-                    continue;
-                }
-                let Some(px) = self.resolve_ship_px(*entity_id, &map_info, &ship_positions, &minimap_positions) else {
-                    continue;
-                };
-                // targetLocalPos yaw is compass bearing (0=north, CW positive).
-                // Convert to screen math coords: screen_yaw = PI/2 - compass_yaw
-                let screen_yaw = std::f32::consts::FRAC_PI_2 - world_yaw;
-                let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
-                let color = ship_color_rgb(relation, self.division_mates.contains(entity_id));
-                commands.push(DrawCommand::CameraDirection {
-                    entity_id: *entity_id,
-                    pos: px,
-                    yaw: screen_yaw,
-                    color,
-                    length: 18,
                 });
             }
         }

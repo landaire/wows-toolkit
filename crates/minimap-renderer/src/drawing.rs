@@ -37,6 +37,8 @@ use crate::SHIP_ICON_OUTLINE_THICKNESS;
 use crate::draw_command::ActivityFeedEntry;
 use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::AnnotationShape;
+use crate::draw_command::CAMERA_DIRECTION_ALPHA;
+use crate::draw_command::CameraDirectionWedge;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
@@ -2532,12 +2534,10 @@ impl RenderTarget for ImageTarget {
                 );
             }
             DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
-                let x = view.x(pos.x);
-                let y = view.y(pos.y);
-                let reach = view.length(*length as f32);
-                let dx = reach * yaw.cos();
-                let dy = -reach * yaw.sin();
-                draw_line(&mut self.map_layer, x, y, x + dx, y + dy, *color, 0.7, 1.0);
+                let wedge = CameraDirectionWedge::new(*pos, *yaw, *length as f32);
+                let corners = wedge.corners().map(|at| (view.x(at.x), view.y(at.y)));
+                let alpha = (CAMERA_DIRECTION_ALPHA * 255.0) as u8;
+                draw_run(&mut self.map_layer, &corners, true, true, [color[0], color[1], color[2], alpha], 0.0);
             }
             DrawCommand::Building { pos, color, icon_type, relation, .. } => {
                 // Try to render an icon; fall back to a dot if no icon is available
@@ -3378,11 +3378,15 @@ mod tests {
     /// A target with no game files behind it: no map art, no icons, and
     /// whatever font the machine has. `None` where it has none.
     fn target() -> Option<ImageTarget> {
+        target_with_ship_icons(HashMap::new())
+    }
+
+    fn target_with_ship_icons(ship_icons: HashMap<String, ShipIcon>) -> Option<ImageTarget> {
         let fonts = crate::assets::test_fonts()?;
         Some(ImageTarget::new(
             None,
             fonts,
-            HashMap::new(),
+            ship_icons,
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
@@ -3478,6 +3482,72 @@ mod tests {
         // background the canvas starts as.
         assert_eq!(pixel(&frame, 400, 400 + HUD_HEIGHT), [30, 40, 60]);
         assert_eq!(pixel(&frame, 400, 4), [20, 25, 35], "and the HUD strip is still the background");
+    }
+
+    fn camera_direction(pos: MinimapPos) -> DrawCommand {
+        DrawCommand::CameraDirection {
+            entity_id: wows_replays::types::EntityId::from(7u32),
+            pos,
+            yaw: 0.0,
+            color: [255, 0, 0],
+            length: crate::ICON_SIZE as i32,
+        }
+    }
+
+    /// A wedge looking east from the icon center reaches one icon length at
+    /// the zoom the icon is drawn at, and nothing behind the center.
+    #[test]
+    fn a_camera_direction_reaches_one_icon_length_from_the_center() {
+        let Some(mut target) = target() else { return };
+        target.set_map_viewport(MapViewport::new(2.0, (0.0, 0.0)));
+        target.begin_frame();
+        target.draw(&camera_direction(MinimapPos { x: 100.25, y: 100.25 }));
+        target.end_frame();
+
+        let frame = target.frame();
+        let (x, y) = (200, 200 + HUD_HEIGHT);
+        let icon = 2 * crate::ICON_SIZE;
+        let map = [30, 40, 60];
+        assert_ne!(pixel(&frame, x + 2, y), map, "the wide end is filled at the center");
+        assert_ne!(pixel(&frame, x + icon * 3 / 4, y), map, "the wedge runs along the look direction");
+        assert_eq!(pixel(&frame, x + icon + 2, y), map, "and stops one icon length out");
+        assert_eq!(pixel(&frame, x - 3, y), map, "nothing is drawn behind the center");
+    }
+
+    /// A ship icon drawn after its wedge covers it, and the wedge shows past
+    /// the icon's bow.
+    #[test]
+    fn a_ship_icon_covers_its_camera_direction() {
+        let icon = image::RgbaImage::from_pixel(crate::ICON_SIZE, crate::ICON_SIZE, image::Rgba([255, 255, 255, 255]));
+        let Some(mut target) = target_with_ship_icons(HashMap::from([("Cruiser".to_string(), icon)])) else {
+            return;
+        };
+        let pos = MinimapPos { x: 100.5, y: 100.5 };
+        target.begin_frame();
+        target.draw(&camera_direction(pos));
+        target.draw(&DrawCommand::Ship {
+            entity_id: wows_replays::types::EntityId::from(7u32),
+            pos,
+            yaw: 0.0,
+            species: Some("Cruiser".to_string()),
+            color: None,
+            visibility: ShipVisibility::Visible,
+            opacity: 1.0,
+            is_self: false,
+            player_name: None,
+            ship_name: None,
+            is_detected_teammate: false,
+            is_disconnected: false,
+            name_color: None,
+        });
+        target.end_frame();
+
+        let frame = target.frame();
+        let (x, y) = (100, 100 + HUD_HEIGHT);
+        let half_icon = crate::ICON_SIZE / 2;
+        assert_eq!(pixel(&frame, x + half_icon - 2, y), [255, 255, 255], "the icon is on top inside its outline");
+        let past_bow = pixel(&frame, x + half_icon + 2, y);
+        assert!(past_bow[0] > past_bow[2], "the red wedge shows past the bow: {past_bow:?}");
     }
 }
 

@@ -25,6 +25,8 @@ use wows_minimap_renderer::activity_feed::PlacedContent;
 use wows_minimap_renderer::activity_feed::RowExtent;
 use wows_minimap_renderer::draw_command::ActivityFeedEntry;
 use wows_minimap_renderer::draw_command::ActivityFeedKind;
+use wows_minimap_renderer::draw_command::CAMERA_DIRECTION_ALPHA;
+use wows_minimap_renderer::draw_command::CameraDirectionWedge;
 use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::RowShade;
@@ -1345,14 +1347,10 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
-            let start = transform.minimap_to_screen(pos);
-            let dx = *length as f32 * yaw.cos();
-            let dy = -*length as f32 * yaw.sin();
-            let end = Pos2::new(start.x + transform.scale_distance(dx), start.y + transform.scale_distance(dy));
-            let stroke_width = transform.scale_stroke(1.5);
-            let c = color_from_rgb(*color);
-            let line_color = Color32::from_rgba_premultiplied(c.r(), c.g(), c.b(), 180);
-            shapes.push(Shape::line_segment([start, end], Stroke::new(stroke_width, line_color)));
+            let wedge = CameraDirectionWedge::new(*pos, *yaw, *length as f32);
+            let corners = wedge.corners().map(|at| transform.minimap_to_screen(&at));
+            let fill = color_from_rgba(*color, CAMERA_DIRECTION_ALPHA);
+            shapes.push(Shape::convex_polygon(corners.to_vec(), fill, Stroke::NONE));
         }
 
         DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
@@ -2565,4 +2563,74 @@ fn hp_bar_color_egui(fraction: f32) -> Color32 {
         )
     };
     if fraction > 0.5 { lerp(AMBER, GREEN, (fraction - 0.5) / 0.5) } else { lerp(RED, AMBER, fraction / 0.5) }
+}
+
+#[cfg(test)]
+mod camera_direction_tests {
+    use super::*;
+    use wows_minimap_renderer::CANVAS_HEIGHT;
+    use wows_minimap_renderer::MINIMAP_SIZE;
+    use wows_minimap_renderer::MinimapPos;
+    use wows_replays::types::EntityId;
+    use wt_translations::DefaultTextResolver;
+
+    /// A wedge is one filled triangle from the icon's center to one drawn
+    /// icon length out, at any zoom, pan and window scale.
+    #[test]
+    fn a_camera_direction_is_a_triangle_one_drawn_icon_long() {
+        let transform = MapTransform {
+            origin: Pos2::new(10.0, 20.0),
+            window_scale: 1.5,
+            zoom: 3.0,
+            pan: Vec2::new(40.0, 60.0),
+            hud_height: HUD_HEIGHT as f32,
+            canvas_height: CANVAS_HEIGHT as f32,
+            canvas_width: MINIMAP_SIZE as f32,
+            hud_width: MINIMAP_SIZE as f32,
+            map_x_offset: 0.0,
+        };
+        let ship_icons = HashMap::new();
+        let plane_icons = HashMap::new();
+        let textures = DrawCommandTextures {
+            ship_icons: &ship_icons,
+            ship_icon_outlines: None,
+            plane_icons: &plane_icons,
+            building_icons: None,
+            consumable_icons: None,
+            ribbon_icons: None,
+            subribbon_icons: None,
+            death_cause_icons: None,
+            powerup_icons: None,
+            silhouette_texture: None,
+        };
+        let pos = MinimapPos { x: 300.0, y: 400.0 };
+        let command = DrawCommand::CameraDirection {
+            entity_id: EntityId::from(7u32),
+            pos,
+            yaw: 0.0,
+            color: [255, 0, 0],
+            length: wows_minimap_renderer::ICON_SIZE as i32,
+        };
+
+        let shapes = draw_command_to_shapes(
+            &command,
+            &transform,
+            &textures,
+            &egui::Context::default(),
+            &DrawCommandLabelOptions::default(),
+            None,
+            &DefaultTextResolver,
+            None,
+            None,
+        );
+
+        let [Shape::Path(path)] = shapes.as_slice() else { panic!("one filled path, got {shapes:?}") };
+        assert!(path.closed);
+        assert_eq!(path.fill, color_from_rgba([255, 0, 0], CAMERA_DIRECTION_ALPHA));
+        let [left, tip, right] = path.points[..] else { panic!("a triangle, got {:?}", path.points) };
+        let center = transform.minimap_to_screen(&pos);
+        let drawn_icon = transform.scale_distance(ICON_SIZE);
+        assert!((tip - center - Vec2::new(drawn_icon, 0.0)).length() < 1e-3, "tip {tip:?}, center {center:?}");
+        assert!(((left.to_vec2() + right.to_vec2()) / 2.0 - center.to_vec2()).length() < 1e-3, "{left:?} {right:?}");
+    }
 }

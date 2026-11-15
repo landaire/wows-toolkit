@@ -34,6 +34,48 @@ pub const SHOT_TIP_ALPHA: f32 = 0.4;
 /// while still showing the fire. Shared by every render backend.
 pub const SECONDARY_SHOT_ALPHA: f32 = 0.25;
 
+/// Opacity of the camera direction wedge. Shared by every render backend.
+pub const CAMERA_DIRECTION_ALPHA: f32 = 0.6;
+
+/// The triangle a [`DrawCommand::CameraDirection`] is filled as, in minimap
+/// pixels: wide across the ship icon's center, narrowing to a point in the
+/// look direction.
+#[derive(Debug, Clone, Copy)]
+pub struct CameraDirectionWedge {
+    /// The corners of the wide end, either side of the icon's center as seen
+    /// looking along the wedge.
+    pub left: MinimapPos,
+    pub right: MinimapPos,
+    pub tip: MinimapPos,
+}
+
+impl CameraDirectionWedge {
+    /// `yaw` is in radians, counter-clockwise from east, and `length` in
+    /// minimap pixels, as the command carries them.
+    pub fn new(center: MinimapPos, yaw: f32, length: f32) -> Self {
+        // At the bow of an icon looking straight ahead the wedge is half this wide.
+        const BASE_WIDTH: f32 = 4.0;
+
+        let half_width = BASE_WIDTH / 2.0;
+
+        // Minimap y grows downward, so `right` is clockwise of `along` on screen.
+        let (sin, cos) = yaw.sin_cos();
+        let along = (cos, -sin);
+        let right = (sin, cos);
+
+        Self {
+            left: MinimapPos { x: center.x - right.0 * half_width, y: center.y - right.1 * half_width },
+            right: MinimapPos { x: center.x + right.0 * half_width, y: center.y + right.1 * half_width },
+            tip: MinimapPos { x: center.x + along.0 * length, y: center.y + along.1 * length },
+        }
+    }
+
+    /// The corners in clockwise order on screen.
+    pub fn corners(&self) -> [MinimapPos; 3] {
+        [self.left, self.tip, self.right]
+    }
+}
+
 /// The type of building icon to display on the minimap.
 ///
 /// Derived from the building's Species in GameParams.
@@ -467,14 +509,16 @@ pub enum DrawCommand {
         #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
         flag_icon: Option<RgbaImage>,
     },
-    /// Camera/look direction indicator line from ship center
+    /// Camera/look direction wedge, filled as a [`CameraDirectionWedge`]
+    /// beneath every ship icon.
     CameraDirection {
         entity_id: EntityId,
+        /// Center of the ship icon.
         pos: MinimapPos,
         /// Camera yaw in radians (world-space, already includes ship heading)
         yaw: f32,
         color: [u8; 3],
-        /// Line length in pixels
+        /// Wedge length in minimap pixels: one ship icon length.
         length: i32,
     },
     /// Building marker on the minimap (fort, AA battery, airbase, etc.)
@@ -1022,5 +1066,95 @@ mod consumable_reading_tests {
     fn an_untranslated_consumable_reads_as_its_key() {
         let untranslated = RosterConsumable { display_name: String::new(), ..consumable() };
         assert_eq!(consumable_lines(&untranslated).name, "PCY009_CrashCrewPremium");
+    }
+}
+
+#[cfg(test)]
+mod camera_direction_wedge_tests {
+    use std::f32::consts::FRAC_PI_2;
+    use std::f32::consts::PI;
+    use std::fmt::Write;
+
+    use super::CameraDirectionWedge;
+    use crate::ICON_SIZE;
+    use crate::map_data::MinimapPos;
+
+    const CENTER: MinimapPos = MinimapPos { x: 100.0, y: 200.0 };
+    const ICON: f32 = ICON_SIZE as f32;
+
+    fn distance(a: MinimapPos, b: MinimapPos) -> f32 {
+        (a.x - b.x).hypot(a.y - b.y)
+    }
+
+    /// The bow of an icon centered on `CENTER`, placed as the icon is drawn:
+    /// the art points up and is turned clockwise by PI/2 - heading.
+    fn bow(heading: f32) -> MinimapPos {
+        let turn = FRAC_PI_2 - heading;
+        let half = ICON / 2.0;
+
+        MinimapPos { x: CENTER.x + turn.sin() * half, y: CENTER.y - turn.cos() * half }
+    }
+
+    fn stern(heading: f32) -> MinimapPos {
+        bow(heading + PI)
+    }
+
+    fn look_angles() -> impl Iterator<Item = f32> {
+        (0..360).step_by(15).map(|degrees| (degrees as f32).to_radians())
+    }
+
+    #[test]
+    fn corners_by_look_direction() {
+        let mut out = String::new();
+        for degrees in [0.0f32, 45.0, 90.0, 180.0, 270.0] {
+            let [left, tip, right] = CameraDirectionWedge::new(CENTER, degrees.to_radians(), ICON).corners();
+            writeln!(
+                out,
+                "{degrees:>3}: base ({:.2}, {:.2}) ({:.2}, {:.2}) tip ({:.2}, {:.2})",
+                left.x, left.y, right.x, right.y, tip.x, tip.y
+            )
+            .expect("writes to a string");
+        }
+
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn starts_at_the_icon_center() {
+        for yaw in look_angles() {
+            let CameraDirectionWedge { left, right, .. } = CameraDirectionWedge::new(CENTER, yaw, ICON);
+            let middle = MinimapPos { x: (left.x + right.x) / 2.0, y: (left.y + right.y) / 2.0 };
+
+            assert!(distance(middle, CENTER) < 1e-3, "yaw {yaw}: base centered on {middle:?}");
+        }
+    }
+
+    #[test]
+    fn reaches_one_icon_length() {
+        for yaw in look_angles() {
+            let tip = CameraDirectionWedge::new(CENTER, yaw, ICON).tip;
+
+            assert!((distance(tip, CENTER) - ICON).abs() < 1e-3, "yaw {yaw}: tip at {tip:?}");
+        }
+    }
+
+    #[test]
+    fn looking_ahead_ends_half_an_icon_past_the_bow() {
+        for heading in look_angles() {
+            let tip = CameraDirectionWedge::new(CENTER, heading, ICON).tip;
+
+            assert!((distance(tip, bow(heading)) - ICON / 2.0).abs() < 1e-3, "heading {heading}: tip at {tip:?}");
+            assert!((distance(tip, stern(heading)) - 1.5 * ICON).abs() < 1e-3, "heading {heading}: past the bow");
+        }
+    }
+
+    #[test]
+    fn looking_astern_ends_half_an_icon_behind_the_stern() {
+        for heading in look_angles() {
+            let tip = CameraDirectionWedge::new(CENTER, heading + PI, ICON).tip;
+
+            assert!((distance(tip, stern(heading)) - ICON / 2.0).abs() < 1e-3, "heading {heading}: tip at {tip:?}");
+            assert!((distance(tip, bow(heading)) - 1.5 * ICON).abs() < 1e-3, "heading {heading}: behind the stern");
+        }
     }
 }
