@@ -16,6 +16,7 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::count_up;
 use rust_i18n::t;
+use wows_toolkit_icons::Glyph;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -30,10 +31,12 @@ use zgui::view::install_stylesheet;
 use zgui_ui::SpinnerProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
+use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;
 use crate::services::Job;
 use crate::services::Services;
+use crate::services::mcp::McpStatus;
 use crate::shell::Shell;
 use crate::shell::collab::SessionControlProps;
 use crate::shell::tabs::ModeHint;
@@ -110,6 +113,7 @@ pub fn ShellStatusBar(shell: Shell) -> impl IntoView {
         mode.key.is_down(shell.held_modifiers()).then_some(mode)
     };
     let jobs = Signal::derive_local(move || services.jobs.running());
+    let offered = move || services.settings.read(|settings| settings.mcp.enabled) == Some(true);
 
     view! {
         StatusBar(attr:data-testid = "app-status-strip") {
@@ -122,6 +126,7 @@ pub fn ShellStatusBar(shell: Shell) -> impl IntoView {
             {move || mode().map(|mode| view! { ModeIndicator(mode = mode) }.into_view())}
             StatusBarEnd(slot) {
                 {move || (!jobs.get().is_empty()).then(|| view! { Work(jobs = jobs) }.into_view())}
+                {move || offered().then(|| view! { McpIndicator(shell = shell) }.into_view())}
                 for toggle in move || toggles().into_iter().filter(|toggle| toggle.side == PanelSide::Right).collect::<Vec<_>>(), key = |toggle: &PanelToggle| toggle.test_id {
                     StatusPanelToggle(toggle = toggle)
                 }
@@ -159,6 +164,51 @@ fn StatusPanelToggle(toggle: PanelToggle) -> impl IntoView {
                 }
             }
             TooltipContent {{tooltip.clone()}}
+        }
+    }
+}
+
+/// Whether the MCP server serves, as a toggle that starts and stops it. Named for a reader by what
+/// a press does; the hover says where it serves or why it does not.
+#[component]
+fn McpIndicator(shell: Shell) -> impl IntoView {
+    let services = Services::current();
+    let locale = services.locale;
+    let mcp = services.mcp;
+    let on = Signal::derive_local(move || mcp.status().is_on());
+    let pressed = Binding::controlled(on, move |_| shell.toggle_mcp());
+    let tip = move || {
+        locale.track();
+        match mcp.status() {
+            McpStatus::Running { endpoint } => t!("ui.mcp.status_running", url = endpoint.url()).into_owned(),
+            McpStatus::Starting { address } => t!("ui.mcp.status_starting", address = address).into_owned(),
+            McpStatus::Failed { .. } => t!("ui.mcp.status_failed").into_owned(),
+            McpStatus::Stopped => t!("ui.mcp.status_stopped").into_owned(),
+        }
+    };
+    let state = move || match mcp.status() {
+        McpStatus::Running { .. } => "running",
+        McpStatus::Starting { .. } => "starting",
+        McpStatus::Failed { .. } => "failed",
+        McpStatus::Stopped => "stopped",
+    };
+
+    view! {
+        Tooltip {
+            TooltipTrigger {
+                Toggle(
+                    pressed = pressed,
+                    size = ToggleSize::Sm,
+                    label = tip(),
+                    class = "lui-status-toggle",
+                    attr:data-testid = "app-status-mcp",
+                    attr:data-state = move || Some(state().to_owned())
+                ) {
+                    AppIcon(glyph = Glyph::Plug)
+                    text {{"MCP"}}
+                }
+            }
+            TooltipContent {{tip}}
         }
     }
 }

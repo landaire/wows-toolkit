@@ -386,3 +386,6 @@ fn choose_free_port(address: McpBindAddress) -> Result<McpPort, PortChoiceError>
 
     Err(PortChoiceError { address, source })
 }
+
+#[cfg(test)]
+mod tests;
