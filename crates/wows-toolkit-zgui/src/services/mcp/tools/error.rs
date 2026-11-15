@@ -54,6 +54,12 @@ pub enum ToolError {
     #[error("the replay's client version {version:?} names no build")]
     UnknownVersion { version: String },
 
+    #[error("the analysis failed: {source}")]
+    ReplayAnalysis {
+        #[source]
+        source: replayshark::AnalysisError,
+    },
+
     #[error("the answer could not be encoded: {source}")]
     Encode {
         #[source]

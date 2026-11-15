@@ -1,9 +1,10 @@
 //! The tools the app adds to the MCP server: the replay index, a replay's header, complete
-//! results, and the files of the game builds on this machine.
+//! results, replayshark's analyses, and the files of the game builds on this machine.
 //!
 //! Every path a caller names is confined: replays to the replay folders the app knows, game files
 //! to the virtual file system of an installed or cached build. The index is only read.
 
+mod analysis;
 mod error;
 mod files;
 mod index;
@@ -32,7 +33,7 @@ use wows_toolkit_replay_data::load::GameDataCache;
 use crate::services::mcp::tools::error::ToolError;
 use crate::services::mcp::tools::files::BuildFiles;
 
-const INSTRUCTIONS: &str = "WoWs Toolkit replay tools. Find matches with replay_index_search, then name a replay by its arena_id (or a path inside the replay folders) in the other replay tools. replay_battle_results needs the game data of the replay's build; replay_header does not. Game files are read per build from game_builds.";
+const INSTRUCTIONS: &str = "WoWs Toolkit replay tools. Find matches with replay_index_search, then name a replay by its arena_id (or a path inside the replay folders) in the other replay tools. replay_battle_results needs the game data of the replay's build; replay_header does not. replay_analysis runs replayshark's analyses: summary, chat_log, players and roster. Game files are read per build from game_builds.";
 
 /// What the tools read, as the app knows it now. Replaced whenever a setting it comes from
 /// changes.
@@ -101,6 +102,7 @@ impl ToolSet for ReplayTools {
             index::players_tool(),
             replays::header_tool(),
             replays::results_tool(),
+            analysis::analysis_tool(),
             files::builds_tool(),
             files::list_tool(),
             files::read_tool(),
@@ -114,6 +116,7 @@ impl ToolSet for ReplayTools {
                 index::PLAYERS => answer(index::players(self, parse_arguments(name, arguments)?).await),
                 replays::HEADER => answer(replays::header(self, parse_arguments(name, arguments)?).await),
                 replays::RESULTS => answer(replays::results(self, parse_arguments(name, arguments)?).await),
+                analysis::ANALYSIS => answer(analysis::analyze(self, parse_arguments(name, arguments)?).await),
                 files::BUILDS => answer(files::builds(self, parse_arguments(name, arguments)?).await),
                 files::LIST => answer(files::list(self, parse_arguments(name, arguments)?).await),
                 files::READ => answer(files::read(self, parse_arguments(name, arguments)?).await),
