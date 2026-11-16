@@ -301,6 +301,24 @@ impl CollabState {
         }
     }
 
+    /// A running session with no peer task behind it, for a test that drives the session's state
+    /// by hand. The receiver is what this end sends the session.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn start_for_test(&mut self) -> std::sync::mpsc::Receiver<LocalEvent> {
+        let (local_tx, sent) = std::sync::mpsc::channel();
+        let (command_tx, _) = std::sync::mpsc::channel();
+        let (frame_tx, _) = std::sync::mpsc::sync_channel(1);
+        self.handle = Some(PeerSessionHandle {
+            event_inbox: wt_collab_client::EventInbox::new(None),
+            command_tx,
+            frame_tx,
+            local_tx,
+            state: Arc::clone(&self.state),
+        });
+
+        sent
+    }
+
     /// Takes what the peer task has raised since the last look and acts on
     /// it.
     ///
@@ -1020,6 +1038,14 @@ impl CollabLink {
         let held = state.lock();
         let board = held.tactics_boards.get(&board_id)?;
         Some(BoardVersions { caps: board.cap_point_sync_version, shapes: board.annotation_sync_version })
+    }
+
+    /// Whether the session holds as many boards as it takes, so every peer would drop another
+    /// one announced.
+    pub fn session_boards_full(&self) -> bool {
+        let Some(state) = &self.state else { return false };
+
+        state.lock().tactics_boards.len() >= wt_collab_client::protocol::MAX_TACTICS_BOARDS
     }
 
     /// The boards open in the session, with who opened each. What a peer reads

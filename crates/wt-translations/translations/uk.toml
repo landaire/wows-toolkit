@@ -1801,6 +1801,7 @@ scan_needs_game_data = "Спочатку завантажте версію гр�
 scan_running = "Читання реплеїв..."
 scan_progress = "Читання реплеїв... %{read} / %{total}"
 scan_done = "Прочитано реплеїв: %{total}, знайдено нових розташувань: %{added}"
+session_boards_full = "У сесії вже відкрито дошок: %{limit}, тому ця дошка залишається на своїй мапі"
 placing = "Розміщення %{ship}"
 side_friendly = "Союзник"
 side_enemy = "Противник"

@@ -112,6 +112,12 @@ impl TacticsHost {
         self.session.set(link);
     }
 
+    /// The session handed to the board, for a test to follow.
+    #[cfg(test)]
+    pub(crate) fn session_for_test(self) -> RwSignal<Option<CollabLink>, LocalStorage> {
+        self.session
+    }
+
     /// Takes what a board's walk of the replays found, for a board opened later to start from.
     fn adopt_layouts(self, found: CapLayoutDb) {
         self.layouts.set_value(found);

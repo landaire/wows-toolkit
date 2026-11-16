@@ -37,6 +37,7 @@ use wt_collab_client::drawing::Held;
 use wt_collab_client::drawing::Selection;
 use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
+use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationRangeFilter;
 use wt_collab_client::types::AnnotationShipConfig;
@@ -137,6 +138,11 @@ pub enum BoardNotice {
     ScanDone {
         added: usize,
         total: usize,
+    },
+    /// A peer's board was asked onto another map, which would make it a board of its own, while
+    /// the session already holds `limit` boards.
+    SessionBoardsFull {
+        limit: usize,
     },
 }
 
@@ -1032,6 +1038,16 @@ impl Board {
             self.redraw();
             return;
         }
+        // A peer's board is already in the session under its owner, so a new link joins it again
+        // rather than announcing it as this reader's.
+        if self.owner.is_some_and(|owner| link.my_user_id() != Some(owner)) {
+            self.joining = None;
+            self.collab = link.on_board(self.board_id);
+            self.announced = true;
+            self.follow_session();
+            self.changed();
+            return;
+        }
         // Held back until the announcement has gone over, because the session drops anything sent
         // for a board it does not hold yet.
         self.joining = Some(link.on_board(self.board_id));
@@ -1086,7 +1102,8 @@ impl Board {
     /// In that order, and through the one channel, because the session drops anything sent for a
     /// board it does not hold. Nothing happens without a map chosen.
     fn announce(&mut self) {
-        if self.announced || self.joining.is_none() {
+        // Announcing stamps the board with this reader as its owner.
+        if self.announced || self.joining.is_none() || self.is_a_peers() {
             return;
         }
         let (Some(map), Some(game_data)) = (self.map.clone(), self.game_data.clone()) else { return };
@@ -1146,6 +1163,25 @@ impl Board {
         }
         self.announced = false;
         self.announce();
+    }
+
+    /// Makes a peer's board this reader's own under a fresh id, carrying what is drawn on it and
+    /// leaving the peer's as it is. A map chosen for it is then announced as this reader's board
+    /// rather than over the peer's.
+    fn leave_peers_board(&mut self) {
+        if !self.is_a_peers() {
+            return;
+        }
+        let session = self.joining.take().unwrap_or_else(|| self.collab.clone());
+        let carried = self.collab.annotations_held();
+        self.owner = None;
+        self.board_id = BoardId::fresh();
+        self.collab = CollabLink::default().on_board(self.board_id);
+        self.collab.adopt(carried);
+        self.joining = Some(session.on_board(self.board_id));
+        self.adopted_caps = None;
+        self.adopted_shapes = None;
+        self.announced = false;
     }
 
     /// Follows the session once: opens a peer's board where the reader has chosen none, and takes
@@ -1855,6 +1891,13 @@ impl Board {
         if !self.collab.may_steer() || self.map.as_ref() == Some(&map) {
             return;
         }
+        // A peer's board set on another map becomes a new board, which every peer drops from a
+        // full session; the reader would be left on a board nobody else sees.
+        if self.is_a_peers() && self.collab.session_boards_full() {
+            self.notices.push(BoardNotice::SessionBoardsFull { limit: MAX_TACTICS_BOARDS });
+            return;
+        }
+        self.leave_peers_board();
         self.modes = modes(&self.layouts, map.map_id, self.game_data.as_ref());
         // The first mode the map has, so a board opens with capture points on it rather than
         // empty.

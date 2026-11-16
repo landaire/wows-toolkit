@@ -7,6 +7,7 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_toolkit_services::collab::CollabState;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wt_collab_client::ConnectedUser;
@@ -16,6 +17,7 @@ use wt_collab_client::SessionStatus;
 use wt_collab_client::protocol::ClientType;
 use zgui::component;
 use zgui::geom::DevicePx;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::view::IntoView;
 
@@ -226,6 +228,29 @@ fn a_window_opened_for_everyone_follows_the_auto_open_setting() {
     shell.collab.poll(shell);
     assert!(shell.collab.take_watch_requests().is_empty(), "the declined ask is gone");
     assert_eq!(ask(false), vec![7], "auto-opening is on");
+}
+
+/// Raising this end to co-host hands every viewport a link that broadcasts, but leaves the tactics
+/// board on the link it was handed as the session started: a board handed a link announces itself
+/// as this reader's, which would take over a peer's board.
+#[test]
+fn a_promotion_hands_the_tactics_board_no_new_link() {
+    let (_window, shell) = open();
+    shell.collab.edit_for_test(shell, |collab| {
+        drop(collab.start_for_test());
+        let mut state = collab.state.lock();
+        state.role = PeerRole::Peer;
+        state.my_user_id = 2;
+    });
+    let board_link = || shell.tactics.session_for_test().get_untracked().expect("the board was handed the session");
+    assert!(!board_link().broadcasts_frames(), "a reader has nothing to broadcast");
+
+    shell.collab.edit_for_test(shell, |collab| collab.state.lock().role = PeerRole::CoHost);
+    assert!(shell.collab.link().get_untracked().broadcasts_frames(), "a viewport is handed a link that broadcasts");
+    assert!(!board_link().broadcasts_frames(), "the board keeps the link the session started with");
+
+    shell.collab.edit_for_test(shell, CollabState::leave);
+    assert!(shell.tactics.session_for_test().get_untracked().is_none(), "the session ending reaches the board");
 }
 
 /// The popover opens above its button: the button is on the bar at the bottom of the window.

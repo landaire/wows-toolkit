@@ -8,6 +8,8 @@
 //! from.
 
 pub mod board;
+#[cfg(test)]
+mod board_tests;
 pub mod render;
 pub mod scan;
 pub mod ships;

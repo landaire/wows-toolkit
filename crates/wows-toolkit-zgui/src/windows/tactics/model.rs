@@ -169,6 +169,9 @@ impl BoardModel {
             BoardNotice::ScanDone { added, total } => {
                 toasts.info(t!("ui.tactics.scan_done", added = added, total = total).into_owned())
             }
+            BoardNotice::SessionBoardsFull { limit } => {
+                toasts.warn(t!("ui.tactics.session_boards_full", limit = limit).into_owned())
+            }
         };
     }
 

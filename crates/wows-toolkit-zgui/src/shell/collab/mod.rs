@@ -195,17 +195,20 @@ impl CollabHost {
         self.refresh(shell);
     }
 
-    /// Notes what the session is now, handing the tactics board its end of it when a session has
-    /// started or ended or this end was raised.
+    /// Notes what the session is now. Every viewport is handed a new link when a session has
+    /// started or ended or this end was raised; the tactics board only when a session has started
+    /// or ended, because a board handed a link announces itself to the session as this reader's.
     fn refresh(self, shell: Shell) {
         self.revision.update(|revision| *revision += 1);
         let active = self.state.with_value(CollabState::is_active);
         let steer = active && self.state.with_value(CollabState::may_steer);
-        if active == self.active.get_untracked() && steer == self.steer.get_untracked() {
+        if steer != self.steer.get_untracked() {
+            self.steer.set(steer);
+        }
+        if active == self.active.get_untracked() {
             return;
         }
         self.active.set(active);
-        self.steer.set(steer);
         shell.tactics.share_session(active.then(|| self.state.with_value(CollabState::link)));
     }
 
