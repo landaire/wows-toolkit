@@ -330,14 +330,9 @@ impl Annotator {
         true
     }
 
-    /// Remembers what the session holds, before changing it.
-    ///
-    /// Only while a session is running, since the undo is a list of what to
-    /// tell it.
+    /// Remembers what is drawn, before changing it. Alone or in a session: the store a link
+    /// holds without one is put back the same way.
     pub fn remember(&mut self, link: &CollabLink) {
-        if !link.is_active() {
-            return;
-        }
         self.history.push(link.annotations_held());
         if self.history.len() > HISTORY_DEPTH {
             self.history.remove(0);

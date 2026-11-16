@@ -23,7 +23,6 @@ use wows_toolkit_replay_data::replay_render::annotate::ToolButton;
 use wows_toolkit_replay_data::replay_render::annotate::places_ship;
 use wows_toolkit_replay_data::replay_render::annotate::same_tool;
 use wows_toolkit_replay_data::replay_render::annotate::ship_tool;
-use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use zgui::component;
 use zgui::css;
@@ -69,14 +68,11 @@ const CSS: &str = css!(
     .wt-renderer-tools__ink[data-chosen] { border: 2px solid #ffffff; }"
 );
 
-/// The drawing tools, on the transport beside the gear.
-///
-/// Refused without a session: an annotation is something everyone in one sees, and there is
-/// nowhere to put one otherwise.
+/// The drawing tools, on the transport beside the gear. Offered alone as in a session: a reader
+/// draws on their own replay whether or not anyone else sees it.
 #[component]
 pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    let refused = Signal::derive_local(move || !session.collab.with(CollabLink::is_active));
     // Kept with the transport, so the catalogue is read once rather than each time the popover opens.
     let catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage> = StoredValue::new_local(None);
     // The ship chooser's search, held here so Escape in it empties it before it closes the popover.
@@ -93,8 +89,6 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::IconXs,
                         attr:data-testid = "replay-renderer-tools-toggle",
-                        state:disabled = move || refused.get(),
-                        a11y:disabled = move || refused.get(),
                         a11y:label = label.clone()
                     ) {
                         AppIcon(glyph = Glyph::NotebookPen)

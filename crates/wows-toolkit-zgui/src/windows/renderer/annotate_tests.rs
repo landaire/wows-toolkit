@@ -121,27 +121,31 @@ fn corner(window: &HeadlessWindow, id: &str) -> (f32, f32) {
     (bounds.origin.x.0, bounds.origin.y.0)
 }
 
-/// Without a session the tools are refused, since an annotation is something everyone in one
-/// sees; given one, the popover opens on them.
+/// With nobody connected the tools still open, a line dragged on the map is kept, and undo takes
+/// it back.
 #[test]
-fn the_tools_are_refused_without_a_session() {
+fn the_tools_draw_and_undo_without_a_session() {
     let (mut window, session) = open();
+    let drawn = || session.collab.with_untracked(CollabLink::annotation_count);
+    assert!(!session.collab.with_untracked(CollabLink::is_active), "nobody is connected");
     let toggle = window.by_test_id("replay-renderer-tools-toggle").expect("the tools control is drawn");
-    assert_eq!(window.a11y(toggle).map(|state| state.disabled), Some(true), "refused with no session");
-
-    let _ = window.click(toggle);
-    settle(&mut window);
-    assert!(window.by_test_id("replay-renderer-tools").is_none(), "a refused control opens nothing");
-
-    let state = Arc::default();
-    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
-    session.set_collab(link);
-    settle(&mut window);
-    let toggle = window.by_test_id("replay-renderer-tools-toggle").expect("the tools control is drawn");
-    assert_eq!(window.a11y(toggle).map(|state| state.disabled), Some(false), "offered in a session");
+    assert_eq!(window.a11y(toggle).map(|state| state.disabled), Some(false), "offered with no session");
 
     click(&mut window, "replay-renderer-tools-toggle");
     assert!(window.by_test_id("replay-renderer-tools").is_some(), "the tools open");
+    click(&mut window, "replay-renderer-tool-line");
+    click(&mut window, "replay-renderer-tools-toggle");
+    assert!(window.by_test_id("replay-renderer-tools").is_none(), "and close again");
+
+    window.drag_from(window_point(session, (200.0, 200.0)), window_point(session, (320.0, 260.0)), 4);
+    settle(&mut window);
+    assert_eq!(drawn(), 1, "the line is kept on this end");
+
+    click(&mut window, "replay-renderer-tools-toggle");
+    let undo = window.by_test_id("replay-renderer-annotations-undo").expect("undo is drawn");
+    assert_eq!(window.a11y(undo).map(|state| state.disabled), Some(false), "the line can be taken back");
+    click(&mut window, "replay-renderer-annotations-undo");
+    assert_eq!(drawn(), 0, "and it was");
 }
 
 /// A tool, a ship to place and an ink chosen on the popover are what is in hand.

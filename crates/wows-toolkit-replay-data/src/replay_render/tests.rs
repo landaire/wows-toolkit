@@ -1925,6 +1925,30 @@ fn drawing_without_a_session_still_puts_a_shape_on_the_map() {
     assert_eq!(link.annotations().len(), 1, "the line a reader drew with nobody connected");
 }
 
+/// With nobody connected a drawing and an erasure are each taken back by an undo, as the egui
+/// board's are.
+#[test]
+fn drawing_alone_is_undone() {
+    let link = CollabLink::default();
+    let mut annotator = Annotator::new();
+
+    annotator.take_up(Tool::Line);
+    annotator.stroke(&link, Stroke::Began { at: [100.0, 100.0] });
+    annotator.stroke(&link, Stroke::Ended { at: [200.0, 100.0] });
+    annotator.take_up(Tool::None);
+    assert_eq!(annotator.undo_depth(), 1, "the drawing can be taken back");
+
+    annotator.pick_at(&link, [150.0, 100.0], false);
+    assert!(annotator.erase_picked(&link));
+    assert_eq!(link.annotation_count(), 0);
+
+    assert!(annotator.undo(&link));
+    assert_eq!(link.annotation_count(), 1, "the erasure is taken back");
+    assert!(annotator.undo(&link));
+    assert_eq!(link.annotation_count(), 0, "and then the drawing");
+    assert!(!annotator.can_undo());
+}
+
 /// Undoing takes the shape off again under the id it was added with.
 #[test]
 fn undoing_takes_back_what_was_just_drawn() {
