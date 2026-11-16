@@ -108,7 +108,7 @@ pub const CSS: &str = css!(
         align-items: center;
         justify-content: center;
         color: var(--lui-color-text-dim);
-        transition: transform 200ms ease-out;
+        transition: transform var(--lui-motion-turn) var(--lui-motion-ease);
     }
     .wt-pt-caret[data-open] { transform: rotate(90deg); }
     .wt-pt-species { font-size: 0.75rem; flex: none; }
