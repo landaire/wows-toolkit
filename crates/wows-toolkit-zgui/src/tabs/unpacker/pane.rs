@@ -192,6 +192,10 @@ impl Rows {
         }
     }
 
+    pub fn is_filtered(&self) -> bool {
+        matches!(self, Self::Filtered { .. })
+    }
+
     /// Every row, for an action that takes the whole listing at once.
     pub fn all(&self) -> Vec<ListingEntry> {
         match self {

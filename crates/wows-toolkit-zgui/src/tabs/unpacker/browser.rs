@@ -305,11 +305,12 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
 fn folder_row(pane: Pane, row: TreeRow<DirKey>) -> impl IntoView {
     let expanded = row.expanded;
     let glyph = Signal::derive_local(move || if expanded.get() { Glyph::FolderOpen } else { Glyph::Folder });
+    let test_id = format!("unpacker-{}-folder-{}", pane.source.id_fragment(), row.key.0);
     let key = row.key;
     let name = move || pane.tree.with(|tree| tree.name(&key).to_string());
 
     view! {
-        row(class = "wt-folder") {
+        row(class = "wt-folder", attr:data-testid = test_id) {
             AppIcon(glyph = glyph, class = "wt-folder__glyph")
             text {{name}}
         }
@@ -468,21 +469,31 @@ fn file_row_content(model: UnpackerModel, pane: Pane, ix: usize, entry: ListingE
     })
 }
 
-/// A file the viewer understands opens in it; a prototype the decoder understands also reads
-/// and writes as JSON. A folder, or a file that is neither, has no menu.
+/// A filter result shows its own folder. A file the viewer understands opens in it; a prototype
+/// the decoder understands also reads and writes as JSON. A folder has no menu, nor does a
+/// directory's file that offers none of these.
 fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> Option<MenuItems> {
-    let entry = pane.rows.with_untracked(|rows| rows.row(key.0))?;
+    let (entry, filtered) = pane.rows.with_untracked(|rows| Some((rows.row(key.0)?, rows.is_filtered())))?;
     if entry.is_dir {
         return None;
     }
     let viewable = is_viewable(&entry.label);
     let decodable = decodable_prototype(&entry.label).is_some();
-    if !viewable && !decodable {
+    if !filtered && !viewable && !decodable {
         return None;
     }
 
+    let source = pane.source;
     let path = entry.path;
     Some(MenuItems::new(move || {
+        let revealed = path.clone();
+        let reveal = filtered.then(|| {
+            view! {
+                MenuItem(on_select = UnsyncCallback::new(move |()| model.reveal(source, revealed.clone()))) {
+                    {t!("ui.unpacker.reveal_in_tree").into_owned()}
+                }
+            }
+        });
         let viewed = path.clone();
         let viewable = viewable.then(|| {
             view! {
@@ -504,6 +515,7 @@ fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> Option<MenuItems> 
         });
 
         view! {
+            {reveal.map(IntoView::into_view)}
             {viewable.map(IntoView::into_view)}
             {decodable.map(IntoView::into_view)}
         }

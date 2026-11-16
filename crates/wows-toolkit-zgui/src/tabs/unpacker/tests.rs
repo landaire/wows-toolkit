@@ -30,6 +30,7 @@ use crate::shell::palette::TabRequest;
 use crate::tabs::unpacker::built_model;
 use crate::tabs::unpacker::model::UnpackerModel;
 use crate::tabs::unpacker::pane::BrowserSource;
+use crate::tabs::unpacker::pane::DirKey;
 use crate::tabs::unpacker::pane::RowKey;
 
 /// The shell, open on the Unpacker tab.
@@ -295,6 +296,31 @@ fn a_filter_lists_matching_files_from_the_whole_tree() {
     tab.settle();
     let cleared: Vec<String> = pane.rows.with_untracked(|rows| rows.all()).into_iter().map(|row| row.label).collect();
     assert_eq!(cleared, vec!["content"], "clearing the filter goes back to the selected directory");
+}
+
+/// A filter result's menu shows the file in its own folder: the filter clears, the folder is
+/// selected and opened in the tree, and the file's row is selected.
+#[test]
+fn a_filter_result_shows_its_folder() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    let pane = tab.model.pkg;
+    pane.filter.set("gameplay".to_string());
+    tab.settle();
+
+    let row = tab.window.by_test_id("unpacker-pkg-row-0").expect("the match has a row");
+    tab.window.right_click(row).expect("the row takes a secondary click");
+    tab.settle();
+    let label = t!("ui.unpacker.reveal_in_tree").into_owned();
+    let item = tab.window.by_role_and_label(Role::MenuItem, &label).expect("the menu offers the folder");
+    tab.window.click(item).expect("the item can be pressed");
+    tab.settle();
+
+    let folder = DirKey("/content/gameplay".to_string());
+    assert_eq!(pane.filter.get_untracked(), "", "the filter is cleared");
+    assert_eq!(pane.selected_dir.get_untracked(), folder.0);
+    assert_eq!(pane.tree_selection.get_untracked(), HashSet::from([folder.clone()]));
+    assert!(tab.shown(&format!("unpacker-pkg-folder-{}", folder.0)), "the folder's parents are opened");
+    assert_eq!(pane.listing_selection.get_untracked(), HashSet::from([RowKey(0)]), "the file is selected");
 }
 
 #[test]
