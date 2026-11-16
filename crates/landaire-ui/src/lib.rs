@@ -229,6 +229,7 @@ pub use crate::tone::Tones;
 pub use crate::tooltip::PointerTip;
 pub use crate::tooltip::PointerTipProps;
 pub use crate::tooltip::TOOLTIP_DELAY;
+pub use crate::tooltip::TipClearance;
 pub use crate::tooltip::Tooltip;
 pub use crate::tooltip::TooltipContent;
 pub use crate::tooltip::TooltipContentProps;

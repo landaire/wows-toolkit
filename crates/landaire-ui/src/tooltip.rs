@@ -334,7 +334,7 @@ pub fn TooltipContent(
     let positioner = NodeRef::new();
     let size = positioner.observe_border_size_while(move || open.get());
     let origin: Signal<Option<Point<CssPx, Css>>, LocalStorage> =
-        Signal::derive_local(move || corner(place.spot.get()?, size.get()?, positioner.scale()));
+        Signal::derive_local(move || corner(place.spot.get()?, size.get()?, positioner.scale(), TipClearance::TIGHT));
     let left = move || origin.get().map(|corner| format!("{}px", corner.x.0));
     let top = move || origin.get().map(|corner| format!("{}px", corner.y.0));
     let visibility = move || origin.get().is_none().then(|| "hidden".to_owned());
@@ -379,6 +379,25 @@ pub fn TooltipContent(
     })
 }
 
+/// How far a [`PointerTip`] stands from its pointer, and how far it keeps inside the window, in CSS
+/// pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TipClearance {
+    pub gap: f32,
+    pub margin: f32,
+}
+
+impl TipClearance {
+    /// Just past the pointer, as a [`Tooltip`]'s label stands, and up to the window's edge.
+    pub const TIGHT: Self = Self { gap: POINTER_GAP, margin: 0.0 };
+}
+
+impl Default for TipClearance {
+    fn default() -> Self {
+        Self::TIGHT
+    }
+}
+
 /// A surface that stands beside a pointer its caller follows, placed as a [`Tooltip`]'s label is,
 /// and moves with it. It shows while `pointer` holds a position and takes no pointer itself.
 #[component]
@@ -386,6 +405,10 @@ pub fn PointerTip(
     /// Where the pointer is, in window CSS pixels. `None` hides it.
     #[prop(into)]
     pointer: Signal<Option<Point<CssPx, Css>>, LocalStorage>,
+    /// How far it stands from the pointer and the window's edge. [`TipClearance::TIGHT`] when
+    /// not given.
+    #[prop(optional)]
+    clearance: TipClearance,
     /// What stands beside the pointer.
     children: ChildrenFn,
 ) -> impl IntoView {
@@ -400,7 +423,7 @@ pub fn PointerTip(
     let size = positioner.observe_border_size_while(move || pointer.get().is_some());
     let origin: Signal<Option<Point<CssPx, Css>>, LocalStorage> = Signal::derive_local(move || {
         let spot = Spot { pointer: pointer.get()?, window: window?.get() };
-        corner(spot, size.get()?, positioner.scale())
+        corner(spot, size.get()?, positioner.scale(), clearance)
     });
     let left = move || origin.get().map(|corner| format!("{}px", corner.x.0));
     let top = move || origin.get().map(|corner| format!("{}px", corner.y.0));
@@ -428,36 +451,42 @@ pub fn PointerTip(
 /// The corner, in CSS pixels, of a surface measured at `size` device pixels beside `spot`'s
 /// pointer on a surface of `scale` device pixels to the CSS pixel. On whole device pixels, so its
 /// edges and text are sharp. `None` while it has no size yet.
-fn corner(spot: Spot, size: Size<DevicePx, Device>, scale: f32) -> Option<Point<CssPx, Css>> {
+fn corner(spot: Spot, size: Size<DevicePx, Device>, scale: f32, clearance: TipClearance) -> Option<Point<CssPx, Css>> {
     if size.width.0 <= 0.0 && size.height.0 <= 0.0 {
         return None;
     }
 
     let size = Size::new(CssPx(size.width.0 / scale), CssPx(size.height.0 / scale));
-    let corner = beside_pointer(spot.pointer, size, spot.window);
+    let corner = beside_pointer(spot.pointer, size, spot.window, clearance);
 
     Some(Point::new(CssPx((corner.x.0 * scale).round() / scale), CssPx((corner.y.0 * scale).round() / scale)))
 }
 
-/// The corner of a tooltip of `size` for the pointer at `pointer`: [`POINTER_GAP`] right of and
+/// The corner of a tooltip of `size` for the pointer at `pointer`: `clearance.gap` right of and
 /// below it, or left of or above it on an axis where the window has no room, or against the
-/// window's start where neither side has room.
-fn beside_pointer(pointer: Point<CssPx, Css>, size: Size<CssPx, Css>, window: Size<CssPx, Css>) -> Point<CssPx, Css> {
+/// window's start where neither side has room. It keeps `clearance.margin` inside the window.
+fn beside_pointer(
+    pointer: Point<CssPx, Css>,
+    size: Size<CssPx, Css>,
+    window: Size<CssPx, Css>,
+    clearance: TipClearance,
+) -> Point<CssPx, Css> {
     Point::new(
-        CssPx(beside(pointer.x.0, size.width.0, window.width.0)),
-        CssPx(beside(pointer.y.0, size.height.0, window.height.0)),
+        CssPx(beside(pointer.x.0, size.width.0, window.width.0, clearance)),
+        CssPx(beside(pointer.y.0, size.height.0, window.height.0, clearance)),
     )
 }
 
 /// Where a span of `length` starts on one axis, beside a pointer at `at` in a window of `room`.
-fn beside(at: f32, length: f32, room: f32) -> f32 {
-    let after = at + POINTER_GAP;
-    if after + length <= room {
+fn beside(at: f32, length: f32, room: f32, clearance: TipClearance) -> f32 {
+    let TipClearance { gap, margin } = clearance;
+    let after = at + gap;
+    if after + length <= room - margin {
         return after;
     }
 
-    let before = at - POINTER_GAP - length;
-    if before >= 0.0 { before } else { (room - length).max(0.0) }
+    let before = at - gap - length;
+    if before >= margin { before } else { (room - margin - length).max(0.0) }
 }
 
 #[cfg(test)]
@@ -472,37 +501,53 @@ mod tests {
         Size::new(CssPx(width), CssPx(height))
     }
 
+    fn tight(pointer: Point<CssPx, Css>, tip: Size<CssPx, Css>, window: Size<CssPx, Css>) -> Point<CssPx, Css> {
+        beside_pointer(pointer, tip, window, TipClearance::TIGHT)
+    }
+
     #[test]
     fn a_tooltip_with_room_stands_right_of_and_below_the_pointer() {
-        assert_eq!(beside_pointer(point(100.0, 50.0), size(80.0, 20.0), size(400.0, 300.0)), point(101.0, 51.0));
+        assert_eq!(tight(point(100.0, 50.0), size(80.0, 20.0), size(400.0, 300.0)), point(101.0, 51.0));
     }
 
     #[test]
     fn a_tooltip_crosses_the_pointer_on_each_axis_without_room() {
         let window = size(400.0, 300.0);
 
-        assert_eq!(beside_pointer(point(380.0, 50.0), size(80.0, 20.0), window), point(299.0, 51.0));
-        assert_eq!(beside_pointer(point(100.0, 290.0), size(80.0, 20.0), window), point(101.0, 269.0));
-        assert_eq!(beside_pointer(point(380.0, 290.0), size(80.0, 20.0), window), point(299.0, 269.0));
+        assert_eq!(tight(point(380.0, 50.0), size(80.0, 20.0), window), point(299.0, 51.0));
+        assert_eq!(tight(point(100.0, 290.0), size(80.0, 20.0), window), point(101.0, 269.0));
+        assert_eq!(tight(point(380.0, 290.0), size(80.0, 20.0), window), point(299.0, 269.0));
     }
 
     #[test]
     fn a_tooltip_with_no_room_either_side_keeps_inside_the_window() {
-        assert_eq!(beside_pointer(point(50.0, 10.0), size(90.0, 20.0), size(100.0, 300.0)), point(10.0, 11.0));
-        assert_eq!(beside_pointer(point(50.0, 10.0), size(150.0, 20.0), size(100.0, 300.0)), point(0.0, 11.0));
+        assert_eq!(tight(point(50.0, 10.0), size(90.0, 20.0), size(100.0, 300.0)), point(10.0, 11.0));
+        assert_eq!(tight(point(50.0, 10.0), size(150.0, 20.0), size(100.0, 300.0)), point(0.0, 11.0));
+    }
+
+    /// A wider clearance stands the tip off the cursor glyph and keeps it off the window's edge.
+    #[test]
+    fn a_clearance_stands_the_tip_off_the_pointer_and_the_edge() {
+        let clear = TipClearance { gap: 16.0, margin: 8.0 };
+        let window = size(400.0, 300.0);
+
+        assert_eq!(beside_pointer(point(100.0, 50.0), size(80.0, 20.0), window, clear), point(116.0, 66.0));
+        // 316 + 80 runs past 392, so it stands left of the pointer instead.
+        assert_eq!(beside_pointer(point(300.0, 50.0), size(80.0, 20.0), window, clear), point(204.0, 66.0));
     }
 
     #[test]
     fn a_zoomed_corner_is_measured_in_css_pixels_and_lands_on_a_device_pixel() {
         let window = size(400.0, 300.0);
         let measured = Size::new(DevicePx(120.0), DevicePx(30.0));
+        let corner = |spot, measured| corner(spot, measured, 1.5, TipClearance::TIGHT);
 
         // 101 CSS pixels is 151.5 device pixels, taken to 152.
         let spot = Spot { pointer: point(100.0, 49.0), window };
-        assert_eq!(corner(spot, measured, 1.5), Some(point(152.0 / 1.5, 50.0)));
+        assert_eq!(corner(spot, measured), Some(point(152.0 / 1.5, 50.0)));
         // 80 CSS pixels wide does not fit right of a pointer 391 CSS pixels along.
         let edge = Spot { pointer: point(391.0, 49.0), window };
-        assert_eq!(corner(edge, measured, 1.5), Some(point(310.0, 50.0)));
-        assert_eq!(corner(spot, Size::new(DevicePx(0.0), DevicePx(0.0)), 1.5), None);
+        assert_eq!(corner(edge, measured), Some(point(310.0, 50.0)));
+        assert_eq!(corner(spot, Size::new(DevicePx(0.0), DevicePx(0.0))), None);
     }
 }

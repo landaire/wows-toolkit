@@ -8,6 +8,7 @@ use landaire_ui::LoadingPace;
 use landaire_ui::LoadingProps;
 use landaire_ui::OverlaySurfaceProps;
 use landaire_ui::PointerTipProps;
+use landaire_ui::TipClearance;
 use rust_i18n::t;
 use wows_toolkit_armor::catalog::translate_name;
 use wows_toolkit_armor::hull_picking::MeshTooltip;
@@ -80,6 +81,10 @@ use super::overlay::OverlayElement;
 use super::state::ArmorViewportState;
 
 const SHEET: &str = "wt-armor-viewport";
+
+/// Where the hover tooltip stands: clear of the cursor glyph, which covers a tip at the pointer,
+/// and off the window's edge. The GPUI viewer's offsets.
+const TOOLTIP_CLEARANCE: TipClearance = TipClearance { gap: 16.0, margin: 8.0 };
 
 const CSS: &str = css!(
     ".wt-armor-viewport__trigger {
@@ -441,7 +446,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                     {move || stand_in(state, locale)}
                     {move || readouts(state, locale)}
                     {move || cast_hint(state, locale, miss_note)}
-                    PointerTip(pointer = pointer) {
+                    PointerTip(pointer = pointer, clearance = TOOLTIP_CLEARANCE) {
                         {move || tooltip(state, locale)}
                     }
                     {move || export_confirm(state, locale, shell)}
