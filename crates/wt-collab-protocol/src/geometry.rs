@@ -11,6 +11,7 @@
 use crate::types::Annotation;
 use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::LabelAnchor;
 use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
 use wows_minimap_renderer::draw_command::ShipVisibility;
 use wows_minimap_renderer::map_data::MinimapPos;
@@ -366,6 +367,87 @@ pub fn annotation_commands(annotation: &Annotation) -> Vec<DrawCommand> {
             commands
         }
     }
+}
+
+/// The marks along a measurement that read its distance off, as the egui
+/// renderer draws them: a dot at each end, a tick every half kilometre with a
+/// longer one at each whole kilometre, the kilometres every two, and the whole
+/// distance past the far end. Without the map's size, in world units, there
+/// are no kilometres, so only the distance in minimap units is given.
+///
+/// Apart from [`annotation_commands`] because the map's size is not part of
+/// the annotation. Empty for anything but a measurement.
+pub fn measurement_commands(annotation: &Annotation, space_size: Option<f32>) -> Vec<DrawCommand> {
+    // Lengths in minimap units, the egui renderer's own.
+    const SMALL_TICK: f32 = 3.0;
+    const LARGE_TICK: f32 = 6.0;
+    const LABEL_SIZE: f32 = 9.0;
+    const LABEL_GAP: f32 = 4.0;
+    const PAST_END: f32 = 6.0;
+    // The ticks and their figures are drawn a little fainter than the line.
+    const FAINT: u8 = 200;
+
+    let Annotation::Measurement { start, end, color, width } = annotation else { return Vec::new() };
+    let along = sub(*end, *start);
+    let distance = length(along);
+    if distance < 0.1 {
+        return Vec::new();
+    }
+    let forward = [along[0] / distance, along[1] / distance];
+    let across = [-forward[1], forward[0]];
+    let step = |from: [f32; 2], by: f32, toward: [f32; 2]| [from[0] + toward[0] * by, from[1] + toward[1] * by];
+    let faint = [color[0], color[1], color[2], FAINT];
+    let label = |spot: [f32; 2], text: String, anchor: LabelAnchor, color: [u8; 4]| DrawCommand::Annotation {
+        shape: AnnotationShape::Label { at: at(spot), text, size: LABEL_SIZE, anchor },
+        color,
+        width: *width,
+    };
+
+    let dot = (width * 1.2).max(3.0);
+    let mut commands: Vec<DrawCommand> = [*start, *end]
+        .into_iter()
+        .map(|center| DrawCommand::Annotation {
+            shape: AnnotationShape::Circle { center: at(center), radius: dot, filled: true },
+            color: *color,
+            width: *width,
+        })
+        .collect();
+
+    // A map with no size has no kilometres to mark.
+    let Some(space_size) = space_size.filter(|size| *size > 0.0) else {
+        let spot = step(*end, LABEL_SIZE * 0.5 + LABEL_GAP + PAST_END, across);
+        commands.push(label(spot, format!("{distance:.0} px"), LabelAnchor::Left, *color));
+        return commands;
+    };
+
+    let beside = LARGE_TICK + LABEL_SIZE * 0.5 + LABEL_GAP;
+    let half_km = km_to_minimap_distance(0.5, space_size);
+    let tick_width = (width * 0.6).max(1.0);
+    let mut walked = half_km;
+    let mut tick = 1_u32;
+    while walked < distance {
+        let spot = step(*start, walked, forward);
+        let reach = if tick.is_multiple_of(2) { LARGE_TICK } else { SMALL_TICK };
+        commands.push(DrawCommand::Annotation {
+            shape: AnnotationShape::Polyline {
+                points: vec![at(step(spot, reach, across)), at(step(spot, -reach, across))],
+            },
+            color: faint,
+            width: tick_width,
+        });
+        if tick.is_multiple_of(4) {
+            let km = tick as f32 * 0.5;
+            commands.push(label(step(spot, beside, across), format!("{km:.0}"), LabelAnchor::Center, faint));
+        }
+        walked += half_km;
+        tick += 1;
+    }
+
+    let total = minimap_distance_to_km(distance, space_size);
+    let spot = step(step(*end, beside, across), PAST_END, forward);
+    commands.push(label(spot, format!("{total:.1} km"), LabelAnchor::Left, *color));
+
+    commands
 }
 
 /// How many metres one unit of the game's own world space is.
@@ -824,5 +906,74 @@ mod tests {
         let there = minimap_distance_to_km(300.0, space_size);
         let back = km_to_minimap_distance(there, space_size);
         assert!((back - 300.0).abs() < NEAR, "{there} km, back to {back}");
+    }
+
+    fn measurement(km: f32, space_size: f32) -> Annotation {
+        let end = km_to_minimap_distance(km, space_size);
+        Annotation::Measurement {
+            start: [100.0, 300.0],
+            end: [100.0 + end, 300.0],
+            color: [240, 230, 50, 255],
+            width: 2.0,
+        }
+    }
+
+    /// The figures a measurement's marks carry, in the order drawn.
+    fn labels(commands: &[DrawCommand]) -> Vec<&str> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Annotation { shape: AnnotationShape::Label { text, .. }, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A measurement of 4.6 km is ticked every half kilometre, figured every two, and its whole
+    /// length is given past its far end, with a dot at each end, as the egui renderer marks it.
+    #[test]
+    fn a_measurement_is_ticked_and_figured_in_kilometres() {
+        let marks = measurement_commands(&measurement(4.6, 1400.0), Some(1400.0));
+        assert_eq!(labels(&marks), ["2", "4", "4.6 km"]);
+
+        let ticks = marks
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Annotation { shape: AnnotationShape::Polyline { points }, .. } => {
+                    Some((points[0].y - points[1].y).abs())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ticks.len(), 9, "one every half kilometre short of the end");
+        assert!(ticks[0] < ticks[1], "a whole kilometre's tick is the longer: {ticks:?}");
+
+        let dots = marks
+            .iter()
+            .filter(|command| {
+                matches!(command, DrawCommand::Annotation { shape: AnnotationShape::Circle { filled: true, .. }, .. })
+            })
+            .count();
+        assert_eq!(dots, 2, "one at each end");
+
+        let Some(DrawCommand::Annotation { shape: AnnotationShape::Label { at, anchor, .. }, .. }) = marks.last()
+        else {
+            panic!("the length comes last")
+        };
+        assert_eq!(*anchor, LabelAnchor::Left);
+        assert!(at.x > 100.0 + km_to_minimap_distance(4.6, 1400.0), "past the far end: {at:?}");
+    }
+
+    /// Without the map's size a measurement is given in minimap units, and anything else is not
+    /// marked at all.
+    #[test]
+    fn a_measurement_on_a_map_of_no_size_is_given_in_minimap_units() {
+        let line = measurement(4.6, 1400.0);
+        let Annotation::Measurement { start, end, .. } = &line else { unreachable!() };
+        let across = (end[0] - start[0]).round();
+        assert_eq!(labels(&measurement_commands(&line, None)), [format!("{across:.0} px")]);
+
+        let ruled = Annotation::Line { start: [0.0, 0.0], end: [100.0, 0.0], color: [255; 4], width: 2.0 };
+        assert!(measurement_commands(&ruled, Some(1400.0)).is_empty());
     }
 }

@@ -43,6 +43,7 @@ use crate::draw_command::ChatEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
+use crate::draw_command::LabelAnchor;
 use crate::draw_command::RenderTarget;
 use crate::draw_command::RowShade;
 use crate::draw_command::ShipVisibility;
@@ -229,6 +230,18 @@ fn text_size(scale: PxScale, font: &impl Font, text: &str) -> (u32, u32) {
 /// Draw text with a shadow (black offset by +1,+1).
 fn draw_text_shadow(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
     draw_text(pm, [0, 0, 0], x + 1, y + 1, scale, font, text);
+    draw_text(pm, color, x, y, scale, font, text);
+}
+
+/// Draw text ringed in black or white, whichever stands out from `color`, as
+/// the egui renderer outlines a measurement's figures.
+fn draw_outlined_text(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+    let luma = 0.299 * f32::from(color[0]) + 0.587 * f32::from(color[1]) + 0.114 * f32::from(color[2]);
+    let outline = if luma > 128.0 { [0, 0, 0] } else { [255, 255, 255] };
+    let reach = (scale.y * 0.1).clamp(1.0, 3.0).round() as i32;
+    for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+        draw_text(pm, outline, x + dx * reach, y + dy * reach, scale, font, text);
+    }
     draw_text(pm, color, x, y, scale, font, text);
 }
 
@@ -2875,6 +2888,17 @@ impl RenderTarget for ImageTarget {
                             draw_circle_outline(&mut self.map_layer, x, y, radius, rgb, alpha, drawn_width);
                         }
                     }
+                    AnnotationShape::Label { at, text, size, anchor } => {
+                        let font = self.fonts.font_for_text(text);
+                        let scale = self.fonts.scale(view.length(*size));
+                        let (text_width, text_height) = text_size(scale, font, text);
+                        let left = match anchor {
+                            LabelAnchor::Center => view.x(at.x) - text_width as f32 / 2.0,
+                            LabelAnchor::Left => view.x(at.x),
+                        };
+                        let top = view.y(at.y) - text_height as f32 / 2.0;
+                        draw_outlined_text(&mut self.map_layer, rgb, left as i32, top as i32, scale, font, text);
+                    }
                 }
             }
             DrawCommand::PositionTrail { points, .. } => {
@@ -3519,6 +3543,36 @@ mod tests {
         // background the canvas starts as.
         assert_eq!(pixel(&frame, 400, 400 + HUD_HEIGHT), [30, 40, 60]);
         assert_eq!(pixel(&frame, 400, 4), [20, 25, 35], "and the HUD strip is still the background");
+    }
+
+    /// A drawing's label is written in its color, ringed in black where the color is light, and
+    /// starts at its position when anchored on the left.
+    #[test]
+    fn a_label_is_outlined_and_anchored() {
+        let Some(mut target) = target() else { return };
+        target.begin_frame();
+        target.draw(&DrawCommand::Annotation {
+            shape: AnnotationShape::Label {
+                at: MinimapPos { x: 400.0, y: 400.0 },
+                text: "4.6 km".to_owned(),
+                size: 12.0,
+                anchor: LabelAnchor::Left,
+            },
+            color: [240, 230, 50, 255],
+            width: 2.0,
+        });
+        target.end_frame();
+
+        let frame = target.frame();
+        let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) < 24);
+        let around: Vec<(u32, [u8; 3])> = (380..460)
+            .flat_map(|x| (390 + HUD_HEIGHT..410 + HUD_HEIGHT).map(move |y| (x, y)))
+            .map(|(x, y)| (x, pixel(&frame, x, y)))
+            .collect();
+        assert!(around.iter().any(|(_, at)| near(*at, [240, 230, 50])), "the text is in its color");
+        assert!(around.iter().any(|(_, at)| near(*at, [0, 0, 0])), "ringed in black");
+        let drawn_left = around.iter().filter(|(_, at)| *at != [30, 40, 60]).map(|(x, _)| *x).min();
+        assert!(drawn_left.is_some_and(|x| x >= 397), "nothing left of its position but the ring: {drawn_left:?}");
     }
 
     fn camera_direction(pos: MinimapPos) -> DrawCommand {

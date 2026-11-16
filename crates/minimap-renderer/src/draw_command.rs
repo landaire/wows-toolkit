@@ -715,7 +715,7 @@ pub enum DrawCommand {
 
 /// What a drawn annotation is, in minimap space.
 ///
-/// Three shapes rather than one per drawing tool: a rectangle and a triangle
+/// A few shapes rather than one per drawing tool: a rectangle and a triangle
 /// are both closed runs of points, and an arrow is a run with a filled head,
 /// so the tools turn into these rather than the target learning each of them.
 #[derive(Debug, Clone)]
@@ -735,6 +735,26 @@ pub enum AnnotationShape {
         radius: f32,
         filled: bool,
     },
+    /// Text read off a drawing, such as a measurement's distance. Outlined in
+    /// black or white, whichever stands out from its color, so it reads over
+    /// any part of the map.
+    Label {
+        at: MinimapPos,
+        text: String,
+        /// How tall the text is, in minimap units, so it grows with the map.
+        size: f32,
+        anchor: LabelAnchor,
+    },
+}
+
+/// Which point of an [`AnnotationShape::Label`] its position names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum LabelAnchor {
+    /// The middle of the text.
+    Center,
+    /// The middle of its left edge.
+    Left,
 }
 
 /// Which gutter a [`DrawCommand::TeamRoster`] sits in.

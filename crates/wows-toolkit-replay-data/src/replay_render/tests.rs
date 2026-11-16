@@ -1797,6 +1797,31 @@ fn what_a_session_has_drawn_is_put_on_the_frame() {
     assert_eq!(shown.map(|shown| shown.len()), Some(1), "so it reaches the frame");
 }
 
+/// A measurement reaches the frame with its distance read off in kilometres on the battle's own
+/// map, as the egui renderer marks one.
+#[test]
+fn a_measurement_reaches_the_frame_with_its_distance() {
+    let link = CollabLink::default();
+    let track = track(vec![0.0, 30.0]);
+    let across = wt_collab_client::geometry::km_to_minimap_distance(2.5, track.space_size);
+    link.add_annotation(Annotation::Measurement {
+        start: [100.0, 300.0],
+        end: [100.0 + across, 300.0],
+        color: [255; 4],
+        width: 2.0,
+    });
+
+    let drawn = Annotator::new().overlay_commands(&link, &track, &GameDataCache::without_install());
+    let figures: Vec<&str> = drawn
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::Annotation { shape: AnnotationShape::Label { text, .. }, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(figures, ["2", "2.5 km"]);
+}
+
 /// Drawing with a tool sends what it drew to the session, and the pointer
 /// goes to the tool rather than to panning the map.
 #[test]

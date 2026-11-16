@@ -28,6 +28,7 @@ use wt_collab_client::drawing::move_annotation;
 use wt_collab_client::drawing::rotate_annotation;
 use wt_collab_client::geometry::annotation_commands;
 use wt_collab_client::geometry::km_to_minimap_distance;
+use wt_collab_client::geometry::measurement_commands;
 use wt_collab_client::geometry::minimap_distance_to_km;
 use wt_collab_client::geometry::ship_range_commands;
 use wt_collab_client::types::Annotation;
@@ -780,18 +781,25 @@ impl Annotator {
         Click::ResetView
     }
 
-    /// What is drawn over the battle: every shape in the session, the range
-    /// circles of every placed ship, and the shape under the pointer drawn the
-    /// way the finished one will be, so what a reader sees while dragging is
-    /// what they get.
+    /// What is drawn over the battle: every shape in the session with a
+    /// measurement's distance marks, the range circles of every placed ship,
+    /// and the shape under the pointer drawn the way the finished one will be,
+    /// so what a reader sees while dragging is what they get.
     pub fn overlay_commands(&self, link: &CollabLink, track: &Track, game_data: &GameDataCache) -> Vec<DrawCommand> {
+        let space_size = Some(track.space_size);
+        let drawn = |annotation: &Annotation| {
+            let mut commands = annotation_commands(annotation);
+            commands.extend(measurement_commands(annotation, space_size));
+            commands
+        };
+
         let annotations = link.annotations();
-        let mut drawn_on: Vec<DrawCommand> = annotations.iter().flat_map(annotation_commands).collect();
+        let mut drawn_on: Vec<DrawCommand> = annotations.iter().flat_map(drawn).collect();
         drawn_on.extend(placed_ship_ranges(&annotations, track, game_data));
         if let Some(at) = self.pointer_at
             && let Some(part_drawn) = self.drawing.in_progress(at)
         {
-            drawn_on.extend(annotation_commands(&part_drawn));
+            drawn_on.extend(drawn(&part_drawn));
         }
 
         drawn_on

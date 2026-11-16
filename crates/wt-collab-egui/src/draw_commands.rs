@@ -581,6 +581,37 @@ pub fn draw_command_to_shapes(
                         shapes.push(Shape::circle_stroke(center, radius, stroke));
                     }
                 }
+                AnnotationShape::Label { at, text, size, anchor } => {
+                    use wows_minimap_renderer::draw_command::LabelAnchor;
+
+                    let font = egui::FontId::proportional(transform.scale_distance(*size));
+                    let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), drawn));
+                    let at = transform.minimap_to_screen(at);
+                    let left = match anchor {
+                        LabelAnchor::Center => at.x - galley.size().x / 2.0,
+                        LabelAnchor::Left => at.x,
+                    };
+                    let corner = Pos2::new(left, at.y - galley.size().y / 2.0);
+                    // Ringed in black or white, whichever stands out, as the egui
+                    // renderer outlines a measurement's figures.
+                    let luma = 0.299 * f32::from(color[0]) + 0.587 * f32::from(color[1]) + 0.114 * f32::from(color[2]);
+                    let outline = if luma > 128.0 { Color32::BLACK } else { Color32::WHITE };
+                    let reach = (font.size * 0.1).clamp(1.0, 3.0);
+                    let ring = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), font, outline));
+                    for (dx, dy) in [
+                        (-1.0, 0.0),
+                        (1.0, 0.0),
+                        (0.0, -1.0),
+                        (0.0, 1.0),
+                        (-1.0, -1.0),
+                        (1.0, -1.0),
+                        (-1.0, 1.0),
+                        (1.0, 1.0),
+                    ] {
+                        shapes.push(Shape::galley(corner + Vec2::new(dx * reach, dy * reach), ring.clone(), outline));
+                    }
+                    shapes.push(Shape::galley(corner, galley, drawn));
+                }
             }
         }
 
