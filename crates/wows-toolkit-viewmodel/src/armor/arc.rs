@@ -25,6 +25,8 @@ pub struct ArcPlate {
     pub zone: String,
     pub thickness: Millimeters,
     pub material: ArmorMaterial,
+    /// The strike angle from the plate's normal.
+    pub angle: Degrees,
 }
 
 /// The plate a shell's run ended at.

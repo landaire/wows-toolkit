@@ -4,6 +4,8 @@
 //!   the pointer, and the incoming fire log of a ship opened from a replay.
 //! - `trajectory`: what the next cast is fired with, a marker per cast arc and the editor of the
 //!   arc a marker selects.
+//! - `plate_detail`: the plates a shell struck and what it did to each, for a cast arc and for a
+//!   shell picked in the incoming fire log.
 //! - `export`: the GLB export dialog, and the export it confirms, run off the UI thread.
 //! - `legend`: the armor thickness legend.
 //! - `splash`: the zones a burst reached, and what each compared shell does to their plating.
@@ -14,6 +16,7 @@ pub mod export;
 pub mod incoming;
 pub mod legend;
 pub mod pen;
+mod plate_detail;
 pub mod splash;
 #[cfg(test)]
 mod tests;

@@ -1335,6 +1335,23 @@ tracked = "%{salvos} 斉射、%{shells} 発の砲弾を追跡"
 nothing_landed = "この艦船にはまだ命中弾がありません"
 shells = "%{count}x"
 unknown_attacker = "艦船 %{id}"
+server_outcome = "サーバー: %{outcome}"
+not_cast = "この砲弾は船体内を追跡できません: 弾道または艦の位置が記録されていません"
+pick_hint = "斉射または砲弾をクリックすると船体内の弾道を表示します"
+
+[ui.armor.plates]
+heading = "命中した装甲板 (%{count})"
+arrival = "着弾時 %{velocity} m/s、飛翔 %{time} 秒、落角 %{fall} 度"
+overmatch = "オーバーマッチ: 貫通力 %{penetration} mm、%{velocity} m/s"
+penetrated = "貫通: %{penetration} mm 対 実効 %{effective} mm、%{velocity} m/s"
+ricochet = "%{angle} 度で跳弾"
+shatter = "破砕: %{penetration} mm 対 実効 %{effective} mm"
+fuse_armed = "信管作動"
+detonation = "%{zone} 内で炸裂、装甲板 #%{number} から %{distance} m"
+detonation_past_armor = "全装甲の外側で炸裂、装甲板 #%{number} から %{distance} m"
+flat_penetrates = "%{ammo} 貫通: %{penetration} mm 対 %{thickness} mm"
+flat_shatters = "%{ammo} 破砕: %{penetration} mm 対 %{thickness} mm"
+server_angle = "サーバー %{angle} 度"
 
 # -- アドバンテージレベルラベル --
 

@@ -1335,6 +1335,23 @@ tracked = "일제 사격 %{salvos}회, 포탄 %{shells}발 추적됨"
 nothing_landed = "아직 이 함선에 명중한 것이 없습니다"
 shells = "%{count}x"
 unknown_attacker = "함선 %{id}"
+server_outcome = "서버: %{outcome}"
+not_cast = "이 포탄은 선체를 따라 추적할 수 없습니다: 비행 또는 함선 위치가 기록되지 않았습니다"
+pick_hint = "일제 사격 또는 포탄을 클릭하면 선체 내 경로를 표시합니다"
+
+[ui.armor.plates]
+heading = "명중한 장갑판 (%{count})"
+arrival = "착탄 시 %{velocity} m/s, 비행 %{time}초, 낙각 %{fall}도"
+overmatch = "오버매치: 관통력 %{penetration} mm, %{velocity} m/s"
+penetrated = "관통: %{penetration} mm 대 유효 %{effective} mm, %{velocity} m/s"
+ricochet = "%{angle}도에서 도탄"
+shatter = "파쇄: %{penetration} mm 대 유효 %{effective} mm"
+fuse_armed = "신관 작동"
+detonation = "%{zone} 내부에서 폭발, 장갑판 #%{number} 이후 %{distance} m"
+detonation_past_armor = "모든 장갑 너머에서 폭발, 장갑판 #%{number} 이후 %{distance} m"
+flat_penetrates = "%{ammo} 관통: %{penetration} mm 대 %{thickness} mm"
+flat_shatters = "%{ammo} 파쇄: %{penetration} mm 대 %{thickness} mm"
+server_angle = "서버 %{angle}도"
 
 # -- 우위 수준 레이블 --
 

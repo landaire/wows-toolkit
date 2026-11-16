@@ -1335,6 +1335,23 @@ tracked = "%{salvos} salvo's, %{shells} granaten gevolgd"
 nothing_landed = "Er is nog niets op dit schip ingeslagen"
 shells = "%{count}x"
 unknown_attacker = "Schip %{id}"
+server_outcome = "Server: %{outcome}"
+not_cast = "Deze granaat kan niet door de romp worden gevolgd: de vlucht of de positie van het schip is niet vastgelegd"
+pick_hint = "Klik op een salvo of granaat om die door de romp te volgen"
+
+[ui.armor.plates]
+heading = "Geraakte platen (%{count})"
+arrival = "%{velocity} m/s bij inslag, %{time} s vlucht, valhoek %{fall} deg"
+overmatch = "Overmatch: %{penetration} mm penetratie bij %{velocity} m/s"
+penetrated = "Penetreert: %{penetration} mm tegen %{effective} mm effectief bij %{velocity} m/s"
+ricochet = "Ricochet bij %{angle} deg"
+shatter = "Spat uiteen: %{penetration} mm tegen %{effective} mm effectief"
+fuse_armed = "Ontsteker op scherp"
+detonation = "Ontploft in %{zone}, %{distance} m na plaat #%{number}"
+detonation_past_armor = "Ontploft voorbij alle bepantsering, %{distance} m na plaat #%{number}"
+flat_penetrates = "%{ammo} penetreert: %{penetration} mm tegen %{thickness} mm"
+flat_shatters = "%{ammo} spat uiteen: %{penetration} mm tegen %{thickness} mm"
+server_angle = "server %{angle} deg"
 
 # -- Labels voordeelniveau --
 

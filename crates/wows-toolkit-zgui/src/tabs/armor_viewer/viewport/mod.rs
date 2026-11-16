@@ -36,6 +36,8 @@ pub use types::ArcSummary;
 pub use types::CameraRingSettings;
 pub use types::CastShell;
 pub use types::CopiedView;
+pub use types::IncomingPick;
+pub use types::IncomingShellDetail;
 pub use types::Isolate;
 pub use types::LoadGeneration;
 pub use types::OpeningLayer;

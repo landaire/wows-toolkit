@@ -11,6 +11,7 @@ use crate::load_ship::ArmorTriangleTooltip;
 use crate::viewport::types::HitResult;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec3;
+use wows_toolkit_viewmodel::armor::plate_detail::AngleBand;
 use wowsunpack::ballistics::ArcProfile;
 use wowsunpack::ballistics::FuseDetonation;
 use wowsunpack::ballistics::ImpactResult;
@@ -39,11 +40,6 @@ const MIN_ARC_HEIGHT_RATIO: f32 = 0.02;
 
 /// How far past the last plate the shell's path is drawn, in model units.
 const TRAILING_LENGTH: f32 = 2.0;
-
-/// Strike angles that read as shallow and as steep. Between them is the
-/// middling band; the three colour the impact markers.
-const SHALLOW_ANGLE: f32 = 30.0;
-const STEEP_ANGLE: f32 = 45.0;
 
 const IMPACT_COLOR_SHALLOW: [f32; 4] = [0.35, 0.85, 0.35, 1.0];
 const IMPACT_COLOR_MEDIUM: [f32; 4] = [0.95, 0.80, 0.25, 1.0];
@@ -125,6 +121,8 @@ pub struct Trajectory {
     /// `None` when no shell was chosen to cast, in which case the hits still
     /// stand but nothing was simulated through them.
     pub sim: Option<ShellSimResult>,
+    /// How the shell arrived, from its flight solve. `None` without a shell.
+    pub impact: Option<ImpactResult>,
     /// Where the fuse went off, when it did.
     pub detonation: Option<Vec3>,
     /// The range this arc was cast from, which sets how steeply it falls. Kept
@@ -316,18 +314,16 @@ pub fn cast(
         (_, Some(first)) => (vec![first.position - approach * TRAILING_LENGTH, first.position], None, None),
         (_, None) => (Vec::new(), None, None),
     };
-    Trajectory { arc, hits, shell_dir, sim, detonation, range, isolating_plates: false, isolating_zones: false }
+    let impact = shell.map(|(_, impact)| impact.clone());
+    Trajectory { arc, hits, shell_dir, sim, impact, detonation, range, isolating_plates: false, isolating_zones: false }
 }
 
 /// The colour an impact marker takes, by how square the strike was.
 fn impact_color(angle: Degrees) -> [f32; 4] {
-    let degrees = angle.value();
-    if degrees < SHALLOW_ANGLE {
-        IMPACT_COLOR_SHALLOW
-    } else if degrees < STEEP_ANGLE {
-        IMPACT_COLOR_MEDIUM
-    } else {
-        IMPACT_COLOR_STEEP
+    match AngleBand::of(angle) {
+        AngleBand::Good => IMPACT_COLOR_SHALLOW,
+        AngleBand::Mid => IMPACT_COLOR_MEDIUM,
+        AngleBand::Bad => IMPACT_COLOR_STEEP,
     }
 }
 
@@ -626,8 +622,5 @@ mod tests {
         assert_eq!(impact_color(Degrees::from(10.0)), IMPACT_COLOR_SHALLOW);
         assert_eq!(impact_color(Degrees::from(37.0)), IMPACT_COLOR_MEDIUM);
         assert_eq!(impact_color(Degrees::from(80.0)), IMPACT_COLOR_STEEP);
-        // The bands meet at their own boundary rather than leaving a gap.
-        assert_eq!(impact_color(Degrees::from(SHALLOW_ANGLE)), IMPACT_COLOR_MEDIUM);
-        assert_eq!(impact_color(Degrees::from(STEEP_ANGLE)), IMPACT_COLOR_STEEP);
     }
 }

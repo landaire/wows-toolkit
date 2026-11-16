@@ -40,17 +40,21 @@ use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_armor::viewport::types::ViewRect;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_armor::visibility::VisibilityUndoStack;
+use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
+use wows_toolkit_viewmodel::armor::penetration::Ifhe;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
+use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShellInfo;
 
 use super::types::CameraRingSettings;
-use super::types::CopiedView;
 use super::types::CastShell;
+use super::types::CopiedView;
+use super::types::IncomingPick;
 use super::types::LoadGeneration;
 use super::types::MeshSeed;
 use super::types::OpeningLayer;
@@ -226,6 +230,29 @@ pub(super) struct PendingArmor {
     pub(super) copied: Option<CopiedView>,
 }
 
+/// Landed shells the incoming-fire log picked, cast back through the scene they were cast in. A
+/// selection is not carried to another scene: its paths run through that scene's plating only.
+pub(super) struct IncomingSelection {
+    pub(super) pick: IncomingPick,
+    pub(super) armor: Arc<LoadedShipArmor>,
+    pub(super) casts: Vec<IncomingCast>,
+}
+
+/// One picked shell, and its path through the hull when it could be cast.
+pub(super) struct IncomingCast {
+    pub(super) shot: ShotId,
+    pub(super) shell: Option<ShellInfo>,
+    pub(super) server: ServerOutcome,
+    pub(super) server_angle: Option<Degrees>,
+    pub(super) path: Option<IncomingPath>,
+}
+
+/// A picked shell's path, in the model's own frame, and the lines it is drawn with.
+pub(super) struct IncomingPath {
+    pub(super) trajectory: trajectory::Trajectory,
+    pub(super) drawing: trajectory::ArcDrawing,
+}
+
 pub struct ViewportModel {
     pub(super) viewport: Viewport3D,
     pub(super) gpu: GpuState,
@@ -337,6 +364,8 @@ pub struct ViewportModel {
     pub(super) sim_unchecked: usize,
     /// A comparison asked for while there was no device, run once there is one.
     pub(super) pending_comparison: Option<PendingComparison>,
+    /// The landed shells picked in the incoming-fire log.
+    pub(super) incoming_selection: Option<IncomingSelection>,
     /// The ship's health at the moment shown, while a replay drives this viewer.
     pub(super) hit_health: Option<f32>,
     /// The camera orbits drawn, so a pointer resting on one can be told which it is.
@@ -387,6 +416,9 @@ pub struct ViewportModel {
     pub(super) splash_mode: bool,
     /// The burst on screen.
     pub(super) burst: Option<Burst>,
+    /// Whether the checker counts Inertia Fuse for HE Shells, which the burst's plates are shaded
+    /// with.
+    pub(super) burst_ifhe: Ifhe,
     /// Whether the named splash boxes are outlined over the hull.
     pub(super) show_splash_boxes: bool,
     /// The boxes ticked in the splash zone list. Only these are outlined.
@@ -463,6 +495,7 @@ impl ViewportModel {
             sim_verdicts: HashMap::new(),
             sim_unchecked: 0,
             pending_comparison: None,
+            incoming_selection: None,
             hit_health: None,
             ring_hovers: Vec::new(),
             hovered_ring: None,
@@ -487,6 +520,7 @@ impl ViewportModel {
             cast_range: DEFAULT_CAST_RANGE,
             splash_mode: false,
             burst: None,
+            burst_ifhe: Ifhe::NotApplied,
             show_splash_boxes: false,
             splash_boxes_checked: HashSet::new(),
             expanded_splash_groups: HashSet::new(),

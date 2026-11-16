@@ -7,3 +7,4 @@ pub mod health_strip;
 pub mod incoming;
 pub mod options_panel;
 pub mod penetration;
+pub mod plate_detail;

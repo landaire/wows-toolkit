@@ -1335,6 +1335,23 @@ tracked = "%{salvos} Salven, %{shells} Granaten erfasst"
 nothing_landed = "Dieses Schiff wurde noch nicht getroffen"
 shells = "%{count}x"
 unknown_attacker = "Schiff %{id}"
+server_outcome = "Server: %{outcome}"
+not_cast = "Diese Granate kann nicht durch den Rumpf verfolgt werden: Ihr Flug oder die Position des Schiffs wurde nicht aufgezeichnet"
+pick_hint = "Salve oder Granate anklicken, um sie durch den Rumpf zu verfolgen"
+
+[ui.armor.plates]
+heading = "Getroffene Platten (%{count})"
+arrival = "%{velocity} m/s beim Aufprall, %{time} s Flugzeit, Fallwinkel %{fall} deg"
+overmatch = "Overmatch: %{penetration} mm Durchschlag bei %{velocity} m/s"
+penetrated = "Durchschlägt: %{penetration} mm gegen %{effective} mm effektiv bei %{velocity} m/s"
+ricochet = "Abpraller bei %{angle} deg"
+shatter = "Zerschellt: %{penetration} mm gegen %{effective} mm effektiv"
+fuse_armed = "Zünder scharf"
+detonation = "Explodiert in %{zone}, %{distance} m nach Platte #%{number}"
+detonation_past_armor = "Explodiert hinter aller Panzerung, %{distance} m nach Platte #%{number}"
+flat_penetrates = "%{ammo} durchschlägt: %{penetration} mm gegen %{thickness} mm"
+flat_shatters = "%{ammo} zerschellt: %{penetration} mm gegen %{thickness} mm"
+server_angle = "Server %{angle} deg"
 
 # -- Vorteilsstufen-Bezeichnungen --
 

@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use wows_toolkit_armor::length_marks::MarkLabels;
 use wows_toolkit_armor::trajectory;
+use wows_toolkit_armor::trajectory::ArcColor;
 use wows_toolkit_armor::viewport::camera::Axis;
 use wows_toolkit_armor::viewport::gizmo;
 use wows_toolkit_armor::viewport::types::Vec2;
@@ -39,6 +40,7 @@ use zgui::view::Ident;
 
 use super::depth_cues;
 use super::model::ViewportModel;
+use super::types::IncomingPick;
 
 /// How a cast arc is drawn: its line, the line of the arc being edited, how far the dark outline
 /// under a line reaches past each edge, and the plate and burst markers, in CSS pixels.
@@ -170,6 +172,17 @@ impl ViewportModel {
             let project = |at: Vec3| camera.project_to_screen(at, rect);
             for arc in others.chain(editing) {
                 scene.arcs.push(arc_paint(&arc.drawing, arc.color.rgba(), Some(arc.id) == selected, project));
+            }
+
+            // A landed shell is cast in the model's own frame, so its path is turned with the model
+            // as the hit markers are. One shell picked is drawn as the arc being edited is.
+            if let Some(selection) = self.incoming_selection() {
+                let color = ArcColor::unused(self.arcs.iter().map(|arc| arc.color)).rgba();
+                let single = matches!(selection.pick, IncomingPick::Shell { .. });
+                let project = |at: Vec3| camera.project_to_screen(self.viewport.pos_to_world_space(at), rect);
+                for path in selection.casts.iter().filter_map(|cast| cast.path.as_ref()) {
+                    scene.arcs.push(arc_paint(&path.drawing, color, single, project));
+                }
             }
 
             for pulse in &self.hit_pulses {

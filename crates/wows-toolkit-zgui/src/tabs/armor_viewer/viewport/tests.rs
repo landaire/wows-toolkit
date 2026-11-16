@@ -53,7 +53,10 @@ use zgui::geom::Point;
 use zgui::geom::Rect;
 use zgui::platform::CursorStyle;
 use zgui::prelude::Zoom;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::IntoView;
 use zgui::vocab::Modifiers;
@@ -67,6 +70,10 @@ use super::host::DeviceStatus;
 use super::model::ViewportModel;
 use super::state::ViewCx;
 use crate::services::Services;
+use crate::tabs::armor_viewer::panels::incoming::IncomingFire;
+use crate::tabs::armor_viewer::panels::incoming::IncomingLogProps;
+use crate::tabs::armor_viewer::test_fixtures::plated_scene;
+use crate::tabs::armor_viewer::test_fixtures::salvo_on_plate;
 use crate::theme::SemanticTokensProps;
 
 /// The size the viewport is reviewed at.
@@ -655,6 +662,120 @@ fn holding_shift_over_a_plate_shows_the_crosshair() {
     window.hold_key(NamedKey::Shift, Modifiers::SHIFT);
     window.advance(Duration::from_millis(100));
     assert_ne!(window.cursor(), Some(CursorStyle::Crosshair), "off the hull there is nothing to aim at");
+}
+
+/// What [`LogHarness`] hands the test: the viewport and the incoming fire log beside it.
+type LogHandles = Rc<Cell<Option<(ArmorViewportState, RwSignal<IncomingFire, LocalStorage>)>>>;
+
+/// The viewport beside the incoming fire log, as the options rail holds it, handing both out.
+#[component]
+fn LogHarness(handed: LogHandles) -> impl IntoView {
+    Services::provide(None);
+    let state = ArmorViewportState::new();
+    let incoming = RwSignal::new_local(IncomingFire::default());
+    handed.set(Some((state, incoming)));
+    let choice = Signal::stored_local(ThemeChoice::Fixed(Scheme::Dark));
+
+    view! {
+        ThemeRoot(choice = choice) {
+            SemanticTokens(choice = Signal::stored_local(wows_toolkit_viewmodel::settings::ThemeChoice::Dark))
+            row(style = "width: 100%; height: 100%; background-color: var(--lui-color-panel)") {
+                box(style = "flex: 1; display: flex") {
+                    ArmorViewport(state = state)
+                }
+                column(style = "width: 360px; padding: 8px") {
+                    IncomingLog(incoming = incoming, playback_at = Signal::stored_local(None), viewport = state, on_seek = None)
+                }
+            }
+        }
+    }
+}
+
+/// The plated fixture in a viewport beside the incoming fire log, holding `shots` shells of one
+/// salvo landed on its plate. `None` with a note when this machine has no adapter.
+fn open_log(shots: usize) -> Option<(HeadlessWindow, ArmorViewportState)> {
+    let handed = Rc::new(Cell::new(None));
+    let given = Rc::clone(&handed);
+    let options = HeadlessOptions { drawing: Drawing::Device, ..HeadlessOptions::new(VIEW) };
+    let opened = HeadlessWindow::open(options, move || {
+        let handed = Rc::clone(&given);
+        view! { LogHarness(handed = handed) }
+    });
+    let mut window = match opened {
+        Ok(window) => window,
+        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+            eprintln!("skipped: no graphics adapter to draw the viewport on");
+            return None;
+        }
+        Err(error) => panic!("the window opens: {error}"),
+    };
+    let (state, incoming) = handed.take().expect("the harness hands its state out");
+
+    show_scene(&mut window, state, plated_scene());
+    let center = state
+        .read_untracked(|model| model.current_armor.as_ref().map(|armor| armor.center()))
+        .flatten()
+        .expect("the scene is uploaded");
+    let fire = salvo_on_plate(center, shots);
+    state.compare_incoming(&fire.context.taken, &fire.context.shells);
+    incoming.set(fire);
+    window.advance(Duration::from_millis(100));
+
+    Some((window, state))
+}
+
+/// How many shell paths the overlay draws.
+fn paths_drawn(state: ArmorViewportState) -> usize {
+    state.read_untracked(|model| model.overlay_scene(std::time::Instant::now()).arcs.len()).unwrap_or_default()
+}
+
+fn press(window: &mut HeadlessWindow, id: &str) {
+    let found = window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+    window.click(found).expect("it takes a click");
+    window.advance(Duration::from_millis(100));
+}
+
+/// A press on a shell in the log casts it back through the hull: its path is drawn and the plates
+/// it struck are listed. A second press puts both away.
+#[test]
+fn a_shell_picked_in_the_log_lists_its_plates_and_draws_its_path() {
+    let Some((mut window, state)) = open_log(1) else { return };
+    assert_eq!(paths_drawn(state), 0, "nothing is drawn before a pick");
+    assert!(window.by_test_id("armor-incoming-detail").is_none());
+
+    press(&mut window, "armor-incoming-shell-0-0");
+    assert!(window.by_test_id("armor-incoming-detail").is_some(), "the picked shell's detail is shown");
+    assert_eq!(window.texts_by_class("wt-armor-plates__thickness"), ["25 mm"], "with the plate it struck");
+    assert!(window.by_test_id("armor-incoming-arrival").is_some(), "and how it arrived");
+    assert_eq!(paths_drawn(state), 1, "its path is drawn over the hull");
+    let row = window.by_test_id("armor-incoming-shell-0-0").expect("the row stays");
+    assert_eq!(window.a11y(row).and_then(|row| row.selected), Some(true), "the row reads as picked");
+
+    press(&mut window, "armor-incoming-shell-0-0");
+    assert!(window.by_test_id("armor-incoming-detail").is_none(), "a second press puts the detail away");
+    assert_eq!(paths_drawn(state), 0, "and the path");
+}
+
+/// A salvo opens to its shells when pressed, and every shell of it is drawn; a second press folds
+/// it and puts the paths away.
+#[test]
+fn a_salvo_picked_in_the_log_opens_and_draws_every_shell() {
+    let Some((mut window, state)) = open_log(2) else { return };
+    assert!(window.by_test_id("armor-incoming-shell-0-0").is_none(), "a salvo of several shells opens folded");
+
+    press(&mut window, "armor-incoming-salvo-0");
+    assert!(window.by_test_id("armor-incoming-shell-0-1").is_some(), "the press opens the salvo");
+    assert_eq!(paths_drawn(state), 2, "and draws each of its shells");
+    assert!(window.by_test_id("armor-incoming-detail").is_none(), "a salvo has no single shell to detail");
+
+    press(&mut window, "armor-incoming-shell-0-1");
+    assert_eq!(paths_drawn(state), 1, "a shell picked inside it is drawn alone");
+    assert!(window.by_test_id("armor-incoming-detail").is_some());
+
+    press(&mut window, "armor-incoming-salvo-0");
+    press(&mut window, "armor-incoming-salvo-0");
+    assert_eq!(paths_drawn(state), 0, "pressing the picked salvo puts it down");
+    assert!(window.by_test_id("armor-incoming-shell-0-0").is_none(), "and folds it");
 }
 
 #[test]

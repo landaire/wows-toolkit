@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Instant;
 
 use rust_i18n::t;
@@ -30,15 +31,18 @@ use wows_toolkit_viewmodel::armor::arc::ZoneShape;
 use wows_toolkit_viewmodel::armor::arc::compare_with_server;
 use wows_toolkit_viewmodel::armor::arc::describe_arc;
 use wows_toolkit_viewmodel::armor::arc::isolate;
+use wows_toolkit_viewmodel::armor::incoming::SalvoKey;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 use wows_toolkit_viewmodel::armor::penetration::Ifhe;
+use wows_toolkit_viewmodel::armor::plate_detail::ArcDetail;
 use wowsunpack::ballistics::ImpactResult;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::Radians;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::models::geometry::SplashBox;
 
@@ -46,13 +50,19 @@ use super::depth_cues::landed;
 use super::model::Burst;
 use super::model::CastArc;
 use super::model::HitPulse;
+use super::model::IncomingCast;
+use super::model::IncomingPath;
+use super::model::IncomingSelection;
 use super::model::PendingComparison;
 use super::model::ViewportModel;
 use super::state::ArmorViewportState;
 use super::state::ViewCx;
 use super::types::ArcSummary;
+use super::types::CastReading;
 use super::types::CastShell;
 use super::types::GapState;
+use super::types::IncomingPick;
+use super::types::IncomingShellDetail;
 use super::types::Isolate;
 use super::types::SimAgreement;
 use super::types::SplashBoxName;
@@ -81,6 +91,16 @@ pub(super) enum CastMiss {
     ThicknessUnknown,
     /// The shell's path, which is not the line of sight, crosses no plate.
     NoPlateOnPath,
+}
+
+/// A landed shell cast back along the way it came: the plates its ray crossed, in strike order,
+/// and the flight that brought it.
+struct LandedCast {
+    params: ShellParams,
+    impact: ImpactResult,
+    shell_dir: Vec3,
+    hits: Vec<trajectory::TrajectoryHit>,
+    range: Km,
 }
 
 impl ViewportModel {
@@ -150,9 +170,11 @@ impl ViewportModel {
         shells: &HashMap<GameParamId, ShellInfo>,
         cx: &mut ViewCx,
     ) {
-        let had = !self.sim_verdicts.is_empty() || self.sim_unchecked > 0;
+        let had = !self.sim_verdicts.is_empty() || self.sim_unchecked > 0 || self.incoming_selection.is_some();
         self.sim_verdicts.clear();
         self.sim_unchecked = 0;
+        // A pick names a shell of the log being replaced.
+        self.incoming_selection = None;
         if !self.is_gpu_ready() || self.current_armor.is_none() {
             self.pending_comparison = Some(PendingComparison { taken: taken.to_vec(), shells: shells.clone() });
             if had {
@@ -188,6 +210,20 @@ impl ViewportModel {
 
     /// One landed shell, cast back along the way it came.
     fn compare_one(&self, hit: &ResolvedShotHit, shell: &ShellInfo, center: Vec3) -> Option<ComparisonVerdict> {
+        let landed = self.cast_landed(hit, shell, center)?;
+        let first = landed.hits.first()?;
+        let strike = Strike { angle: first.angle_from_normal, thickness: first.thickness };
+        let plates: Vec<ArcPlate> = landed.hits.iter().map(arc_plate).collect();
+
+        let sim = trajectory::simulate(&landed.params, &landed.impact, &landed.hits, self.continue_on_ricochet);
+        let server = ServerOutcome::from_shell_hit_type(&hit.hit.hit_type.shell_hit);
+        compare_with_server(&sim, &plates, strike, &server, &landed.params)
+    }
+
+    /// The plates a landed shell crossed on its way in, in the model's own frame, with the flight
+    /// that brought it. `None` for a shell whose victim's pose was not held or whose flight does
+    /// not solve.
+    fn cast_landed(&self, hit: &ResolvedShotHit, shell: &ShellInfo, center: Vec3) -> Option<LandedCast> {
         let arrival = wows_replay_insights::hull_impact::shell_arrival(hit)?;
         // Placed without the hull's bounds, unlike a drawn marker: holding an impact inside them
         // keeps a marker off open water, but a strike dragged to the hull's edge would be
@@ -205,20 +241,160 @@ impl ViewportModel {
 
         // Cast from outside the hull along that bearing, so the ray crosses every plate the shell
         // would have met rather than only those past the point it stopped at. Through the impact's
-        // own height, since a hit up a superstructure did not cross the belt.
+        // own height, since a hit up a superstructure did not cross the belt. Every plate counts,
+        // drawn or not: hiding one did not stop the shell.
         let through = Vec3::new(at[0], at[1], at[2]);
-        let ray_hits = self.viewport.pick_all_ray_model_space(through - shell_dir * CAST_STANDOFF, shell_dir);
-        let hits = trajectory::build_hits(&ray_hits, &self.mesh_triangle_info, &shell_dir);
-        let first = hits.first()?;
-        let strike = Strike { angle: first.angle_from_normal, thickness: first.thickness };
-        let plates: Vec<ArcPlate> = hits
-            .iter()
-            .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material })
-            .collect();
+        let armor = self.current_armor.as_ref()?;
+        let show_zero_mm = self.show_zero_mm();
+        let hits = trajectory::cast_through(
+            &armor.meshes,
+            through - shell_dir * CAST_STANDOFF,
+            shell_dir,
+            |info| show_zero_mm || !upload::is_zero_mm(info.thickness_mm),
+            |at| at,
+        );
 
-        let sim = trajectory::simulate(&params, &impact, &hits, self.continue_on_ricochet);
-        let server = ServerOutcome::from_shell_hit_type(&hit.hit.hit_type.shell_hit);
-        compare_with_server(&sim, &plates, strike, &server, &params)
+        Some(LandedCast { params, impact, shell_dir, hits, range: arrival.travelled.to_km() })
+    }
+
+    /// Picks landed shells in the incoming-fire log and casts each back through the hull, or puts
+    /// the pick down when it is the one held.
+    ///
+    /// `taken` is the log's hits, from which the picked salvo's shells are read, and `shells`
+    /// names the shell each salvo was fired with.
+    pub(super) fn toggle_incoming(
+        &mut self,
+        pick: IncomingPick,
+        taken: &[PreExtractedHit],
+        shells: &HashMap<GameParamId, ShellInfo>,
+        cx: &mut ViewCx,
+    ) {
+        let held = self.incoming_pick() == Some(pick);
+        self.incoming_selection = None;
+        cx.notify();
+        if held {
+            return;
+        }
+        let Some(armor) = self.current_armor.clone() else { return };
+
+        let center = armor.center();
+        let casts = taken
+            .iter()
+            .map(|taken| &taken.hit)
+            .filter(|hit| {
+                let Some(salvo) = hit.salvo.as_ref() else { return false };
+                let key = SalvoKey { owner: salvo.owner_id, salvo_id: salvo.salvo_id };
+                match pick {
+                    IncomingPick::Salvo(picked) => key == picked,
+                    IncomingPick::Shell { salvo: picked, shot } => key == picked && hit.hit.shot_id == shot,
+                }
+            })
+            .map(|hit| {
+                let shell = hit.salvo.as_ref().and_then(|salvo| shells.get(&salvo.params_id)).cloned();
+                let path = shell.as_ref().and_then(|shell| self.incoming_path(hit, shell, center));
+                let server_angle = hit
+                    .hit
+                    .terminal_ballistics
+                    .as_ref()
+                    .map(|ballistics| Radians::from(ballistics.material_angle).to_degrees());
+                IncomingCast {
+                    shot: hit.hit.shot_id,
+                    shell,
+                    server: ServerOutcome::from_shell_hit_type(&hit.hit.hit_type.shell_hit),
+                    server_angle,
+                    path,
+                }
+            })
+            .collect();
+        self.incoming_selection = Some(IncomingSelection { pick, armor, casts });
+    }
+
+    /// A landed shell's path through the hull, laid out as a cast arc is.
+    fn incoming_path(&self, hit: &ResolvedShotHit, shell: &ShellInfo, center: Vec3) -> Option<IncomingPath> {
+        let landed = self.cast_landed(hit, shell, center)?;
+
+        Some(self.lay_incoming_path(landed.hits, landed.shell_dir, shell, &landed.params, &landed.impact, landed.range))
+    }
+
+    /// The path of `shell` through `hits`, simulated with the ricochet setting as it stands.
+    fn lay_incoming_path(
+        &self,
+        hits: Vec<trajectory::TrajectoryHit>,
+        shell_dir: Vec3,
+        shell: &ShellInfo,
+        params: &ShellParams,
+        impact: &ImpactResult,
+        range: Km,
+    ) -> IncomingPath {
+        let fired = Some((params, impact));
+        let mut trajectory =
+            trajectory::cast(hits, shell_dir, fired, self.model_extent(), self.continue_on_ricochet, range);
+        // The plate chain models armour-piercing shells; an HE or SAP shell's path is drawn through
+        // every plate the ray crossed, as a cast with no shell is, and read flat in the detail.
+        if shell.ammo_type != AmmoType::AP {
+            trajectory.sim = None;
+            trajectory.detonation = None;
+        }
+        let drawing = trajectory::drawing(&trajectory);
+
+        IncomingPath { trajectory, drawing }
+    }
+
+    /// Simulates the picked landed shells again over the plates they crossed, after how a
+    /// ricochet is followed changed.
+    fn resimulate_incoming(&mut self) {
+        let Some(mut selection) = self.incoming_selection.take() else { return };
+        for cast in &mut selection.casts {
+            let (Some(shell), Some(path)) = (cast.shell.as_ref(), cast.path.take()) else { continue };
+            let held = path.trajectory;
+            let solved = ShellParams::from_shell_info(shell)
+                .and_then(|params| Some((solve_for_range(&params, held.range.to_meters())?, params)));
+            cast.path = match solved {
+                Some((impact, params)) => {
+                    Some(self.lay_incoming_path(held.hits, held.shell_dir, shell, &params, &impact, held.range))
+                }
+                // It solved when it was picked, with the same shell and range.
+                None => Some(IncomingPath { drawing: trajectory::drawing(&held), trajectory: held }),
+            };
+        }
+        self.incoming_selection = Some(selection);
+    }
+
+    /// The selection on the scene shown. One made on another scene is of no use here.
+    pub(super) fn incoming_selection(&self) -> Option<&IncomingSelection> {
+        let shown = self.current_armor.as_ref()?;
+
+        self.incoming_selection.as_ref().filter(|selection| Arc::ptr_eq(&selection.armor, shown))
+    }
+
+    /// What the incoming-fire log has picked.
+    pub(super) fn incoming_pick(&self) -> Option<IncomingPick> {
+        self.incoming_selection().map(|selection| selection.pick)
+    }
+
+    /// The picked shell as its detail shows it. `None` unless one shell is picked.
+    pub(super) fn incoming_detail(&self) -> Option<IncomingShellDetail> {
+        let selection = self.incoming_selection()?;
+        let IncomingPick::Shell { shot, .. } = selection.pick else { return None };
+        let cast = selection.casts.iter().find(|cast| cast.shot == shot)?;
+
+        let reading = cast.path.as_ref().map(|path| {
+            let trajectory = &path.trajectory;
+            let plates: Vec<ArcPlate> = trajectory.hits.iter().map(arc_plate).collect();
+            let ammo = cast.shell.as_ref().map(|shell| &shell.ammo_type);
+            CastReading {
+                outcome: describe_arc(trajectory.sim.as_ref(), &plates),
+                detail: ArcDetail::new(ammo, trajectory.impact.as_ref(), trajectory.sim.as_ref(), &plates),
+            }
+        });
+
+        Some(IncomingShellDetail {
+            shell: cast.shell.clone(),
+            server: cast.server.clone(),
+            server_angle: cast.server_angle,
+            agreement: self.sim_verdicts.get(&shot).cloned(),
+            cast: reading,
+        })
     }
 
     /// How many hits are drawn on the hull.
@@ -315,6 +491,19 @@ impl ViewportModel {
             boxes_shown: self.show_splash_boxes,
             has_data: self.current_armor.as_ref().is_some_and(|armor| armor.splash_data.is_some()),
             zones_reached: self.burst.as_ref().map(|burst| burst.result.hit_zones.len()).unwrap_or(0),
+        }
+    }
+
+    /// Takes whether the checker counts Inertia Fuse for HE Shells, and shades the burst's plates
+    /// again by it.
+    pub(super) fn set_burst_ifhe(&mut self, ifhe: Ifhe, cx: &mut ViewCx) {
+        if self.burst_ifhe == ifhe {
+            return;
+        }
+        self.burst_ifhe = ifhe;
+        if self.burst.is_some() {
+            self.reupload_current_armor(cx);
+            cx.notify();
         }
     }
 
@@ -465,6 +654,7 @@ impl ViewportModel {
         }
         self.continue_on_ricochet = on;
         self.recast_arcs(cx);
+        self.resimulate_incoming();
     }
 
     /// Casts every arc again at its own range and with its own shell, as the plates under it
@@ -637,28 +827,14 @@ impl ViewportModel {
 
     /// Every cast arc, as the trajectory section lists them.
     pub(super) fn arcs(&self) -> Vec<ArcSummary> {
-        self.arcs
-            .iter()
-            .map(|arc| {
-                let cast = &arc.trajectory;
-                let plates: Vec<ArcPlate> = cast
-                    .hits
-                    .iter()
-                    .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material })
-                    .collect();
-                ArcSummary {
-                    id: arc.id,
-                    color: arc.color,
-                    hits: cast.hits.len(),
-                    total_armor: Millimeters::from(cast.hits.iter().map(|hit| hit.thickness.value()).sum::<f32>()),
-                    range: cast.range,
-                    shell: arc.shell.clone(),
-                    isolating_plates: cast.isolating_plates,
-                    isolating_zones: cast.isolating_zones,
-                    outcome: describe_arc(cast.sim.as_ref(), &plates),
-                }
-            })
-            .collect()
+        self.arcs.iter().map(arc_summary).collect()
+    }
+
+    /// One arc, and where it sits among the arcs, which is the number its marker carries.
+    pub(super) fn arc(&self, id: ArcId) -> Option<(usize, ArcSummary)> {
+        let index = self.arcs.iter().position(|arc| arc.id == id)?;
+
+        Some((index, arc_summary(&self.arcs[index])))
     }
 
     /// The arc being edited, and the range it is fired from.
@@ -759,13 +935,19 @@ impl ViewportModel {
             plate_visibility: self.plate_visibility.clone(),
         });
         self.isolate_by_arcs(cx);
+        // A change of visibility like any other: saved, and followed by a synced pane.
+        cx.emit(ViewportChange::Settings);
     }
 
     /// Keeps what the arcs isolate in step with the plates they cross after they were cast again.
-    /// Not an undo step: the reader moved a slider, and did not hide anything.
+    /// Not an undo step: the reader moved a slider, and did not hide anything. What redo held no
+    /// longer follows from what is hidden now, so it goes.
     fn follow_arc_isolation(&mut self, cx: &mut ViewCx) {
         if self.arcs.iter().any(|arc| arc.trajectory.isolating_plates || arc.trajectory.isolating_zones) {
+            self.undo_stack.forget_redo();
             self.isolate_by_arcs(cx);
+            // Followed by a synced pane, but not saved on every step of the slider.
+            cx.emit(ViewportChange::Synced);
         }
     }
 
@@ -812,8 +994,6 @@ impl ViewportModel {
                 .collect();
         }
         self.reupload_current_armor(cx);
-        // A change of visibility like any other, so a synced pane follows it.
-        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -839,6 +1019,31 @@ fn fall_direction(approach: Vec3, impact: Option<&ImpactResult>) -> Vec3 {
             Vec3::new(approach[0] * fall.cos(), -fall.sin(), approach[2] * fall.cos()).normalize()
         }
         None => approach,
+    }
+}
+
+/// A plate a cast crossed, as the outcome and the plate list read it.
+fn arc_plate(hit: &trajectory::TrajectoryHit) -> ArcPlate {
+    ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material, angle: hit.angle_from_normal }
+}
+
+/// A cast arc, as the trajectory section shows it.
+fn arc_summary(arc: &CastArc) -> ArcSummary {
+    let cast = &arc.trajectory;
+    let plates: Vec<ArcPlate> = cast.hits.iter().map(arc_plate).collect();
+    let ammo = arc.shell.as_ref().and_then(CastShell::shell).map(|shell| &shell.ammo_type);
+
+    ArcSummary {
+        id: arc.id,
+        color: arc.color,
+        hits: cast.hits.len(),
+        total_armor: Millimeters::from(cast.hits.iter().map(|hit| hit.thickness.value()).sum::<f32>()),
+        range: cast.range,
+        shell: arc.shell.clone(),
+        isolating_plates: cast.isolating_plates,
+        isolating_zones: cast.isolating_zones,
+        outcome: describe_arc(cast.sim.as_ref(), &plates),
+        detail: ArcDetail::new(ammo, cast.impact.as_ref(), cast.sim.as_ref(), &plates),
     }
 }
 
@@ -889,6 +1094,25 @@ impl ArmorViewportState {
         self.read(|this| this.sim_unchecked()).unwrap_or_default()
     }
 
+    /// Casts the picked landed shells back through the hull, or puts the pick down when it is the
+    /// one held.
+    pub fn toggle_incoming(
+        self,
+        pick: IncomingPick,
+        taken: &[PreExtractedHit],
+        shells: &HashMap<GameParamId, ShellInfo>,
+    ) {
+        self.update(|this, cx| this.toggle_incoming(pick, taken, shells, cx));
+    }
+
+    pub fn incoming_pick(self) -> Option<IncomingPick> {
+        self.read(|this| this.incoming_pick()).flatten()
+    }
+
+    pub fn incoming_detail(self) -> Option<IncomingShellDetail> {
+        self.read(|this| this.incoming_detail()).flatten()
+    }
+
     pub fn hits_drawn(self) -> usize {
         self.read(|this| this.hits_drawn()).unwrap_or_default()
     }
@@ -908,6 +1132,10 @@ impl ArmorViewportState {
 
     pub fn set_cast_shell(self, shell: Option<CastShell>) {
         self.update(|this, cx| this.set_cast_shell(shell, cx));
+    }
+
+    pub fn set_burst_ifhe(self, ifhe: Ifhe) {
+        self.update(|this, cx| this.set_burst_ifhe(ifhe, cx));
     }
 
     /// The range the next cast is fired from; the default range once the state is gone.
@@ -1000,6 +1228,16 @@ impl ArmorViewportState {
 
     pub fn arcs(self) -> Vec<ArcSummary> {
         self.read(|this| this.arcs()).unwrap_or_default()
+    }
+
+    /// One arc, and its place among the arcs.
+    pub fn arc(self, id: ArcId) -> Option<(usize, ArcSummary)> {
+        self.read(|this| this.arc(id)).flatten()
+    }
+
+    /// [`Self::arc`] without following the state.
+    pub fn arc_untracked(self, id: ArcId) -> Option<(usize, ArcSummary)> {
+        self.read_untracked(|this| this.arc(id)).flatten()
     }
 
     pub fn selected_arc(self) -> Option<(ArcId, Km)> {

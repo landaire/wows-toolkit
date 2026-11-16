@@ -1291,6 +1291,23 @@ tracked = "%{salvos} salvo, %{shells} mermi izlendi"
 nothing_landed = "Bu gemiye henüz hiçbir şey isabet etmedi"
 shells = "%{count}x"
 unknown_attacker = "Gemi %{id}"
+server_outcome = "Sunucu: %{outcome}"
+not_cast = "Bu mermi gövde boyunca izlenemiyor: uçuşu ya da geminin konumu kaydedilmedi"
+pick_hint = "Gövde boyunca izlemek için bir salvoya veya mermiye tıklayın"
+
+[ui.armor.plates]
+heading = "İsabet alan plakalar (%{count})"
+arrival = "Çarpmada %{velocity} m/s, %{time} s uçuş, %{fall} deg düşüş açısı"
+overmatch = "Overmatch: %{velocity} m/s hızda %{penetration} mm delme"
+penetrated = "Deler: %{velocity} m/s hızda %{penetration} mm, etkin %{effective} mm'ye karşı"
+ricochet = "%{angle} deg açıda sekme"
+shatter = "Parçalanır: %{penetration} mm, etkin %{effective} mm'ye karşı"
+fuse_armed = "Tapa kuruldu"
+detonation = "%{zone} içinde, #%{number} plakadan %{distance} m sonra patlar"
+detonation_past_armor = "Tüm zırhın ötesinde, #%{number} plakadan %{distance} m sonra patlar"
+flat_penetrates = "%{ammo} deler: %{penetration} mm, %{thickness} mm'ye karşı"
+flat_shatters = "%{ammo} parçalanır: %{penetration} mm, %{thickness} mm'ye karşı"
+server_angle = "sunucu %{angle} deg"
 
 [advantage]
 absolute = "Mutlak"

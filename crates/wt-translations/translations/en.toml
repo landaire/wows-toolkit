@@ -1885,6 +1885,23 @@ tracked = "%{salvos} salvos, %{shells} shells tracked"
 nothing_landed = "Nothing has landed on this ship yet"
 shells = "%{count}x"
 unknown_attacker = "Ship %{id}"
+server_outcome = "Server: %{outcome}"
+not_cast = "This shell cannot be traced through the hull: its flight or the ship's position was not recorded"
+pick_hint = "Click a salvo or shell to trace it through the hull"
+
+[ui.armor.plates]
+heading = "Plates struck (%{count})"
+arrival = "%{velocity} m/s at impact, %{time} s flight, falling at %{fall} deg"
+overmatch = "Overmatch: %{penetration} mm penetration at %{velocity} m/s"
+penetrated = "Penetrates: %{penetration} mm against %{effective} mm effective at %{velocity} m/s"
+ricochet = "Ricochet at %{angle} deg"
+shatter = "Shatters: %{penetration} mm against %{effective} mm effective"
+fuse_armed = "Fuse armed"
+detonation = "Detonates inside %{zone}, %{distance} m after plate #%{number}"
+detonation_past_armor = "Detonates past all armor, %{distance} m after plate #%{number}"
+flat_penetrates = "%{ammo} penetrates: %{penetration} mm against %{thickness} mm"
+flat_shatters = "%{ammo} shatters: %{penetration} mm against %{thickness} mm"
+server_angle = "server %{angle} deg"
 
 [ui.tactics]
 a_peers_board = "A board shared by someone else in this session"

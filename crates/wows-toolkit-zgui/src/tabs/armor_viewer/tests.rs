@@ -27,6 +27,7 @@ use wows_toolkit_armor::load_model::fixtures;
 use wows_toolkit_armor::load_ship::ArmorZone;
 use wows_toolkit_armor::load_ship::EmptyScene;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::load_ship::SceneSubject;
 use wows_toolkit_armor::load_ship::ShipLoadError;
 use wows_toolkit_armor::load_ship::ShipSubject;
@@ -49,6 +50,7 @@ use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
 use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
+use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -65,6 +67,8 @@ use wowsunpack::export::mount_armor::VehicleParamIndex;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CameraTrajectory;
+use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::Vec2;
 use wowsunpack::game_types::Vec3;
 use wowsunpack::models::geometry::SplashBox;
@@ -86,6 +90,11 @@ use crate::tabs::armor_viewer::BUILT;
 use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::armor_viewer::options::TextureFocus;
+use crate::tabs::armor_viewer::test_fixtures::add_cast_arc;
+use crate::tabs::armor_viewer::test_fixtures::iowa_ap;
+use crate::tabs::armor_viewer::test_fixtures::plated_scene;
+use crate::tabs::armor_viewer::test_fixtures::salvo_on_plate;
+use crate::tabs::armor_viewer::viewport::CastShell;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
 use crate::tabs::armor_viewer::viewport::SplashBoxName;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
@@ -799,6 +808,35 @@ fn the_xray_mode_and_the_held_key_choose_the_highlight_depth() {
     }
 }
 
+/// A compare split copies the pane it splits from: the plates hidden there stay hidden and the
+/// camera stays where it was, though the copy's scene uploads only once its own view has a device.
+#[test]
+fn a_compare_split_keeps_the_hidden_plates_and_the_camera() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    armor.install(ship_scene(), &[]);
+    let source = workspace.active_untracked();
+    let plate = PlateKey { zone: "Turret".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 0 };
+    source.toggle_plate(plate);
+    let mut camera = source.camera();
+    camera.azimuth += 1.0;
+    camera.distance *= 0.5;
+    source.set_camera(camera.clone());
+    armor.settle();
+    let settings = source.synced_settings();
+
+    workspace.compare(None);
+    armor.settle();
+    let copy = workspace.active_untracked();
+    assert!(copy != source, "the split is a pane of its own");
+    // Without a device here the copy's scene is held for upload, which keeps the view to put back.
+    assert!(!copy.has_armor());
+
+    assert_eq!(copy.synced_settings(), settings, "the hidden plate and the rest of the view are copied");
+    let copied = copy.camera();
+    assert_eq!((copied.azimuth, copied.distance), (camera.azimuth, camera.distance), "and so is the camera");
+}
+
 /// Closing a pane stops the load running into it.
 #[test]
 fn closing_a_pane_cancels_its_load() {
@@ -859,6 +897,18 @@ fn a_model_without_armor_keeps_only_the_mesh_and_display_sections() {
     armor.show_tab(OptionsTab::Ship);
     assert!(armor.shown("armor-options-section-Configuration"));
     assert!(armor.shown("armor-export-trigger"), "a model still exports");
+}
+
+/// A model with nothing for the tab the rail is on opens on a tab that has something, rather than
+/// on a blank rail.
+#[test]
+fn a_model_opens_on_a_tab_with_something_for_it() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    armor.workspace.options_tab.set(OptionsTab::Analysis);
+    armor.install(fixtures::model_scene(turret(), Vec::new()), &[]);
+
+    assert_ne!(armor.workspace.options_tab.get_untracked(), OptionsTab::Analysis);
+    assert!(!armor.shown("armor-options-tab-empty"), "the rail is not blank");
 }
 
 #[test]
@@ -1818,6 +1868,83 @@ fn the_splash_zone_list_renders_in_dark_and_light() {
         armor.click("armor-splash-zone-group-expand-Turret");
         let row = armor.window.by_test_id("armor-splash-zone-box-CM_SB_cit_2").expect("the box row is shown");
         armor.window.hover(row).expect("the row can be hovered");
+        settle_in_real_time(&mut armor.window);
+
+        let path = save_shot(&mut armor.window, name);
+        println!("{}", path.display());
+    }
+}
+
+/// [`plated_scene`] as a ship, which is what the trajectory and penetration sections are for.
+fn plated_ship_scene() -> LoadedShipArmor {
+    let mut scene = plated_scene();
+    scene.subject =
+        SceneSubject::Ship(ShipSubject { vehicle_param_index: VehicleParamIndex::new("PASB001"), parts: Vec::new() });
+
+    scene
+}
+
+/// The tab, tall enough that the options rail shows the whole of its Analysis tab, drawn on the
+/// graphics device in `appearance`.
+fn tall_review_window(appearance: Appearance) -> ArmorWindow {
+    let size = landaire_ui::test_support::WindowSize { width: 1280.0, height: 1400.0 };
+    ArmorWindow::open(HeadlessOptions { size, ..review_options(appearance) })
+}
+
+/// A cast arc's editor with its plate list unfolded, in dark and light.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the trajectory detail"]
+fn the_trajectory_detail_renders_in_dark_and_light() {
+    for (appearance, name) in
+        [(Appearance::Dark, "armor-trajectory-detail-dark"), (Appearance::Light, "armor-trajectory-detail-light")]
+    {
+        let mut armor = tall_review_window(appearance);
+        armor.install(plated_ship_scene(), &[OptionSection::Trajectory]);
+        let viewport = armor.workspace.active_untracked();
+        armor.settle_until(|| viewport.read_untracked(|model| model.current_armor.is_some()).unwrap_or(false));
+        let ship = ComparisonShip {
+            param_index: "PJSB018".to_string(),
+            display_name: "Yamato".to_string(),
+            tier: 10,
+            nation: "japan".to_string(),
+            species: Species::Battleship,
+            shells: vec![iowa_ap()],
+        };
+        viewport.set_cast_shell(Some(CastShell { ship, shell_index: Some(0) }));
+        add_cast_arc(viewport, Km::new(12.0)).expect("the viewport takes an arc");
+        armor.settle();
+        armor.click("armor-arc-plates-toggle");
+        assert!(armor.shown("armor-plate-2"), "the plate list is unfolded");
+        settle_in_real_time(&mut armor.window);
+
+        let path = save_shot(&mut armor.window, name);
+        println!("{}", path.display());
+    }
+}
+
+/// A shell picked in the incoming fire log, its path drawn over the hull and its plates listed, in
+/// dark and light.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the incoming shell detail"]
+fn the_incoming_detail_renders_in_dark_and_light() {
+    for (appearance, name) in
+        [(Appearance::Dark, "armor-incoming-detail-dark"), (Appearance::Light, "armor-incoming-detail-light")]
+    {
+        let mut armor = tall_review_window(appearance);
+        armor.install(plated_ship_scene(), &[OptionSection::PenCheck]);
+        let viewport = armor.workspace.active_untracked();
+        armor.settle_until(|| viewport.read_untracked(|model| model.current_armor.is_some()).unwrap_or(false));
+        let center = viewport
+            .read_untracked(|model| model.current_armor.as_ref().map(|armor| armor.center()))
+            .flatten()
+            .expect("the scene is uploaded");
+        let fire = salvo_on_plate(center, 2);
+        viewport.compare_incoming(&fire.context.taken, &fire.context.shells);
+        armor.workspace.incoming.set(fire);
+        armor.settle();
+        armor.click("armor-incoming-salvo-0");
+        armor.click("armor-incoming-shell-0-0");
+        assert!(armor.shown("armor-incoming-detail"), "the picked shell's detail is shown");
         settle_in_real_time(&mut armor.window);
 
         let path = save_shot(&mut armor.window, name);

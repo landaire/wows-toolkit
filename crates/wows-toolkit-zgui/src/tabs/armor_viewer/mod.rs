@@ -12,6 +12,8 @@ pub mod options;
 pub mod panels;
 pub mod sidebar;
 #[cfg(test)]
+mod test_fixtures;
+#[cfg(test)]
 mod tests;
 pub mod viewport;
 pub mod workspace;
@@ -295,9 +297,9 @@ enum Waiting {
 /// Holds `feed` after the rest, keeping only each viewport's latest position as the library does.
 fn push_waiting_feed(waiting: &mut Vec<Waiting>, mut feed: ViewerFeed) {
     if let ViewerFeed::Followed { source, followed } = &mut feed
-        && let Some(at) = waiting.iter().position(
-            |held| matches!(held, Waiting::Feed(ViewerFeed::Followed { source: from, .. }) if from == source),
-        )
+        && let Some(at) =
+            waiting.iter().rposition(|held| matches!(held, Waiting::Feed(held) if held.moves_hits_of(*source)))
+        && matches!(waiting[at], Waiting::Feed(ViewerFeed::Followed { .. }))
         && let Waiting::Feed(ViewerFeed::Followed { followed: earlier, .. }) = waiting.remove(at)
     {
         followed.supersede(earlier);

@@ -1335,6 +1335,23 @@ tracked = "已追蹤 %{salvos} 次齊射、%{shells} 發砲彈"
 nothing_landed = "此艦船尚未被命中"
 shells = "%{count}x"
 unknown_attacker = "艦船 %{id}"
+server_outcome = "伺服器: %{outcome}"
+not_cast = "無法在船體內追蹤此砲彈: 未記錄其飛行或艦船位置"
+pick_hint = "點擊齊射或砲彈以在船體內追蹤其彈道"
+
+[ui.armor.plates]
+heading = "命中的裝甲板 (%{count})"
+arrival = "著彈 %{velocity} m/s，飛行 %{time} 秒，落角 %{fall} 度"
+overmatch = "過穿: 穿深 %{penetration} mm，%{velocity} m/s"
+penetrated = "擊穿: %{penetration} mm 對 等效 %{effective} mm，%{velocity} m/s"
+ricochet = "%{angle} 度跳彈"
+shatter = "碎裂: %{penetration} mm 對 等效 %{effective} mm"
+fuse_armed = "引信已觸發"
+detonation = "在 %{zone} 內爆炸，裝甲板 #%{number} 之後 %{distance} m"
+detonation_past_armor = "在所有裝甲之外爆炸，裝甲板 #%{number} 之後 %{distance} m"
+flat_penetrates = "%{ammo} 擊穿: %{penetration} mm 對 %{thickness} mm"
+flat_shatters = "%{ammo} 碎裂: %{penetration} mm 對 %{thickness} mm"
+server_angle = "伺服器 %{angle} 度"
 
 # -- 優勢等級標籤 --
 

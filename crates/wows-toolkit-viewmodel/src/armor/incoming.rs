@@ -28,7 +28,7 @@ pub struct IncomingFilter {
 }
 
 /// What one salvo is known by.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SalvoKey {
     pub owner: EntityId,
     pub salvo_id: u32,

@@ -170,6 +170,7 @@ pub fn compare_with_server(
             zone: hit.zone.clone(),
             thickness: hit.thickness,
             material: hit.material,
+            angle: hit.angle_from_normal,
         })
         .collect();
     wows_toolkit_viewmodel::armor::arc::compare_with_server(sim, &plates, strike, server_outcome, params)

@@ -1291,6 +1291,23 @@ tracked = "%{salvos} salvas, %{shells} projéteis registrados"
 nothing_landed = "Nada atingiu este navio ainda"
 shells = "%{count}x"
 unknown_attacker = "Navio %{id}"
+server_outcome = "Servidor: %{outcome}"
+not_cast = "Não é possível seguir este projétil pelo casco: o voo ou a posição do navio não foi registrado"
+pick_hint = "Clique em uma salva ou projétil para segui-lo pelo casco"
+
+[ui.armor.plates]
+heading = "Placas atingidas (%{count})"
+arrival = "%{velocity} m/s no impacto, %{time} s de voo, caindo a %{fall} deg"
+overmatch = "Sobrecalibre: %{penetration} mm de penetração a %{velocity} m/s"
+penetrated = "Penetra: %{penetration} mm contra %{effective} mm efetivos a %{velocity} m/s"
+ricochet = "Ricochete a %{angle} deg"
+shatter = "Estilhaça: %{penetration} mm contra %{effective} mm efetivos"
+fuse_armed = "Espoleta armada"
+detonation = "Detona dentro de %{zone}, %{distance} m após a placa #%{number}"
+detonation_past_armor = "Detona além de toda a blindagem, %{distance} m após a placa #%{number}"
+flat_penetrates = "%{ammo} penetra: %{penetration} mm contra %{thickness} mm"
+flat_shatters = "%{ammo} estilhaça: %{penetration} mm contra %{thickness} mm"
+server_angle = "servidor %{angle} deg"
 
 [advantage]
 absolute = "Absoluta"

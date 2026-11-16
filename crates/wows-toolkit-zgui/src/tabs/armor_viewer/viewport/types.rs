@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rust_i18n::t;
+use wows_replays::types::ShotId;
 use wows_toolkit_armor::assets::ModelAssets;
 use wows_toolkit_armor::load_model::ModelLoadRequest;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
@@ -18,12 +19,16 @@ use wows_toolkit_armor::viewport::types::LightingSettings;
 use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
 use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
+use wows_toolkit_viewmodel::armor::incoming::SalvoKey;
+use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
+use wows_toolkit_viewmodel::armor::plate_detail::ArcDetail;
 use wowsunpack::ballistics::ImpactResult;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
@@ -83,6 +88,46 @@ pub struct ArcSummary {
     pub isolating_plates: bool,
     pub isolating_zones: bool,
     pub outcome: ArcOutcome,
+    /// Each plate the shell struck and what it did there.
+    pub detail: ArcDetail,
+}
+
+/// What the incoming-fire log has picked to cast back through the hull: every shell of a salvo,
+/// or one of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncomingPick {
+    Salvo(SalvoKey),
+    Shell { salvo: SalvoKey, shot: ShotId },
+}
+
+impl IncomingPick {
+    /// The salvo picked, or the one the picked shell belongs to.
+    pub fn salvo(self) -> SalvoKey {
+        match self {
+            Self::Salvo(salvo) | Self::Shell { salvo, .. } => salvo,
+        }
+    }
+}
+
+/// One landed shell picked in the log, as its detail shows it.
+#[derive(Clone)]
+pub struct IncomingShellDetail {
+    /// The shell fired. `None` for a salvo whose shell this build cannot name.
+    pub shell: Option<ShellInfo>,
+    pub server: ServerOutcome,
+    /// The strike angle the server reported at the first plate.
+    pub server_angle: Option<Degrees>,
+    pub agreement: Option<SimAgreement>,
+    /// `None` for a shell that could not be cast back: one with no named shell, no held pose or no
+    /// flight that solves, or one picked before the armor was on the device.
+    pub cast: Option<CastReading>,
+}
+
+/// What a shell cast back through the hull did.
+#[derive(Clone)]
+pub struct CastReading {
+    pub outcome: ArcOutcome,
+    pub detail: ArcDetail,
 }
 
 /// The ship and shell an arc is fired with.
@@ -226,7 +271,10 @@ pub struct MeshSeed {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewportChange {
     Camera,
+    /// A saved setting changed, which a synced pane follows too.
     Settings,
+    /// A setting a synced pane follows changed, which is not saved.
+    Synced,
 }
 
 /// Which of the loads a pane started into one viewport a result belongs to.
@@ -301,6 +349,7 @@ pub struct SyncedSettings {
 
 /// What a compare pane takes from the pane it copies: the camera, and the visibility and display
 /// it was showing.
+#[derive(Clone)]
 pub struct CopiedView {
     pub camera: ArcballCamera,
     pub settings: Option<SyncedSettings>,

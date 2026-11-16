@@ -1335,6 +1335,23 @@ tracked = "ติดตาม %{salvos} ชุดยิง, %{shells} นัด"
 nothing_landed = "ยังไม่มีกระสุนโดนเรือลำนี้"
 shells = "%{count}x"
 unknown_attacker = "เรือ %{id}"
+server_outcome = "เซิร์ฟเวอร์: %{outcome}"
+not_cast = "ไม่สามารถติดตามกระสุนนี้ผ่านตัวเรือได้: ไม่ได้บันทึกการบินหรือตำแหน่งของเรือ"
+pick_hint = "คลิกชุดยิงหรือกระสุนเพื่อติดตามผ่านตัวเรือ"
+
+[ui.armor.plates]
+heading = "แผ่นเกราะที่ถูกยิง (%{count})"
+arrival = "%{velocity} m/s เมื่อกระทบ, บิน %{time} วินาที, มุมตก %{fall} องศา"
+overmatch = "Overmatch: เจาะ %{penetration} mm ที่ %{velocity} m/s"
+penetrated = "เจาะทะลุ: %{penetration} mm ต่อ %{effective} mm ที่มีผล ที่ %{velocity} m/s"
+ricochet = "สะท้อนที่ %{angle} องศา"
+shatter = "แตก: %{penetration} mm ต่อ %{effective} mm ที่มีผล"
+fuse_armed = "ชนวนพร้อมทำงาน"
+detonation = "ระเบิดภายใน %{zone}, %{distance} m หลังแผ่น #%{number}"
+detonation_past_armor = "ระเบิดเลยเกราะทั้งหมด, %{distance} m หลังแผ่น #%{number}"
+flat_penetrates = "%{ammo} เจาะทะลุ: %{penetration} mm ต่อ %{thickness} mm"
+flat_shatters = "%{ammo} แตก: %{penetration} mm ต่อ %{thickness} mm"
+server_angle = "เซิร์ฟเวอร์ %{angle} องศา"
 
 # -- ระดับข้อได้เปรียบ --
 

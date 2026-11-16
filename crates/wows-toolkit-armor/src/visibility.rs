@@ -81,6 +81,12 @@ impl VisibilityUndoStack {
         Some(next)
     }
 
+    /// Drops what redo would put back, after a change made without an undo step of its own:
+    /// the snapshots it holds no longer follow from the state now.
+    pub fn forget_redo(&mut self) {
+        self.redo.clear();
+    }
+
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();

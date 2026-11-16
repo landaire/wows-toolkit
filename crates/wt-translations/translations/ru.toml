@@ -1291,6 +1291,23 @@ tracked = "Отслежено залпов: %{salvos}, снарядов: %{shell
 nothing_landed = "По этому кораблю ещё нет попаданий"
 shells = "%{count}x"
 unknown_attacker = "Корабль %{id}"
+server_outcome = "Сервер: %{outcome}"
+not_cast = "Этот снаряд нельзя проследить через корпус: его полёт или положение корабля не записаны"
+pick_hint = "Нажмите на залп или снаряд, чтобы проследить его через корпус"
+
+[ui.armor.plates]
+heading = "Пробитые плиты (%{count})"
+arrival = "%{velocity} м/с при попадании, %{time} с полёта, угол падения %{fall} град."
+overmatch = "Оверматч: бронепробитие %{penetration} мм при %{velocity} м/с"
+penetrated = "Пробивает: %{penetration} мм против %{effective} мм приведённой брони при %{velocity} м/с"
+ricochet = "Рикошет при %{angle} град."
+shatter = "Разрушается: %{penetration} мм против %{effective} мм приведённой брони"
+fuse_armed = "Взрыватель взведён"
+detonation = "Взрыв внутри %{zone}, %{distance} м после плиты #%{number}"
+detonation_past_armor = "Взрыв за всей бронёй, %{distance} м после плиты #%{number}"
+flat_penetrates = "%{ammo} пробивает: %{penetration} мм против %{thickness} мм"
+flat_shatters = "%{ammo} не пробивает: %{penetration} мм против %{thickness} мм"
+server_angle = "сервер %{angle} град."
 
 [advantage]
 absolute = "Абсолютное"

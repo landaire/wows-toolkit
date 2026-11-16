@@ -1291,6 +1291,23 @@ tracked = "Sledováno salv: %{salvos}, střel: %{shells}"
 nothing_landed = "Na tuto loď zatím nic nedopadlo"
 shells = "%{count}x"
 unknown_attacker = "Loď %{id}"
+server_outcome = "Server: %{outcome}"
+not_cast = "Tento granát nelze sledovat trupem: jeho let nebo poloha lodi nebyly zaznamenány"
+pick_hint = "Klepnutím na salvu nebo granát jej sledujete trupem"
+
+[ui.armor.plates]
+heading = "Zasažené pláty (%{count})"
+arrival = "%{velocity} m/s při dopadu, %{time} s letu, pád pod úhlem %{fall} deg"
+overmatch = "Overmatch: průbojnost %{penetration} mm při %{velocity} m/s"
+penetrated = "Probíjí: %{penetration} mm proti %{effective} mm efektivně při %{velocity} m/s"
+ricochet = "Odraz při %{angle} deg"
+shatter = "Roztříští se: %{penetration} mm proti %{effective} mm efektivně"
+fuse_armed = "Zapalovač aktivován"
+detonation = "Exploduje uvnitř %{zone}, %{distance} m za plátem #%{number}"
+detonation_past_armor = "Exploduje za veškerým pancířem, %{distance} m za plátem #%{number}"
+flat_penetrates = "%{ammo} probíjí: %{penetration} mm proti %{thickness} mm"
+flat_shatters = "%{ammo} se roztříští: %{penetration} mm proti %{thickness} mm"
+server_angle = "server %{angle} deg"
 
 [advantage]
 absolute = "Absolutní"

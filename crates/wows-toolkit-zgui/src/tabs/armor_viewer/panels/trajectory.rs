@@ -12,9 +12,9 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_armor::trajectory::ArcId;
 use wows_toolkit_icons::Glyph;
-use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
-use wows_toolkit_viewmodel::armor::arc::StoppingPlate;
 use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
+use wows_toolkit_viewmodel::armor::penetration::Ifhe;
+use wows_toolkit_viewmodel::armor::plate_detail::flat_check;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShellInfo;
 use zgui::component;
@@ -22,10 +22,12 @@ use zgui::css;
 use zgui::elements::Focus;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
@@ -47,6 +49,9 @@ use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
+use zgui_ui_icons::IconProps;
+use zgui_ui_icons::IconSize;
+use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
@@ -54,6 +59,7 @@ use crate::services::Services;
 use crate::shell::tabs::ModifierKey;
 use crate::tabs::armor_viewer::panels::legend::swatch_css;
 use crate::tabs::armor_viewer::panels::pen::PenetrationState;
+use crate::tabs::armor_viewer::panels::plate_detail;
 use crate::tabs::armor_viewer::viewport::ArcSummary;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use crate::tabs::armor_viewer::viewport::CastShell;
@@ -87,12 +93,12 @@ const CSS: &str = css!(
     .wt-armor-trajectory__title { font-size: 14px; font-weight: 700; }
     .wt-armor-trajectory__summary { flex: 1; min-width: 0; font-size: 12px; color: var(--wt-color-text-dim);
         overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .wt-armor-trajectory__outcome { font-size: 12px; }
-    .wt-armor-trajectory__outcome[data-tone=pen] { color: var(--wt-color-armor-pen); }
-    .wt-armor-trajectory__outcome[data-tone=overpen] { color: var(--wt-color-armor-overpen); }
-    .wt-armor-trajectory__outcome[data-tone=ricochet] { color: var(--wt-color-armor-ricochet); }
-    .wt-armor-trajectory__outcome[data-tone=shatter] { color: var(--wt-color-armor-shatter); }
-    .wt-armor-trajectory__outcome[data-tone=dim] { color: var(--wt-color-text-dim); }
+    .wt-armor-trajectory__arrival { font-size: 12px; color: var(--wt-color-text-dim); }
+    .wt-armor-trajectory__disclosure { display: flex; align-items: center; gap: 4px; padding: 2px 0;
+        font-size: 12px; font-weight: 600; color: var(--wt-color-text-dim); cursor: pointer; }
+    .wt-armor-trajectory__chevron { flex: none; display: flex; align-items: center;
+        transition: transform var(--lui-motion-turn) var(--lui-motion-ease); }
+    .wt-armor-trajectory__disclosure[data-open] .wt-armor-trajectory__chevron { transform: rotate(90deg); }
     .wt-armor-trajectory__legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .wt-armor-trajectory__key { display: flex; align-items: center; gap: 4px; font-size: 12px;
         color: var(--wt-color-text-dim); }
@@ -136,8 +142,11 @@ pub fn TrajectoryPanel(
     );
     let range_label = t!("ui.armor.trajectory_range").into_owned();
 
+    let plates_open = RwSignal::new_local(false);
     let markers = move || markers(viewport);
-    let editor = move || editor(pen, viewport);
+    // Built again only for another arc: a rebuild under a dragged range slider ends the drag.
+    let selected = Memo::new(move |_| viewport.selected_arc().map(|(id, _)| id));
+    let editor = move || selected.get().and_then(|id| editor(pen, viewport, id, plates_open));
 
     view! {
         column(class = "wt-armor-trajectory", attr:data-testid = "armor-trajectory") {
@@ -429,29 +438,63 @@ fn marker(viewport: ArmorViewportState, index: usize, arc: &ArcSummary, selected
 }
 
 /// The arc a marker selected: its range, the shell it is fired with and what it hides, each
-/// applied as it changes; then what became of it.
-fn editor(pen: RwSignal<PenetrationState, LocalStorage>, viewport: ArmorViewportState) -> Option<AnyView> {
-    let (id, _) = viewport.selected_arc()?;
-    let arcs = viewport.arcs();
-    let index = arcs.iter().position(|arc| arc.id == id)?;
-    let arc = arcs[index].clone();
-    let number = index + 1;
-    let color = swatch_css(arc.color.rgba());
-    let summary = t!(
-        "ui.armor.arc_summary",
-        hits = arc.hits,
-        armor = format!("{:.0}", arc.total_armor.value()),
-        range = format!("{:.1}", arc.range.value()),
-    )
-    .into_owned();
-    let (outcome, tone) = (describe_outcome(&arc.outcome, viewport), outcome_tone(&arc.outcome));
+/// applied as it changes; then what became of it, and the plates it struck while `plates_open`.
+///
+/// Built once per arc. What changes with the arc is read inside, so the range slider is kept
+/// while it is dragged.
+fn editor(
+    pen: RwSignal<PenetrationState, LocalStorage>,
+    viewport: ArmorViewportState,
+    id: ArcId,
+    plates_open: RwSignal<bool, LocalStorage>,
+) -> Option<AnyView> {
+    let (_, held) = viewport.arc_untracked(id)?;
+    let color = swatch_css(held.color.rgba());
+    let title = move || {
+        let (index, _) = viewport.arc(id)?;
+        Some(t!("ui.armor.arc_heading", number = index + 1).into_owned())
+    };
+    let summary = move || {
+        let (_, arc) = viewport.arc(id)?;
+        Some(
+            t!(
+                "ui.armor.arc_summary",
+                hits = arc.hits,
+                armor = format!("{:.0}", arc.total_armor.value()),
+                range = format!("{:.1}", arc.range.value()),
+            )
+            .into_owned(),
+        )
+    };
+    let shell_picker = move || {
+        let (_, arc) = viewport.arc(id)?;
+        let ships = pen.with(|pen| pen.ships.clone());
+        Some(arc_shell_picker(viewport, id, arc.shell.as_ref(), ships))
+    };
+    let reading = move || {
+        let (_, arc) = viewport.arc(id)?;
+        let outcome = plate_detail::describe_outcome(&arc.outcome, viewport);
+        let tone = plate_detail::outcome_tone(&arc.outcome);
+        let arrival = arc.detail.arrival.map(|arrival| {
+            AnyView::new(view! {
+                text(class = "wt-armor-trajectory__arrival", attr:data-testid = "armor-arc-arrival") {{plate_detail::arrival_text(arrival)}}
+            })
+        });
+        let plates = plates(pen, viewport, &arc, plates_open);
+        Some(AnyView::new(view! {
+            column(class = "wt-armor-trajectory__group") {
+                {arrival}
+                {plate_detail::line(outcome, tone, "armor-arc-outcome")}
+                {plates}
+            }
+        }))
+    };
     let range = Binding::controlled(
         Signal::derive_local(move || {
-            viewport.selected_arc().map_or(DEFAULT_CAST_RANGE, |(_, range)| f64::from(range.value()))
+            viewport.arc(id).map_or(DEFAULT_CAST_RANGE, |(_, arc)| f64::from(arc.range.value()))
         }),
         move |range: f64| viewport.set_arc_range(id, Km::new(range as f32)),
     );
-    let ships = pen.with(|pen| pen.ships.clone());
     let delete_tip = t!("ui.armor.arc_delete").into_owned();
     let delete_label = delete_tip.clone();
 
@@ -463,7 +506,7 @@ fn editor(pen: RwSignal<PenetrationState, LocalStorage>, viewport: ArmorViewport
         ) {
             row(class = "wt-armor-trajectory__editor-head") {
                 box(class = "wt-armor-trajectory__dot", style:background-color = color.clone())
-                text(class = "wt-armor-trajectory__title") {{t!("ui.armor.arc_heading", number = number).into_owned()}}
+                text(class = "wt-armor-trajectory__title") {{title}}
                 text(class = "wt-armor-trajectory__summary") {{summary}}
                 Tooltip {
                     TooltipTrigger {
@@ -488,28 +531,34 @@ fn editor(pen: RwSignal<PenetrationState, LocalStorage>, viewport: ArmorViewport
                 attr:data-testid = "armor-arc-range"
             )
             row(class = "wt-armor-trajectory__row") {
-                {arc_shell_picker(viewport, id, arc.shell.as_ref(), ships)}
+                {shell_picker}
             }
             row(class = "wt-armor-trajectory__row") {
-                {isolate_one(viewport, id, Isolate::Plates, arc.isolating_plates)}
-                {isolate_one(viewport, id, Isolate::Zones, arc.isolating_zones)}
+                {isolate_one(viewport, id, Isolate::Plates)}
+                {isolate_one(viewport, id, Isolate::Zones)}
             }
-            text(class = "wt-armor-trajectory__outcome", attr:data-tone = tone, attr:data-testid = "armor-arc-outcome") {{outcome}}
+            {reading}
         }
     }))
 }
 
 /// One arc's isolation, pressed while it is on.
-fn isolate_one(viewport: ArmorViewportState, id: ArcId, what: Isolate, on: bool) -> AnyView {
+fn isolate_one(viewport: ArmorViewportState, id: ArcId, what: Isolate) -> AnyView {
     let (label, tip, stem) = isolate_keys(what);
     let (label, tip) = (t!(label).into_owned(), t!(tip).into_owned());
+    let on = Signal::derive_local(move || {
+        viewport.arc(id).is_some_and(|(_, arc)| match what {
+            Isolate::Plates => arc.isolating_plates,
+            Isolate::Zones => arc.isolating_zones,
+        })
+    });
 
     AnyView::new(view! {
         Tooltip {
             TooltipTrigger {
                 Toggle(
                     size = ToggleSize::Sm,
-                    pressed = Binding::controlled(Signal::stored_local(on), move |next: bool| {
+                    pressed = Binding::controlled(on, move |next: bool| {
                         viewport.isolate_arc(id, what, next)
                     }),
                     label = label.clone(),
@@ -606,48 +655,41 @@ fn angle_legend() -> AnyView {
     })
 }
 
-/// What an outcome reads as.
-fn describe_outcome(outcome: &ArcOutcome, viewport: ArmorViewportState) -> String {
-    match outcome {
-        ArcOutcome::NotSimulated => t!("ui.armor.arc_no_shell").into_owned(),
-        ArcOutcome::Detonated { zone } => match zone {
-            Some(zone) => t!("ui.armor.arc_detonated_in", zone = zone.clone()).into_owned(),
-            None => t!("ui.armor.arc_detonated_past_armor").into_owned(),
-        },
-        ArcOutcome::Ricocheted { plate } => {
-            t!("ui.armor.arc_ricochet", plate = describe_plate(plate, viewport)).into_owned()
-        }
-        ArcOutcome::Shattered { plate } => {
-            t!("ui.armor.arc_shatter", plate = describe_plate(plate, viewport)).into_owned()
-        }
-        ArcOutcome::Stopped { plate } => {
-            t!("ui.armor.arc_stopped", plate = describe_plate(plate, viewport)).into_owned()
-        }
-        ArcOutcome::Overpenetrated { fuse_armed: true } => t!("ui.armor.arc_overpen").into_owned(),
-        ArcOutcome::Overpenetrated { fuse_armed: false } => t!("ui.armor.arc_overpen_unarmed").into_owned(),
-    }
-}
+/// The plates an arc struck, behind a heading that folds them away.
+fn plates(
+    pen: RwSignal<PenetrationState, LocalStorage>,
+    viewport: ArmorViewportState,
+    arc: &ArcSummary,
+    open: RwSignal<bool, LocalStorage>,
+) -> AnyView {
+    let shown = open.get();
+    let heading = t!("ui.armor.plates.heading", count = arc.detail.plates.len()).into_owned();
+    let list = shown.then(|| {
+        let ifhe = Ifhe::from_enabled(pen.with(|pen| pen.ifhe));
+        let shell = arc.shell.as_ref().and_then(CastShell::shell);
+        let first = arc.detail.plates.first();
+        let flat = shell.zip(first).and_then(|(shell, first)| flat_check(shell, first.thickness, ifhe));
+        plate_detail::plate_list(&arc.detail.plates, flat, None, viewport)
+    });
 
-/// The plate a shell stopped at, or that nothing is known about it, which a cast whose plate list
-/// is shorter than its simulation reports.
-fn describe_plate(plate: &Option<StoppingPlate>, viewport: ArmorViewportState) -> String {
-    match plate {
-        Some(plate) => {
-            let named = viewport.material_label(plate.material);
-            format!("#{} {:.0}mm {}", plate.number, plate.thickness.value(), named)
+    AnyView::new(view! {
+        column(class = "wt-armor-trajectory__group") {
+            control(
+                class = "wt-armor-trajectory__disclosure",
+                tabindex = {Focus::Sequential},
+                a11y:role = {Role::Button},
+                a11y:label = heading.clone(),
+                a11y:expanded = shown,
+                attr:data-open = shown.then(String::new),
+                attr:data-testid = "armor-arc-plates-toggle",
+                on:click = move |_| open.update(|open| *open = !*open)
+            ) {
+                box(class = "wt-armor-trajectory__chevron") {
+                    Icon(icon = CHEVRON_RIGHT, size = IconSize::Sm)
+                }
+                text {{heading}}
+            }
+            {list}
         }
-        None => t!("ui.armor.arc_plate_unknown").into_owned(),
-    }
-}
-
-/// The tone an outcome reads in: the armor palette the viewers paint their verdicts in, where a
-/// detonation is the result the reader was after.
-fn outcome_tone(outcome: &ArcOutcome) -> &'static str {
-    match outcome {
-        ArcOutcome::Detonated { .. } => "pen",
-        ArcOutcome::Overpenetrated { .. } => "overpen",
-        ArcOutcome::Ricocheted { .. } => "ricochet",
-        ArcOutcome::Shattered { .. } | ArcOutcome::Stopped { .. } => "shatter",
-        ArcOutcome::NotSimulated => "dim",
-    }
+    })
 }

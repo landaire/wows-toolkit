@@ -1335,6 +1335,23 @@ tracked = "%{salvos} salve, %{shells} proiettili tracciati"
 nothing_landed = "Nessun colpo ha ancora raggiunto questa nave"
 shells = "%{count}x"
 unknown_attacker = "Nave %{id}"
+server_outcome = "Server: %{outcome}"
+not_cast = "Impossibile seguire questo proiettile nello scafo: il suo volo o la posizione della nave non sono stati registrati"
+pick_hint = "Fai clic su una salva o un proiettile per seguirlo nello scafo"
+
+[ui.armor.plates]
+heading = "Piastre colpite (%{count})"
+arrival = "%{velocity} m/s all'impatto, %{time} s di volo, in caduta a %{fall} deg"
+overmatch = "Overmatch: %{penetration} mm di penetrazione a %{velocity} m/s"
+penetrated = "Penetra: %{penetration} mm contro %{effective} mm effettivi a %{velocity} m/s"
+ricochet = "Rimbalzo a %{angle} deg"
+shatter = "Si frantuma: %{penetration} mm contro %{effective} mm effettivi"
+fuse_armed = "Spoletta armata"
+detonation = "Esplode in %{zone}, %{distance} m dopo la piastra #%{number}"
+detonation_past_armor = "Esplode oltre ogni corazza, %{distance} m dopo la piastra #%{number}"
+flat_penetrates = "%{ammo} penetra: %{penetration} mm contro %{thickness} mm"
+flat_shatters = "%{ammo} si frantuma: %{penetration} mm contro %{thickness} mm"
+server_angle = "server %{angle} deg"
 
 # -- Etichette livello vantaggio --
 

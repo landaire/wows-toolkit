@@ -1335,6 +1335,23 @@ tracked = "%{salvos} salves, %{shells} obus suivis"
 nothing_landed = "Rien n'a encore touché ce navire"
 shells = "%{count}x"
 unknown_attacker = "Navire %{id}"
+server_outcome = "Serveur : %{outcome}"
+not_cast = "Cet obus ne peut pas être suivi dans la coque : sa trajectoire ou la position du navire n'a pas été enregistrée"
+pick_hint = "Cliquez sur une salve ou un obus pour le suivre dans la coque"
+
+[ui.armor.plates]
+heading = "Plaques touchées (%{count})"
+arrival = "%{velocity} m/s à l'impact, %{time} s de vol, chute à %{fall} deg"
+overmatch = "Surcalibrage : %{penetration} mm de pénétration à %{velocity} m/s"
+penetrated = "Pénètre : %{penetration} mm contre %{effective} mm effectifs à %{velocity} m/s"
+ricochet = "Ricochet à %{angle} deg"
+shatter = "Se brise : %{penetration} mm contre %{effective} mm effectifs"
+fuse_armed = "Fusée armée"
+detonation = "Explose dans %{zone}, %{distance} m après la plaque #%{number}"
+detonation_past_armor = "Explose au-delà de tout blindage, %{distance} m après la plaque #%{number}"
+flat_penetrates = "%{ammo} pénètre : %{penetration} mm contre %{thickness} mm"
+flat_shatters = "%{ammo} se brise : %{penetration} mm contre %{thickness} mm"
+server_angle = "serveur %{angle} deg"
 
 # -- Niveaux d'avantage --
 

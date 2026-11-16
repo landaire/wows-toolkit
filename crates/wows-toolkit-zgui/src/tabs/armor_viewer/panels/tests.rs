@@ -55,6 +55,7 @@ use crate::tabs::armor_viewer::panels::pen::PenetrationState;
 use crate::tabs::armor_viewer::panels::pen::PlateUnderPointer;
 use crate::tabs::armor_viewer::panels::splash::SplashReadoutPanelProps;
 use crate::tabs::armor_viewer::panels::trajectory::TrajectoryPanelProps;
+use crate::tabs::armor_viewer::test_fixtures::add_cast_arc;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use wows_toolkit_armor::trajectory;
 use wows_toolkit_armor::trajectory::Trajectory;
@@ -64,6 +65,8 @@ use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShipModelDistance;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -265,7 +268,7 @@ fn the_checker_reads_each_shell_against_the_plate_under_the_pointer() {
 
     click(&mut window, "armor-pen-remove-1");
     assert_eq!(mounted.pen.get_untracked().ships.len(), 1);
-    assert_eq!(mounted.pen.get_untracked().firing_ship, None, "dropping the firing ship stops it firing");
+    assert_eq!(mounted.pen.get_untracked().firing_ship.as_deref(), Some("PA"), "the ship left fires in its place");
 
     click(&mut window, "armor-pen-clear");
     assert!(mounted.pen.get_untracked().ships.is_empty());
@@ -423,6 +426,52 @@ fn the_trajectory_section_prompts_a_cast_while_it_has_no_arc() {
     click(&mut window, "armor-trajectory-clear");
     assert!(viewport.arcs().is_empty());
     assert!(shown(&window, "armor-trajectory-empty"), "clearing the arcs brings it back");
+}
+
+/// The editor says how the selected arc's shell arrived, and lists each plate it struck with what
+/// the shell did there once the list is unfolded.
+#[test]
+fn the_arc_editor_lists_each_plate_the_shell_struck() {
+    let (mut window, mounted) = open();
+    let viewport = mounted.viewport;
+    add_cast_arc(viewport, Km::new(10.0)).expect("the viewport takes an arc");
+    window.advance(Duration::from_millis(100));
+    assert!(shown(&window, "armor-arc-arrival"), "the editor says how the shell arrived");
+    assert!(!shown(&window, "armor-plate-1"), "the plates are folded away until asked for");
+
+    click(&mut window, "armor-arc-plates-toggle");
+    assert_eq!(text_of(&window, "wt-armor-plates__thickness"), ["25 mm", "300 mm"]);
+    let said = text_of(&window, "wt-armor-plates__line");
+    assert!(said.iter().any(|line| line.starts_with("Overmatch: ")), "406 mm overmatches 25 mm: {said:?}");
+    assert!(said.iter().any(|line| line.starts_with("Penetrates: ")), "and goes through the belt: {said:?}");
+    assert_eq!(text_of(&window, "wt-armor-plates__fuse"), ["Fuse armed"], "the belt arms the fuse");
+    assert!(shown(&window, "armor-plate-detonation"), "the detonation is listed under the plate it followed");
+
+    click(&mut window, "armor-arc-plates-toggle");
+    assert!(!shown(&window, "armor-plate-1"), "a second press folds the list away");
+}
+
+/// The arc's range slider follows a drag across several steps in one press: the editor is not
+/// built again under it as the arc is fired from each new range.
+#[test]
+fn dragging_the_arc_range_slider_fires_the_arc_from_where_it_is_let_go() {
+    let (mut window, mounted) = open();
+    let viewport = mounted.viewport;
+    viewport.add_arc(Vec3::zeros(), Vec3::x(), cast_from(10.0)).expect("the viewport takes an arc");
+    window.advance(Duration::from_millis(100));
+
+    let slider = *window.by_role(Role::Slider).last().expect("the editor has a range slider");
+    let bounds = window.bounds(slider).expect("the slider is laid out");
+    let end = Point::new(
+        DevicePx(bounds.origin.x.0 + bounds.size.width.0 - 1.0),
+        DevicePx(bounds.origin.y.0 + bounds.size.height.0 / 2.0),
+    );
+    window.drag(slider, end, 8).expect("the slider takes a drag");
+    window.advance(Duration::from_millis(100));
+
+    let range = viewport.arcs()[0].range.value();
+    assert!(range >= 29.0, "the arc is fired from the slider's far end, not the first step: {range}");
+    assert!(shown(&window, "armor-arc-editor"));
 }
 
 /// The latest build of the install `WT_WOWS_DIR` names, loaded as the app loads it: with the

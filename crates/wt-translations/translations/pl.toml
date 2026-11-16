@@ -1291,6 +1291,23 @@ tracked = "Śledzone salwy: %{salvos}, pociski: %{shells}"
 nothing_landed = "Nic jeszcze nie trafiło w ten okręt"
 shells = "%{count}x"
 unknown_attacker = "Okręt %{id}"
+server_outcome = "Serwer: %{outcome}"
+not_cast = "Nie można prześledzić tego pocisku przez kadłub: nie zapisano jego lotu lub pozycji okrętu"
+pick_hint = "Kliknij salwę lub pocisk, aby prześledzić go przez kadłub"
+
+[ui.armor.plates]
+heading = "Trafione płyty (%{count})"
+arrival = "%{velocity} m/s przy trafieniu, %{time} s lotu, opadanie pod kątem %{fall} deg"
+overmatch = "Overmatch: %{penetration} mm penetracji przy %{velocity} m/s"
+penetrated = "Penetruje: %{penetration} mm wobec %{effective} mm efektywnych przy %{velocity} m/s"
+ricochet = "Rykoszet przy %{angle} deg"
+shatter = "Rozbija się: %{penetration} mm wobec %{effective} mm efektywnych"
+fuse_armed = "Zapalnik uzbrojony"
+detonation = "Wybucha wewnątrz %{zone}, %{distance} m za płytą #%{number}"
+detonation_past_armor = "Wybucha za całym pancerzem, %{distance} m za płytą #%{number}"
+flat_penetrates = "%{ammo} penetruje: %{penetration} mm wobec %{thickness} mm"
+flat_shatters = "%{ammo} rozbija się: %{penetration} mm wobec %{thickness} mm"
+server_angle = "serwer %{angle} deg"
 
 [advantage]
 absolute = "Absolutna"
