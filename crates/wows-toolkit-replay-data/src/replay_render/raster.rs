@@ -14,8 +14,9 @@ use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
 use crate::minimap_preview::layout_for;
 use crate::minimap_preview::renderer_for_replay;
+use crate::replay_render::motion::FrameMotion;
+use crate::replay_render::motion::reach_ships;
 use crate::replay_render::ships::ShipChoices;
-use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
 
 /// What following the options onto the canvas they need came to.
@@ -31,32 +32,42 @@ pub enum LayoutChange {
     Refused,
 }
 
-/// The commands frame `at` is rasterised from.
+/// The commands drawn at `clock`, between `motion`'s frame and the next.
 ///
 /// Filtered here rather than at bake time: a toggle then costs one frame
 /// rather than another walk of the battle. Trails are read from the track's
-/// recorded positions up to the frame's clock and go first, so they sit behind
-/// everything, as the egui renderer draws them. `drawn_on` is what is drawn
-/// over the battle rather than by it (annotations, placed ranges): it is not
-/// filtered and goes on after the battle's own map layers, so a drawn line is
-/// not buried under a ship.
-/// `None` for a frame past the end of the track.
+/// recorded positions up to the clock, end at their ships and go first, so
+/// they sit behind everything, as the egui renderer draws them. `drawn_on` is
+/// what is drawn over the battle rather than by it (annotations, placed
+/// ranges): it is not filtered and goes on after the battle's own map layers,
+/// so a drawn line is not buried under a ship.
 pub fn raster_commands(
     track: &Track,
-    at: FrameIndex,
+    motion: &FrameMotion,
+    clock: GameClock,
     options: &RenderOptions,
     show_dead_ships: bool,
     choices: &ShipChoices,
     drawn_on: Vec<DrawCommand>,
-) -> Option<Vec<DrawCommand>> {
-    let commands = track.commands(at)?;
-    let trails = track.trails.trails_at(GameClock(track.seconds_at(at)), options);
+) -> Vec<DrawCommand> {
+    let keep =
+        |command: &DrawCommand| should_draw_command(command, options, show_dead_ships) && choices.allows(command);
+    let frame: Vec<DrawCommand> = motion
+        .commands_at(track, clock, keep)
+        .map(|mut command| {
+            hide_command_parts(&mut command, options);
+            command
+        })
+        .collect();
+    let mut trails = track.trails.trails_at(clock, options);
+    reach_ships(&mut trails, &frame);
 
-    let mut shown =
-        shown_commands(trails.into_iter().chain(commands.iter().cloned()), options, show_dead_ships, choices);
+    let mut shown = shown_commands(trails.into_iter(), options, show_dead_ships, choices);
+    shown.reserve(frame.len() + drawn_on.len());
+    shown.extend(frame);
     shown.extend(drawn_on);
 
-    Some(shown)
+    shown
 }
 
 /// What of `commands` the layer switches and the per-ship choices let through, with the parts

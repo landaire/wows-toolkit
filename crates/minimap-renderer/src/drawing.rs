@@ -74,28 +74,41 @@ fn rgb_to_pixmap(img: &RgbImage) -> Pixmap {
 
 /// Convert a tiny-skia Pixmap (premultiplied RGBA) back to an RGB image.
 fn pixmap_to_rgb(pm: &Pixmap) -> RgbImage {
-    let w = pm.width();
-    let h = pm.height();
-    let data = pm.data();
-    let mut img = RgbImage::new(w, h);
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) as usize * 4;
-            let a = data[idx + 3] as f32 / 255.0;
-            // Unpremultiply alpha
-            let (r, g, b) = if a > 0.001 {
-                (
-                    (data[idx] as f32 / a).min(255.0) as u8,
-                    (data[idx + 1] as f32 / a).min(255.0) as u8,
-                    (data[idx + 2] as f32 / a).min(255.0) as u8,
-                )
-            } else {
-                (0, 0, 0)
-            };
-            img.put_pixel(x, y, Rgb([r, g, b]));
-        }
+    let mut rgb = Vec::with_capacity(pm.data().len() / 4 * 3);
+    for pixel in pm.data().as_chunks::<4>().0 {
+        rgb.extend_from_slice(&unpremultiplied(pixel));
     }
-    img
+
+    RgbImage::from_raw(pm.width(), pm.height(), rgb).expect("a pixmap holds width times height pixels")
+}
+
+/// Writes a tiny-skia Pixmap over `out` as tightly packed opaque BGRA rows, with the colours
+/// [`pixmap_to_rgb`] gives it.
+fn pixmap_to_bgra(pm: &Pixmap, out: &mut Vec<u8>) {
+    out.clear();
+    out.reserve(pm.data().len());
+    for pixel in pm.data().as_chunks::<4>().0 {
+        let [red, green, blue] = unpremultiplied(pixel);
+        out.extend_from_slice(&[blue, green, red, u8::MAX]);
+    }
+}
+
+/// One premultiplied RGBA pixel's colour with its alpha divided back out.
+fn unpremultiplied(pixel: &[u8; 4]) -> [u8; 3] {
+    // The canvas is opaque almost everywhere, where there is nothing to divide out.
+    if pixel[3] == u8::MAX {
+        return [pixel[0], pixel[1], pixel[2]];
+    }
+    let a = pixel[3] as f32 / 255.0;
+    if a > 0.001 {
+        [
+            (pixel[0] as f32 / a).min(255.0) as u8,
+            (pixel[1] as f32 / a).min(255.0) as u8,
+            (pixel[2] as f32 / a).min(255.0) as u8,
+        ]
+    } else {
+        [0, 0, 0]
+    }
 }
 
 /// Convert an RGBA image to a tiny-skia Pixmap (premultiplied alpha).
@@ -2340,6 +2353,12 @@ impl ImageTarget {
         pixmap_to_rgb(&self.canvas)
     }
 
+    /// Writes the current frame over `out` as tightly packed opaque BGRA rows, the layout a
+    /// texture takes, with the same colours [`Self::frame`] has.
+    pub fn write_bgra(&self, out: &mut Vec<u8>) {
+        pixmap_to_bgra(&self.canvas, out);
+    }
+
     /// Canvas dimensions.
     pub fn canvas_size(&self) -> (u32, u32) {
         (self.canvas.width(), self.canvas.height())
@@ -3400,6 +3419,24 @@ mod tests {
     /// The pixel at `x`, `y` of a finished frame.
     fn pixel(frame: &RgbImage, x: u32, y: u32) -> [u8; 3] {
         frame.get_pixel(x, y).0
+    }
+
+    /// A frame written as BGRA for a texture has the colours the RGB frame has, translucent and
+    /// empty pixels included.
+    #[test]
+    fn a_bgra_frame_has_the_colours_of_the_rgb_one() {
+        let mut canvas = Pixmap::new(4, 1).expect("a pixmap of four pixels");
+        let pixels = [[200, 120, 40, 255], [100, 60, 20, 128], [1, 1, 1, 2], [0, 0, 0, 0]];
+        canvas.data_mut().copy_from_slice(pixels.as_flattened());
+
+        let rgb = pixmap_to_rgb(&canvas);
+        let mut bgra = Vec::new();
+        pixmap_to_bgra(&canvas, &mut bgra);
+
+        let swizzled: Vec<u8> =
+            rgb.as_raw().as_chunks::<3>().0.iter().flat_map(|[r, g, b]| [*b, *g, *r, u8::MAX]).collect();
+        assert_eq!(bgra, swizzled);
+        assert_eq!(&bgra[..8], [40, 120, 200, 255, 39, 119, 199, 255], "opaque as stored, translucent unpremultiplied");
     }
 
     /// A torpedo sits where the viewport says it does, and is drawn at all.

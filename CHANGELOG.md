@@ -51,6 +51,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Play replays in the renderer at thirty frames a second at every speed, with ships, planes, shells, torpedoes, smoke and capture progress moved between the stored frames, and keep 1x at real time on long battles. Seeks and event jumps land on the exact time, so Next event moves on from an event between stored frames. Exported videos move the same things between frames
 - *(zgui)* Rate replays indexed without a personal rating table once the table arrives
 - *(zgui)* Show a newly landed battle's personal rating and match contribution without a relist
 - *(zgui)* Stop treating every enemy icon as spotted in a playback merged with another team's recording

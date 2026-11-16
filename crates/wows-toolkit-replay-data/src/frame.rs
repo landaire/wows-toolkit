@@ -48,6 +48,17 @@ impl BgraFrame {
         Self::from_parts(side, side, bgra)
     }
 
+    /// A frame from rows already packed as BGRA.
+    ///
+    /// # Panics
+    ///
+    /// If `bgra` is not `width` by `height` pixels of four bytes.
+    pub fn from_bgra(width: u32, height: u32, bgra: Vec<u8>) -> Self {
+        assert_eq!(bgra.len(), width as usize * height as usize * 4, "a {width}x{height} frame is four bytes a pixel");
+
+        Self::from_parts(width, height, bgra)
+    }
+
     fn from_parts(width: u32, height: u32, bgra: Vec<u8>) -> Self {
         Self { width, height, bytes: Arc::new(bgra) }
     }

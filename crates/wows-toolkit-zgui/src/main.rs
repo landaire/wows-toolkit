@@ -102,6 +102,7 @@ mod site_shots;
 mod tabs;
 mod text_marks;
 mod theme;
+mod ticker;
 mod window_shell;
 mod windows;
 mod zoom;

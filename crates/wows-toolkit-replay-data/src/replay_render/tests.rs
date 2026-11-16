@@ -42,6 +42,7 @@ use wows_replay_insights::timeline::kind_index;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_replays::types::PlaneId;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::push_ping_aged;
@@ -87,12 +88,14 @@ use crate::replay_render::export::export_settings_of;
 use crate::replay_render::export::must_use_cpu;
 use crate::replay_render::hover::advantage_hover;
 use crate::replay_render::hover::consumable_at;
+use crate::replay_render::motion::FrameMotion;
 use crate::replay_render::options::adopt_saved_defaults;
 use crate::replay_render::options::adopt_saved_self_ranges;
 use crate::replay_render::options::batch_options;
 use crate::replay_render::options::defaults_to_save;
 use crate::replay_render::options::playback_options;
 use crate::replay_render::options::playback_options_hidden;
+use crate::replay_render::playback::FRAME_INTERVAL;
 use crate::replay_render::playback::Playback;
 use crate::replay_render::playback::SPEEDS;
 use crate::replay_render::playback::Tick;
@@ -136,6 +139,54 @@ fn track(clocks: Vec<f32>) -> Track {
         map_origin: DEFAULT_MAP_ORIGIN,
         trails: BakedTrails::default(),
     }
+}
+
+/// What frame `at` of `track` draws, as playback draws it when it is on that frame.
+fn drawn_at(
+    track: &Track,
+    at: FrameIndex,
+    options: &RenderOptions,
+    show_dead_ships: bool,
+    choices: &ShipChoices,
+    drawn_on: Vec<DrawCommand>,
+) -> Option<Vec<DrawCommand>> {
+    let motion = FrameMotion::between(track, at)?;
+
+    Some(raster_commands(track, &motion, GameClock(track.seconds_at(at)), options, show_dead_ships, choices, drawn_on))
+}
+
+/// What the first frame of `track` moves to `clock`, with every layer drawn.
+fn moved_to(track: &Track, clock: f32) -> Vec<DrawCommand> {
+    let motion = FrameMotion::between(track, FrameIndex::FIRST).expect("the track has a first frame");
+
+    motion.commands_at(track, GameClock(clock), |_| true).collect()
+}
+
+/// Where the tracers of `commands` have their tails and heads.
+fn tracer_ends(commands: &[DrawCommand]) -> Vec<(f32, f32, f32, f32)> {
+    commands
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::ShotTracer { from, to, .. } => Some((from.x, from.y, to.x, to.y)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tracer(from: (f32, f32), to: (f32, f32)) -> DrawCommand {
+    DrawCommand::ShotTracer {
+        from: MinimapPos { x: from.0, y: from.1 },
+        to: MinimapPos { x: to.0, y: to.1 },
+        color: [255, 0, 0],
+    }
+}
+
+fn tip(at: (f32, f32)) -> DrawCommand {
+    DrawCommand::ShotTracerTip { at: MinimapPos { x: at.0, y: at.1 }, color: [0, 0, 255] }
+}
+
+fn torpedo(at: (f32, f32)) -> DrawCommand {
+    DrawCommand::Torpedo { pos: MinimapPos { x: at.0, y: at.1 }, color: [0, 255, 0] }
 }
 
 /// Trails recorded for ship 1, `me`, at each `(clock, x)` along the top edge, as a bake records
@@ -655,13 +706,13 @@ fn a_display_toggle_changes_what_is_drawn_without_rebaking() {
     let baked = track.len();
 
     assert!(options.show_torpedoes, "the track was baked with them on");
-    let drawn = raster_commands(&track, FrameIndex::FIRST, &options, show_dead_ships, &choices, Vec::new());
+    let drawn = drawn_at(&track, FrameIndex::FIRST, &options, show_dead_ships, &choices, Vec::new());
     assert_eq!(drawn.map(|drawn| drawn.len()), Some(1));
 
     (toggle("renderer-opt-torpedoes").write)(&mut options, &mut show_dead_ships, false);
 
     assert!(!options.show_torpedoes);
-    let drawn = raster_commands(&track, FrameIndex::FIRST, &options, show_dead_ships, &choices, Vec::new());
+    let drawn = drawn_at(&track, FrameIndex::FIRST, &options, show_dead_ships, &choices, Vec::new());
     assert_eq!(drawn.map(|drawn| drawn.len()), Some(0), "the torpedo is no longer drawn");
     assert_eq!(track.len(), baked, "the track is untouched; only what is drawn of it moved");
 }
@@ -768,6 +819,25 @@ fn the_event_controls_step_between_what_happened() {
 
     playback.go_to(&track, FrameIndex::new(239));
     assert!(events.next(playback.elapsed(&track)).is_none(), "nothing happened after the last one");
+}
+
+/// On a long battle's coarser track, an event between two kept frames is landed on exactly, so
+/// the next event control moves on from it rather than finding it again.
+#[test]
+fn the_next_event_moves_on_from_one_between_kept_frames() {
+    // Two-second frames, as a twenty-minute battle keeps them, with the battle starting at 40s.
+    let mut track = track((0..100).map(|frame| frame as f32 * 2.0).collect());
+    set_battle_window(&mut track, 40.0, None);
+    let events = BattleEvents::from_read(seeded_events(&[10.7, 30.0]), None, HashMap::new());
+    let mut playback = Playback::new();
+
+    let next = events.next(playback.elapsed(&track)).expect("an event follows").clock.seconds();
+    playback.go_to_elapsed(&track, next);
+    assert_eq!(playback.at(), FrameIndex::new(25), "the kept frame before it is what is drawn from");
+    assert!((playback.elapsed(&track) - 10.7).abs() < 1e-4, "and playback is at the event itself");
+
+    let next = events.next(playback.elapsed(&track)).expect("another follows").clock.seconds();
+    assert_eq!(next, 30.0, "the event after it, not the same one");
 }
 
 /// With no events read yet, the controls have nowhere to go.
@@ -907,7 +977,7 @@ fn a_trail_follows_the_ship_between_the_frames_the_bake_kept() {
     track.trails = recorded_trail(&[(0.0, 0.0), (2.0, 20.0), (4.0, 60.0), (6.0, 30.0), (8.0, 70.0), (10.0, 100.0)]);
     let options = RenderOptions { show_trails: true, ..playback_options_hidden() };
     let trail_xs = |at: FrameIndex| -> Option<Vec<f32>> {
-        raster_commands(&track, at, &options, true, &ShipChoices::new(), Vec::new())?.into_iter().find_map(|command| {
+        drawn_at(&track, at, &options, true, &ShipChoices::new(), Vec::new())?.into_iter().find_map(|command| {
             match command {
                 DrawCommand::PositionTrail { points, .. } => Some(points.iter().map(|(pos, _)| pos.x).collect()),
                 _ => None,
@@ -921,6 +991,243 @@ fn a_trail_follows_the_ship_between_the_frames_the_bake_kept() {
         Some(vec![0.0, 20.0, 60.0, 30.0, 70.0, 100.0]),
         "every recorded turn is drawn, not a straight line between the kept frames"
     );
+}
+
+/// Playing at 1x draws a frame every frame interval, each with the ship further along than the
+/// last, between two baked frames half a second apart.
+#[test]
+fn real_time_playback_moves_a_ship_on_every_frame_between_two_baked_ones() {
+    let mut track = track(vec![0.0, 0.5, 1.0]);
+    for (frame, x) in [0.0, 10.0, 20.0].into_iter().enumerate() {
+        track.frames[frame] = vec![drawn_ship(1, "me", x, true)];
+    }
+    let mut playback = Playback::new();
+    playback.set_speed(1.0);
+    playback.toggle_playing(&track);
+
+    let mut xs = Vec::new();
+    while playback.advance(&track, FRAME_INTERVAL) == Tick::Moved {
+        let motion = FrameMotion::between(&track, playback.at()).expect("playback stays on the track");
+        let drawn = raster_commands(
+            &track,
+            &motion,
+            playback.clock(&track),
+            &playback_options_hidden(),
+            true,
+            &ShipChoices::new(),
+            Vec::new(),
+        );
+        xs.extend(drawn.iter().find_map(|command| match command {
+            DrawCommand::Ship { pos, .. } => Some(pos.x),
+            _ => None,
+        }));
+    }
+
+    assert_eq!(playback.at(), FrameIndex::new(1), "the next baked frame ends the stretch");
+    assert!(xs.len() >= 14, "half a second at thirty frames a second: {xs:?}");
+    assert!(xs.windows(2).all(|pair| pair[1] > pair[0]), "every frame moves the ship on: {xs:?}");
+    assert!(xs.iter().all(|x| *x > 0.0 && *x < 10.0), "between the two baked positions: {xs:?}");
+}
+
+/// A ship turning through due south turns the short way, not the long way round.
+#[test]
+fn a_ship_turns_the_short_way_between_frames() {
+    let mut track = track(vec![0.0, 1.0]);
+    let heading = |yaw: f32| {
+        let mut ship = drawn_ship(1, "me", 0.0, true);
+        if let DrawCommand::Ship { yaw: at, .. } = &mut ship {
+            *at = yaw;
+        }
+        ship
+    };
+    track.frames[0] = vec![heading(3.0)];
+    track.frames[1] = vec![heading(-3.0)];
+
+    let yaw = moved_to(&track, 0.5).iter().find_map(|command| match command {
+        DrawCommand::Ship { yaw, .. } => Some(*yaw),
+        _ => None,
+    });
+
+    let yaw = yaw.expect("the ship is drawn");
+    assert!((yaw - std::f32::consts::PI).abs() < 1e-3, "halfway is due south: {yaw}");
+}
+
+/// A shell flies along its line between frames, with its tip at its head. One that landed before
+/// the next frame is gone past halfway, and one fired before it is out from halfway.
+#[test]
+fn shells_fly_between_frames_and_land_and_fire_halfway() {
+    let mut track = track(vec![0.0, 1.0]);
+    track.frames[0] = vec![tracer((0.0, 0.0), (10.0, 0.0)), tip((10.0, 0.0)), tracer((0.0, 50.0), (10.0, 52.0))];
+    track.frames[1] = vec![tracer((20.0, 0.0), (30.0, 0.0)), tip((30.0, 0.0)), tracer((90.0, 90.0), (95.0, 90.0))];
+
+    let early = moved_to(&track, 0.25);
+    assert_eq!(
+        tracer_ends(&early),
+        [(5.0, 0.0, 15.0, 0.0), (0.0, 50.0, 10.0, 52.0)],
+        "a quarter of the way along, and the one that lands still in the air"
+    );
+    assert!(
+        early.iter().any(|command| matches!(command, DrawCommand::ShotTracerTip { at, .. } if at.x == 15.0)),
+        "the tip rides the head"
+    );
+
+    let late = moved_to(&track, 0.75);
+    assert_eq!(
+        tracer_ends(&late),
+        [(15.0, 0.0, 25.0, 0.0), (90.0, 90.0, 95.0, 90.0)],
+        "three quarters of the way along, the landed one gone and the new one out"
+    );
+}
+
+/// Of two salvos flying one line, each shell pairs with the one just ahead of it in the next frame
+/// rather than the one past it.
+#[test]
+fn two_salvos_on_one_line_keep_to_their_own_shells() {
+    let mut track = track(vec![0.0, 1.0]);
+    track.frames[0] = vec![tracer((100.0, 0.0), (110.0, 0.0)), tracer((10.0, 0.0), (20.0, 0.0))];
+    track.frames[1] = vec![tracer((120.0, 0.0), (130.0, 0.0)), tracer((30.0, 0.0), (40.0, 0.0))];
+
+    assert_eq!(tracer_ends(&moved_to(&track, 0.5)), [(110.0, 0.0, 120.0, 0.0), (20.0, 0.0, 30.0, 0.0)]);
+}
+
+/// Torpedoes pair with the nearest of their colour, and one that hit is gone past halfway.
+#[test]
+fn torpedoes_run_between_frames() {
+    let mut track = track(vec![0.0, 1.0]);
+    track.frames[0] = vec![torpedo((10.0, 10.0)), torpedo((10.0, 14.0)), torpedo((200.0, 200.0))];
+    track.frames[1] = vec![torpedo((12.0, 14.0)), torpedo((12.0, 10.0))];
+    let positions = |commands: Vec<DrawCommand>| -> Vec<(f32, f32)> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Torpedo { pos, .. } => Some((pos.x, pos.y)),
+                _ => None,
+            })
+            .collect()
+    };
+
+    assert_eq!(positions(moved_to(&track, 0.25)), [(10.5, 10.0), (10.5, 14.0), (200.0, 200.0)]);
+    assert_eq!(positions(moved_to(&track, 0.5)), [(11.0, 10.0), (11.0, 14.0)], "the one that hit is gone");
+}
+
+/// A squadron and the circle its fighters patrol fly between frames by the squadron they belong to.
+#[test]
+fn planes_fly_between_frames() {
+    let squadron = PlaneId::from(7u64);
+    let plane = |x: f32| DrawCommand::Plane {
+        plane_id: squadron,
+        owner_entity_id: EntityId::from(1u32),
+        pos: MinimapPos { x, y: 0.0 },
+        icon_key: String::new(),
+        player_name: None,
+        ship_name: None,
+    };
+    let patrol = |x: f32| DrawCommand::PatrolRadius {
+        plane_id: squadron,
+        pos: MinimapPos { x, y: 0.0 },
+        radius_px: 5,
+        color: [0, 0, 0],
+        alpha: 1.0,
+    };
+    let mut track = track(vec![0.0, 2.0]);
+    track.frames[0] = vec![patrol(0.0), plane(0.0)];
+    track.frames[1] = vec![patrol(40.0), plane(80.0)];
+
+    let xs: Vec<f32> = moved_to(&track, 0.5)
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::Plane { pos, .. } | DrawCommand::PatrolRadius { pos, .. } => Some(pos.x),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(xs, [10.0, 20.0]);
+}
+
+/// Two shells flying opposite ways along one line are not taken for one shell turning round.
+#[test]
+fn shells_flying_opposite_ways_on_one_line_are_not_paired() {
+    let mut track = track(vec![0.0, 1.0]);
+    track.frames[0] = vec![tracer((0.0, 0.0), (10.0, 0.0))];
+    track.frames[1] = vec![tracer((20.0, 0.0), (10.0, 0.0))];
+
+    assert_eq!(tracer_ends(&moved_to(&track, 0.25)), [(0.0, 0.0, 10.0, 0.0)], "the first stays as it was");
+    assert_eq!(tracer_ends(&moved_to(&track, 0.75)), [(20.0, 0.0, 10.0, 0.0)], "and the second is out by then");
+}
+
+/// Smoke spreads where it lies, and a capture fills while the same team keeps taking it.
+#[test]
+fn smoke_spreads_and_a_capture_fills_between_frames() {
+    let puff = |radius: i32, alpha: f32| DrawCommand::Smoke {
+        pos: MinimapPos { x: 50.0, y: 50.0 },
+        radius,
+        color: [200, 200, 200],
+        alpha,
+    };
+    let point = |progress: f32| DrawCommand::CapturePoint {
+        pos: MinimapPos { x: 300.0, y: 300.0 },
+        radius: 30,
+        color: [255, 255, 255],
+        alpha: 0.3,
+        label: "A".to_owned(),
+        progress,
+        invader_color: Some([0, 255, 0]),
+        flag_icon: None,
+    };
+    let mut track = track(vec![0.0, 1.0]);
+    track.frames[0] = vec![point(0.2), puff(10, 0.4)];
+    track.frames[1] = vec![point(0.4), puff(20, 0.8)];
+
+    let between = moved_to(&track, 0.5);
+    let progress = between.iter().find_map(|command| match command {
+        DrawCommand::CapturePoint { progress, .. } => Some(*progress),
+        _ => None,
+    });
+    let smoke = between.iter().find_map(|command| match command {
+        DrawCommand::Smoke { radius, alpha, .. } => Some((*radius, *alpha)),
+        _ => None,
+    });
+    assert!(progress.is_some_and(|progress| (progress - 0.3).abs() < 1e-6), "half filled: {progress:?}");
+    assert!(smoke.is_some_and(|(radius, alpha)| radius == 15 && (alpha - 0.6).abs() < 1e-6), "half spread: {smoke:?}");
+}
+
+/// A written video frame between two baked ones has its shells part of the way along, as playback
+/// draws them.
+#[test]
+fn an_export_flies_shells_between_the_frames_the_bake_kept() {
+    let mut track = track(vec![0.0, 10.0]);
+    track.frames[0] = vec![tracer((0.0, 0.0), (10.0, 0.0))];
+    track.frames[1] = vec![tracer((100.0, 0.0), (110.0, 0.0))];
+    let layers = ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let heads: Vec<f32> = frames.iter().flat_map(|frame| tracer_ends(frame)).map(|(_, _, head, _)| head).collect();
+
+    assert_eq!(heads.len(), EXPORT_FRAME_COUNT, "the shell is in every written frame");
+    assert!(heads.windows(2).all(|pair| pair[1] > pair[0]), "and flies on in each");
+}
+
+/// The game timer counts on between frames, and what happened by the next frame shows only once
+/// that frame is reached.
+#[test]
+fn the_timer_counts_on_and_events_wait_for_their_frame() {
+    let mut track = track(vec![0.0, 2.0]);
+    track.frames[0] = vec![DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(10.5) }];
+    track.frames[1] = vec![
+        DrawCommand::Timer { time_remaining: Some(598), elapsed: ElapsedClock(12.5) },
+        DrawCommand::KillFeed { entries: Vec::new() },
+    ];
+
+    let between = moved_to(&track, 1.75);
+    let [DrawCommand::Timer { time_remaining, elapsed }] = &between[..] else {
+        panic!("the timer alone, with no kill yet: {between:?}");
+    };
+    assert_eq!(*time_remaining, Some(598), "two seconds off the countdown");
+    assert_eq!(*elapsed, ElapsedClock(12.25));
 }
 
 /// What is on screen is what is written: the trails asked for, and what was drawn over the
@@ -1255,14 +1562,22 @@ fn playing_walks_the_track_and_stops_at_its_end() {
     playback.toggle_playing(&track);
     assert!(playback.is_playing());
 
-    // Two ticks reach the last frame; the third would run past it.
-    assert_eq!(playback.advance(&track), Tick::Advanced);
-    assert_eq!(playback.advance(&track), Tick::Advanced);
-    assert_eq!(playback.advance(&track), Tick::Finished);
+    // Three seconds of game time a tick at 30x: the second frame after ten ticks, and the end of
+    // the track eleven after that, with the transport stopped there rather than run past it.
+    playback.set_speed(30.0);
+    let ticks = |playback: &mut Playback, count: usize| -> Vec<Tick> {
+        (0..count).map(|_| playback.advance(&track, Duration::from_millis(100))).collect()
+    };
+    assert!(ticks(&mut playback, 9).iter().all(|tick| *tick == Tick::Moved), "between the first two frames");
+    assert_eq!(ticks(&mut playback, 1), [Tick::Advanced], "the second frame is reached at 30s");
+    let rest = ticks(&mut playback, 11);
+    assert_eq!(rest.last(), Some(&Tick::Finished), "the last frame is reached at 61s: {rest:?}");
+    assert!(rest[..10].iter().all(|tick| *tick == Tick::Moved), "and nothing before it: {rest:?}");
 
     assert_eq!(playback.at(), FrameIndex::new(2), "playback reached the last frame");
     assert!(!playback.is_playing(), "and stopped there rather than running past it");
     assert_eq!(playback.clock_label(&track), "01:01");
+    assert_eq!(playback.advance(&track, Duration::from_millis(100)), Tick::Idle, "a stopped transport does not move");
 }
 
 /// A viewport with nothing baked yet has no frames to walk, and the transport
@@ -1404,7 +1719,7 @@ fn the_stats_panel_switch_decides_what_reaches_the_frame() {
         DrawCommand::TeamRoster { side: RosterSide::Friendly, x: 0, y: 0, width: 200, height: 400, rows: Vec::new() },
     ];
     let kinds = |options: &RenderOptions| -> Vec<&'static str> {
-        raster_commands(&track, FrameIndex::FIRST, options, true, &ShipChoices::new(), Vec::new())
+        drawn_at(&track, FrameIndex::FIRST, options, true, &ShipChoices::new(), Vec::new())
             .expect("the frame is in the track")
             .iter()
             .map(|command| match command {
@@ -1451,7 +1766,7 @@ fn what_a_session_has_drawn_is_put_on_the_frame() {
     // No display option hides what a reader drew deliberately.
     let hidden = playback_options_hidden();
     assert!(should_draw_command(&drawn[0], &hidden, false), "and nothing filters it out");
-    let shown = raster_commands(&track, FrameIndex::FIRST, &hidden, false, &ShipChoices::new(), drawn);
+    let shown = drawn_at(&track, FrameIndex::FIRST, &hidden, false, &ShipChoices::new(), drawn);
     assert_eq!(shown.map(|shown| shown.len()), Some(1), "so it reaches the frame");
 }
 
@@ -1735,7 +2050,7 @@ fn an_open_armor_viewer_follows_playback_but_only_when_it_must() {
     let mut follow = ArmorFollow::new(ship, seeded);
     // Where a front end tells the viewer: only when playback moved.
     let moved_to = |playback: &mut Playback, follow: &mut ArmorFollow, frame: usize| {
-        playback.go_to(&track, FrameIndex::new(frame)) && follow.follow(GameClock(playback.seconds(&track))).is_some()
+        playback.go_to(&track, FrameIndex::new(frame)) && follow.follow(playback.clock(&track)).is_some()
     };
 
     // This battle recorded no hits, so walking it never changes what the

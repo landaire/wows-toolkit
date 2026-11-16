@@ -3,14 +3,17 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
+use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::DrawnRegion;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::toggles::Toggle;
@@ -54,12 +57,14 @@ use wows_toolkit_replay_data::replay_render::export::temporary_output;
 use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
 use wows_toolkit_replay_data::replay_render::hover::consumable_at;
 use wows_toolkit_replay_data::replay_render::hover::hover_changed;
+use wows_toolkit_replay_data::replay_render::motion::FrameMotion;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_self_ranges;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
 use wows_toolkit_replay_data::replay_render::options::open_merged_on_rosters;
 use wows_toolkit_replay_data::replay_render::options::playback_options;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
+use wows_toolkit_replay_data::replay_render::playback::FRAME_INTERVAL;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
 use wows_toolkit_replay_data::replay_render::playback::Tick;
@@ -118,6 +123,7 @@ use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::services::Services;
+use crate::ticker::Ticker;
 
 /// A replay to play back, and other recordings of the same battle read alongside it so the map
 /// shows what the primary's team could not see.
@@ -240,9 +246,10 @@ struct Run {
     /// renderer it brings back, are dropped.
     renderer_generation: Generation,
     layout: SidePanelLayout,
-    /// A frame was asked for while one was being drawn. The draw in flight starts another as it
-    /// finishes, so what ends up on screen is the newest thing asked for.
-    redraw_wanted: bool,
+    /// A frame was asked for while one was being drawn, and whether any such ask put its frame in
+    /// front of the session. The draw in flight starts another as it finishes, so what ends up on
+    /// screen is the newest thing asked for.
+    redraw_wanted: Option<Share>,
     /// An export asked for while a frame was being drawn. It starts as the draw hands the
     /// renderer back.
     pending_export: Option<ExportTarget>,
@@ -256,8 +263,13 @@ struct Run {
     event_generation: Generation,
     /// The ship an open armor viewer follows, shown again once a bake for new names lands.
     armor_renamed: Option<EntityId>,
-    ticker: Option<IntervalHandle>,
+    ticker: Option<Ticker>,
     collab_ticker: Option<IntervalHandle>,
+    /// How the frame playback is on moves on to the next, kept for every draw between the two.
+    motion: Option<HeldMotion>,
+    /// Frames asked for since the session opened, which is what a test reads the redraw rate by.
+    #[cfg(test)]
+    frames_asked: u64,
     tasks: Vec<Task>,
     replay_id: ReplayId,
     /// Whether the session has been told this playback is open.
@@ -319,7 +331,7 @@ impl RendererSession {
                 renderer: None,
                 renderer_generation: Generation::default(),
                 layout: SidePanelLayout::None,
-                redraw_wanted: false,
+                redraw_wanted: None,
                 pending_export: None,
                 regions: Vec::new(),
                 cancel: Arc::new(AtomicBool::new(false)),
@@ -329,6 +341,9 @@ impl RendererSession {
                 armor_renamed: None,
                 ticker: None,
                 collab_ticker: None,
+                motion: None,
+                #[cfg(test)]
+                frames_asked: 0,
                 tasks: Vec::new(),
                 replay_id: ReplayId::fresh(),
                 shared: false,
@@ -658,7 +673,7 @@ impl RendererSession {
                     // A draw or an export in flight on the old renderer drops it as it finishes.
                     run.renderer = Some(renderer);
                     run.renderer_generation.next();
-                    run.redraw_wanted = true;
+                    run.redraw_wanted = Some(Share::Yes);
                 });
                 self.map_origin.set(map_origin);
             }
@@ -674,10 +689,13 @@ impl RendererSession {
         }
     }
 
-    /// Moves playback to the frame at game time `clock`.
+    /// Moves playback to game time `clock`.
     pub fn go_to_clock(self, clock: GameClock) {
         let Some(track) = self.track_untracked() else { return };
-        self.go_to(track.frame_at(clock.0));
+        let moved = self.change_playback(|playback| playback.go_to_clock(&track, clock));
+        if moved || self.frame_size.get_untracked().is_none() {
+            self.moved();
+        }
     }
 
     /// Moves playback `delta` seconds of game time from where it is.
@@ -793,41 +811,48 @@ impl RendererSession {
     }
 
     pub fn set_speed(self, speed: f32) {
-        let changed = self.change_playback(|playback| playback.set_speed(speed));
-        // The ticker's interval is fixed when it starts, so a speed change replaces it.
-        if changed && self.playback.with_untracked(Playback::is_playing) {
-            self.start_ticker();
-        }
+        self.change_playback(|playback| playback.set_speed(speed));
     }
 
     pub fn step_speed(self, step: i32) {
-        let changed = self.change_playback(|playback| playback.step_speed(step));
-        if changed && self.playback.with_untracked(Playback::is_playing) {
-            self.start_ticker();
-        }
+        self.change_playback(|playback| playback.step_speed(step));
     }
 
     fn start_ticker(self) {
-        let interval = self.playback.with_untracked(Playback::tick_interval);
         self.run.update_value(|run| {
-            run.ticker = run.timers.as_ref().map(|timers| timers.set_interval(interval, move || self.tick()));
+            run.ticker = run
+                .timers
+                .as_ref()
+                .map(|timers| Ticker::start(timers, FRAME_INTERVAL, move |elapsed| self.tick(elapsed)));
         });
     }
 
-    fn tick(self) {
+    /// Moves playback on by `elapsed` of real time at its speed, and draws where it got to.
+    fn tick(self, elapsed: Duration) {
         let Some(track) = self.track_untracked() else { return };
         let tick = self
             .playback
             .try_maybe_update(|playback| {
-                let tick = playback.advance(&track);
-                (tick != Tick::Idle, tick)
+                let second = playback.elapsed(&track).floor();
+                let tick = playback.advance(&track, elapsed);
+                // What reads playback (the scrubber, the clock, the event controls) changes with
+                // the frame or the second shown, not with every draw between two frames.
+                let told = match tick {
+                    Tick::Moved => playback.elapsed(&track).floor() != second,
+                    Tick::Advanced | Tick::Finished => true,
+                    Tick::Idle => false,
+                };
+                (told, tick)
             })
             .unwrap_or(Tick::Idle);
         match tick {
+            Tick::Moved => self.ask_frame(Share::No),
             Tick::Advanced => self.moved(),
-            Tick::Finished | Tick::Idle => {
+            Tick::Finished => {
                 self.run.update_value(|run| run.ticker = None);
+                self.moved();
             }
+            Tick::Idle => self.run.update_value(|run| run.ticker = None),
         }
     }
 
@@ -968,10 +993,35 @@ impl RendererSession {
     pub fn open_ship_menu(self, position: WindowPoint) {
         let origin = self.map_origin.get_untracked();
         let Some(at) = self.map.with_untracked(|map| map.map_point(position, origin)) else { return };
-        let Some(track) = self.track_untracked() else { return };
-        let at_frame = self.playback.with_untracked(Playback::at);
-        let picked = track.commands(at_frame).and_then(|commands| ship_at(commands, at));
+        let picked = self.frame_commands().and_then(|commands| ship_at(&commands, at));
         self.menu.set(picked.map(|ship| ShipMenu::open(ship, position)));
+    }
+
+    /// What is drawn of the battle where playback is, every layer included: the baked frame at or
+    /// before it, moved on to its clock.
+    pub fn frame_commands(self) -> Option<Vec<DrawCommand>> {
+        let track = self.track_untracked()?;
+        let (at, clock) = self.playback.with_untracked(|playback| (playback.at(), playback.clock(&track)));
+        let motion = self.motion(&track, at)?;
+
+        Some(motion.commands_at(&track, clock, |_| true).collect())
+    }
+
+    /// How frame `at` of `track` moves on to the next, worked out once for every draw between the
+    /// two.
+    fn motion(self, track: &Arc<Track>, at: FrameIndex) -> Option<Arc<FrameMotion>> {
+        self.with_run(|run| {
+            if let Some(held) = &run.motion
+                && held.motion.base() == at
+                && held.track.upgrade().is_some_and(|held_track| Arc::ptr_eq(&held_track, track))
+            {
+                return Some(Arc::clone(&held.motion));
+            }
+            let motion = Arc::new(FrameMotion::between(track, at)?);
+            run.motion = Some(HeldMotion { track: Arc::downgrade(track), motion: Arc::clone(&motion) });
+            Some(motion)
+        })
+        .flatten()
     }
 
     /// Drops a ping where the pointer is, for everyone in the session.
@@ -1283,6 +1333,7 @@ impl RendererSession {
 
     fn follow_armor(self) {
         let Some(track) = self.track_untracked() else { return };
+        // Hits are what the viewer shows, and a frame shows the hits taken by its own clock.
         let clock = GameClock(track.seconds_at(self.playback.with_untracked(Playback::at)));
         let followed = self.with_run(|run| {
             let followed = run.armor.as_mut()?.follow(clock)?;
@@ -1293,45 +1344,68 @@ impl RendererSession {
         }
     }
 
-    /// Draws the frame playback is on, unless one is already being drawn, in which case that one
-    /// draws again as it finishes.
+    /// Draws where playback is, and puts the frame in front of the session, unless a frame is
+    /// already being drawn, in which case that one draws again as it finishes.
     pub fn draw(self) {
+        self.ask_frame(Share::Yes);
+    }
+
+    fn ask_frame(self, share: Share) {
+        #[cfg(test)]
+        self.with_run(|run| run.frames_asked += 1);
+        self.draw_shared(share);
+    }
+
+    /// How many frames have been asked for since the session opened.
+    #[cfg(test)]
+    pub fn frames_asked(self) -> u64 {
+        self.run.with_value(|run| run.frames_asked)
+    }
+
+    fn draw_shared(self, share: Share) {
         let Some(track) = self.track_untracked() else { return };
         let Some(game_data) = self.run.try_with_value(|run| run.game_data.clone()).flatten() else { return };
-        let Some((renderer, generation)) = self
+        let Some((renderer, generation, share)) = self
             .with_run(|run| {
-                let renderer = run.renderer.take();
+                let wanted = run.redraw_wanted.take();
+                let share = wanted.map_or(share, |wanted| wanted.max(share));
+                let Some(renderer) = run.renderer.take() else {
+                    run.redraw_wanted = Some(share);
+                    return None;
+                };
                 // This draw is of the newest state, which is what any earlier ask wanted.
-                run.redraw_wanted = renderer.is_none();
-                renderer.map(|renderer| (renderer, run.renderer_generation))
+                Some((renderer, run.renderer_generation, share))
             })
             .flatten()
         else {
             return;
         };
 
-        let at = self.playback.with_untracked(Playback::at);
+        let (at, clock) = self.playback.with_untracked(|playback| (playback.at(), playback.clock(&track)));
+        let Some(motion) = self.motion(&track, at) else {
+            self.run.update_value(|run| run.renderer = Some(renderer));
+            return;
+        };
         let link = self.collab.get_untracked();
         let drawn_on = self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data));
         let shown = self.layers.with_untracked(|layers| {
             self.choices.with_untracked(|choices| {
-                raster_commands(&track, at, &layers.options, layers.show_dead_ships, choices, drawn_on)
+                raster_commands(&track, &motion, clock, &layers.options, layers.show_dead_ships, choices, drawn_on)
             })
         });
-        let Some(shown) = shown else {
-            self.run.update_value(|run| run.renderer = Some(renderer));
-            return;
-        };
-        self.broadcast(&track, at);
+        if share == Share::Yes {
+            self.broadcast(&track, at);
+        }
 
         let view = self.map.with_untracked(MapView::shaped_view);
         let drawing = Arc::clone(&renderer);
         self.spawn(async move {
             let drawn = blocking(move || {
                 let mut drawing = drawing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                let (image, regions) = drawing.render_regions(view, &shown);
-                let size = FrameSize { width: image.width(), height: image.height() };
-                RasterOutput { frame: BgraFrame::from_rgb(&image), size, regions }
+                let mut bgra = Vec::new();
+                let ((width, height), regions) = drawing.render_regions_bgra(view, &shown, &mut bgra);
+                let size = FrameSize { width, height };
+                RasterOutput { frame: BgraFrame::from_bgra(width, height, bgra), size, regions }
             })
             .await;
             self.finish_draw(generation, renderer, drawn);
@@ -1372,8 +1446,8 @@ impl RendererSession {
             self.start_export(target);
             return;
         }
-        if self.with_run(|run| std::mem::take(&mut run.redraw_wanted)) == Some(true) {
-            self.draw();
+        if let Some(Some(share)) = self.with_run(|run| run.redraw_wanted.take()) {
+            self.draw_shared(share);
         }
     }
 
@@ -1602,6 +1676,21 @@ impl RendererSession {
     pub fn mark_popped_out(self) {
         self.popped_out.set(true);
     }
+}
+
+/// Whether a draw puts its frame in front of the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Share {
+    /// Playback moved on between the same two baked frames, which the session already has.
+    No,
+    Yes,
+}
+
+/// How a frame of a track moves on to the next. Held by the track it was worked out for, so a
+/// track baked again is not drawn with the old one's.
+struct HeldMotion {
+    track: Weak<Track>,
+    motion: Arc<FrameMotion>,
 }
 
 /// Counts the starts of one kind of work, so a result that a newer start replaced is recognised

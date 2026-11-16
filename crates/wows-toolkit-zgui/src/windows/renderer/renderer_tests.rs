@@ -3,6 +3,7 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,12 +16,21 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_minimap_renderer::ShipVisibility;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::map_data::MinimapPos;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineEventKind;
+use wows_replays::ReplayFile;
+use wows_replays::packet2::PacketType;
+use wows_replays::packet2::PacketTypeId;
+use wows_replays::packet2::Parser;
+use wows_replays::packet2::RawPacketIterator;
 use wows_replays::types::ElapsedClock;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::replay_render::export::ExportProgress;
 use wows_toolkit_replay_data::replay_render::export::ExportStage;
@@ -378,6 +388,150 @@ fn playing_walks_the_track_and_stops_at_its_end() {
         window.a11y(find(&window, "replay-renderer-play")).and_then(|state| state.label),
         Some(rust_i18n::t!("ui.replay.renderer.play").into_owned())
     );
+}
+
+/// The game clock where playback is.
+fn clock(session: RendererSession) -> f32 {
+    let track = session.track_untracked().expect("the track is here");
+    session.playback.with_untracked(|playback| playback.clock(&track).seconds())
+}
+
+/// One entity's position in two consecutive position packets of a fixture replay, half a second
+/// to two seconds apart and with the entity under way between them, as minimap points.
+fn sailed_between_packets() -> [(f32, MinimapPos); 2] {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/replays/20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+    let replay = ReplayFile::from_file(&path).expect("the fixture replay reads");
+    // Each entity's last position packet: its clock, and where it was on the sea's plane.
+    let mut last: HashMap<EntityId, (f32, f32, f32)> = HashMap::new();
+    let mut found = None;
+    for raw in RawPacketIterator::new(replay.packet_data()) {
+        let Ok(raw) = raw else { break };
+        if raw.packet_type != PacketTypeId::Position {
+            continue;
+        }
+        // A position packet needs no entity definitions, so the parser is given none.
+        let mut bytes = Vec::with_capacity(12 + raw.payload.len());
+        bytes.extend_from_slice(&raw.packet_size.to_le_bytes());
+        bytes.extend_from_slice(&raw.packet_type.raw().to_le_bytes());
+        bytes.extend_from_slice(&raw.clock.seconds().to_le_bytes());
+        bytes.extend_from_slice(raw.payload);
+        let mut input = bytes.as_slice();
+        let Ok(packet) = Parser::new(&[]).parse_packet(&mut input) else { continue };
+        let PacketType::Position(position) = packet.payload else { continue };
+
+        let now = (raw.clock.seconds(), position.position.x, position.position.z);
+        let Some(before) = last.insert(position.pid, now) else { continue };
+        let gap = now.0 - before.0;
+        let sailed = ((now.1 - before.1).powi(2) + (now.2 - before.2).powi(2)).sqrt();
+        // Under way, rather than still or jumping somewhere it did not sail.
+        if (0.5..=2.0).contains(&gap) && (1.0..50.0).contains(&sailed) {
+            found = Some([before, now]);
+            break;
+        }
+    }
+    let pair = found.expect("an entity sailed between two of its position packets");
+
+    // Five minimap pixels a world unit, so the ship crosses pixels between the two.
+    pair.map(|(clock, x, z)| (clock, MinimapPos { x: 384.0 + x * 5.0, y: 384.0 - z * 5.0 }))
+}
+
+fn ship(pos: MinimapPos) -> DrawCommand {
+    DrawCommand::Ship {
+        entity_id: EntityId::from(1u32),
+        pos,
+        yaw: 0.0,
+        species: None,
+        color: None,
+        visibility: ShipVisibility::Visible,
+        opacity: 1.0,
+        is_self: true,
+        player_name: None,
+        ship_name: None,
+        is_detected_teammate: false,
+        is_disconnected: false,
+        name_color: None,
+    }
+}
+
+/// At 1x, every frame drawn between two of a ship's position packets puts the ship further along
+/// from the first position toward the second, rather than holding it at the first.
+#[test]
+fn real_time_playback_draws_a_ship_between_its_position_packets() {
+    let [(from_clock, from), (to_clock, to)] = sailed_between_packets();
+    let mut sailed = track(vec![from_clock, to_clock]);
+    sailed.frames[0] = vec![ship(from)];
+    sailed.frames[1] = vec![ship(to)];
+    let (mut window, session) = open_viewport(sailed);
+    session.set_speed(1.0);
+    session.toggle_playing();
+
+    // How far along the way from the first position to the second each drawn frame has the ship.
+    let along = |pos: MinimapPos| {
+        let way = (to.x - from.x, to.y - from.y);
+        ((pos.x - from.x) * way.0 + (pos.y - from.y) * way.1) / (way.0 * way.0 + way.1 * way.1)
+    };
+    let mut drawn = Vec::new();
+    // Bounded, so a transport that never starts fails rather than hangs.
+    for _ in 0..240 {
+        window.advance(Duration::from_millis(16));
+        if at(session) != 0 {
+            break;
+        }
+        let commands = session.frame_commands().expect("the frame playback is on is drawn");
+        let pos = commands.iter().find_map(|command| match command {
+            DrawCommand::Ship { pos, .. } => Some(*pos),
+            _ => None,
+        });
+        drawn.push(along(pos.expect("the ship is drawn")));
+    }
+    drawn.dedup();
+
+    let frames = ((to_clock - from_clock) * 30.0) as usize;
+    assert!(drawn.len() + 2 >= frames, "a frame every thirtieth of a second: {} of {frames}", drawn.len());
+    assert!(drawn.windows(2).all(|pair| pair[1] > pair[0]), "each further along than the last: {drawn:?}");
+    assert!(drawn.iter().all(|step| (0.0..1.0).contains(step)), "between the two packets: {drawn:?}");
+}
+
+/// A playing viewport asks for thirty frames a second whatever the speed, as the egui renderer
+/// drew, rather than one each time playback reaches a stored frame.
+#[test]
+fn playback_draws_thirty_frames_a_second_at_every_speed() {
+    let (mut window, session) = open_viewport(track(half_second_frames(600)));
+    for speed in [1.0, 20.0] {
+        session.set_speed(speed);
+        session.go_to(FrameIndex::FIRST);
+        session.toggle_playing();
+        window.advance(Duration::from_millis(100));
+
+        let asked = session.frames_asked();
+        window.advance(Duration::from_secs(1));
+        let drawn = session.frames_asked() - asked;
+        session.toggle_playing();
+
+        assert!((29..=31).contains(&drawn), "{drawn} frames in a second at {speed}x");
+    }
+}
+
+/// A battle long enough that the bake kept a frame every two seconds plays at the speed asked
+/// for, rather than a stored frame a tick.
+#[test]
+fn a_long_battle_plays_in_real_time_at_1x() {
+    // Twenty-five minutes of two-second frames, as the bake keeps a long battle.
+    let (mut window, session) = open_viewport(track((0..750).map(|frame| frame as f32 * 2.0).collect()));
+    for (speed, expected) in [(1.0, 3.0), (20.0, 60.0)] {
+        session.set_speed(speed);
+        session.go_to(FrameIndex::FIRST);
+        session.toggle_playing();
+        window.advance(Duration::from_millis(100));
+
+        let started = clock(session);
+        window.advance(Duration::from_secs(3));
+        let played = clock(session) - started;
+        session.toggle_playing();
+
+        assert!((played - expected).abs() <= speed * 0.1, "three seconds at {speed}x played {played}s of battle");
+    }
 }
 
 /// The zoom control moves the view, and Reset puts the whole map back and is refused while the

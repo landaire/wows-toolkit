@@ -136,18 +136,22 @@ impl PreviewRenderer {
         self.target.frame()
     }
 
-    /// The same, with what the frame drew that a pointer can rest on.
+    /// The same, written over `out` as tightly packed opaque BGRA rows, the layout a texture takes,
+    /// with what the frame drew that a pointer can rest on. Returns the frame's width and height.
     ///
-    /// Handed back with the frame rather than kept: one renderer is shared by
-    /// every preview of a map, so regions left on it would belong to whichever
-    /// frame was drawn last.
-    pub fn render_regions(
+    /// The regions are handed back with the frame rather than kept: one renderer is shared by
+    /// every preview of a map, so regions left on it would belong to whichever frame was drawn
+    /// last.
+    pub fn render_regions_bgra(
         &mut self,
         viewport: MapViewport,
         commands: &[DrawCommand],
-    ) -> (RgbImage, Vec<crate::drawing::DrawnRegion>) {
+        out: &mut Vec<u8>,
+    ) -> ((u32, u32), Vec<crate::drawing::DrawnRegion>) {
         self.draw(viewport, commands);
-        (self.target.frame(), self.target.drawn_regions().to_vec())
+        self.target.write_bgra(out);
+
+        (self.target.canvas_size(), self.target.drawn_regions().to_vec())
     }
 
     fn draw<'a>(&mut self, viewport: MapViewport, commands: impl IntoIterator<Item = &'a DrawCommand>) {

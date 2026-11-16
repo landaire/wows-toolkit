@@ -191,8 +191,11 @@ impl BattleEvents {
     }
 
     /// The event after `elapsed` seconds into the battle, if there is one.
+    ///
+    /// A millisecond on: playback that jumped to an event reads its clock back through the
+    /// battle's start, which can land a hair before it and find the same event again.
     pub fn next(&self, elapsed: f32) -> Option<&TimelineEvent> {
-        self.events.iter().find(|event| event.clock.seconds() > elapsed)
+        self.events.iter().find(|event| event.clock.seconds() > elapsed + 0.001)
     }
 }
 

@@ -2,14 +2,16 @@
 
 use std::time::Duration;
 
+use wows_minimap_renderer::video::FPS;
 use wows_replays::types::GameClock;
 
 use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
 
-/// How often the viewport advances while playing, before the speed
-/// multiplier. One frame of game time per tick at 1x.
-pub const TICK: Duration = Duration::from_millis(500);
+/// How often a playing viewport draws, at every speed: the rate a video is written at, and the
+/// rate the egui renderer's playback loop ran at. Each draw is placed between the two baked frames
+/// around its clock, so playback moves at this rate rather than at the bake's.
+pub const FRAME_INTERVAL: Duration = Duration::from_nanos((1_000_000_000.0 / FPS) as u64);
 
 /// The speeds the transport offers, which are the egui renderer's own
 /// (`PLAYBACK_SPEEDS`). A battle runs twenty minutes, so the useful range is
@@ -29,6 +31,9 @@ pub const SEEK_STEP: f32 = 10.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Playback {
     at: FrameIndex,
+    /// How far past `at`'s clock playback is, in seconds of game time. Zero on a frame sought by
+    /// its index, so it is drawn as it was baked.
+    past: f32,
     playing: bool,
     speed: f32,
 }
@@ -36,9 +41,11 @@ pub struct Playback {
 /// What one tick of a running transport did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tick {
-    /// Playback moved one frame on.
+    /// Playback moved on between the same two frames.
+    Moved,
+    /// Playback moved on to a later frame.
     Advanced,
-    /// Playback had reached the last frame and stopped there.
+    /// Playback reached the last frame and stopped there.
     Finished,
     /// Playback was not running.
     Idle,
@@ -46,10 +53,10 @@ pub enum Tick {
 
 impl Playback {
     pub fn new() -> Self {
-        Self { at: FrameIndex::FIRST, playing: false, speed: DEFAULT_SPEED }
+        Self { at: FrameIndex::FIRST, past: 0.0, playing: false, speed: DEFAULT_SPEED }
     }
 
-    /// Which frame of the track is on screen, or is being drawn for.
+    /// The frame at or before where playback is: what it draws, moved on by [`Self::clock`].
     pub fn at(&self) -> FrameIndex {
         self.at
     }
@@ -68,45 +75,58 @@ impl Playback {
     /// returns `false`.
     pub fn go_to(&mut self, track: &Track, at: FrameIndex) -> bool {
         let at = at.min(track.last());
-        if at == self.at {
+        if at == self.at && self.past == 0.0 {
             return false;
         }
         self.at = at;
+        self.past = 0.0;
 
         true
     }
 
     /// Moves playback `delta` seconds of game time from where it is.
     pub fn seek_by(&mut self, track: &Track, delta: f32) -> bool {
-        let at = track.frame_at(track.seconds_at(self.at) + delta);
-        self.go_to(track, at)
+        self.go_to_clock(track, GameClock(self.clock(track).seconds() + delta))
     }
 
     /// Moves playback to the frame a seek bar over the track's frames names.
+    ///
+    /// The frame playback is already on is no move: a seek bar writes back the frame it shows as
+    /// it is built, which must not pull a playing transport back to that frame's start.
     pub fn seek_to_slider(&mut self, track: &Track, value: f32) -> bool {
-        self.go_to(track, FrameIndex::new(value.round().max(0.) as usize))
+        let at = FrameIndex::new(value.round().max(0.) as usize);
+        if at == self.at {
+            return false;
+        }
+
+        self.go_to(track, at)
     }
 
     /// Moves playback to `elapsed` seconds into the battle, which is the
     /// clock a timeline event carries.
     pub fn go_to_elapsed(&mut self, track: &Track, elapsed: f32) -> bool {
-        let frame = track.frame_at(elapsed + track.battle_start.seconds());
-        self.go_to(track, frame)
+        self.go_to_clock(track, GameClock(elapsed + track.battle_start.seconds()))
     }
 
-    /// Moves playback to the frame `clock` falls in.
+    /// Moves playback to `clock`, held to the track, between frames if that is where it falls.
     ///
-    /// The clock is the battle's own, as the replay's timeline states it, which
-    /// is what a salvo in the incoming-fire log is stamped with.
+    /// The clock is the battle's own, as the replay's timeline states it, which is what a salvo in
+    /// the incoming-fire log is stamped with. Landing on it rather than on the frame before is what
+    /// lets the next event after one that was jumped to be found, rather than that one again.
     pub fn go_to_clock(&mut self, track: &Track, clock: GameClock) -> bool {
-        let frame = track.frame_at(clock.seconds());
-        self.go_to(track, frame)
+        let seconds = clock.seconds().clamp(track.seconds_at(FrameIndex::FIRST), track.duration_seconds());
+        let at = track.frame_at(seconds);
+        let past = seconds - track.seconds_at(at);
+        if at == self.at && past == self.past {
+            return false;
+        }
+        self.at = at;
+        self.past = past;
+
+        true
     }
 
     /// Changes the speed. Returns whether it changed.
-    ///
-    /// A ticker's interval is fixed when it starts, so a front end restarts
-    /// one that is running when this returns `true`.
     pub fn set_speed(&mut self, speed: f32) -> bool {
         if (self.speed - speed).abs() < f32::EPSILON {
             return false;
@@ -143,40 +163,42 @@ impl Playback {
         false
     }
 
-    /// Stops playback where it is.
+    /// Stops playback where it is, between frames if that is where it is.
     pub fn stop(&mut self) {
         self.playing = false;
     }
 
-    /// How long a running transport waits between ticks at this speed.
-    pub fn tick_interval(&self) -> Duration {
-        Duration::from_secs_f32(TICK.as_secs_f32() / self.speed.max(0.1))
-    }
-
-    /// Advances a running transport by one frame, stopping at the last.
-    pub fn advance(&mut self, track: &Track) -> Tick {
+    /// Moves a running transport on by `elapsed` of real time at its speed, stopping at the last
+    /// frame.
+    pub fn advance(&mut self, track: &Track, elapsed: Duration) -> Tick {
         if !self.playing {
             return Tick::Idle;
         }
-        let next = self.at.get() + 1;
-        if next >= track.len() {
+        let target = self.clock(track).seconds() + elapsed.as_secs_f32() * self.speed;
+        if target >= track.duration_seconds() || self.at >= track.last() {
+            self.at = track.last();
+            self.past = 0.0;
             self.playing = false;
             return Tick::Finished;
         }
-        self.go_to(track, FrameIndex::new(next));
 
-        Tick::Advanced
+        let at = track.frame_at(target);
+        let advanced = at != self.at;
+        self.at = at;
+        self.past = target - track.seconds_at(at);
+
+        if advanced { Tick::Advanced } else { Tick::Moved }
     }
 
-    /// The game clock where playback is, in seconds.
-    pub fn seconds(&self, track: &Track) -> f32 {
-        track.seconds_at(self.at)
+    /// The game clock where playback is.
+    pub fn clock(&self, track: &Track) -> GameClock {
+        GameClock(track.seconds_at(self.at) + self.past)
     }
 
     /// How far into the battle playback is, which is what an event's clock is
     /// measured against.
     pub fn elapsed(&self, track: &Track) -> f32 {
-        track.elapsed_at(self.at)
+        self.clock(track).seconds() - track.battle_start.seconds()
     }
 
     /// Where playback has reached, as the clock the game showed.

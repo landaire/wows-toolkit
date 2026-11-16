@@ -13,6 +13,7 @@ pub mod armor;
 pub mod collab;
 pub mod export;
 pub mod hover;
+pub mod motion;
 pub mod options;
 pub mod playback;
 pub mod raster;
