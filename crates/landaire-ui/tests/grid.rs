@@ -566,6 +566,43 @@ fn pressing_a_sortable_header_asks_for_ascending_then_descending_then_none() {
 }
 
 #[test]
+fn sorting_a_fitted_column_by_its_header_keeps_its_width() {
+    let fitted = || {
+        let mut columns = columns();
+        columns[1] = GridColumn::new("size", "Size of the item", |item: &Item| item.size.to_string()).sortable(true);
+        columns
+    };
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let sort: RwSignal<Option<ColumnSort>, LocalStorage> = RwSignal::new_local(None);
+        let on_sort = UnsyncCallback::new(move |next: Option<ColumnSort>| sort.set(next));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(2)),
+                        columns = fitted(),
+                        row_key = |item: &Item| item.id,
+                        sort = sort,
+                        on_sort = on_sort,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(50));
+    let size = header(&mut window, "Size of the item");
+    let unsorted = width(&window, size);
+
+    window.click(size).expect("the header has a box");
+    window.advance(Duration::from_millis(50));
+
+    let size = header(&mut window, "Size of the item");
+    assert_eq!(width(&window, size), unsorted, "the indicator had its room");
+}
+
+#[test]
 fn an_expanded_row_grows_into_its_detail_and_pushes_the_rows_below_down() {
     let handles = Rc::new(Handles::default());
     let detail = || {

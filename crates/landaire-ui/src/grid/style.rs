@@ -82,7 +82,12 @@ pub(crate) const CSS: &str = css!(
     }
     .lui-grid__head[data-align=\"end\"] { justify-content: flex-end; }
     .lui-grid__head[data-align=\"center\"] { justify-content: center; }
-    .lui-grid__sort { flex: none; color: var(--lui-color-text-dim); }
+    .lui-grid__sort {
+        display: flex;
+        flex: none;
+        width: var(--zui-icon-sm, 12px);
+        color: var(--lui-color-text-dim);
+    }
     .lui-grid__grip {
         position: absolute;
         top: 0;

@@ -37,6 +37,7 @@ use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::arrow::ARROW_DOWN;
 use zgui_ui_icons::set::arrow::ARROW_UP;
 
+use crate::grid::column::ColumnAlign;
 use crate::grid::column::ColumnId;
 use crate::grid::column::GridColumn;
 use crate::grid::layout;
@@ -284,6 +285,25 @@ where
     };
 
     let label = column.header_view();
+    // A sortable header always holds the indicator's room, so sorting never changes a width.
+    let sort_slot = column.is_sortable().then(|| {
+        AnyView::new(view! {
+            box(class = "lui-grid__sort") {
+                {move || sorted().map(|direction| {
+                    let icon = match direction {
+                        SortDirection::Ascending => ARROW_UP,
+                        SortDirection::Descending => ARROW_DOWN,
+                    };
+                    AnyView::new(view! { Icon(icon = icon, size = IconSize::Sm) })
+                })}
+            }
+        })
+    });
+    // An end-aligned label keeps its edge in line with the figures under it, so its room leads.
+    let (leading_slot, trailing_slot) = match column.align_value() {
+        ColumnAlign::End => (sort_slot, None),
+        ColumnAlign::Start | ColumnAlign::Center => (None, sort_slot),
+    };
     let grip = column.is_resizable().then(|| AnyView::new(grip(Rc::clone(&cx), id.clone(), cell)));
 
     AnyView::new(view! {
@@ -300,14 +320,9 @@ where
             on:key_down = on_key_down,
             {..own}
         ) {
+            {leading_slot}
             box(class = "lui-grid__label") {{label}}
-            {move || sorted().map(|direction| {
-                let icon = match direction {
-                    SortDirection::Ascending => ARROW_UP,
-                    SortDirection::Descending => ARROW_DOWN,
-                };
-                AnyView::new(view! { Icon(icon = icon, size = IconSize::Sm, class = "lui-grid__sort") })
-            })}
+            {trailing_slot}
             {grip}
         }
     })
