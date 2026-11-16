@@ -637,6 +637,20 @@ fn a_viewport_opens_on_the_first_frame() {
     assert!(!session.playback.with_untracked(Playback::is_playing));
 }
 
+/// A listener that outlives the viewport, as the armor viewer's seek does, finds nothing to move
+/// rather than reading the closed session's state.
+#[test]
+fn a_seek_into_a_closed_session_does_nothing() {
+    let (_window, session) = open_viewport(track(half_second_frames(10)));
+    session.close();
+
+    session.go_to_clock(GameClock(3.0));
+    session.go_to(FrameIndex::FIRST);
+    session.go_to_elapsed(2.0);
+    session.seek_by(1.0);
+    assert!(session.track_untracked().is_none());
+}
+
 /// A watched window, mounted while `shown` holds, over a session the test feeds frames into.
 #[component]
 fn Watching(shared: SharedWindow, link: CollabLink, shown: Rc<Cell<Option<RwSignal<bool>>>>) -> impl IntoView {

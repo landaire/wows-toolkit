@@ -418,11 +418,15 @@ impl RendererSession {
         })
     }
 
+    /// The baked battle. `None` until the bake lands, and once the session has closed, since a
+    /// listener such as the armor viewer's seek can outlive it.
     pub fn track_untracked(self) -> Option<Arc<Track>> {
-        self.status.with_untracked(|status| match status {
-            Status::Ready(track) => Some(Arc::clone(track)),
-            _ => None,
-        })
+        self.status
+            .try_with_untracked(|status| match status {
+                Status::Ready(track) => Some(Arc::clone(track)),
+                _ => None,
+            })
+            .flatten()
     }
 
     /// Whether the transport can act: the track is here.
