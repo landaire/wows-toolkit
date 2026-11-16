@@ -587,9 +587,65 @@ pub fn highlight_color(penetrates: Option<bool>) -> [f32; 4] {
     if penetrates == Some(true) { PEN_COLOR } else { NO_PEN_COLOR }
 }
 
-/// How far a shaded triangle is lifted off its plate.
-pub fn highlight_offset() -> f32 {
-    HIGHLIGHT_OFFSET
+/// The armour triangles inside a burst, shaded by whether `shell` gets through each, lifted off
+/// their plates so they do not fight them for depth.
+///
+/// Empty when the burst reached no splash box, since shading plates the game would deal no damage
+/// through would claim damage it does not deal, and when no bursting shell was chosen to hold
+/// against them.
+pub fn build_burst_highlight(
+    meshes: &[InteractiveArmorMesh],
+    result: &SplashResult,
+    shell: Option<&ShellInfo>,
+    ifhe: Ifhe,
+) -> (Vec<Vertex>, Vec<u32>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let Some(shell) = shell.filter(|_| !result.hit_zones.is_empty()) else { return (vertices, indices) };
+
+    let penetration = flat_penetration(shell, ifhe);
+    let reach = result.half_extent.value();
+    let centre = result.impact_point;
+    let burst_min = [centre[0] - reach, centre[1] - reach, centre[2] - reach];
+    let burst_max = [centre[0] + reach, centre[1] + reach, centre[2] + reach];
+    for mesh in meshes {
+        for (triangle, corners) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+            let Some(info) = mesh.triangle_info.get(triangle) else { continue };
+            let Some(points) = triangle_corners(mesh, corners) else { continue };
+            let middle: [f32; 3] =
+                std::array::from_fn(|axis| points.iter().map(|point| point[axis]).sum::<f32>() / 3.0);
+            if !point_in_box(middle, burst_min, burst_max) {
+                continue;
+            }
+
+            let penetrates = penetration.map(|penetration| penetration >= Millimeters::new(info.thickness_mm));
+            let color = highlight_color(penetrates);
+            let edge = |to: usize| std::array::from_fn::<f32, 3, _>(|axis| points[to][axis] - points[0][axis]);
+            let normal = normalize(cross(edge(1), edge(2)));
+            let base = vertices.len() as u32;
+            for point in points {
+                let position = std::array::from_fn(|axis| point[axis] + normal[axis] * HIGHLIGHT_OFFSET);
+                vertices.push(Vertex { position, normal, color, uv: [0.0, 0.0], tangent: [0.0; 4] });
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2]);
+        }
+    }
+
+    (vertices, indices)
+}
+
+/// A triangle's corners in ship space. `None` when the mesh's own indices do not reach them.
+fn triangle_corners(mesh: &InteractiveArmorMesh, corners: &[u32; 3]) -> Option<[[f32; 3]; 3]> {
+    let mut points = [[0.0_f32; 3]; 3];
+    for (point, &corner) in points.iter_mut().zip(corners) {
+        let position = *mesh.positions.get(corner as usize)?;
+        *point = match &mesh.transform {
+            Some(transform) => transform_point(transform, position),
+            None => position,
+        };
+    }
+
+    Some(points)
 }
 
 #[cfg(test)]
@@ -936,5 +992,26 @@ mod tests {
 
         assert_eq!(splash_readout(&result, None, &[], Ifhe::NotApplied).triangles, None);
         assert_eq!(splash_readout(&result, Some(&no_figure), &[], Ifhe::NotApplied).triangles, None);
+    }
+
+    /// Inside a burst that reached a box, each plate is shaded by whether the shell gets through
+    /// it; plates outside the burst, and every plate of a burst that reached no box, are not.
+    #[test]
+    fn a_burst_shades_the_plates_it_holds_by_whether_the_shell_gets_through() {
+        let he = shell(AmmoType::HE, 152.0, Some(25.0), None);
+        let meshes =
+            [plate_mesh(&[([0.0, 0.0, 0.0], 19.0), ([0.1, 0.0, 0.0], 32.0), ([5.0, 0.0, 0.0], 10.0)], None, None)];
+        let boxed = data(vec![splash_box("CM_SB_cit_1", [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])]);
+        let result = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.5), &boxed, None, &meshes);
+
+        let (vertices, indices) = build_burst_highlight(&meshes, &result, Some(&he), Ifhe::NotApplied);
+
+        let colors: Vec<[f32; 4]> = vertices.chunks(3).map(|corners| corners[0].color).collect();
+        assert_eq!(colors, [PEN_COLOR, NO_PEN_COLOR], "19 mm is penetrated, 32 mm is not, 10 mm is outside");
+        assert_eq!(indices.len(), 6);
+
+        let unboxed = compute_splash([0.0, 0.0, 0.0], ModelUnit::new(0.5), &data(Vec::new()), None, &meshes);
+        assert!(build_burst_highlight(&meshes, &unboxed, Some(&he), Ifhe::NotApplied).0.is_empty());
+        assert!(build_burst_highlight(&meshes, &result, None, Ifhe::NotApplied).0.is_empty());
     }
 }

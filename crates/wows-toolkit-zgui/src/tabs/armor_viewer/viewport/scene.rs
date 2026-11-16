@@ -256,6 +256,7 @@ impl ViewportModel {
     pub(super) fn set_camera(&mut self, camera: ArcballCamera, cx: &mut ViewCx) {
         self.viewport.camera = camera;
         self.viewport.mark_dirty();
+        self.hover_again();
         cx.notify();
     }
 
@@ -343,10 +344,11 @@ impl ViewportModel {
         cx: &mut ViewCx,
     ) {
         self.show_armor(armor, layer, cx);
-        match self.pending_armor.as_mut() {
-            Some(pending) => pending.copied = Some(view),
-            None => self.adopt_view(view, cx),
+        // Taken at once, so the pane reads as the copy it is; and again once the scene uploads.
+        if let Some(pending) = self.pending_armor.as_mut() {
+            pending.copied = Some(view.clone());
         }
+        self.adopt_view(view, cx);
     }
 
     /// Takes another pane's camera and settings.
@@ -563,7 +565,7 @@ impl ViewportModel {
         }
         self.camera_rings = settings;
         self.reupload_current_armor(cx);
-        cx.emit(ViewportChange::Settings);
+        cx.emit(ViewportChange::Synced);
         cx.notify();
     }
 
@@ -578,7 +580,7 @@ impl ViewportModel {
             return;
         }
         self.switch_perspective(on, cx);
-        cx.emit(ViewportChange::Settings);
+        cx.emit(ViewportChange::Synced);
     }
 
     /// Locks the camera or lets it go, without reporting it.
@@ -610,7 +612,7 @@ impl ViewportModel {
         self.perspective.camera.fov_deg = degrees;
         self.perspective.camera.clamp();
         self.reupload_current_armor(cx);
-        cx.emit(ViewportChange::Settings);
+        cx.emit(ViewportChange::Synced);
         cx.notify();
     }
 
@@ -622,7 +624,7 @@ impl ViewportModel {
         }
         self.perspective.camera.look_mode = mode;
         self.reupload_current_armor(cx);
-        cx.emit(ViewportChange::Settings);
+        cx.emit(ViewportChange::Synced);
         cx.notify();
     }
 
@@ -841,7 +843,7 @@ impl ViewportModel {
     }
 
     /// Picks the hover again where the pointer last moved over the view.
-    fn hover_again(&mut self) {
+    pub(super) fn hover_again(&mut self) {
         let Some(at) = self.last_pointer else { return };
         let over_view = self.last_bounds.is_some_and(|bounds| bounds.contains(at));
         if over_view && self.drag.is_none() && self.camera_is_free() {
@@ -1052,8 +1054,10 @@ impl ArmorViewportState {
         self.read(|this| this.has_armor()).unwrap_or_default()
     }
 
+    /// The last plate the pointer was over, following the pointer: hover moves it without
+    /// notifying the panels.
     pub fn last_plate(self) -> Option<(String, f32)> {
-        self.read(|this| this.last_plate()).flatten()
+        self.read_overlay(|this| this.last_plate()).flatten()
     }
 
     pub fn shown_ship_name(self) -> Option<String> {

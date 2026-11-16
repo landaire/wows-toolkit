@@ -32,11 +32,11 @@ use wows_toolkit_armor::load_model::SceneProblem;
 use wows_toolkit_armor::load_model::load_model_scene;
 use wows_toolkit_armor::load_ship;
 use wows_toolkit_armor::load_ship::ShipLoadError;
-use wows_toolkit_armor::scene_load::LoadCancel;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::OpenTarget;
 use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::scene_load::LoadCancel;
 use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_config::queries::SavedLighting;
@@ -47,6 +47,7 @@ use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
 use wows_toolkit_viewmodel::armor::options_panel::TabMatches;
+use wows_toolkit_viewmodel::armor::penetration::Ifhe;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::model_catalog::ModelPath;
@@ -206,13 +207,15 @@ struct Following {
     pane: PaneId,
 }
 
-/// What decides the ship a trajectory cast fires and its shell.
+/// What decides the ship a trajectory cast fires and its shell, and how a burst's plates are
+/// shaded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CastKey {
     firing_ship: Option<String>,
     firing_shell: Option<usize>,
     /// The first ship the checker holds, which fires when none is chosen.
     first_ship: Option<String>,
+    ifhe: bool,
 }
 
 /// The tab's state, as one `Copy` handle.
@@ -272,6 +275,9 @@ pub struct ArmorWorkspace {
     /// not undo.
     options_layout_picked: StoredValue<bool>,
     pub options_filter: RwSignal<String, LocalStorage>,
+    /// The pane and scene the options rail was last built for, held here rather than in the rail,
+    /// which is let go while it is closed, so reopening it is not taken for a new scene.
+    pub options_scene: StoredValue<Option<(PaneId, Option<usize>)>>,
     pub zone_filter: RwSignal<String, LocalStorage>,
     pub part_filter: RwSignal<String, LocalStorage>,
     /// The mesh whose material the textures section shows open, as the viewport menu chose it.
@@ -314,6 +320,7 @@ impl ArmorWorkspace {
             options_matches: RwSignal::new_local(None),
             options_layout_picked: StoredValue::new(false),
             options_filter: RwSignal::new_local(String::new()),
+            options_scene: StoredValue::new(None),
             zone_filter: RwSignal::new_local(String::new()),
             part_filter: RwSignal::new_local(String::new()),
             texture_focus: RwSignal::new_local(None),
@@ -592,6 +599,7 @@ impl ArmorWorkspace {
                 // The display settings are a preference, so they outlive the session.
                 self.save_defaults();
             }
+            ViewportChange::Synced if self.sync_options.get_untracked() => self.push_settings_from(source),
             _ => {}
         }
     }
@@ -722,7 +730,7 @@ impl ArmorWorkspace {
     /// During a search it moves among the tabs holding a match.
     pub fn cycle_options_tab(self, forward: bool) {
         let was_open = self.options_open.get_untracked();
-        let searching = !self.options_filter.get_untracked().is_empty();
+        let searching = !self.options_filter.get_untracked().trim().is_empty();
         self.options_open.set(true);
         // The counts are the closed rail's last, which a pane or scene change since may have made
         // stale: the reopened rail counts again before a search moves between tabs.
@@ -810,15 +818,19 @@ impl ArmorWorkspace {
             firing_ship: pen.firing_ship.clone(),
             firing_shell: pen.firing_shell,
             first_ship: pen.ships.first().map(|ship| ship.param_index.clone()),
+            ifhe: pen.ifhe,
         })
     }
 
-    /// Hands every pane the ship a trajectory cast fires: the controls are the tab's, so whichever
-    /// pane the reader casts in fires what they show.
+    /// Hands every pane the ship a trajectory cast fires, and whether a burst counts Inertia Fuse
+    /// for HE Shells: the controls are the tab's, so whichever pane the reader casts in fires what
+    /// they show.
     pub fn push_cast_ship(self) {
         let shell = self.cast_shell_untracked();
+        let ifhe = Ifhe::from_enabled(self.pen.with_untracked(|pen| pen.ifhe));
         for viewport in self.viewports_untracked() {
             viewport.set_cast_shell(shell.clone());
+            viewport.set_burst_ifhe(ifhe);
         }
     }
 

@@ -279,6 +279,11 @@ impl ViewportModel {
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             }
+            let (vertices, indices) =
+                splash::build_burst_highlight(&armor.meshes, &burst.result, burst.shell.as_ref(), self.burst_ifhe);
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            }
         }
 
         // Walked over the same triangles the armor pass just uploaded, so a hidden plate's rim is

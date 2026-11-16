@@ -180,14 +180,15 @@ impl PenetrationState {
         self.ships.push(ship);
     }
 
-    /// Drops the ship at `index`, and the cast's ship with it when it was that one.
+    /// Drops the ship at `index`. When it was the cast's ship, the first ship left fires instead,
+    /// as casts would otherwise use it without saying so.
     pub fn remove(&mut self, index: usize) {
         if index >= self.ships.len() {
             return;
         }
         self.ships.remove(index);
         if self.firing_ship.as_deref().is_none_or(|ship| !self.holds(ship)) {
-            self.firing_ship = None;
+            self.firing_ship = self.ships.first().map(|ship| ship.param_index.clone());
             self.firing_shell = None;
         }
     }
@@ -696,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn the_first_ship_fires_and_dropping_it_clears_the_cast() {
+    fn the_first_ship_fires_and_dropping_it_hands_the_cast_to_the_first_left() {
         let mut state = PenetrationState::default();
         state.add(ship("A"));
         state.add(ship("B"));
@@ -714,8 +715,16 @@ mod tests {
         state.set_firing_ship("C");
         assert_eq!(state.firing_ship.as_deref(), Some("B"), "a ship not compared cannot fire");
 
+        state.set_firing_shell(1);
         state.remove(1);
-        assert_eq!((state.firing_ship.as_deref(), state.firing_shell), (None, None));
+        assert_eq!(
+            (state.firing_ship.as_deref(), state.firing_shell),
+            (Some("A"), None),
+            "the first ship left fires from its default shell"
+        );
         assert_eq!(state.ships.len(), 1);
+
+        state.remove(0);
+        assert_eq!((state.firing_ship.as_deref(), state.firing_shell), (None, None), "no ship left to fire");
     }
 }

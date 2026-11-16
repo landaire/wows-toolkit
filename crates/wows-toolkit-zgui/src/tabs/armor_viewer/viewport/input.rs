@@ -380,6 +380,7 @@ impl ViewportModel {
             self.viewport.camera.zoom(notches);
         }
         self.viewport.mark_dirty();
+        self.hover_again();
         cx.emit(ViewportChange::Camera);
     }
 
@@ -433,21 +434,24 @@ impl ViewportModel {
     }
 
     /// Applies one frame's camera movement for every held movement key. `dt` is the time since the
-    /// previous frame, which the pan is scaled by. Says whether the camera moved.
+    /// previous frame, which every step is scaled by, so the camera moves as fast at any refresh
+    /// rate. Says whether the camera moved.
     pub(super) fn apply_held_keys(&mut self, dt: Duration) -> bool {
         if self.held_keys.is_empty() || !self.camera_is_free() {
             return false;
         }
 
+        // The steps are sized for a 60 Hz frame, as the GPUI viewer's key ticker ran.
+        let frames = dt.as_secs_f32() / FRAME_STEP.as_secs_f32();
         let motion = HeldMotion::from_keys(&self.held_keys);
         if motion.forward != 0.0 || motion.right != 0.0 {
-            self.viewport.camera.wasd(motion.forward, motion.right);
+            self.viewport.camera.wasd(motion.forward * frames, motion.right * frames);
         }
         if motion.vertical != 0.0 {
-            self.viewport.camera.move_vertical(motion.vertical);
+            self.viewport.camera.move_vertical(motion.vertical * frames);
         }
         if motion.rotate != 0.0 {
-            self.viewport.camera.rotate_horizontal(motion.rotate);
+            self.viewport.camera.rotate_horizontal(motion.rotate * frames);
         }
         if motion.pan_x != 0.0 || motion.pan_y != 0.0 {
             let size = self.viewport_size();
@@ -471,17 +475,21 @@ impl ViewportModel {
     /// Every frame of a snap is a camera change, so a mirrored pane follows the whole eased move.
     pub(super) fn advance_frame(&mut self, now: Timestamp, cx: &mut ViewCx) -> bool {
         let dt = self.last_frame.map_or(FRAME_STEP, |last| now.saturating_since(last).min(LONGEST_FRAME));
-        if self.apply_held_keys(dt) {
-            self.viewport.mark_dirty();
-            cx.emit(ViewportChange::Camera);
-        }
-        if self.viewport.camera.animation.is_some() {
+        let keyed = self.apply_held_keys(dt);
+        let snapping = self.viewport.camera.animation.is_some();
+        if snapping {
             self.viewport.camera.update_animation(dt.as_secs_f32());
+        }
+        if keyed || snapping {
             self.viewport.mark_dirty();
+            // The plate under a still pointer changes as the camera moves under it.
+            self.hover_again();
             cx.emit(ViewportChange::Camera);
         }
 
-        let moving = !self.held_keys.is_empty() || self.viewport.camera.animation.is_some() || self.prune_pulses(cx);
+        // A held key moves nothing while the camera is locked, so it asks for no frames then.
+        let keys_move = !self.held_keys.is_empty() && self.camera_is_free();
+        let moving = keys_move || self.viewport.camera.animation.is_some() || self.prune_pulses(cx);
         self.last_frame = moving.then_some(now);
         moving
     }
@@ -572,6 +580,36 @@ mod tests {
         model.key_up(ViewKey::Left);
         let mut cx = ViewCx::for_test();
         assert!(!model.advance_frame(Timestamp::from_origin(Duration::from_millis(32)), &mut cx));
+        assert!(cx.events().is_empty());
+    }
+
+    /// A held key turns the camera as far in a second at 144 Hz as at 60 Hz.
+    #[test]
+    fn a_held_key_moves_the_camera_at_the_same_speed_at_any_refresh_rate() {
+        let turned_in_a_second = |hz: u32| {
+            let mut model = ViewportModel::new();
+            model.held_keys.insert(MoveKey::RotateLeft);
+            let azimuth = model.viewport.camera.azimuth;
+            for _ in 0..hz {
+                model.apply_held_keys(Duration::from_secs(1) / hz);
+            }
+            model.viewport.camera.azimuth - azimuth
+        };
+
+        let (at_60, at_144) = (turned_in_a_second(60), turned_in_a_second(144));
+        assert!((at_60 - at_144).abs() < at_60.abs() * 0.01, "60 Hz turned {at_60}, 144 Hz turned {at_144}");
+    }
+
+    /// With the camera locked to the ship's orbit a held key moves nothing, so it does not keep
+    /// the frames coming.
+    #[test]
+    fn a_held_key_asks_for_no_frames_while_the_camera_is_locked() {
+        let mut model = ViewportModel::new();
+        model.held_keys.insert(MoveKey::RotateLeft);
+        model.perspective.enabled = true;
+        let mut cx = ViewCx::for_test();
+
+        assert!(!model.advance_frame(Timestamp::from_origin(Duration::from_millis(16)), &mut cx));
         assert!(cx.events().is_empty());
     }
 

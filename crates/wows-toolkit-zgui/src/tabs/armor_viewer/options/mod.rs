@@ -41,6 +41,8 @@ use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
@@ -274,8 +276,10 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
                     {move || {
                         locale.track();
                         // Another pane, or another scene in this one, builds the rail again.
-                        let _ = workspace.active_id();
-                        let _ = scene.get();
+                        let pane = workspace.active_id();
+                        let shown = (pane, scene.get());
+                        let opened = workspace.options_scene.with_value(|last| *last != Some(shown));
+                        workspace.options_scene.set_value(Some(shown));
                         let filter = RailFilter::new(&filter_text.get());
                         let matching = filter.is_active().then(|| match_state.get());
                         let inputs = RailInputs {
@@ -284,6 +288,7 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
                             features: features.get(),
                             matching,
                             tab: workspace.options_tab.get(),
+                            opened,
                         };
                         let built = rail_content(workspace, inputs);
                         if matches.get_untracked() != built.matches {
@@ -307,6 +312,8 @@ struct RailInputs {
     matching: Option<MatchState>,
     /// The tab the reader chose.
     tab: OptionsTab,
+    /// Whether a pane or scene other than the one last built for is shown.
+    opened: bool,
 }
 
 /// The shown tab's content, and what a search kept in each tab.
@@ -319,12 +326,27 @@ struct RailContent {
 /// The chosen tab as the filter leaves it. While a search is typed every tab is built to count
 /// what it kept, and the first tab holding a match is shown in place of a chosen one with none.
 fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> RailContent {
-    let RailInputs { filter, sections, features, matching, tab } = inputs;
+    let RailInputs { filter, sections, features, matching, tab, opened } = inputs;
     let viewport = workspace.active_untracked();
     let cx = SectionCx { workspace, viewport, filter: filter.clone(), sections, features, matching };
 
     if !filter.is_active() {
-        return RailContent { view: tab_view(tab, tab_parts(&cx, tab), false), matches: None };
+        let parts = tab_parts(&cx, tab);
+        // A scene opening on a tab with nothing for it, such as Analysis for a model with no
+        // armor, opens on the first tab that has something instead. A tab the reader picks is
+        // shown as it is, saying it has nothing.
+        if opened
+            && parts.is_empty()
+            && let Some((shown, parts)) = OptionsTab::ALL
+                .into_iter()
+                .filter(|other| *other != tab)
+                .map(|other| (other, tab_parts(&cx, other)))
+                .find(|(_, parts)| !parts.is_empty())
+        {
+            workspace.options_tab.set(shown);
+            return RailContent { view: tab_view(shown, parts, false), matches: None };
+        }
+        return RailContent { view: tab_view(tab, parts, false), matches: None };
     }
 
     let mut matches = TabMatches::default();
@@ -355,6 +377,11 @@ impl TabParts {
     /// How many tools and sections the filter kept.
     fn kept(&self) -> usize {
         self.tools.len() + self.sections.len()
+    }
+
+    /// Whether the tab has nothing at all for the scene.
+    fn is_empty(&self) -> bool {
+        self.tools.is_empty() && self.sections.is_empty() && self.readout.is_none()
     }
 }
 

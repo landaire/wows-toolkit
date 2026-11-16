@@ -271,7 +271,12 @@ pub fn armor_target(
         upgrades.keys().find(|key| key.contains(&module_index)).cloned()
     });
 
-    Some(ArmorTarget { param_index: param.index().to_string(), display_name: param.name().to_string(), hull_upgrade })
+    // The internal name stands in for a ship the build has no translation for, as the catalogue
+    // names it.
+    let localized = wowsunpack::data::ResourceLoader::localized_name_from_param(provider.as_ref(), &param);
+    let display_name = localized.unwrap_or_else(|| param.name().to_string());
+
+    Some(ArmorTarget { param_index: param.index().to_string(), display_name, hull_upgrade })
 }
 
 /// Whether `entity_id`'s ship has anything an armor viewer could show.
