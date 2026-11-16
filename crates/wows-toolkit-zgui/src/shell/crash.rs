@@ -2,6 +2,7 @@
 
 use rust_i18n::t;
 use zgui::css;
+use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::WithValue;
@@ -9,6 +10,14 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
+use zgui_ui::AlertDialogActionProps;
+use zgui_ui::AlertDialogCancelProps;
+use zgui_ui::AlertDialogContentProps;
+use zgui_ui::AlertDialogDescriptionProps;
+use zgui_ui::AlertDialogFooterProps;
+use zgui_ui::AlertDialogHeaderProps;
+use zgui_ui::AlertDialogProps;
+use zgui_ui::AlertDialogTitleProps;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
@@ -18,9 +27,12 @@ use zgui_ui::DialogFooterProps;
 use zgui_ui::DialogHeaderProps;
 use zgui_ui::DialogTitleProps;
 
+use crate::desktop;
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
 use crate::shell::dialogs::focus_when_bound;
+use crate::shell::menu::DISCORD_URL;
+use crate::shell::menu::ISSUES_URL;
 
 const SHEET: &str = "wt-crash";
 
@@ -45,7 +57,12 @@ const CSS: &str = css!(
         font-size: 11px;
         white-space: pre-wrap;
         user-select: text;
-    }"
+    }
+    .wt-crash__links {
+        display: flex;
+        gap: 8px;
+    }
+    .wt-crash__clear { margin-left: auto; }"
 );
 
 /// Reports what the last run's crash left behind, once.
@@ -55,7 +72,8 @@ pub fn report_last_crash(shell: Shell) {
     show_crash_report(shell, report);
 }
 
-/// The crash dialog, with a way to copy the report.
+/// The crash dialog, with a way to copy the report, the places to report it, and a way to clear the
+/// settings in case they are what crashed it.
 pub fn show_crash_report(shell: Shell, report: String) {
     shell.remember_crash(report.clone());
     shell.dialogs.open(move |handle| {
@@ -73,6 +91,33 @@ pub fn show_crash_report(shell: Shell, report: String) {
                     }
                     column(class = "wt-crash") {
                         text(class = "wt-crash__report", attr:data-testid = "crash-report-scroll") {{report.with_value(|report| report.trim().to_owned())}}
+                        row(class = "wt-crash__links") {
+                            Button(
+                                size = ButtonSize::Sm,
+                                variant = ButtonVariant::Outline,
+                                attr:data-testid = "crash-report-github",
+                                on:click = move |_| desktop::open_url(ISSUES_URL)
+                            ) {
+                                {t!("ui.buttons.github").into_owned()}
+                            }
+                            Button(
+                                size = ButtonSize::Sm,
+                                variant = ButtonVariant::Outline,
+                                attr:data-testid = "crash-report-discord",
+                                on:click = move |_| desktop::open_url(DISCORD_URL)
+                            ) {
+                                {t!("ui.buttons.discord").into_owned()}
+                            }
+                            Button(
+                                size = ButtonSize::Sm,
+                                variant = ButtonVariant::Destructive,
+                                class = "wt-crash__clear",
+                                attr:data-testid = "crash-report-clear-settings",
+                                on:click = move |_| confirm_clear_settings(shell)
+                            ) {
+                                {t!("ui.buttons.clear_settings").into_owned()}
+                            }
+                        }
                     }
                     DialogFooter {
                         Button(
@@ -93,6 +138,34 @@ pub fn show_crash_report(shell: Shell, report: String) {
                             }
                         ) {
                             {t!("ui.buttons.copy").into_owned()}
+                        }
+                    }
+                }
+            }
+        })
+    });
+}
+
+/// Asks before clearing the settings, which cannot be taken back.
+fn confirm_clear_settings(shell: Shell) {
+    shell.dialogs.open(move |handle| {
+        let open = RwSignal::new_local(true);
+
+        AnyView::new(view! {
+            AlertDialog(open = open, on_open_change = handle.on_open_change()) {
+                AlertDialogContent(attr:data-testid = "crash-clear-settings-confirm") {
+                    AlertDialogHeader {
+                        AlertDialogTitle {{t!("ui.buttons.clear_settings").into_owned()}}
+                        AlertDialogDescription {{t!("ui.dialogs.crash_clear_settings").into_owned()}}
+                    }
+                    AlertDialogFooter {
+                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogAction(
+                            variant = ButtonVariant::Destructive,
+                            attr:data-testid = "crash-clear-settings-ok",
+                            on:click = move |_| shell.services().settings.clear()
+                        ) {
+                            {t!("ui.buttons.clear_settings").into_owned()}
                         }
                     }
                 }
@@ -154,6 +227,7 @@ pub fn copy_latest_log(shell: Shell) {
 mod tests {
     use std::time::Duration;
 
+    use landaire_ui::Appearance;
     use landaire_ui::test_support::HeadlessWindow;
     use zgui::geom::DevicePx;
     use zgui::geom::Point;
@@ -162,9 +236,17 @@ mod tests {
     use zgui::vocab::NamedKey;
 
     use super::show_crash_report;
+    use crate::desktop::opened_for_test;
     use crate::interaction_tests::REVIEW_SIZE;
     use crate::interaction_tests::open_bare_shell;
+    use crate::interaction_tests::open_shell;
+    use crate::interaction_tests::review_options;
+    use crate::interaction_tests::save_shot;
     use crate::interaction_tests::shell;
+    use crate::services::CLEARED;
+    use crate::services::saved_for_test;
+    use crate::shell::menu::DISCORD_URL;
+    use crate::shell::menu::ISSUES_URL;
 
     fn settle(window: &mut HeadlessWindow) {
         window.advance(Duration::from_millis(400));
@@ -176,6 +258,15 @@ mod tests {
         settle(&mut window);
 
         window
+    }
+
+    fn press(window: &mut HeadlessWindow, id: &str) {
+        window.click(window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"))).expect("the button is pressed");
+        settle(window);
+    }
+
+    fn cleared() -> bool {
+        saved_for_test().iter().any(|(key, _)| *key == CLEARED)
     }
 
     #[test]
@@ -198,6 +289,42 @@ mod tests {
         assert!(window.by_test_id("crash-report").is_none(), "copying closes the report");
         let toasts = window.texts_by_class("zui-toast").concat();
         assert!(toasts.contains(rust_i18n::t!("ui.stats.copied").as_ref()), "{toasts}");
+    }
+
+    #[test]
+    fn the_crash_report_links_to_github_and_discord() {
+        let mut window = open_crash_report();
+
+        press(&mut window, "crash-report-github");
+        press(&mut window, "crash-report-discord");
+
+        assert_eq!(opened_for_test(), [ISSUES_URL, DISCORD_URL]);
+    }
+
+    #[test]
+    fn clearing_the_settings_from_the_crash_report_asks_first() {
+        let mut window = open_crash_report();
+
+        press(&mut window, "crash-report-clear-settings");
+        assert!(window.by_test_id("crash-clear-settings-confirm").is_some(), "the clear is confirmed first");
+        assert!(!cleared(), "nothing is cleared before the answer");
+
+        press(&mut window, "crash-clear-settings-ok");
+        assert!(cleared());
+        assert!(window.by_test_id("crash-clear-settings-confirm").is_none());
+    }
+
+    /// Draws the crash report over the shell, in Dark and Light.
+    #[test]
+    #[ignore = "draws on the graphics device; run by hand to review the crash report"]
+    fn the_crash_report_renders_in_dark_and_light() {
+        for (appearance, name) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
+            let mut window = open_shell(review_options(appearance));
+            show_crash_report(shell(), "thread 'main' panicked at src/main.rs:1:1".to_owned());
+            settle(&mut window);
+
+            println!("{}", save_shot(&mut window, &format!("crash-report-{name}")).display());
+        }
     }
 
     /// The report box's `max-height`.

@@ -97,6 +97,37 @@ pub async fn delete_setting(pool: &SqlitePool, key: &str) -> Result<(), sqlx::Er
     Ok(())
 }
 
+/// Puts what the egui app keeps as its persisted state back to its defaults: every setting but
+/// those named in `kept`, the session stats and their charts, the armor viewer defaults, the render
+/// options, the dock layouts and the mod manager's record. The recovery the crash window offers.
+///
+/// Tracked players, sent replays and the replay index are kept, as the egui reset keeps them. So is
+/// the migration flag, without which the next start would migrate `app.ron` over the cleared state.
+pub async fn clear_settings(pool: &SqlitePool, kept: &[&str]) -> Result<(), sqlx::Error> {
+    const CLEARED_TABLES: [&str; 6] = [
+        "DELETE FROM session_stats",
+        "DELETE FROM chart_configs",
+        "DELETE FROM armor_viewer_defaults",
+        "DELETE FROM render_options",
+        "DELETE FROM dock_layouts",
+        "DELETE FROM mod_manager",
+    ];
+
+    let kept: Vec<&str> = kept.iter().copied().chain([crate::db::MIGRATION_COMPLETED]).collect();
+    let kept = serde_json::to_string(&kept).expect("a list of strings serializes");
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM settings WHERE key NOT IN (SELECT value FROM json_each(?1))")
+        .bind(kept)
+        .execute(&mut *tx)
+        .await?;
+    for statement in CLEARED_TABLES {
+        sqlx::query(statement).execute(&mut *tx).await?;
+    }
+
+    tx.commit().await
+}
+
 /// A row from the session_stats table.
 #[derive(Debug, sqlx::FromRow)]
 pub struct SessionStatRow {

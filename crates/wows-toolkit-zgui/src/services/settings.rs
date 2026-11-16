@@ -25,6 +25,7 @@ use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::task::spawn_detached;
 
 /// Where the settings read has got.
 pub enum SettingsState {
@@ -187,6 +188,46 @@ impl Settings {
         self.commit_detached(writer.begin_armor_defaults(row));
     }
 
+    /// Puts the persisted settings back to their defaults, as the egui crash window's Clear
+    /// Settings does, and reads them again.
+    ///
+    /// In the write order, so a save made before it never lands after it, and waited for at quit as
+    /// a save is. A failure is logged, as a failed save is.
+    pub fn clear(self) {
+        #[cfg(test)]
+        SAVED.with(|saved| saved.borrow_mut().push((CLEARED, String::new())));
+
+        let Some(writer) = self.writer.get_value() else {
+            tracing::warn!("settings: nothing was cleared because the config database is not open");
+            return;
+        };
+        let Some(runtime) = self.runtime.get_value() else {
+            tracing::error!("settings: nothing was cleared because no tokio runtime is running");
+            return;
+        };
+
+        // The tracker blob is tracked players not yet imported, not a setting.
+        let pending = writer.begin_clear(vec![wows_toolkit_viewmodel::player_tracker::tracked::SETTING_KEY]);
+        let pool = writer.pool().clone();
+        let (reloaded, read) = futures::channel::oneshot::channel();
+        runtime.spawn(self.tracked(async move {
+            let Some(write) = pending.turn().await else { return };
+            if let Err(err) = write.commit().await {
+                tracing::error!("settings: the clear could not be written: {err}");
+                return;
+            }
+            // Read before the next write commits, so what is shown is the cleared state.
+            let settings = StartupSettings::load(&pool).await;
+            drop(write);
+            let _ = reloaded.send(settings);
+        }));
+        spawn_detached(async move {
+            let Ok(settings) = read.await else { return };
+            // `try_`, as the shell may be gone by the time the clear lands.
+            self.state.try_set(SettingsState::Loaded(Box::new(settings)));
+        });
+    }
+
     /// Commits `pending` once its turn comes, unless a newer save has overtaken it.
     ///
     /// On the tokio runtime rather than the UI executor, and tracked: a save must land even when
@@ -255,6 +296,10 @@ fn wait_for_writes(runtime: &Runtime, writes: &TaskTracker, timeout: Duration) {
 /// What [`saved_for_test`] names a write of the armor viewer defaults row.
 #[cfg(test)]
 pub const ARMOR_DEFAULTS: &str = "armor_viewer_defaults";
+
+/// What [`saved_for_test`] names a clear of every setting.
+#[cfg(test)]
+pub const CLEARED: &str = "cleared";
 
 #[cfg(test)]
 thread_local! {
@@ -333,5 +378,31 @@ mod tests {
 
         let stored = runtime.block_on(wows_toolkit_config::queries::get_setting::<String>(&pool, KEY));
         assert_eq!(stored.as_deref(), Some("closed"));
+    }
+
+    /// A save made just before Clear Settings is cleared rather than landing after it, one made just
+    /// after survives it, and the clear is waited for at quit.
+    #[test]
+    fn a_clear_lands_between_the_saves_around_it() {
+        const BEFORE: &str = "zgui_test_saved_before_clear";
+        const AFTER: &str = "zgui_test_saved_after_clear";
+
+        zgui::reactive::install().expect("the reactive runtime installs");
+        let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
+        let main = Mounted::new();
+        let services = main.with(|| Services::provide(Some(Arc::clone(&runtime))));
+        let pool = runtime.block_on(wows_toolkit_config::test_pool());
+        let settings = runtime.block_on(StartupSettings::load(&pool));
+        services.settings.adopt(settings, pool.clone());
+
+        services.settings.save(BEFORE, &"before");
+        services.settings.clear();
+        services.settings.save(AFTER, &"after");
+        main.unmount();
+        finish_pending_writes(&runtime, Duration::from_secs(5));
+
+        let read = |key| runtime.block_on(wows_toolkit_config::queries::get_setting::<String>(&pool, key));
+        assert_eq!(read(BEFORE), None, "the earlier save is cleared");
+        assert_eq!(read(AFTER).as_deref(), Some("after"), "the later save stays");
     }
 }

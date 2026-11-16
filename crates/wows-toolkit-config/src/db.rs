@@ -119,12 +119,15 @@ pub fn load_startup_setting<T: serde::de::DeserializeOwned>(key: &str) -> Result
     Ok(rt.block_on(queries::get_setting(&pool, key)))
 }
 
+/// The setting that records the one-time migration from `app.ron`.
+pub(crate) const MIGRATION_COMPLETED: &str = "migration_completed";
+
 /// Check whether the one-time migration from `app.ron` has already been performed.
 pub async fn is_migrated(pool: &SqlitePool) -> bool {
-    queries::get_setting::<bool>(pool, "migration_completed").await.unwrap_or(false)
+    queries::get_setting::<bool>(pool, MIGRATION_COMPLETED).await.unwrap_or(false)
 }
 
 /// Mark the one-time migration as completed.
 pub async fn set_migrated(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    queries::set_setting(pool, "migration_completed", &true).await
+    queries::set_setting(pool, MIGRATION_COMPLETED, &true).await
 }
