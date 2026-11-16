@@ -1,4 +1,4 @@
-// Cargo only. Buck compiles wgc.rc with the cross toolchain's windres (BUCK).
+// Cargo only. Buck compiles wgc.rc with the Nix toolchain's llvm-windres (BUCK).
 fn main() {
     println!("cargo:rerun-if-changed=wgc.rc");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {

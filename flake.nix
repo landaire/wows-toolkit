@@ -225,25 +225,6 @@
               cargoExtraArgs = "-p replayshark";
             });
         }
-        # wgc-relay.exe and the wgc.exe placeholder run inside the Wine prefix
-        # the Linux launcher drives. rustc with the windows-gnu standard library
-        # and the mingw-w64 linker and windres. Kept apart from buck-toolchain
-        # so its path, and every cached action, stays unchanged.
-        // lib.optionalAttrs stdenv.hostPlatform.isLinux {
-          buck-windows-cross = symlinkJoin {
-            name = "wows-toolkit-buck-windows-cross";
-            paths = [
-              (pkgs.rust-bin.stable.${resolvedChannel}.minimal.override {
-                extensions = ["clippy"];
-                targets = ["x86_64-pc-windows-gnu"];
-              })
-              pkgsCross.mingwW64.stdenv.cc
-              pkgsCross.mingwW64.buildPackages.binutils
-              # The windows-gnu std links -l:libpthread.a.
-              pkgsCross.mingwW64.windows.pthreads
-            ];
-          };
-        }
         # The nix-pinned macOS SDK the Buck toolchain's wrapped clang bakes in.
         # scripts/refresh-buck-toolchain.nu passes its path to check-macos-sdk.nu
         # so an ambient DEVELOPER_DIR/SDKROOT is verified to be exactly this one.

@@ -20,31 +20,34 @@ load("@prelude//python_bootstrap:python_bootstrap.bzl", "PythonBootstrapToolchai
 load("@prelude//rust:rust_toolchain.bzl", "PanicRuntime", "RustToolchainInfo")
 load("@prelude//tests:remote_test_execution_toolchain.bzl", "RemoteTestExecutionToolchainInfo")
 
-# The Nix toolchain roots Buck reads from .buckconfig.local. `nix_toolchain`
-# serves every host target; `nix_windows_cross` (flake output
-# buck-windows-cross, Linux only) builds the Windows executables the Linux
-# launcher runs under Wine. Read at load time: analysis cannot read config.
-_TOOLCHAIN_ROOTS = {
-    "nix_toolchain": read_root_config("nix_toolchain", "root"),
-    "nix_windows_cross": read_root_config("nix_windows_cross", "root"),
-}
+# The Nix toolchain root Buck reads from .buckconfig.local. Read at load time:
+# analysis cannot read config.
+_NIX_TOOLCHAIN_ROOT = read_root_config("nix_toolchain", "root")
 
-def _toolchain_root(section = "nix_toolchain"):
-    root = _TOOLCHAIN_ROOTS[section]
-    if root == None:
-        fail("Missing [{}] root. Run `nu scripts/refresh-buck-toolchain.nu` before invoking Buck2.".format(section))
-    return root
+def _toolchain_root():
+    if _NIX_TOOLCHAIN_ROOT == None:
+        fail("Missing [nix_toolchain] root. Run `nu scripts/refresh-buck-toolchain.nu` before invoking Buck2.")
+    return _NIX_TOOLCHAIN_ROOT
 
-def _tool(name, section = "nix_toolchain"):
-    return RunInfo(args = [_toolchain_root(section) + "/bin/" + name])
+def _tool(name):
+    return RunInfo(args = [_toolchain_root() + "/bin/" + name])
+
+# The Windows cross toolchain runs the Nix toolchain's rustc and lld, and only
+# the Linux app ships the executables it builds.
+WINDOWS_CROSS_EXEC_COMPATIBLE_WITH = [
+    "config//os/constraints:linux",
+    "config//cpu/constraints:x86_64",
+]
 
 def windows_cross_compatible_with():
     """Constraints for a target that builds only with the Windows cross toolchain.
 
-    Hosts without a `[nix_windows_cross]` root (Windows, macOS) skip it, so
-    patterns such as `root//...` do not fail analysis.
+    Its targets are configured for windows-gnu whatever the host, so the host
+    is checked here. Other hosts skip them, so patterns such as `root//...` do
+    not fail analysis.
     """
-    return [] if _TOOLCHAIN_ROOTS["nix_windows_cross"] else ["prelude//:none"]
+    host = host_info()
+    return [] if host.os.is_linux and host.arch.is_x86_64 else ["prelude//:none"]
 
 # The Wine helpers ship beside the Linux launcher and are copied into every
 # prefix, so they are built for size. These follow the toolchain's own flags
@@ -58,18 +61,15 @@ WINDOWS_HELPER_RUSTC_FLAGS = [
 ]
 
 def _windows_cross_resource_impl(ctx):
-    root = _toolchain_root("nix_windows_cross")
     output = ctx.actions.declare_output(ctx.attrs.out)
 
-    # windres preprocesses through the cross gcc, which it would otherwise
-    # seek on PATH.
+    # The scripts use no preprocessor directives. Preprocessing would run the
+    # Nix clang, whose wrapper targets the host.
     ctx.actions.run(
         cmd_args(
-            root + "/bin/x86_64-w64-mingw32-windres",
-            "--preprocessor=" + root + "/bin/x86_64-w64-mingw32-gcc",
-            "--preprocessor-arg=-E",
-            "--preprocessor-arg=-xc-header",
-            "--preprocessor-arg=-DRC_INVOKED",
+            _toolchain_root() + "/bin/llvm-windres",
+            "--target=pe-x86-64",
+            "--no-preprocess",
             "-O",
             "coff",
             "-i",
@@ -161,18 +161,16 @@ def native_buildscript_env():
     return env
 
 def _hermetic_rust_toolchain_impl(ctx):
-    section = ctx.attrs.toolchain_root_section
-
     # windows-gnu imports raw-dylib functions (windows-sys) through an import
     # library rustc writes with dlltool, which it would otherwise seek on PATH.
-    dlltool_flags = ["-Cdlltool=" + _toolchain_root(section) + "/bin/" + ctx.attrs.dlltool] if ctx.attrs.dlltool else []
+    dlltool_flags = ["-Cdlltool=" + _toolchain_root() + "/bin/" + ctx.attrs.dlltool] if ctx.attrs.dlltool else []
     return [
         DefaultInfo(),
         RustToolchainInfo(
             allow_lints = [],
-            clippy_driver = _tool("clippy-driver", section),
+            clippy_driver = _tool("clippy-driver"),
             clippy_toml = None,
-            compiler = _tool("rustc", section),
+            compiler = _tool("rustc"),
             default_edition = ctx.attrs.default_edition,
             deny_lints = [],
             doctests = False,
@@ -183,8 +181,9 @@ def _hermetic_rust_toolchain_impl(ctx):
             rustc_flags = ctx.attrs.rustc_flags + dlltool_flags,
             rustc_target_triple = ctx.attrs.rustc_target_triple,
             rustc_test_flags = [],
-            rustdoc = _tool("rustdoc", section),
+            rustdoc = _tool("rustdoc"),
             rustdoc_flags = [],
+            sysroot_path = ctx.attrs.sysroot,
             warn_lints = [],
         ),
     ]
@@ -196,14 +195,16 @@ _hermetic_rust_toolchain_rule = rule(
         "dlltool": attrs.option(attrs.string(), default = None),
         "rustc_flags": attrs.list(attrs.string()),
         "rustc_target_triple": attrs.string(),
-        "toolchain_root_section": attrs.string(default = "nix_toolchain"),
+        # A sysroot holding the target's standard library, for a target the
+        # Nix rustc ships none for.
+        "sysroot": attrs.option(attrs.source(allow_directory = True), default = None),
     },
     is_toolchain_rule = True,
 )
 
-def hermetic_rust_toolchain(**kwargs):
+def hermetic_rust_toolchain(rustc_flags = [], **kwargs):
     """The Nix-rooted Rust toolchain, compiling in the selected build mode."""
-    _hermetic_rust_toolchain_rule(rustc_flags = _rustc_flags(), **kwargs)
+    _hermetic_rust_toolchain_rule(rustc_flags = _rustc_flags() + rustc_flags, **kwargs)
 
 def _hermetic_rustfmt_impl(ctx):
     if not ctx.attrs.rustfmt:
@@ -273,39 +274,39 @@ local_remote_test_execution_toolchain = rule(
 
 def _hermetic_cxx_toolchain_impl(ctx):
     linker_type = LinkerType(ctx.attrs.linker_type)
-    section = ctx.attrs.toolchain_root_section
-    root = _toolchain_root(section)
+    root = _toolchain_root()
     prefix = ctx.attrs.tool_prefix
     compiler_type = ctx.attrs.compiler_type
-
-    def tool(name):
-        return _tool(name, section)
 
     # Clang resolves `ld` through PATH, which the actions clear. Point it at the
     # pinned lld in the same Nix toolchain root instead.
     extra_linker_flags = ["-fuse-ld=" + root + "/bin/ld.lld"] if ctx.attrs.use_lld else []
-    linker_flags = (["-L" + root + "/lib"] if ctx.attrs.link_toolchain_lib else []) + extra_linker_flags
+    linker_flags = (
+        (["-L" + root + "/lib"] if ctx.attrs.link_toolchain_lib else []) +
+        [cmd_args("-L", directory, delimiter = "") for directory in ctx.attrs.library_dirs] +
+        extra_linker_flags
+    )
     return [
         DefaultInfo(),
         CxxToolchainInfo(
             as_compiler_info = CCompilerInfo(
-                compiler = tool(ctx.attrs.c_compiler),
+                compiler = _tool(ctx.attrs.c_compiler),
                 compiler_type = compiler_type,
             ),
             asm_compiler_info = CCompilerInfo(
-                compiler = tool(ctx.attrs.c_compiler),
+                compiler = _tool(ctx.attrs.c_compiler),
                 compiler_type = compiler_type,
             ),
             binary_utilities_info = BinaryUtilitiesInfo(
-                nm = tool(prefix + "nm"),
-                objcopy = tool(prefix + "objcopy"),
-                objdump = tool(prefix + "objdump"),
-                ranlib = tool(prefix + "ranlib"),
-                strip = tool(prefix + "strip"),
+                nm = _tool(prefix + "nm"),
+                objcopy = _tool(prefix + "objcopy"),
+                objdump = _tool(prefix + "objdump"),
+                ranlib = _tool(prefix + "ranlib"),
+                strip = _tool(prefix + "strip"),
             ),
             bolt_enabled = False,
             c_compiler_info = CCompilerInfo(
-                compiler = tool(ctx.attrs.c_compiler),
+                compiler = _tool(ctx.attrs.c_compiler),
                 compiler_type = compiler_type,
                 compiler_flags = ctx.attrs.compiler_flags,
                 preprocessor_flags = [],
@@ -314,7 +315,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             ),
             cpp_dep_tracking_mode = DepTrackingMode("show_headers"),
             cxx_compiler_info = CxxCompilerInfo(
-                compiler = tool(ctx.attrs.cxx_compiler),
+                compiler = _tool(ctx.attrs.cxx_compiler),
                 compiler_type = compiler_type,
                 compiler_flags = ctx.attrs.compiler_flags,
                 preprocessor_flags = [],
@@ -324,7 +325,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             header_mode = HeaderMode("symlink_tree_only"),
             internal_tools = ctx.attrs.internal_tools[CxxInternalTools],
             linker_info = LinkerInfo(
-                archiver = tool(prefix + ctx.attrs.archiver),
+                archiver = _tool(prefix + ctx.attrs.archiver),
                 # Apple's ar predates @argfile support; GNU ar accepts it.
                 archiver_supports_argfiles = ctx.attrs.archiver_supports_argfiles,
                 archiver_type = "gnu",
@@ -338,7 +339,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
                 link_libraries_locally = True,
                 link_style = LinkStyle("shared"),
                 link_weight = 1,
-                linker = tool(ctx.attrs.linker),
+                linker = _tool(ctx.attrs.linker),
                 linker_flags = linker_flags,
                 lto_mode = LtoMode("none"),
                 object_file_extension = "o",
@@ -354,7 +355,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
                 type = linker_type,
                 use_archiver_flags = True,
             ),
-            llvm_link = tool("llvm-link"),
+            llvm_link = _tool("llvm-link"),
             pic_behavior = PicBehavior(ctx.attrs.pic_behavior),
             runtime_dependency_handling = RuntimeDependencyHandling("no_symlink"),
             use_dep_files = True,
@@ -371,6 +372,8 @@ hermetic_cxx_toolchain = rule(
         "compiler_type": attrs.string(default = "clang"),
         "compiler_flags": attrs.list(attrs.string()),
         "cxx_compiler": attrs.string(default = "clang++"),
+        # Directories added to the linker's library search path.
+        "library_dirs": attrs.list(attrs.source(allow_directory = True), default = []),
         # The Nix wrappers link through clang, which needs the toolchain's own
         # libraries on the search path.
         "link_toolchain_lib": attrs.bool(default = True),
@@ -380,10 +383,9 @@ hermetic_cxx_toolchain = rule(
         "platform_name": attrs.string(),
         "shared_library_name_format": attrs.string(),
         "shared_library_versioned_name_format": attrs.string(),
-        # Prepended to the binutils names, for a cross toolchain whose tools
-        # carry the target triple.
+        # Prepended to the binutils and archiver names, for a target the host
+        # binutils cannot handle.
         "tool_prefix": attrs.string(default = ""),
-        "toolchain_root_section": attrs.string(default = "nix_toolchain"),
         "use_lld": attrs.bool(default = False),
         "internal_tools": attrs.default_only(attrs.exec_dep(
             providers = [CxxInternalTools],
@@ -394,8 +396,8 @@ hermetic_cxx_toolchain = rule(
 )
 
 def nix_cxx_toolchain(name, os, visibility):
-    """Declare the Nix-rooted C++ toolchain for one host operating system, for
-    wasm32 (`os = "none"`), or for Windows cross builds (`os = "windows-gnu"`)."""
+    """Declare the Nix-rooted C++ toolchain for one host operating system, or
+    for wasm32 (`os = "none"`)."""
     if os == "macos":
         hermetic_cxx_toolchain(
             name = name,
@@ -441,28 +443,34 @@ def nix_cxx_toolchain(name, os, visibility):
             shared_library_versioned_name_format = "{}.wasm",
             visibility = visibility,
         )
-    elif os == "windows-gnu":
-        hermetic_cxx_toolchain(
-            name = name,
-            archiver_supports_argfiles = True,
-            c_compiler = "x86_64-w64-mingw32-gcc",
-            compiler_flags = _cxx_compiler_flags(),
-            compiler_type = "gcc",
-            cxx_compiler = "x86_64-w64-mingw32-g++",
-            # The windows-gnu std links winpthreads statically from here.
-            link_toolchain_lib = True,
-            linker = "x86_64-w64-mingw32-gcc",
-            linker_type = "gnu",
-            pic_behavior = "not_supported",
-            platform_name = "windows-x86_64-gnu",
-            shared_library_name_format = "{}.dll",
-            shared_library_versioned_name_format = "{}.dll",
-            tool_prefix = "x86_64-w64-mingw32-",
-            toolchain_root_section = "nix_windows_cross",
-            visibility = visibility,
-        )
     else:
         fail("nix_cxx_toolchain does not support os {}".format(os))
+
+def windows_gnu_cxx_toolchain(name, mingw_libraries, visibility):
+    """The linker for x86_64-pc-windows-gnu: the Nix ld.lld, against the MinGW
+    runtime and import libraries in `mingw_libraries`.
+
+    Nothing built for that target compiles C or C++, so it has no compiler of
+    its own.
+    """
+    hermetic_cxx_toolchain(
+        name = name,
+        archiver_supports_argfiles = True,
+        compiler_flags = [],
+        exec_compatible_with = WINDOWS_CROSS_EXEC_COMPATIBLE_WITH,
+        library_dirs = [mingw_libraries],
+        link_toolchain_lib = False,
+        # rustc drives it as a GNU ld (`-Clinker-flavor=ld`), and lld reads the
+        # `-m i386pep` rustc passes as a MinGW link.
+        linker = "ld.lld",
+        linker_type = "gnu",
+        pic_behavior = "not_supported",
+        platform_name = "windows-x86_64-gnu",
+        shared_library_name_format = "{}.dll",
+        shared_library_versioned_name_format = "{}.dll",
+        tool_prefix = "llvm-",
+        visibility = visibility,
+    )
 
 def _hermetic_python_bootstrap_toolchain_impl(ctx):
     return [

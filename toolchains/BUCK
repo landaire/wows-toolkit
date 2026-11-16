@@ -1,4 +1,4 @@
-load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "nix_system_library", "nix_wasm_tools", "selected_toolchain")
+load(":hermetic_rust.bzl", "WINDOWS_CROSS_EXEC_COMPATIBLE_WITH", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "nix_system_library", "nix_wasm_tools", "selected_toolchain", "windows_gnu_cxx_toolchain")
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
 
 # libdbus-sys links it on Linux. The Flatpak runtime provides libdbus-1.so.3.
@@ -27,10 +27,30 @@ nix_cxx_toolchain(
 )
 
 # wgc-relay and the wgc.exe placeholder, which the Linux launcher runs under
-# Wine. Only Linux hosts publish the cross toolchain.
-nix_cxx_toolchain(
+# Wine. The Nix rustc compiles them against the x86_64-pc-windows-gnu standard
+# library and links them with the Nix ld.lld against the MinGW runtime and
+# import libraries. Both come from the Rust release of that rustc and move with
+# it; scripts/refresh-buck-toolchain.nu fails until they match. The hashes are
+# in https://static.rust-lang.org/dist/channel-rust-<version>.toml.
+http_archive(
+    name = "rust_std_windows_gnu",
+    exec_compatible_with = WINDOWS_CROSS_EXEC_COMPATIBLE_WITH,
+    sha256 = "f96259e34f86f270d75944cfd870b40003c9601678269a2751708e5a0000ab06",
+    strip_prefix = "rust-std-1.100.0-x86_64-pc-windows-gnu/rust-std-x86_64-pc-windows-gnu",
+    urls = ["https://static.rust-lang.org/dist/2026-11-12/rust-std-1.100.0-x86_64-pc-windows-gnu.tar.xz"],
+)
+
+http_archive(
+    name = "rust_mingw_windows_gnu",
+    exec_compatible_with = WINDOWS_CROSS_EXEC_COMPATIBLE_WITH,
+    sha256 = "5491d2ad03b0f124307c8b2c4ac840b65e738a348f4381975f0e638b012e4ae9",
+    strip_prefix = "rust-mingw-1.100.0-x86_64-pc-windows-gnu/rust-mingw/lib/rustlib/x86_64-pc-windows-gnu/lib/self-contained",
+    urls = ["https://static.rust-lang.org/dist/2026-11-12/rust-mingw-1.100.0-x86_64-pc-windows-gnu.tar.xz"],
+)
+
+windows_gnu_cxx_toolchain(
     name = "nix_cxx_windows_gnu",
-    os = "windows-gnu",
+    mingw_libraries = ":rust_mingw_windows_gnu",
     visibility = ["PUBLIC"],
 )
 
@@ -85,9 +105,17 @@ hermetic_rust_toolchain(
 hermetic_rust_toolchain(
     name = "nix_rust_windows_gnu",
     default_edition = "2024",
-    dlltool = "x86_64-w64-mingw32-dlltool",
+    dlltool = "llvm-dlltool",
+    exec_compatible_with = WINDOWS_CROSS_EXEC_COMPATIBLE_WITH,
+    rustc_flags = [
+        # The linker is ld.lld itself, not a C compiler driver.
+        "-Clinker-flavor=ld",
+        # The C runtime startup objects come from the sysroot, where a driver
+        # would have supplied its own.
+        "-Clink-self-contained=yes",
+    ],
     rustc_target_triple = "x86_64-pc-windows-gnu",
-    toolchain_root_section = "nix_windows_cross",
+    sysroot = ":rust_std_windows_gnu",
     visibility = ["PUBLIC"],
 )
 

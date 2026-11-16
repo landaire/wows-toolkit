@@ -33,6 +33,10 @@ let required = [
     "llvm-ar"
     "wasm-bindgen"
     "wasm-opt"
+    # The Windows helpers: windows-sys import libraries and the version
+    # resource.
+    "llvm-dlltool"
+    "llvm-windres"
 ]
 
 for tool in $required {
@@ -42,15 +46,16 @@ for tool in $required {
     }
 }
 
-let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-out-paths .#buck-system-libs | str trim)
-
-# The Windows executables the Linux launcher runs under Wine. Other hosts leave
-# the section out, which makes those targets incompatible there.
-let windows_cross_root = if $nu.os-info.name == "linux" {
-    ^nix build --out-link .tools/buck-windows-cross --print-out-paths .#buck-windows-cross | str trim
-} else {
-    null
+# The Windows helpers compile against the windows-gnu standard library that
+# toolchains/BUCK pins, which this rustc rejects from any other release.
+if $nu.os-info.name == "linux" {
+    let rustc_version = (^$"($toolchain_root)/bin/rustc" --version | parse "rustc {version} {rest}" | get version.0)
+    if not (open --raw toolchains/BUCK | str contains $"/rust-std-($rustc_version)-x86_64-pc-windows-gnu.tar.xz") {
+        error make {msg: $"toolchains/BUCK pins a windows-gnu rust-std from another release than rustc ($rustc_version). Move the rust_std_windows_gnu and rust_mingw_windows_gnu archives to ($rustc_version)."}
+    }
 }
+
+let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-out-paths .#buck-system-libs | str trim)
 
 # Buck reads these instead of resolving any tool through PATH.
 [
@@ -70,11 +75,6 @@ let windows_cross_root = if $nu.os-info.name == "linux" {
     "[nix_system_libs]"
     $"root = ($system_libs_root)"
     ""
-    ...(if $windows_cross_root != null {
-        ["[nix_windows_cross]" $"root = ($windows_cross_root)" ""]
-    } else {
-        []
-    })
     # Nothing reads debug info out of a CI artifact, and carrying all of it is
     # what makes linking the GUI binary expensive. Line tables are kept so a
     # panic in a Buck test still names a file and line.

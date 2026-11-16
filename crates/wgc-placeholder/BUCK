@@ -19,9 +19,10 @@ workspace_binary(
     incoming_transition = "//build-support/buck/windows_cross:transition",
     rustc_flags = WINDOWS_HELPER_RUSTC_FLAGS + [
         "--cfg=wows_buck_build",
+        # Leaves out the C runtime startup objects the toolchain links.
+        "-Clink-self-contained=no",
         "-Clink-arg=$(location :version_resource)",
-        "-Clink-arg=-nostartfiles",
-        "-Clink-arg=-Wl,--entry=wgc_placeholder_start",
+        "-Clink-arg=--entry=wgc_placeholder_start",
     ],
     target_compatible_with = windows_cross_compatible_with(),
 )

@@ -91,6 +91,8 @@ Provisioning runs the platform toolchain bootstrap (`scripts/refresh-buck-toolch
 
 On macOS and Linux, `.buckconfig.local` also has a `[nix_system_libs]` section. Its `root` is the `buck-system-libs` flake output, which holds the system shared libraries the Linux binaries link dynamically, such as libdbus. It is kept apart from `[nix_toolchain]` so that adding a library leaves the toolchain path, and every cached action, unchanged. A Linux build that links one of these libraries fails with `Missing [nix_system_libs] root` when the section is absent. Windows needs no such section.
 
+The Linux app ships two small Windows executables that the launcher runs inside the game's Wine prefix: `wgc-relay.exe` and the `wgc.exe` placeholder. Buck builds them for `x86_64-pc-windows-gnu` with the Nix `rustc` and `ld.lld`. It downloads the Windows standard library and MinGW libraries they link against from the Rust release, pinned in `toolchains/BUCK`, so they need no `.buckconfig.local` section of their own. Only Linux x86_64 hosts build them. When the Nix `rustc` moves to a new Rust release, move those two archives to the same release. Their URLs and SHA-256 digests are in `https://static.rust-lang.org/dist/channel-rust-<version>.toml`. The bootstrap fails on Linux until the two match.
+
 ### Bumping Buck2
 
 1. Replace `toolchains/buck2` with the DotSlash file from the new release:
