@@ -17,17 +17,18 @@ use wows_toolkit_hardening::modules::Inventory;
 
 static RENDER_MODE: OnceLock<String> = OnceLock::new();
 
-/// The crates whose events are kept, at the levels the egui app keeps them.
-/// `front_end` is the crate name of the running front end, whose own events
-/// are kept at debug.
-fn targets(front_end: &'static str) -> tracing_subscriber::filter::Targets {
+/// The crates whose events are kept, at the levels the egui app keeps them. Each target is a
+/// prefix, so `wows_toolkit` keeps every `wows_toolkit_*` crate, the front end among them.
+fn targets() -> tracing_subscriber::filter::Targets {
     tracing_subscriber::filter::Targets::new()
-        .with_target(front_end, tracing::Level::DEBUG)
+        .with_target("wows_toolkit", tracing::Level::DEBUG)
+        .with_target("landaire_ui", tracing::Level::DEBUG)
         .with_target("wows_replay_insights", tracing::Level::DEBUG)
         .with_target("wows_replays", tracing::Level::INFO)
         .with_target(wows_data_mgr::LOG_TARGET, tracing::Level::INFO)
+        .with_target("wgc_", tracing::Level::INFO)
         // zgui's renderer names the adapter it opens and each one it passes over.
-        .with_target("zgui_render_wgpu", tracing::Level::INFO)
+        .with_target("zgui", tracing::Level::INFO)
 }
 
 /// Where the rotated log files live: beside the executable, as the egui app
@@ -44,8 +45,7 @@ pub fn log_dir() -> PathBuf {
 /// The returned guard flushes the file on drop and has to be held for the life of
 /// the process; without it the last events written are lost. `RUST_LOG` still
 /// overrides what reaches stderr, which is how a session is asked for more.
-/// `front_end` is the running front end's crate name (see [`targets`]).
-pub fn init(to_file: bool, front_end: &'static str) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+pub fn init(to_file: bool) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -79,7 +79,7 @@ pub fn init(to_file: bool, front_end: &'static str) -> Option<tracing_appender::
             .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
             .with_ansi(false)
             .with_target(true)
-            .with_filter(targets(front_end))
+            .with_filter(targets())
     }));
     let _ = tracing::subscriber::set_global_default(subscriber);
 
@@ -203,6 +203,33 @@ pub fn take_crash_report() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Every first-party crate's events reach the log file, at the levels a report needs, and a
+    /// dependency's chatter does not.
+    #[test]
+    fn the_log_keeps_every_first_party_crate() {
+        use tracing::Level;
+
+        let targets = super::targets();
+        let kept = [
+            ("wows_toolkit_zgui::shell", Level::DEBUG),
+            ("wows_toolkit_services::update", Level::DEBUG),
+            ("wows_toolkit_replay_data::load", Level::DEBUG),
+            ("wows_toolkit_config::db", Level::DEBUG),
+            ("wows_toolkit_viewmodel::settings", Level::DEBUG),
+            ("wows_toolkit_hardening", Level::DEBUG),
+            ("landaire_ui::chrome::toasts", Level::DEBUG),
+            ("wgc_auth::session", Level::INFO),
+            ("zgui_render_wgpu::gpu", Level::INFO),
+            ("zgui_runtime::window", Level::INFO),
+            ("wows_replays::parser", Level::INFO),
+        ];
+        for (target, level) in kept {
+            assert!(targets.would_enable(target, &level), "{target} at {level}");
+        }
+        assert!(!targets.would_enable("wows_replays::parser", &Level::DEBUG));
+        assert!(!targets.would_enable("hyper::client", &Level::INFO));
+    }
+
     /// The newest file is the one with the highest name, which is what the hourly
     /// suffix makes it, rather than the one most recently touched.
     #[test]

@@ -173,7 +173,7 @@ fn main() {
         wows_toolkit_config::load_startup_setting::<bool>(wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING)
             .unwrap_or(None)
             .unwrap_or(true);
-    let _log_guard = wows_toolkit_services::logging::init(to_file, "wows_toolkit_zgui");
+    let _log_guard = wows_toolkit_services::logging::init(to_file);
     wows_toolkit_services::logging::install_panic_hook();
     wows_toolkit_services::logging::record_render_mode(asked.render_mode());
 
