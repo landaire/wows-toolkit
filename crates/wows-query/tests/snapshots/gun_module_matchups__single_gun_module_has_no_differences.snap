@@ -15,7 +15,8 @@ targets:
   test: 11
   with_citadel: 43
 modules:
-  - module: 460 mm/45 Type 94 in a triple-gun turret
+  - ship: "T10 Yamato (battleship, Japan)"
+    module: 460 mm/45 Type 94 in a triple-gun turret
     stock: true
     shell: 460 mm AP/APC Type91
     caliber_mm: 460

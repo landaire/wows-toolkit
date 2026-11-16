@@ -44,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* List the F key special ability in ship_overview
 - *(wows-query)* Resolve ship names written with a leading "the", and September as Sete de Setembro
 - *(wows-query)* List AP raw penetration every 5 km out to firing range in ship_shells
+- *(wows-query)* Compare the main battery guns of several ships in gun_module_matchups
 
 ### Bug Fixes
 

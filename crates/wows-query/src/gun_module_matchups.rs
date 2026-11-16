@@ -1,5 +1,6 @@
-//! A ship's main battery gun modules compared as the attacker: what the shell
-//! of each module does to the armor over the citadel of a set of target ships.
+//! Main battery gun modules of one ship, or of several ships, compared as the
+//! attacker: what the shell of each module does to the armor over the citadel
+//! of a set of target ships.
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -48,8 +49,11 @@ pub struct GunModuleMatchupsArgs {
     /// Firing ship, e.g. "G. Kurfurst".
     pub ship: String,
 
-    /// Main battery gun modules to compare, e.g. ["420 mm/48 SK C/40 on a Drh LC/34 mount"]. Defaults to every gun module the ship can mount, stock first.
+    /// Main battery gun modules of `ship` to compare, e.g. ["420 mm/48 SK C/40 on a Drh LC/34 mount"]. Defaults to every gun module the ship can mount, stock first.
     pub modules: Option<Vec<String>>,
+
+    /// Other firing ships whose main battery gun modules are compared with `ship`'s, every gun module of each, stock first, e.g. ["Montana"].
+    pub compare_with: Option<Vec<String>>,
 
     /// Shell type. Defaults to AP.
     pub ammo: Option<Ammo>,
@@ -117,6 +121,8 @@ pub struct TargetSet {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleMatchup {
+    /// Firing ship the module belongs to.
+    pub ship: String,
     pub module: String,
     pub stock: bool,
 
@@ -154,7 +160,14 @@ pub struct ModuleMatchup {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleDifference {
+    /// Firing ship of `module`; absent when one ship is compared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ship: Option<String>,
     pub module: String,
+
+    /// Firing ship of `against`; absent when one ship is compared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub against_ship: Option<String>,
 
     /// The first module, which `module` is compared with.
     pub against: String,
@@ -248,11 +261,18 @@ enum TargetArmor {
     Citadel(ArmorFingerprint),
 }
 
+/// A gun module and the firing ship that mounts it.
+struct FiringModule<'a> {
+    ship: &'a Ship,
+    module: Module,
+}
+
 impl GameData {
-    /// Each main battery gun module of `args.ship` as the attacker: its
-    /// shell, raw penetration, overmatch and fuse threshold, and against a
-    /// set of target ships how many it penetrates the armor over the citadel
-    /// of and citadels, with the ships where the modules differ.
+    /// Each main battery gun module of `args.ship`, and of each ship in
+    /// `args.compare_with`, as the attacker: its shell, raw penetration,
+    /// overmatch and fuse threshold, and against a set of target ships how
+    /// many it penetrates the armor over the citadel of and citadels, with the
+    /// ships where the modules differ.
     pub fn gun_module_matchups(&self, args: &GunModuleMatchupsArgs) -> Result<GunModuleMatchupsOutput, QueryError> {
         // The range battle_impact and dispersion_at_range compare guns at.
         const DEFAULT_RANGE: Km = Km::new(12.0);
@@ -267,7 +287,26 @@ impl GameData {
 
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
-        let modules = self.compared_gun_modules(ship, args.modules.as_deref())?;
+        let mut firing: Vec<FiringModule> = self
+            .compared_gun_modules(ship, args.modules.as_deref())?
+            .into_iter()
+            .map(|module| FiringModule { ship, module })
+            .collect();
+        let mut ships: Vec<&Ship> = vec![ship];
+        for name in args.compare_with.iter().flatten() {
+            let other = self.resolve_ship(name, &mut interpretations)?;
+            if ships.iter().any(|known| std::ptr::eq(*known, other)) {
+                continue;
+            }
+
+            ships.push(other);
+            firing.extend(
+                self.compared_gun_modules(other, None)?.into_iter().map(|module| FiringModule { ship: other, module }),
+            );
+        }
+
+        let several_ships = ships.len() > 1;
+
         let ammo = args.ammo.unwrap_or(Ammo::Ap);
         let range = args.range_km.unwrap_or(DEFAULT_RANGE);
         let angle = args.target_angle_deg.unwrap_or(Degrees::new(0.0));
@@ -277,9 +316,9 @@ impl GameData {
         let class = args.target_class.unwrap_or(ship.class);
         let tiers = target_tiers(ship.tier, args.target_min_tier, args.target_max_tier)?;
 
-        let mut shells: Vec<Shell> = Vec::with_capacity(modules.len());
-        let mut weapons: Vec<Weapon> = Vec::with_capacity(modules.len());
-        for module in &modules {
+        let mut shells: Vec<Shell> = Vec::with_capacity(firing.len());
+        let mut weapons: Vec<Weapon> = Vec::with_capacity(firing.len());
+        for FiringModule { ship, module } in &firing {
             let module_shells = self.gun_module_shells(ship, &module.param);
             let Some(shell) = largest_shell(&module_shells, ammo) else {
                 let fired: BTreeSet<Ammo> = module_shells.iter().map(|shell| shell.ammo).collect();
@@ -370,12 +409,13 @@ impl GameData {
 
         let count =
             |measure: Measure, index: usize| counted.iter().filter(|(_, rays)| measure.meets(rays[index])).count();
-        let matchups: Vec<ModuleMatchup> = modules
+        let matchups: Vec<ModuleMatchup> = firing
             .iter()
             .zip(&shells)
             .zip(&weapons)
             .enumerate()
-            .map(|(index, ((module, shell), weapon))| ModuleMatchup {
+            .map(|(index, ((FiringModule { ship, module }, shell), weapon))| ModuleMatchup {
+                ship: ship.label(),
                 module: module.name.clone(),
                 stock: module.stock,
                 shell: shell.name.clone(),
@@ -390,10 +430,13 @@ impl GameData {
             })
             .collect();
 
-        let differences: Vec<ModuleDifference> = (1..modules.len())
+        let ship_label = |index: usize| several_ships.then(|| firing[index].ship.label());
+        let differences: Vec<ModuleDifference> = (1..firing.len())
             .map(|index| ModuleDifference {
-                module: modules[index].name.clone(),
-                against: modules[0].name.clone(),
+                ship: ship_label(index),
+                module: firing[index].module.name.clone(),
+                against_ship: ship_label(0),
+                against: firing[0].module.name.clone(),
                 penetrates_armor: ship_difference(&counted, index, Measure::PenetratesArmor),
                 citadels: ship_difference(&counted, index, Measure::Citadels),
                 citadels_often: ship_difference(&counted, index, Measure::CitadelsOften),
@@ -401,7 +444,8 @@ impl GameData {
             .collect();
 
         let aspect = aspect(angle);
-        let conclusion = conclusion(ship, &matchups, &target_set, &aspect, range, ammo);
+        let labels = module_labels(&firing, &matchups, several_ships);
+        let conclusion = conclusion(ship, &matchups, &labels, &target_set, &aspect, range, ammo);
 
         Ok(GunModuleMatchupsOutput {
             interpretations,
@@ -551,10 +595,11 @@ fn aspect(angle: Degrees) -> String {
 /// AP from the 420 mm guns (597.8 against 566.5 mm raw penetration) gets
 /// through the armor over the citadel of 43 ships against 40 for AP from the
 /// 406 mm guns, citadels 38 against 32 at least sometimes and 19 against 16
-/// often."
+/// often." With several ships the labels name them: "Ohio's 457 mm guns".
 fn conclusion(
     ship: &Ship,
     matchups: &[ModuleMatchup],
+    labels: &[ModuleLabel],
     targets: &TargetSet,
     aspect: &str,
     range: Km,
@@ -577,7 +622,6 @@ fn conclusion(
         range.value(),
         targets.with_citadel
     );
-    let labels = module_labels(matchups);
     let ammo = ammo.label();
 
     let Some((first, others)) = matchups.split_first() else {
@@ -587,7 +631,7 @@ fn conclusion(
         return format!(
             "{situation}, {ammo} from {}'s {} ({}) gets through the armor over the citadel of {}, citadels {} at least sometimes and {} often; it has no other gun module.",
             ship.name,
-            labels[0],
+            labels[0].bare,
             penetration(first, None),
             first.penetrates_armor,
             first.citadels,
@@ -600,7 +644,7 @@ fn conclusion(
         .zip(&labels[1..])
         .map(|(other, label)| {
             format!(
-                "{ammo} from the {label} ({}) gets through the armor over the citadel of {} ships against {} for {ammo} from the {}, citadels {} against {} at least sometimes and {} against {} often",
+                "{ammo} from {label} ({}) gets through the armor over the citadel of {} ships against {} for {ammo} from {}, citadels {} against {} at least sometimes and {} against {} often",
                 penetration(other, Some(first)),
                 other.penetrates_armor,
                 first.penetrates_armor,
@@ -631,14 +675,46 @@ fn penetration(matchup: &ModuleMatchup, against: Option<&ModuleMatchup>) -> Stri
     }
 }
 
-/// "420 mm guns" when the calibers tell the modules apart, else module names.
-fn module_labels(matchups: &[ModuleMatchup]) -> Vec<String> {
-    let calibers: BTreeSet<u32> = matchups.iter().map(|matchup| whole_mm(matchup.caliber_mm)).collect();
-    if calibers.len() == matchups.len() {
-        matchups.iter().map(|matchup| format!("{} mm guns", whole_mm(matchup.caliber_mm))).collect()
-    } else {
-        matchups.iter().map(|matchup| matchup.module.clone()).collect()
+/// A module as the conclusion names it.
+struct ModuleLabel {
+    /// "420 mm guns", or the module name.
+    bare: String,
+
+    /// "Ohio's", or "the" when one ship is compared.
+    owner: String,
+}
+
+impl std::fmt::Display for ModuleLabel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} {}", self.owner, self.bare)
     }
+}
+
+/// "420 mm guns" when the calibers tell a ship's modules apart, else module
+/// names, owned by the ship when several ships are compared.
+fn module_labels(firing: &[FiringModule], matchups: &[ModuleMatchup], several_ships: bool) -> Vec<ModuleLabel> {
+    let mut by_ship: HashMap<&str, BTreeSet<u32>> = HashMap::new();
+    let mut modules: HashMap<&str, usize> = HashMap::new();
+    for (entry, matchup) in firing.iter().zip(matchups) {
+        by_ship.entry(entry.ship.param.name()).or_default().insert(whole_mm(matchup.caliber_mm));
+        *modules.entry(entry.ship.param.name()).or_default() += 1;
+    }
+
+    firing
+        .iter()
+        .zip(matchups)
+        .map(|(entry, matchup)| {
+            let key = entry.ship.param.name();
+            let bare = if by_ship[key].len() == modules[key] {
+                format!("{} mm guns", whole_mm(matchup.caliber_mm))
+            } else {
+                matchup.module.clone()
+            };
+            let owner = if several_ships { format!("{}'s", entry.ship.name) } else { "the".to_owned() };
+
+            ModuleLabel { bare, owner }
+        })
+        .collect()
 }
 
 fn whole_mm(caliber: Millimeters) -> u32 {

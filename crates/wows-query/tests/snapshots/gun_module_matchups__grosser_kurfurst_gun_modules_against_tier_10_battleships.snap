@@ -22,7 +22,8 @@ targets:
   test: 11
   with_citadel: 43
 modules:
-  - module: 406 mm/52 Drh C/34 on a Drh LC/34 mount
+  - ship: "T10 G. Kurfürst (battleship, Germany, premium)"
+    module: 406 mm/52 Drh C/34 on a Drh LC/34 mount
     stock: true
     shell: 406 mm P.Spr.Gr. L/4.4
     caliber_mm: 406
@@ -32,7 +33,8 @@ modules:
     penetrates_armor: 40
     citadels: 32
     citadels_often: 16
-  - module: 420 mm/48 SK C/40 on a Drh LC/34 mount
+  - ship: "T10 G. Kurfürst (battleship, Germany, premium)"
+    module: 420 mm/48 SK C/40 on a Drh LC/34 mount
     stock: false
     shell: 420 mm P.Spr.Gr. L/4.6
     caliber_mm: 420

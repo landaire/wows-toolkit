@@ -42,3 +42,19 @@ fn single_gun_module_has_no_differences() {
     assert!(output.differences.is_empty());
     insta::assert_yaml_snapshot!(output);
 }
+
+/// Ohio's 457 mm guns against Montana's 406 mm guns, at Ohio's class and tier.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn ohio_guns_compared_with_montana() {
+    let output = GAME
+        .gun_module_matchups(&GunModuleMatchupsArgs {
+            ship: "Ohio".to_owned(),
+            compare_with: Some(vec!["Montana".to_owned()]),
+            ..Default::default()
+        })
+        .expect("both ships' gun modules trace");
+
+    assert!(output.modules.iter().any(|module| module.ship.contains("Montana")));
+    insta::assert_yaml_snapshot!(output);
+}
