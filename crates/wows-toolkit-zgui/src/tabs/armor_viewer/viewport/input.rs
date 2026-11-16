@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use wows_toolkit_armor::trajectory::ArcId;
 use wows_toolkit_armor::viewport::camera;
 use wows_toolkit_armor::viewport::camera::Axis;
 use wows_toolkit_armor::viewport::gizmo;
@@ -11,6 +12,7 @@ use wows_toolkit_armor::viewport::types::ViewRect;
 use zgui::vocab::PointerButton;
 use zgui::vocab::Timestamp;
 
+use super::casts::CastMiss;
 use super::model::DragKind;
 use super::model::DragState;
 use super::model::MoveKey;
@@ -308,23 +310,34 @@ impl ViewportModel {
         self.clear_mesh_hover() || plate_changed || ring_changed || hardpoint_changed
     }
 
-    pub(super) fn pointer_up(&mut self, at: Vec2, button: PointerButton, shift: bool, cx: &mut ViewCx) {
+    /// A release over the viewport. The outcome of the cast it asked for, if it asked for one.
+    pub(super) fn pointer_up(
+        &mut self,
+        at: Vec2,
+        button: PointerButton,
+        shift: bool,
+        cx: &mut ViewCx,
+    ) -> Option<Result<ArcId, CastMiss>> {
         let drag = self.drag.take();
         if !self.is_gpu_ready() {
             self.gizmo_press_in_box = false;
-            return;
+            return None;
         }
         let plain_click = drag.is_some_and(|drag| !drag.moved);
-        match click_action(button, plain_click, self.gizmo_press_in_box, self.splash_mode, shift) {
+        let cast = match click_action(button, plain_click, self.gizmo_press_in_box, self.splash_mode, shift) {
             ClickAction::SnapGizmo => {
                 if let Some(rect) = self.gizmo_rect()
                     && let Some((axis, positive)) = gizmo::hit_test(rect, &self.viewport.camera, at)
                 {
                     self.snap_camera(axis, positive, cx);
                 }
+                None
             }
-            ClickAction::Cast => self.cast_at(at, cx),
-            ClickAction::Burst => self.burst_at(at, cx),
+            ClickAction::Cast => Some(self.cast_at(at, cx)),
+            ClickAction::Burst => {
+                self.burst_at(at, cx);
+                None
+            }
             ClickAction::TogglePlate => {
                 // A plain click on the model, outside the gizmo box, toggles the hovered plate,
                 // as egui's click-to-hide does.
@@ -333,14 +346,17 @@ impl ViewportModel {
                 {
                     self.toggle_plate(key, cx);
                 }
+                None
             }
-            ClickAction::Nothing => {}
-        }
+            ClickAction::Nothing => None,
+        };
         self.gizmo_press_in_box = false;
         // The release lands where the pointer is: pick again now the drag is over.
         if drag.is_some() && self.last_pointer.is_some() {
             self.pick_hovers(at);
         }
+
+        cast
     }
 
     /// The press ended somewhere the viewport did not see its release.

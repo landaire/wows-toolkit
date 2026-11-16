@@ -1691,6 +1691,13 @@ action_stroke_width = "Épaisseur du trait"
 action_delete = "Supprimer"
 action_cancel = "Annuler / Désélectionner"
 
+[ui.armor.cast]
+prompt = "%{key}+clic sur la coque pour ajouter un point d'impact"
+empty = "Aucun point d'impact pour l'instant"
+miss_nothing_under_pointer = "Aucune plaque de blindage sous le pointeur"
+miss_thickness_unknown = "Les plaques de ce modèle n'ont pas d'épaisseur connue contre laquelle tirer"
+miss_no_plate_on_path = "La trajectoire de l'obus sous cet angle ne traverse aucune plaque de blindage"
+
 [ui.armor.pen]
 search_hint = "Rechercher des navires à comparer..."
 add_a_ship = "Recherchez et ajoutez des navires ci-dessus pour comparer la pénétration"

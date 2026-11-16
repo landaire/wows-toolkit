@@ -51,6 +51,7 @@ use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
 use crate::services::Services;
+use crate::shell::tabs::ModifierKey;
 use crate::tabs::armor_viewer::panels::legend::swatch_css;
 use crate::tabs::armor_viewer::panels::pen::PenetrationState;
 use crate::tabs::armor_viewer::viewport::ArcSummary;
@@ -98,7 +99,12 @@ const CSS: &str = css!(
     .wt-armor-trajectory__key-dot { width: 8px; height: 8px; border-radius: 4px; }
     .wt-armor-trajectory__key-dot[data-angle=good] { background-color: var(--wt-color-armor-angle-good); }
     .wt-armor-trajectory__key-dot[data-angle=mid] { background-color: var(--wt-color-armor-angle-mid); }
-    .wt-armor-trajectory__key-dot[data-angle=bad] { background-color: var(--wt-color-armor-angle-bad); }"
+    .wt-armor-trajectory__key-dot[data-angle=bad] { background-color: var(--wt-color-armor-angle-bad); }
+    .wt-armor-trajectory__empty { display: flex; align-items: center; gap: 8px; padding: 8px;
+        border-radius: 6px; border: 1px dashed var(--zui-color-border); }
+    .wt-armor-trajectory__empty-icon { flex: none; color: var(--wt-color-text-dim); }
+    .wt-armor-trajectory__empty-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .wt-armor-trajectory__empty-title { font-size: 12px; font-weight: 600; }"
 );
 
 /// The span a cast range is chosen over, in kilometres: the egui viewer's own range slider.
@@ -302,12 +308,21 @@ fn menu_item(label: String, active: bool, choose: impl Fn() + 'static) -> AnyVie
     })
 }
 
-/// One marker per arc, in its colour, with what applies to every arc at once below them.
+/// One marker per arc, in its colour, with what applies to every arc at once below them. With no
+/// arc, how to cast one.
 fn markers(viewport: ArmorViewportState) -> AnyView {
     let arcs = viewport.arcs();
     if arcs.is_empty() {
+        let title = t!("ui.armor.cast.empty").into_owned();
+        let prompt = t!("ui.armor.cast.prompt", key = ModifierKey::Shift.label()).into_owned();
         return AnyView::new(view! {
-            text(class = "wt-armor-trajectory__hint", attr:data-testid = "armor-arc-none") {{t!("ui.armor.arc_none").into_owned()}}
+            row(class = "wt-armor-trajectory__empty", attr:data-testid = "armor-trajectory-empty") {
+                AppIcon(glyph = Glyph::Crosshair, class = "wt-armor-trajectory__empty-icon")
+                column(class = "wt-armor-trajectory__empty-text") {
+                    text(class = "wt-armor-trajectory__empty-title") {{title}}
+                    text(class = "wt-armor-trajectory__hint") {{prompt}}
+                }
+            }
         });
     }
     let selected = viewport.selected_arc().map(|(id, _)| id);

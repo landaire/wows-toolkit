@@ -1691,6 +1691,13 @@ action_stroke_width = "线条粗细"
 action_delete = "删除"
 action_cancel = "取消 / 取消选择"
 
+[ui.armor.cast]
+prompt = "%{key}+点击舰体以添加命中点"
+empty = "尚无命中点"
+miss_nothing_under_pointer = "指针下没有装甲板"
+miss_thickness_unknown = "此模型的装甲板厚度未知，无法投射"
+miss_no_plate_on_path = "从此角度投射的炮弹弹道未穿过任何装甲板"
+
 [ui.armor.pen]
 search_hint = "搜索要比较的舰船..."
 add_a_ship = "在上方搜索并添加舰船以比较穿深"

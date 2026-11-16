@@ -275,7 +275,7 @@ fn the_checker_reads_each_shell_against_the_plate_under_the_pointer() {
 fn the_trajectory_section_asks_for_a_ship_until_one_is_compared() {
     let (mut window, mounted) = open();
     assert!(shown(&window, "armor-trajectory-add-ship"), "with no ship the button leads to the checker");
-    assert!(shown(&window, "armor-arc-none"), "nothing is cast yet");
+    assert!(shown(&window, "armor-trajectory-empty"), "nothing is cast yet");
 
     mounted.pen.update(|pen| pen.add(ship("PA", "Alpha")));
     window.advance(Duration::from_millis(100));
@@ -405,6 +405,26 @@ fn a_marker_selects_its_arc_for_editing_and_removes_it() {
     assert!(shown(&window, "armor-arc-marker-0"), "without removing the arc");
 }
 
+/// With no arc the section says how to cast one; the prompt goes with the first arc and comes
+/// back once the arcs are cleared.
+#[test]
+fn the_trajectory_section_prompts_a_cast_while_it_has_no_arc() {
+    let (mut window, mounted) = open();
+    let prompt = window.by_test_id("armor-trajectory-empty").expect("the prompt is shown with no arc");
+    let said = window.texts_by_class("wt-armor-trajectory__hint").concat();
+    assert!(said.contains("Shift+click the hull to add an impact point"), "the prompt names the gesture: {said}");
+    assert!(window.bounds(prompt).is_some_and(|bounds| bounds.size.height.0 > 0.0), "and takes up room");
+
+    let viewport = mounted.viewport;
+    viewport.add_arc(Vec3::x(), cast_from(10.0)).expect("the viewport takes an arc");
+    window.advance(Duration::from_millis(100));
+    assert!(!shown(&window, "armor-trajectory-empty"), "an arc replaces the prompt");
+
+    click(&mut window, "armor-trajectory-clear");
+    assert!(viewport.arcs().is_empty());
+    assert!(shown(&window, "armor-trajectory-empty"), "clearing the arcs brings it back");
+}
+
 /// The latest build of the install `WT_WOWS_DIR` names, loaded as the app loads it: with the
 /// game's translations, which the catalog's display names come from.
 fn real_assets() -> (Arc<ShipAssets>, Arc<ShipCatalog>, Arc<GameMetadataProvider>) {
@@ -435,6 +455,19 @@ fn param_index_of(catalog: &ShipCatalog, name: &str) -> String {
 
 fn review_options(appearance: Appearance) -> HeadlessOptions {
     HeadlessOptions { drawing: Drawing::Device, desktop: Some(appearance), ..HeadlessOptions::new(SIZE) }
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the trajectory prompt"]
+fn the_trajectory_prompt_renders_in_dark_and_light() {
+    for (appearance, theme, name) in [
+        (Appearance::Dark, ThemeChoice::Dark, "armor-trajectory-empty-dark"),
+        (Appearance::Light, ThemeChoice::Light, "armor-trajectory-empty-light"),
+    ] {
+        let (mut window, _mounted) = open_with(theme, review_options(appearance), None, None);
+        assert!(shown(&window, "armor-trajectory-empty"));
+        println!("{}", save_shot(&mut window, name).display());
+    }
 }
 
 /// The checker comparing two real ships against a plate, the trajectory section and the legend,

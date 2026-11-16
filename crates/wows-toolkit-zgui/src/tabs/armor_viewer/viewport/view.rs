@@ -1,6 +1,7 @@
 //! The viewport element: the scene's surface, the overlay over it, what stands in the scene's
 //! place while there is none, the hover tooltips, the readouts and the context menu.
 
+use std::time::Duration;
 use std::time::Instant;
 
 use landaire_ui::LoadingProps;
@@ -27,10 +28,16 @@ use zgui::prelude::Fonts;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::WithValue;
 use zgui::reactive::use_context;
 use zgui::reactive::use_local_context;
@@ -41,6 +48,8 @@ use zgui::view::EventCx;
 use zgui::view::IntoView;
 use zgui::view::NodeRef;
 use zgui::view::ShowProps;
+use zgui::view::TimeoutHandle;
+use zgui::view::Timers;
 use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
@@ -59,6 +68,7 @@ use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::ModifierKey;
 
+use super::casts::CastMiss;
 use super::host::ViewportRenderer;
 use super::input::KeyModifiers;
 use super::input::KeyOutcome;
@@ -85,6 +95,7 @@ const CSS: &str = css!(
         min-height: 0;
         overflow: hidden;
     }
+    .wt-armor-viewport[data-aiming] { cursor: crosshair; }
     .wt-armor-viewport__scene {
         position: absolute;
         inset: 0;
@@ -151,6 +162,29 @@ const CSS: &str = css!(
         gap: 2px;
     }
     .wt-armor-viewport__readout--bottom { bottom: 8px; }
+    /* Above the length readout in the bottom left, which a narrow pane would put it over. */
+    .wt-armor-viewport__cast-strip {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 40px;
+        padding: 0 8px;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+    }
+    .wt-armor-viewport__cast-hint {
+        padding: 4px 12px;
+        border-radius: 12px;
+        background-color: color-mix(in srgb, var(--zui-color-background) 70%, transparent);
+        border: 1px solid var(--zui-color-border);
+        color: var(--wt-color-text-dim);
+        font-size: var(--zui-type-size-xs);
+    }
+    .wt-armor-viewport__cast-hint[data-miss] {
+        background-color: color-mix(in srgb, var(--zui-color-background) 90%, transparent);
+        color: var(--wt-color-text-strong);
+    }
     .wt-armor-viewport__log-line {
         display: flex;
         flex-direction: row;
@@ -229,6 +263,9 @@ const CSS: &str = css!(
 /// How tall a line of wheel scrolling is, in CSS pixels.
 const WHEEL_LINE: f32 = 20.0;
 
+/// How long the reason a cast missed stays over the viewport.
+const MISS_SHOWN_FOR: Duration = Duration::from_millis(3000);
+
 /// The viewport showing `state`: the scene with its gizmo and labels, the pointer and keyboard
 /// driving its camera, hover tooltips and the plate menu.
 #[component]
@@ -255,8 +292,21 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
         let bounds = area.window_bounds()?;
         Some(window_point(cursor, bounds.origin, device_scale(area)))
     });
+    let shift_held = RwSignal::new_local(false);
+    let hold_shift = move |held: bool| {
+        if shift_held.get_untracked() != held {
+            shift_held.set(held);
+        }
+    };
+    // The crosshair says a Shift-click here casts: Shift is held over a plate that can be cast at.
+    let aiming = move || {
+        let over_plate = state.read_overlay(|model| model.hovered.is_some() && model.can_cast()).unwrap_or(false);
+        (shift_held.get() && over_plate).then(String::new)
+    };
+    let miss_note = MissNote::new();
 
     let on_down = move |ev: &mut EventCx<'_, events::PointerDown>| {
+        hold_shift(ev.modifiers.shift());
         let Some(button) = ev.button else { return };
         let Some(at) = local(ev.position) else { return };
         area.focus();
@@ -267,6 +317,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
         }
     };
     let on_move = move |ev: &mut EventCx<'_, events::PointerMove>| {
+        hold_shift(ev.modifiers.shift());
         let Some(at) = local(ev.position) else { return };
         state.update(|model, cx| model.pointer_move(at, cx));
     };
@@ -274,12 +325,22 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
         let Some(button) = ev.button else { return };
         ev.release_pointer();
         let shift = ev.modifiers.shift();
-        match local(ev.position) {
-            Some(at) => state.update(|model, cx| model.pointer_up(at, button, shift, cx)),
-            None => state.update(|model, _| model.pointer_cancelled()),
+        hold_shift(shift);
+        let cast = match local(ev.position) {
+            Some(at) => state.update(|model, cx| model.pointer_up(at, button, shift, cx)).flatten(),
+            None => {
+                state.update(|model, _| model.pointer_cancelled());
+                None
+            }
         };
+        match cast {
+            Some(Ok(_)) => miss_note.clear(),
+            Some(Err(miss)) => miss_note.show(miss, state.scene_key()),
+            None => {}
+        }
     };
     let on_key_down = move |ev: &mut EventCx<'_, events::KeyDown>| {
+        hold_shift(ev.modifiers.shift() || matches!(ev.key_without_modifiers, Key::Named(NamedKey::Shift)));
         let lowered;
         let key = match &ev.key_without_modifiers {
             Key::Named(NamedKey::ArrowUp) => ViewKey::Up,
@@ -308,6 +369,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
         }
     };
     let on_key_up = move |ev: &mut EventCx<'_, events::KeyUp>| {
+        hold_shift(ev.modifiers.shift() && !matches!(ev.key_without_modifiers, Key::Named(NamedKey::Shift)));
         let lowered;
         let key = match &ev.key_without_modifiers {
             Key::Named(NamedKey::ArrowUp) => ViewKey::Up,
@@ -334,6 +396,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                     class = SHEET,
                     node_ref = area,
                     attr:data-testid = "armor-viewport",
+                    attr:data-aiming = aiming,
                     tabindex = {Focus::Programmatic},
                     on:pointer_down = on_down,
                     on:pointer_move = on_move,
@@ -362,6 +425,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                     on:key_down = on_key_down,
                     on:key_up = on_key_up,
                     on:focus_out = move |_| {
+                        hold_shift(false);
                         state.update(|model, _| model.release_keys());
                     }
                 ) {
@@ -375,6 +439,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                     {overlay.class("wt-armor-viewport__overlay")}
                     {move || stand_in(state, locale)}
                     {move || readouts(state, locale)}
+                    {move || cast_hint(state, locale, miss_note)}
                     PointerTip(pointer = pointer) {
                         {move || tooltip(state, locale)}
                     }
@@ -523,6 +588,86 @@ fn readouts(state: ArmorViewportState, locale: Locale) -> Vec<AnyView> {
         }));
     }
     views
+}
+
+/// Why the last Shift-click cast nothing, said over the viewport for [`MISS_SHOWN_FOR`].
+#[derive(Clone, Copy)]
+struct MissNote {
+    /// The miss, with the scene it was made on: another scene does not say it.
+    miss: RwSignal<Option<(CastMiss, Option<usize>)>, LocalStorage>,
+    /// Takes the note down. Replaced, and so cancelled, by a later miss.
+    fading: StoredValue<Option<TimeoutHandle>, LocalStorage>,
+    timers: StoredValue<Option<Timers>, LocalStorage>,
+}
+
+impl MissNote {
+    /// Called in a component's body, where the window's clock is found.
+    fn new() -> Self {
+        Self {
+            miss: RwSignal::new_local(None),
+            fading: StoredValue::new_local(None),
+            timers: StoredValue::new_local(Timers::current()),
+        }
+    }
+
+    fn show(self, miss: CastMiss, scene: Option<usize>) {
+        let Some(timers) = self.timers.get_value() else { return };
+
+        self.miss.set(Some((miss, scene)));
+        let shown = self.miss;
+        self.fading.set_value(Some(timers.set_timeout(MISS_SHOWN_FOR, move || {
+            shown.try_set(None);
+        })));
+    }
+
+    /// Takes the note down at once: a cast landed.
+    fn clear(self) {
+        self.fading.set_value(None);
+        if self.miss.get_untracked().is_some() {
+            self.miss.set(None);
+        }
+    }
+}
+
+/// The pill along the bottom of the scene: why the last cast missed while that is fresh, else how
+/// to cast while the armor shown has no arc yet.
+fn cast_hint(state: ArmorViewportState, locale: Locale, note: MissNote) -> Option<AnyView> {
+    locale.track();
+    let shown = state.read(ViewportModel::scene_is_shown).unwrap_or(false);
+    if !shown {
+        return None;
+    }
+
+    let miss = note.miss.get().filter(|(_, scene)| *scene == state.scene_key()).map(|(miss, _)| miss);
+    let (said, test_id) = match miss {
+        Some(miss) => {
+            let said = match miss {
+                CastMiss::NothingUnderPointer => t!("ui.armor.cast.miss_nothing_under_pointer"),
+                CastMiss::ThicknessUnknown => t!("ui.armor.cast.miss_thickness_unknown"),
+                CastMiss::NoPlateOnPath => t!("ui.armor.cast.miss_no_plate_on_path"),
+            };
+            (said, "armor-viewport-cast-miss")
+        }
+        None => {
+            let invite = state.read(|model| model.arcs.is_empty() && model.can_cast()).unwrap_or(false);
+            if !invite {
+                return None;
+            }
+            (t!("ui.armor.cast.prompt", key = ModifierKey::Shift.label()), "armor-viewport-cast-hint")
+        }
+    };
+    let said = said.into_owned();
+
+    // One shape for both, so a rebuild from one to the other rewrites every attribute.
+    Some(AnyView::new(view! {
+        box(class = "wt-armor-viewport__cast-strip") {
+            text(
+                class = "wt-armor-viewport__cast-hint",
+                attr:data-miss = miss.map(|_| String::new()),
+                attr:data-testid = test_id
+            ) {{said}}
+        }
+    }))
 }
 
 /// What a tooltip shows.

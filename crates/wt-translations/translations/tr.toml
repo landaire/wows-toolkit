@@ -1645,6 +1645,13 @@ action_stroke_width = "Çizgi kalınlığı"
 action_delete = "Sil"
 action_cancel = "İptal / Seçimi kaldır"
 
+[ui.armor.cast]
+prompt = "Darbe noktası eklemek için gövdeye %{key}+tıklayın"
+empty = "Henüz darbe noktası yok"
+miss_nothing_under_pointer = "İşaretçinin altında zırh plakası yok"
+miss_thickness_unknown = "Bu modelin plakalarının atış yapılacak bilinen bir kalınlığı yok"
+miss_no_plate_on_path = "Bu açıdan merminin yörüngesi hiçbir zırh plakasını kesmiyor"
+
 [ui.armor.pen]
 search_hint = "Karşılaştırılacak gemileri ara..."
 add_a_ship = "Delmeyi karşılaştırmak için yukarıdan gemi arayıp ekleyin"

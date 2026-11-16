@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Show how to Shift+click the hull to cast a shell in the armor viewport and the Trajectory section while no arc is cast, show a crosshair while Shift is held over the hull, and say why a Shift+click cast nothing
 - *(zgui)* Group the armor viewer options into Ship, Layers, Analysis and Display tabs on the panel's edge. The search covers every tab, counts the matches on each and shows the first tab holding one, and the chosen tab and open sections are remembered. Ctrl+Tab moves between the tabs
 - *(armor)* Start the armor viewer with the water off and the grid showing. A saved choice to show the water is kept
 - *(zgui)* Choose a placed ship's hull, Concealment Expert and range mods, and its own range circles on the tactics board when it is picked alone

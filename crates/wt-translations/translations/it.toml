@@ -1691,6 +1691,13 @@ action_stroke_width = "Spessore tratto"
 action_delete = "Elimina"
 action_cancel = "Annulla / Deseleziona"
 
+[ui.armor.cast]
+prompt = "%{key}+clic sullo scafo per aggiungere un punto di impatto"
+empty = "Ancora nessun punto di impatto"
+miss_nothing_under_pointer = "Nessuna piastra corazzata sotto il puntatore"
+miss_thickness_unknown = "Le piastre di questo modello non hanno uno spessore noto contro cui sparare"
+miss_no_plate_on_path = "La traiettoria del proiettile da questo angolo non attraversa alcuna piastra corazzata"
+
 [ui.armor.pen]
 search_hint = "Cerca navi da confrontare..."
 add_a_ship = "Cerca e aggiungi navi qui sopra per confrontare la penetrazione"

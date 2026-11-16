@@ -1691,6 +1691,13 @@ action_stroke_width = "Strichstärke"
 action_delete = "Löschen"
 action_cancel = "Abbrechen / Abwählen"
 
+[ui.armor.cast]
+prompt = "%{key}+Klick auf den Rumpf fügt einen Einschlagpunkt hinzu"
+empty = "Noch keine Einschlagpunkte"
+miss_nothing_under_pointer = "Keine Panzerplatte unter dem Mauszeiger"
+miss_thickness_unknown = "Die Platten dieses Modells haben keine bekannte Dicke, auf die geschossen werden kann"
+miss_no_plate_on_path = "Die Flugbahn der Granate aus diesem Winkel kreuzt keine Panzerplatte"
+
 [ui.armor.pen]
 search_hint = "Schiffe zum Vergleichen suchen..."
 add_a_ship = "Suchen Sie oben Schiffe und fügen Sie sie hinzu, um den Durchschlag zu vergleichen"

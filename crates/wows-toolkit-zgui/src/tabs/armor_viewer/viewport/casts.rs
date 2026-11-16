@@ -68,6 +68,17 @@ const DEFAULT_MODEL_EXTENT: f32 = 20.0;
 /// How many lines of the shot log are shown at once.
 const SHOT_LOG_LINES: usize = 12;
 
+/// Why a Shift-click cast no shell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CastMiss {
+    /// No armor plate is drawn under the pointer.
+    NothingUnderPointer,
+    /// The plates have no thickness to fire against: a model no ship gives armor values for.
+    ThicknessUnknown,
+    /// The shell's path, which is not the line of sight, crosses no plate.
+    NoPlateOnPath,
+}
+
 impl ViewportModel {
     /// Draws what the ship had taken, replacing whatever was drawn before.
     ///
@@ -423,22 +434,36 @@ impl ViewportModel {
         cx.notify();
     }
 
+    /// Whether a Shift-click on the scene shown can cast: it has plates, and they have a thickness
+    /// to fire against.
+    pub(super) fn can_cast(&self) -> bool {
+        let armored = self.scene_features().is_some_and(|features| features.armor);
+
+        armored && !self.shown().is_some_and(|armor| armor.thickness_unknown())
+    }
+
     /// Casts a shell at whatever the pointer is over, adds it to the arcs already cast, and
-    /// selects it. A cast past the ship does nothing.
+    /// selects it. Says why nothing was cast when the pointer was not over armor a shell can be
+    /// fired at.
     ///
     /// The shell comes in along the camera's own bearing, flattened: a trajectory is read against
     /// the ship, and firing from wherever the eye happens to sit vertically would say more about
     /// the camera than the armor.
-    pub(super) fn cast_at(&mut self, pointer: Vec2, cx: &mut ViewCx) {
-        let Some(rect) = self.last_bounds else { return };
-        let fired = self.viewport.pick(pointer, rect).and_then(|surface| {
-            let (_, ray) = self.viewport.screen_to_ray(pointer, rect)?;
-            let approach = trajectory::approach_xz(&ray);
-            Some((approach, self.fire_at(surface.world_position, approach)?))
-        });
-        let Some((approach, trajectory)) = fired else { return };
+    pub(super) fn cast_at(&mut self, pointer: Vec2, cx: &mut ViewCx) -> Result<ArcId, CastMiss> {
+        // Said wherever the click lands: no plate of such a model can be cast at, shown or not.
+        if self.current_armor.as_ref().is_some_and(|armor| armor.thickness_unknown()) {
+            return Err(CastMiss::ThicknessUnknown);
+        }
+        // Before the first frame nothing is drawn under the pointer to be picked.
+        let Some(rect) = self.last_bounds else { return Err(CastMiss::NothingUnderPointer) };
+        let Some(surface) = self.viewport.pick(pointer, rect) else { return Err(CastMiss::NothingUnderPointer) };
+        let Some((_, ray)) = self.viewport.screen_to_ray(pointer, rect) else {
+            return Err(CastMiss::NothingUnderPointer);
+        };
+        let approach = trajectory::approach_xz(&ray);
+        let trajectory = self.fire_at(surface.world_position, approach).ok_or(CastMiss::NoPlateOnPath)?;
 
-        self.add_arc(approach, trajectory, cx);
+        Ok(self.add_arc(approach, trajectory, cx))
     }
 
     /// Keeps a cast shell, fired with the next cast's ship and shell, in a colour no other arc

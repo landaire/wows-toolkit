@@ -20,10 +20,15 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_toolkit_armor::catalog::ShipCatalog;
 use wows_toolkit_armor::load_model::fixtures::armored_model_scene;
+use wows_toolkit_armor::load_ship::ArmorThickness;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
+use wows_toolkit_armor::load_ship::SceneSubject;
+use wows_toolkit_armor::load_ship::ThicknessSource;
 use wows_toolkit_armor::load_ship::load_ship_armor_by_param;
+use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_armor::plate_picking;
 use wows_toolkit_armor::scene_load::LoadCancel;
 use wows_toolkit_armor::viewport::device::ViewportDevice;
@@ -31,7 +36,10 @@ use wows_toolkit_armor::viewport::headless::HeadlessDevice;
 use wows_toolkit_armor::viewport::headless::SRGB_TARGET;
 use wows_toolkit_armor::viewport::renderer::GpuPipeline;
 use wows_toolkit_armor::viewport::types::TargetSize;
+use wows_toolkit_armor::viewport::types::Vec2;
+use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_armor::viewport::types::ViewRect;
+use wowsunpack::export::hardpoint::HardpointName;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_data::AssetsBin;
@@ -43,10 +51,13 @@ use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Rect;
+use zgui::platform::CursorStyle;
 use zgui::prelude::Zoom;
 use zgui::reactive::Signal;
 use zgui::view;
 use zgui::view::IntoView;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 
 use super::ArmorViewportProps;
 use super::ArmorViewportState;
@@ -478,4 +489,190 @@ fn a_scene_handed_over_before_the_device_is_uploaded_when_it_arrives() {
     let frame = device.render_rgba(&model.viewport, TargetSize::new(160, 120).expect("a frame has area"));
     let ground = frame[..4].to_vec();
     assert!(frame.as_chunks::<4>().0.iter().any(|pixel| pixel.as_slice() != ground.as_slice()), "the model is drawn");
+}
+
+fn turret() -> ModelPath {
+    ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path")
+}
+
+/// [`armored_model_scene`] with its plate read as 25 mm from a ship that mounts the model.
+fn known_thickness_scene() -> LoadedShipArmor {
+    let mut scene = armored_model_scene(turret());
+    for info in scene.meshes.iter_mut().flat_map(|mesh| &mut mesh.triangle_info) {
+        info.thickness_mm = 25.0;
+    }
+    if let SceneSubject::Model(model) = &mut scene.subject {
+        model.thickness = ArmorThickness::Ship(ThicknessSource {
+            vehicle_param_index: VehicleParamIndex::new("PASC001".to_string()),
+            display_name: "Iowa".to_string(),
+            hp: HardpointName::new("HP_AGM_1"),
+        });
+    }
+
+    scene
+}
+
+/// Shows `scene` in `state` and runs frames until it is drawn.
+fn show_scene(window: &mut HeadlessWindow, state: ArmorViewportState, scene: LoadedShipArmor) {
+    state.show_armor(Arc::new(scene), OpeningLayer::Armor);
+    settle_until(window, || state.read_untracked(ViewportModel::scene_is_shown).unwrap_or(false));
+    // The frame after the upload draws the meshes, and lays out the view picking reads.
+    window.advance(Duration::from_millis(100));
+}
+
+/// Where the middle of the fixture's one plate is drawn, in window pixels: the viewport fills a
+/// window of scale one at its corner.
+fn plate_on_screen(state: ArmorViewportState) -> Point<DevicePx, Device> {
+    let at = state
+        .read_untracked(|model| {
+            let rect = model.last_bounds?;
+            let centroid = model.viewport.pos_to_world_space(Vec3::new(4.0 / 3.0, 2.0 / 3.0, 2.0));
+            model.viewport.camera.project_to_screen(centroid, rect)
+        })
+        .flatten()
+        .expect("the plate's middle is in view");
+
+    Point::new(DevicePx(at.x), DevicePx(at.y))
+}
+
+/// A point of the viewport with no plate under it, clear of the gizmo in the top right corner.
+fn empty_on_screen(state: ArmorViewportState) -> Point<DevicePx, Device> {
+    let at = state
+        .read_untracked(|model| {
+            let rect = model.last_bounds?;
+            [(30.0, 30.0), (30.0, rect.h - 30.0), (rect.w - 30.0, rect.h - 30.0)]
+                .into_iter()
+                .map(|(x, y)| Vec2::new(x, y))
+                .find(|at| model.viewport.pick(*at, rect).is_none())
+        })
+        .flatten()
+        .expect("a corner of the viewport shows no plate");
+
+    Point::new(DevicePx(at.x), DevicePx(at.y))
+}
+
+fn cast_hint_text(window: &HeadlessWindow) -> String {
+    window.texts_by_class("wt-armor-viewport__cast-hint").concat()
+}
+
+/// The hint invites a cast while the armor has no arc: a Shift-click on the plate casts one and
+/// takes the hint down, and clearing the arcs puts it back.
+#[test]
+fn a_shift_click_on_the_hull_casts_and_the_hint_follows_the_arcs() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, known_thickness_scene());
+    assert!(window.by_test_id("armor-viewport-cast-hint").is_some(), "an armored scene with no arc invites a cast");
+    let said = cast_hint_text(&window);
+    assert!(said.contains("Shift+click the hull to add an impact point"), "the hint names the gesture: {said}");
+    let bounds = |id: &str| {
+        let element = window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        window.bounds(element).expect("it is laid out")
+    };
+    assert!(
+        bounds("armor-viewport-cast-hint").bottom() <= bounds("armor-length-readout").top(),
+        "the hint sits above the length readout"
+    );
+
+    let plate = plate_on_screen(state);
+    window.click_at_with(plate, Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(state.arcs().len(), 1, "a Shift-click on the plate casts an arc");
+    assert!(window.by_test_id("armor-viewport-cast-miss").is_none(), "a cast that lands says nothing");
+    assert!(window.by_test_id("armor-viewport-cast-hint").is_none(), "the hint goes once an arc exists");
+
+    state.clear_trajectories();
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("armor-viewport-cast-hint").is_some(), "and comes back when the arcs are cleared");
+}
+
+/// A Shift-click off the hull says nothing is there, for a few seconds, and casts nothing.
+#[test]
+fn a_shift_click_off_the_hull_says_why_nothing_was_cast() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, known_thickness_scene());
+
+    window.click_at_with(empty_on_screen(state), Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert!(state.arcs().is_empty());
+    assert!(window.by_test_id("armor-viewport-cast-miss").is_some(), "the miss is said");
+    assert_eq!(cast_hint_text(&window), t!("ui.armor.cast.miss_nothing_under_pointer"), "in place of the hint");
+
+    window.advance(Duration::from_secs(4));
+    assert!(window.by_test_id("armor-viewport-cast-miss").is_none(), "the miss is said for a while only");
+    let hint = window.by_test_id("armor-viewport-cast-hint").expect("and the hint returns");
+    assert_eq!(window.attribute(hint, "data-miss"), None, "drawn as the hint, not the miss");
+}
+
+/// A Shift-click that lands takes down the miss a click before it said, at once.
+#[test]
+fn a_cast_that_lands_takes_down_the_last_miss() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, known_thickness_scene());
+    window.click_at_with(empty_on_screen(state), Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("armor-viewport-cast-miss").is_some());
+
+    window.click_at_with(plate_on_screen(state), Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(state.arcs().len(), 1);
+    assert!(window.by_test_id("armor-viewport-cast-miss").is_none(), "the miss is taken down with the cast");
+}
+
+/// A model no ship gives thickness for cannot be cast at: a Shift-click on its plate says so, and
+/// nothing invites a cast there.
+#[test]
+fn a_shift_click_on_a_plate_of_unknown_thickness_says_so() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, armored_model_scene(turret()));
+    assert!(window.by_test_id("armor-viewport-cast-hint").is_none(), "no cast is invited where none can land");
+
+    window.click_at_with(plate_on_screen(state), Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert!(state.arcs().is_empty());
+    assert_eq!(cast_hint_text(&window), t!("ui.armor.cast.miss_thickness_unknown"));
+}
+
+/// Holding Shift over a plate shows the crosshair, and only there.
+#[test]
+fn holding_shift_over_a_plate_shows_the_crosshair() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, known_thickness_scene());
+    // A press focuses the viewport, which the keys go to; the middle button only pans.
+    let viewport = window.by_test_id("armor-viewport").expect("the viewport is in the document");
+    window.middle_click(viewport).expect("the viewport takes a press");
+
+    window.hover_at(plate_on_screen(state));
+    window.advance(Duration::from_millis(100));
+    assert_ne!(window.cursor(), Some(CursorStyle::Crosshair), "not without Shift");
+    window.hold_key(NamedKey::Shift, Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(window.cursor(), Some(CursorStyle::Crosshair), "Shift over the plate aims");
+    window.release_key(NamedKey::Shift, Modifiers::NONE);
+    window.advance(Duration::from_millis(100));
+    assert_ne!(window.cursor(), Some(CursorStyle::Crosshair), "letting go of Shift stops aiming");
+
+    window.hover_at(empty_on_screen(state));
+    window.hold_key(NamedKey::Shift, Modifiers::SHIFT);
+    window.advance(Duration::from_millis(100));
+    assert_ne!(window.cursor(), Some(CursorStyle::Crosshair), "off the hull there is nothing to aim at");
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the cast hint"]
+fn the_cast_hint_renders_in_dark_and_light() {
+    for (appearance, name) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
+        let Some((mut window, state)) = open(appearance) else { return };
+        show_scene(&mut window, state, known_thickness_scene());
+        assert!(window.by_test_id("armor-viewport-cast-hint").is_some());
+        let path = shot_path(&format!("armor-viewport-cast-hint-{name}"));
+        window.save_png(&path).expect("the window is written to a PNG");
+        println!("{}", path.display());
+
+        window.click_at_with(empty_on_screen(state), Modifiers::SHIFT);
+        window.advance(Duration::from_millis(100));
+        assert!(window.by_test_id("armor-viewport-cast-miss").is_some());
+        let path = shot_path(&format!("armor-viewport-cast-miss-{name}"));
+        window.save_png(&path).expect("the window is written to a PNG");
+        println!("{}", path.display());
+    }
 }

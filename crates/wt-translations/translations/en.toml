@@ -1777,6 +1777,15 @@ tree_matches = "Matches: %{count}"
 tree_no_matches = "No matches"
 no_matching_options = "No options match the filter"
 
+# -- Armor Viewer: casting --
+
+[ui.armor.cast]
+prompt = "%{key}+click the hull to add an impact point"
+empty = "No impact points yet"
+miss_nothing_under_pointer = "No armor plate under the pointer"
+miss_thickness_unknown = "This model's plates have no known thickness to cast against"
+miss_no_plate_on_path = "The shell's path from this angle crosses no armor plate"
+
 # -- Armor Viewer: penetration checker --
 
 [ui.armor.pen]

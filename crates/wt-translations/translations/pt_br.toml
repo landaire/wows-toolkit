@@ -1645,6 +1645,13 @@ action_stroke_width = "Espessura do traço"
 action_delete = "Excluir"
 action_cancel = "Cancelar / Desmarcar"
 
+[ui.armor.cast]
+prompt = "%{key}+clique no casco para adicionar um ponto de impacto"
+empty = "Nenhum ponto de impacto ainda"
+miss_nothing_under_pointer = "Nenhuma placa de blindagem sob o cursor"
+miss_thickness_unknown = "As placas deste modelo não têm uma espessura conhecida para disparar contra"
+miss_no_plate_on_path = "A trajetória do projétil a partir deste ângulo não cruza nenhuma placa de blindagem"
+
 [ui.armor.pen]
 search_hint = "Pesquisar navios para comparar..."
 add_a_ship = "Pesquise e adicione navios acima para comparar a penetração"

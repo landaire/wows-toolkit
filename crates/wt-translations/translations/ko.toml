@@ -1691,6 +1691,13 @@ action_stroke_width = "선 굵기"
 action_delete = "삭제"
 action_cancel = "취소 / 선택 해제"
 
+[ui.armor.cast]
+prompt = "%{key}+클릭으로 선체에 착탄 지점을 추가합니다"
+empty = "아직 착탄 지점이 없습니다"
+miss_nothing_under_pointer = "포인터 아래에 장갑판이 없습니다"
+miss_thickness_unknown = "이 모델의 장갑판은 두께를 알 수 없어 발사할 수 없습니다"
+miss_no_plate_on_path = "이 각도에서의 포탄 탄도는 장갑판을 지나지 않습니다"
+
 [ui.armor.pen]
 search_hint = "비교할 함선 검색..."
 add_a_ship = "위에서 함선을 검색하고 추가하여 관통력을 비교하세요"

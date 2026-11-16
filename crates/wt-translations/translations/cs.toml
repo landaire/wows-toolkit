@@ -1645,6 +1645,13 @@ action_stroke_width = "Šířka čáry"
 action_delete = "Smazat"
 action_cancel = "Zrušit / zrušit výběr"
 
+[ui.armor.cast]
+prompt = "%{key}+kliknutím na trup přidáte bod zásahu"
+empty = "Zatím žádné body zásahu"
+miss_nothing_under_pointer = "Pod ukazatelem není žádný pancéřový plát"
+miss_thickness_unknown = "Pláty tohoto modelu nemají známou tloušťku, na kterou by šlo vystřelit"
+miss_no_plate_on_path = "Dráha střely z tohoto úhlu neprotíná žádný pancéřový plát"
+
 [ui.armor.pen]
 search_hint = "Hledat lodě k porovnání..."
 add_a_ship = "Vyhledejte a přidejte lodě výše pro porovnání průniku"

@@ -1691,6 +1691,13 @@ action_stroke_width = "線の太さ"
 action_delete = "削除"
 action_cancel = "キャンセル / 選択解除"
 
+[ui.armor.cast]
+prompt = "%{key}+クリックで船体に着弾点を追加"
+empty = "着弾点はまだありません"
+miss_nothing_under_pointer = "カーソルの下に装甲板がありません"
+miss_thickness_unknown = "このモデルの装甲板は装甲厚が不明なため、発射できません"
+miss_no_plate_on_path = "この角度からの砲弾の弾道は装甲板と交差しません"
+
 [ui.armor.pen]
 search_hint = "比較する艦船を検索..."
 add_a_ship = "上で艦船を検索・追加して貫通力を比較します"

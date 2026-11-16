@@ -1691,6 +1691,13 @@ action_stroke_width = "ความกว้างเส้น"
 action_delete = "ลบ"
 action_cancel = "ยกเลิก / ยกเลิกการเลือก"
 
+[ui.armor.cast]
+prompt = "%{key}+คลิกที่ตัวเรือเพื่อเพิ่มจุดกระทบ"
+empty = "ยังไม่มีจุดกระทบ"
+miss_nothing_under_pointer = "ไม่มีแผ่นเกราะใต้ตัวชี้"
+miss_thickness_unknown = "แผ่นเกราะของโมเดลนี้ไม่ทราบความหนา จึงยิงไม่ได้"
+miss_no_plate_on_path = "วิถีกระสุนจากมุมนี้ไม่ผ่านแผ่นเกราะใดเลย"
+
 [ui.armor.pen]
 search_hint = "ค้นหาเรือเพื่อเปรียบเทียบ..."
 add_a_ship = "ค้นหาและเพิ่มเรือด้านบนเพื่อเปรียบเทียบการเจาะทะลุ"

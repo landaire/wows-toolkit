@@ -1691,6 +1691,13 @@ action_stroke_width = "Lijndikte"
 action_delete = "Verwijderen"
 action_cancel = "Annuleren / Deselecteren"
 
+[ui.armor.cast]
+prompt = "%{key}+klik op de romp om een inslagpunt toe te voegen"
+empty = "Nog geen inslagpunten"
+miss_nothing_under_pointer = "Geen pantserplaat onder de aanwijzer"
+miss_thickness_unknown = "De platen van dit model hebben geen bekende dikte om op te vuren"
+miss_no_plate_on_path = "De baan van de granaat vanuit deze hoek kruist geen pantserplaat"
+
 [ui.armor.pen]
 search_hint = "Schepen zoeken om te vergelijken..."
 add_a_ship = "Zoek en voeg hierboven schepen toe om penetratie te vergelijken"

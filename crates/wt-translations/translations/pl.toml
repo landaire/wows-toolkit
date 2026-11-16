@@ -1645,6 +1645,13 @@ action_stroke_width = "Grubość linii"
 action_delete = "Usuń"
 action_cancel = "Anuluj / odznacz"
 
+[ui.armor.cast]
+prompt = "%{key}+kliknij kadłub, aby dodać punkt trafienia"
+empty = "Brak punktów trafienia"
+miss_nothing_under_pointer = "Pod wskaźnikiem nie ma płyty pancerza"
+miss_thickness_unknown = "Płyty tego modelu nie mają znanej grubości, w którą można strzelić"
+miss_no_plate_on_path = "Tor pocisku pod tym kątem nie przecina żadnej płyty pancerza"
+
 [ui.armor.pen]
 search_hint = "Szukaj okrętów do porównania..."
 add_a_ship = "Wyszukaj i dodaj okręty powyżej, aby porównać penetrację"
