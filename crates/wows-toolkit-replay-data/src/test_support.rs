@@ -148,6 +148,7 @@ pub fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> 
         name: format!("Player{db_id}"),
         display_name: format!("Player{db_id}"),
         clan: String::new(),
+        clan_id: None,
         clan_color_rgb: Some(0),
         is_hidden_profile: false,
         connection: None,

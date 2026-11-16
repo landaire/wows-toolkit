@@ -17,7 +17,13 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
+use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::IndexedVehicleRow;
+use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::PlayerFacet;
+use wows_toolkit_config::index::rows::ReplayRecord;
+use wows_toolkit_config::index::rows::VehicleRelation;
 use wows_toolkit_config::queries;
 use wows_toolkit_replay_data::live_match::ARENA_INFO_FILE;
 use wows_toolkit_services::settings::StartupSettings;
@@ -35,6 +41,7 @@ use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -607,6 +614,122 @@ fn the_debug_replay_picker_shows_in_debug_mode_and_seeds_the_battle() {
     shell().debug_mode.set(false);
     tracker.settle();
     assert!(!tracker.has("tracker-debug-replay"), "leaving debug mode hides the picker");
+}
+
+/// One battle in the shared index: `recorder` in division 1 with `mate`, against `enemy` of clan
+/// `clan`, fought five minutes ago so every period shows it.
+fn index_division_battle(
+    arena_id: ArenaId,
+    recorder: AccountId,
+    mate: AccountId,
+    enemy: AccountId,
+    clan: &str,
+) -> jiff::Timestamp {
+    let pool = shell().services().settings.pool().expect("the settings database is open");
+    let runtime = shell().services().runtime().expect("the shell has a runtime");
+    let at = jiff::Timestamp::from_second(jiff::Timestamp::now().as_second() - 5 * 60).expect("a valid timestamp");
+    let vehicle = |account: AccountId, relation: VehicleRelation, division_id: Option<i64>| IndexedVehicleRow {
+        arena_id,
+        account_id: account,
+        player_name: format!("Player{}", account.raw()),
+        clan: clan.to_owned(),
+        realm: None,
+        ship_id: 100u64.into(),
+        ship_index: "PFSD110".into(),
+        ship_name: "Kleber".into(),
+        nation: "france".into(),
+        species: "Destroyer".into(),
+        tier: 10,
+        relation,
+        division_id,
+        survived: None,
+        damage: None,
+        kills: None,
+        spotting: None,
+        potential: None,
+        received: None,
+        pr: None,
+        mc: None,
+        mc_version: None,
+        mc_torpedoes_observed: false,
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: None,
+        sniper_twitch_login: None,
+    };
+    let vehicles = [
+        vehicle(recorder, VehicleRelation::SelfPlayer, Some(1)),
+        vehicle(mate, VehicleRelation::Ally, Some(1)),
+        vehicle(enemy, VehicleRelation::Enemy, None),
+    ];
+
+    runtime.block_on(async move {
+        let root = std::path::Path::new("C:/tracker-populate/replays");
+        let source = query::ensure_default_source(&pool, root, at).await.expect("a source is recorded");
+        let objective = ObjectiveMatch {
+            arena_id,
+            timestamp: at,
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: None,
+        };
+        query::upsert_match(&pool, &objective).await.expect("a match is recorded");
+        query::upsert_vehicles(&pool, &vehicles).await.expect("the roster is recorded");
+        let record = ReplayRecord {
+            arena_id,
+            source_id: source,
+            replay_path: root.join(format!("{}.wowsreplay", arena_id.raw())),
+            file_mtime: None,
+            outcome: MatchOutcome::Win,
+            self_account_id: Some(recorder),
+            self_ship_id: None,
+            self_survived: None,
+            self_damage: None,
+            self_kills: None,
+            self_pr: None,
+            results_available: true,
+            indexed_at: at,
+        };
+        query::upsert_record(&pool, &record).await.expect("a record is recorded");
+    });
+
+    at
+}
+
+/// Populate records the index's battles into the tracker: the Players table counts and dates the
+/// opponent, the Clans table lists their clan, the division mate is marked, and the recorder is
+/// left out.
+#[test]
+fn populate_fills_the_tables_from_the_index() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let (recorder, mate, enemy) = (AccountId(970_001), AccountId(970_002), AccountId(970_003));
+    let arena = ArenaId::new(97_000_001);
+    let at = index_division_battle(arena, recorder, mate, enemy, "PPLT");
+
+    tracker.press("tracker-repopulate");
+    let mut row = None;
+    for _ in 0..10 {
+        row = tracker.model.rows.get_untracked().into_iter().find(|row| row.facet.account_id == enemy);
+        if row.as_ref().is_some_and(|row| row.total_encounters.is_some()) {
+            break;
+        }
+        settle_in_real_time(&mut tracker.window);
+    }
+
+    let row = row.expect("the opponent has a row");
+    assert_eq!(row.total_encounters, Some(1), "Total counts the battle");
+    assert_eq!(row.last_seen, Some(at), "Last seen is the battle's time");
+    assert!(tracker.has(&format!("tracker-player-{}", enemy.raw())), "the row is shown");
+    let clan = tracker.model.clans.get_untracked().into_iter().find(|clan| clan.clan == "PPLT");
+    assert_eq!(clan.map(|clan| clan.matches), Some(1), "the Clans table counts the opponent's clan");
+    tracker.model.tracked.with_untracked(|tracked| {
+        assert!(!tracked.contains_key(&recorder), "the recorder is not someone they met");
+        assert!(tracked[&mate].arena_in_division(arena), "the division mate is marked");
+        assert!(!tracked[&enemy].arena_in_division(arena));
+    });
 }
 
 #[test]

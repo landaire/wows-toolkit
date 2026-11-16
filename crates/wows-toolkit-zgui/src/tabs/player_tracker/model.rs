@@ -118,6 +118,8 @@ pub struct TrackerModel {
     pub load: RwSignal<LoadState, LocalStorage>,
     pub clan_load: RwSignal<LoadState, LocalStorage>,
     generation: StoredValue<Generation>,
+    /// Whether this session has marked the index's division encounters on the stored players.
+    division_synced: StoredValue<bool>,
     /// `Some` until the saved view has loaded. The load keeps the fields changed meanwhile, and
     /// saving waits for it so a partial view does not stand in for the saved one.
     view_edits: StoredValue<Option<ViewEdits>>,
@@ -222,6 +224,7 @@ impl TrackerModel {
             load: RwSignal::new_local(LoadState::Idle),
             clan_load: RwSignal::new_local(LoadState::Idle),
             generation: StoredValue::new(Generation::default()),
+            division_synced: StoredValue::new(false),
             view_edits: StoredValue::new(Some(ViewEdits::default())),
             expanded_players: RwSignal::new_local(HashSet::new()),
             expanded_clans: RwSignal::new_local(HashSet::new()),
@@ -279,9 +282,13 @@ impl TrackerModel {
         });
     }
 
-    /// Reads the notes and view modes the front ends share.
+    /// Reads the notes and view modes the front ends share. The first read of the session also
+    /// marks the index's division encounters, which a tracker recorded before they were marked
+    /// lacks.
     fn load_tracked(self, pool: SqlitePool) {
         let services = self.services;
+        let sync_divisions = !self.division_synced.get_value();
+        self.division_synced.set_value(true);
         self.spawn(async move {
             let read = services
                 .on_tokio(async move {
@@ -289,9 +296,12 @@ impl TrackerModel {
                     if let Err(err) = store::import_blob_once(&pool).await {
                         tracing::warn!("player tracker: the stored blob was not imported: {err}");
                     }
-                    let players = store::load(&pool).await;
+                    if sync_divisions && let Err(err) = store::sync_division_mates(&pool).await {
+                        tracing::warn!("player tracker: the division mates were not marked: {err}");
+                    }
+                    let players = store::load(&pool).await?;
                     let modes = store::load_view_modes(&pool).await;
-                    players.map(|players| (players, modes))
+                    Ok::<_, sqlx::Error>((players, modes))
                 })
                 .await;
             match read {
@@ -347,6 +357,31 @@ impl TrackerModel {
                 Ok(Err(err)) => self.load.set(LoadState::Failed(err.to_string())),
                 Err(err) => self.load.set(LoadState::Failed(err.to_string())),
             }
+        });
+    }
+
+    /// Records every encounter the index holds into the tracker, then reads the tables again.
+    pub fn populate(self) {
+        let Some(pool) = self.pool() else { return };
+        self.load.set(LoadState::Loading);
+        let services = self.services;
+        let write = pool.clone();
+        self.spawn(async move {
+            let populated = services.on_tokio(async move { store::populate_from_index(&write).await }).await;
+            let failed = match populated {
+                Ok(Ok(())) => None,
+                Ok(Err(err)) => Some(err.to_string()),
+                Err(err) => Some(err.to_string()),
+            };
+            if let Some(reason) = failed {
+                tracing::warn!("player tracker: the tracker was not populated: {reason}");
+                self.load.set(LoadState::Failed(reason));
+                return;
+            }
+
+            // The populate marked the division encounters itself.
+            self.division_synced.set_value(true);
+            self.refresh(pool);
         });
     }
 

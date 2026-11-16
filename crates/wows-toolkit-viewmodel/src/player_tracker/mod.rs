@@ -7,6 +7,7 @@
 pub mod clans;
 pub mod history;
 pub mod live;
+pub mod record;
 pub mod saved_view;
 pub mod store;
 

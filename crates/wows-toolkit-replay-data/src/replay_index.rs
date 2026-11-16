@@ -28,6 +28,8 @@ use wows_toolkit_viewmodel::index_rows::map_rows;
 use wows_toolkit_viewmodel::index_rows::pr_repairs;
 use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::player_tracker::record::BattleRoster;
+use wows_toolkit_viewmodel::player_tracker::store as tracker_store;
 
 use crate::load::GameDataCache;
 use crate::load::IndexableBattle;
@@ -305,6 +307,13 @@ async fn store_battle(
         rows.rating_scope,
     )
     .await?;
+
+    // Every path a replay enters the index by records who it met, as the egui app records each
+    // replay it parses. The rows are in, so a tracker write that fails costs only the tracker.
+    let roster = BattleRoster::from_report(&battle.normalized, battle.arena_id);
+    if let Err(err) = tracker_store::record_battle(pool, &roster).await {
+        tracing::warn!("replay index: {} was indexed but its players were not tracked: {err}", stored.path.display());
+    }
 
     Ok(())
 }
@@ -656,6 +665,28 @@ mod tests {
 
             let rating = listed_rating(&pool, source, path).await.expect("the battle was rated");
             assert!((rating - 1150.0).abs() < 1e-6, "expected 1150, stored {rating}");
+        });
+    }
+
+    /// Indexing a battle records who the owner met in the tracker, and indexing it again does
+    /// not count it twice.
+    #[test]
+    fn an_indexed_battle_records_its_players_in_the_tracker_once() {
+        use wows_replays::types::AccountId;
+
+        runtime().block_on(async {
+            let pool = wows_toolkit_config::test_pool().await;
+            let path = Path::new("G:/wows/replays/met.wowsreplay");
+
+            store_rated_battle(&pool, path, None).await;
+            store_rated_battle(&pool, path, None).await;
+
+            let tracked = tracker_store::load(&pool).await.expect("the tracker reads");
+            assert!(!tracked.contains_key(&AccountId(1)), "the owner is not someone they met");
+            let enemy = &tracked[&AccountId(2)];
+            assert_eq!(enemy.last_name, "Player2");
+            assert_eq!(enemy.arena_ids.iter().collect::<Vec<_>>(), vec![ArenaId::new(1)]);
+            assert_eq!(enemy.timestamps.len(), 1);
         });
     }
 

@@ -502,11 +502,7 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                 glyph = Glyph::RotateCcw,
                 hover = t!("ui.player_tracker.populate_from_replays").into_owned(),
                 test_id = "tracker-repopulate".to_owned(),
-                on_press = move || {
-                    if let Some(pool) = model.services.settings.pool() {
-                        model.refresh(pool);
-                    }
-                }
+                on_press = move || model.populate()
             )
             IconButton(
                 glyph = Glyph::Trash,

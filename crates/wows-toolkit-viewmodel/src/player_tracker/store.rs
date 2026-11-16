@@ -5,12 +5,21 @@
 //! write a shape the other cannot read.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
+use jiff::Timestamp;
 use sqlx::SqlitePool;
 use wows_replays::types::AccountId;
+use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::DivisionMateEncounter;
+use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_config::index::rows::MatchFilter;
+use wows_toolkit_config::index::rows::PlayerEncounter;
 use wows_toolkit_config::queries;
 use wows_toolkit_config::tracker;
 
+use crate::player_tracker::record::BattleRoster;
+use crate::player_tracker::record::record_roster;
 use crate::player_tracker::tracked;
 use crate::player_tracker::tracked::BlobError;
 use crate::player_tracker::tracked::Pending;
@@ -228,6 +237,134 @@ pub async fn save(
     players: &HashMap<AccountId, TrackedPlayer>,
 ) -> Result<(), sqlx::Error> {
     tracker::apply_tracker_write(pool, &write_for(pending, players)).await
+}
+
+/// Folds one battle's roster into the stored tracker, reading only the accounts
+/// it met.
+pub async fn record_battle(pool: &SqlitePool, roster: &BattleRoster<'_>) -> Result<(), sqlx::Error> {
+    let accounts = roster.met_accounts();
+
+    tracker::update_tracker(pool, tracker::TrackerScope::Accounts(&accounts), |rows| {
+        let mut players = players_from_rows(rows);
+        let mut pending = Pending::default();
+        record_roster(&mut players, &mut pending, roster);
+        write_for(&pending, &players)
+    })
+    .await
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DivisionSyncError {
+    #[error("the index's division encounters could not be read")]
+    Index(#[source] IndexError),
+    #[error("the division marks could not be stored")]
+    Store(#[source] sqlx::Error),
+}
+
+/// Marks every division encounter the index holds on the stored players.
+pub async fn sync_division_mates(pool: &SqlitePool) -> Result<(), DivisionSyncError> {
+    let encounters =
+        query::division_mate_encounters(pool, &MatchFilter::default()).await.map_err(DivisionSyncError::Index)?;
+
+    tracker::update_tracker(pool, tracker::TrackerScope::All, |rows| {
+        let mut players = players_from_rows(rows);
+        let mut pending = Pending::default();
+        mark_division_encounters(&mut players, &mut pending, &encounters);
+        write_for(&pending, &players)
+    })
+    .await
+    .map_err(DivisionSyncError::Store)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PopulateError {
+    #[error("the index's encounters could not be read")]
+    Index(#[source] IndexError),
+    #[error("the tracker could not be read or written")]
+    Store(#[source] sqlx::Error),
+}
+
+/// Records every encounter the index holds into the stored tracker and marks
+/// the division ones. The egui tracker's Populate (`ui/player_tracker/model.rs`'s
+/// `populate_from_index`).
+///
+/// A player's name and clan are taken from the index only where its latest
+/// battle with them is the tracker's latest too, so a name a newer replay
+/// recorded is not put back.
+pub async fn populate_from_index(pool: &SqlitePool) -> Result<(), PopulateError> {
+    let encounters = query::player_encounters(pool).await.map_err(PopulateError::Index)?;
+    let division =
+        query::division_mate_encounters(pool, &MatchFilter::default()).await.map_err(PopulateError::Index)?;
+
+    tracker::update_tracker(pool, tracker::TrackerScope::All, |rows| {
+        let mut players = players_from_rows(rows);
+        let mut pending = Pending::default();
+        record_index_encounters(&mut players, &mut pending, &encounters);
+        // After the encounters: a mark only lands on a player the tracker holds.
+        mark_division_encounters(&mut players, &mut pending, &division);
+        write_for(&pending, &players)
+    })
+    .await
+    .map_err(PopulateError::Store)
+}
+
+fn record_index_encounters(
+    players: &mut HashMap<AccountId, TrackedPlayer>,
+    pending: &mut Pending,
+    encounters: &[PlayerEncounter],
+) {
+    let mut latest: HashMap<AccountId, (Timestamp, &str, &str)> = HashMap::new();
+    for encounter in encounters {
+        let account = encounter.account_id;
+        let player = players.entry(account).or_insert_with(|| TrackedPlayer::new(account));
+        if player.arena_ids.insert(encounter.arena_id) {
+            pending.arena_changed(account, encounter.arena_id);
+        }
+        if player.timestamps.insert(encounter.timestamp) {
+            pending.timestamp_changed(account, encounter.timestamp);
+        }
+
+        let identity = (encounter.timestamp, encounter.name.as_str(), encounter.clan.as_str());
+        match latest.entry(account) {
+            Entry::Occupied(mut held) if held.get().0 < encounter.timestamp => {
+                held.insert(identity);
+            }
+            // An older battle's name is not the player's.
+            Entry::Occupied(_) => {}
+            Entry::Vacant(vacant) => {
+                vacant.insert(identity);
+            }
+        }
+    }
+
+    for (account, (seen, name, clan)) in latest {
+        let Some(player) = players.get_mut(&account) else { continue };
+        if player.timestamps.last() != Some(seen) || (player.last_name == name && player.clan == clan) {
+            continue;
+        }
+        if player.last_name != name && !player.last_name.is_empty() {
+            player.names.insert(std::mem::take(&mut player.last_name));
+        }
+        player.last_name = name.to_owned();
+        player.clan = clan.to_owned();
+        pending.identity_changed(account);
+    }
+}
+
+/// Marks `encounters` on the players `players` already has. An account the
+/// tracker has no row for is not marked: it has no row to hide, and creating one
+/// would invent a player the tracker never recorded.
+fn mark_division_encounters(
+    players: &mut HashMap<AccountId, TrackedPlayer>,
+    pending: &mut Pending,
+    encounters: &[DivisionMateEncounter],
+) {
+    for encounter in encounters {
+        let Some(player) = players.get_mut(&encounter.account_id) else { continue };
+        if player.division_encounters.mark(encounter.arena_id, encounter.timestamp) {
+            pending.encounter_changed(encounter.account_id, encounter.arena_id, encounter.timestamp);
+        }
+    }
 }
 
 /// What [`import_blob_once`] found to do.
@@ -523,5 +660,200 @@ mod tests {
         let left: Option<String> =
             queries::try_get_setting(&pool, tracked::SETTING_KEY).await.expect("the settings read");
         assert!(left.is_some(), "an unreadable blob is not deleted");
+    }
+
+    /// One battle in the index, recorded by `recorder`, with each player's name, clan and
+    /// division.
+    async fn index_battle(
+        pool: &SqlitePool,
+        arena: i64,
+        second: i64,
+        recorder: AccountId,
+        roster: &[(AccountId, &str, &str, Option<i64>)],
+    ) {
+        use std::path::Path;
+        use std::path::PathBuf;
+
+        use wows_replays::types::GameParamId;
+        use wows_toolkit_config::index::rows::IndexedVehicleRow;
+        use wows_toolkit_config::index::rows::MatchOutcome;
+        use wows_toolkit_config::index::rows::ObjectiveMatch;
+        use wows_toolkit_config::index::rows::ReplayRecord;
+        use wows_toolkit_config::index::rows::VehicleRelation;
+
+        let at = seen(second);
+        let arena_id = ArenaId::new(arena);
+        let source = query::ensure_default_source(pool, Path::new("C:/wows/replays"), at).await.expect("a source");
+        let objective = ObjectiveMatch {
+            arena_id,
+            timestamp: at,
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: None,
+        };
+        query::upsert_match(pool, &objective).await.expect("the match is stored");
+
+        let vehicles: Vec<IndexedVehicleRow> = roster
+            .iter()
+            .map(|&(account, name, clan, division)| IndexedVehicleRow {
+                arena_id,
+                account_id: account,
+                player_name: name.to_owned(),
+                clan: clan.to_owned(),
+                realm: None,
+                ship_id: GameParamId::from(111u64),
+                ship_index: "PJSB018".into(),
+                ship_name: "Yamato".into(),
+                nation: "japan".into(),
+                species: "Battleship".into(),
+                tier: 10,
+                relation: if account == recorder { VehicleRelation::SelfPlayer } else { VehicleRelation::Enemy },
+                division_id: division,
+                survived: None,
+                damage: None,
+                kills: None,
+                spotting: None,
+                potential: None,
+                received: None,
+                pr: None,
+                mc: None,
+                mc_version: None,
+                mc_torpedoes_observed: false,
+                is_test_ship: false,
+                disconnected: None,
+                is_stream_sniper: None,
+                sniper_twitch_login: None,
+            })
+            .collect();
+        query::upsert_vehicles(pool, &vehicles).await.expect("the roster is stored");
+
+        let record = ReplayRecord {
+            arena_id,
+            source_id: source,
+            replay_path: PathBuf::from(format!("C:/wows/replays/{arena}.wowsreplay")),
+            file_mtime: None,
+            outcome: MatchOutcome::Win,
+            self_account_id: Some(recorder),
+            self_ship_id: None,
+            self_survived: None,
+            self_damage: None,
+            self_kills: None,
+            self_pr: None,
+            results_available: true,
+            indexed_at: at,
+        };
+        query::upsert_record(pool, &record).await.expect("the record is stored");
+    }
+
+    /// A battle read twice is stored once, its division mate marked and its recorder left out.
+    #[tokio::test]
+    async fn a_recorded_battle_is_stored_once() {
+        use crate::player_tracker::record::RosterPlayer;
+
+        let pool = pool().await;
+        let player = |account: i64, name: &'static str, division_id: Option<u32>, is_self: bool| RosterPlayer {
+            account: AccountId(account),
+            name,
+            clan: "WTK",
+            clan_id: Some(7),
+            division_id,
+            is_bot: false,
+            is_self,
+        };
+        let roster = BattleRoster {
+            arena_id: ArenaId::new(10),
+            timestamp: seen(1_700_000_000),
+            players: vec![
+                player(1, "Me", Some(4), true),
+                player(2, "Mate", Some(4), false),
+                player(3, "Enemy", None, false),
+            ],
+        };
+
+        record_battle(&pool, &roster).await.expect("the battle is recorded");
+        record_battle(&pool, &roster).await.expect("the battle is recorded again");
+
+        let read = load(&pool).await.expect("the tables read back");
+        assert!(!read.contains_key(&AccountId(1)), "the recorder is not someone they met");
+        let enemy = &read[&AccountId(3)];
+        assert_eq!(enemy.last_name, "Enemy");
+        assert_eq!(enemy.clan, "WTK");
+        assert_eq!(enemy.arena_ids.len(), 1);
+        assert_eq!(enemy.timestamps.len(), 1);
+        assert!(read[&AccountId(2)].arena_in_division(ArenaId::new(10)));
+        assert!(!enemy.arena_in_division(ArenaId::new(10)));
+    }
+
+    /// Populate fills the tracker from the index, takes the latest name, marks division mates,
+    /// leaves notes alone, and counts nothing twice when pressed again.
+    #[tokio::test]
+    async fn populate_fills_the_tracker_from_the_index() {
+        let pool = pool().await;
+        let (me, mate, enemy) = (AccountId(1), AccountId(9), AccountId(5));
+        index_battle(
+            &pool,
+            100,
+            1_700_000_000,
+            me,
+            &[(me, "Me", "", Some(3)), (mate, "Mate", "", Some(3)), (enemy, "Old", "OLD", None)],
+        )
+        .await;
+        index_battle(&pool, 101, 1_700_009_000, me, &[(me, "Me", "", None), (enemy, "New", "NEW", None)]).await;
+
+        let held =
+            TrackedPlayer { last_name: "Old".to_owned(), notes: "camps".to_owned(), ..TrackedPlayer::new(enemy) };
+        let noted = HashMap::from([(enemy, held)]);
+        let mut pending = Pending::default();
+        pending.identity_changed(enemy);
+        pending.note_changed(enemy);
+        save(&pool, &pending, &noted).await.expect("the note is stored");
+
+        populate_from_index(&pool).await.expect("the tracker populates");
+        populate_from_index(&pool).await.expect("the tracker populates again");
+
+        let read = load(&pool).await.expect("the tables read back");
+        assert!(!read.contains_key(&me), "the recorder is not someone they met");
+        let stored = &read[&enemy];
+        assert_eq!(stored.arena_ids.len(), 2);
+        assert_eq!(stored.timestamps.len(), 2);
+        assert_eq!(stored.last_name, "New");
+        assert_eq!(stored.clan, "NEW");
+        assert!(stored.names.contains("Old"), "the earlier name is kept as an alias");
+        assert_eq!(stored.notes, "camps");
+        assert!(read[&mate].arena_in_division(ArenaId::new(100)));
+        assert!(read[&mate].timestamp_in_division(seen(1_700_000_000)));
+        assert!(!stored.arena_in_division(ArenaId::new(100)));
+    }
+
+    /// The division sync marks the players the tracker holds, and only them.
+    #[tokio::test]
+    async fn the_division_sync_marks_only_tracked_mates() {
+        let pool = pool().await;
+        let (me, mate, stranger) = (AccountId(1), AccountId(9), AccountId(8));
+        index_battle(
+            &pool,
+            100,
+            1_700_000_000,
+            me,
+            &[(me, "Me", "", Some(3)), (mate, "Mate", "", Some(3)), (stranger, "Stranger", "", Some(3))],
+        )
+        .await;
+        let mut recorded = tracked_player(mate.0);
+        recorded.arena_ids.insert(ArenaId::new(100));
+        recorded.timestamps.insert(seen(1_700_000_000));
+        let players = HashMap::from([(mate, recorded)]);
+        let mut pending = Pending::default();
+        pending.identity_changed(mate);
+        pending.encounter_changed(mate, ArenaId::new(100), seen(1_700_000_000));
+        save(&pool, &pending, &players).await.expect("the encounter is stored");
+
+        sync_division_mates(&pool).await.expect("the sync runs");
+
+        let read = load(&pool).await.expect("the tables read back");
+        assert!(read[&mate].arena_in_division(ArenaId::new(100)));
+        assert!(!read.contains_key(&stranger), "an account the tracker never recorded is not created");
     }
 }

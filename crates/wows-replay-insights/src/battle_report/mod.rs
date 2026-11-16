@@ -97,6 +97,10 @@ pub struct NormalizedPlayer {
     /// the username is an `IDS_` key. Export keeps the raw `name`.
     pub display_name: String,
     pub clan: String,
+    /// `None` for a player outside any clan. Kept for the player tracker, which
+    /// stores it; not part of serialized output.
+    #[serde(skip)]
+    pub clan_id: Option<i64>,
     /// Clan-league color as the game sent it, packed `0xRRGGBB`. The game
     /// sends `0` for a clanless player. `None` when the replay carries no
     /// `clanColor`, which older builds omit.
@@ -1025,6 +1029,7 @@ fn build_player(
         name: state.username().to_string(),
         display_name,
         clan: state.clan().to_string(),
+        clan_id: state.clan_id(),
         clan_color_rgb: clan_color_rgb(player),
         realm: state.realm().map(str::to_owned),
         division_id,

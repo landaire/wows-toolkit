@@ -151,10 +151,67 @@ pub struct TrackerCounts {
 
 /// Every tracked player, with their aliases and encounters.
 pub async fn load_tracker(pool: &SqlitePool) -> Result<TrackerRows, sqlx::Error> {
+    let mut connection = pool.acquire().await?;
+
+    load_rows(&mut connection, TrackerScope::All).await
+}
+
+/// Which tracked accounts a read covers.
+#[derive(Debug, Clone, Copy)]
+pub enum TrackerScope<'a> {
+    All,
+    Accounts(&'a [AccountId]),
+}
+
+/// Reads the rows `scope` covers and applies the write `change` makes of them in
+/// one transaction, so no other write lands between the read and the write
+/// based on it.
+pub async fn update_tracker(
+    pool: &SqlitePool,
+    scope: TrackerScope<'_>,
+    change: impl FnOnce(TrackerRows) -> TrackerWrite,
+) -> Result<(), sqlx::Error> {
+    if let TrackerScope::Accounts(accounts) = scope
+        && accounts.is_empty()
+    {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let rows = load_rows(&mut tx, scope).await?;
+    let write = change(rows);
+    if !write.is_empty() {
+        write_rows(&mut tx, &write).await?;
+    }
+
+    tx.commit().await
+}
+
+/// `select` over one tracker table, narrowed to `scope`.
+fn scoped<'a>(select: &str, scope: TrackerScope<'_>) -> QueryBuilder<'a, Sqlite> {
+    let mut query = QueryBuilder::new(select);
+    if let TrackerScope::Accounts(accounts) = scope {
+        query.push(" WHERE account_id IN (");
+        let mut separated = query.separated(", ");
+        for account in accounts {
+            separated.push_bind(account.0);
+        }
+        query.push(")");
+    }
+
+    query
+}
+
+async fn load_rows(
+    connection: &mut sqlx::SqliteConnection,
+    scope: TrackerScope<'_>,
+) -> Result<TrackerRows, sqlx::Error> {
     let mut rows = TrackerRows::default();
 
-    let players =
-        sqlx::query("SELECT account_id, last_name, clan_id, clan, notes FROM tracked_player").fetch_all(pool).await?;
+    let players = scoped("SELECT account_id, last_name, clan_id, clan, notes FROM tracked_player", scope)
+        .build()
+        .fetch_all(&mut *connection)
+        .await?;
     rows.players.reserve(players.len());
     for row in players {
         rows.players.push(TrackedPlayerRow {
@@ -167,14 +224,17 @@ pub async fn load_tracker(pool: &SqlitePool) -> Result<TrackerRows, sqlx::Error>
         });
     }
 
-    let names = sqlx::query("SELECT account_id, name FROM tracked_player_name").fetch_all(pool).await?;
+    let names =
+        scoped("SELECT account_id, name FROM tracked_player_name", scope).build().fetch_all(&mut *connection).await?;
     rows.names.reserve(names.len());
     for row in names {
         rows.names.push((AccountId(row.try_get::<i64, _>("account_id")?), row.try_get("name")?));
     }
 
-    let arenas =
-        sqlx::query("SELECT account_id, arena_id, in_division FROM tracked_player_arena").fetch_all(pool).await?;
+    let arenas = scoped("SELECT account_id, arena_id, in_division FROM tracked_player_arena", scope)
+        .build()
+        .fetch_all(&mut *connection)
+        .await?;
     rows.arenas.reserve(arenas.len());
     for row in arenas {
         rows.arenas.push(EncounterRow {
@@ -184,8 +244,10 @@ pub async fn load_tracker(pool: &SqlitePool) -> Result<TrackerRows, sqlx::Error>
         });
     }
 
-    let timestamps =
-        sqlx::query("SELECT account_id, seen_at, in_division FROM tracked_player_timestamp").fetch_all(pool).await?;
+    let timestamps = scoped("SELECT account_id, seen_at, in_division FROM tracked_player_timestamp", scope)
+        .build()
+        .fetch_all(&mut *connection)
+        .await?;
     rows.timestamps.reserve(timestamps.len());
     for row in timestamps {
         let seen_at = row.try_get::<i64, _>("seen_at")?;

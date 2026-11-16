@@ -31,6 +31,7 @@ use super::rows::MatchHit;
 use super::rows::MatchOutcome;
 use super::rows::NamedPlayer;
 use super::rows::ObjectiveMatch;
+use super::rows::PlayerEncounter;
 use super::rows::PlayerFacet;
 use super::rows::PrGap;
 use super::rows::PrInputs;
@@ -1383,6 +1384,43 @@ pub async fn division_mate_encounters(
             })
         })
         .collect()
+}
+
+/// Every battle the index holds a replay of, once per account met in it.
+///
+/// The recording accounts are left out: a replay's own player is in every battle
+/// it recorded and is not someone that player met. A row whose stored second is
+/// not a timestamp is skipped, since no key could record it.
+pub async fn player_encounters(pool: &SqlitePool) -> Result<Vec<PlayerEncounter>, IndexError> {
+    let rows = sqlx::query(
+        "SELECT DISTINCT v.account_id, v.arena_id, m.timestamp, v.player_name, v.clan \
+           FROM indexed_vehicle v \
+           JOIN indexed_match m ON m.arena_id = v.arena_id \
+          WHERE v.account_id <> 0 \
+            AND EXISTS (SELECT 1 FROM replay_record r WHERE r.arena_id = v.arena_id) \
+            AND v.account_id NOT IN \
+                (SELECT self_account_id FROM replay_record WHERE self_account_id IS NOT NULL)",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut encounters = Vec::with_capacity(rows.len());
+    for row in rows {
+        let second = row.try_get::<i64, _>("timestamp")?;
+        let Ok(timestamp) = Timestamp::from_second(second) else {
+            tracing::warn!("an indexed match at second {second} is not a timestamp; skipping it");
+            continue;
+        };
+        encounters.push(PlayerEncounter {
+            account_id: AccountId::from(row.try_get::<i64, _>("account_id")?),
+            arena_id: ArenaId::new(row.try_get::<i64, _>("arena_id")?),
+            timestamp,
+            name: row.try_get("player_name")?,
+            clan: row.try_get("clan")?,
+        });
+    }
+
+    Ok(encounters)
 }
 
 /// Encounters whose clan at the time differs from the account's latest clan.

@@ -356,6 +356,16 @@ pub struct DivisionMateEncounter {
     pub timestamp: Timestamp,
 }
 
+/// One battle in which an account was met, with what the battle called it.
+#[derive(Debug, Clone)]
+pub struct PlayerEncounter {
+    pub account_id: AccountId,
+    pub arena_id: ArenaId,
+    pub timestamp: Timestamp,
+    pub name: String,
+    pub clan: String,
+}
+
 /// A distinct player seen in the index (for palette/Search facets).
 #[derive(Debug, Clone)]
 pub struct PlayerFacet {
