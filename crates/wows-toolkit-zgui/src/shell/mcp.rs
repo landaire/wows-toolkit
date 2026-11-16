@@ -290,7 +290,9 @@ impl Shell {
             Notice::failed(t!("ui.mcp.start_failed", reason = reason).into_owned())
                 .keyed(ToastKey::new(MCP_TOAST))
                 .sticky()
-                .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::McpPort)),
+                .action_keeping_open(t!("ui.settings.panel.open").into_owned(), move || {
+                    open.open_at(Setting::McpPort);
+                }),
         );
     }
 

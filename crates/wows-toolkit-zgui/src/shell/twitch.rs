@@ -8,6 +8,8 @@ use futures::future::AbortHandle;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
 use rust_i18n::t;
+use tokio::runtime::Runtime;
+use wows_toolkit_services::twitch::PollError;
 use wows_toolkit_services::twitch::Session;
 use wows_toolkit_viewmodel::settings_drawer::Setting;
 use wows_toolkit_viewmodel::twitch::Token;
@@ -144,18 +146,25 @@ impl Shell {
                 }
             };
 
-            let channel = request.channel;
-            let opened = on_tokio(runtime.clone(), async move { Session::open(&token, &channel, client).await }).await;
-            let session = match opened {
-                Ok(Ok(session)) => Arc::new(session),
-                Ok(Err(err)) => {
-                    tracing::warn!("twitch: the stored credential is not usable: {err}");
-                    self.twitch_refused();
-                    return;
+            let session = loop {
+                let token = token.clone();
+                let channel = request.channel.clone();
+                let client = client.clone();
+                let opened =
+                    on_tokio(runtime.clone(), async move { Session::open(&token, &channel, client).await }).await;
+                match opened {
+                    Ok(Ok(session)) => break Arc::new(session),
+                    Ok(Err(err @ PollError::Credential(_))) => {
+                        tracing::warn!("twitch: the stored credential is not usable: {err}");
+                        self.twitch_refused();
+                        return;
+                    }
+                    // Offline, or Twitch did not answer, or the check itself failed: asked again on
+                    // the poll interval, as the egui app does.
+                    Ok(Err(err)) => tracing::warn!("twitch: the credential could not be checked yet: {err}"),
+                    Err(err) => tracing::warn!("twitch: the credential check did not complete: {err}"),
                 }
-                Err(err) => {
-                    tracing::warn!("twitch: the credential check did not complete: {err}");
-                    self.twitch_refused();
+                if !wait_for_next_poll(runtime.clone()).await {
                     return;
                 }
             };
@@ -176,9 +185,7 @@ impl Shell {
                     Err(err) => tracing::warn!("twitch: a chat poll did not complete: {err}"),
                 }
 
-                // Built inside the runtime: a tokio timer made outside one panics.
-                let interval = wows_toolkit_services::twitch::poll_interval();
-                if on_tokio(runtime.clone(), async move { tokio::time::sleep(interval).await }).await.is_err() {
+                if !wait_for_next_poll(runtime.clone()).await {
                     return;
                 }
             }
@@ -254,7 +261,17 @@ impl Shell {
             Notice::warn(t!("ui.messages.twitch_token_invalid").into_owned())
                 .keyed(ToastKey::new(STUCK_TWITCH_TOKEN))
                 .sticky()
-                .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::TwitchToken)),
+                .action_keeping_open(t!("ui.settings.panel.open").into_owned(), move || {
+                    open.open_at(Setting::TwitchToken);
+                }),
         );
     }
+}
+
+/// Waits out the poll interval. `false` when the runtime is gone.
+async fn wait_for_next_poll(runtime: Option<Arc<Runtime>>) -> bool {
+    // Built inside the runtime: a tokio timer made outside one panics.
+    let interval = wows_toolkit_services::twitch::poll_interval();
+
+    on_tokio(runtime, async move { tokio::time::sleep(interval).await }).await.is_ok()
 }

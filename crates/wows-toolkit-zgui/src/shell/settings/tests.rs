@@ -502,9 +502,9 @@ fn choosing_a_tab_shuts_the_drawer() {
     assert!(window.by_test_id("settings-search").is_none(), "and the drawer is shut");
 }
 
-/// The warning about the game directory goes once its button opens the drawer at the setting.
+/// The warning about the game directory stays while its button opens the drawer at the setting.
 #[test]
-fn the_game_directory_warning_goes_with_its_button() {
+fn the_game_directory_warning_stays_when_its_button_is_pressed() {
     let mut window = open_unsaved();
     crate::shell::startup::warn_wows_dir_invalid(shell());
     settle(&mut window);
@@ -512,10 +512,10 @@ fn the_game_directory_warning_goes_with_its_button() {
     press_warning_button(&mut window, &t!("ui.messages.wows_dir_invalid"), Setting::WowsDirectory);
 }
 
-/// The warning about a Twitch credential Twitch refused goes once its button opens the drawer at
-/// the setting, and a later refusal puts it up again.
+/// The warning about a Twitch credential Twitch refused stays while its button opens the drawer at
+/// the setting, and a later refusal keeps one warning up.
 #[test]
-fn the_twitch_warning_goes_with_its_button() {
+fn the_twitch_warning_stays_when_its_button_is_pressed() {
     let mut window = open_unsaved();
     let warning = t!("ui.messages.twitch_token_invalid").into_owned();
     shell().twitch_refused();
@@ -529,7 +529,7 @@ fn the_twitch_warning_goes_with_its_button() {
 }
 
 /// Presses the button on the warning that says `warning`, and checks that the drawer opens with
-/// `setting` at the top and the warning is gone.
+/// `setting` at the top and the warning stays until the state it reports is fixed.
 fn press_warning_button(window: &mut HeadlessWindow, warning: &str, setting: Setting) {
     assert!(window.texts_by_class("lui-toasts").concat().contains(warning), "the warning is up");
     let open = window.by_role_and_label(Role::Button, &t!("ui.settings.panel.open")).expect("the warning has a button");
@@ -539,7 +539,7 @@ fn press_warning_button(window: &mut HeadlessWindow, warning: &str, setting: Set
 
     assert!(window.by_test_id("settings-search").is_some(), "the button opens the drawer");
     assert!(in_view_of_scroll(window, &row_test_id(setting)), "with the setting it is about in view");
-    assert!(!window.texts_by_class("lui-toasts").concat().contains(warning), "and the warning is gone");
+    assert!(window.texts_by_class("lui-toasts").concat().contains(warning), "and the warning stays");
 }
 
 /// A message about a setting opens the drawer with that setting at the top.

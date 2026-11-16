@@ -143,21 +143,34 @@ impl Notice {
 
     /// The same message with a button that runs `run` and then takes the message down.
     pub fn action(self, label: impl Into<String>, run: impl Fn() + 'static) -> Self {
-        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run) };
+        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run), keep_open: false };
+        Self { action: Some(action), ..self }
+    }
+
+    /// The same message with a button that runs `run` and leaves the message up, for a state that
+    /// stays until it is fixed and the message [`Toasts::withdraw`]n.
+    pub fn action_keeping_open(self, label: impl Into<String>, run: impl Fn() + 'static) -> Self {
+        let action = NoticeAction { label: label.into(), run: std::rc::Rc::new(run), keep_open: true };
         Self { action: Some(action), ..self }
     }
 
     fn into_toast(self) -> Toast {
+        // Long enough to read a two-line message before it slides away.
+        const BRIEFLY: std::time::Duration = std::time::Duration::from_secs(5);
+
         let toast = Toast::new(self.message).kind(self.tone.kind());
         let toast = match self.stay {
-            ToastStay::Briefly => toast,
+            ToastStay::Briefly => toast.duration(BRIEFLY),
             ToastStay::UntilWithdrawn => toast.persistent(),
         };
 
         let Some(action) = self.action else {
             return toast;
         };
-        toast.action_with(ToastAction::new(action.label, move || (action.run)()))
+        let keep_open = action.keep_open;
+        let button = ToastAction::new(action.label, move || (action.run)());
+        let button = if keep_open { button.keep_open() } else { button };
+        toast.action_with(button)
     }
 }
 
@@ -222,11 +235,16 @@ impl Toasts {
 struct NoticeAction {
     label: String,
     run: std::rc::Rc<dyn Fn()>,
+    keep_open: bool,
 }
 
 impl std::fmt::Debug for NoticeAction {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("NoticeAction").field("label", &self.label).finish_non_exhaustive()
+        formatter
+            .debug_struct("NoticeAction")
+            .field("label", &self.label)
+            .field("keep_open", &self.keep_open)
+            .finish_non_exhaustive()
     }
 }
 
@@ -251,7 +269,7 @@ pub fn ToastHost(
     #[prop(into, default = String::from("Dismiss"))]
     dismiss_label: String,
     /// How many messages may be up at once; the oldest leave to make room.
-    #[prop(default = 3)]
+    #[prop(default = 10)]
     limit: usize,
     #[prop(default = ToastCorner::TopRight)] corner: ToastCorner,
     children: Children,
@@ -329,11 +347,10 @@ mod tests {
         view! { box() }
     }
 
-    #[test]
-    fn keys_of_messages_that_leave_on_their_own_are_forgotten() {
+    fn open_host() -> (HeadlessWindow, Toasts) {
         let handed = Rc::new(Cell::new(None));
         let sent = Rc::clone(&handed);
-        let mut window =
+        let window =
             HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 640.0, height: 400.0 }), move || {
                 let sent = Rc::clone(&sent);
                 view! {
@@ -346,17 +363,69 @@ mod tests {
             })
             .expect("opens");
         let toasts = handed.get().expect("the host publishes its messages");
+
+        (window, toasts)
+    }
+
+    #[test]
+    fn keys_of_messages_that_leave_on_their_own_are_forgotten() {
+        let (mut window, toasts) = open_host();
         let remembered = || toasts.keyed.with_value(HashMap::len);
 
-        for worker in 0..5 {
+        for worker in 0..12 {
             toasts.show(
                 Notice::info(format!("Worker {worker} started")).keyed(ToastKey::new(format!("worker-{worker}"))),
             );
         }
         window.advance(Duration::from_secs(1));
-        assert_eq!(remembered(), 3, "the two pushed out by the limit are forgotten");
+        assert_eq!(remembered(), 10, "the two pushed out by the limit are forgotten");
 
         window.advance(Duration::from_secs(8));
         assert_eq!(remembered(), 0, "the ones that expired are forgotten");
+    }
+
+    #[test]
+    fn a_brief_message_stays_five_seconds() {
+        let (mut window, toasts) = open_host();
+        let up = || toasts.keyed.with_value(HashMap::len) == 1;
+
+        toasts.show(Notice::info("Saved").keyed(ToastKey::new("saved")));
+        window.advance(Duration::from_millis(4500));
+        assert!(up(), "still up after four and a half seconds");
+
+        window.advance(Duration::from_secs(2));
+        assert!(!up(), "gone after five");
+    }
+
+    /// A message about a state the reader has to fix stays when its button is pressed, and a
+    /// plain message with a button leaves.
+    #[test]
+    fn a_kept_open_action_leaves_its_message_up() {
+        use zgui::vocab::Role;
+
+        let (mut window, toasts) = open_host();
+        let pressed = Rc::new(Cell::new(0));
+        let counted = Rc::clone(&pressed);
+        let key = ToastKey::new("stuck");
+        toasts.show(
+            Notice::warn("The game directory holds no install")
+                .keyed(key.clone())
+                .sticky()
+                .action_keeping_open("Open", move || counted.set(counted.get() + 1)),
+        );
+        window.advance(Duration::from_millis(500));
+
+        let open = window.by_role_and_label(Role::Button, "Open").expect("the button is up");
+        window.click(open).expect("the button is clicked");
+        window.advance(Duration::from_secs(2));
+        assert_eq!(pressed.get(), 1);
+        assert!(toasts.keyed.with_value(|keyed| keyed.contains_key(&key)), "the message stays up");
+
+        toasts.show(Notice::info("Copied").keyed(key.clone()).action("Undo", || {}));
+        window.advance(Duration::from_millis(500));
+        let undo = window.by_role_and_label(Role::Button, "Undo").expect("the button is up");
+        window.click(undo).expect("the button is clicked");
+        window.advance(Duration::from_secs(2));
+        assert!(!toasts.keyed.with_value(|keyed| keyed.contains_key(&key)), "the plain message leaves");
     }
 }
