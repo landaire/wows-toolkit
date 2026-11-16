@@ -12725,6 +12725,7 @@ dependencies = [
 name = "wgc-install"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "quick-xml 0.36.2",
  "rootcause",
  "serde",

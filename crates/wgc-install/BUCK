@@ -41,5 +41,5 @@ workspace_integration_tests(
     version = "0.1.0",
     library = ":wgc-install",
     deps = WGC_INSTALL_DEPS,
-    test_deps = ["//third-party/rust:tempfile"],
+    test_deps = ["//third-party/rust:insta", "//third-party/rust:tempfile"],
 )

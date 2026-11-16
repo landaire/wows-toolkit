@@ -1,0 +1,16 @@
+---
+source: crates/wgc-install/tests/steam_appmanifest.rs
+assertion_line: 23
+expression: report
+---
+[
+    "bad_state_flags.acf: Err(BadNumber { field: \"StateFlags\", value: \"four\" })",
+    "installed.acf: Ok((AppManifest { state_flags: AppStateFlags(4), update_result: Some(0), language: Some(\"german\") }, None))",
+    "last_update_failed.acf: Ok((AppManifest { state_flags: AppStateFlags(4), update_result: Some(12), language: None }, Some(UpdateFailed { result: 12 })))",
+    "no_state_flags.acf: Err(MissingStateFlags)",
+    "no_update_result.acf: Ok((AppManifest { state_flags: AppStateFlags(4), update_result: None, language: None }, None))",
+    "running_from_steam.acf: Ok((AppManifest { state_flags: AppStateFlags(68), update_result: Some(0), language: None }, None))",
+    "update_required.acf: Ok((AppManifest { state_flags: AppStateFlags(6), update_result: Some(0), language: None }, Some(State { flags: AppStateFlags(6) })))",
+    "updating.acf: Ok((AppManifest { state_flags: AppStateFlags(1030), update_result: Some(0), language: None }, Some(State { flags: AppStateFlags(1030) })))",
+    "validating.acf: Ok((AppManifest { state_flags: AppStateFlags(131076), update_result: None, language: None }, Some(State { flags: AppStateFlags(131076) })))",
+]

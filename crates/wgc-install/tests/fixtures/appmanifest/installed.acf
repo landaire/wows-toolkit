@@ -1,0 +1,14 @@
+"AppState"
+{
+	"appid"		"552990"
+	"name"		"World of Warships"
+	"installdir"		"World of Warships"
+	"StateFlags"		"4"
+	"buildid"		"20702112"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"0"
+	"UserConfig"
+	{
+		"language"		"german"
+	}
+}

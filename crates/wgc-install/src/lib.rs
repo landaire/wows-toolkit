@@ -63,6 +63,38 @@ pub enum InstallError {
     },
 }
 
+#[derive(Debug, Error)]
+pub enum AppManifestError {
+    #[error("could not read the Steam appmanifest {path}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("the Steam appmanifest {path} is malformed")]
+    Malformed {
+        path: PathBuf,
+        #[source]
+        kind: AppManifestErrorKind,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum AppManifestErrorKind {
+    #[error("it is not a key-value file")]
+    Syntax,
+    #[error("it has no StateFlags")]
+    MissingStateFlags,
+    #[error("its {field} {value:?} is not a number")]
+    BadNumber { field: &'static str, value: String },
+}
+
+impl AppManifestErrorKind {
+    pub fn at(self, path: PathBuf) -> AppManifestError {
+        AppManifestError::Malformed { path, kind: self }
+    }
+}
+
 pub mod registry;
 pub mod steam;
 pub mod version;
