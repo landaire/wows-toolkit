@@ -229,6 +229,17 @@ pub fn SearchTab() -> impl IntoView {
             search.open_saved_query();
         }
     });
+    // The pills' ids are named from the index, which opens with the config database.
+    let naming = RenderEffect::new(move |_| {
+        if !services.settings.with_state(|state| matches!(state, SettingsState::Loaded(_))) {
+            return;
+        }
+        search.reading.with(|reading| {
+            if let Some(expr) = reading {
+                search.resolve_pill_names(expr);
+            }
+        });
+    });
     let requests = RenderEffect::new(move |_| {
         for request in shell.palette.take_requests(AppTab::Search) {
             if let TabRequest::Search(query) = request {
@@ -238,6 +249,7 @@ pub fn SearchTab() -> impl IntoView {
     });
     on_cleanup_local(move || {
         drop(opening);
+        drop(naming);
         drop(requests);
     });
 

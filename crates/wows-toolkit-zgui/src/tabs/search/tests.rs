@@ -10,10 +10,21 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_core::game_types::ArenaId;
+use wows_replays::types::AccountId;
+use wows_replays::types::GameParamId;
+use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
+use wows_toolkit_config::index::query_ast::Expr;
 use wows_toolkit_config::index::query_text;
+use wows_toolkit_config::index::rows::IndexedVehicleRow;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::ObjectiveMatch;
+use wows_toolkit_config::index::rows::SourceId;
+use wows_toolkit_config::index::rows::SourceKind;
+use wows_toolkit_config::index::rows::VehicleRelation;
+use wows_toolkit_viewmodel::query_bar::seed;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Rect;
@@ -28,6 +39,7 @@ use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::interaction_tests::shell;
 use crate::tabs::search::model::Search;
 use crate::tabs::search::model::Status;
 
@@ -128,6 +140,90 @@ fn enter_turns_the_typed_term_into_a_pill() {
     assert!(search.pending.get_untracked().is_empty(), "the box is empty for the next term");
     assert!(window.by_test_id("search-pill-0").is_some(), "the pill is drawn");
     assert_eq!(search.history.get_untracked().first().map(String::as_str), Some("map:ocean"));
+}
+
+/// The ids a seeded query carries are looked up in the index, so a player's, a ship's and a
+/// folder's pills read as names.
+#[test]
+fn pills_read_the_names_of_the_ids_they_carry() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    let account = AccountId(735_001_234);
+    let ship = GameParamId::from(4_281_000_111_u64);
+    let source = index_named_battle(account, ship);
+
+    let expr = Expr::All(vec![
+        seed::source_scoped(source),
+        seed::matches_with_player(account),
+        seed::my_matches_in_ship(ship),
+    ]);
+    search.set_query_text(query_text::print_query(&expr));
+    settle_in_real_time(&mut window);
+
+    let pills = window.texts_by_class("wt-search-pill").join(" | ");
+    for name in ["Pill folder", "PillPlayer", "Pill Ship"] {
+        assert!(pills.contains(name), "{name} is read in the pills: {pills}");
+    }
+    assert!(!pills.contains('#'), "no pill reads as an id: {pills}");
+}
+
+/// Writes one battle with `account` sailing `ship` into the index, under a folder source of its
+/// own, and answers that source.
+fn index_named_battle(account: AccountId, ship: GameParamId) -> SourceId {
+    let pool = shell().services().settings.pool().expect("the settings database is open");
+    let runtime = shell().services().runtime().expect("the shell has a runtime");
+    let arena = ArenaId::new(7_350_012_340);
+
+    runtime.block_on(async move {
+        let now = jiff::Timestamp::from_second(1_700_000_000).expect("a timestamp in range");
+        let root = PathBuf::from("/search-tests/pill-folder");
+        let source = query::ensure_source(&pool, "Pill folder", SourceKind::ImportedDir, &root, now)
+            .await
+            .expect("a source is recorded");
+        let objective = ObjectiveMatch {
+            arena_id: arena,
+            timestamp: now,
+            map: "North".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: None,
+        };
+        query::upsert_match(&pool, &objective).await.expect("a match is recorded");
+        let vehicle = IndexedVehicleRow {
+            arena_id: arena,
+            account_id: account,
+            player_name: "PillPlayer".into(),
+            clan: String::new(),
+            realm: None,
+            ship_id: ship,
+            ship_index: "PASB017".into(),
+            ship_name: "Pill Ship".into(),
+            nation: "usa".into(),
+            species: "Battleship".into(),
+            tier: 10,
+            relation: VehicleRelation::SelfPlayer,
+            division_id: None,
+            survived: Some(true),
+            damage: None,
+            kills: None,
+            spotting: None,
+            potential: None,
+            received: None,
+            pr: None,
+            mc: None,
+            mc_version: None,
+            mc_torpedoes_observed: false,
+            is_test_ship: false,
+            disconnected: Some(false),
+            is_stream_sniper: None,
+            sniper_twitch_login: None,
+        };
+        query::upsert_vehicles(&pool, &[vehicle]).await.expect("a vehicle is recorded");
+
+        source
+    })
 }
 
 /// A structural edit can be undone and redone from the keyboard, and a query that does not parse

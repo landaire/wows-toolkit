@@ -12,10 +12,12 @@ use wowsunpack::game_types::PersonalRatingCategory;
 use wows_toolkit_config::index::query_ast::CmpOp;
 use wows_toolkit_config::index::query_ast::DivisionScope;
 use wows_toolkit_config::index::query_ast::Expr;
+use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::MatchField;
 use wows_toolkit_config::index::query_ast::MatchTerm;
 use wows_toolkit_config::index::query_ast::Op;
 use wows_toolkit_config::index::query_ast::Quant;
+use wows_toolkit_config::index::query_ast::RosterExpr;
 use wows_toolkit_config::index::query_ast::RosterField;
 use wows_toolkit_config::index::query_ast::RosterTerm;
 use wows_toolkit_config::index::query_ast::ShipClass;
@@ -27,12 +29,13 @@ use wows_toolkit_config::index::query_ast::ValueKind;
 use wows_toolkit_config::index::query_text::local_date;
 use wows_toolkit_config::index::rows::IndexSource;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::VehicleRelation;
 
 /// Display names for ids that only appear as numbers in the tree. Filled by the
 /// Search tab from the index; an id that is absent renders as `#<id>`, matching
 /// what the tab did before this widget existed.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct NameCache {
     pub ships: HashMap<GameParamId, String>,
     pub players: HashMap<AccountId, String>,
@@ -41,6 +44,76 @@ pub struct NameCache {
     /// `settings.app.locale` and threads in here every frame. `None` (the
     /// default) formats numbers as en-US, matching `separate_number`'s own default.
     pub locale: Option<String>,
+}
+
+impl NameCache {
+    /// Takes in names an index lookup found.
+    pub fn adopt(&mut self, found: PillNames) {
+        let PillNames { ships, players, sources } = found;
+        self.ships.extend(ships);
+        self.players.extend(players);
+        if let Some(sources) = sources {
+            self.sources = sources;
+        }
+    }
+}
+
+/// The ids a query's pills name, each of which reads as `#<id>` until [`NameCache`] holds its
+/// name.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct PillIds {
+    pub ships: Vec<GameParamId>,
+    pub players: Vec<AccountId>,
+    pub sources: Vec<SourceId>,
+}
+
+impl PillIds {
+    /// Every id `expr` names. Ships and accounts sit inside roster predicates, sources in match
+    /// terms.
+    pub fn of(expr: &MatchExpr) -> Self {
+        let mut ids = Self::default();
+        let mut matches = vec![expr];
+        let mut rosters: Vec<&RosterExpr> = Vec::new();
+        while let Some(node) = matches.pop() {
+            match node {
+                Expr::Leaf(MatchTerm::Roster { pred, .. }) => rosters.push(pred),
+                Expr::Leaf(MatchTerm::Field(_, _, value)) => ids.note(value),
+                Expr::Leaf(MatchTerm::FreeText(_)) => {}
+                other => matches.extend(other.children().iter().rev()),
+            }
+        }
+
+        while let Some(node) = rosters.pop() {
+            match node {
+                Expr::Leaf(term) => ids.note(&term.value),
+                other => rosters.extend(other.children().iter().rev()),
+            }
+        }
+
+        ids
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ships.is_empty() && self.players.is_empty() && self.sources.is_empty()
+    }
+
+    fn note(&mut self, value: &Value) {
+        match value {
+            Value::Ship(id) => self.ships.push(*id),
+            Value::Account(id) => self.players.push(*id),
+            Value::Source(id) => self.sources.push(*id),
+            _ => {}
+        }
+    }
+}
+
+/// The names an index lookup found for a [`PillIds`]. An id the index does not know is absent.
+#[derive(Debug, Default)]
+pub struct PillNames {
+    pub ships: Vec<(GameParamId, String)>,
+    pub players: Vec<(AccountId, String)>,
+    /// Every index source, read when the ids name one. `None` when they name none.
+    pub sources: Option<Vec<IndexSource>>,
 }
 
 /// Which part of a term a segment renders. Each role carries its own click
@@ -486,11 +559,67 @@ mod tests {
     use wows_toolkit_config::index::query_ast::Value;
     use wows_toolkit_config::index::rows::MatchOutcome;
 
+    use crate::query_bar::seed;
+
     #[test]
     fn a_match_field_pill_reads_as_field_op_value() {
         let cache = NameCache::default();
         let term = MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win));
         assert_eq!(pill_text(&term, &cache), "Result is Win");
+    }
+
+    /// Seeded queries carry bare ids, every ship and account inside a quantifier, so a walk that
+    /// stopped at the roster boundary would find neither.
+    #[test]
+    fn pill_ids_reach_inside_roster_predicates() {
+        let ship = GameParamId::from(4_179_530_192_u64);
+        let account = AccountId(1_234_567);
+        let expr = Expr::All(vec![seed::my_matches_in_ship(ship), seed::matches_with_player(account)]);
+
+        let ids = PillIds::of(&expr);
+        assert_eq!(ids.ships, vec![ship]);
+        assert_eq!(ids.players, vec![account]);
+    }
+
+    /// A negated term still names an id whose pill has to read as a name.
+    #[test]
+    fn pill_ids_descend_through_negation_and_disjunction() {
+        let account = AccountId(42);
+        let expr: MatchExpr = Expr::Any(vec![
+            Expr::Not(Box::new(seed::matches_with_player(account))),
+            Expr::Leaf(MatchTerm::FreeText("ocean".into())),
+        ]);
+
+        let ids = PillIds::of(&expr);
+        assert!(ids.ships.is_empty());
+        assert_eq!(ids.players, vec![account]);
+    }
+
+    /// A relation is not an id, and asking the index to resolve one would be a query per pill
+    /// that can never answer.
+    #[test]
+    fn pill_ids_ignore_roster_values_that_are_not_ids() {
+        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster {
+            quant: Quant::Any,
+            pred: Expr::Leaf(RosterTerm {
+                field: RosterField::Relation,
+                op: Op::Is,
+                value: Value::Relation(VehicleRelation::Enemy),
+            }),
+        });
+
+        assert!(PillIds::of(&expr).is_empty());
+    }
+
+    /// "Search these replays" scopes by a match-level source term, whose pill reads as the
+    /// source's name.
+    #[test]
+    fn pill_ids_find_a_source_scope() {
+        let expr = Expr::All(vec![seed::source_scoped(SourceId(7)), seed::games_i_won()]);
+
+        let ids = PillIds::of(&expr);
+        assert_eq!(ids.sources, vec![SourceId(7)]);
+        assert!(ids.ships.is_empty() && ids.players.is_empty());
     }
 
     /// A date pill has to read as the day the box beside it spells and the day

@@ -13,6 +13,8 @@ use wows_toolkit_config::index::rows::MatchOutcome;
 use crate::formatting::separate_number;
 use crate::name_lookup::PlayerLookup;
 use crate::name_lookup::ShipLookup;
+use crate::query_bar::label::PillIds;
+use crate::query_bar::label::PillNames;
 use crate::query_bar::suggest::ValueOption;
 use crate::rating_breakdown::MatchContributionWithheld;
 use crate::text_filter::FilterQuery;
@@ -206,6 +208,36 @@ pub async fn look_up_sources(pool: &sqlx::SqlitePool) -> Vec<ValueOption> {
             Vec::new()
         }
     }
+}
+
+/// The names the index holds for `ids`. A failed lookup is logged and its pill keeps reading
+/// `#<id>`: the query itself still runs.
+pub async fn look_up_pill_names(pool: &sqlx::SqlitePool, ids: &PillIds) -> PillNames {
+    let mut found = PillNames::default();
+    for &ship in &ids.ships {
+        match query::ship_name(pool, ship).await {
+            Ok(Some(name)) => found.ships.push((ship, name)),
+            Ok(None) => {}
+            Err(err) => tracing::warn!("search: the ship name lookup failed for {ship:?}: {err}"),
+        }
+    }
+
+    for &account in &ids.players {
+        match query::player_name(pool, account).await {
+            Ok(Some(name)) => found.players.push((account, name)),
+            Ok(None) => {}
+            Err(err) => tracing::warn!("search: the player name lookup failed for {account:?}: {err}"),
+        }
+    }
+
+    if !ids.sources.is_empty() {
+        match query::list_sources(pool).await {
+            Ok(sources) => found.sources = Some(sources),
+            Err(err) => tracing::warn!("search: the source lookup failed: {err}"),
+        }
+    }
+
+    found
 }
 
 #[cfg(test)]

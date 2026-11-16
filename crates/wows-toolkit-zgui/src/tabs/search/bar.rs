@@ -217,7 +217,7 @@ pub(crate) fn QueryBar(search: Search) -> impl IntoView {
         let preferences = search.operator_preferences.get();
         let path = search.value_edit.with(|edit| edit.as_ref().map(|edit| edit.path.clone()));
         let editing = path.as_ref().map(|path| Editing { path, query: input });
-        Some(search.names.with(|names| pill_strip(search, &expr, names, &selection, &preferences, editing)))
+        Some(pill_strip(search, &expr, &search.pill_names(), &selection, &preferences, editing))
     };
     let parse_error = move || match search.status.get() {
         crate::tabs::search::model::Status::Invalid { reason, span, text } => {

@@ -6,12 +6,14 @@
 //! typed term into the pills.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
 use wows_core::pseudonym::NameDisplay;
+use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
@@ -22,7 +24,9 @@ use wows_toolkit_config::index::query_ast::ValueKind;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
+use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_viewmodel::query_bar::label::NameCache;
+use wows_toolkit_viewmodel::query_bar::label::PillIds;
 use wows_toolkit_viewmodel::query_bar::picker;
 use wows_toolkit_viewmodel::query_bar::picker::Completion;
 use wows_toolkit_viewmodel::query_bar::picker::StructuralEdit;
@@ -38,6 +42,7 @@ use wows_toolkit_viewmodel::search_results::NameList;
 use wows_toolkit_viewmodel::search_results::RESULT_LIMIT;
 use wows_toolkit_viewmodel::search_results::ValueNames;
 use wows_toolkit_viewmodel::search_results::look_up_maps;
+use wows_toolkit_viewmodel::search_results::look_up_pill_names;
 use wows_toolkit_viewmodel::search_results::look_up_sources;
 use wows_toolkit_viewmodel::search_settings;
 use wows_toolkit_viewmodel::search_settings::SEARCH_SETTINGS_KEY;
@@ -159,6 +164,24 @@ struct FieldNames {
     names: Arc<ValueNames>,
 }
 
+/// The ids a name lookup was sent for, found or not, so an id the index does not know is not asked
+/// for again on every edit while its pill stays.
+#[derive(Default)]
+struct AskedNames {
+    ships: HashSet<GameParamId>,
+    players: HashSet<AccountId>,
+    sources: HashSet<SourceId>,
+}
+
+impl AskedNames {
+    /// Drops from `ids` what was asked for already, noting the rest as asked.
+    fn keep_unasked(&mut self, ids: &mut PillIds) {
+        ids.ships.retain(|id| self.ships.insert(*id));
+        ids.players.retain(|id| self.players.insert(*id));
+        ids.sources.retain(|id| self.sources.insert(*id));
+    }
+}
+
 /// The Search tab's state, as one `Copy` handle.
 #[derive(Clone, Copy)]
 pub(crate) struct Search {
@@ -168,7 +191,9 @@ pub(crate) struct Search {
     pub pending: RwSignal<String, LocalStorage>,
     /// The committed query, which is what the pills read back.
     pub reading: RwSignal<Option<MatchExpr>, LocalStorage>,
-    pub names: RwSignal<NameCache, LocalStorage>,
+    /// The names the pills' ids stand for, players by their real names. See [`Self::pill_names`].
+    names: RwSignal<NameCache, LocalStorage>,
+    asked_names: StoredValue<AskedNames, LocalStorage>,
     pub selection: RwSignal<Selection, LocalStorage>,
     selection_anchor: StoredValue<Option<NodePath>, LocalStorage>,
     selection_focus: StoredValue<Option<NodePath>, LocalStorage>,
@@ -230,6 +255,7 @@ impl Search {
             pending: RwSignal::new_local(String::new()),
             reading: RwSignal::new_local(None),
             names: RwSignal::new_local(NameCache::default()),
+            asked_names: StoredValue::new_local(AskedNames::default()),
             selection: RwSignal::new_local(Selection::default()),
             selection_anchor: StoredValue::new_local(None),
             selection_focus: StoredValue::new_local(None),
@@ -928,6 +954,37 @@ impl Search {
                 self.resolved_ships.update(|names| {
                     names.insert(key, name);
                 });
+            }
+        });
+    }
+
+    /// The names the pills read, players as the name setting shows them. Reactive.
+    pub fn pill_names(self) -> NameCache {
+        let display = self.services.settings.name_display();
+        let mut names = self.names.get();
+        for name in names.players.values_mut() {
+            *name = display.player_name(name).into_owned();
+        }
+
+        names
+    }
+
+    /// Looks up the names of the ids `expr` names that were not asked for yet, so their pills read
+    /// as names rather than as `#<id>`.
+    pub fn resolve_pill_names(self, expr: &MatchExpr) {
+        let Some(pool) = self.services.settings.pool() else { return };
+        let mut ids = PillIds::of(expr);
+        self.asked_names.update_value(|asked| asked.keep_unasked(&mut ids));
+        if ids.is_empty() {
+            return;
+        }
+
+        let services = self.services;
+        self.spawn(async move {
+            match services.on_tokio(async move { look_up_pill_names(&pool, &ids).await }).await {
+                Ok(found) => self.names.update(|names| names.adopt(found)),
+                // The pills keep reading as ids.
+                Err(err) => tracing::warn!(%err, "search: the pill name lookup did not finish"),
             }
         });
     }

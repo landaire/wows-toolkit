@@ -17,12 +17,8 @@ use crate::db::index::query;
 use crate::db::index::query::SortColumn;
 use crate::db::index::query::SortDirection;
 use crate::db::index::query::SortSpec;
-use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MapCatalog;
 use crate::db::index::query_ast::MatchExpr;
-use crate::db::index::query_ast::MatchTerm;
-use crate::db::index::query_ast::RosterExpr;
-use crate::db::index::query_ast::Value;
 use crate::db::index::query_sql::CompileCtx;
 use crate::db::index::query_text::print_query;
 use crate::db::index::query_text::quote_if_needed;
@@ -33,6 +29,8 @@ use crate::icons;
 use crate::replay::renderer::preview::PreviewKey;
 use crate::ui::query_bar::Deps;
 use crate::ui::query_bar::QueryBar;
+use crate::ui::query_bar::label::PillIds;
+use crate::ui::query_bar::label::PillNames;
 use crate::ui::query_bar::select::prune_empty;
 use crate::ui::query_bar::suggest::ValueOption;
 use crate::ui::query_bar::suggest::ValueRequest;
@@ -41,6 +39,7 @@ use crate::ui::theme::semantic::SemanticExt;
 use crate::ui::widgets::pr_chip;
 use crate::util::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
+use wows_toolkit_viewmodel::search_results::look_up_pill_names;
 
 /// Rows a single search reads. `search_by_ast` fetches one more so the count can
 /// say "at least this many" rather than reporting a truncated total.
@@ -103,10 +102,7 @@ enum SearchMsg {
     },
     Sources(Vec<IndexSource>),
     Maps(Vec<String>),
-    Names {
-        ships: Vec<(GameParamId, String)>,
-        players: Vec<(AccountId, String)>,
-    },
+    Names(PillNames),
     /// How many indexed matches have `game_mode_id IS NULL`, refreshed
     /// alongside every search so it reads zero again once the user re-indexes.
     GameModeGap(i64),
@@ -247,10 +243,7 @@ impl SearchTabState {
                     self.sources = sources;
                 }
                 SearchMsg::Maps(maps) => self.map_names = maps,
-                SearchMsg::Names { ships, players } => {
-                    self.bar.names.ships.extend(ships);
-                    self.bar.names.players.extend(players);
-                }
+                SearchMsg::Names(names) => self.bar.names.adopt(names),
                 SearchMsg::GameModeGap(count) => self.game_mode_gap = Some(count),
             }
         }
@@ -330,33 +323,16 @@ impl SearchTabState {
     /// name cache alone would re-ask for it on every edit for as long as its
     /// pill was in the bar.
     fn resolve_names(&mut self, pool: &sqlx::SqlitePool, rt: &Runtime) {
-        let (mut ships, mut players) = (Vec::new(), Vec::new());
-        collect_ids(&self.bar.expr, &mut ships, &mut players);
-        ships.retain(|id| self.asked_ships.insert(*id));
-        players.retain(|id| self.asked_players.insert(*id));
-        if ships.is_empty() && players.is_empty() {
+        let mut ids = PillIds::of(&self.bar.expr);
+        ids.ships.retain(|id| self.asked_ships.insert(*id));
+        ids.players.retain(|id| self.asked_players.insert(*id));
+        // Sources are read once, as the tab opens.
+        ids.sources.clear();
+        if ids.is_empty() {
             return;
         }
         let pool = pool.clone();
-        self.spawn(rt, async move {
-            let mut ship_names = Vec::new();
-            for id in ships {
-                match query::ship_name(&pool, id).await {
-                    Ok(Some(name)) => ship_names.push((id, name)),
-                    Ok(None) => {}
-                    Err(e) => tracing::warn!("search: ship_name lookup failed for {id:?}: {e}"),
-                }
-            }
-            let mut player_names = Vec::new();
-            for id in players {
-                match query::player_name(&pool, id).await {
-                    Ok(Some(name)) => player_names.push((id, name)),
-                    Ok(None) => {}
-                    Err(e) => tracing::warn!("search: player_name lookup failed for {id:?}: {e}"),
-                }
-            }
-            Some(SearchMsg::Names { ships: ship_names, players: player_names })
-        });
+        self.spawn(rt, async move { Some(SearchMsg::Names(look_up_pill_names(&pool, &ids).await)) });
     }
 
     /// Starts the debounce for a value lookup the bar asked for. A new request
@@ -453,21 +429,6 @@ fn source_option(source: &IndexSource) -> ValueOption {
 
 fn map_option(name: &str) -> ValueOption {
     ValueOption { label: name.to_owned(), token: quote_if_needed(name) }
-}
-
-/// The ship and account ids a query names. Only roster terms can carry one: the
-/// match level has no ship or account field, because the perspective player is
-/// the roster row whose relation is `self`.
-fn collect_ids(expr: &MatchExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
-    match expr {
-        Expr::Leaf(MatchTerm::Roster { pred, .. }) => collect_roster_ids(pred, ships, players),
-        Expr::Leaf(MatchTerm::Field(..) | MatchTerm::FreeText(_)) => {}
-        other => {
-            for child in other.children() {
-                collect_ids(child, ships, players);
-            }
-        }
-    }
 }
 
 pub use wows_toolkit_viewmodel::search::game_mode_gap_applies as game_mode_gap_hint_relevant;
@@ -918,21 +879,6 @@ fn show_results_table(ui: &mut egui::Ui, delegate: &mut ResultsTable<'_>) -> egu
     id
 }
 
-fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
-    match expr {
-        Expr::Leaf(term) => match &term.value {
-            Value::Ship(id) => ships.push(*id),
-            Value::Account(id) => players.push(*id),
-            _ => {}
-        },
-        other => {
-            for child in other.children() {
-                collect_roster_ids(child, ships, players);
-            }
-        }
-    }
-}
-
 use wows_toolkit_viewmodel::search::ship_display_name;
 
 /// What a table pass asked to open, given the two paths it reports.
@@ -1180,11 +1126,8 @@ impl ToolkitTabViewer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::index::query_ast::Quant;
-    use crate::db::index::query_ast::RosterField;
-    use crate::db::index::query_ast::RosterTerm;
-    use crate::db::index::rows::VehicleRelation;
-    use crate::ui::query_bar::seed;
+    use crate::db::index::query_ast::Expr;
+    use crate::db::index::query_ast::MatchTerm;
     use crate::ui::theme::contrast::CONTRAST_FLOOR as TEXT_CONTRAST_FLOOR;
     use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
     use crate::ui::theme::contrast::contrast_ratio;
@@ -1316,54 +1259,6 @@ mod tests {
         for (index, hit) in hits.iter().enumerate() {
             assert_eq!(copy_target(&hits, index), hit.replay_path);
         }
-    }
-
-    /// Seeded queries carry bare ids, so the pill reads as `#<id>` until these
-    /// are found and looked up. A walk that stopped at the roster boundary
-    /// would find neither, since every id lives inside a quantifier.
-    #[test]
-    fn id_collection_reaches_inside_roster_predicates() {
-        let ship = GameParamId::from(4_179_530_192_u64);
-        let account = AccountId(1_234_567);
-        let expr = Expr::All(vec![seed::my_matches_in_ship(ship), seed::matches_with_player(account)]);
-
-        let (mut ships, mut players) = (Vec::new(), Vec::new());
-        collect_ids(&expr, &mut ships, &mut players);
-        assert_eq!(ships, vec![ship]);
-        assert_eq!(players, vec![account]);
-    }
-
-    /// A negated term still names an id whose pill has to read as a name.
-    #[test]
-    fn id_collection_descends_through_negation_and_disjunction() {
-        let account = AccountId(42);
-        let expr: MatchExpr = Expr::Any(vec![
-            Expr::Not(Box::new(seed::matches_with_player(account))),
-            Expr::Leaf(MatchTerm::FreeText("ocean".into())),
-        ]);
-
-        let (mut ships, mut players) = (Vec::new(), Vec::new());
-        collect_ids(&expr, &mut ships, &mut players);
-        assert!(ships.is_empty());
-        assert_eq!(players, vec![account]);
-    }
-
-    /// A relation is not an id, and asking the index to resolve one would be a
-    /// query per pill that can never answer.
-    #[test]
-    fn id_collection_ignores_roster_values_that_are_not_ids() {
-        let expr: MatchExpr = Expr::Leaf(MatchTerm::Roster {
-            quant: Quant::Any,
-            pred: Expr::Leaf(RosterTerm {
-                field: RosterField::Relation,
-                op: crate::db::index::query_ast::Op::Is,
-                value: Value::Relation(VehicleRelation::Enemy),
-            }),
-        });
-
-        let (mut ships, mut players) = (Vec::new(), Vec::new());
-        collect_ids(&expr, &mut ships, &mut players);
-        assert!(ships.is_empty() && players.is_empty());
     }
 
     /// A value reply belongs to the field the caret was on when it was asked
