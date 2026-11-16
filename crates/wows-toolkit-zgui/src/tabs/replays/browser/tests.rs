@@ -1167,23 +1167,56 @@ fn the_listing_renders_in_dark_and_light() {
 /// The ways a row can be scored, in the order [`scored_listing`] lists them.
 const SCORINGS: [&str; 5] = ["both", "pr-only", "mc-only", "neither", "unrated"];
 
+/// How the replays of a [`scored_listing`] reach it.
+#[derive(Clone, Copy)]
+enum Reached {
+    /// In the directory when it is opened.
+    Scanned,
+    /// Landed in the pinned directory while it is on screen, with nothing opened as it lands, so
+    /// each is tagged New.
+    Landed,
+}
+
 /// A listing of one replay per entry of [`SCORINGS`], each scored that way, by path.
-fn scored_listing(window: &mut HeadlessWindow, control: BrowserControl) -> (tempfile::TempDir, Vec<PathBuf>) {
+fn scored_listing(
+    window: &mut HeadlessWindow,
+    control: BrowserControl,
+    reached: Reached,
+) -> (tempfile::TempDir, Vec<PathBuf>) {
     let random = RatingScope::Rated(RatedBattle::Random);
     let dir = tempfile::tempdir().expect("a temporary directory can be made");
     let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
-    let paths: Vec<PathBuf> = SCORINGS
+    let copies: Vec<(PathBuf, &str)> = SCORINGS
         .iter()
         .zip(FIXTURES.iter().cycle())
-        .map(|(scoring, name)| {
-            let path = root.join(format!("{scoring}-{name}"));
-            std::fs::copy(fixture(name), &path).expect("the replay is copied");
-            path
-        })
+        .map(|(scoring, name)| (root.join(format!("{scoring}-{name}")), *name))
         .collect();
+    let copy = |copies: &[(PathBuf, &str)]| {
+        for (path, name) in copies {
+            std::fs::copy(fixture(name), path).expect("the replay is copied");
+        }
+    };
     control.adopt_pinned_folders(PinnedFolders::default());
-    control.open_folder(root.clone());
-    settle_in_real_time(window);
+    match reached {
+        Reached::Scanned => {
+            copy(&copies);
+            control.open_folder(root.clone());
+            settle_in_real_time(window);
+        }
+        Reached::Landed => {
+            set_autoload(window, control, false);
+            control.open_folder(root.clone());
+            settle_in_real_time(window);
+            control.pin_folder(folder_id(control, &root), true);
+            settle_in_real_time(window);
+            copy(&copies);
+            for (path, _) in &copies {
+                simulated_watch::report(&root, DirChange::Appeared(path.clone()));
+                settle_in_real_time(window);
+            }
+        }
+    }
+    let paths: Vec<PathBuf> = copies.into_iter().map(|(path, _)| path).collect();
 
     let summaries = HashMap::from([
         (paths[0].clone(), summary(MatchOutcome::Win, random, Some(1650.4))),
@@ -1235,7 +1268,7 @@ fn chip_in_row(window: &HeadlessWindow, path: &Path, kind: &str) -> Option<ChipP
 #[test]
 fn a_rows_scores_stack_pr_above_mc_and_line_up_across_rows() {
     let (mut window, control) = open();
-    let (_dir, paths) = scored_listing(&mut window, control);
+    let (_dir, paths) = scored_listing(&mut window, control, Reached::Scanned);
     let [both, pr_only, mc_only, neither, unrated] = <[PathBuf; 5]>::try_from(paths).expect("one row per scoring");
 
     let pr = chip_in_row(&window, &both, "pr").expect("the row shows its PR");
@@ -1271,8 +1304,75 @@ fn the_listing_scores_render_in_dark_and_light() {
         simulated_watch::install();
         let mut window = open_shell(review_options(appearance));
         let control = MADE.with(std::cell::Cell::get).expect("the replays tab made its browser");
-        let (_dir, _paths) = scored_listing(&mut window, control);
+        let (_dir, _paths) = scored_listing(&mut window, control, Reached::Scanned);
 
         println!("{}", save_shot(&mut window, name).display());
+    }
+}
+
+/// Drags the listing's edge `by` pixels to the right, or to the left when negative.
+fn drag_listing_edge(window: &mut HeadlessWindow, by: f32) {
+    let edge = window.by_role_and_label(Role::Splitter, "Replays").expect("the listing's edge is announced");
+    let at = window.bounds(edge).expect("the edge has a box");
+    let to =
+        zgui::geom::Point::new(zgui::geom::DevicePx(at.origin.x.0 + by), zgui::geom::DevicePx(at.origin.y.0 + 100.0));
+    window.drag(edge, to, 4).expect("the edge drags");
+    window.advance(Duration::from_millis(32));
+}
+
+/// The listing's widths a row is checked at: as it opens, then dragged to its narrowest and to a
+/// wide one, by how far its edge moves to reach each.
+const LISTING_WIDTHS: [(&str, f32); 3] = [("default", 0.0), ("narrow", -100.0), ("wide", 220.0)];
+
+/// The New tag sits wholly inside its row at every width, with and without the stacked scores.
+#[test]
+fn a_new_tag_sits_inside_its_row() {
+    let (mut window, control) = open();
+    let (_dir, paths) = scored_listing(&mut window, control, Reached::Landed);
+
+    for (width, by) in LISTING_WIDTHS {
+        drag_listing_edge(&mut window, by);
+        let tags: Vec<_> = window
+            .all_by_attribute(landaire_ui::test_support::TEST_ID_ATTRIBUTE, "replay-row-new")
+            .into_iter()
+            .filter_map(|tag| window.bounds(tag))
+            .collect();
+        assert_eq!(tags.len(), paths.len(), "every landed row is tagged");
+        for path in &paths {
+            let row = window.bounds(row(&window, path)).expect("the row has a box");
+            let middle = |tag: &zgui::geom::Rect<zgui::geom::DevicePx, zgui::geom::Device>| {
+                tag.top().0 + tag.size.height.0 / 2.0
+            };
+            let tag = tags
+                .iter()
+                .find(|tag| row.top().0 <= middle(tag) && middle(tag) <= row.bottom().0)
+                .unwrap_or_else(|| panic!("{} has its tag at {width} width", path.display()));
+            assert!(
+                row.top().0 <= tag.top().0
+                    && tag.bottom().0 <= row.bottom().0
+                    && row.left().0 <= tag.left().0
+                    && tag.right().0 <= row.right().0,
+                "at {width} width the tag {tag:?} of {} is outside its row {row:?}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the New tag beside the scores"]
+fn the_new_tag_renders_in_dark_and_light() {
+    for (appearance, theme) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
+        simulated_watch::install();
+        let mut window = open_shell(review_options(appearance));
+        let control = MADE.with(std::cell::Cell::get).expect("the replays tab made its browser");
+        let (_dir, _paths) = scored_listing(&mut window, control, Reached::Landed);
+        window.advance(LANDING_PULSE);
+
+        for (width, by) in LISTING_WIDTHS {
+            drag_listing_edge(&mut window, by);
+            window.advance(Duration::from_millis(1500));
+            println!("{}", save_shot(&mut window, &format!("replay-browser-new-{theme}-{width}")).display());
+        }
     }
 }

@@ -162,6 +162,7 @@ const CSS: &str = css!(
         border: 1px solid var(--lui-color-border);
     }
     .wt-row__thumb image { width: 27px; height: 27px; }
+    /* Two lines at the inherited leading overflow the row, so each is held to 16px. */
     .wt-row__lines {
         display: flex;
         flex-direction: column;
@@ -169,6 +170,7 @@ const CSS: &str = css!(
         flex: 1;
         min-width: 0;
         overflow: hidden;
+        line-height: 16px;
     }
     .wt-row__identity {
         display: flex;
@@ -190,12 +192,14 @@ const CSS: &str = css!(
         font-size: 14px;
     }
     .wt-row__division { color: var(--wt-color-division); }
+    /* As tall as the label's line, so a tagged row lays out as any other. */
     .wt-row__new {
         flex: none;
         padding: 0 4px;
         border-radius: 2px;
         border: 1px solid var(--lui-color-accent);
         font-size: 12px;
+        line-height: 14px;
         color: var(--lui-color-accent);
     }
     .wt-row__scores {
