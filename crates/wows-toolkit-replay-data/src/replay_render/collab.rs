@@ -16,9 +16,10 @@ use wows_toolkit_services::collab::Silhouette;
 use wt_collab_client::peer::FrameBroadcast;
 
 use crate::load::GameDataCache;
+use crate::replay_render::motion::FrameMotion;
+use crate::replay_render::motion::reach_ships;
 use crate::replay_render::ships::NO_RANGES;
 use crate::replay_render::ships::ShipChoices;
-use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
 
 /// How long a ping stays on the map, in seconds.
@@ -105,33 +106,30 @@ pub fn cursor_opacity(age: Duration) -> Option<f32> {
     Some(1.0 - fading.as_secs_f32() / (GONE_AFTER - FADES_AFTER).as_secs_f32())
 }
 
-/// What a session watching this playback is sent for frame `at`.
+/// What a session watching this playback is sent at `clock`, between `motion`'s frame and the
+/// next: every layer, moved on to the clock as the host's own frame is, so a watcher sees the
+/// battle move between baked frames rather than in their steps.
 ///
-/// Draw commands rather than pixels, so each peer draws the battle with its
-/// own art at its own size.
-pub fn frame_broadcast(replay_id: ReplayId, track: &Track, at: FrameIndex, commands: &[DrawCommand]) -> FrameBroadcast {
-    broadcast_of(replay_id, track, at, commands.to_vec())
-}
-
-/// [`frame_broadcast`] with the trails `options` ask for drawn behind the frame. A watcher has no
-/// track to read trails from, and a baked frame holds none, so they travel with it as the egui
-/// host sends them. Every ship's trail is sent; a watcher hides the ones the session hides.
-pub fn frame_broadcast_with_trails(
+/// Draw commands rather than pixels, so each peer draws the battle with its own art at its own
+/// size. The trails `options` ask for go behind it: a watcher has no track to read trails from,
+/// and a baked frame holds none, so they travel with it as the egui host sends them. Every ship's
+/// trail is sent; a watcher hides the ones the session hides.
+pub fn moment_broadcast(
     replay_id: ReplayId,
     track: &Track,
-    at: FrameIndex,
-    commands: &[DrawCommand],
+    motion: &FrameMotion,
+    clock: GameClock,
     options: &RenderOptions,
 ) -> FrameBroadcast {
-    let trails = track.trails.trails_at(GameClock(track.seconds_at(at)), options);
-    broadcast_of(replay_id, track, at, trails.into_iter().chain(commands.iter().cloned()).collect())
-}
+    let frame: Vec<DrawCommand> = motion.commands_at(track, clock, |_| true).collect();
+    let mut commands = track.trails.trails_at(clock, options);
+    reach_ships(&mut commands, &frame);
+    commands.extend(frame);
 
-fn broadcast_of(replay_id: ReplayId, track: &Track, at: FrameIndex, commands: Vec<DrawCommand>) -> FrameBroadcast {
     FrameBroadcast {
         replay_id: replay_id.raw(),
-        clock: track.seconds_at(at),
-        frame_index: at.get() as u32,
+        clock: clock.seconds(),
+        frame_index: motion.base().get() as u32,
         total_frames: track.len() as u32,
         game_duration: track.duration_seconds(),
         commands,

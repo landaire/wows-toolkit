@@ -39,7 +39,7 @@ use wows_toolkit_replay_data::replay_render::collab::CursorReport;
 use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
 use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
-use wows_toolkit_replay_data::replay_render::collab::frame_broadcast_with_trails;
+use wows_toolkit_replay_data::replay_render::collab::moment_broadcast;
 use wows_toolkit_replay_data::replay_render::collab::range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::shared_replay;
 use wows_toolkit_replay_data::replay_render::collab::track_silhouette;
@@ -255,10 +255,9 @@ struct Run {
     /// The canvas build in flight. A newer one, or a return to the canvas there is, drops what an
     /// older one builds.
     canvas_generation: Generation,
-    /// A frame was asked for while one was being drawn, and whether any such ask put its frame in
-    /// front of the session. The draw in flight starts another as it finishes, so what ends up on
-    /// screen is the newest thing asked for.
-    redraw_wanted: Option<Share>,
+    /// A frame was asked for while one was being drawn. The draw in flight starts another as it
+    /// finishes, so what ends up on screen is the newest thing asked for.
+    redraw_wanted: bool,
     /// An export asked for while a frame was being drawn. It starts as the draw hands the
     /// renderer back.
     pending_export: Option<ExportTarget>,
@@ -346,7 +345,7 @@ impl RendererSession {
                 layout: SidePanelLayout::None,
                 building: None,
                 canvas_generation: Generation::default(),
-                redraw_wanted: None,
+                redraw_wanted: false,
                 pending_export: None,
                 regions: Vec::new(),
                 messages: None,
@@ -956,7 +955,7 @@ impl RendererSession {
             })
             .unwrap_or(Tick::Idle);
         match tick {
-            Tick::Moved => self.ask_frame(Share::No),
+            Tick::Moved => self.ask_frame(),
             Tick::Advanced => self.moved(),
             Tick::Finished => {
                 self.run.update_value(|run| run.ticker = None);
@@ -1461,16 +1460,19 @@ impl RendererSession {
         }
     }
 
-    /// Draws where playback is, and puts the frame in front of the session, unless a frame is
-    /// already being drawn, in which case that one draws again as it finishes.
+    /// Draws where playback is, and puts it in front of the session, unless a frame is already
+    /// being drawn, in which case that one draws again as it finishes.
+    ///
+    /// Every draw is sent, at its own clock: a playing viewport draws at `FRAME_INTERVAL`, the rate
+    /// the egui host sent frames at, so a watcher sees the battle move as smoothly as the host does.
     pub fn draw(self) {
-        self.ask_frame(Share::Yes);
+        self.ask_frame();
     }
 
-    fn ask_frame(self, share: Share) {
+    fn ask_frame(self) {
         #[cfg(test)]
         self.with_run(|run| run.frames_asked += 1);
-        self.draw_shared(share);
+        self.draw_shared();
     }
 
     /// How many frames have been asked for since the session opened.
@@ -1479,19 +1481,18 @@ impl RendererSession {
         self.run.with_value(|run| run.frames_asked)
     }
 
-    fn draw_shared(self, share: Share) {
+    fn draw_shared(self) {
         let Some(track) = self.track_untracked() else { return };
         let Some(game_data) = self.run.try_with_value(|run| run.game_data.clone()).flatten() else { return };
-        let Some(DrawStart { renderer, generation, share, layout }) = self
+        let Some(DrawStart { renderer, generation, layout }) = self
             .with_run(|run| {
-                let wanted = run.redraw_wanted.take();
-                let share = wanted.map_or(share, |wanted| wanted.max(share));
+                run.redraw_wanted = false;
                 let Some(renderer) = run.renderer.take() else {
-                    run.redraw_wanted = Some(share);
+                    run.redraw_wanted = true;
                     return None;
                 };
                 // This draw is of the newest state, which is what any earlier ask wanted.
-                Some(DrawStart { renderer, generation: run.renderer_generation, share, layout: run.layout })
+                Some(DrawStart { renderer, generation: run.renderer_generation, layout: run.layout })
             })
             .flatten()
         else {
@@ -1511,9 +1512,7 @@ impl RendererSession {
                 raster_commands(&track, &motion, clock, &options, layers.show_dead_ships, choices, drawn_on)
             })
         });
-        if share == Share::Yes {
-            self.broadcast(&track, at);
-        }
+        self.broadcast(&track, &motion, clock);
 
         let view = self.map.with_untracked(MapView::shaped_view);
         let drawing = Arc::clone(&renderer);
@@ -1564,8 +1563,8 @@ impl RendererSession {
             self.start_export(target);
             return;
         }
-        if let Some(Some(share)) = self.with_run(|run| run.redraw_wanted.take()) {
-            self.draw_shared(share);
+        if self.with_run(|run| std::mem::take(&mut run.redraw_wanted)) == Some(true) {
+            self.draw_shared();
         }
     }
 
@@ -1578,16 +1577,15 @@ impl RendererSession {
         });
     }
 
-    /// Puts the frame in front of the session, where this end is the one the rest watches.
-    fn broadcast(self, track: &Track, at: FrameIndex) {
+    /// Puts the moment at `clock` in front of the session, where this end is the one the rest
+    /// watches.
+    fn broadcast(self, track: &Track, motion: &FrameMotion, clock: GameClock) {
         let Some((shared, replay_id)) = self.run.try_with_value(|run| (run.shared, run.replay_id)) else { return };
         if !shared {
             return;
         }
-        let Some(commands) = track.commands(at) else { return };
-        let broadcast = self
-            .layers
-            .with_untracked(|layers| frame_broadcast_with_trails(replay_id, track, at, commands, &layers.options));
+        let broadcast =
+            self.layers.with_untracked(|layers| moment_broadcast(replay_id, track, motion, clock, &layers.options));
         self.collab.with_untracked(|link| link.broadcast_frame(broadcast));
     }
 
@@ -1842,14 +1840,6 @@ impl RendererSession {
     }
 }
 
-/// Whether a draw puts its frame in front of the session.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Share {
-    /// Playback moved on between the same two baked frames, which the session already has.
-    No,
-    Yes,
-}
-
 /// How a frame of a track moves on to the next. Held by the track it was worked out for, so a
 /// track baked again is not drawn with the old one's.
 struct HeldMotion {
@@ -1874,7 +1864,6 @@ impl Generation {
 struct DrawStart {
     renderer: SharedPreviewRenderer,
     generation: Generation,
-    share: Share,
     /// The layout `renderer` draws on.
     layout: SidePanelLayout,
 }

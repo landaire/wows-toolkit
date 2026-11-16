@@ -77,7 +77,7 @@ use crate::replay_render::collab::PING_SECONDS;
 use crate::replay_render::collab::adopt_range_overrides;
 use crate::replay_render::collab::adopt_trail_overrides;
 use crate::replay_render::collab::cursor_opacity;
-use crate::replay_render::collab::frame_broadcast_with_trails;
+use crate::replay_render::collab::moment_broadcast;
 use crate::replay_render::collab::range_overrides;
 use crate::replay_render::export::BatchStep;
 use crate::replay_render::export::EXPORT_FRAME_COUNT;
@@ -532,27 +532,31 @@ fn hidden_trails_land_and_the_rest_are_drawn() {
     assert!(options.show_trails);
 }
 
-/// A watcher is sent the trails up to the frame's clock, behind the frame, and none while the
-/// trail layer is off.
+/// A watcher is sent the battle where the host's clock is, part of the way between two baked
+/// frames, with the trails up to that clock behind it and none while the trail layer is off.
 #[test]
-fn a_watched_frame_carries_the_trails_the_layers_ask_for() {
+fn a_watched_moment_is_moved_on_to_the_hosts_clock() {
     let mut track = track(vec![0.0, 10.0, 20.0]);
     track.frames[1] = vec![drawn_ship(1, "me", 100.0, true)];
+    track.frames[2] = vec![drawn_ship(1, "me", 200.0, true)];
     track.trails = recorded_trail(&[(0.0, 0.0), (10.0, 100.0), (20.0, 200.0)]);
-    let commands = track.commands(FrameIndex::new(1)).expect("a frame").to_vec();
+    let motion = FrameMotion::between(&track, FrameIndex::new(1)).expect("a frame to move from");
     let on = RenderOptions { show_trails: true, ..playback_options_hidden() };
 
-    let sent = frame_broadcast_with_trails(ReplayId::from_raw(1), &track, FrameIndex::new(1), &commands, &on);
+    let sent = moment_broadcast(ReplayId::from_raw(1), &track, &motion, GameClock(15.0), &on);
 
+    assert_eq!((sent.clock, sent.frame_index), (15.0, 1), "the clock itself, from the frame before it");
     let DrawCommand::PositionTrail { points, .. } = &sent.commands[0] else {
         panic!("the trail goes first: {:?}", sent.commands)
     };
-    assert_eq!(points.iter().map(|(pos, _)| pos.x).collect::<Vec<_>>(), [0.0, 100.0]);
-    assert_eq!(sent.commands.len(), commands.len() + 1);
-    assert!(matches!(sent.commands[1], DrawCommand::Ship { .. }), "the frame follows");
+    assert_eq!(points.iter().map(|(pos, _)| pos.x).collect::<Vec<_>>(), [0.0, 100.0, 150.0], "ending at the ship");
+    let [_, DrawCommand::Ship { pos, .. }] = sent.commands.as_slice() else {
+        panic!("the ship follows the trail: {:?}", sent.commands)
+    };
+    assert_eq!(pos.x, 150.0, "halfway to where the next frame has it");
+
     let off = RenderOptions { show_trails: false, ..on };
-    let sent = frame_broadcast_with_trails(ReplayId::from_raw(1), &track, FrameIndex::new(1), &commands, &off);
-    assert_eq!(sent.commands.len(), commands.len());
+    let sent = moment_broadcast(ReplayId::from_raw(1), &track, &motion, GameClock(15.0), &off);
     assert!(!sent.commands.iter().any(|command| matches!(command, DrawCommand::PositionTrail { .. })));
 }
 
