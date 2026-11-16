@@ -31,6 +31,8 @@ use crate::token::TokenPair;
 pub use os_keyring::OsKeyring;
 pub use plaintext::PlaintextFile;
 
+use plaintext::LockedPlaintext;
+
 /// Where a stored entry lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageBackend {
@@ -167,17 +169,18 @@ impl CredentialStore {
         nickname: Option<&Nickname>,
         secret: &str,
     ) -> Result<StorageBackend, AuthError> {
+        let plaintext = self.lock_plaintext()?;
         match self.keyring.set(&kind.entry(account, nickname), secret) {
             Ok(()) => {
-                // The file's entry for this secret is older than the one just saved.
-                if let Some(plaintext) = &self.plaintext {
+                if let Some(plaintext) = &plaintext {
+                    // The file's entry for this secret is older than the one just saved.
                     plaintext.remove(kind, &account.key())?;
+                    self.migrate_plaintext(plaintext)?;
                 }
-                self.migrate_plaintext()?;
                 Ok(StorageBackend::Keyring)
             }
             Err(AuthError::NoSecretStore) => {
-                let Some(plaintext) = &self.plaintext else {
+                let Some(plaintext) = &plaintext else {
                     return Err(AuthError::NoSecretStore);
                 };
                 plaintext.insert(kind, &account.key(), secret)?;
@@ -188,17 +191,20 @@ impl CredentialStore {
     }
 
     fn load(&self, kind: Kind, account: AccountRef) -> Result<Option<Stored<String>>, AuthError> {
+        let plaintext = self.lock_plaintext()?;
         match self.keyring.get(&kind.entry(account, None)) {
             Ok(found) => {
                 // Moves an entry saved while there was no secret store over the keyring's.
-                if self.migrate_plaintext()? {
+                if let Some(plaintext) = &plaintext
+                    && self.migrate_plaintext(plaintext)?
+                {
                     let moved = self.keyring.get(&kind.entry(account, None))?;
                     return Ok(moved.map(|value| Stored { value, backend: StorageBackend::Keyring }));
                 }
                 Ok(found.map(|value| Stored { value, backend: StorageBackend::Keyring }))
             }
             Err(AuthError::NoSecretStore) => {
-                let Some(plaintext) = &self.plaintext else {
+                let Some(plaintext) = &plaintext else {
                     return Ok(None);
                 };
                 let found = plaintext.get(kind, &account.key())?;
@@ -209,13 +215,14 @@ impl CredentialStore {
     }
 
     fn delete(&self, kind: Kind, account: AccountRef) -> Result<(), AuthError> {
+        let plaintext = self.lock_plaintext()?;
         let from_keyring = match self.keyring.delete(&kind.entry(account, None)) {
             Ok(()) | Err(AuthError::NoSecretStore) => Ok(()),
             Err(err) => Err(err),
         };
         // The file entry goes even when the keyring refused, so a sign-out never leaves
         // plaintext behind.
-        let from_file = match &self.plaintext {
+        let from_file = match &plaintext {
             Some(plaintext) => plaintext.remove(kind, &account.key()),
             None => Ok(()),
         };
@@ -223,13 +230,16 @@ impl CredentialStore {
         from_keyring.and(from_file)
     }
 
+    /// Every keyring access that can race a migration holds this, so a migration never copies
+    /// a stale file entry over a newer keyring one.
+    fn lock_plaintext(&self) -> Result<Option<LockedPlaintext<'_>>, AuthError> {
+        self.plaintext.as_ref().map(PlaintextFile::lock).transpose()
+    }
+
     /// Moves every plaintext entry into the keyring, which just answered, and deletes the file.
     /// Returns whether there was anything to move. An entry the keyring refuses stays in the
     /// file, so nothing is lost.
-    fn migrate_plaintext(&self) -> Result<bool, AuthError> {
-        let Some(plaintext) = &self.plaintext else {
-            return Ok(false);
-        };
+    fn migrate_plaintext(&self, plaintext: &LockedPlaintext<'_>) -> Result<bool, AuthError> {
         let Some(contents) = plaintext.read()? else {
             return Ok(false);
         };

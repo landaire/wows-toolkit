@@ -65,6 +65,37 @@ impl SecretStore for FakeKeyring {
     }
 }
 
+/// Pauses the first `set` before it reaches `inner`, until the test resumes it.
+struct GatedKeyring {
+    inner: Arc<FakeKeyring>,
+    gate: Mutex<Option<Gate>>,
+}
+
+impl SecretStore for GatedKeyring {
+    fn get(&self, entry: &KeyringEntry) -> Result<Option<String>, AuthError> {
+        self.inner.get(entry)
+    }
+
+    fn set(&self, entry: &KeyringEntry, secret: &str) -> Result<(), AuthError> {
+        let gate = self.gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            gate.entered.send(()).unwrap();
+            gate.resume.recv().unwrap();
+        }
+
+        self.inner.set(entry, secret)
+    }
+
+    fn delete(&self, entry: &KeyringEntry) -> Result<(), AuthError> {
+        self.inner.delete(entry)
+    }
+}
+
+struct Gate {
+    entered: std::sync::mpsc::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
+}
+
 fn session(nickname: &str) -> StoredSession {
     StoredSession {
         realm: AccountRealm::Eu,
@@ -151,6 +182,49 @@ fn a_plaintext_write_waits_for_a_lock_held_elsewhere() {
     assert!(waited.is_err(), "the save finished while another handle held the lock");
     assert_eq!(writer.join().unwrap().unwrap(), StorageBackend::PlaintextFile);
     assert!(file_path(&dir).exists());
+}
+
+/// A save that arrives while a migration copies the file into the keyring waits for it, so
+/// the migration never writes its older copy over the newer save.
+#[test]
+fn a_save_during_migration_is_not_overwritten_by_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = FakeKeyring::new(Answer::Missing);
+    store(&fake, &dir).save_session(&session("Old_Name")).unwrap();
+    fake.answer_with(Answer::Stores);
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let gated = Arc::new(GatedKeyring {
+        inner: Arc::clone(&fake),
+        gate: Mutex::new(Some(Gate { entered: entered_tx, resume: resume_rx })),
+    });
+    let store = CredentialStore::with_backends(gated, Some(PlaintextFile::in_dir(dir.path())));
+    let saved = session("New_Name");
+
+    let migrating = {
+        let store = store.clone();
+        std::thread::spawn(move || store.load_session(AccountRealm::Eu, AccountId::new(697_769_785)).map(|_| ()))
+    };
+    entered_rx.recv().unwrap();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let saving = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            let backend = store.save_session(&saved);
+            done_tx.send(()).unwrap();
+            backend
+        })
+    };
+    let waited = done_rx.recv_timeout(Duration::from_millis(200));
+    resume_tx.send(()).unwrap();
+    migrating.join().unwrap().unwrap();
+    saving.join().unwrap().unwrap();
+
+    assert!(waited.is_err(), "the save finished while the migration held the file");
+    let loaded = store.load_session(AccountRealm::Eu, AccountId::new(697_769_785)).unwrap().unwrap();
+    assert_eq!(loaded.value.nickname.as_str(), "New_Name");
+    assert!(!file_path(&dir).exists());
 }
 
 #[test]

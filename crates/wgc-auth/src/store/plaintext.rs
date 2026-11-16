@@ -16,9 +16,10 @@ use crate::error::AuthError;
 use crate::store::Kind;
 
 /// `<data>/launcher/sessions.json`: the secrets the keyring would hold, keyed by
-/// `realm:account_id`. Created 0600 in a 0700 directory on Unix. Every read-modify-write holds
-/// an advisory lock on the sibling `sessions.json.lock`: a session save and a game's token2
-/// save can run at once, in this process or in another toolkit instance.
+/// `realm:account_id`. Created 0600 in a 0700 directory on Unix. Every access goes through
+/// [`LockedPlaintext`], which holds an advisory lock on the sibling `sessions.json.lock`: a
+/// session save, a game's token2 save and a migration to the keyring can run at once, in this
+/// process or in another toolkit instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaintextFile {
     path: PathBuf,
@@ -37,17 +38,46 @@ impl PlaintextFile {
         self.path.with_extension("json.lock")
     }
 
-    /// `None` when the file does not exist or holds nothing. Takes no lock: every write
-    /// replaces the file by rename, so a read sees one whole version.
+    /// Blocks until no other handle, in any process, holds the lock file. The lock file stays
+    /// in place: removing it would let two writers lock different files.
+    pub(super) fn lock(&self) -> Result<LockedPlaintext<'_>, AuthError> {
+        create_private_dir(self.dir()?).map_err(|source| self.io_error(source))?;
+
+        let lock_path = self.lock_path();
+        let file = open_lock_file(&lock_path)
+            .and_then(|file| file.lock().map(|()| file))
+            .map_err(|source| AuthError::PlaintextStore { path: lock_path, source })?;
+
+        Ok(LockedPlaintext { file: self, _lock: file })
+    }
+
+    fn dir(&self) -> Result<&Path, AuthError> {
+        self.path.parent().ok_or_else(|| self.io_error(std::io::Error::from(std::io::ErrorKind::InvalidInput)))
+    }
+
+    fn io_error(&self, source: std::io::Error) -> AuthError {
+        AuthError::PlaintextStore { path: self.path.clone(), source }
+    }
+}
+
+/// [`PlaintextFile`] while its lock is held, released on drop.
+pub(super) struct LockedPlaintext<'a> {
+    file: &'a PlaintextFile,
+    _lock: fs::File,
+}
+
+impl LockedPlaintext<'_> {
+    /// `None` when the file does not exist or holds nothing.
     pub(super) fn read(&self) -> Result<Option<PlaintextContents>, AuthError> {
-        let mut bytes = match fs::read(&self.path) {
+        let path = &self.file.path;
+        let mut bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => return Err(self.io_error(source)),
+            Err(source) => return Err(self.file.io_error(source)),
         };
         let parsed: Result<PlaintextContents, _> = serde_json::from_slice(&bytes);
         bytes.zeroize();
-        let contents = parsed.map_err(|source| AuthError::PlaintextStoreFormat { path: self.path.clone(), source })?;
+        let contents = parsed.map_err(|source| AuthError::PlaintextStoreFormat { path: path.clone(), source })?;
 
         Ok((!contents.is_empty()).then_some(contents))
     }
@@ -59,18 +89,14 @@ impl PlaintextFile {
     }
 
     pub(super) fn insert(&self, kind: Kind, key: &str, secret: &str) -> Result<(), AuthError> {
-        let lock = self.lock()?;
-
         let mut contents = self.read()?.unwrap_or_default();
         contents.map_mut(kind).insert(key.to_string(), Secret(secret.to_string()));
 
-        self.write(&lock, &contents)
+        self.write(&contents)
     }
 
     /// Deletes the file once its last entry goes.
     pub(super) fn remove(&self, kind: Kind, key: &str) -> Result<(), AuthError> {
-        let lock = self.lock()?;
-
         let Some(mut contents) = self.read()? else {
             return Ok(());
         };
@@ -78,59 +104,39 @@ impl PlaintextFile {
             return Ok(());
         }
         if contents.is_empty() {
-            return match fs::remove_file(&self.path) {
+            return match fs::remove_file(&self.file.path) {
                 Ok(()) => Ok(()),
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(source) => Err(self.io_error(source)),
+                Err(source) => Err(self.file.io_error(source)),
             };
         }
 
-        self.write(&lock, &contents)
-    }
-
-    /// Blocks until no other handle, in any process, holds the lock file. The lock file stays
-    /// in place: removing it would let two writers lock different files.
-    fn lock(&self) -> Result<HeldLock, AuthError> {
-        create_private_dir(self.dir()?).map_err(|source| self.io_error(source))?;
-
-        let lock_path = self.lock_path();
-        let file = open_lock_file(&lock_path)
-            .and_then(|file| file.lock().map(|()| file))
-            .map_err(|source| AuthError::PlaintextStore { path: lock_path, source })?;
-
-        Ok(HeldLock(file))
+        self.write(&contents)
     }
 
     /// Writes a sibling temporary file and renames it over the file, so a crash never leaves a
     /// half-written one. The temporary file is created private; it is never wider first. The
     /// held lock keeps its fixed name to one writer, and lets the next write remove one a crash
     /// left.
-    fn write(&self, _lock: &HeldLock, contents: &PlaintextContents) -> Result<(), AuthError> {
-        let temporary = self.path.with_extension("json.tmp");
+    fn write(&self, contents: &PlaintextContents) -> Result<(), AuthError> {
+        let file = self.file;
+        let temporary = file.path.with_extension("json.tmp");
         match fs::remove_file(&temporary) {
             Ok(()) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => return Err(self.io_error(source)),
+            Err(source) => return Err(file.io_error(source)),
         }
 
         let mut json = serde_json::to_vec(contents)
-            .map_err(|source| AuthError::PlaintextStoreFormat { path: self.path.clone(), source })?;
-        let written = create_private_file(&temporary).and_then(|mut file| {
-            file.write_all(&json)?;
-            file.sync_all()
+            .map_err(|source| AuthError::PlaintextStoreFormat { path: file.path.clone(), source })?;
+        let written = create_private_file(&temporary).and_then(|mut out| {
+            out.write_all(&json)?;
+            out.sync_all()
         });
         json.zeroize();
-        written.map_err(|source| self.io_error(source))?;
+        written.map_err(|source| file.io_error(source))?;
 
-        fs::rename(&temporary, &self.path).map_err(|source| self.io_error(source))
-    }
-
-    fn dir(&self) -> Result<&Path, AuthError> {
-        self.path.parent().ok_or_else(|| self.io_error(std::io::Error::from(std::io::ErrorKind::InvalidInput)))
-    }
-
-    fn io_error(&self, source: std::io::Error) -> AuthError {
-        AuthError::PlaintextStore { path: self.path.clone(), source }
+        fs::rename(&temporary, &file.path).map_err(|source| file.io_error(source))
     }
 }
 
@@ -178,9 +184,6 @@ impl PlaintextContents {
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(transparent)]
 struct Secret(String);
-
-/// The advisory lock on [`PlaintextFile::lock_path`], released when the file closes.
-struct HeldLock(#[expect(dead_code, reason = "held for its drop")] fs::File);
 
 #[cfg(unix)]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
