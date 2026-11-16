@@ -239,7 +239,7 @@ fn the_disclosure_opens_and_closes_a_row_without_selecting_it() {
 }
 
 #[test]
-fn pinning_a_column_from_its_header_is_saved_under_the_gpui_key() {
+fn pinning_a_column_from_its_header_is_saved_under_its_key() {
     let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
     let kills = ReplayColumn::Kills.label();
     let header = window.by_role_and_label(Role::ColumnHeader, &kills).expect("the Kills header is drawn");

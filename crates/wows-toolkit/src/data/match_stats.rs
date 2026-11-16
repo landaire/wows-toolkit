@@ -2,7 +2,7 @@
 //! with each player's win rates, PR and battle counts.
 //!
 //! The protocol itself is `wows_toolkit_viewmodel::match_stats`, which the
-//! GPUI port speaks too; this adds the HTTP client and its per-arena cache.
+//! zgui app speaks too; this adds the HTTP client and its per-arena cache.
 
 use std::collections::HashMap;
 use std::time::Duration;

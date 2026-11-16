@@ -1,4 +1,4 @@
-//! The renderer on a real replay, drawn on the graphics device for review against the GPUI one.
+//! The renderer on a real replay, drawn on the graphics device for review.
 //!
 //! `WT_RENDERER_REPLAY` names the replay; `WT_WOWS_DIR` the install, or the game data dump is read
 //! without one.

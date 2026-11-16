@@ -398,7 +398,7 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
             arrivals.sweep(workspace);
         }
     });
-    // As the egui and gpui apps report once a load of the install finishes: an install that loads
+    // As the egui app reports once a load of the install finishes: an install that loads
     // but lists no replays is likely the wrong directory. Said once per load.
     let checked_install = zgui::reactive::StoredValue::new(false);
     let warning_empty = RenderEffect::new(move |_| {

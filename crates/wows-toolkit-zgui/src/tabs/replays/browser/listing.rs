@@ -621,7 +621,7 @@ impl Listing {
             self.say(ListingEvent::BuildsListed(listed));
         }
 
-        // Before the settings name a cache nothing is offered unasked, as in the GPUI listing.
+        // Before the settings name a cache nothing is offered unasked.
         let Some(cache) = self.work.with_value(|work| work.services.game_data.cache_untracked()) else { return };
         let missing = self.files.with_untracked(|files| missing_builds(files, &cache));
         if !missing.is_empty() {

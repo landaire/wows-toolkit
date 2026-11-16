@@ -1,4 +1,4 @@
-//! A replay tab's title, as the GPUI tab draws it: a spinner while the battle is read, then the
+//! A replay tab's title: a spinner while the battle is read, then the
 //! recording player's flag and ship class, pointing right, beside "{ship} - {map}".
 
 use rust_i18n::t;

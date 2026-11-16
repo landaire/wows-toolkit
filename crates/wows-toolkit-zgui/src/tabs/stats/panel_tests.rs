@@ -340,7 +340,7 @@ fn the_whole_ship_header_opens_the_ship() {
     assert_eq!(expanded(&mut window, SHIMAKAZE), Some(false), "another press closes it");
 }
 
-/// A press on any cell of a ship's line opens or closes it, as in GPUI; its buttons do not.
+/// A press on any cell of a ship's line opens or closes it; its buttons do not.
 #[test]
 fn a_number_cell_of_the_ship_line_opens_the_ship() {
     let Opened { mut window, .. } = open_ships(true);

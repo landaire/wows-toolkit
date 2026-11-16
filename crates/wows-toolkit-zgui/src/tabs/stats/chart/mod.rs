@@ -268,7 +268,7 @@ pub fn StatsChart(
     let view_state = RwSignal::new_local(PlotView::new());
 
     // A different statistic or way of plotting it is a different picture, so the view goes back
-    // to the whole of it, as it does in GPUI.
+    // to the whole of it.
     effect(move |previous: Option<(ChartableStat, ChartMode, bool, bool)>| {
         let shape = settings.with(|settings| (settings.stat, settings.mode, settings.running, settings.combined));
         if previous.is_some_and(|previous| previous != shape) {
@@ -582,7 +582,7 @@ enum CopyImageError {
 /// Draws the chart again into an image, at the size it is on screen, and puts it on the
 /// clipboard.
 ///
-/// zgui's clipboard writes text only, so this goes through `arboard` as the GPUI front end does.
+/// zgui's clipboard writes text only, so this goes through `arboard`.
 fn copy_image(area: NodeRef, handle: StoredValue<CustomHandle<PlotElement>, LocalStorage>, toasts: Option<Toasts>) {
     let Some(bounds) = area.window_bounds() else { return };
     let scale = area.scale();

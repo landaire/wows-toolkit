@@ -72,7 +72,7 @@
 //!
 //! # Translations
 //!
-//! Strings come from the shared catalog through `t!`, under the keys the GPUI front end uses. A
+//! Strings come from the shared catalog through `t!`. A
 //! string read in a reactive hole calls [`i18n::Locale::track`] first so it follows a change of
 //! language.
 

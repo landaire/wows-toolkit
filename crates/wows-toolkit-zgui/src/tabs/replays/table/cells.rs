@@ -428,7 +428,7 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
         })
     });
 
-    // A double click on the player's text leaves the row as it is, as GPUI's does.
+    // A double click on the player's text leaves the row as it is.
     let species = class_mark(&player, cx);
     let species_name = player.ship_species_text.clone();
     let species = if species_name.is_empty() {

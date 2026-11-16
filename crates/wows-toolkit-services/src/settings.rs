@@ -38,8 +38,7 @@ pub struct StartupSettings {
     pub replay: ReplaySettings,
     /// `AppPreferences.debug_mode` in the egui app: unhides NDA-hidden stats
     /// in the Replay Inspector and reveals its raw-metadata/raw-results
-    /// viewers. Read-only seed for the inspector's session debug toggle; the
-    /// GPUI front end never writes it back.
+    /// viewers. Seed for the inspector's session debug toggle.
     pub debug_mode: bool,
     /// `check_for_updates` in the shared database: whether the app looks for a
     /// new release at startup. Defaults on, as the egui app does.
@@ -52,9 +51,8 @@ pub struct StartupSettings {
     /// used rather than a separate enabled flag.
     pub proxy_url: String,
     /// `TabState.persisted.auto_load_latest_replay` in the egui app: a
-    /// top-level setting, not part of `ReplaySettings`. Read-only seed for the
-    /// inspector header's "Autoload Latest Replay" checkbox; the GPUI front end
-    /// never writes it back.
+    /// top-level setting, not part of `ReplaySettings`. Backs the
+    /// inspector header's "Autoload Latest Replay" checkbox.
     pub auto_load_latest_replay: bool,
     /// Where the unpacker writes extracted files. Empty until the user picks
     /// one, which is the absence this setting has always used; the Extract

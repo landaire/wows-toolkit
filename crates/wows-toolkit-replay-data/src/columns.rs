@@ -2,7 +2,7 @@
 //! `ui/replay_parser/sorting.rs` (`ReplayColumn`, declaration order) and the
 //! per-cell mapping in `ui/replay_parser/mod.rs`'s `TableDelegate::cell_ui`.
 //! Colors are represented as `ColorRole`, resolved to real colors by the
-//! render layer (Milestone 2); no `gpui_kit`/`egui` color type appears here.
+//! render layer (Milestone 2); no UI toolkit color type appears here.
 
 use rust_i18n::t;
 use serde::Deserialize;
@@ -396,7 +396,7 @@ pub const NDA: &str = "NDA";
 const DASH: &str = "-";
 
 /// Display text, optional color role, and optional hover text for one cell.
-/// Plain data: no gpui_kit/egui type appears here.
+/// Plain data: no UI toolkit type appears here.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CellValue {
     pub text: String,

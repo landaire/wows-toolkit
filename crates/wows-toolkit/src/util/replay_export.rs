@@ -1,7 +1,7 @@
 //! The replay export, as the egui app writes it.
 //!
 //! The document itself is `wows_toolkit_viewmodel::replay_export`, which the
-//! GPUI port writes too; this adapts the egui `Replay` to it.
+//! zgui app writes too; this adapts the egui `Replay` to it.
 
 pub use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 pub use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;

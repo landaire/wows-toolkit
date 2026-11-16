@@ -1,6 +1,6 @@
 //! The settings snapshot read from the shared config database, and the writing back of an edit.
 //!
-//! An edit is written to the same row the egui and GPUI apps read, so a setting changed in any of
+//! An edit is written to the same row the egui app reads, so a setting changed in any of
 //! them holds in all of them.
 
 use std::sync::Arc;

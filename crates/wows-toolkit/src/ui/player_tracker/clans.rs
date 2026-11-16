@@ -29,7 +29,7 @@ use super::row_offset;
 use super::sort_header_label;
 
 /// One clan's encounter aggregates, and the rule that counts them. Shared
-/// with the GPUI port, which shows the same table over the same history.
+/// with the zgui app, which shows the same table over the same history.
 pub(crate) use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 
 /// What the index-sourced inputs to a breakdown were fetched against.

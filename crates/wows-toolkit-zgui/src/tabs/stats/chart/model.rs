@@ -1,6 +1,6 @@
 //! What one chart shows for its settings, and how each control changes those settings.
 //!
-//! GPUI's chart panel keeps these as fields of its own; here the settings row is the state, so
+//! The settings row is the state, so
 //! every change is a whole [`ChartSettings`] the tab can save as it stands.
 
 use wows_replays::types::GameParamId;

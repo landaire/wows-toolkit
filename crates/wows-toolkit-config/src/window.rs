@@ -1,4 +1,4 @@
-//! Persisted window geometry shared between the egui app and GPUI port.
+//! Persisted window geometry shared between the egui and zgui apps.
 //!
 //! The egui-specific constructors/appliers live in the egui app as an
 //! extension trait; this crate holds the serializable data and the read and

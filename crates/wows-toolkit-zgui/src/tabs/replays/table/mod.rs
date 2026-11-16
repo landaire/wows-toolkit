@@ -253,7 +253,7 @@ impl TableCx {
 
 /// The player table of one replay.
 ///
-/// Sorted as the GPUI table is: a press on a header sorts by it, descending first, and a second
+/// Sorted by header: a press on a header sorts by it, descending first, and a second
 /// press turns the order. A double click or Enter opens the row's detail, built by `detail`.
 #[component]
 pub fn PlayerTable(
@@ -335,7 +335,7 @@ pub fn PlayerTable(
 
         Some(ColumnSort { column: column_id(col), direction })
     });
-    // The grid proposes its own next sort; the press is taken as the GPUI table takes it.
+    // The grid proposes its own next sort; a press on the sorted column turns its order.
     let on_sort = UnsyncCallback::new(move |asked: Option<ColumnSort>| {
         let pressed = asked.map(|asked| asked.column).or_else(|| grid_sort.get_untracked().map(|sort| sort.column));
         let Some(col) = pressed.and_then(|id| ReplayColumn::from_storage_key(id.as_str())) else { return };

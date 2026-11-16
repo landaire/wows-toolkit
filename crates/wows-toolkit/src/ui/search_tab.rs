@@ -63,7 +63,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 use wows_toolkit_viewmodel::preview_dwell::DWELL as PREVIEW_DWELL;
 
 /// How long the pointer dwells on a row before its preview is baked, and the
-/// state that measures it. Shared with the GPUI port so a preview appears
+/// state that measures it. Shared with the zgui app so a preview appears
 /// after the same wait in both.
 type PreviewState = wows_toolkit_viewmodel::preview_dwell::Dwell<PreviewKey>;
 

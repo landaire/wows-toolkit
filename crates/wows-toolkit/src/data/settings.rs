@@ -300,7 +300,7 @@ impl Default for StatsFilterSettings {
     }
 }
 
-/// Which theme the app renders in. Shared with the GPUI port, which reads the
+/// Which theme the app renders in. Shared with the zgui app, which reads the
 /// same stored value.
 pub use wows_toolkit_viewmodel::settings::ThemeChoice;
 

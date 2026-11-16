@@ -3,7 +3,7 @@
 //! icon is drawn in.
 //!
 //! The game's class icons are white and point up. Every view shows one turned to point right,
-//! as GPUI does, so [`class_icon_svg`] is the only reader of them and turns them as it reads. A
+//! so [`class_icon_svg`] is the only reader of them and turns them as it reads. A
 //! row's icon is that SVG with every paint multiplied by the row's tone, as the game tints them,
 //! either as markup or drawn to a PNG.
 

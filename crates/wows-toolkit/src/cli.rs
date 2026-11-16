@@ -7,7 +7,7 @@ use clap::Subcommand;
 
 /// What a finalize step may delete, and why a path was refused.
 ///
-/// Moved to `wows_toolkit_viewmodel::update` so the GPUI port gates the same
+/// Defined in `wows_toolkit_viewmodel::update` so both front ends gate the same
 /// delete the same way; this is the path the rest of this crate uses.
 pub use wows_toolkit_viewmodel::update::FinalizeError;
 pub use wows_toolkit_viewmodel::update::validate_finalize_target;

@@ -54,7 +54,7 @@ pub struct TrajectoryResult {
 /// Which zone volume the shell's fuse went off inside, `None` past all armor
 /// or without a detonation.
 ///
-/// Shared with the GPUI port, which reads the same answer out of the same cast.
+/// Shared with the zgui app, which reads the same answer out of the same cast.
 pub fn detonation_zone<'a>(hits: &'a [TrajectoryHit], sim: &ShellSimResult) -> Option<&'a str> {
     let zones: Vec<&str> = hits.iter().map(|hit| hit.zone.as_str()).collect();
     sim.detonation_zone(&zones)
@@ -145,11 +145,11 @@ pub fn model_distance(a: &Vec3, b: &Vec3) -> ShipModelDistance {
 
 // Server vs Simulation Comparison
 
-/// Shared with the GPUI port, whose incoming-fire log names the same
+/// Shared with the zgui app, whose incoming-fire log names the same
 /// outcomes.
 pub use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 
-/// The comparison itself is shared with the GPUI port, whose incoming-fire log
+/// The comparison itself is shared with the zgui app, whose incoming-fire log
 /// says the same thing about the same shell
 /// (`wows_toolkit_viewmodel::armor::arc`).
 pub use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;

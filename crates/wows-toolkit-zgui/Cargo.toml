@@ -43,8 +43,8 @@ ciborium = "0.2"
 csv = "1"
 # The Player Tracker's timestamps.
 jiff = { workspace = true }
-# The live roster's ship-class icons: read from the battle's build, drawn tinted like the egui and
-# GPUI rosters draw them, and shown through an image element.
+# The live roster's ship-class icons: read from the battle's build, drawn tinted like the egui
+# roster draws them, and shown through an image element.
 resvg = { version = "0.47", default-features = false }
 image = { workspace = true, features = ["png"] }
 # The game-data cache's maintenance.

@@ -1,8 +1,7 @@
 //! The control each setting is changed with, and the line under it that reports on it.
 //!
 //! A control writes through `Services::settings`, which changes the snapshot every view reads and
-//! saves the row the egui and GPUI apps read, so a change takes effect at once and holds in all
-//! three. There is no apply step to forget.
+//! saves the row the egui app reads, so a change takes effect at once and holds in both. There is no apply step to forget.
 
 use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;

@@ -176,7 +176,7 @@ const CSS: &str = css!(
 
 /// The settings row the dragged column widths are kept in, in [`ResultColumn::all`] order.
 const COLUMN_WIDTHS_KEY: &str = "search_column_widths";
-/// The pinned columns, in order. Not shared with the GPUI front end, which does not pin.
+/// The pinned columns, in order.
 const PINNED_COLUMNS_KEY: &str = "search_pinned_columns_zgui";
 
 /// The column the row's actions sit in, last.

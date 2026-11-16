@@ -26,7 +26,7 @@ pub(super) fn text_color(category: PersonalRatingCategory) -> String {
     format!("var(--wt-pr-{}-text)", rating_band_name(category))
 }
 
-/// The band's hue, tinted as the GPUI chip tints it.
+/// The band's hue at the chip tint alpha.
 fn tint(category: PersonalRatingCategory) -> String {
     let percent = f32::from(personal_rating::CHIP_TINT_ALPHA) / 255.0 * 100.0;
     format!("color-mix(in srgb, var(--wt-pr-{}-hue) {percent}%, transparent)", rating_band_name(category))

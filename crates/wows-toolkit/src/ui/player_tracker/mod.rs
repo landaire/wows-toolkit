@@ -79,7 +79,7 @@ pub(crate) struct StatsLookup {
 
 /// The Historical and Clans table settings, persisted one key apiece under
 /// the keys in [`saved_view`](wows_toolkit_viewmodel::player_tracker::saved_view),
-/// which imports them once into the zgui and GPUI view.
+/// which imports them once into the zgui view.
 #[derive(Debug, Default)]
 pub struct TrackerPrefs {
     pub sort_order: SortedBy,
@@ -555,7 +555,7 @@ impl ToolkitTabViewer<'_> {
 mod tests {
     use super::*;
 
-    /// The GPUI port writes this blob carrying only the players; the whole
+    /// A blob may carry only the players; the whole
     /// tracker must still deserialize from it, or the next periodic save
     /// writes an empty one over everything.
     #[test]

@@ -1,8 +1,8 @@
 //! The Phosphor glyphs the shared row text carries.
 //!
 //! A listing row's stats line is assembled here, icons and all, so both front
-//! ends render the same string; each draws it with its own copy of the same
-//! font (`egui-phosphor` in the egui app, `icons.rs` in the GPUI port).
+//! ends render the same string; each draws it with a copy of the
+//! Phosphor font (`egui-phosphor` in the egui app).
 //! Codepoints are Phosphor's regular set.
 
 /// Precedes a timestamp.

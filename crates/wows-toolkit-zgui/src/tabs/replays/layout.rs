@@ -18,8 +18,7 @@ use zgui::task::spawn_local;
 use crate::tabs::replays::workspace::Docked;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
-/// Not shared with the GPUI front end, which saves no layout for this dock and whose dock format
-/// is its own.
+/// The settings row this dock's layout is kept in.
 pub const DOCK_LAYOUT_KEY: &str = "replay_inspector_dock_layout_zgui";
 
 /// Reads the saved layout once the settings are open and puts it back, then saves every change.

@@ -1,4 +1,4 @@
-//! The armor viewer's panels beside and over the hull, ported from the GPUI viewer:
+//! The armor viewer's panels beside and over the hull:
 //!
 //! - `pen`: the penetration checker, which reads the ships being compared against the plate under
 //!   the pointer, and the incoming fire log of a ship opened from a replay.

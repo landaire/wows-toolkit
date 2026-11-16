@@ -9,7 +9,7 @@ use crate::stats::chart::ChartMode;
 use crate::stats::chart::ChartSettings;
 use crate::stats::chart::ChartableStat;
 
-/// The settings row the session's charts are kept in, shared by the zgui and GPUI apps.
+/// The settings row the session's charts are kept in.
 pub const CHARTS_SETTINGS_KEY: &str = "stats_charts";
 
 #[derive(Debug, thiserror::Error)]

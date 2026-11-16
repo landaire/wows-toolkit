@@ -127,7 +127,7 @@ impl CollabState {
     /// A peer in this app plays a battle back from its own copy of the replay, so
     /// this is a list of what the session is on rather than a set of windows to
     /// open: a reader who has the same replay can open it themselves, and one who
-    /// does not cannot be shown it (see `docs/gpui-port-gaps.md`, item 22).
+    /// does not cannot be shown it.
     pub fn shared_windows(&self) -> Vec<SharedWindow> {
         let state = self.state.lock();
         state
@@ -1080,7 +1080,7 @@ impl CollabLink {
     /// Asks the session to send this end the frames of one of its windows.
     ///
     /// No waker is registered with the sink: the shared one is a plain callback,
-    /// and reaching a gpui entity from the peer task would need a channel into
+    /// and reaching a view from the peer task would need a channel into
     /// the UI thread that the viewport is already draining. It looks for frames
     /// on its own timer instead.
     pub fn watch_window(

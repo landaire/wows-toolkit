@@ -434,11 +434,6 @@ pub(crate) fn listed_replay(entry: &std::fs::DirEntry) -> Option<PathBuf> {
     is_file.then_some(path)
 }
 
-/// Starts watching `dir`, sending what happens in it to `sink`.
-pub fn start_watch(dir: &Path, sink: WatchSink) -> Result<DirWatch, WatchStopCause> {
-    start(&[dir.to_path_buf()], sink)
-}
-
 /// Starts the watch `plan` prepared, sending what happens in its folder to
 /// `messages`.
 pub fn start_planned_watch(
@@ -564,16 +559,6 @@ pub fn read_replay_files(
     }
 
     read
-}
-
-/// Sends the replays in `dir` the scan did not walk to `messages`. See
-/// [`report_missed_in`].
-pub fn report_missed(
-    dir: &Path,
-    walked: &HashSet<PathBuf>,
-    messages: &futures::channel::mpsc::UnboundedSender<WatchMessage>,
-) {
-    report_missed_in(&ReplayFolder::from_dir(dir.to_path_buf()), walked, messages);
 }
 
 /// Sends the replays in `folder` the scan did not walk to `messages`, as

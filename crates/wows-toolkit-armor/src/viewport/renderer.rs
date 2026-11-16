@@ -858,23 +858,6 @@ pub enum HighlightDepth {
     Tested,
 }
 
-/// How a layer's meshes meet the depth buffer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DepthState {
-    /// Tested and written.
-    Written,
-    /// Tested, not written.
-    Tested,
-    /// Neither tested nor written: drawn over everything.
-    Ignored,
-}
-
-/// How meshes on `layer` meet the depth buffer while hover highlights are in
-/// `highlight`.
-pub fn layer_depth_state(layer: i32, highlight: HighlightDepth) -> DepthState {
-    LayerKind::of(layer).depth_state(highlight)
-}
-
 /// Which pipelines a layer draws with.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LayerKind {
@@ -897,14 +880,6 @@ impl LayerKind {
             Self::Overlay
         } else {
             Self::Highlight
-        }
-    }
-
-    fn depth_state(self, highlight: HighlightDepth) -> DepthState {
-        match (self, highlight) {
-            (Self::Opaque | Self::Armor, _) => DepthState::Written,
-            (Self::Translucent, _) | (Self::Highlight, HighlightDepth::Tested) => DepthState::Tested,
-            (Self::Overlay, _) | (Self::Highlight, HighlightDepth::XRay) => DepthState::Ignored,
         }
     }
 

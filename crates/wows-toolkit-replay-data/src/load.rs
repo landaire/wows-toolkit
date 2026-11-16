@@ -894,23 +894,6 @@ fn stale_cache_build(name: &str) -> Option<u32> {
     rest?.parse().ok()
 }
 
-/// Outcome of the startup preload ([`load_current_build`]): the current
-/// installed build's game data, loaded once at app startup rather than on the
-/// first replay click. A replay parse does not need it directly, since
-/// preloading through the shared [`GameDataCache`] already warms the same
-/// per-build slot it reads from.
-#[derive(Clone)]
-pub enum GameDataStatus {
-    /// `version` is what the install says it is, so the listing can name what it
-    /// is waiting for. `None` when `preferences.xml` could not be read, which is
-    /// the one case nothing can be named.
-    Loading {
-        version: Option<String>,
-    },
-    Ready(Arc<LoadedGameData>),
-    Failed(String),
-}
-
 /// Determines the current installed build (the highest build number under
 /// `wows_dir/bin`, matching [`wowsunpack::game_data::build_game_vfs`]'s own
 /// "latest build" choice) and loads it through `game_data`. Loading through

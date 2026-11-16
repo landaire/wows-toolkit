@@ -380,7 +380,6 @@ impl Letterbox {
 /// figures, in screen pixels at any zoom.
 pub const HANDLE_RADIUS: f32 = 5.0;
 pub const HANDLE_DISTANCE: f32 = 25.0;
-pub const HANDLE_COLOR: [u8; 3] = [0xff, 0xff, 0x64];
 
 /// How near a drawn shape a press has to land to pick it out, in map pixels. A line is one pixel
 /// wide and nobody presses one exactly.

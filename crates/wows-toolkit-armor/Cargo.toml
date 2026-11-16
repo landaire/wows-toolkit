@@ -38,7 +38,7 @@ wows-toolkit-viewmodel = { workspace = true }
 # The saved Armor Viewer defaults the scene options start from.
 wows-toolkit-config = { workspace = true }
 wt-translations = { workspace = true }
-# The wgpu instance GPUI's renderer uses, so a host can pass its own device in.
+# Lets a host pass its own wgpu device in.
 wgpu = { workspace = true }
 # Ship, model and armor loading, and the ray-triangle test the picking shares
 # with the armor export.

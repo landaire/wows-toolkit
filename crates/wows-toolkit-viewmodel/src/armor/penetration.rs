@@ -1,7 +1,7 @@
 //! Whether a shell defeats a plate, and the shells a ship brings.
 //!
 //! Shared by both front ends: the egui armor viewer's analysis window and the
-//! GPUI pane's penetration checker report the same verdicts, so neither can
+//! zgui pane's penetration checker report the same verdicts, so neither can
 //! drift from the other on what overmatches what.
 
 use std::collections::HashSet;

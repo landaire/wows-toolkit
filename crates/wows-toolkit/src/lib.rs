@@ -18,7 +18,7 @@ pub mod collab;
 pub mod data;
 pub(crate) mod db;
 pub mod gpu;
-/// Windows process mitigations, shared with the GPUI port: both front ends apply
+/// Windows process mitigations, shared with the zgui app: both front ends apply
 /// the same policies before they open a window.
 pub use wows_toolkit_hardening as hardening;
 #[cfg(feature = "mod_manager")]

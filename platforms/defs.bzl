@@ -34,9 +34,9 @@ def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
 
 # One platform per build mode, because a build script or proc macro is built in
 # its execution platform's configuration, not its dependent's. Cargo builds
-# them without debug assertions in release, and some build scripts read that
-# (gpui's Windows backend compiles its shaders only then). The Rust and C++
-# toolchains require the platform whose mode matches the target's.
+# them without debug assertions in release, and some build scripts read that.
+# The Rust and C++ toolchains require the platform whose mode matches the
+# target's.
 execution_platform = rule(
     impl = _execution_platform_impl,
     attrs = {

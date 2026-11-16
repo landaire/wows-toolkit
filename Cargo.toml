@@ -4,7 +4,6 @@ members = [
     "crates/wows-toolkit",
     "crates/wows-toolkit-config",
     "crates/wows-toolkit-hardening",
-    "crates/wows-toolkit-gpui",
     "crates/wows-toolkit-zgui",
     "crates/wows-toolkit-viewmodel",
     "crates/wows-toolkit-replay-data",
@@ -163,19 +162,6 @@ accesskit_consumer = "0.38"
 # zgui's copy of fontique, which keeps resolved font families across queries
 # and caches the system font collection between launches.
 fontique = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-# GPUI Fast from our fork: the wgpu renderer on every desktop platform and the
-# dynamic textures the armor viewport and replay renderer draw into. The branch
-# holds the fork's generated release workspace, so the crates keep their
-# crates.io names and use the registry wgpu.
-gpui-fast = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-apple = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-linux = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-macos = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-macros = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-platform = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-web = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-wgpu = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
-gpui-fast-windows = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
 # pickled = { path = "../pickled" }
 # egui = { git = "https://github.com/emilk/egui", branch = "main" }
 # eframe = { git = "https://github.com/emilk/egui", branch = "main" }

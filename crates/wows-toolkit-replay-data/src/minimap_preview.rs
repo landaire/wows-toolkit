@@ -1007,7 +1007,7 @@ mod tests {
     }
 
     /// A frame is handed over decoded and at the physical size it is drawn:
-    /// gpui decodes an encoded image when it paints and caches it by id, and a
+    /// an encoded image is decoded when painted and cached by id, and a
     /// track holds more frames than that cache does, so an encoded track would
     /// decode a frame afresh on every pass of the loop. Sized for the window's
     /// scale factor, a frame lands one image pixel per screen pixel instead of

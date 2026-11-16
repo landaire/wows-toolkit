@@ -375,7 +375,7 @@ impl NetworkingThread {
             return;
         }
         self.last_constants_check = Some(now);
-        // The fetch itself is shared with the GPUI port
+        // The fetch itself is shared with the zgui app
         // (`wows_data_mgr::constants::fetch_latest_constants`); what stays here is
         // the throttle and the reply channel.
         let result = self

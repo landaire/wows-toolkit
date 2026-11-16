@@ -176,6 +176,13 @@ name = "icu_locale_fallback_data"
 license = "Unicode-3.0"
 files = ["LICENSE"]
 
+# fontique's `system` feature enables it on Linux, where zgui links it, but
+# cargo-about leaves it out.
+[[unresolved_crate]]
+name = "yeslogic-fontconfig-sys"
+license = "MIT"
+files = ["LICENSE"]
+
 # Crates whose license text cargo-about cannot give with the copyright notice
 # their license requires. `crate_files` are read from the crate, then `files`
 # from this repository. `version` makes an update recheck the entry.
@@ -347,12 +354,6 @@ name = "number_prefix"
 version = "0.4.0"
 license = "MIT"
 files = ["third-party/licenses/texts/rust-number-prefix.txt"]
-
-[[crate_license]]
-name = "pulp-wasm-simd-flag"
-version = "0.1.1"
-license = "MIT"
-files = ["third-party/licenses/texts/pulp.txt"]
 
 [[crate_license]]
 name = "rust-i18n-macro"

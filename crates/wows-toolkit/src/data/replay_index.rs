@@ -53,7 +53,7 @@ pub use wows_toolkit_viewmodel::index_rows::MappedRows;
 /// Builds every row a replay contributes.
 ///
 /// The mapping itself is `wows_toolkit_viewmodel::index_rows`, over the
-/// normalized report both this app and the GPUI port build, so the two index
+/// normalized report both front ends build, so the two index
 /// a replay identically. What is assembled here is the part that is this
 /// app's own: where the file is and what the parse made of it.
 ///

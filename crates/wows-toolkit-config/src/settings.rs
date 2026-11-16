@@ -1,4 +1,4 @@
-//! Leaf settings types shared between the egui app and the GPUI port.
+//! Leaf settings types shared between the egui and zgui apps.
 
 use serde::Deserialize;
 use serde::Serialize;

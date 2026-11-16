@@ -1,5 +1,5 @@
 //! Presentation row model built from `NormalizedBattleReport`. Pure: no
-//! `gpui_kit`/`egui` types anywhere. Mirrors the field mapping in the egui app's
+//! UI toolkit types anywhere. Mirrors the field mapping in the egui app's
 //! `ui/replay_parser/mod.rs` (`PlayerReport` construction, lines 535-851) and
 //! `ui/replay_parser/models.rs` (`PlayerReport` field list), with
 //! `RichText`/`Color32`/texture fields dropped or replaced by plain

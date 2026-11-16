@@ -163,8 +163,8 @@ pub async fn raw_upload_first_seen(
 /// The files a parse could not read, remembered so they are not retried every
 /// launch.
 ///
-/// Moved to `wows_toolkit_config::index::unindexable` so the GPUI port shares the
-/// one ledger: it is a single row in the settings table, and both apps walk the
+/// Defined in `wows_toolkit_config::index::unindexable` so both front ends share
+/// the one ledger: it is a single row in the settings table, and both apps walk the
 /// same directory.
 pub use wows_toolkit_config::index::unindexable::Unindexable;
 

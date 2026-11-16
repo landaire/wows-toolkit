@@ -289,7 +289,7 @@ fn module_alternative_row(
 ) -> Option<AnyView> {
     let heading = format!("{ct}:");
     let inner = within(filter, &heading);
-    // Past Z the letters run on through ASCII, as the GPUI viewer labels them.
+    // Past Z the letters run on through ASCII.
     let kept: Vec<(usize, String, String)> = alternatives
         .iter()
         .enumerate()

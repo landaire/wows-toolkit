@@ -1,7 +1,7 @@
 //! The collaborative session: hosting one, joining one, and steering it from the session control
 //! on the status bar.
 //!
-//! What it drives is `wows_toolkit_services::collab::CollabState`, shared with the GPUI front end
+//! What it drives is `wows_toolkit_services::collab::CollabState`, shared with the egui app
 //! and speaking `wt-collab-client`, so a session hosted from any front end looks the same to a
 //! peer. One session per window: it belongs to the replays tab, so its control is on the bar only
 //! while that tab is selected.
@@ -257,7 +257,7 @@ impl CollabHost {
         });
         // What this end asks of the peer task (locks, a replay opened, a window opened for
         // everyone) changes the session without a wake, so a running session is also looked at
-        // on a tick, as the GPUI view does on each draw.
+        // on a tick.
         let ticking = Timers::current().map(|timers| {
             timers.set_interval(SESSION_TICK, move || {
                 if self.active.get_untracked() {

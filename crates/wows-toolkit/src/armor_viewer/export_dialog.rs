@@ -1,6 +1,6 @@
 //! The ship model export dialog: what goes into the GLB, and what it costs.
 //!
-//! The choices themselves are shared with the GPUI port, which collects the same
+//! The choices themselves are shared with the zgui app, which collects the same
 //! ones (`wows_toolkit_viewmodel::armor::export`).
 
 pub use wows_toolkit_viewmodel::armor::export::ExportDefaults;

@@ -1,4 +1,4 @@
-//! SQLite persistence plumbing shared between the egui app and the GPUI port.
+//! SQLite persistence plumbing shared between the egui and zgui apps.
 //!
 //! Opens the application database, runs embedded migrations, and exposes the
 //! synchronous window-geometry read used at startup.

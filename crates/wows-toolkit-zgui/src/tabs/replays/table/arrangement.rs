@@ -1,5 +1,5 @@
-//! The reader's column order, pins and widths, kept under the settings rows the GPUI front end
-//! uses, and their translation to and from the grid's [`ColumnLayout`].
+//! The reader's column order, pins and widths, kept under their settings rows, and
+//! their translation to and from the grid's [`ColumnLayout`].
 
 use std::cell::RefCell;
 

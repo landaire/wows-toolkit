@@ -1,7 +1,7 @@
 //! File-browser grouping model: `ReplayLite` (a replay's minimal, cheaply
 //! read summary) and `build_browser_tree`, which groups replay files by
 //! Date/Ship/None and builds the group/leaf display labels. Pure: no
-//! `gpui_kit`/`egui` types. Mirrors `ui/replay_parser/mod.rs`'s
+//! UI toolkit types. Mirrors `ui/replay_parser/mod.rs`'s
 //! `build_file_listing_grouped`/`build_file_listing_ungrouped`
 //! (`mod.rs:3267-3448`), `win_rate_label` (`mod.rs:150`), and `colorize_label`
 //! (`mod.rs:136`, whose win/loss/draw color is resolved by the render layer
@@ -236,8 +236,7 @@ mod tests {
         }
     }
 
-    /// Flattens a tree to `(depth, label)` pairs, matching the test-helper
-    /// style `gpui_kit::component::tree`'s own tests use for asserting shape.
+    /// Flattens a tree to `(depth, label)` pairs for asserting shape.
     /// A leaf contributes its identity line; [`stats_lines`] covers the
     /// second one.
     fn flatten(nodes: &[BrowserNode], depth: usize, out: &mut Vec<(usize, String)>) {

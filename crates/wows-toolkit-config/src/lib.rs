@@ -2,7 +2,7 @@
 //!
 //! This crate holds the egui-free portions of the app's SQLite persistence
 //! layer and the serializable settings/window types, so both the shipping
-//! egui app and the GPUI port read the same on-disk database and formats.
+//! egui app and the zgui app read the same on-disk database and formats.
 
 mod db;
 pub mod index;

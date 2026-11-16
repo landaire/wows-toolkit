@@ -1032,7 +1032,7 @@ fn copy_breakdown_button(fire_chance: &EffectiveFireChance, shell: Option<Shell>
 }
 
 /// A modifier's raw source identifier. Resolving it needs the metadata provider, which the
-/// detail is not handed; the GPUI front end shows it raw for the same reason.
+/// detail is not handed, so it is shown raw.
 fn raw_source(source: &str) -> String {
     source.to_owned()
 }

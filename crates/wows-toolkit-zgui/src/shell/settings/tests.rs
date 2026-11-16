@@ -40,7 +40,7 @@ use crate::shell::settings::category_test_id;
 use crate::shell::settings::row_test_id;
 use crate::shell::settings::section_test_id;
 
-/// The size the GPUI shell is reviewed at.
+/// The size the shell is reviewed at.
 const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
 
 thread_local! {

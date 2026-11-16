@@ -27,7 +27,7 @@ use crate::replay::renderer::preview::PreviewKey;
 use crate::replay::renderer::preview::PreviewState;
 use crate::replay::renderer::preview::poll_preview;
 
-/// What a preview draws: the preset shared with the GPUI port.
+/// What a preview draws: the preset every preview shares.
 ///
 /// This is a paint-time filter over what
 /// [`bake_options`](crate::replay::renderer::preview::bake_options) put in the

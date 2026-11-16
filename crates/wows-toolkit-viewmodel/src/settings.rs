@@ -1,7 +1,7 @@
 //! Settings both front ends read and write.
 //!
 //! The keys live here rather than as string literals at each call site, so a
-//! setting the egui app writes is the one the GPUI port reads, and renaming
+//! setting one front end writes is the one the other reads, and renaming
 //! one is a single edit that the compiler checks.
 
 use serde::Deserialize;

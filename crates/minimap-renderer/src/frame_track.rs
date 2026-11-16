@@ -152,8 +152,8 @@ pub fn bake_options() -> RenderOptions {
 ///
 /// At 384x384 the canvas scales to about 0.48x, so ship names render around
 /// 5px tall: readable at a glance but only just. Player names and the HUD
-/// panels stay off to keep the map uncluttered. Shared so the egui popup and
-/// the GPUI port show the same layers.
+/// panels stay off to keep the map uncluttered. Shared so every preview
+/// shows the same layers.
 pub fn paint_options() -> RenderOptions {
     RenderOptions {
         show_stats_panel: false,

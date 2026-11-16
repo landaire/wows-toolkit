@@ -2,7 +2,7 @@
 //! an in-memory parse contributes.
 //!
 //! Everything else -- which stats win, and how the two lines read -- is
-//! shared with the GPUI port in `wows_toolkit_viewmodel::listing_row`.
+//! shared with the zgui app in `wows_toolkit_viewmodel::listing_row`.
 
 pub use wows_toolkit_viewmodel::listing_row::ListedReplay;
 pub(crate) use wows_toolkit_viewmodel::listing_row::ParsedStats;

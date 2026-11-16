@@ -1,6 +1,6 @@
 //! Collaborative replay sessions.
 //!
-//! The session itself lives in `wt-collab-client`, shared with the GPUI port
+//! The session itself lives in `wt-collab-client`, shared with the zgui app
 //! so both front ends drive one implementation. What stays here is the part
 //! that is this app's own: turning its persisted render options into the wire
 //! form, and waking its own viewports.

@@ -126,7 +126,6 @@ workspace_test(
     # headlessly.
     deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS] + ZGUI_PLATFORM_DEPS,
     test_deps = ["//third-party/rust:tempfile"],
-    incoming_transition = "//build-support/buck/test-support:transition",
     # Each test opens a window. One thread per core wedges the run on a machine with many of them.
     run_env = {"RUST_TEST_THREADS": "4"},
 )

@@ -225,7 +225,7 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("wt-gpui-gameparams-{name}-{}.out", std::process::id()))
+        std::env::temp_dir().join(format!("wt-gameparams-{name}-{}.out", std::process::id()))
     }
 
     #[test]

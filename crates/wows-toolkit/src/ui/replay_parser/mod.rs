@@ -3050,7 +3050,7 @@ impl Replay {
         self.battle_report.as_ref()
     }
 
-    /// Shared with the GPUI port, which names the same battle the same file
+    /// Shared with the zgui app, which names the same battle the same file
     /// (`wows_toolkit_viewmodel::replay_export::exported_file_stem`).
     pub fn better_file_name(&self, metadata_provider: &GameMetadataProvider) -> String {
         wows_toolkit_viewmodel::replay_export::exported_file_stem(&self.replay_file.meta, metadata_provider)

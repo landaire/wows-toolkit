@@ -16,7 +16,7 @@ use crate::util::build_tracker;
 
 // The rules themselves -- what a mode shares, which battles are eligible, and how
 // long a raw upload waits for results -- are `wows_toolkit_viewmodel::upload`,
-// which the GPUI port shares. What is left here is what only this crate has: the
+// which the zgui app shares. What is left here is what only this crate has: the
 // packet-level scan that produces a `ResultsScan`, and the sending itself.
 /// Name of the entity method announcing the battle's end. Unlike the
 /// `BattleResults` packet, which only exists at or after

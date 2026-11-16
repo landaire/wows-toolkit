@@ -1,2 +1,0 @@
-# Generates the icon name enum and the embedded default asset list.
-buildscript.run = true

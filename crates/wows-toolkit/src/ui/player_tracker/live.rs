@@ -1,7 +1,7 @@
 //! The roster of the match currently in progress.
 //!
 //! The model is `wows_toolkit_viewmodel::player_tracker::live`, which the
-//! GPUI port renders too; this adapts it to the tracker's own storage.
+//! zgui app renders too; this adapts it to the tracker's own storage.
 
 use std::collections::HashMap;
 

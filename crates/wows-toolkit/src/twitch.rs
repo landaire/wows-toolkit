@@ -11,7 +11,7 @@ use twitch_api::twitch_oauth2::UserToken;
 use twitch_api::types::UserId;
 
 /// The Twitch credential and the keys it is stored under, shared with the
-/// GPUI port so both front ends read one login.
+/// zgui app so both front ends read one login.
 pub use wows_toolkit_viewmodel::twitch::Token;
 
 #[derive(Debug)]

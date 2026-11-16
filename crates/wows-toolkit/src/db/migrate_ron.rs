@@ -299,7 +299,7 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
 /// The view settings and table settings as this process last wrote them.
 ///
 /// The save task runs on a timer whether or not anything changed, and the view
-/// settings are shared with the GPUI port: rewriting them unchanged would
+/// settings are shared with the zgui app: rewriting them unchanged would
 /// replace a toggle made there with this process's copy of it. They are small
 /// enough to compare rather than track.
 static LAST_TRACKER_SETTINGS: parking_lot::Mutex<Option<(ViewModes, TrackerPrefsSnapshot)>> =

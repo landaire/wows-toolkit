@@ -260,7 +260,7 @@ mod tests {
     /// Needs a real GPU adapter. Run with:
     ///
     /// ```text
-    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture a_tested_highlight_shows_where_its_surface_is_visible
+    /// cargo test -p wows-toolkit-armor -- --ignored --nocapture a_tested_highlight_shows_where_its_surface_is_visible
     /// ```
     #[test]
     #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]

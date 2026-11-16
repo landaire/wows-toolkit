@@ -26,7 +26,6 @@ pub mod splash;
 pub mod surface_maps;
 pub mod textures;
 pub mod trajectory;
-pub mod tree_filter;
 pub mod upload;
 pub mod upload_hull;
 pub mod viewport;

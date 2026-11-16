@@ -82,7 +82,7 @@ impl PreviewError {
     }
 }
 
-/// The frame sampling, shared with the GPUI port so both play the same frames,
+/// The frame sampling, shared with the zgui app so both play the same frames,
 /// and the options a preview bakes under.
 use wows_minimap_renderer::frame_track::TrackSink;
 pub(crate) use wows_minimap_renderer::frame_track::bake_options;

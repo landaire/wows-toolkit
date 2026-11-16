@@ -374,7 +374,7 @@ pub fn load_wows_files(
 pub use wows_toolkit_config::game_data_dump_base;
 
 /// Where auto-dumped game data is cached, preferring the reader's own
-/// directory. Shared with the GPUI port so both resolve the same cache.
+/// directory. Shared with the zgui app so both resolve the same cache.
 pub use wows_toolkit_config::game_data_dump_base_with_override;
 
 /// The `builds.toml` index under `dump_base`. An index that does not load is

@@ -712,7 +712,7 @@ fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
     })
 }
 
-/// Copy as Markdown and as CSV, writing the same documents the GPUI copy menu writes.
+/// Copy as Markdown and as CSV, as Markdown and CSV documents.
 fn copy_items(cx: ShipsCx, summary: ShipRow) -> AnyView {
     let markdown = summary.markdown(column_heading, stat_heading);
     let csv = summary.csv(column_heading, stat_heading);

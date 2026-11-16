@@ -2,7 +2,7 @@
 /// re-exported so armor-viewer paths keep working.
 pub use wowsunpack::ballistics;
 pub(crate) mod camera_ellipse;
-/// Shared with the GPUI port, whose viewport locks its camera the same way.
+/// Shared with the zgui app, whose viewport locks its camera the same way.
 pub(crate) use wows_toolkit_viewmodel::armor::camera_perspective;
 pub mod common;
 pub mod constants;

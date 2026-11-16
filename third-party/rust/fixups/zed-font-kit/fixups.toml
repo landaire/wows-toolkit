@@ -1,2 +1,0 @@
-# Emits the fontconfig-dlopen cfg from an environment variable, which is unset.
-buildscript.run = false

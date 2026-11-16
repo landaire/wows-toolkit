@@ -27,7 +27,7 @@ const DEBUG_NOTICE: &str = "app-debug-notice";
 const WORK: &str = "app-status-work";
 const SCRIM: &str = "app-drop-scrim";
 
-/// The size the GPUI shell is reviewed at.
+/// The size the shell is reviewed at.
 pub(crate) const REVIEW_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
 
 thread_local! {

@@ -13,7 +13,7 @@
 //! is drawing through `std::sync::mpsc` channels and an
 //! `Arc<Mutex<SessionState>>`, and wakes it through a [`SessionWaker`] the
 //! front end supplies: the task cannot know whether a repaint means an egui
-//! viewport or a GPUI entity.
+//! viewport or a zgui view.
 
 pub mod peer;
 
@@ -40,7 +40,7 @@ pub use wt_collab_protocol::types::UserCursor;
 ///
 /// The task runs off the drawing thread, so a change it makes reaches the
 /// screen only when that thread comes round again. Each front end wakes
-/// itself its own way -- egui repaints a viewport, GPUI notifies an entity --
+/// itself its own way -- egui repaints a viewport, zgui wakes its view --
 /// so the session is handed one of these rather than knowing either.
 pub trait SessionWaker: Send + Sync {
     /// Wakes whatever shows the session as a whole: the roster, the token,

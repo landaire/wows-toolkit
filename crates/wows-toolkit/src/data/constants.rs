@@ -11,7 +11,7 @@ use wowsunpack::data::Version;
 /// used with. Results decoded through mismatched constants read the wrong
 /// indices, so they are never persisted (see `replay_index::map_rows`).
 ///
-/// Shared with the GPUI port, which judges the same files by the same rule.
+/// Shared with the zgui app, which judges the same files by the same rule.
 pub use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 
 /// Judge `constants` against the build it is about to decode.
@@ -121,7 +121,7 @@ pub fn install_constants(
     Ok(InstalledConstants { build: parsed.build, version: parsed.version.clone(), storage_path, dump_path })
 }
 
-/// Shared with the GPUI port, which picks a build's constants the same way.
+/// Shared with the zgui app, which picks a build's constants the same way.
 pub use wows_toolkit_viewmodel::index_rows::resolve_replay_constants;
 
 #[cfg(test)]

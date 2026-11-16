@@ -278,7 +278,7 @@ pub(super) fn CheckRow(
                     attr:data-testid = test_id.clone()
                 )
                 // A label only focuses its control; a press on the name here toggles it as well,
-                // as the GPUI and egui checkboxes do.
+                // as the egui checkboxes do.
                 Label(node_ref = name, control = control, on:click = move |_| on_change.run(!checked.get_untracked())) {
                     {label.clone()}
                 }

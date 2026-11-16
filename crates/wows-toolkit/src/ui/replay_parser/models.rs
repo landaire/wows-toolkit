@@ -24,7 +24,7 @@ pub fn ship_class_icon_from_species(species: Species, wows_data: &BuildData) -> 
 }
 
 /// What a player is, for colouring. The classification is shared with the
-/// GPUI port; only the colour it resolves to is an egui concern.
+/// zgui app; only the colour it resolves to is an egui concern.
 pub use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 
 /// A tint's colour under the active theme. An extension trait because the

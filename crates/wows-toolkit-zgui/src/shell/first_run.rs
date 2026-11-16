@@ -1,6 +1,6 @@
 //! What the app asks the reader once.
 //!
-//! The egui and GPUI apps ask the same questions and record the answers in the rows all of them
+//! The egui app asks the same questions and record the answers in the rows all of them
 //! read, so a reader who answered in one is not asked again in another.
 
 use rust_i18n::t;

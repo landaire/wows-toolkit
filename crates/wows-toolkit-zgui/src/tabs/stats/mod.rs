@@ -138,8 +138,8 @@ const MAX_GAME_LIMIT: usize = 999;
 const SAMPLE_GAMES: usize = 800;
 const SAMPLE_SEED: u64 = 0x5EED;
 
-/// The session's dock layout. Not the GPUI row `stats_charts_dock_layout`: that holds the GPUI
-/// dock's own tree, which this dock cannot read and must not overwrite.
+/// The session's dock layout. Not the row `stats_charts_dock_layout`: that holds a different
+/// dock format, which this dock cannot read and must not overwrite.
 const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout_zgui";
 
 const OVERVIEW_KIND: &str = "StatsOverviewPanel";

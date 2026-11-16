@@ -79,7 +79,7 @@ const RESIZE_HANDLE_TOLERANCE: f32 = 8.0;
 const DEFAULT_CAP_RADIUS: f32 = 150.0;
 use wows_toolkit_viewmodel::tactics::PresetAnnotation;
 use wows_toolkit_viewmodel::tactics::PresetCapPoint;
-/// The preset model is shared with the GPUI port, which reads and writes the
+/// The preset model is shared with the zgui app, which reads and writes the
 /// same files (`wows_toolkit_viewmodel::tactics`). What is local here is the
 /// hop between this crate's egui-typed annotations and the wire-shaped ones the
 /// preset stores.
@@ -2332,7 +2332,7 @@ fn screen_delta_to_world(screen_delta: Vec2, transform: &MapTransform, map_info:
 }
 
 /// Translate a map name to a human-readable string, falling back to a pretty format.
-/// Shared with the GPUI port, whose board names the same maps the same way
+/// Shared with the zgui app, whose board names the same maps the same way
 /// (`wows_toolkit_viewmodel::tactics::naming`).
 fn translate_or_pretty(map_name: &str, wows_data: &SharedBuildData) -> String {
     let wdata = wows_data.read();
