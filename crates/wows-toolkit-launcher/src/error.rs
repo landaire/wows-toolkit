@@ -44,6 +44,37 @@ pub enum PlayError {
     SavingGameSettings,
     #[error("the app has no data directory to keep the game runtime in")]
     NoDataDir,
+    #[error("{path} plays through Steam")]
+    PlaysThroughSteam { path: PathBuf },
+    #[error("{path} is not a Steam install")]
+    NotSteamInstall { path: PathBuf },
+    #[error(transparent)]
+    LaunchDelta(#[from] LaunchDeltaError),
+    #[error("the Steam client was not found; install Steam to play this install")]
+    SteamNotFound,
+}
+
+/// Why a Steam install cannot run with the WGC layer now.
+#[derive(Debug, Error)]
+pub enum LaunchDeltaError {
+    #[error("{path} is not a Steam install")]
+    NotSteamInstall { path: PathBuf },
+    #[error("Steam has an update pending for this install; let Steam finish it, then play")]
+    SteamUpdatePending { path: PathBuf, update: wgc_install::steam::PendingUpdate },
+    #[error(transparent)]
+    SteamManifest(#[from] wgc_install::AppManifestError),
+    #[error("could not read the game builds of {path}: {source}")]
+    ReadBuilds {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{path} has no game build")]
+    NoGameBuild { path: PathBuf },
+    #[error("the Game Center files for game build {build} are not downloaded yet")]
+    WgcLayerNotReady { build: GameBuild },
+    #[error("Steam changed {path} from game build {expected} to {found} during the launch; try again")]
+    BuildChanged { path: PathBuf, expected: GameBuild, found: GameBuild },
 }
 
 /// Why a launch that Play or a replay started did not reach the game. Reported after the call
@@ -66,6 +97,12 @@ pub enum LaunchFailure {
     Relay(#[from] wgc_ipc::IpcError),
     #[error("could not start the game: {0}")]
     Spawn(#[from] wgc_launch::SpawnError),
+    #[error("could not lay the Game Center files over the install: {0}")]
+    WgcLayer(#[from] WgcLayerError),
+    #[error("could not start Steam: {0}")]
+    SteamLaunch(std::io::Error),
+    #[error(transparent)]
+    LaunchDelta(#[from] LaunchDeltaError),
     #[error("the launch task stopped: {0}")]
     Task(#[from] tokio::task::JoinError),
 }
@@ -85,6 +122,8 @@ pub enum ReplayLaunchError {
     SavingGameSettings,
     #[error("the app has no data directory to keep the game runtime in")]
     NoDataDir,
+    #[error(transparent)]
+    LaunchDelta(#[from] LaunchDeltaError),
 }
 
 /// Why the game could not be started outside the launcher.

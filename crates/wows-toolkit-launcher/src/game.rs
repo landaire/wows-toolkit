@@ -10,6 +10,7 @@ use std::sync::RwLockReadGuard;
 use wgc_launch::GameHandle;
 
 use crate::accounts::AccountSession;
+use crate::error::LaunchDeltaError;
 use crate::error::LaunchFailure;
 use crate::error::NativeReplayError;
 use crate::error::PlayError;
@@ -23,6 +24,7 @@ use crate::play::Program;
 use crate::play::SignIn;
 use crate::settings::AccountKey;
 use crate::settings::LauncherSettings;
+use crate::steam::PlayRoute;
 
 /// A game build number: the `bin/<build>` directory of an install, and the build a replay was
 /// recorded with.
@@ -101,7 +103,7 @@ impl GameGate {
     }
 
     /// Marks the game active, unless a save holds the gate. Returns whether it did.
-    fn try_activate(&self) -> bool {
+    pub(crate) fn try_activate(&self) -> bool {
         let Ok(mut state) = self.0.try_write() else {
             return false;
         };
@@ -252,6 +254,7 @@ impl Launcher {
         let AccountSession::SignedIn { session, .. } = self.account_session(key) else {
             return Err(PlayError::NotSignedIn { key, status: self.account_status(key) });
         };
+        let session = Arc::clone(session);
         // Every sign-in and restore mints the tracking id first, so a signed-in account has one.
         let Some(tracking_id) = settings.tracking_id() else {
             return Err(PlayError::NotSignedIn { key, status: self.account_status(key) });
@@ -262,11 +265,15 @@ impl Launcher {
         if self.download_state(&path).is_some_and(|state| state.is_active()) {
             return Err(PlayError::InstallBusy { path });
         }
+        let delta = match self.play_route(&path, settings) {
+            PlayRoute::Toolkit => None,
+            PlayRoute::Steam => return Err(PlayError::PlaysThroughSteam { path }),
+            PlayRoute::WgcLogin => Some(self.launch_delta(&path, settings, env)?),
+        };
         let Some(dirs) = env.runtime_dirs.clone() else {
             return Err(PlayError::NoDataDir);
         };
 
-        let session = Arc::clone(session);
         if !self.gate.try_activate() {
             return Err(PlayError::SavingGameSettings);
         }
@@ -278,6 +285,7 @@ impl Launcher {
             runner: settings.runner.clone(),
             dirs,
             install: path,
+            delta,
             args: settings.launch_args(safe_mode),
             program: Program::SignIn(SignIn { key, session, tracking_id, credentials: env.credentials.clone() }),
         };
@@ -314,6 +322,16 @@ impl Launcher {
         let Some(dirs) = env.runtime_dirs.clone() else {
             return Err(ReplayLaunchError::NoDataDir);
         };
+        let delta = match self.play_route(&path, settings) {
+            PlayRoute::WgcLogin => match self.launch_delta(&path, settings, env) {
+                Ok(delta) => Some(delta),
+                // Replays are offline and need no sign-in, so until the layer is ready the install
+                // plays them as it is. An install Steam may change still refuses.
+                Err(LaunchDeltaError::WgcLayerNotReady { .. }) => None,
+                Err(err) => return Err(err.into()),
+            },
+            PlayRoute::Toolkit | PlayRoute::Steam => None,
+        };
 
         if !self.gate.try_activate() {
             return Err(ReplayLaunchError::SavingGameSettings);
@@ -326,6 +344,7 @@ impl Launcher {
             runner: settings.runner.clone(),
             dirs,
             install: path,
+            delta,
             args: settings.launch_args(false),
             program: Program::Replay(replay),
         };
@@ -352,11 +371,14 @@ impl Launcher {
             .find(|path| has_build(path, build))
     }
 
-    pub(crate) fn apply_game(&mut self, event: GameEvent) {
+    pub(crate) fn apply_game(&mut self, event: GameEvent, env: &LauncherEnv) {
         match event {
             GameEvent::Failed { launch, failure } => {
                 if launch != self.launch {
                     return;
+                }
+                if let Some(install) = self.game.install().map(Path::to_path_buf) {
+                    self.finish_pending_delta_clear(&install, env);
                 }
                 self.game = GameState::Idle;
                 self.gate.stop();
@@ -393,6 +415,7 @@ impl Launcher {
                 self.gate.stop();
                 let install = exit.install.clone();
                 self.last_exit = Some(exit);
+                self.finish_pending_delta_clear(&install, env);
                 // The game may have updated itself; its catalog state is stale.
                 self.catalog.remove(&install);
             }
@@ -430,7 +453,7 @@ impl Launcher {
         }
     }
 
-    fn next_launch(&mut self) -> LaunchId {
+    pub(crate) fn next_launch(&mut self) -> LaunchId {
         self.launch = LaunchId(self.launch.0 + 1);
         self.last_exit = None;
         self.launch_failure = None;
@@ -527,13 +550,13 @@ mod tests {
         launcher.start_session_adoption(&env);
         let launch = launcher.launch;
 
-        launcher.apply_game(GameEvent::Adopted { launch, install: install.clone() });
+        launcher.apply_game(GameEvent::Adopted { launch, install: install.clone() }, &env);
         assert_eq!(launcher.game_state(), &GameState::Running { account: None, install: install.clone() });
         assert!(launcher.game_gate().hold_stopped().is_none());
         let played = launcher.play(key(), None, false, &settings, &env, |_| {});
         assert!(matches!(played, Err(PlayError::GameRunning)));
 
-        launcher.apply_game(GameEvent::Exited { launch, exit: GameExit { install, status: None } });
+        launcher.apply_game(GameEvent::Exited { launch, exit: GameExit { install, status: None } }, &env);
         assert!(launcher.game_state().is_idle());
         assert!(launcher.game_gate().hold_stopped().is_some());
     }
@@ -551,7 +574,7 @@ mod tests {
         let played = launcher.play(key(), None, false, &settings, &env, |_| {});
         assert!(matches!(played, Err(PlayError::CheckingForGame)));
 
-        launcher.apply_game(GameEvent::NothingAdopted { launch });
+        launcher.apply_game(GameEvent::NothingAdopted { launch }, &env);
         assert!(launcher.game_state().is_idle());
         assert!(launcher.game_gate().hold_stopped().is_some());
         let played = launcher.play(key(), None, false, &settings, &env, |_| {});

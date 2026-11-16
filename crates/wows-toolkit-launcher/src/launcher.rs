@@ -2,6 +2,7 @@
 //! downloads. Accounts and the game session extend [`Launcher`] in their own modules.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ use crate::game::LaunchId;
 use crate::runner::RunnerState;
 use crate::settings::AccountKey;
 use crate::settings::LauncherSettings;
+use crate::steam::WgcLayerState;
 
 /// What a front end supplies for background work.
 #[derive(Clone)]
@@ -122,6 +124,7 @@ pub(crate) enum Event {
         choice: wgc_launch::RunnerChoice,
         result: Result<wgc_launch::ResolvedRunner, wgc_launch::RunnerError>,
     },
+    WgcLayer(crate::game::GameBuild, WgcLayerState),
 }
 
 /// The receiving end of a [`Launcher`]'s events.
@@ -141,7 +144,7 @@ impl LauncherEvents {
 
 /// What the launcher shows, and the operations that change it.
 pub struct Launcher {
-    installs: Vec<GameInstall>,
+    pub(crate) installs: Vec<GameInstall>,
     discovering: bool,
     pub(crate) catalog: HashMap<PathBuf, CatalogCheckState>,
     /// Keyed by the install path for an update, by the destination for a fresh install.
@@ -175,6 +178,12 @@ pub struct Launcher {
     pub(crate) last_exit: Option<GameExit>,
     pub(crate) launch_failure: Option<LaunchFailure>,
     pub(crate) runner: RunnerState,
+    /// The newest game build of each Steam install, which picks its WGC layer.
+    pub(crate) steam_builds: HashMap<PathBuf, crate::game::GameBuild>,
+    pub(crate) wgc_layers: HashMap<crate::game::GameBuild, WgcLayerState>,
+    /// Steam installs whose WGC layer stays selected until the game running from them ends,
+    /// because the login was turned off meanwhile.
+    pub(crate) pending_delta_clears: HashSet<PathBuf>,
 
     sender: tokio::sync::mpsc::UnboundedSender<LauncherEvent>,
 
@@ -210,6 +219,9 @@ impl Launcher {
             last_exit: None,
             launch_failure: None,
             runner: RunnerState::Unknown,
+            steam_builds: HashMap::new(),
+            wgc_layers: HashMap::new(),
+            pending_delta_clears: HashSet::new(),
             sender,
             #[cfg(feature = "test-support")]
             script: crate::test_support::SignInScript::default(),
@@ -293,6 +305,7 @@ impl Launcher {
                     self.spawn_catalog_check(install, false, env);
                 }
                 self.carry_all_replay_settings(env);
+                self.probe_wgc_layers(settings, env);
                 false
             }
             Event::Catalog(path, state) => {
@@ -329,7 +342,7 @@ impl Launcher {
             Event::Login(msg) => self.apply_login(msg, settings),
             Event::SessionRestored { key, restore, outcome } => self.apply_restore(key, restore, outcome, settings),
             Event::Game(event) => {
-                self.apply_game(event);
+                self.apply_game(event, env);
                 false
             }
             Event::KeyringProbed(state) => {
@@ -338,6 +351,10 @@ impl Launcher {
             }
             Event::RunnerProbed { choice, result } => {
                 self.apply_runner_probe(choice, result, settings);
+                false
+            }
+            Event::WgcLayer(build, state) => {
+                self.apply_wgc_layer(build, state, settings, env);
                 false
             }
         }

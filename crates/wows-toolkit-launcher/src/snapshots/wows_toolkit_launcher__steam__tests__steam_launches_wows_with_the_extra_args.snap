@@ -1,0 +1,12 @@
+---
+source: crates/wows-toolkit-launcher/src/steam.rs
+assertion_line: 362
+expression: argv
+---
+[
+    "/usr/bin/steam",
+    "-applaunch",
+    "552990",
+    "-safe",
+    "--no-intro",
+]

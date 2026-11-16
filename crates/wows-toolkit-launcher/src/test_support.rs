@@ -10,6 +10,7 @@ use crate::AccountKey;
 use crate::AccountSession;
 use crate::CatalogCheckState;
 use crate::DownloadState;
+use crate::GameBuild;
 use crate::GameState;
 use crate::KeyringState;
 use crate::Launcher;
@@ -18,6 +19,7 @@ use crate::LoginTarget;
 use crate::RunnerState;
 use crate::SessionStorage;
 use crate::SignInFailure;
+use crate::WgcLayerState;
 use crate::accounts::LoginMsg;
 use crate::accounts::LoginState;
 use crate::accounts::PendingLogin;
@@ -91,6 +93,23 @@ pub fn set_runner(launcher: &mut Launcher, state: RunnerState) {
 /// A finished install discovery that found `installs`.
 pub fn installs_found(installs: Vec<GameInstall>) -> LauncherEvent {
     LauncherEvent(Event::Installs(installs))
+}
+
+/// Puts `installs` in place as a discovery would, without the update checks and layer lookups it
+/// starts.
+pub fn set_installs(launcher: &mut Launcher, installs: Vec<GameInstall>) {
+    launcher.installs = installs;
+}
+
+/// Sets where the WGC layer for the Steam install at `install`, of game build `build`, stands.
+pub fn set_wgc_layer(launcher: &mut Launcher, install: PathBuf, build: GameBuild, state: WgcLayerState) {
+    launcher.steam_builds.insert(install, build);
+    launcher.wgc_layers.insert(build, state);
+}
+
+/// A downloaded layer for `build` at `dir`, for [`set_wgc_layer`].
+pub fn ready_wgc_layer(dir: PathBuf, build: GameBuild) -> WgcLayerState {
+    WgcLayerState::Ready(Arc::new(crate::wgc_layer::WgcLayer::for_test(dir, build)))
 }
 
 /// A finished catalog check of the install at `install`.

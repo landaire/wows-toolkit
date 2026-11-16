@@ -31,6 +31,7 @@ use crate::game::LaunchId;
 use crate::launcher::Event;
 use crate::launcher::EventSender;
 use crate::settings::AccountKey;
+use crate::steam::LaunchDelta;
 
 /// Decorates the runner command before it spawns, for process hardening.
 pub(crate) type PrepareCommand = Box<dyn FnOnce(&mut Command) + Send>;
@@ -41,6 +42,8 @@ pub(crate) struct LaunchPlan {
     pub(crate) runner: RunnerChoice,
     pub(crate) dirs: RuntimeDirs,
     pub(crate) install: PathBuf,
+    /// The WGC layer, for a Steam install that signs in through the toolkit.
+    pub(crate) delta: Option<LaunchDelta>,
     pub(crate) args: LaunchArgs,
     pub(crate) program: Program,
 }
@@ -127,13 +130,14 @@ async fn start(
     prepare: PrepareCommand,
     sender: &EventSender,
 ) -> Result<(GameProcess, Option<tokio::task::JoinHandle<()>>), LaunchFailure> {
-    let LaunchPlan { launch, runner, dirs, install, args, program } = plan;
+    let LaunchPlan { launch, runner, dirs, install, delta, args, program } = plan;
     #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
     let capture_dirs = dirs.clone();
 
     let signs_in = matches!(program, Program::SignIn(_));
     let Prepared { lock, runner, view, relay_exe } =
-        tokio::task::spawn_blocking(move || prepare_launch(&runner, &dirs, &install, signs_in)).await??;
+        tokio::task::spawn_blocking(move || prepare_launch(&runner, &dirs, &install, delta.as_ref(), signs_in))
+            .await??;
     #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
     let (sign_in_trigger, capture) = crate::diagnostics::prepare(launch, &capture_dirs, view.files());
 
@@ -195,6 +199,7 @@ fn prepare_launch(
     choice: &RunnerChoice,
     dirs: &RuntimeDirs,
     install: &Path,
+    delta: Option<&LaunchDelta>,
     signs_in: bool,
 ) -> Result<Prepared, LaunchFailure> {
     let lock = SessionLock::acquire(dirs)?;
@@ -204,6 +209,12 @@ fn prepare_launch(
         runner.initialize_prefix(&lock)?;
     }
 
+    // The layer is checked against the install, written and selected under the session lock,
+    // while nothing mounts it.
+    if let Some(delta) = delta {
+        delta.prepare_for(install)?;
+    }
+    InstallView::select_delta(install, dirs, delta.map(LaunchDelta::delta_dir).as_deref())?;
     let view = InstallView::prepare(install, dirs)?;
 
     let relay_exe = if signs_in {

@@ -351,12 +351,14 @@ pub fn report_launch_failure(shell: Shell, failure: &LaunchFailure) {
         LaunchFailure::Runner(_) | LaunchFailure::Prefix(_) | LaunchFailure::NoWinePrefix => {
             shell.settings_drawer.open_at(Setting::GameRunner);
         }
-        LaunchFailure::View(_) => shell.settings_drawer.open_at(Setting::GameInstalls),
+        LaunchFailure::View(_) | LaunchFailure::WgcLayer(_) => shell.settings_drawer.open_at(Setting::GameInstalls),
         // Nothing in the settings changes these.
         LaunchFailure::Lock(_)
         | LaunchFailure::RelayPrefix(_)
         | LaunchFailure::Relay(_)
         | LaunchFailure::Spawn(_)
+        | LaunchFailure::SteamLaunch(_)
+        | LaunchFailure::LaunchDelta(_)
         | LaunchFailure::Task(_) => {}
     }
 }

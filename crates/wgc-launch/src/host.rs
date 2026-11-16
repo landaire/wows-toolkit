@@ -107,6 +107,11 @@ impl HostSearch {
         self.find_on_path(OsStr::new("umu-run"))
     }
 
+    /// The `steam` command on `PATH`, which starts the client or hands it `-applaunch`.
+    pub fn steam_client(&self) -> Option<PathBuf> {
+        self.find_on_path(OsStr::new("steam"))
+    }
+
     pub(crate) fn find_on_path(&self, program: &OsStr) -> Option<PathBuf> {
         let path = self.path.as_ref()?;
         std::env::split_paths(path).map(|dir| dir.join(program)).find(|candidate| is_executable(candidate))

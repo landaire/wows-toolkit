@@ -95,6 +95,10 @@ pub struct LauncherSettings {
     /// Preselected realm in the add-account form.
     pub sign_in_realm: Option<wgc_auth::AccountRealm>,
 
+    /// Steam installs that Play runs through the toolkit's WGC sign-in and the WGC layer instead
+    /// of `steam -applaunch`.
+    pub wgc_login_installs: Vec<PathBuf>,
+
     /// The opt-in that turns the launcher on. `None` keeps every launcher surface hidden and its
     /// background work stopped. Cleared when the user turns the launcher off, so turning it on
     /// again asks again.
@@ -147,6 +151,8 @@ struct StoredLauncherSettings {
     #[serde(default)]
     sign_in_realm: Option<Lenient<wgc_auth::AccountRealm>>,
     #[serde(default)]
+    wgc_login_installs: Vec<PathBuf>,
+    #[serde(default)]
     consent: Option<LauncherConsent>,
     /// The single signed-in account older versions kept.
     #[serde(default)]
@@ -173,6 +179,7 @@ impl From<StoredLauncherSettings> for LauncherSettings {
             accounts,
             default_account,
             sign_in_realm,
+            wgc_login_installs,
             consent,
             active_account,
         } = stored;
@@ -207,6 +214,7 @@ impl From<StoredLauncherSettings> for LauncherSettings {
             accounts,
             default_account,
             sign_in_realm,
+            wgc_login_installs,
             consent,
         }
     }
@@ -348,6 +356,26 @@ impl LauncherSettings {
             return false;
         }
         account.install = install;
+
+        true
+    }
+
+    /// Whether Play runs the Steam install at `install` through the WGC sign-in.
+    pub fn uses_wgc_login(&self, install: &Path) -> bool {
+        self.wgc_login_installs.iter().any(|path| path == install)
+    }
+
+    /// Turns the WGC sign-in on or off for the Steam install at `install`. Returns whether
+    /// anything changed.
+    pub fn set_wgc_login(&mut self, install: &Path, on: bool) -> bool {
+        if self.uses_wgc_login(install) == on {
+            return false;
+        }
+        if on {
+            self.wgc_login_installs.push(install.to_path_buf());
+        } else {
+            self.wgc_login_installs.retain(|path| path != install);
+        }
 
         true
     }

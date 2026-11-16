@@ -20,4 +20,5 @@ default_account:
   realm: Eu
   account_id: 697769785
 sign_in_realm: Eu
+wgc_login_installs: []
 consent: ~
