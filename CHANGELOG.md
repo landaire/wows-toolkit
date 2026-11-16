@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Add battles played to the session stats as the game writes them to its replays folder, and show set, added and cleared session battles in the Stats tab at once
 - *(zgui)* List each plate a cast arc struck in the armor viewer's trajectory editor, with its thickness, strike angle, zone and material and what the shell did there, and say how the shell arrived. Click a salvo or shell in the incoming fire log to draw its path through the hull and list the plates it struck
 - *(zgui)* Offer the replay renderer's drawing tools and undo without a collab session, as the egui renderer does
+- *(zgui)* Fill a circle, rectangle or triangle in the replay renderer by pressing its tool's button again, as the egui toolbar does
 - *(zgui)* List a ship's splash boxes by group in the armor viewer's Layers tab, with a checkbox for each box and group, and outline the boxes of a hovered row on the hull
 - *(zgui)* Show how to Shift+click the hull to cast a shell in the armor viewport and the Trajectory section while no arc is cast, show a crosshair while Shift is held over the hull, and say why a Shift+click cast nothing
 - *(zgui)* Group the armor viewer options into Ship, Layers, Analysis and Display tabs on the panel's edge. The search covers every tab, counts the matches on each and shows the first tab holding one, and the chosen tab and open sections are remembered. Ctrl+Tab moves between the tabs

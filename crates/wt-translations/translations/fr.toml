@@ -1724,6 +1724,7 @@ action_multi_select = "Sélection multiple"
 action_stroke_width = "Épaisseur du trait"
 action_delete = "Supprimer"
 action_cancel = "Annuler / Désélectionner"
+toggle_fill = "Cliquez à nouveau pour activer ou désactiver le remplissage"
 
 [ui.armor.cast]
 prompt = "%{key}+clic sur la coque pour ajouter un point d'impact"

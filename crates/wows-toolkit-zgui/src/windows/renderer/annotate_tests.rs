@@ -38,6 +38,7 @@ use zgui::view;
 use zgui::view::IntoView;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::Toggled;
 
 use crate::services::Services;
 use crate::windows::renderer::session::RendererSession;
@@ -179,6 +180,23 @@ fn choosing_on_the_popover_puts_it_in_hand() {
     assert_eq!(ink, [230, 50, 50, 255]);
     let red = window.by_test_id("replay-renderer-ink-red").expect("the swatch is drawn");
     assert!(window.by_attribute("data-chosen", "true") == Some(red), "the chosen ink is outlined");
+}
+
+/// The circle's button pressed again fills the circle and stays chosen; the next press empties it.
+#[test]
+fn a_second_press_of_a_shape_button_fills_it() {
+    let (mut window, session) = open();
+    click(&mut window, "replay-renderer-tools-toggle");
+
+    click(&mut window, "replay-renderer-tool-circle");
+    assert_eq!(tool(session), Tool::Circle { filled: false });
+    click(&mut window, "replay-renderer-tool-circle");
+    assert_eq!(tool(session), Tool::Circle { filled: true }, "the second press fills it");
+    let circle = window.by_test_id("replay-renderer-tool-circle").expect("the circle is drawn");
+    assert_eq!(window.a11y(circle).and_then(|state| state.checked), Some(Toggled::True), "and it stays chosen");
+
+    click(&mut window, "replay-renderer-tool-circle");
+    assert_eq!(tool(session), Tool::Circle { filled: false }, "the third empties it");
 }
 
 /// The nib steps one at a time and stops at the thickest the board offers, where the step that

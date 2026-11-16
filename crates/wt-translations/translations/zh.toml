@@ -1724,6 +1724,7 @@ action_multi_select = "多选"
 action_stroke_width = "线条粗细"
 action_delete = "删除"
 action_cancel = "取消 / 取消选择"
+toggle_fill = "再次点击以切换填充"
 
 [ui.armor.cast]
 prompt = "%{key}+点击舰体以添加命中点"

@@ -1678,6 +1678,7 @@ action_multi_select = "Zaznaczanie wielokrotne"
 action_stroke_width = "Grubość linii"
 action_delete = "Usuń"
 action_cancel = "Anuluj / odznacz"
+toggle_fill = "Kliknij ponownie, aby przełączyć wypełnienie"
 
 [ui.armor.cast]
 prompt = "%{key}+kliknij kadłub, aby dodać punkt trafienia"

@@ -314,6 +314,18 @@ impl Annotator {
         self.drawing.set_tool(tool);
     }
 
+    /// Takes up `tool` as its toolbar button does: the button of the shape already in hand fills
+    /// it, or empties it again, as a second click on the egui toolbar does.
+    pub fn choose(&mut self, tool: Tool) {
+        let chosen = match (self.drawing.tool(), tool) {
+            (Tool::Circle { filled }, Tool::Circle { .. }) => Tool::Circle { filled: !filled },
+            (Tool::Rectangle { filled }, Tool::Rectangle { .. }) => Tool::Rectangle { filled: !filled },
+            (Tool::Triangle { filled }, Tool::Triangle { .. }) => Tool::Triangle { filled: !filled },
+            (_, tool) => tool,
+        };
+        self.take_up(chosen);
+    }
+
     pub fn set_ink(&mut self, ink: [u8; 4]) {
         self.drawing.set_color(ink);
     }
@@ -712,6 +724,11 @@ pub fn tool_for_key(key: &str) -> Option<Tool> {
 /// not choosing a different tool, so the button reads as already chosen.
 pub fn same_tool(chosen: &Tool, other: &Tool) -> bool {
     std::mem::discriminant(chosen) == std::mem::discriminant(other)
+}
+
+/// Whether `tool` draws a shape that can be filled, which a second press of its button toggles.
+pub fn is_fillable(tool: &Tool) -> bool {
+    matches!(tool, Tool::Circle { .. } | Tool::Rectangle { .. } | Tool::Triangle { .. })
 }
 
 /// The tool that places a ship of `species` for one side.

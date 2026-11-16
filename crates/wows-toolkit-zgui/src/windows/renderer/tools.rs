@@ -20,6 +20,7 @@ use wows_toolkit_replay_data::replay_render::annotate::SPECIES;
 use wows_toolkit_replay_data::replay_render::annotate::ShipCatalog;
 use wows_toolkit_replay_data::replay_render::annotate::TOOLS;
 use wows_toolkit_replay_data::replay_render::annotate::ToolButton;
+use wows_toolkit_replay_data::replay_render::annotate::is_fillable;
 use wows_toolkit_replay_data::replay_render::annotate::places_ship;
 use wows_toolkit_replay_data::replay_render::annotate::same_tool;
 use wows_toolkit_replay_data::replay_render::annotate::ship_tool;
@@ -164,7 +165,8 @@ fn ToolsPanel(
     }
 }
 
-/// One tool on the popover, chosen while it is the one in hand.
+/// One tool on the popover, chosen while it is the one in hand. Pressed again, a shape's button
+/// fills the shape or empties it.
 #[component]
 fn ToolToggle(session: RendererSession, button: &'static ToolButton) -> impl IntoView {
     let make = button.tool;
@@ -176,20 +178,30 @@ fn ToolToggle(session: RendererSession, button: &'static ToolButton) -> impl Int
         None => t!(button.label_key).into_owned(),
     };
     let label = named.clone();
+    let fillable = is_fillable(&make());
+    let tip = move || {
+        if fillable && on.get() {
+            format!("{named} - {}", t!("ui.renderer.annotations.toggle_fill"))
+        } else {
+            named.clone()
+        }
+    };
 
     view! {
         Tooltip {
             TooltipTrigger {
                 Toggle(
                     size = ToggleSize::Sm,
-                    pressed = Binding::controlled(on, move |_: bool| session.take_up(make())),
+                    pressed = Binding::controlled(on, move |_: bool| {
+                        session.annotate(|annotator, _| annotator.choose(make()));
+                    }),
                     label = label.clone(),
                     attr:data-testid = button.id
                 ) {
                     AppIcon(glyph = button.glyph)
                 }
             }
-            TooltipContent {{named.clone()}}
+            TooltipContent {{tip.clone()}}
         }
     }
 }

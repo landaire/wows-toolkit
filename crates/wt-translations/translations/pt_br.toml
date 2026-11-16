@@ -1678,6 +1678,7 @@ action_multi_select = "Seleção múltipla"
 action_stroke_width = "Espessura do traço"
 action_delete = "Excluir"
 action_cancel = "Cancelar / Desmarcar"
+toggle_fill = "Clique novamente para alternar o preenchimento"
 
 [ui.armor.cast]
 prompt = "%{key}+clique no casco para adicionar um ponto de impacto"

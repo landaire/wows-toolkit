@@ -1678,6 +1678,7 @@ action_multi_select = "Vícenásobný výběr"
 action_stroke_width = "Šířka čáry"
 action_delete = "Smazat"
 action_cancel = "Zrušit / zrušit výběr"
+toggle_fill = "Dalším kliknutím přepnete výplň"
 
 [ui.armor.cast]
 prompt = "%{key}+kliknutím na trup přidáte bod zásahu"

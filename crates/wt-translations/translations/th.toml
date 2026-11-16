@@ -1724,6 +1724,7 @@ action_multi_select = "เลือกหลายรายการ"
 action_stroke_width = "ความกว้างเส้น"
 action_delete = "ลบ"
 action_cancel = "ยกเลิก / ยกเลิกการเลือก"
+toggle_fill = "คลิกอีกครั้งเพื่อสลับการเติมสี"
 
 [ui.armor.cast]
 prompt = "%{key}+คลิกที่ตัวเรือเพื่อเพิ่มจุดกระทบ"

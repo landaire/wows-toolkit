@@ -1678,6 +1678,7 @@ action_multi_select = "Множинний вибір"
 action_stroke_width = "Товщина лінії"
 action_delete = "Видалити"
 action_cancel = "Скасувати / зняти вибір"
+toggle_fill = "Натисніть ще раз, щоб перемкнути заливку"
 
 [ui.armor.cast]
 prompt = "%{key}+клацання по корпусу додає точку влучання"

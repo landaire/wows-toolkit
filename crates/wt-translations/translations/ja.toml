@@ -1724,6 +1724,7 @@ action_multi_select = "複数選択"
 action_stroke_width = "線の太さ"
 action_delete = "削除"
 action_cancel = "キャンセル / 選択解除"
+toggle_fill = "もう一度クリックすると塗りつぶしを切り替えます"
 
 [ui.armor.cast]
 prompt = "%{key}+クリックで船体に着弾点を追加"

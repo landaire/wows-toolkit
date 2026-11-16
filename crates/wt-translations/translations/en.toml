@@ -1475,6 +1475,7 @@ action_multi_select = "Multi-select"
 action_stroke_width = "Stroke width"
 action_delete = "Delete"
 action_cancel = "Cancel / Deselect"
+toggle_fill = "Click again to toggle fill"
 
 [ui.renderer.settings]
 title = "Display Settings"

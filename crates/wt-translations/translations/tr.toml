@@ -1678,6 +1678,7 @@ action_multi_select = "Çoklu seçim"
 action_stroke_width = "Çizgi kalınlığı"
 action_delete = "Sil"
 action_cancel = "İptal / Seçimi kaldır"
+toggle_fill = "Dolguyu açıp kapatmak için yeniden tıklayın"
 
 [ui.armor.cast]
 prompt = "Darbe noktası eklemek için gövdeye %{key}+tıklayın"

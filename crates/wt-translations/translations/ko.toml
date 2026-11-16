@@ -1724,6 +1724,7 @@ action_multi_select = "다중 선택"
 action_stroke_width = "선 굵기"
 action_delete = "삭제"
 action_cancel = "취소 / 선택 해제"
+toggle_fill = "다시 클릭하면 채우기를 전환합니다"
 
 [ui.armor.cast]
 prompt = "%{key}+클릭으로 선체에 착탄 지점을 추가합니다"

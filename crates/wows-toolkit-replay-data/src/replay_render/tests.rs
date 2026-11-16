@@ -1949,6 +1949,37 @@ fn drawing_alone_is_undone() {
     assert!(!annotator.can_undo());
 }
 
+/// The button of the shape already in hand fills it, and the next press empties it again, as the
+/// egui toolbar's second click does; what is drawn then carries the fill.
+#[test]
+fn a_second_press_of_a_shape_button_toggles_its_fill() {
+    let link = CollabLink::default();
+    let mut annotator = Annotator::new();
+    let in_hand = |annotator: &Annotator| annotator.drawing().tool().clone();
+
+    annotator.choose(Tool::Circle { filled: false });
+    assert_eq!(in_hand(&annotator), Tool::Circle { filled: false }, "the first press takes the circle up");
+    annotator.choose(Tool::Circle { filled: false });
+    assert_eq!(in_hand(&annotator), Tool::Circle { filled: true }, "the second fills it");
+
+    annotator.stroke(&link, Stroke::Began { at: [100.0, 100.0] });
+    annotator.stroke(&link, Stroke::Ended { at: [140.0, 100.0] });
+    assert!(
+        matches!(link.annotations()[..], [Annotation::Circle { filled: true, .. }]),
+        "the circle is drawn filled: {:?}",
+        link.annotations()
+    );
+
+    annotator.choose(Tool::Circle { filled: false });
+    assert_eq!(in_hand(&annotator), Tool::Circle { filled: false }, "the third empties it");
+    annotator.choose(Tool::Circle { filled: false });
+    annotator.choose(Tool::Rectangle { filled: false });
+    assert_eq!(in_hand(&annotator), Tool::Rectangle { filled: false }, "another shape starts empty");
+    annotator.choose(Tool::Line);
+    annotator.choose(Tool::Line);
+    assert_eq!(in_hand(&annotator), Tool::Line, "a tool with nothing to fill stays as it is");
+}
+
 /// Undoing takes the shape off again under the id it was added with.
 #[test]
 fn undoing_takes_back_what_was_just_drawn() {
