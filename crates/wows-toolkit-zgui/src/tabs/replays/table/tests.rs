@@ -642,17 +642,22 @@ fn a_withheld_match_contribution_says_why_it_is_missing() {
     }
 }
 
-/// Writes the table in both appearances, with one row open, to `target/zgui-shots`.
+/// Writes the table in both appearances, with one row open, and the row part way open as its
+/// detail fades in, to `target/zgui-shots`.
 #[test]
 #[ignore = "needs a graphics device"]
 fn the_player_table_renders_in_dark_and_light() {
+    let shots = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots");
     for (scheme, name) in [(Scheme::Dark, "player-table-dark"), (Scheme::Light, "player-table-light")] {
         let (mut window, expanded) = open_table(Drawing::Device, scheme);
         expanded.set(HashSet::from([AccountId::from(1i64)]));
         window.advance(Duration::from_millis(600));
 
-        let path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots").join(format!("{name}.png"));
-        window.save_png(&path).expect("the window is drawn to a PNG");
+        window.save_png(&shots.join(format!("{name}.png"))).expect("the window is drawn to a PNG");
     }
+
+    let (mut window, expanded) = open_table(Drawing::Device, Scheme::Dark);
+    expanded.set(HashSet::from([AccountId::from(1i64)]));
+    window.advance(Duration::from_millis(80));
+    window.save_png(&shots.join("player-table-opening-dark.png")).expect("the window is drawn to a PNG");
 }

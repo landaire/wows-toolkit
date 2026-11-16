@@ -109,7 +109,16 @@ pub(crate) const CSS: &str = css!(
             translate var(--lui-motion-rearrange) var(--lui-motion-ease);
     }
     .lui-grid__detail-cell[data-state=\"open\"] { height: var(--lui-grid-detail-height, auto); }
-    .lui-grid__detail-part { box-sizing: border-box; width: max-content; min-width: 100%; }
+    /* Only the content fades with the reveal: a translucent ground would show the cut-off fade
+       painted over it as a darker edge. */
+    .lui-grid__detail-part {
+        box-sizing: border-box;
+        width: max-content;
+        min-width: 100%;
+        opacity: 0;
+        transition: opacity var(--lui-motion-reveal) var(--lui-motion-ease);
+    }
+    .lui-grid__detail-cell[data-state=\"open\"] > .lui-grid__detail-part { opacity: 1; }
     .lui-grid__detail-fade {
         position: absolute;
         top: 0;

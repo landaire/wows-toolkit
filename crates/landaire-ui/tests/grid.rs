@@ -634,6 +634,27 @@ fn a_column_detail_opens_each_part_under_its_own_column() {
 }
 
 #[test]
+fn a_row_detail_fades_in_as_it_opens() {
+    let handles = Rc::new(Handles::default());
+    let detail = || {
+        RowMode::with_column_detail(|item: &Item, column: &ColumnId| {
+            (column.as_str() == "name").then(|| {
+                view! { box(attr:data-testid = format!("part-{}", item.id), style = "height: 40px; width: 20px") {} }
+            })
+        })
+    };
+    let mut window = open(items(2), detail, Rc::clone(&handles));
+
+    window.double_click(cell(&window, "name-0")).expect("the cell has a box");
+    window.advance(Duration::from_millis(50));
+    let part = window.by_class("lui-grid__detail-part").expect("the part is built");
+    assert!(window.running_animations(part) > 0, "the part's content fades in");
+
+    window.advance(Duration::from_millis(400));
+    assert_eq!(window.running_animations(part), 0, "the fade has finished");
+}
+
+#[test]
 fn a_fitted_column_widens_to_an_open_part_and_narrows_after_it_closes() {
     let fitted = || {
         let mut columns = columns();
