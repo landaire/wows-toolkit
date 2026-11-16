@@ -37,6 +37,7 @@ pub use crate::chrome::frame_window::FrameWindow;
 pub use crate::chrome::loading::Loading;
 pub use crate::chrome::loading::LoadingLine;
 pub use crate::chrome::loading::LoadingLineProps;
+pub use crate::chrome::loading::LoadingPace;
 pub use crate::chrome::loading::LoadingPlacement;
 pub use crate::chrome::loading::LoadingProps;
 pub use crate::chrome::loading::TableSkeleton;

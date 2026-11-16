@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 use landaire_ui::LoadingLineProps;
+use landaire_ui::LoadingPace;
 use landaire_ui::LoadingProps;
 use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
@@ -409,7 +410,7 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
             {move || note().map(|(text, waiting)| view! {
                 row(class = "wt-tracker-roster__note wt-tracker-small wt-tracker-dim", attr:data-testid = "tracker-live-note") {
                     {if waiting {
-                        AnyView::new(view! { LoadingLine(label = text) })
+                        AnyView::new(view! { LoadingLine(label = text, pace = LoadingPace::Unbounded) })
                     } else {
                         AnyView::new(view! { text {{text}} })
                     }}

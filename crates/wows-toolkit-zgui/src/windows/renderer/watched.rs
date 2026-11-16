@@ -13,6 +13,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 
+use landaire_ui::LoadingPace;
 use landaire_ui::LoadingProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
@@ -434,7 +435,11 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                 }
                 Show(when = move || !watch.drawn.get()) {
                     // The host may never send a frame, so the wait has no end.
-                    Loading(label = t!("ui.collab.waiting_for_frames").into_owned(), attr:data-testid = "watched-playback-waiting")
+                    Loading(
+                        label = t!("ui.collab.waiting_for_frames").into_owned(),
+                        pace = LoadingPace::Unbounded,
+                        attr:data-testid = "watched-playback-waiting"
+                    )
                 }
             }
         }

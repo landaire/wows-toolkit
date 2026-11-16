@@ -4,6 +4,7 @@
 use std::time::Duration;
 use std::time::Instant;
 
+use landaire_ui::LoadingPace;
 use landaire_ui::LoadingProps;
 use landaire_ui::OverlaySurfaceProps;
 use landaire_ui::PointerTipProps;
@@ -526,7 +527,12 @@ fn stand_in(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
         StandIn::Initializing => {
             let label = t!("ui.armor.initializing").into_owned();
             AnyView::new(view! {
-                Loading(label = label, class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-initializing")
+                Loading(
+                    label = label,
+                    pace = LoadingPace::Unbounded,
+                    class = "wt-armor-viewport__said",
+                    attr:data-testid = "armor-viewport-initializing"
+                )
             })
         }
         StandIn::Problem { headline, explanation } => AnyView::new(view! {
