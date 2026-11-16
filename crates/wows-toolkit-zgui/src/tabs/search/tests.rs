@@ -11,6 +11,7 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_toolkit_config::index::query::SortColumn;
+use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use zgui::geom::Device;
@@ -28,6 +29,7 @@ use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::tabs::search::model::Search;
+use crate::tabs::search::model::Status;
 
 type DeviceRect = Rect<DevicePx, Device>;
 
@@ -221,6 +223,30 @@ fn escape_closes_the_completions_then_empties_the_text() {
     settle(&mut window);
     assert_eq!(search.pending.get_untracked(), "", "a second Escape empties the text");
     assert!(!search.completions_open.get_untracked(), "and the dropdown stays closed");
+}
+
+/// Emptying the box with Escape runs what the pills hold at once, so the results follow the cleared
+/// text rather than staying on it.
+#[test]
+fn escape_runs_the_query_without_the_cleared_text() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    click(&mut window, "search-query");
+    window.type_text("map:ocean");
+    settle(&mut window);
+    assert_eq!(search.ran.get_untracked(), query_text::parse_query("map:ocean").ok(), "the typed term ran");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(10));
+    assert_eq!(search.pending.get_untracked(), "map:ocean", "the first Escape only closes the completions");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(10));
+    assert_eq!(search.pending.get_untracked(), "");
+    assert_eq!(search.ran.get_untracked(), query_text::parse_query("").ok(), "the empty query runs at once");
+
+    settle_in_real_time(&mut window);
+    assert_eq!(search.status.get_untracked(), Status::Done);
+    assert_eq!(search.ran.get_untracked(), query_text::parse_query("").ok(), "no later run brings the old text back");
 }
 
 fn focused(window: &mut HeadlessWindow, id: &str) -> bool {

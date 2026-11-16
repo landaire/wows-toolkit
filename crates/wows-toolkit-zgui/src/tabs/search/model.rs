@@ -672,10 +672,14 @@ impl Search {
         }
     }
 
-    /// Empties the box as an edit would, so the query runs again, but with the completions closed.
+    /// Empties the box and runs what the pills hold, with the completions closed. Run at once
+    /// rather than after the typing delay, so a search still running for the old text cannot land.
     pub fn clear_typed(self) {
-        self.typed("", false);
-        self.pending.set(String::new());
+        self.set_bar_text("", Offer::Nothing);
+        self.refresh_value_options("");
+        self.dirty.update_value(|dirty| dirty.query = true);
+        self.rerun.set_value(None);
+        self.run();
     }
 
     /// Puts an older (positive `delta`) or newer query in the bar. Walking past the newest
