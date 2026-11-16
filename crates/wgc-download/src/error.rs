@@ -12,6 +12,9 @@ pub enum DownloadError {
     Json(#[from] serde_json::Error),
     #[error("malformed torrent: {detail}")]
     BadTorrent { detail: String },
+    /// The `.torrent` file is not the one the catalog named.
+    #[error("the torrent at {url} has SHA-256 {got}, but the catalog names {expected}")]
+    TorrentHashMismatch { url: String, expected: String, got: String },
     /// Never issued for a Steam-managed install: Steam owns that directory
     /// and patches it itself, so we refuse before making any request.
     #[error("refusing to download into a Steam-managed install")]

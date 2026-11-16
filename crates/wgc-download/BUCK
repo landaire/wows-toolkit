@@ -10,6 +10,7 @@ WGC_DOWNLOAD_DEPS = [
     "//third-party/rust:reqwest",
     "//third-party/rust:tokio",
     "//third-party/rust:sha1",
+    "//third-party/rust:sha2",
     "//third-party/rust:futures",
     "//third-party/rust:hex",
     "//third-party/rust:sevenz-rust2",

@@ -41,6 +41,29 @@ use std::path::PathBuf;
 /// entry) and parse it. Separate from [`parse_torrent`] so callers that
 /// already have the bytes (tests, cached fixtures) skip the network call.
 pub async fn fetch_torrent(client: &reqwest::Client, url: &str) -> Result<TorrentMeta, DownloadError> {
+    parse_torrent(&fetch_torrent_bytes(client, url).await?)
+}
+
+/// [`fetch_torrent`], checked against the catalog's `torrent/hash`: the
+/// hex SHA-256 of the `.torrent` file. The torrent's per-file sha1s then
+/// verify every downloaded byte back to the catalog.
+pub async fn fetch_verified_torrent(
+    client: &reqwest::Client,
+    url: &str,
+    sha256: &str,
+) -> Result<TorrentMeta, DownloadError> {
+    use sha2::Digest;
+
+    let bytes = fetch_torrent_bytes(client, url).await?;
+    let got = hex::encode(sha2::Sha256::digest(&bytes));
+    if !got.eq_ignore_ascii_case(sha256) {
+        return Err(DownloadError::TorrentHashMismatch { url: url.to_string(), expected: sha256.to_string(), got });
+    }
+
+    parse_torrent(&bytes)
+}
+
+async fn fetch_torrent_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, DownloadError> {
     let response =
         client.get(url).send().await.map_err(|source| DownloadError::Request { url: url.to_string(), source })?;
     let status = response.status();
@@ -48,7 +71,8 @@ pub async fn fetch_torrent(client: &reqwest::Client, url: &str) -> Result<Torren
         return Err(DownloadError::Http { url: url.to_string(), status });
     }
     let bytes = response.bytes().await.map_err(|source| DownloadError::Request { url: url.to_string(), source })?;
-    parse_torrent(&bytes)
+
+    Ok(bytes.to_vec())
 }
 
 /// The game folder name under whichever platform-standard parent directory

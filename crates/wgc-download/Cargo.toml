@@ -23,6 +23,7 @@ data-encoding = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "gzip"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs"] }
 sha1 = "0.10"
+sha2 = { workspace = true }
 futures = "0.3"
 hex = "0.4"
 # Pure-Rust 7z extractor (no C deps, buck-friendly). Decoding-only: WG's
