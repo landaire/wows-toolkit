@@ -26,6 +26,7 @@ use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -43,6 +44,7 @@ use crate::services::JobHandle;
 use crate::services::Services;
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
+use crate::shell::dialogs::focus_when_bound;
 use crate::shell::notices;
 
 const SHEET: &str = "wt-update";
@@ -273,10 +275,14 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
             None
         });
         let open_link = UnsyncCallback::new(|url: String| desktop::open_url(&url));
+        // Enter installs where installing is offered, and opens the release page elsewhere.
+        let primary = NodeRef::new();
+        focus_when_bound(primary);
+        let view_release = if can_install { NodeRef::new() } else { primary };
 
         AnyView::new(view! {
             HostedDialog(handle = handle) {
-                DialogContent(attr:data-testid = "update-offer") {
+                DialogContent(dismiss_on_outside_press = false, attr:data-testid = "update-offer") {
                     DialogHeader {
                         DialogTitle {{t!("ui.windows.update_available").into_owned()}}
                     }
@@ -298,6 +304,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
                     // than the end of the notes above.
                     DialogFooter(class = "wt-update__footer") {
                         Button(
+                            node_ref = view_release,
                             variant = ButtonVariant::Outline,
                             size = ButtonSize::Sm,
                             attr:data-testid = "update-view-release",
@@ -308,6 +315,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
                         {can_install.then(|| {
                             view! {
                                 Button(
+                                    node_ref = primary,
                                     size = ButtonSize::Sm,
                                     attr:data-testid = "update-install",
                                     on:click = move |_| {

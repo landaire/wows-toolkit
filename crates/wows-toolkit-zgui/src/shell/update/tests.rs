@@ -12,7 +12,11 @@ use rust_i18n::t;
 use wows_toolkit_services::update::Downloaded;
 use wows_toolkit_services::update::UpdateError;
 use wows_toolkit_viewmodel::update::Release;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 
 use super::Asked;
 use super::ReleaseSource;
@@ -20,6 +24,7 @@ use super::UpdateStatus;
 use super::check_for_update;
 use super::check_unasked;
 use super::install_update;
+use crate::desktop::opened_for_test;
 use crate::interaction_tests::open_bare_shell;
 use crate::interaction_tests::shell;
 use crate::services::Job;
@@ -223,4 +228,33 @@ fn an_install_says_how_far_it_got_and_why_it_failed() {
     assert_eq!(shell().update.status.get_untracked(), UpdateStatus::Idle);
     let said = error_text(&window);
     assert!(said.contains(&UpdateError::MissingExecutable.to_string()), "{said}");
+}
+
+#[test]
+fn a_press_past_the_offer_leaves_it_open() {
+    let (mut window, releases) = open();
+    check_for_update(shell().services(), shell(), Asked::AtStartup);
+    settle(&mut window);
+    releases.answer_check(Ok(Some(release(None))));
+    settle(&mut window);
+
+    window.click_at(Point::new(DevicePx(4.0), DevicePx(4.0)));
+    settle(&mut window);
+
+    assert!(window.by_test_id("update-offer").is_some());
+}
+
+/// The release has no Windows archive, so nothing can be installed on any platform.
+#[test]
+fn enter_opens_the_release_where_it_cannot_be_installed() {
+    let (mut window, releases) = open();
+    check_for_update(shell().services(), shell(), Asked::AtStartup);
+    settle(&mut window);
+    releases.answer_check(Ok(Some(release(None))));
+    settle(&mut window);
+
+    window.press_key(NamedKey::Enter, Modifiers::NONE);
+    settle(&mut window);
+
+    assert_eq!(opened_for_test(), [release(None).html_url]);
 }

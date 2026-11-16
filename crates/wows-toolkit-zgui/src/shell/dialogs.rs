@@ -5,9 +5,11 @@ use std::rc::Rc;
 
 use zgui::component;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Update;
@@ -17,6 +19,7 @@ use zgui::view::AnyView;
 use zgui::view::Children;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui_ui::DialogProps;
 
 /// Names one open dialog.
@@ -94,6 +97,23 @@ pub fn HostedDialog(handle: DialogHandle, children: Children) -> impl IntoView {
             {children.into_view_once()}
         }
     }
+}
+
+/// Puts the keyboard on `node` once it is bound: a dialog's main answer, so Enter takes it, or a
+/// field the reader is about to type in.
+pub fn focus_when_bound(node: NodeRef) {
+    let focusing = RenderEffect::new(move |focused: Option<bool>| {
+        if focused == Some(true) {
+            return true;
+        }
+        let bound = node.get().is_some();
+        if bound {
+            node.focus();
+        }
+
+        bound
+    });
+    on_cleanup_local(move || drop(focusing));
 }
 
 /// Where the window's hosted dialogs are built.

@@ -75,6 +75,7 @@ use zgui_ui_icons::set::ui::SEARCH;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
+use crate::shell::dialogs::focus_when_bound;
 use crate::shell::palette::Layer;
 use crate::shell::palette::ModeRow;
 use crate::shell::palette::ModeRows;
@@ -571,20 +572,4 @@ fn PaletteField(
             }
         }
     }
-}
-
-/// Puts the caret in `input` once it is bound: a reader who opened a list is about to type.
-fn focus_when_bound(input: NodeRef) {
-    let focusing = RenderEffect::new(move |focused: Option<bool>| {
-        if focused == Some(true) {
-            return true;
-        }
-        let bound = input.get().is_some();
-        if bound {
-            input.focus();
-        }
-
-        bound
-    });
-    on_cleanup_local(move || drop(focusing));
 }

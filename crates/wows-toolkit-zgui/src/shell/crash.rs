@@ -7,6 +7,7 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -19,6 +20,7 @@ use zgui_ui::DialogTitleProps;
 
 use crate::shell::HostedDialogProps;
 use crate::shell::Shell;
+use crate::shell::dialogs::focus_when_bound;
 
 const SHEET: &str = "wt-crash";
 
@@ -59,10 +61,12 @@ pub fn show_crash_report(shell: Shell, report: String) {
     shell.dialogs.open(move |handle| {
         install_stylesheet(SHEET, CSS);
         let report = StoredValue::new(report.clone());
+        let copy = NodeRef::new();
+        focus_when_bound(copy);
 
         AnyView::new(view! {
             HostedDialog(handle = handle) {
-                DialogContent(attr:data-testid = "crash-report") {
+                DialogContent(dismiss_on_outside_press = false, attr:data-testid = "crash-report") {
                     DialogHeader {
                         DialogTitle {{t!("ui.windows.crash_detected").into_owned()}}
                         DialogDescription {{t!("ui.dialogs.crash_message").into_owned()}}
@@ -79,6 +83,7 @@ pub fn show_crash_report(shell: Shell, report: String) {
                             {t!("ui.buttons.cancel").into_owned()}
                         }
                         Button(
+                            node_ref = copy,
                             size = ButtonSize::Sm,
                             attr:data-testid = "crash-report-copy",
                             on:click = move |_| {
@@ -149,12 +154,51 @@ pub fn copy_latest_log(shell: Shell) {
 mod tests {
     use std::time::Duration;
 
+    use landaire_ui::test_support::HeadlessWindow;
+    use zgui::geom::DevicePx;
+    use zgui::geom::Point;
     use zgui::reactive::prelude::GetUntracked;
+    use zgui::vocab::Modifiers;
+    use zgui::vocab::NamedKey;
 
     use super::show_crash_report;
     use crate::interaction_tests::REVIEW_SIZE;
     use crate::interaction_tests::open_bare_shell;
     use crate::interaction_tests::shell;
+
+    fn settle(window: &mut HeadlessWindow) {
+        window.advance(Duration::from_millis(400));
+    }
+
+    fn open_crash_report() -> HeadlessWindow {
+        let mut window = open_bare_shell();
+        show_crash_report(shell(), "thread 'main' panicked at src/main.rs:1:1".to_owned());
+        settle(&mut window);
+
+        window
+    }
+
+    #[test]
+    fn a_press_past_the_crash_report_leaves_it_open() {
+        let mut window = open_crash_report();
+
+        window.click_at(Point::new(DevicePx(4.0), DevicePx(4.0)));
+        settle(&mut window);
+
+        assert!(window.by_test_id("crash-report").is_some());
+    }
+
+    #[test]
+    fn enter_copies_the_crash_report() {
+        let mut window = open_crash_report();
+
+        window.press_key(NamedKey::Enter, Modifiers::NONE);
+        settle(&mut window);
+
+        assert!(window.by_test_id("crash-report").is_none(), "copying closes the report");
+        let toasts = window.texts_by_class("zui-toast").concat();
+        assert!(toasts.contains(rust_i18n::t!("ui.stats.copied").as_ref()), "{toasts}");
+    }
 
     /// The report box's `max-height`.
     const REPORT_HEIGHT: f32 = 260.0;
