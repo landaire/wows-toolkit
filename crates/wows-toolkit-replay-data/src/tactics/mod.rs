@@ -387,9 +387,6 @@ pub const HANDLE_DISTANCE: f32 = 25.0;
 /// wide and nobody presses one exactly.
 const SHAPE_REACH_PX: f32 = 10.0;
 
-/// How much one pixel of wheel travel changes the zoom.
-pub const ZOOM_PER_NOTCH: f32 = 0.004;
-
 /// [`RESIZE_BAND_PX`] in world units, at this map's scale.
 ///
 /// A zone's edge is a line on screen; the press that grabs it is measured in the world, so the

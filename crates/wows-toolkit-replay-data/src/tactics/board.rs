@@ -47,6 +47,7 @@ use wt_collab_client::types::AnnotationShipConfig;
 
 use crate::load::GameDataCache;
 use crate::replay_render::collab::CursorReport;
+use crate::replay_render::view::ZOOM_PER_PIXEL;
 use crate::tactics::BoardCapPoint;
 use crate::tactics::CapDrag;
 use crate::tactics::DEFAULT_INK;
@@ -69,7 +70,6 @@ use crate::tactics::SHAPE_REACH_PX;
 use crate::tactics::ScanProgress;
 use crate::tactics::ShipModifier;
 use crate::tactics::WORLD_UNITS_PER_KM;
-use crate::tactics::ZOOM_PER_NOTCH;
 use crate::tactics::band_in_world;
 use crate::tactics::caps_of;
 use crate::tactics::halo;
@@ -921,10 +921,16 @@ impl Board {
         (away < reach).then_some((index, annotation))
     }
 
-    /// Zooms the map about the pointer, so what is under it stays there.
-    pub fn zoom_about(&mut self, notches: f32, at: ElementPos) {
+    /// The part of the map shown.
+    pub fn view(&self) -> MapViewport {
+        self.view
+    }
+
+    /// Zooms the map about the pointer, so what is under it stays there. `delta_y` is wheel travel
+    /// in pixels, positive zooming in, at the replay renderer's rate.
+    pub fn zoom_about(&mut self, delta_y: f32, at: ElementPos) {
         let Some(drawn) = self.drawn_point(at) else { return };
-        let zoom = self.view.zoom() * (1.0 + notches * ZOOM_PER_NOTCH);
+        let zoom = self.view.zoom() * (1.0 + delta_y * ZOOM_PER_PIXEL);
         let view = self.view.zoomed_about(zoom, drawn);
         if view == self.view {
             return;

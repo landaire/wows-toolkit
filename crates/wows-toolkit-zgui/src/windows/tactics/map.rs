@@ -2,6 +2,7 @@
 
 use landaire_ui::LoadingProps;
 use rust_i18n::t;
+use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::ElementPos;
 use wows_toolkit_replay_data::tactics::ElementSize;
@@ -239,9 +240,11 @@ fn MapSurface(model: BoardModel) -> impl IntoView {
                     on:double_click = move |_| model.update(|board| board.double_click()),
                     on:wheel = move |ev| {
                         let Some(at) = local(ev.position) else { return };
-                        let notches = ev.delta.to_pixels(CssPx(16.0)).height.0;
-                        if notches != 0.0 {
-                            model.update(|board| board.zoom_about(notches, at));
+                        let travel = ev.delta.to_pixels(CssPx(SCROLL_LINE_PX)).height.0;
+                        if travel != 0.0 {
+                            // A wheel turned away from the reader scrolls down, which zooms out,
+                            // as it does in the replay renderer.
+                            model.update(|board| board.zoom_about(-travel, at));
                             ev.prevent_default();
                         }
                     }

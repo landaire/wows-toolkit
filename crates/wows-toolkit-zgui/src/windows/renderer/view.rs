@@ -18,6 +18,7 @@ use wows_toolkit_replay_data::replay_render::playback::speed_index;
 use wows_toolkit_replay_data::replay_render::playback::speed_label;
 use wows_toolkit_replay_data::replay_render::track::FrameIndex;
 use wows_toolkit_replay_data::replay_render::view::ElementBounds;
+use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
 use zgui::component;
 use zgui::css;
@@ -147,9 +148,6 @@ const CSS: &str = css!(
     .wt-renderer__speed .wt-renderer__speed-trigger { width: 100%; height: 24px; padding: 0 8px; }
     .wt-renderer__rule { flex: none; width: 1px; align-self: stretch; margin: 4px 0; background-color: var(--lui-color-border); }"
 );
-
-/// How much one line of wheel travel is worth, for a wheel that reports lines rather than pixels.
-const SCROLL_LINE: f32 = 20.0;
 
 /// What a docked renderer names on the status bar: the shortcut sheet its key shows while held.
 pub const SHORTCUTS_MODE: ModeHint =
@@ -285,7 +283,7 @@ fn MapArea(session: RendererSession, map: NodeRef, root: NodeRef) -> impl IntoVi
             on:context_menu = move |ev| ev.prevent_default(),
             on:wheel = move |ev| {
                 place(session, map);
-                let delta = ev.delta.to_pixels(zgui::geom::CssPx(SCROLL_LINE)).height.0;
+                let delta = ev.delta.to_pixels(zgui::geom::CssPx(SCROLL_LINE_PX)).height.0;
                 // A wheel turned away from the reader scrolls down, which zooms out.
                 session.wheel(window_point(ev.position), -delta);
                 ev.prevent_default();

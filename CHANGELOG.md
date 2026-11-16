@@ -54,6 +54,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
 - *(zgui)* Play replays in the renderer at thirty frames a second at every speed, with ships, planes, shells, torpedoes, smoke and capture progress moved between the stored frames, and keep 1x at real time on long battles. Seeks and event jumps land on the exact time, so Next event moves on from an event between stored frames. Exported videos move the same things between frames
 - *(zgui)* Pace the hover preview by the window's clock, so it no longer falls behind 15 frames a second
 - *(zgui)* Record the players in every replay put in the index in the Player Tracker, mark division mates, and make the tracker's Populate button fill it from the replay index

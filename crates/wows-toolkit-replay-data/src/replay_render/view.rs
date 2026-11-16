@@ -15,6 +15,10 @@ use wows_minimap_renderer::viewport::MapViewport;
 /// rate, so the wheel feels the same in both.
 pub const ZOOM_PER_PIXEL: f32 = 0.01;
 
+/// How many pixels one line of wheel travel is, for a wheel that reports lines rather than
+/// pixels.
+pub const SCROLL_LINE_PX: f32 = 20.0;
+
 /// The strip the renderer reserves above the map, which is where the score
 /// bar and the advantage label are drawn.
 pub const HUD_STRIP_HEIGHT: f32 = HUD_HEIGHT as f32;

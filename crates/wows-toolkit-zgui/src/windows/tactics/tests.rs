@@ -420,6 +420,28 @@ fn the_shape_row_and_a_peers_pointer_render() {
     }
 }
 
+/// The wheel zooms the board the way it zooms the replay renderer: turned toward the reader it
+/// zooms in, at the renderer's rate of a hundredth per pixel.
+#[test]
+fn the_wheel_zooms_as_the_renderer_does() {
+    let mut board = BoardWindow::open();
+    board.set_map();
+    // A build with no map art draws no frame, so the board is told the size of one.
+    board.model.update(|board| board.drawn(Some((768.0, 768.0))));
+    board.settle();
+    let map = board.window.by_test_id("tactics-map").expect("the map is drawn");
+
+    board.window.wheel(map, -50.0).expect("the map takes the wheel");
+    board.settle();
+    let zoom = board.model.with_untracked(|board| board.view().zoom());
+    assert!((zoom - 1.5).abs() < 1e-4, "fifty pixels toward the reader zoom in by half: {zoom}");
+
+    board.window.wheel(map, 50.0).expect("the map takes the wheel");
+    board.settle();
+    let zoom = board.model.with_untracked(|board| board.view().zoom());
+    assert!(zoom < 1.5, "and turned away it zooms back out: {zoom}");
+}
+
 /// The board's window from a real install, set on a map with a capture point added and a line
 /// drawn, in both palettes. Reads the install named by `WT_WOWS_DIR`.
 #[test]
