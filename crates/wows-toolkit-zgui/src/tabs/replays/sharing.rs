@@ -94,8 +94,10 @@ impl Contributor {
 
     /// Reads `path` and sends what the setting asks for, if anything.
     pub async fn contribute(&self, path: PathBuf, ledger: LedgerUse) -> Result<Outcome, ContributeError> {
-        // The ledger names a battle the game rewrote under an overlay by the copy it replaced.
-        if ledger == LedgerUse::Consult && self.layer_copy_contributed(&path).await {
+        // The ledger and the anchor may name the battle by another of its paths: another spelling
+        // of the install, or the copy the game replaced when it rewrote the file under an overlay.
+        let other_paths = self.other_paths(&path).await;
+        if ledger == LedgerUse::Consult && self.ledger_has(other_paths.clone()).await {
             return Ok(Outcome::AlreadySent);
         }
         let (reading, cache) = (path.clone(), self.game_data.clone());
@@ -103,7 +105,7 @@ impl Contributor {
 
         // The anchor both apps keep, recorded on the first sight of this replay: the grace window
         // for its results runs from there.
-        let first_seen = self.first_seen(&path).await.map_err(ContributeError::NoAnchor)?;
+        let first_seen = self.first_seen(&path, &other_paths).await.map_err(ContributeError::NoAnchor)?;
         let Some(mode) = self.mode() else { return Ok(Outcome::Skipped) };
         let candidate = Candidate { path, shareable: parsed.shareable, first_seen };
         let (pool, proxy) = (self.pool.clone(), self.proxy.clone());
@@ -116,22 +118,23 @@ impl Contributor {
             .map_err(ContributeError::Tokio)
     }
 
-    /// Whether the ledger already has `path`, or its copy in another layer of the install's
-    /// overlay. A ledger that cannot be read answers `false`, and the send asks again.
+    /// Whether the ledger already has `path`, or the battle under another of its paths in the
+    /// install. A ledger that cannot be read answers `false`, and the send asks again.
     pub async fn already_contributed(&self, path: &Path) -> bool {
-        self.ledger_has(vec![path.to_path_buf()]).await || self.layer_copy_contributed(path).await
+        self.ledger_has(vec![path.to_path_buf()]).await || self.ledger_has(self.other_paths(path).await).await
     }
 
-    async fn layer_copy_contributed(&self, path: &Path) -> bool {
+    /// See [`ReplayFolder::other_paths`]. Empty for a replay outside the install.
+    async fn other_paths(&self, path: &Path) -> Vec<PathBuf> {
         let Some(wows_dir) = self.services.settings.read_untracked(|settings| settings.wows_dir.clone()) else {
-            return false;
+            return Vec::new();
         };
         if wows_dir.is_empty() {
-            return false;
+            return Vec::new();
         }
         let named = path.to_path_buf();
-        let copies = long_job(move || ReplayFolder::from_app_install(Path::new(&wows_dir)).layer_copies(&named)).await;
-        self.ledger_has(copies).await
+
+        long_job(move || ReplayFolder::from_app_install(Path::new(&wows_dir)).other_paths(&named)).await
     }
 
     async fn ledger_has(&self, paths: Vec<PathBuf>) -> bool {
@@ -204,23 +207,14 @@ impl Contributor {
             }
         };
         let sent: HashSet<String> = sent.into_iter().collect();
-        long_job(move || {
-            unsent(battles_of(&folder), &sent, &unindexable, &skips)
-                .into_iter()
-                // A battle the game rewrote under an overlay was sent as the copy it replaced.
-                .filter(|path| {
-                    !folder.layer_copies(path).iter().any(|copy| sent.contains(copy.to_string_lossy().as_ref()))
-                })
-                .collect()
-        })
-        .await
+        long_job(move || unsent_of(&folder, &sent, &unindexable, &skips)).await
     }
 
-    async fn first_seen(&self, path: &Path) -> Result<jiff::Timestamp, AnchorError> {
+    async fn first_seen(&self, path: &Path, other_paths: &[PathBuf]) -> Result<jiff::Timestamp, AnchorError> {
         let mut attempt = 1;
         loop {
-            let (pool, named) = (self.pool.clone(), path.to_path_buf());
-            let read = self.services.on_tokio(async move { upload::first_seen(&pool, &named).await }).await;
+            let (pool, named, others) = (self.pool.clone(), path.to_path_buf(), other_paths.to_vec());
+            let read = self.services.on_tokio(async move { upload::first_seen(&pool, &named, &others).await }).await;
             let err = match read {
                 Ok(Ok(first_seen)) => return Ok(first_seen),
                 Ok(Err(err)) => AnchorError::Store(err),
@@ -324,6 +318,20 @@ pub fn unsent(
         .collect()
 }
 
+/// The battles of `folder` that [`unsent`] keeps and that were not sent under another of their
+/// paths either: another spelling of the install, or the copy a battle replaced under an overlay.
+pub fn unsent_of(
+    folder: &ReplayFolder,
+    sent: &HashSet<String>,
+    unindexable: &Unindexable,
+    skips: &StableUploadSkips,
+) -> Vec<PathBuf> {
+    unsent(battles_of(folder), sent, unindexable, skips)
+        .into_iter()
+        .filter(|path| !folder.other_paths(path).iter().any(|other| sent.contains(other.to_string_lossy().as_ref())))
+        .collect()
+}
+
 /// The finished battles directly in `dir`. The live battle's file is rewritten all match long and
 /// is never one.
 pub fn battles_in(dir: &Path) -> Vec<PathBuf> {
@@ -406,5 +414,62 @@ mod tests {
 
         let unsent = unsent(battles_in(&root), &HashSet::new(), &Unindexable::default(), &skips);
         assert_eq!(unsent, vec![rewritten]);
+    }
+
+    /// Once the launcher runs an install named through a link from an overlay, the sweep sends
+    /// again neither a battle the ledger holds under the name the install was given nor one it
+    /// holds under the install's resolved name. A battle only the overlay holds is sent.
+    #[cfg(unix)]
+    #[test]
+    fn an_install_named_through_a_link_is_not_sent_again_once_overlaid() {
+        let tmp = tempfile::tempdir().expect("a temporary directory can be made");
+        let base = std::fs::canonicalize(tmp.path()).expect("the directory resolves");
+        let real = base.join("real");
+        std::fs::create_dir_all(real.join("install/replays")).expect("the install is made");
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("the link is made");
+        let install = link.join("install");
+        let replays = install.join("replays");
+        for name in ["named.wowsreplay", "resolved.wowsreplay", "unsent.wowsreplay"] {
+            std::fs::write(replays.join(name), name.as_bytes()).expect("the file is written");
+        }
+        let dirs = wgc_launch::RuntimeDirs::new(&link.join("app"));
+        let state = dirs.install_state(&std::fs::canonicalize(&install).expect("the install resolves"));
+        let upper = state.upper().join("replays");
+        std::fs::create_dir_all(&upper).expect("the upper directory is made");
+        std::fs::write(state.backend_record(), "kernel-bwrap").expect("the backend is recorded");
+        std::fs::write(upper.join("upper.wowsreplay"), b"upper").expect("the file is written");
+        let sent = HashSet::from([
+            replays.join("named.wowsreplay").to_string_lossy().into_owned(),
+            real.join("install/replays/resolved.wowsreplay").to_string_lossy().into_owned(),
+        ]);
+
+        let folder = ReplayFolder::from_install(&install, Some(&dirs));
+        let mut unsent = unsent_of(&folder, &sent, &Unindexable::default(), &StableUploadSkips::default());
+        unsent.sort();
+
+        let mut expected = vec![replays.join("unsent.wowsreplay"), upper.join("upper.wowsreplay")];
+        expected.sort();
+        assert_eq!(unsent, expected);
+    }
+
+    /// A battle keeps the earliest anchor recorded under any of its paths, though the path it is
+    /// read by already has a later one: its grace window runs from its first sight.
+    #[test]
+    fn the_anchor_is_the_first_sight_under_any_path() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime starts");
+        let pool = runtime.block_on(wows_toolkit_config::test_pool());
+        let (lower, upper) = (PathBuf::from("/mnt/wows/replays/a.wowsreplay"), PathBuf::from("/upper/a.wowsreplay"));
+        let at = |second| jiff::Timestamp::from_second(second).expect("the time is in range");
+        let record = |path: &Path, second| {
+            let path = path.to_string_lossy().into_owned();
+            runtime.block_on(wows_toolkit_config::queries::raw_upload_first_seen(&pool, &path, at(second)))
+        };
+        record(&lower, 1_000).expect("the anchor is recorded");
+        record(&upper, 2_000).expect("the anchor is recorded");
+
+        let anchor = runtime.block_on(upload::first_seen(&pool, &upper, &[lower])).expect("the anchor is read");
+
+        assert_eq!(anchor, at(1_000));
     }
 }

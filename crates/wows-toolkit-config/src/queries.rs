@@ -212,7 +212,7 @@ pub async fn sent_replay_exists(pool: &SqlitePool, path: &str) -> Result<bool, s
 }
 
 /// When this replay was first seen by whichever app saw it first, recording
-/// `now` if this is its first sight.
+/// `sighted` if this is its first sight or earlier than the stored anchor.
 ///
 /// The grace a raw upload waits for results through anchors here rather than on
 /// the file's own timestamp: an archived replay carries one from months ago and
@@ -221,24 +221,36 @@ pub async fn sent_replay_exists(pool: &SqlitePool, path: &str) -> Result<bool, s
 pub async fn raw_upload_first_seen(
     pool: &SqlitePool,
     path: &str,
-    now: jiff::Timestamp,
+    sighted: jiff::Timestamp,
 ) -> Result<jiff::Timestamp, sqlx::Error> {
     // Insert and read in one statement: a conflicting insert returns no row, so
-    // the update keeps the stored anchor and hands it back rather than leaving
+    // the update keeps the earlier anchor and hands it back rather than leaving
     // the caller to work out whether it won the race.
     let seconds: i64 = sqlx::query_scalar(
         "INSERT INTO raw_upload_first_seen (replay_path, first_seen) VALUES (?1, ?2) \
-         ON CONFLICT(replay_path) DO UPDATE SET first_seen = first_seen \
+         ON CONFLICT(replay_path) DO UPDATE SET first_seen = MIN(first_seen, excluded.first_seen) \
          RETURNING first_seen",
     )
     .bind(path)
-    .bind(now.as_second())
+    .bind(sighted.as_second())
     .fetch_one(pool)
     .await?;
 
     // A stored value outside the range can only come from a damaged row; starting
     // the window again is the conservative reading of it.
-    Ok(jiff::Timestamp::from_second(seconds).unwrap_or(now))
+    Ok(jiff::Timestamp::from_second(seconds).unwrap_or(sighted))
+}
+
+/// The anchor [`raw_upload_first_seen`] recorded for `path`, without recording one.
+pub async fn raw_upload_anchor(pool: &SqlitePool, path: &str) -> Result<Option<jiff::Timestamp>, sqlx::Error> {
+    let seconds: Option<i64> =
+        sqlx::query_scalar("SELECT first_seen FROM raw_upload_first_seen WHERE replay_path = ?1")
+            .bind(path)
+            .fetch_optional(pool)
+            .await?;
+
+    // A damaged row anchors nothing, as in `raw_upload_first_seen`.
+    Ok(seconds.and_then(|seconds| jiff::Timestamp::from_second(seconds).ok()))
 }
 
 /// Delete sent replays not in the given set.

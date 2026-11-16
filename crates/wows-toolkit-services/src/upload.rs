@@ -83,10 +83,22 @@ pub struct Sender<'a> {
 ///
 /// Recorded on the first sight, in the row the egui app's own uploader keeps, so
 /// the two apps agree about how long a battle has been waiting for its results.
-/// Without the anchor the window cannot be measured, so a caller tries again
-/// rather than sending.
-pub async fn first_seen(pool: &SqlitePool, path: &Path) -> Result<jiff::Timestamp, sqlx::Error> {
-    wows_toolkit_config::queries::raw_upload_first_seen(pool, &path.to_string_lossy(), jiff::Timestamp::now()).await
+/// A battle first seen under one of `other_paths` keeps that anchor. Without the
+/// anchor the window cannot be measured, so a caller tries again rather than
+/// sending.
+pub async fn first_seen(
+    pool: &SqlitePool,
+    path: &Path,
+    other_paths: &[PathBuf],
+) -> Result<jiff::Timestamp, sqlx::Error> {
+    let mut first_sight = jiff::Timestamp::now();
+    for other in other_paths {
+        if let Some(anchor) = wows_toolkit_config::queries::raw_upload_anchor(pool, &other.to_string_lossy()).await? {
+            first_sight = first_sight.min(anchor);
+        }
+    }
+
+    wows_toolkit_config::queries::raw_upload_first_seen(pool, &path.to_string_lossy(), first_sight).await
 }
 
 /// Whether this replay is already in the ledger.
