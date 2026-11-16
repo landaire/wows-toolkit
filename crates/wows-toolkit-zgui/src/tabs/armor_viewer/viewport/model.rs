@@ -56,6 +56,7 @@ use super::types::OpeningLayer;
 use super::types::PerspectiveSettings;
 use super::types::SceneSource;
 use super::types::SimAgreement;
+use super::types::SplashBoxName;
 
 /// The device generation zgui reports for the device a viewport draws on.
 pub(super) type SceneDevice = ViewportDevice<u64>;
@@ -332,8 +333,9 @@ pub struct ViewportModel {
     pub(super) hovered_ring: Option<(String, Vec2)>,
     /// The overlay mesh highlighting the hovered plate.
     pub(super) hover_highlight: Option<(PlateKey, MeshId)>,
-    /// The overlay mesh highlighting a hovered tree row.
-    pub(super) sidebar_highlight: Option<(SidebarHighlightKey, MeshId)>,
+    /// The overlay mesh highlighting a hovered tree row. The mesh is `None` while there is no
+    /// device or scene to build it on; the key is kept so it is built once there is.
+    pub(super) sidebar_highlight: Option<(SidebarHighlightKey, Option<MeshId>)>,
     /// The mesh under the pointer when no plate is.
     pub(super) hovered_mesh: Option<MeshHover>,
     /// The overlay mesh highlighting every mesh named as `hovered_mesh` is.
@@ -375,6 +377,10 @@ pub struct ViewportModel {
     pub(super) burst: Option<Burst>,
     /// Whether the named splash boxes are outlined over the hull.
     pub(super) show_splash_boxes: bool,
+    /// The boxes ticked in the splash zone list. Only these are outlined.
+    pub(super) splash_boxes_checked: HashSet<SplashBoxName>,
+    /// Which groups of the splash zone list are expanded.
+    pub(super) expanded_splash_groups: HashSet<String>,
     /// The boxes' names and where each is written, while they are outlined.
     pub(super) splash_labels: Vec<splash::SplashBoxLabel>,
     pub(super) gap_count: usize,
@@ -470,6 +476,8 @@ impl ViewportModel {
             splash_mode: false,
             burst: None,
             show_splash_boxes: false,
+            splash_boxes_checked: HashSet::new(),
+            expanded_splash_groups: HashSet::new(),
             splash_labels: Vec::new(),
             gap_count: 0,
             show_hidden_only: false,

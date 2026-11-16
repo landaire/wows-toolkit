@@ -18,6 +18,7 @@
 mod display;
 pub mod filter;
 mod hull;
+mod splash_zones;
 mod tab_strip;
 mod textures;
 mod tools;
@@ -384,6 +385,15 @@ fn tab_parts(cx: &SectionCx, tab: OptionsTab) -> TabParts {
                     OptionSection::Visibility,
                     &t!("ui.armor.armor_options"),
                     visibility::body,
+                ));
+            }
+            // Only a ship whose hull ships a splash file has boxes to list.
+            if features.is_some_and(|features| features.splash_boxes) {
+                sections.extend(section(
+                    cx,
+                    OptionSection::SplashZones,
+                    &t!("ui.armor.splash.section"),
+                    splash_zones::body,
                 ));
             }
             sections.extend(section(

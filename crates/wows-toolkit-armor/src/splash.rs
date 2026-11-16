@@ -8,6 +8,7 @@
 //! zones they belong to from GameParams' own hit locations, so the egui
 //! viewer and this one answer from the same data.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -53,9 +54,13 @@ const NO_PEN_COLOR: [f32; 4] = [0.9, 0.2, 0.2, 0.55];
 pub const CUBE_COLOR: [f32; 4] = [1.0, 0.7, 0.1, 0.7];
 /// Colour of the box outlines the reader can switch on.
 pub const BOX_COLOR: [f32; 4] = [0.3, 0.7, 1.0, 0.6];
+/// Colour of a box outline while its row in the splash zone list is hovered.
+const BOX_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.9];
 
 /// Half-width of a drawn wireframe edge, in model units.
 const EDGE_HALF_WIDTH: f32 = 0.003;
+/// Half-width of a highlighted box's edges, wide enough to stand out over its plain outline.
+const HIGHLIGHT_EDGE_HALF_WIDTH: f32 = 0.006;
 
 /// How far a shaded triangle is lifted off the plate it belongs to, so it
 /// does not fight with it for the same depth.
@@ -445,28 +450,55 @@ pub struct SplashBoxLabel {
 }
 
 /// The outlines of every named box.
-pub fn build_splash_box_wireframes(boxes: &[SplashBox]) -> (Vec<Vertex>, Vec<u32>) {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    for shape in boxes {
-        let (shape_vertices, shape_indices) = build_box_wireframe(shape.min, shape.max, BOX_COLOR, EDGE_HALF_WIDTH);
-        let base = vertices.len() as u32;
-        vertices.extend(shape_vertices);
-        indices.extend(shape_indices.into_iter().map(|index| index + base));
-    }
-    (vertices, indices)
+pub fn build_splash_box_wireframes<B>(boxes: &[B]) -> (Vec<Vertex>, Vec<u32>)
+where
+    B: Borrow<SplashBox>,
+{
+    build_box_wireframes(boxes, BOX_COLOR, EDGE_HALF_WIDTH)
+}
+
+/// The outlines of the boxes named in `names`, wider and brighter than their plain outlines, for
+/// a hovered row in the splash zone list.
+pub fn build_splash_box_highlight(boxes: &[SplashBox], names: &[String]) -> (Vec<Vertex>, Vec<u32>) {
+    let named: Vec<&SplashBox> = boxes.iter().filter(|shape| names.contains(&shape.name)).collect();
+
+    build_box_wireframes(&named, BOX_HIGHLIGHT_COLOR, HIGHLIGHT_EDGE_HALF_WIDTH)
 }
 
 /// Each box's name as the reader reads it, written at the middle of its top
 /// face, which is clear of the hull for every box that is not buried in it.
-pub fn box_labels(boxes: &[SplashBox]) -> Vec<SplashBoxLabel> {
+pub fn box_labels<B>(boxes: &[B]) -> Vec<SplashBoxLabel>
+where
+    B: Borrow<SplashBox>,
+{
     boxes
         .iter()
-        .map(|shape| SplashBoxLabel {
-            position: [(shape.min[0] + shape.max[0]) * 0.5, shape.max[1], (shape.min[2] + shape.max[2]) * 0.5],
-            name: prettify_box_name(&shape.name),
+        .map(|shape| {
+            let shape = shape.borrow();
+            SplashBoxLabel {
+                position: [(shape.min[0] + shape.max[0]) * 0.5, shape.max[1], (shape.min[2] + shape.max[2]) * 0.5],
+                name: prettify_box_name(&shape.name),
+            }
         })
         .collect()
+}
+
+/// Every box's outline in one mesh.
+fn build_box_wireframes<B>(boxes: &[B], color: [f32; 4], half_width: f32) -> (Vec<Vertex>, Vec<u32>)
+where
+    B: Borrow<SplashBox>,
+{
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for shape in boxes {
+        let shape = shape.borrow();
+        let (shape_vertices, shape_indices) = build_box_wireframe(shape.min, shape.max, color, half_width);
+        let base = vertices.len() as u32;
+        vertices.extend(shape_vertices);
+        indices.extend(shape_indices.into_iter().map(|index| index + base));
+    }
+
+    (vertices, indices)
 }
 
 /// A box drawn as twelve thin quads, one per edge.
@@ -718,6 +750,28 @@ mod tests {
         // getting that wrong draws one box's edges onto the other.
         assert!(indices.iter().all(|index| (*index as usize) < vertices.len()));
         assert_eq!(vertices.len(), 2 * 12 * 2 * 4);
+    }
+
+    /// A hovered row outlines only the boxes it names, with edges standing further off the box
+    /// than its plain outline's so it reads over it.
+    #[test]
+    fn a_highlight_outlines_only_the_named_boxes_and_stands_out_from_their_outline() {
+        let boxes = [splash_box("a", [0.0; 3], [1.0; 3]), splash_box("b", [2.0, 2.0, 2.0], [3.0, 3.0, 3.0])];
+        // How far a vertex sits outside box `b`.
+        let outside_b = |vertex: &Vertex| {
+            vertex.position.iter().map(|axis| (2.0 - axis).max(axis - 3.0).max(0.0)).fold(0.0_f32, f32::max)
+        };
+
+        let (highlight, indices) = build_splash_box_highlight(&boxes, &["b".to_string()]);
+        let (outline, _) = build_splash_box_wireframes(&boxes[1..]);
+
+        assert_eq!(highlight.len(), outline.len(), "one box's worth of edges");
+        assert!(indices.iter().all(|index| (*index as usize) < highlight.len()));
+        let reach = |vertices: &[Vertex]| vertices.iter().map(outside_b).fold(0.0_f32, f32::max);
+        assert!(reach(&highlight) < 0.5, "nothing is drawn around box a");
+        assert!(reach(&highlight) > reach(&outline), "the highlight's edges are wider");
+        assert_ne!(highlight[0].color, outline[0].color);
+        assert!(build_splash_box_highlight(&boxes, &["c".to_string()]).0.is_empty(), "an unknown name draws nothing");
     }
 
     #[test]

@@ -667,6 +667,8 @@ impl ViewportModel {
         visibility::retain_hull_visibility(&mut self.hull_visibility, &armor.hull_part_groups);
         visibility::retain_part_visibility(&mut self.part_visibility, &armor.zone_parts);
         visibility::retain_plate_visibility(&mut self.plate_visibility, &armor.zone_part_plates);
+        let old = self.current_armor.clone();
+        self.carry_splash_boxes(old.as_deref(), &armor);
         self.undo_stack.clear();
         self.hovered = None;
         self.hover_highlight = None;

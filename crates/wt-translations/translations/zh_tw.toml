@@ -1731,6 +1731,7 @@ no_zones = "此處沒有重疊的爆風框"
 zones = "爆炸範圍內的區域"
 direct_hit = "直接命中"
 hp = "%{value} HP"
+section = "爆風區域"
 
 [ui.armor.export]
 hull = "艦體"

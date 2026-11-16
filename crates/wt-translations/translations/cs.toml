@@ -1685,6 +1685,7 @@ no_zones = "V tomto bodě se nepřekrývají žádné oblasti rozstřiku"
 zones = "Zóny ve výbuchu"
 direct_hit = "Přímý zásah"
 hp = "%{value} HP"
+section = "Zóny rozstřiku"
 
 [ui.armor.export]
 hull = "Trup"

@@ -1731,6 +1731,7 @@ no_zones = "Aucune zone d'éclaboussure ne se chevauche à cet endroit"
 zones = "Zones dans l'explosion"
 direct_hit = "Coup direct"
 hp = "%{value} PV"
+section = "Zones d'éclaboussure"
 
 [ui.armor.export]
 hull = "Coque"

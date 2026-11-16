@@ -1731,6 +1731,7 @@ no_zones = "ไม่มีกล่องสแปลชซ้อนทับ�
 zones = "โซนในแรงระเบิด"
 direct_hit = "โดนตรง"
 hp = "%{value} HP"
+section = "โซนสแปลช"
 
 [ui.armor.export]
 hull = "ตัวเรือ"

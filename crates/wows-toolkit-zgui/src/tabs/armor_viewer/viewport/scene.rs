@@ -152,6 +152,12 @@ impl ViewportModel {
         self.hull_all_visible = defaults.map(|d| d.hull_all_visible).unwrap_or(false);
         // Off with no saved row, as the row's own column default and the egui viewer have it.
         self.show_splash_boxes = defaults.is_some_and(|d| d.show_splash_boxes);
+        if self.show_splash_boxes
+            && self.splash_boxes_checked.is_empty()
+            && let Some(armor) = self.shown().cloned()
+        {
+            self.check_every_splash_box(&armor);
+        }
         // A row with no lighting leaves the lighting as it is.
         if let Some(lighting) = defaults.and_then(|d| d.lighting.clone()) {
             self.viewport.lighting = lighting.into();
@@ -205,7 +211,11 @@ impl ViewportModel {
     /// What the scene handed to this pane has for the option rail to act on. `None` while nothing
     /// has been.
     pub(super) fn scene_features(&self) -> Option<SceneFeatures> {
-        self.shown().map(|armor| SceneFeatures { ship: armor.is_ship(), armor: armor.has_armor() })
+        self.shown().map(|armor| SceneFeatures {
+            ship: armor.is_ship(),
+            armor: armor.has_armor(),
+            splash_boxes: armor.is_ship() && armor.splash_data.is_some(),
+        })
     }
 
     /// What this pane's scene was loaded from, which seeds a compare pane's own source.
@@ -304,6 +314,12 @@ impl ViewportModel {
         self.reload_load.cancel();
         // What the background stage of the scene replaced would still add is of no use now.
         self.rest_load = None;
+        // The splash zone list starts folded, with every box ticked while the outlines are on.
+        self.splash_boxes_checked.clear();
+        self.expanded_splash_groups.clear();
+        if self.show_splash_boxes {
+            self.check_every_splash_box(&armor);
+        }
         if self.scene().is_some() {
             self.upload_armor_now(armor, layer, cx);
             self.pending_armor = None;
@@ -378,18 +394,16 @@ impl ViewportModel {
         self.reupload_current_armor(cx);
     }
 
-    /// Outlines the named splash boxes while they are shown, and keeps their names for the
+    /// Outlines the ticked splash boxes while they are shown, and keeps their names for the
     /// overlay. The outlines are meshes and the names are not, so both are made here to stay in
     /// step.
     pub(super) fn upload_splash_boxes(&mut self, scene: &SceneDevice, armor: &LoadedShipArmor) {
-        self.splash_labels.clear();
-        let Some(data) = armor.splash_data.as_ref().filter(|_| self.show_splash_boxes) else { return };
-
-        let (vertices, indices) = splash::build_splash_box_wireframes(&data.boxes);
+        let drawn = self.drawn_splash_boxes(armor);
+        let (vertices, indices) = splash::build_splash_box_wireframes(&drawn);
         if !indices.is_empty() {
             self.viewport.add_non_pickable_mesh(scene.device(), &vertices, &indices, LAYER_OVERLAY);
         }
-        self.splash_labels = splash::box_labels(&data.boxes);
+        self.splash_labels = splash::box_labels(&drawn);
     }
 
     /// Marks the hardpoints the sidebar asked for that belong to the scene shown, and keeps their
@@ -834,6 +848,8 @@ impl ViewportModel {
         self.last_plate = None;
         self.burst = None;
         self.splash_labels.clear();
+        self.splash_boxes_checked.clear();
+        self.expanded_splash_groups.clear();
         self.gap_count = 0;
 
         self.viewport.clear();

@@ -1685,6 +1685,7 @@ no_zones = "Bu noktada çakışan sıçrama kutusu yok"
 zones = "Patlamadaki bölgeler"
 direct_hit = "Doğrudan isabet"
 hp = "%{value} HP"
+section = "Sıçrama Bölgeleri"
 
 [ui.armor.export]
 hull = "Gövde"

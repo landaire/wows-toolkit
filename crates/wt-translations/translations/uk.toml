@@ -1685,6 +1685,7 @@ no_zones = "У цій точці не перетинається жодна зо
 zones = "Зони в області розриву"
 direct_hit = "Пряме влучання"
 hp = "%{value} HP"
+section = "Зони сплешу"
 
 [ui.armor.export]
 hull = "Корпус"

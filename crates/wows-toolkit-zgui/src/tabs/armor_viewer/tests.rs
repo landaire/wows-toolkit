@@ -33,12 +33,15 @@ use wows_toolkit_armor::load_ship::ShipSubject;
 use wows_toolkit_armor::load_ship::ZonePart;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::scene_load::FirstStage;
+use wows_toolkit_armor::splash;
+use wows_toolkit_armor::splash::ShipSplashData;
 use wows_toolkit_armor::textures::LocatedTexture;
 use wows_toolkit_armor::textures::PropertyTexture;
 use wows_toolkit_armor::textures::SceneMaterial;
 use wows_toolkit_armor::textures::SceneTextures;
 use wows_toolkit_armor::textures::TextureLookup;
 use wows_toolkit_armor::viewport::renderer::HighlightDepth;
+use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_services::dialog::Asked;
@@ -64,6 +67,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_types::Vec2;
 use wowsunpack::game_types::Vec3;
+use wowsunpack::models::geometry::SplashBox;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
 use zgui::reactive::prelude::GetUntracked;
@@ -83,6 +87,7 @@ use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::armor_viewer::options::TextureFocus;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
+use crate::tabs::armor_viewer::viewport::SplashBoxName;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
 use crate::tabs::armor_viewer::workspace::PaneId;
 
@@ -1628,6 +1633,194 @@ fn the_options_tabs_render_in_dark_and_light() {
         armor.type_into("armor-options-filter", "hull");
         settle_in_real_time(&mut armor.window);
         let path = save_shot(&mut armor.window, &format!("armor-options-search-{suffix}"));
+        println!("{}", path.display());
+    }
+}
+
+/// A ship over the armored model fixture with five splash boxes: one at the bow, two citadel
+/// boxes and two turret boxes.
+fn splash_zone_scene() -> LoadedShipArmor {
+    let mut scene = ship_scene();
+    let shape = |name: &str, min: [f32; 3], max: [f32; 3]| SplashBox { name: name.to_string(), min, max };
+    let boxes = vec![
+        shape("CM_SB_bow_1", [0.0, 0.0, 4.5], [1.2, 1.8, 6.0]),
+        shape("CM_SB_cit_1", [0.4, 0.0, 1.0], [2.6, 0.9, 2.6]),
+        shape("CM_SB_cit_2", [0.2, 0.0, 2.6], [1.8, 1.1, 4.2]),
+        shape("CM_SB_gk_1_1", [1.4, 0.6, 1.2], [2.4, 1.6, 2.2]),
+        shape("CM_SB_gk_2_1", [0.4, 1.0, 3.2], [1.4, 2.0, 4.2]),
+    ];
+    scene.splash_box_groups = splash::build_splash_box_groups(&boxes);
+    scene.splash_data = Some(ShipSplashData { boxes, box_to_zone: HashMap::new() });
+
+    scene
+}
+
+fn box_names(names: &[&str]) -> Vec<SplashBoxName> {
+    names.iter().map(|name| SplashBoxName::new(*name)).collect()
+}
+
+/// A ship with splash boxes lists them in a section of their own under the armor section, one row
+/// per group with its box count, each folding open to its boxes. A ship without them has no such
+/// section.
+#[test]
+fn the_splash_zone_section_lists_each_group_with_its_box_count() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(ship_scene(), &[OptionSection::SplashZones]);
+    assert!(!armor.shown("armor-options-section-SplashZones"), "a hull without splash boxes lists none");
+
+    armor.install(splash_zone_scene(), &[OptionSection::SplashZones]);
+    let bounds = |armor: &ArmorWindow, id: &str| {
+        let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        armor.window.bounds(element).expect("it is laid out")
+    };
+    let (armor_head, splash_head) =
+        (bounds(&armor, "armor-options-section-Visibility"), bounds(&armor, "armor-options-section-SplashZones"));
+    assert!(armor_head.bottom() <= splash_head.top(), "the section follows the armor section");
+    for group in ["Bow", "Citadel", "Turret"] {
+        assert!(armor.shown(&format!("armor-splash-zone-group-{group}")), "{group} has a row");
+    }
+    assert_eq!(armor.window.texts_by_class("wt-armor-splash__count"), ["(1)", "(2)", "(2)"]);
+    assert!(!armor.shown("armor-splash-zone-box-CM_SB_cit_1"), "groups start folded");
+
+    armor.click("armor-splash-zone-group-expand-Citadel");
+    assert!(armor.shown("armor-splash-zone-box-CM_SB_cit_1") && armor.shown("armor-splash-zone-box-CM_SB_cit_2"));
+    let labels = armor.window.texts_by_class("wt-armor-check__label");
+    assert_eq!(labels, ["Citadel 1", "Citadel 2"], "each box is named as the reader reads it");
+    assert!(!armor.shown("armor-splash-zone-box-CM_SB_gk_1_1"), "Turret stays folded");
+}
+
+/// All draws every box and None none, each switching the outlines with them; a group or box box
+/// draws its boxes, and the outlines go off with the last box unticked.
+#[test]
+fn the_splash_zone_toggles_choose_the_boxes_drawn() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(splash_zone_scene(), &[OptionSection::SplashZones]);
+    let viewport = armor.workspace.active_untracked();
+    let every = box_names(&["CM_SB_bow_1", "CM_SB_cit_1", "CM_SB_cit_2", "CM_SB_gk_1_1", "CM_SB_gk_2_1"]);
+    assert!(viewport.drawn_splash_boxes().is_empty(), "the outlines start off");
+
+    armor.click("armor-splash-zones-all");
+    assert_eq!(viewport.drawn_splash_boxes(), every);
+    assert!(viewport.splash_state().boxes_shown);
+
+    armor.click("armor-splash-zones-none");
+    assert!(viewport.drawn_splash_boxes().is_empty());
+    assert!(!viewport.splash_state().boxes_shown, "None turns the outlines off");
+
+    armor.click("armor-splash-zone-group-check-Citadel");
+    assert_eq!(viewport.drawn_splash_boxes(), box_names(&["CM_SB_cit_1", "CM_SB_cit_2"]));
+    assert!(viewport.splash_state().boxes_shown, "a ticked group turns the outlines on");
+
+    armor.click("armor-splash-zone-group-expand-Citadel");
+    armor.click("armor-splash-zone-box-check-CM_SB_cit_1");
+    assert_eq!(viewport.drawn_splash_boxes(), box_names(&["CM_SB_cit_2"]));
+    armor.click("armor-splash-zone-box-check-CM_SB_cit_2-label");
+    assert!(viewport.drawn_splash_boxes().is_empty());
+    assert!(!viewport.splash_state().boxes_shown, "the outlines go off with the last box");
+
+    // As the rail's splash-box button does: with nothing ticked, it ticks every box.
+    viewport.set_show_splash_boxes(true);
+    assert_eq!(viewport.drawn_splash_boxes(), every);
+}
+
+/// The rail's filter keeps the groups and boxes it matches by name; a match on a group keeps every
+/// box in it. A search typed on another tab finds the list on Layers.
+#[test]
+fn the_rail_filter_narrows_the_splash_zone_list() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(splash_zone_scene(), &[]);
+    armor.show_tab(OptionsTab::Analysis);
+
+    armor.type_into("armor-options-filter", "citadel");
+    assert!(armor.shown("armor-options-tab-count-Layers"), "Layers counts the match");
+    assert!(armor.shown("armor-options-page-Layers"), "and is shown in place of the chosen tab");
+    assert!(armor.shown("armor-options-body-SplashZones"), "the section opens on a match");
+    assert!(armor.shown("armor-splash-zone-box-CM_SB_cit_1") && armor.shown("armor-splash-zone-box-CM_SB_cit_2"));
+    assert!(!armor.shown("armor-splash-zone-group-Bow") && !armor.shown("armor-splash-zone-group-Turret"));
+    assert!(!armor.shown("armor-splash-zones-all"), "the bulk switches are put away");
+    armor.erase("citadel");
+
+    armor.type_into("armor-options-filter", "turret 21");
+    assert!(armor.shown("armor-splash-zone-group-Turret"), "a box match keeps its group");
+    assert!(armor.shown("armor-splash-zone-box-CM_SB_gk_2_1"));
+    assert!(!armor.shown("armor-splash-zone-box-CM_SB_gk_1_1"), "the other turret box does not match");
+
+    // The group box acts only on the boxes the filter kept.
+    armor.click("armor-splash-zone-group-check-Turret");
+    assert_eq!(armor.workspace.active_untracked().drawn_splash_boxes(), box_names(&["CM_SB_gk_2_1"]));
+}
+
+/// Hovering a group or box row highlights its boxes on the hull, and leaving the row clears it.
+#[test]
+fn hovering_a_splash_zone_row_highlights_its_boxes() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(splash_zone_scene(), &[OptionSection::SplashZones]);
+    let viewport = armor.workspace.active_untracked();
+    armor.click("armor-splash-zone-group-expand-Citadel");
+    let hover = |armor: &mut ArmorWindow, id: &str| {
+        let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        armor.window.hover(element).expect("the row can be hovered");
+        armor.settle();
+    };
+
+    hover(&mut armor, "armor-splash-zone-box-CM_SB_cit_1");
+    let one = SidebarHighlightKey::SplashBoxes(vec!["CM_SB_cit_1".to_string()]);
+    assert_eq!(viewport.sidebar_highlight_key(), Some(one));
+
+    hover(&mut armor, "armor-splash-zone-group-Citadel");
+    let group = SidebarHighlightKey::SplashBoxes(vec!["CM_SB_cit_1".to_string(), "CM_SB_cit_2".to_string()]);
+    assert_eq!(viewport.sidebar_highlight_key(), Some(group));
+
+    hover(&mut armor, "armor-options-filter");
+    assert_eq!(viewport.sidebar_highlight_key(), None, "leaving the rows clears the highlight");
+
+    // Ctrl+Tab takes the hovered row away without its pointer leaving it.
+    hover(&mut armor, "armor-splash-zone-group-Citadel");
+    armor.workspace.cycle_options_tab(true);
+    armor.settle();
+    assert!(!armor.shown("armor-splash-zone-group-Citadel"));
+    assert_eq!(viewport.sidebar_highlight_key(), None, "a tab change clears the highlight of the row it hides");
+}
+
+/// A ship opened while the outlines are on draws every box, whatever was ticked on the ship
+/// before.
+#[test]
+fn loading_a_ship_with_the_splash_zones_on_ticks_every_box() {
+    let mut armor = ArmorWindow::open_tall();
+    let workspace = armor.workspace;
+    let row = ArmorViewerDefaultsRow { show_splash_boxes: true, ..saved_row() };
+    workspace.apply_defaults(Some(&row), true, XrayHighlight::Always);
+
+    armor.install(splash_zone_scene(), &[OptionSection::SplashZones]);
+    let viewport = workspace.active_untracked();
+    assert_eq!(viewport.drawn_splash_boxes().len(), 5, "every box is ticked");
+
+    viewport.set_splash_boxes_checked(box_names(&["CM_SB_bow_1"]), false);
+    assert_eq!(viewport.drawn_splash_boxes().len(), 4);
+    armor.install(splash_zone_scene(), &[OptionSection::SplashZones]);
+    assert_eq!(viewport.drawn_splash_boxes().len(), 5, "the next ship starts with every box ticked");
+}
+
+/// The splash zone list with every box outlined on the hull and one box row hovered, in dark and
+/// light.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the splash zone list"]
+fn the_splash_zone_list_renders_in_dark_and_light() {
+    for (appearance, name) in
+        [(Appearance::Dark, "armor-splash-zones-dark"), (Appearance::Light, "armor-splash-zones-light")]
+    {
+        let mut armor = ArmorWindow::open(review_options(appearance));
+        armor.install(splash_zone_scene(), &[OptionSection::SplashZones]);
+        let viewport = armor.workspace.active_untracked();
+        armor.settle_until(|| viewport.read_untracked(|model| model.current_armor.is_some()).unwrap_or(false));
+        armor.click("armor-splash-zones-all");
+        armor.click("armor-splash-zone-group-expand-Citadel");
+        armor.click("armor-splash-zone-group-expand-Turret");
+        let row = armor.window.by_test_id("armor-splash-zone-box-CM_SB_cit_2").expect("the box row is shown");
+        armor.window.hover(row).expect("the row can be hovered");
+        settle_in_real_time(&mut armor.window);
+
+        let path = save_shot(&mut armor.window, name);
         println!("{}", path.display());
     }
 }

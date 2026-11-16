@@ -10,7 +10,7 @@ use serde::Serialize;
 pub enum OptionsTab {
     /// The hull, modules, camo and LOD the ship is drawn with, its textures and the export.
     Ship,
-    /// What is drawn: armor zones and plates, hull parts and splash boxes.
+    /// What is drawn: armor zones and plates, splash boxes and hull parts.
     Layers,
     /// Casting shells at the hull: trajectories, the penetration check and splash.
     #[default]
@@ -106,6 +106,8 @@ pub enum OptionSection {
     Configuration,
     Textures,
     Visibility,
+    /// The splash boxes of a ship's hull, each ticked to outline it.
+    SplashZones,
     HullParts,
     Trajectory,
     PenCheck,
@@ -119,7 +121,7 @@ impl OptionSection {
     pub const fn tab(self) -> OptionsTab {
         match self {
             Self::Configuration | Self::Textures => OptionsTab::Ship,
-            Self::Visibility | Self::HullParts => OptionsTab::Layers,
+            Self::Visibility | Self::SplashZones | Self::HullParts => OptionsTab::Layers,
             Self::Trajectory | Self::PenCheck => OptionsTab::Analysis,
             Self::Display | Self::CameraRings | Self::Lighting => OptionsTab::Display,
         }
@@ -131,6 +133,7 @@ impl OptionSection {
             Self::Configuration => "Configuration",
             Self::Textures => "Textures",
             Self::Visibility => "Visibility",
+            Self::SplashZones => "SplashZones",
             Self::HullParts => "HullParts",
             Self::Trajectory => "Trajectory",
             Self::PenCheck => "PenCheck",
@@ -149,6 +152,7 @@ pub struct OptionSectionsOpen {
     pub configuration: bool,
     pub textures: bool,
     pub visibility: bool,
+    pub splash_zones: bool,
     pub hull_parts: bool,
     pub trajectory: bool,
     pub pen_check: bool,
@@ -164,6 +168,7 @@ impl Default for OptionSectionsOpen {
             configuration: true,
             textures: false,
             visibility: true,
+            splash_zones: false,
             hull_parts: false,
             trajectory: true,
             pen_check: false,
@@ -181,6 +186,7 @@ impl OptionSectionsOpen {
             configuration: false,
             textures: false,
             visibility: false,
+            splash_zones: false,
             hull_parts: false,
             trajectory: false,
             pen_check: false,
@@ -195,6 +201,7 @@ impl OptionSectionsOpen {
             OptionSection::Configuration => self.configuration,
             OptionSection::Textures => self.textures,
             OptionSection::Visibility => self.visibility,
+            OptionSection::SplashZones => self.splash_zones,
             OptionSection::HullParts => self.hull_parts,
             OptionSection::Trajectory => self.trajectory,
             OptionSection::PenCheck => self.pen_check,
@@ -209,6 +216,7 @@ impl OptionSectionsOpen {
             OptionSection::Configuration => &mut self.configuration,
             OptionSection::Textures => &mut self.textures,
             OptionSection::Visibility => &mut self.visibility,
+            OptionSection::SplashZones => &mut self.splash_zones,
             OptionSection::HullParts => &mut self.hull_parts,
             OptionSection::Trajectory => &mut self.trajectory,
             OptionSection::PenCheck => &mut self.pen_check,

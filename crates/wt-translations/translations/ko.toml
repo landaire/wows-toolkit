@@ -1731,6 +1731,7 @@ no_zones = "이 지점에 겹치는 스플래시 박스가 없습니다"
 zones = "폭발 범위 내 구역"
 direct_hit = "직격"
 hp = "%{value} HP"
+section = "스플래시 구역"
 
 [ui.armor.export]
 hull = "선체"

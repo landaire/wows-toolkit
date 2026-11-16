@@ -1731,6 +1731,7 @@ no_zones = "この地点に重なるスプラッシュボックスはありま�
 zones = "爆発範囲内の区画"
 direct_hit = "直撃"
 hp = "%{value} HP"
+section = "スプラッシュゾーン"
 
 [ui.armor.export]
 hull = "船体"

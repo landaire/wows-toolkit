@@ -1685,6 +1685,7 @@ no_zones = "W tym punkcie nie nakładają się żadne strefy rozbryzgu"
 zones = "Strefy w wybuchu"
 direct_hit = "Trafienie bezpośrednie"
 hp = "%{value} HP"
+section = "Strefy rozbryzgu"
 
 [ui.armor.export]
 hull = "Kadłub"

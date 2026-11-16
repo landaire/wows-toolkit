@@ -12,6 +12,7 @@ use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::GameParamId;
 use wows_replays::types::ShotId;
 use wows_toolkit_armor::length_marks::Reading;
+use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::splash;
 use wows_toolkit_armor::trajectory;
@@ -38,6 +39,7 @@ use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
+use wowsunpack::models::geometry::SplashBox;
 
 use super::depth_cues::landed;
 use super::model::Burst;
@@ -52,6 +54,7 @@ use super::types::CastShell;
 use super::types::GapState;
 use super::types::Isolate;
 use super::types::SimAgreement;
+use super::types::SplashBoxName;
 use super::types::SplashState;
 use super::types::TrajectoryState;
 use super::types::ViewportChange;
@@ -324,15 +327,93 @@ impl ViewportModel {
     }
 
     /// Shows or hides the outlines of the ship's named splash boxes. A preference, so the pane
-    /// reports it to be saved.
+    /// reports it to be saved. Turned on with no box ticked, every box is, as a load does.
     pub(super) fn set_show_splash_boxes(&mut self, show: bool, cx: &mut ViewCx) {
         if self.show_splash_boxes == show {
             return;
         }
+        if show
+            && self.splash_boxes_checked.is_empty()
+            && let Some(armor) = self.shown().cloned()
+        {
+            self.check_every_splash_box(&armor);
+        }
+        self.apply_splash_boxes_shown(show, cx);
+    }
+
+    /// The boxes ticked in the splash zone list.
+    pub fn splash_boxes_checked(&self) -> &HashSet<SplashBoxName> {
+        &self.splash_boxes_checked
+    }
+
+    /// Which groups of the splash zone list are expanded.
+    pub fn expanded_splash_groups(&self) -> &HashSet<String> {
+        &self.expanded_splash_groups
+    }
+
+    /// The boxes of `armor` outlined: the ticked ones, while the outlines are shown.
+    pub(super) fn drawn_splash_boxes<'a>(&self, armor: &'a LoadedShipArmor) -> Vec<&'a SplashBox> {
+        let Some(data) = armor.splash_data.as_ref().filter(|_| self.show_splash_boxes) else { return Vec::new() };
+
+        data.boxes.iter().filter(|shape| self.splash_boxes_checked.contains(shape.name.as_str())).collect()
+    }
+
+    /// Ticks every box `armor` has.
+    pub(super) fn check_every_splash_box(&mut self, armor: &LoadedShipArmor) {
+        let Some(data) = armor.splash_data.as_ref() else { return };
+
+        self.splash_boxes_checked = data.boxes.iter().map(|shape| SplashBoxName::new(shape.name.clone())).collect();
+    }
+
+    /// Ticks or unticks every box, turning the outlines on or off with them, as the list's All
+    /// and None do.
+    pub(super) fn set_every_splash_box_checked(&mut self, checked: bool, cx: &mut ViewCx) {
+        self.splash_boxes_checked.clear();
+        if checked && let Some(armor) = self.shown().cloned() {
+            self.check_every_splash_box(&armor);
+        }
+        self.apply_splash_boxes_shown(checked, cx);
+    }
+
+    /// Ticks or unticks `names`. The outlines are on while any box is ticked.
+    pub(super) fn set_splash_boxes_checked(&mut self, names: Vec<SplashBoxName>, checked: bool, cx: &mut ViewCx) {
+        for name in names {
+            if checked {
+                self.splash_boxes_checked.insert(name);
+            } else {
+                self.splash_boxes_checked.remove(&name);
+            }
+        }
+
+        let any_checked = !self.splash_boxes_checked.is_empty();
+        self.apply_splash_boxes_shown(any_checked, cx);
+    }
+
+    pub(super) fn toggle_splash_group_expanded(&mut self, group: String, cx: &mut ViewCx) {
+        if !self.expanded_splash_groups.remove(&group) {
+            self.expanded_splash_groups.insert(group);
+        }
+        cx.notify();
+    }
+
+    /// Draws the ticked boxes again with the outlines `show`n or not. Only the switch itself is a
+    /// saved preference; which boxes are ticked is the pane's own.
+    fn apply_splash_boxes_shown(&mut self, show: bool, cx: &mut ViewCx) {
+        let switched = self.show_splash_boxes != show;
         self.show_splash_boxes = show;
         self.reupload_current_armor(cx);
-        cx.emit(ViewportChange::Settings);
+        if switched {
+            cx.emit(ViewportChange::Settings);
+        }
         cx.notify();
+    }
+
+    /// Carries the splash zone list over a reload that swapped `old` for `new`.
+    pub(super) fn carry_splash_boxes(&mut self, old: Option<&LoadedShipArmor>, new: &LoadedShipArmor) {
+        let had: HashSet<&str> = old.map(|old| splash_box_names(old).collect()).unwrap_or_default();
+        self.splash_boxes_checked =
+            carried_splash_ticks(&self.splash_boxes_checked, &had, splash_box_names(new), self.show_splash_boxes);
+        self.expanded_splash_groups.retain(|group| new.splash_box_groups.iter().any(|(name, _)| name == group));
     }
 
     /// Bursts a shell where the pointer is.
@@ -704,6 +785,25 @@ fn fall_direction(approach: Vec3, impact: Option<&ImpactResult>) -> Vec3 {
     }
 }
 
+/// The names of `armor`'s splash boxes, in the splash file's order.
+fn splash_box_names(armor: &LoadedShipArmor) -> impl Iterator<Item = &str> {
+    armor.splash_data.iter().flat_map(|data| &data.boxes).map(|shape| shape.name.as_str())
+}
+
+/// The boxes ticked once a reload swaps a hull with the boxes `had` for one with the boxes `has`:
+/// a box both have keeps its tick, and a box only the new hull has is ticked while the outlines are
+/// `shown`, as a load ticks every box.
+fn carried_splash_ticks<'a>(
+    checked: &HashSet<SplashBoxName>,
+    had: &HashSet<&str>,
+    has: impl Iterator<Item = &'a str>,
+    shown: bool,
+) -> HashSet<SplashBoxName> {
+    has.filter(|name| if had.contains(name) { checked.contains(*name) } else { shown })
+        .map(SplashBoxName::new)
+        .collect()
+}
+
 impl ArmorViewportState {
     /// Draws what the ship had taken, replacing whatever was drawn before.
     pub fn show_hits(self, hits: Vec<PreExtractedHit>) {
@@ -777,6 +877,29 @@ impl ArmorViewportState {
 
     pub fn set_show_splash_boxes(self, show: bool) {
         self.update(|this, cx| this.set_show_splash_boxes(show, cx));
+    }
+
+    pub fn set_every_splash_box_checked(self, checked: bool) {
+        self.update(|this, cx| this.set_every_splash_box_checked(checked, cx));
+    }
+
+    pub fn set_splash_boxes_checked(self, names: Vec<SplashBoxName>, checked: bool) {
+        self.update(|this, cx| this.set_splash_boxes_checked(names, checked, cx));
+    }
+
+    pub fn toggle_splash_group_expanded(self, group: String) {
+        self.update(|this, cx| this.toggle_splash_group_expanded(group, cx));
+    }
+
+    /// The boxes of the scene last handed to this pane that are outlined, in the splash file's
+    /// order.
+    #[cfg(test)]
+    pub fn drawn_splash_boxes(self) -> Vec<SplashBoxName> {
+        self.read_untracked(|this| {
+            let Some(armor) = this.shown() else { return Vec::new() };
+            this.drawn_splash_boxes(armor).iter().map(|shape| SplashBoxName::new(shape.name.clone())).collect()
+        })
+        .unwrap_or_default()
     }
 
     pub fn splash_readout(self, ships: &[ComparisonShip], ifhe: Ifhe) -> Option<splash::SplashReadout> {
@@ -853,6 +976,8 @@ impl ArmorViewportState {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use wows_replay_insights::timeline::PreExtractedHit;
     use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
     use wows_replays::analyzer::decoder::HitType;
@@ -877,7 +1002,9 @@ mod tests {
     use super::super::state::ViewCx;
     use super::super::types::CastShell;
     use super::super::types::Isolate;
+    use super::super::types::SplashBoxName;
     use super::SHOT_LOG_LINES;
+    use super::carried_splash_ticks;
 
     fn plate(zone: &str, thickness: f32) -> TrajectoryHit {
         TrajectoryHit {
@@ -1019,5 +1146,23 @@ mod tests {
         assert_eq!(log.len(), SHOT_LOG_LINES);
         let newest = wows_replay_insights::hull_impact::log_line(model.hits.last().expect("hits were added"));
         assert_eq!(log[0], newest);
+    }
+
+    #[test]
+    fn a_reload_keeps_the_ticks_of_boxes_both_hulls_have() {
+        let checked: HashSet<SplashBoxName> = ["cit_1", "gone"].into_iter().map(SplashBoxName::new).collect();
+        let had: HashSet<&str> = ["cit_1", "cit_2", "gone"].into_iter().collect();
+        let has = ["cit_1", "cit_2", "new"];
+        let ticked = |shown: bool| {
+            let mut names: Vec<String> = carried_splash_ticks(&checked, &had, has.into_iter(), shown)
+                .into_iter()
+                .map(|name| name.as_str().to_owned())
+                .collect();
+            names.sort();
+            names
+        };
+
+        assert_eq!(ticked(true), ["cit_1", "new"], "a box only the new hull has is ticked with the outlines on");
+        assert_eq!(ticked(false), ["cit_1"], "and left unticked with them off");
     }
 }

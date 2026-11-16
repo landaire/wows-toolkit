@@ -1731,6 +1731,7 @@ no_zones = "Op dit punt overlappen geen splashboxen"
 zones = "Zones in de explosie"
 direct_hit = "Voltreffer"
 hp = "%{value} HP"
+section = "Splashzones"
 
 [ui.armor.export]
 hull = "Romp"

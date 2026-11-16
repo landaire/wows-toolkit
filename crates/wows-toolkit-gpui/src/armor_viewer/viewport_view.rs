@@ -3700,6 +3700,17 @@ impl ViewportView {
                 names,
                 plate_picking::HighlightOrigin::Row,
             ),
+            SidebarHighlightKey::SplashBoxes(names) => {
+                // A hull without a splash file has no boxes to outline.
+                let boxes = armor.splash_data.as_ref().map(|data| data.boxes.as_slice()).unwrap_or_default();
+                let (vertices, indices) = splash::build_splash_box_highlight(boxes, names);
+                self.viewport.add_non_pickable_mesh(
+                    scene.device(),
+                    &vertices,
+                    &indices,
+                    plate_picking::HighlightOrigin::Row.layer(),
+                )
+            }
         };
         self.sidebar_highlight = Some((key, mesh_id));
         self.viewport.mark_dirty();

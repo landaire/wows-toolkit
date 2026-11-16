@@ -1685,6 +1685,7 @@ no_zones = "Nenhuma caixa de respingo se sobrepõe neste ponto"
 zones = "Zonas na explosão"
 direct_hit = "Impacto direto"
 hp = "%{value} HP"
+section = "Zonas de respingo"
 
 [ui.armor.export]
 hull = "Casco"

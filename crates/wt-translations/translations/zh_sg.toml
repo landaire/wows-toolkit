@@ -1731,6 +1731,7 @@ no_zones = "此处没有重叠的溅射框"
 zones = "爆炸范围内的区域"
 direct_hit = "直接命中"
 hp = "%{value} HP"
+section = "溅射区域"
 
 [ui.armor.export]
 hull = "舰体"

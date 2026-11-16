@@ -1,5 +1,6 @@
 //! What the viewport's state hands to the panels around it, and what they hand back.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -139,6 +140,26 @@ pub struct SplashState {
     pub zones_reached: usize,
 }
 
+/// A splash box's name as the hull's splash file gives it, such as `CM_SB_cit_1`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SplashBoxName(String);
+
+impl SplashBoxName {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for SplashBoxName {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 /// How many shells have been cast, and whether a ricochet is followed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TrajectoryState {
@@ -225,6 +246,8 @@ pub struct SceneFeatures {
     pub ship: bool,
     /// Armor plates: their tree, the legend, casts and the plate tools.
     pub armor: bool,
+    /// Splash boxes to list: a ship whose hull ships a splash file.
+    pub splash_boxes: bool,
 }
 
 /// What a pane's scene was loaded from, which a reload or an export reads again. Set by the pane

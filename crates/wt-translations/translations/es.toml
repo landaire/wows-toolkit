@@ -1685,6 +1685,7 @@ no_zones = "Ninguna zona de salpicadura se superpone en este punto"
 zones = "Zonas en la explosión"
 direct_hit = "Impacto directo"
 hp = "%{value} PS"
+section = "Zonas de salpicadura"
 
 [ui.armor.export]
 hull = "Casco"

@@ -1821,6 +1821,7 @@ no_zones = "No splash boxes overlap at this point"
 zones = "Zones in the burst"
 direct_hit = "Direct hit"
 hp = "%{value} HP"
+section = "Splash Zones"
 
 [ui.armor.export]
 hull = "Hull"

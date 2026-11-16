@@ -12,6 +12,8 @@ use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::plate_picking;
 use wows_toolkit_armor::plate_picking::HighlightOrigin;
+use wows_toolkit_armor::splash;
+use wows_toolkit_armor::viewport::types::MeshId;
 use wows_toolkit_armor::viewport::types::Vec2;
 use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_armor::viewport::types::ViewRect;
@@ -237,22 +239,29 @@ impl ViewportModel {
         self.viewport.mark_dirty();
     }
 
-    /// Replaces the tree-row highlight overlay mesh with one for `key`. Leaves no highlight if
-    /// there is no device or no armor loaded. Also rebuilds an active highlight against fresh
+    /// Replaces the tree-row highlight overlay mesh with one for `key`. Without a device or armor
+    /// loaded the key is kept with no mesh. Also rebuilds an active highlight against fresh
     /// geometry after a visibility change.
     pub(super) fn rebuild_sidebar_highlight(&mut self, key: SidebarHighlightKey) {
-        if let Some((_, old_id)) = self.sidebar_highlight.take() {
+        if let Some((_, Some(old_id))) = self.sidebar_highlight.take() {
             self.viewport.remove_mesh(old_id);
         }
-        let Some(scene) = self.scene() else { return };
-        let Some(armor) = self.current_armor.clone() else { return };
+        let mesh_id = self.build_sidebar_highlight(&key);
+        self.sidebar_highlight = Some((key, mesh_id));
+        self.viewport.mark_dirty();
+    }
+
+    /// The overlay mesh highlighting `key`. `None` without a device or armor loaded.
+    fn build_sidebar_highlight(&mut self, key: &SidebarHighlightKey) -> Option<MeshId> {
+        let scene = self.scene()?;
+        let armor = self.current_armor.clone()?;
         let visibility = VisibilityFilter {
             part: &self.part_visibility,
             plate: &self.plate_visibility,
             show_hidden_only: self.show_hidden_only,
         };
         let show_zero_mm = self.show_zero_mm();
-        let mesh_id = match &key {
+        let mesh_id = match key {
             SidebarHighlightKey::Zone(zone) => plate_picking::upload_zone_highlight(
                 &mut self.viewport,
                 scene.device(),
@@ -286,9 +295,14 @@ impl ViewportModel {
                 names,
                 HighlightOrigin::Row,
             ),
+            SidebarHighlightKey::SplashBoxes(names) => {
+                let boxes = armor.splash_data.as_ref()?;
+                let (vertices, indices) = splash::build_splash_box_highlight(&boxes.boxes, names);
+                self.viewport.add_non_pickable_mesh(scene.device(), &vertices, &indices, HighlightOrigin::Row.layer())
+            }
         };
-        self.sidebar_highlight = Some((key, mesh_id));
-        self.viewport.mark_dirty();
+
+        Some(mesh_id)
     }
 
     /// Sets the tree-row highlight to `key`, rebuilding the overlay mesh only when the key
@@ -303,11 +317,13 @@ impl ViewportModel {
 
     /// Clears the tree-row highlight unconditionally: the tree closed.
     pub(super) fn clear_sidebar_hover(&mut self, cx: &mut ViewCx) {
-        if let Some((_, old_id)) = self.sidebar_highlight.take() {
+        let Some((_, mesh_id)) = self.sidebar_highlight.take() else { return };
+
+        if let Some(old_id) = mesh_id {
             self.viewport.remove_mesh(old_id);
             self.viewport.mark_dirty();
-            cx.notify();
         }
+        cx.notify();
     }
 
     /// Clears the tree-row highlight only if it matches `key`: a row's leave firing after another
@@ -532,6 +548,12 @@ impl ArmorViewportState {
 
     pub fn clear_sidebar_hover_if(self, key: &SidebarHighlightKey) {
         self.update(|this, cx| this.clear_sidebar_hover_if(key, cx));
+    }
+
+    /// The tree row the viewport highlights.
+    #[cfg(test)]
+    pub fn sidebar_highlight_key(self) -> Option<SidebarHighlightKey> {
+        self.read_untracked(|this| this.sidebar_highlight.as_ref().map(|(key, _)| key.clone())).flatten()
     }
 
     pub fn toggle_plate(self, key: PlateKey) {

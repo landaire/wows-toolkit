@@ -1731,6 +1731,7 @@ no_zones = "Nessun volume splash si sovrappone in questo punto"
 zones = "Zone nell'esplosione"
 direct_hit = "Colpo diretto"
 hp = "%{value} PS"
+section = "Zone splash"
 
 [ui.armor.export]
 hull = "Scafo"
