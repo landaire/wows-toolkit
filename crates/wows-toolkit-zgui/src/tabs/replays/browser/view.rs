@@ -365,10 +365,7 @@ fn ListingRows(
     let activate_events = events.clone();
     // Enter or a double-click opens a replay, and opens or closes a group, as a click on it does.
     let on_activate = UnsyncCallback::new(move |key: NodeKey| match key {
-        NodeKey::Leaf(path) => {
-            listing.mark_opened(&path);
-            activate_events.send(ReplayBrowserEvent::Open(path));
-        }
+        NodeKey::Leaf(path) => activate_events.send(ReplayBrowserEvent::Open(path)),
         group @ NodeKey::Group(_) => listing.expanded.update(|expanded| {
             if !expanded.remove(&group) {
                 expanded.insert(group);
@@ -473,8 +470,9 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         MatchOutcome::Draw => "wt-row__edge wt-row__edge--draw",
         MatchOutcome::Unknown => "wt-row__edge",
     };
-    let arrived_path = path.clone();
-    let arrived = Signal::derive_local(move || listing.arrivals.with(|arrivals| arrivals.contains(&arrived_path)));
+    let (tagged_path, glow_path) = (path.clone(), path.clone());
+    let tagged = Signal::derive_local(move || listing.arrivals.with(|arrivals| arrivals.contains(&tagged_path)));
+    let glowing = Signal::derive_local(move || listing.glowing.with(|glowing| glowing.contains(&glow_path)));
     let space = leaf.map_name.clone();
     let thumb = move || match thumbnails.get(&space) {
         Some(Thumbnail::Ready(bytes)) => AnyView::new(view! {
@@ -552,14 +550,14 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
     let inset = format!("{}px", depth.0 as f32 * LEVEL_INSET);
 
     AnyView::new(view! {
-        row(class = "wt-row", class:wt-row-arrived = arrived, attr:data-testid = format!("replay-row-{}", path.display())) {
+        row(class = "wt-row", class:wt-row-arrived = glowing, attr:data-testid = format!("replay-row-{}", path.display())) {
             box(class = edge)
             box(class = "wt-row__thumb-slot", style:margin-left = inset) {{thumb}}
             column(class = "wt-row__lines") {
                 row(class = "wt-row__identity") {
                     text(class = "wt-row__label") {{leaf.label}}
                     {division.map(IntoView::into_view)}
-                    Show(when = move || arrived.get()) {
+                    Show(when = move || tagged.get()) {
                         text(class = "wt-row__new", attr:data-testid = "replay-row-new") {{t!("ui.replay.new_tag").into_owned()}}
                     }
                 }
@@ -722,18 +720,6 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         }
     });
 
-    let opened = path.clone();
-    let open = {
-        let events = events.clone();
-        move |event: ReplayBrowserEvent| {
-            let events = events.clone();
-            let opened = opened.clone();
-            UnsyncCallback::new(move |()| {
-                listing.mark_opened(&opened);
-                events.send(event.clone());
-            })
-        }
-    };
     let (set_label, add_label) = if count == 1 {
         (
             t!("ui.replay.context.set_session_stats_one").into_owned(),
@@ -800,10 +786,8 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
 
     AnyView::new(view! {
         {batch_items.map(IntoView::into_view)}
-        MenuItem(on_select = open(ReplayBrowserEvent::Open(path.clone()))) {{t!("ui.collab.open").into_owned()}}
-        MenuItem(on_select = open(ReplayBrowserEvent::OpenInNewTab(path.clone()))) {
-            {t!("ui.replay.context.open_in_new_tab").into_owned()}
-        }
+        {item(t!("ui.collab.open").into_owned(), ReplayBrowserEvent::Open(path.clone()))}
+        {item(t!("ui.replay.context.open_in_new_tab").into_owned(), ReplayBrowserEvent::OpenInNewTab(path.clone()))}
         {item(t!("ui.replay.context.render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
         {single_items.map(IntoView::into_view)}
         MenuSeparator()

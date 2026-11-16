@@ -41,6 +41,7 @@ use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
 use crate::tabs::armor_viewer::library::FeedSource;
 use crate::tabs::armor_viewer::library::ViewerFeed;
+use crate::tabs::replays::browser::BrowserControl;
 use crate::tabs::replays::constants::ResultMappings;
 use crate::tabs::replays::panel::PanelControl;
 use crate::tabs::replays::panel::PanelEvents;
@@ -141,6 +142,8 @@ pub struct ReplayWorkspace {
     pub columns: Signal<Vec<ReplayColumn>, LocalStorage>,
     pub personal_rating: RwSignal<Option<Arc<PersonalRatingData>>, LocalStorage>,
     pub mappings: ResultMappings,
+    /// The listings, whose New tag comes off a replay once it is opened.
+    browser: BrowserControl,
     owner: StoredValue<Owner, LocalStorage>,
     pub shell: Shell,
     pub services: Services,
@@ -148,7 +151,7 @@ pub struct ReplayWorkspace {
 
 impl ReplayWorkspace {
     /// Made in the replays tab's body; its panels and sessions belong to the tab.
-    pub fn new(columns: Signal<Vec<ReplayColumn>, LocalStorage>) -> Self {
+    pub fn new(columns: Signal<Vec<ReplayColumn>, LocalStorage>, browser: BrowserControl) -> Self {
         let workspace = Self {
             dock: DockState::new(PanelRegistry::new()),
             replays: RwSignal::new_local(HashMap::new()),
@@ -160,6 +163,7 @@ impl ReplayWorkspace {
             columns,
             personal_rating: RwSignal::new_local(None),
             mappings: ResultMappings::new(),
+            browser,
             owner: StoredValue::new_local(Owner::current().expect("the workspace is made inside a component")),
             shell: Shell::current(),
             services: Services::current(),
@@ -320,14 +324,15 @@ impl ReplayWorkspace {
         modes.iter().copied().find(|mode| mode.key.is_down(held)).or_else(|| modes.first().copied())
     }
 
-    /// Shows `path` in a tab. `None` when nothing could be shown, because there is no game data
-    /// to read it with yet.
+    /// Shows `path` in a tab, and takes the listings' New tag off it. `None` when nothing could be
+    /// shown, because there is no game data to read it with yet.
     pub fn open(self, path: PathBuf, target: OpenTarget) -> Option<TabShown> {
         if self.services.game_data.cache_untracked().is_none() {
             tracing::warn!(path = %path.display(), "replays: open asked for before the game directory was known");
             return None;
         }
         self.touched.set_value(true);
+        self.browser.mark_opened(&path);
 
         let docked = Docked::Replay(path.clone());
         if self.replays.with_untracked(|replays| replays.contains_key(&path)) {

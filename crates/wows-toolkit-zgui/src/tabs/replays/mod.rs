@@ -174,10 +174,10 @@ pub fn ReplaysTab() -> impl IntoView {
             .read(|settings| default_columns(&settings.replay))
             .unwrap_or_else(|| default_columns(&ReplaySettings::default()))
     });
-    let workspace = ReplayWorkspace::new(columns);
+    let control = BrowserControl::new();
+    let workspace = ReplayWorkspace::new(columns, control);
     #[cfg(test)]
     BUILT.with(|built| built.set(Some(workspace)));
-    let control = BrowserControl::new();
     let arrivals = Arrivals::new(workspace, control.sharing_reads());
     let offer = GameDataOffer::new();
 

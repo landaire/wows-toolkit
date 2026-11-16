@@ -414,9 +414,22 @@ fn a_pinned_folder_is_watched_and_saved_in_tab_order() {
     assert_eq!(simulated_watch::watching(&first), 0, "unpinning stops the updates");
 }
 
+/// Sets "Autoload Latest Replay", which is on until the reader turns it off.
+fn set_autoload(window: &mut HeadlessWindow, control: BrowserControl, on: bool) {
+    control.shell().services().settings.edit(
+        wows_toolkit_viewmodel::settings::keys::AUTO_LOAD_LATEST_REPLAY,
+        |settings| {
+            settings.auto_load_latest_replay = on;
+            on
+        },
+    );
+    settle_in_real_time(window);
+}
+
 #[test]
 fn a_new_arrival_is_tagged_until_opened_or_left() {
     let (mut window, control) = open();
+    set_autoload(&mut window, control, false);
     control.adopt_pinned_folders(PinnedFolders::default());
     let (_dir, root) = replay_dir(1);
     control.open_folder(root.clone());
@@ -450,6 +463,7 @@ fn a_new_arrival_is_tagged_until_opened_or_left() {
 #[test]
 fn a_modified_double_click_selects_without_opening() {
     let (mut window, control) = open();
+    set_autoload(&mut window, control, false);
     control.adopt_pinned_folders(PinnedFolders::default());
     let (_dir, root) = replay_dir(1);
     control.open_folder(root.clone());
@@ -464,6 +478,84 @@ fn a_modified_double_click_selects_without_opening() {
     window.advance(Duration::from_millis(50));
 
     assert!(shown.arrivals.with_untracked(|arrivals| arrivals.contains(&landed)), "the replay was not opened");
+}
+
+/// A battle landed in a pinned folder on screen.
+struct Landed {
+    _dir: tempfile::TempDir,
+    listing: Listing,
+    path: PathBuf,
+}
+
+impl Landed {
+    /// Lands a battle and returns once the listing holds it, while its row still glows.
+    fn new(window: &mut HeadlessWindow, control: BrowserControl) -> Self {
+        control.adopt_pinned_folders(PinnedFolders::default());
+        let (dir, root) = replay_dir(0);
+        control.open_folder(root.clone());
+        settle_in_real_time(window);
+        control.pin_folder(folder_id(control, &root), true);
+        settle_in_real_time(window);
+        let listing = listing(control, &root);
+
+        let path = root.join(FIXTURES[1]);
+        std::fs::copy(fixture(FIXTURES[1]), &path).expect("the replay is copied");
+        simulated_watch::report(&root, DirChange::Appeared(path.clone()));
+        // The header is read off the UI thread, so frames are run in step with real time.
+        for _ in 0..100 {
+            if listing.holds(&path) {
+                break;
+            }
+            window.advance(Duration::from_millis(16));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(listing.holds(&path), "the watch lists the battle");
+        window.advance(Duration::from_millis(32));
+
+        Self { _dir: dir, listing, path }
+    }
+
+    fn is_new(&self) -> bool {
+        self.listing.arrivals.with_untracked(|arrivals| arrivals.contains(&self.path))
+    }
+
+    fn glows(&self, window: &HeadlessWindow) -> bool {
+        window.all_by_class("wt-row-arrived").contains(&row(window, &self.path))
+    }
+}
+
+/// A battle opened by "Autoload Latest Replay" as it lands is not tagged New, and its row glows
+/// as any arrival's does.
+#[test]
+fn an_autoloaded_arrival_glows_but_is_not_tagged() {
+    let (mut window, control) = open();
+    set_autoload(&mut window, control, true);
+
+    let landed = Landed::new(&mut window, control);
+
+    assert_eq!(workspace().open_replays(), std::slice::from_ref(&landed.path), "the battle opened as it landed");
+    assert!(!landed.is_new(), "so it is not new");
+    assert!(window.by_test_id("replay-row-new").is_none(), "and its row has no New tag");
+    assert!(landed.glows(&window), "the row glows as it arrives");
+    window.advance(Duration::from_millis(1300));
+    assert!(!landed.glows(&window), "once");
+}
+
+/// A battle opened from outside the listing, as search, the palette and a lone drop do, is not
+/// tagged New either.
+#[test]
+fn an_arrival_opened_from_elsewhere_is_not_tagged() {
+    let (mut window, control) = open();
+    set_autoload(&mut window, control, false);
+    let landed = Landed::new(&mut window, control);
+    assert!(window.by_test_id("replay-row-new").is_some(), "the arrival carries the New tag");
+
+    workspace().shell.request_replay(crate::shell::ReplayRequest::OpenReplay(landed.path.clone()));
+    settle_in_real_time(&mut window);
+
+    assert_eq!(workspace().open_replays(), std::slice::from_ref(&landed.path));
+    assert!(!landed.is_new(), "opening it takes the tag off");
+    assert!(window.by_test_id("replay-row-new").is_none());
 }
 
 /// Enter on a group header opens or closes the group, as a click on it does.
@@ -1052,6 +1144,7 @@ fn the_listing_renders_in_dark_and_light() {
         simulated_watch::install();
         let mut window = open_shell(review_options(appearance));
         let control = MADE.with(std::cell::Cell::get).expect("the replays tab made its browser");
+        set_autoload(&mut window, control, false);
         control.adopt_pinned_folders(PinnedFolders::default());
         let (_dir, root) = replay_dir(3);
         let (_other_dir, other) = replay_dir(1);

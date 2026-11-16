@@ -543,6 +543,14 @@ impl BrowserControl {
         self.listing(FolderId::INSTALL)
     }
 
+    /// `path` was opened, so no listing tags it as new.
+    pub fn mark_opened(self, path: &Path) {
+        let listings: Vec<Listing> = self.listings.with_untracked(|listings| listings.values().copied().collect());
+        for listing in listings {
+            listing.mark_opened(path);
+        }
+    }
+
     /// Whether the install's directory was listed and holds no replay. `None` while it is being
     /// listed, or while no game directory is set.
     pub fn install_listed_empty(self) -> Option<bool> {

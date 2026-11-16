@@ -71,6 +71,9 @@ use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::NodeKey;
 use crate::tabs::replays::browser::tree::TreeInputs;
 
+/// How long a landed replay's row glows: the length of its `wt-row-arrival` animation.
+const ARRIVAL_GLOW: Duration = Duration::from_millis(1200);
+
 /// What a listing reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ListingSource {
@@ -142,9 +145,12 @@ pub struct Listing {
     pub tree: RwSignal<Rc<BrowserTree>, LocalStorage>,
     pub selection: RwSignal<HashSet<NodeKey>, LocalStorage>,
     pub expanded: RwSignal<HashSet<NodeKey>, LocalStorage>,
-    /// Replays the watch added since the reader last looked: they carry the New tag and glow
-    /// once as they arrive.
+    /// Replays the watch added since the reader last looked and not opened since: they carry the
+    /// New tag.
     pub arrivals: RwSignal<HashSet<PathBuf>, LocalStorage>,
+    /// Replays the watch just added, whose rows glow once as they arrive whether or not they are
+    /// opened.
+    pub glowing: RwSignal<HashSet<PathBuf>, LocalStorage>,
 
     work: StoredValue<Work, LocalStorage>,
 }
@@ -196,6 +202,7 @@ impl Listing {
             selection: RwSignal::new_local(HashSet::new()),
             expanded: RwSignal::new_local(HashSet::new()),
             arrivals: RwSignal::new_local(HashSet::new()),
+            glowing: RwSignal::new_local(HashSet::new()),
             work: StoredValue::new_local(Work {
                 services,
                 owner: Owner::current().expect("a listing is made inside a component"),
@@ -352,6 +359,20 @@ impl Listing {
         if self.arrivals.with_untracked(|arrivals| !arrivals.is_empty()) {
             self.arrivals.set(HashSet::new());
         }
+    }
+
+    /// Has `path`'s row glow for as long as its arrival animation runs.
+    fn glow(self, path: PathBuf) {
+        self.glowing.update(|glowing| {
+            glowing.insert(path.clone());
+        });
+        // Scoped to the listing, which cancels it with the listing's signals.
+        let _glow = self.spawn(async move {
+            self.sleep(ARRIVAL_GLOW).await;
+            self.glowing.update(|glowing| {
+                glowing.remove(&path);
+            });
+        });
     }
 
     pub fn set_grouping(self, grouping: ReplayGrouping) {
@@ -782,6 +803,7 @@ impl Listing {
             self.arrivals.update(|arrivals| {
                 arrivals.insert(path.clone());
             });
+            self.glow(path.clone());
             self.status.set(ScanStatus::Loaded);
             self.say(ListingEvent::Appeared(path));
         }
