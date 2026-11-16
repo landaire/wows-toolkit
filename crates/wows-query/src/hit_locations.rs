@@ -20,7 +20,7 @@ use crate::ships::ShipSummary;
 // Rules beyond the game data follow the Wargaming wiki article
 // "Ship:Damage Saturation" (2021-03-31), whose 75% hull pool and 16.5% shares
 // match every hull's `maxHP` and `volumeCoeff`.
-const EXPLANATION: &str = "Damage saturation: a ship's HP is split among hull sections (bow, stern, casemate or midsection, superstructure, auxiliary rooms, citadel), each with its own HP pool, plus a hull pool of 75% of ship HP that has no geometry of its own. A penetrating hit drains the pool of the section it damages and, for a section that lists drains, the hull pool too; overpenetrations, fire and flooding drain only ship HP. penetration_damage_pct is the share of an AP shell's listed damage a penetrating hit deals there while the pools it drains have HP: 33% on most sections, half from each pool, and 100% on the citadel. Once a section's own pool is spent it is saturated (black in the damage model) and penetrations there deal only saturated_damage_pct, half as much. Once the hull pool is spent, every section that drains it counts as saturated and penetrations deal 10% (Wargaming wiki). The citadel never saturates, and neither does the midsection of most destroyers, which always takes its full 33%. Repair Party restores up to repairable_pct of the damage a section has taken (Halland's unique upgrade raises it on every section but the citadel), and its healing refills every section's pool in proportion to what that section has lost, so a healed section takes its full share again. French battleships and cruisers have no special saturation: their sections follow the same rules as those of other nations. \"French saturation\" is a destroyer trait: the midsection of most French destroyers (not Aigle or Kleber TE) and of a few others, such as Shigure and Blyskawica '52, has a pool that saturates, so past that much damage there they take half damage instead of full damage.";
+const EXPLANATION: &str = "Damage saturation: a ship's HP is split among hull sections (bow, stern, casemate or midsection, superstructure, auxiliary rooms, citadel), each with its own HP pool, plus a hull pool of 75% of ship HP that has no geometry of its own. A penetrating hit drains the pool of the section it damages and, for a section that lists drains, the hull pool too; overpenetrations, fire and flooding drain only ship HP. penetration_damage_pct is the share of an AP shell's listed damage a penetrating hit deals there while the pools it drains have HP: 33% on most sections, half from each pool, and 100% on the citadel. A pool with less HP left than its half gives only what it has. Once a section's own pool is spent it is saturated (black in the damage model) and penetrations there deal only saturated_damage_pct, half as much, from the hull pool. Once the hull pool is spent, a section that drains it still takes its own half (16.5%) from its own pool while that lasts; penetrations deal 10% only once both pools are spent (Wargaming wiki). The citadel never saturates, and neither does the midsection of most destroyers, which always takes its full 33%. Repair Party restores up to repairable_pct of the damage a section has taken (Halland's unique upgrade raises it on every section but the citadel), and its healing refills every section's pool in proportion to what that section has lost, so a healed section takes its full share again. French battleships and cruisers have no special saturation: their sections follow the same rules as those of other nations. \"French saturation\" is a destroyer trait: the midsection of most French destroyers (not Aigle or Kleber TE) and of a few others, such as Shigure and Blyskawica '52, has a pool that saturates, so past that much damage there they take half damage instead of full damage.";
 
 /// Arguments for `ship_hit_locations`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -151,7 +151,7 @@ impl GameData {
 
 /// Display order: the extremities, the midsection and what sits on it, the
 /// citadel, then the hull pool. Other keys follow by name.
-fn section_order(location: &HullHitLocation) -> (u8, &str) {
+pub(crate) fn section_order(location: &HullHitLocation) -> (u8, &str) {
     let rank = match location.section_type {
         HullSectionType::Hull => 7,
         HullSectionType::Citadel => 5,
@@ -170,14 +170,19 @@ fn section_order(location: &HullHitLocation) -> (u8, &str) {
     (rank, location.name.as_str())
 }
 
-/// `location` of a hull whose sections are `all` and whose HP is `ship_hp`.
-fn section(location: &HullHitLocation, all: &[HullHitLocation], ship_hp: Option<Hp>) -> Section {
+/// Whether `location`'s pool can run out before a ship of `ship_hp` sinks.
+pub(crate) fn saturates(location: &HullHitLocation, ship_hp: Option<Hp>) -> bool {
     // A pool larger than the ship's HP cannot run out: game data gives
     // sections that never saturate 165000 or 165500 HP.
-    let saturates = match (location.max_hp, ship_hp) {
+    match (location.max_hp, ship_hp) {
         (Some(pool), Some(ship)) => pool.value() < ship.value(),
         _ => false,
-    };
+    }
+}
+
+/// `location` of a hull whose sections are `all` and whose HP is `ship_hp`.
+fn section(location: &HullHitLocation, all: &[HullHitLocation], ship_hp: Option<Hp>) -> Section {
+    let saturates = saturates(location, ship_hp);
     let pool_hp = location.max_hp.filter(|_| saturates);
     let share_of_ship_hp_pct =
         pool_hp.zip(ship_hp).map(|(pool, ship)| Percent::new(round_to(pool.value() / ship.value() * 100.0, 10.0)));
@@ -218,7 +223,7 @@ fn section(location: &HullHitLocation, all: &[HullHitLocation], ship_hp: Option<
     }
 }
 
-fn section_name(location: &HullHitLocation) -> String {
+pub(crate) fn section_name(location: &HullHitLocation) -> String {
     let name = match location.section_type {
         HullSectionType::Hull => "hull pool",
         HullSectionType::Citadel => "citadel",

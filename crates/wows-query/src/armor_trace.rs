@@ -459,7 +459,7 @@ pub(crate) struct TracedRay<'a> {
     pub(crate) outcome: RayOutcome,
     over_citadel: bool,
     random_ricochet_band: bool,
-    detonated_in: Option<&'a str>,
+    pub(crate) detonated_in: Option<&'a str>,
     pub(crate) sim: Option<ShellSimResult>,
 }
 

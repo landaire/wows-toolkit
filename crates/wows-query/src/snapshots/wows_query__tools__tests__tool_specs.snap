@@ -343,6 +343,34 @@ expression: specs()
     required:
       - shooter
       - target_ship
+- name: salvo_kill
+  description: "Whether one main battery salvo can sink a ship, for questions such as \"can a Piemonte one-shot a Hoffmann with SAP\", \"can Yamato delete a broadside Des Moines in one salvo\" or \"how many shells does X need to kill Y\". Traces the shooter's stock main battery shell through the target's 3D armor at range_km (default 10) and target_angle_deg as armor_trace does, maps each armor zone to the target's hull sections and their HP pools (ship_hit_locations), and places every shell of one salvo where it deals the most damage given the pools the earlier shells spent. Without ammo, covers each shell type the main battery fires. Per type: shells per salvo and listed alpha per shell, per hull section what the shell does there and the damage of one penetration before and after saturation, the best-case salvo damage and the shells that must hit to sink the target at stock HP and with its best HP build, and a conclusion. Answer from conclusion: a shell's listed alpha is not the damage it deals, and a salvo is several shells."
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      shooter:
+        type: string
+        description: "Firing ship, e.g. \"Piemonte\"."
+      target:
+        type: string
+        description: "Ship fired at, e.g. \"G. Hoffmann\"."
+      ammo:
+        type: string
+        enum:
+          - AP
+          - HE
+          - SAP
+        description: "Main battery shell type. Defaults to every type the shooter's stock main battery fires."
+      range_km:
+        type: number
+        description: "Gun range in km, 0 or more. Defaults to 10."
+      target_angle_deg:
+        type: number
+        description: "Target heading away from broadside in degrees: 0 is broadside, 30 angled, 90 bow-on with the bow toward the shooter. Defaults to 0."
+    required:
+      - shooter
+      - target
 - name: citadel_profile
   description: "Shape and exposure of one ship's citadel from its 3D armor model, including questions asking the total side armor or penetration needed to reach the citadel. Reports the share of the citadel face above the waterline per side, roof height, slope of the citadel plates by height band (vertical, inclined belt, sloped deck, flat deck), whether it is a turtleback, and its height along the ship. For broadside flat fire, and for a shooter's main battery AP at range_km when given, reports the armor in front of the citadel and the least, median and most armored plate stacks. A stack's plates list at most the seven plates nearest the citadel in strike order, followed by the first citadel plate; more_plates counts omitted outer plates. total_effective_mm includes every crossed plate through that citadel plate, not only the listed plates, one side plate or the thinnest citadel plate. Overmatch, ricochet and fuse events are included for a shooter. Glancing rays are counted apart."
   input_schema:

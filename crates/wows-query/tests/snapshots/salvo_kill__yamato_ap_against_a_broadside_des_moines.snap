@@ -1,0 +1,129 @@
+---
+source: crates/wows-query/tests/salvo_kill.rs
+expression: output
+---
+shooter: "T10 Yamato (battleship, Japan)"
+target: "T10 Des Moines (cruiser, USA)"
+target_hull: Des Moines
+range_km: 12
+target_angle_deg: 0
+aspect: broadside
+target_hp:
+  stock: 50600
+  best_build:
+    hp: 55100
+    assumed:
+      - Survivability Expert
+salvos:
+  - ammo: AP
+    shell: 460 mm AP/APC Type91
+    caliber_mm: 460
+    alpha_per_shell: 14800
+    shells_per_salvo: 9
+    main_battery_barrels: 9
+    raw_penetration_mm: 636.9
+    rays: 2776
+    sections:
+      - section: bow
+        game_key: Bow
+        rays: 379
+        outcome: overpenetration
+        penetrates_on_some_rays: false
+        outcomes:
+          overpenetration: 379
+        penetrations_here: 0
+        penetration_damage: 4884
+        saturated_damage: 2442
+        damage_once_hull_pool_spent: 2442
+        fully_saturated_damage: 1480
+      - section: stern
+        game_key: St
+        rays: 419
+        outcome: overpenetration
+        penetrates_on_some_rays: false
+        outcomes:
+          overpenetration: 419
+        penetrations_here: 0
+        penetration_damage: 4884
+        saturated_damage: 2442
+        damage_once_hull_pool_spent: 2442
+        fully_saturated_damage: 1480
+      - section: casemate (midsection)
+        game_key: Cas
+        rays: 726
+        outcome: overpenetration
+        penetrates_on_some_rays: true
+        outcomes:
+          penetration: 38
+          overpenetration: 345
+          ricochet: 343
+        penetrations_here: 6
+        penetration_damage: 4884
+        saturated_damage: 2442
+        damage_once_hull_pool_spent: 2442
+        fully_saturated_damage: 1480
+      - section: superstructure
+        game_key: SS
+        rays: 808
+        outcome: overpenetration
+        penetrates_on_some_rays: false
+        outcomes:
+          overpenetration: 805
+          ricochet: 3
+        penetrations_here: 0
+        penetration_damage: 4884
+        saturated_damage: 2442
+        damage_once_hull_pool_spent: 2442
+        fully_saturated_damage: 1480
+      - section: citadel
+        game_key: Cit
+        rays: 235
+        outcome: citadel
+        penetrates_on_some_rays: true
+        outcomes:
+          citadel: 186
+          penetration: 4
+          overpenetration: 45
+        penetrations_here: 186
+        penetration_damage: 14800
+    other_zones:
+      - zone: Turret
+        rays: 209
+        outcome: overpenetration
+        outcomes:
+          penetration: 32
+          overpenetration: 133
+          ricochet: 44
+        penetrations_here: 41
+      - zone: no zone
+        rays: 0
+        penetrations_here: 27
+    overpenetration_damage: 1480
+    best_case:
+      ship_hp: 50600
+      max_damage: 133200
+      shells_to_sink: 4
+      hits:
+        - shells: 9
+          lands: citadel
+          share: full
+          damage_per_shell: 14800
+    best_case_with_hp_build:
+      ship_hp: 55100
+      max_damage: 133200
+      shells_to_sink: 4
+      hits:
+        - shells: 9
+          lands: citadel
+          share: full
+          damage_per_shell: 14800
+    conclusion: "At 12 km against a broadside Des Moines (50600 HP), one AP salvo of 9 shells from Yamato deals at most 133200 damage if every shell hits where it deals the most, so it can sink it with 4 of 9 shells hitting. With Survivability Expert (55100 HP) it needs 4 of 9."
+assumptions:
+  - "Every shell of the salvo hits and is placed where it deals the most damage given the pools the earlier shells of the same salvo spent, one shell at a time; a section counts as reachable when at least one traced ray deals penetration damage to it. The target is undamaged when the salvo lands."
+  - "No fires, flooding, detonation or HE splash; Repair Party is not used."
+  - "Saturation follows ship_hit_locations and the Wargaming wiki: a penetration takes its section's share of the listed damage from the section's pool and the hull pool's share from the hull pool (16.5% each on most sections, so 33%; 100% on the citadel, which never saturates). A pool with less HP left than its share gives only what it has, so a section deals 16.5% once either pool is spent, and a penetration deals at least 10%, which it deals once both are spent. Overpenetrations deal 10% and drain only ship HP."
+  - "The game data lists one share per section for every shell type, so AP, HE and SAP penetrations follow the same section rules."
+  - "AP penetration damage lands in the section whose volume the fuse goes off in; HE and SAP damage lands in the section of the first plate they defeat. Armor zones with no hull section (turrets, steering gear, torpedo protection, internal hull plates) are listed in other_zones and deal no counted damage."
+  - Each shell deals its listed damage as given; no damage roll is modelled.
+  - "The shooter is on stock modules and turned so that the most main battery barrels firing the shell bear together; target_angle_deg sets only the target's heading. The target is on its stock hull; best_case_with_hp_build scales every pool with ship HP."
+  - Rays 1 m apart are cast over the target along the line of fire and traced as armor_trace traces them; rays whose first armor contact is below the waterline are left out.

@@ -48,6 +48,7 @@ pub mod rates;
 pub mod raw_params;
 pub mod replay;
 pub mod replay_worker;
+pub mod salvo_kill;
 pub mod shell_traits;
 pub mod shells;
 pub mod ship_variants;

@@ -36,6 +36,7 @@ use crate::module_comparison::ModuleComparisonArgs;
 use crate::penetration::PenetrationSearchArgs;
 use crate::quantities::QuantitySearchArgs;
 use crate::quantities::QuantityValuesArgs;
+use crate::salvo_kill::SalvoKillArgs;
 use crate::shell_traits::ApShellTraitsArgs;
 use crate::ships::FindShipsArgs;
 use crate::ships::ShipArgs;
@@ -185,6 +186,12 @@ const TOOLS: &[Tool] = &[
         description: "Trace a shooter's shell or bomb through a target ship's 3D armor model, e.g. whether Sekiryu's AP bombs can citadel Yamato or Des Moines AP can citadel a broadside cruiser at 10 km. Casts a grid of parallel rays along the line of fire (gun range and target angle, or the bomber's dive) and runs AP through every plate with the armor viewer's simulation; HE and SAP are tested against the first plate, where SAP ricochets at steep angles unless it overmatches the plate. Without ammo, traces each shell or bomb type the weapon fires or carries. Returns one trace per type: the fraction of rays over the citadel that detonate inside it, a summary per struck zone, example rays with their plates, a verdict, and the assumptions behind it.",
         schema: input_schema::<ArmorTraceArgs>,
         call: |game, arguments| run(arguments, |args| game.armor_trace(args)),
+    },
+    Tool {
+        name: "salvo_kill",
+        description: "Whether one main battery salvo can sink a ship, for questions such as \"can a Piemonte one-shot a Hoffmann with SAP\", \"can Yamato delete a broadside Des Moines in one salvo\" or \"how many shells does X need to kill Y\". Traces the shooter's stock main battery shell through the target's 3D armor at range_km (default 10) and target_angle_deg as armor_trace does, maps each armor zone to the target's hull sections and their HP pools (ship_hit_locations), and places every shell of one salvo where it deals the most damage given the pools the earlier shells spent. Without ammo, covers each shell type the main battery fires. Per type: shells per salvo and listed alpha per shell, per hull section what the shell does there and the damage of one penetration before and after saturation, the best-case salvo damage and the shells that must hit to sink the target at stock HP and with its best HP build, and a conclusion. Answer from conclusion: a shell's listed alpha is not the damage it deals, and a salvo is several shells.",
+        schema: input_schema::<SalvoKillArgs>,
+        call: |game, arguments| run(arguments, |args| game.salvo_kill(args)),
     },
     Tool {
         name: "citadel_profile",

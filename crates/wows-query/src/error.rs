@@ -215,6 +215,18 @@ pub enum QueryError {
     #[error("{ship}'s hulls list no hull sections with HP pools")]
     HitLocationsMissing { ship: String },
 
+    #[error("{ship}'s {hull} lists no hull sections with HP pools")]
+    HullSectionsMissing { ship: String, hull: String },
+
+    #[error("{ship}'s {hull} lists no HP")]
+    HullHpMissing { ship: String, hull: String },
+
+    #[error("shell {projectile} lists no damage in this game data")]
+    ShellDamageMissing { projectile: String },
+
+    #[error("{ship}'s {module} has no shells in this game data")]
+    ModuleShellsMissing { ship: String, module: String },
+
     #[error("no stat matches {query:?}; {}", did_you_mean(suggestions, "list stat names with stat_names"))]
     StatNotFound { query: String, suggestions: Vec<String> },
 

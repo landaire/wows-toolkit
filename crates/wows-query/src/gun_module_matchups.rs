@@ -587,7 +587,7 @@ fn whole_percent(share: f32) -> Percent {
     Percent::new((share * 100.0).round())
 }
 
-fn aspect(angle: Degrees) -> String {
+pub(crate) fn aspect(angle: Degrees) -> String {
     if angle.value() == 0.0 { "broadside".to_owned() } else { format!("{} deg from broadside", angle.value()) }
 }
 

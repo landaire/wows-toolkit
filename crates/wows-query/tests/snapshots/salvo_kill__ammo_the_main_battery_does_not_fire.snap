@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/salvo_kill.rs
+expression: error.to_string()
+---
+Yamato's 460 mm/45 Type 94 in a triple-gun turret fires no SAP; it fires AP and HE
