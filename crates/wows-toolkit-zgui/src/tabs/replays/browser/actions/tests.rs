@@ -548,3 +548,19 @@ fn a_battle_stored_unrated_is_rated_when_the_table_arrives() {
         listing.summaries.with_untracked(|summaries| summaries.get(&path).and_then(|summary| summary.self_pr)).is_some()
     });
 }
+
+/// Rating rows stored unrated changes what a search filtered by rating matches, so the repair is
+/// told to the views that read the index, as a pass that wrote rows is.
+#[test]
+fn rating_stored_battles_counts_as_an_index_write() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    store_unrated_battle(control, &install);
+    let before = control.work.shell_index.writes();
+
+    control.adopt_personal_rating(Arc::new(fixture_personal_rating_data()));
+
+    settle_until(&mut window, "the repair is noted as an index write", |_| control.work.shell_index.writes() != before);
+}

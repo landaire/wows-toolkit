@@ -27,6 +27,7 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
@@ -38,6 +39,11 @@ use crate::services::Job;
 use crate::services::Progress;
 use crate::services::progress;
 use crate::shell::Shell;
+
+/// Counts the indexing passes that finished having written rows, so a view that read the index can
+/// tell it changed since.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IndexWrites(u64);
 
 /// The running build, how far it has got, and what the last one said.
 #[derive(Clone, Copy)]
@@ -53,6 +59,8 @@ pub struct ReplayIndexJobs {
     /// Whether the last build stored its rows without a rating table, until the replays tab
     /// takes it to rate them.
     wrote_unrated: StoredValue<bool>,
+    /// Passes of this build or the replays tab's that wrote rows.
+    writes: RwSignal<IndexWrites, LocalStorage>,
 }
 
 impl ReplayIndexJobs {
@@ -63,6 +71,7 @@ impl ReplayIndexJobs {
             cancel: StoredValue::new(None),
             folder_pass: RwSignal::new_local(false),
             wrote_unrated: StoredValue::new(false),
+            writes: RwSignal::new_local(IndexWrites::default()),
         }
     }
 
@@ -105,6 +114,19 @@ impl ReplayIndexJobs {
     /// Whether the last build stored its rows unrated, clearing it.
     pub fn take_wrote_unrated(self) -> bool {
         self.wrote_unrated.try_update_value(std::mem::take).unwrap_or(false)
+    }
+
+    /// The passes that wrote rows so far, subscribing to the next.
+    pub fn writes(self) -> IndexWrites {
+        self.writes.get()
+    }
+
+    /// Notes a finished pass that wrote `indexed` replays' rows. `try_`, since the shell may be
+    /// gone by the time a pass answers.
+    pub fn note_written(self, indexed: u64) {
+        if indexed > 0 {
+            let _ = self.writes.try_update(|writes| writes.0 += 1);
+        }
     }
 }
 
@@ -191,6 +213,7 @@ impl Shell {
             index.cancel.set_value(None);
             let said = match built {
                 Ok((progress, _)) => {
+                    index.note_written(progress.indexed);
                     let said = if progress.skipped > 0 {
                         t!(
                             "ui.settings.index.built_with_skipped",

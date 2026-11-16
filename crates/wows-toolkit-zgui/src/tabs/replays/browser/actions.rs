@@ -302,6 +302,8 @@ fn repair_personal_ratings(control: BrowserControl) {
         match repairing.await {
             Ok(Ok(0)) => {}
             Ok(Ok(filled)) => {
+                // Rows rated now match rating filters they did not before.
+                work.shell_index.note_written(filled);
                 tracing::info!(filled, "personal rating: rated the index rows stored without a rating");
                 for listing in control.all_listings() {
                     listing.load_summaries();
@@ -947,6 +949,7 @@ async fn read_again(
 
     match ran {
         Ok(progress) => {
+            work.shell_index.note_written(progress.indexed);
             shell.toasts().show(pass_notice(&purpose, progress, skipped));
         }
         Err(err) => {
@@ -1164,12 +1167,15 @@ fn run_next_pass(control: BrowserControl) {
 fn pass_finished(control: BrowserControl, id: FolderId, built: IndexWrite<Result<IndexProgress, IndexError>>) {
     let IndexWrite { outcome, rated } = built;
     match outcome {
-        Ok(progress) => tracing::info!(
-            indexed = progress.indexed,
-            skipped = progress.skipped,
-            failed = progress.failed,
-            "replay folders: the directory was indexed"
-        ),
+        Ok(progress) => {
+            control.work.shell_index.note_written(progress.indexed);
+            tracing::info!(
+                indexed = progress.indexed,
+                skipped = progress.skipped,
+                failed = progress.failed,
+                "replay folders: the directory was indexed"
+            );
+        }
         Err(err) => tracing::warn!("replay folders: the directory was not indexed: {err}"),
     }
     let work = control.work;

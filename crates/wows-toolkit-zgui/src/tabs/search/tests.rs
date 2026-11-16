@@ -167,6 +167,58 @@ fn pills_read_the_names_of_the_ids_they_carry() {
     assert!(!pills.contains('#'), "no pill reads as an id: {pills}");
 }
 
+/// An indexing pass that wrote rows runs the query again, since what it matches may have changed.
+/// A pass that wrote nothing leaves the results as they are.
+#[test]
+fn a_pass_that_wrote_rows_runs_the_query_again() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    search.set_query_text("map:ocean".to_owned());
+    settle_in_real_time(&mut window);
+    assert_eq!(search.status.get_untracked(), Status::Done);
+    let first = search.results.get_untracked().generation;
+
+    shell().replay_index.note_written(0);
+    settle_in_real_time(&mut window);
+    assert_eq!(search.results.get_untracked().generation, first, "nothing was written");
+
+    shell().replay_index.note_written(3);
+    settle_in_real_time(&mut window);
+    assert_eq!(search.status.get_untracked(), Status::Done);
+    assert_ne!(search.results.get_untracked().generation, first, "the query ran again");
+}
+
+/// A count of matches without a game mode asked for while another is being taken is taken again
+/// once that one lands: the one in flight may have been read before a pass wrote rows.
+#[test]
+fn a_game_mode_gap_asked_for_during_a_count_is_counted_again() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    let before = search.gap_counts();
+
+    search.run();
+    search.index_written();
+    settle_in_real_time(&mut window);
+
+    assert_eq!(search.gap_counts() - before, 2, "the count asked for during the first was taken after it");
+}
+
+/// A name lookup sent before a pass wrote rows is superseded by the one sent after it, so its late
+/// reply is not taken in over newer names.
+#[test]
+fn a_name_lookup_sent_before_an_index_write_is_not_taken_in() {
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    let account = AccountId(735_001_234);
+    index_named_battle(account, GameParamId::from(4_281_000_111_u64));
+
+    search.resolve_pill_names(&seed::matches_with_player(account));
+    search.index_written();
+    settle_in_real_time(&mut window);
+
+    assert!(!search.pill_names().players.contains_key(&account), "the reply from before the write was dropped");
+}
+
 /// Writes one battle with `account` sailing `ship` into the index, under a folder source of its
 /// own, and answers that source.
 fn index_named_battle(account: AccountId, ship: GameParamId) -> SourceId {

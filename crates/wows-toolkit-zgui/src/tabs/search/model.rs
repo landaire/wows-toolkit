@@ -168,6 +168,9 @@ struct FieldNames {
 /// for again on every edit while its pill stays.
 #[derive(Default)]
 struct AskedNames {
+    /// Counts the times the index changed under the names asked for, so a reply to a lookup sent
+    /// before the change is told apart.
+    round: u64,
     ships: HashSet<GameParamId>,
     players: HashSet<AccountId>,
     sources: HashSet<SourceId>,
@@ -180,6 +183,21 @@ impl AskedNames {
         ids.players.retain(|id| self.players.insert(*id));
         ids.sources.retain(|id| self.sources.insert(*id));
     }
+
+    /// Forgets every id asked for, and every lookup still out, since the index changed.
+    fn forget(&mut self) {
+        self.round += 1;
+        self.ships.clear();
+        self.players.clear();
+        self.sources.clear();
+    }
+}
+
+/// Whether the game-mode gap is being counted, and whether a run asked for it again meanwhile.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GapLookup {
+    Idle,
+    Running { again: bool },
 }
 
 /// The Search tab's state, as one `Copy` handle.
@@ -228,7 +246,10 @@ pub(crate) struct Search {
     pub ran: RwSignal<Option<MatchExpr>, LocalStorage>,
     /// How many indexed matches carry no game mode. `None` until asked.
     pub game_mode_gap: RwSignal<Option<i64>, LocalStorage>,
-    gap_lookup_running: StoredValue<bool>,
+    gap_lookup: StoredValue<GapLookup>,
+    /// How many game-mode gap counts have landed, for the tests.
+    #[cfg(test)]
+    gap_counts: StoredValue<u32>,
     generation: StoredValue<u64>,
     last_run: StoredValue<String, LocalStorage>,
     dirty: StoredValue<Dirty>,
@@ -282,7 +303,9 @@ impl Search {
             status: RwSignal::new_local(Status::Idle),
             ran: RwSignal::new_local(None),
             game_mode_gap: RwSignal::new_local(None),
-            gap_lookup_running: StoredValue::new(false),
+            gap_lookup: StoredValue::new(GapLookup::Idle),
+            #[cfg(test)]
+            gap_counts: StoredValue::new(0),
             generation: StoredValue::new(0),
             last_run: StoredValue::new_local(String::new()),
             dirty: StoredValue::new(Dirty::default()),
@@ -882,22 +905,36 @@ impl Search {
         self.status.set(Status::Done);
     }
 
+    #[cfg(test)]
+    pub fn gap_counts(self) -> u32 {
+        self.gap_counts.get_value()
+    }
+
     /// Asks how many matches carry no game mode, so a query on one can say what it cannot see.
     /// Asked per search, since ingest appends to the index while the app runs.
     fn look_up_game_mode_gap(self, pool: sqlx::SqlitePool) {
-        if self.gap_lookup_running.get_value() {
+        if let GapLookup::Running { .. } = self.gap_lookup.get_value() {
+            // The count in flight may have been read before the index changed.
+            self.gap_lookup.set_value(GapLookup::Running { again: true });
             return;
         }
-        self.gap_lookup_running.set_value(true);
+        self.gap_lookup.set_value(GapLookup::Running { again: false });
         let services = self.services;
         self.spawn(async move {
             let found = services.on_tokio(async move { query::matches_missing_game_mode_count(&pool).await }).await;
-            self.gap_lookup_running.set_value(false);
+            let again = self.gap_lookup.get_value() == GapLookup::Running { again: true };
+            self.gap_lookup.set_value(GapLookup::Idle);
+            #[cfg(test)]
+            self.gap_counts.update_value(|counts| *counts += 1);
             match found {
                 Ok(Ok(count)) => self.game_mode_gap.set(Some(count)),
                 // The results still stand; only the hint is missing.
                 Ok(Err(err)) => tracing::warn!("search: the game-mode gap lookup failed: {err}"),
                 Err(err) => tracing::warn!("search: the game-mode gap lookup did not complete: {err}"),
+            }
+
+            if again && let Some(pool) = self.services.settings.pool() {
+                self.look_up_game_mode_gap(pool);
             }
         });
     }
@@ -958,6 +995,21 @@ impl Search {
         });
     }
 
+    /// Follows an indexing pass that wrote rows: the query runs again, which also asks for the
+    /// game-mode gap again, and the pills' ids are looked up anew. A query not run yet, or one that
+    /// does not parse, has no results to refresh.
+    pub fn index_written(self) {
+        self.asked_names.update_value(AskedNames::forget);
+        if let Some(expr) = self.reading.get_untracked() {
+            self.resolve_pill_names(&expr);
+        }
+        if matches!(self.status.get_untracked(), Status::Idle | Status::Invalid { .. }) {
+            return;
+        }
+
+        self.run();
+    }
+
     /// The names the pills read, players as the name setting shows them. Reactive.
     pub fn pill_names(self) -> NameCache {
         let display = self.services.settings.name_display();
@@ -979,9 +1031,15 @@ impl Search {
             return;
         }
 
+        let round = self.asked_names.with_value(|asked| asked.round);
         let services = self.services;
         self.spawn(async move {
-            match services.on_tokio(async move { look_up_pill_names(&pool, &ids).await }).await {
+            let found = services.on_tokio(async move { look_up_pill_names(&pool, &ids).await }).await;
+            // Asked before the index changed: the lookup sent since then answers instead.
+            if self.asked_names.with_value(|asked| asked.round) != round {
+                return;
+            }
+            match found {
                 Ok(found) => self.names.update(|names| names.adopt(found)),
                 // The pills keep reading as ids.
                 Err(err) => tracing::warn!(%err, "search: the pill name lookup did not finish"),
