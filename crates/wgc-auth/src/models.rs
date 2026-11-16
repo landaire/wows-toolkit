@@ -6,6 +6,8 @@
 //! default.
 
 use serde::Deserialize;
+use zeroize::Zeroize;
+use zeroize::ZeroizeOnDrop;
 
 /// WGNI sends `algorithm.version` and `timestamp` as JSON integers on the live
 /// EU endpoint, but older/other responses may send strings. Accept either and
@@ -71,7 +73,7 @@ pub(crate) struct PowAlgorithmWire {
 }
 
 /// `.../oauth/token/` success response (password grant or exchange grant).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub(crate) struct TokenSuccessResponse {
     pub access_token: String,
     /// Present on the password-grant response; the exchange-grant response
@@ -83,7 +85,7 @@ pub(crate) struct TokenSuccessResponse {
 }
 
 /// `.../oauth/token/` error response.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub(crate) struct TokenErrorResponse {
     /// WG's OAuth machine code; classification tries this first (see
     /// `client.rs::classify_token_error`).
@@ -120,7 +122,7 @@ impl Token1Request<'_> {
 
 /// `.../create/token1/<id>/` settled response. WGC reads `token` as a JSON
 /// integer and formats it in decimal; a string is accepted too.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub(crate) struct Token1Response {
     #[serde(deserialize_with = "de_stringish")]
     pub token: String,

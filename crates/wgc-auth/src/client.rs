@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use rootcause::prelude::*;
 use wgc_core::TrackingId;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::error::AuthError;
 use crate::error::CredentialParameters;
@@ -126,12 +126,12 @@ impl AuthClient {
         let challenge_wire = self.request_challenge().await?;
         let challenge = to_pow_challenge(&challenge_wire);
         let solution = solve_pow(challenge).await?;
-        let success = self.request_token_by_password(credentials, solution, twofactor.as_ref()).await?;
+        let mut success = self.request_token_by_password(credentials, solution, twofactor.as_ref()).await?;
         // The password-grant success body carries no `user` field; identity
         // comes from the account/info call below. When `user` is present
         // (older/other shapes), cross-check it as a consistency guard.
         let user_id = success.user;
-        let access_token = AccessToken::new(success.access_token);
+        let access_token = AccessToken::new(std::mem::take(&mut success.access_token));
         // The password grant issues a short-lived token that only serves the
         // exchange (WGC's step is `QueryOAuthShortTokenFromBasicCreds`); the
         // session's lifetime is the exchanged token's.
@@ -296,16 +296,16 @@ impl AuthClient {
             self.http.post(&url).header(reqwest::header::AUTHORIZATION, bearer).form(&form).send().await.map_err(
                 |source| report!(AuthError::Request { url: url.clone(), source }).attach("requesting account/info"),
             )?;
-        let (status, body_text) = self.resolve_login(response, &url).await?;
+        let (status, body) = self.resolve_login(response, &url).await?;
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(report!(AuthError::SessionExpired));
         }
         if !status.is_success() {
             return Err(report!(AuthError::BadResponse {
-                detail: format!("account/info returned HTTP {}: {}", status.as_u16(), body_text),
+                detail: format!("account/info returned HTTP {}: {}", status.as_u16(), String::from_utf8_lossy(&body)),
             }));
         }
-        let info: models::AccountInfoResponse = serde_json::from_str(&body_text).map_err(|source| {
+        let info: models::AccountInfoResponse = serde_json::from_slice(&body).map_err(|source| {
             report!(AuthError::MalformedResponse { url: url.clone(), source }).attach("parsing account/info response")
         })?;
         Ok((AccountId::new(info.sub), Nickname::new(info.nickname)))
@@ -321,21 +321,21 @@ impl AuthClient {
         let response = self.http.post(url).form(form).send().await.map_err(|source| {
             report!(AuthError::Request { url: url.to_string(), source }).attach("posting to the WGNI token endpoint")
         })?;
-        let (status, body_text) = self.resolve_login(response, url).await?;
+        let (status, body) = self.resolve_login(response, url).await?;
         if status.is_success() {
-            return serde_json::from_str(&body_text).map_err(|source| {
+            return serde_json::from_slice(&body).map_err(|source| {
                 report!(AuthError::MalformedResponse { url: url.to_string(), source }).attach("parsing token response")
             });
         }
         // The error body may not even be JSON (proxy/5xx page); a failed
         // parse here just means no structured error/error_description to
         // classify on, which classify_token_error already handles via `None`.
-        let error: Option<models::TokenErrorResponse> = serde_json::from_str(&body_text).ok();
-        let (error_code, description, twofactor_token) = match error {
-            Some(e) => (e.error, e.error_description, e.twofactor_token),
-            None => (None, None, None),
-        };
-        Err(classify_token_error(status.as_u16(), error_code.as_deref(), description.as_deref(), twofactor_token))
+        let mut error: Option<models::TokenErrorResponse> = serde_json::from_slice(&body).ok();
+        let twofactor_token = error.as_mut().and_then(|e| e.twofactor_token.take());
+        let error_code = error.as_ref().and_then(|e| e.error.as_deref());
+        let description = error.as_ref().and_then(|e| e.error_description.as_deref());
+
+        Err(classify_token_error(status.as_u16(), error_code, description, twofactor_token))
     }
 
     async fn request_game_token1(
@@ -361,7 +361,7 @@ impl AuthClient {
             })?;
 
         let poll = self.game_token1.poll;
-        let (status, mut body_text) = match self.resolve_async(response, &url, poll, Some(&bearer)).await? {
+        let (status, body) = match self.resolve_async(response, &url, poll, Some(&bearer)).await? {
             Settled::Final { status, body } => (status, body),
             Settled::StillPending => {
                 return Err(report!(AuthError::GameTokenTimeout { limit: poll.interval * poll.attempts as u32 }));
@@ -374,17 +374,13 @@ impl AuthClient {
         if !status.is_success() {
             // A non-JSON error body only means there is nothing structured to
             // classify on.
-            let error: Option<models::TokenErrorResponse> = serde_json::from_str(&body_text).ok();
-            let (error_code, description) = match error {
-                Some(e) => (e.error, e.error_description),
-                None => (None, None),
-            };
-            return Err(classify_token_error(status.as_u16(), error_code.as_deref(), description.as_deref(), None));
+            let error: Option<models::TokenErrorResponse> = serde_json::from_slice(&body).ok();
+            let error_code = error.as_ref().and_then(|e| e.error.as_deref());
+            let description = error.as_ref().and_then(|e| e.error_description.as_deref());
+            return Err(classify_token_error(status.as_u16(), error_code, description, None));
         }
 
-        let parsed: Result<models::Token1Response, _> = serde_json::from_str(&body_text);
-        body_text.zeroize();
-        let mut parsed = parsed.map_err(|source| {
+        let mut parsed: models::Token1Response = serde_json::from_slice(&body).map_err(|source| {
             report!(AuthError::MalformedResponse { url: url.clone(), source }).attach("parsing the token1 response")
         })?;
 
@@ -398,7 +394,7 @@ impl AuthClient {
         &self,
         response: reqwest::Response,
         context_url: &str,
-    ) -> rootcause::Result<(reqwest::StatusCode, String), AuthError> {
+    ) -> rootcause::Result<(reqwest::StatusCode, Zeroizing<Vec<u8>>), AuthError> {
         match self.resolve_async(response, context_url, LOGIN_POLL, None).await? {
             Settled::Final { status, body } => Ok((status, body)),
             Settled::StillPending => Err(report!(AuthError::VerificationPending)),
@@ -422,7 +418,7 @@ impl AuthClient {
         // not make another origin trusted with the bearer.
         let origin = url::Url::parse(context_url).ok().map(|url| url.origin());
         let next = location_of(&response);
-        let body = response.text().await.map_err(|source| {
+        let body = read_body(response).await.map_err(|source| {
             report!(AuthError::Request { url: context_url.to_string(), source }).attach("reading response body")
         })?;
         if status != reqwest::StatusCode::ACCEPTED {
@@ -449,7 +445,7 @@ impl AuthClient {
             })?;
             let status = polled.status();
             let chained = location_of(&polled);
-            let body = polled.text().await.map_err(|source| {
+            let body = read_body(polled).await.map_err(|source| {
                 report!(AuthError::Request { url: location.to_string(), source })
                     .attach(format!("reading polled body from {location}"))
             })?;
@@ -487,7 +483,7 @@ struct Token1Timing {
 
 /// Outcome of following a WGNI `202 Accepted` chain.
 enum Settled {
-    Final { status: reqwest::StatusCode, body: String },
+    Final { status: reqwest::StatusCode, body: Zeroizing<Vec<u8>> },
     StillPending,
 }
 
@@ -496,6 +492,26 @@ enum Settled {
 fn location_of(response: &reqwest::Response) -> Option<url::Url> {
     let location = response.headers().get(reqwest::header::LOCATION)?.to_str().ok()?;
     response.url().join(location).ok()
+}
+
+/// Reads a body that may carry tokens into a buffer that is wiped on drop.
+/// Growth copies into a fresh zeroizing buffer so no stale copy is left
+/// behind by a reallocation.
+async fn read_body(mut response: reqwest::Response) -> Result<Zeroizing<Vec<u8>>, reqwest::Error> {
+    let mut body = Zeroizing::new(Vec::new());
+    while let Some(chunk) = response.chunk().await? {
+        if body.capacity() - body.len() < chunk.len() {
+            let mut grown = Zeroizing::new(Vec::with_capacity((body.len() + chunk.len()).max(body.capacity() * 2)));
+            grown.extend_from_slice(&body);
+            body = grown;
+        }
+        body.extend_from_slice(&chunk);
+
+        // Reclaims the chunk's buffer when it is unshared so it is wiped too.
+        drop(Zeroizing::new(Vec::<u8>::from(chunk)));
+    }
+
+    Ok(body)
 }
 
 fn bearer_header(tokens: &TokenPair) -> String {
