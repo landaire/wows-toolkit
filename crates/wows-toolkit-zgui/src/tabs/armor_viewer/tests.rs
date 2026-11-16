@@ -317,7 +317,7 @@ fn landed_at(seconds: f32) -> PreExtractedHit {
 /// Playback moved to the last of `hits`, with the ship at `health`.
 fn followed(hits: &[f32], health: f32) -> ArmorFollowed {
     let at = GameClock(*hits.last().expect("playback has reached a hit"));
-    ArmorFollowed { hits: hits.iter().copied().map(landed_at).collect(), health: Some(health), at }
+    ArmorFollowed { hits: Some(hits.iter().copied().map(landed_at).collect()), health: Some(health), at }
 }
 
 /// The ships list and the options rail each have a toggle on the status bar, which puts the panel

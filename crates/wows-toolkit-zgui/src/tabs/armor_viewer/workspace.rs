@@ -30,7 +30,9 @@ use wows_toolkit_armor::load_model::ModelLoadRequest;
 use wows_toolkit_armor::load_model::ProblemReason;
 use wows_toolkit_armor::load_model::SceneProblem;
 use wows_toolkit_armor::load_model::load_model_scene;
-use wows_toolkit_armor::load_ship::load_ship_armor_by_param;
+use wows_toolkit_armor::load_ship;
+use wows_toolkit_armor::load_ship::ShipLoadError;
+use wows_toolkit_armor::scene_load::LoadCancel;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::OpenTarget;
 use wows_toolkit_armor::model_refs::ShipPartRef;
@@ -80,6 +82,7 @@ use crate::tabs::armor_viewer::panels::pen::PenetrationState;
 use crate::tabs::armor_viewer::sidebar::CommonPaneSettings;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use crate::tabs::armor_viewer::viewport::CastShell;
+use crate::tabs::armor_viewer::viewport::CopiedView;
 use crate::tabs::armor_viewer::viewport::LoadGeneration;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
 use crate::tabs::armor_viewer::viewport::SceneSource;
@@ -495,14 +498,11 @@ impl ArmorWorkspace {
             if let Some(scene_source) = source.scene_source() {
                 viewport.set_scene_source(scene_source);
             }
-            viewport.show_armor(armor, self.opening_layer.get_untracked());
+            let view = CopiedView { camera: source.camera(), settings: source.synced_settings() };
+            viewport.show_copy(armor, self.opening_layer.get_untracked(), view);
             // The copy holds the background stage too, so it runs on if the source closes first.
             if let Some(run) = source.scene_rest() {
                 viewport.share_scene_rest(run);
-            }
-            viewport.set_camera(source.camera());
-            if let Some(synced) = source.synced_settings() {
-                viewport.apply_synced(&synced);
             }
         }
         let target = match self.dock.group_of(&self.active.get_untracked().panel_id()) {
@@ -518,7 +518,7 @@ impl ArmorWorkspace {
 
         if let Some((param_index, display_name)) = ship {
             self.forget_incoming();
-            self.start_ship_load(param_index, display_name);
+            self.start_ship_load(param_index, display_name, None);
         }
         self.push_cast_ship();
     }
@@ -861,7 +861,7 @@ impl ArmorWorkspace {
             return;
         }
         self.forget_incoming();
-        self.start_ship_load(param_index, display_name);
+        self.start_ship_load(param_index, display_name, None);
     }
 
     /// Opens one catalogued model in the active pane. A re-click on the model already shown keeps
@@ -960,15 +960,16 @@ impl ArmorWorkspace {
         });
     }
 
-    /// Starts loading `param_index` into the active pane. `None` when the ship data is not ready,
-    /// so nothing was started.
-    fn start_ship_load(self, param_index: String, display_name: String) -> Option<StartedLoad> {
+    /// Starts loading `param_index` into the active pane with `hull` fitted, at the pane's level of
+    /// detail. `None` when the ship data is not ready, so nothing was started.
+    fn start_ship_load(self, param_index: String, display_name: String, hull: Option<String>) -> Option<StartedLoad> {
         let Some(bundle) = self.library.ready_untracked() else {
             tracing::warn!("armor viewer: ship selected before ship assets finished loading");
             return None;
         };
         let pane = self.active.get_untracked();
         let target = self.active_untracked();
+        let lod = target.hull_lod();
         let opening = target.begin_load(display_name.clone());
         let started = StartedLoad { pane, generation: opening.generation };
         let cancel = opening.cancel;
@@ -981,7 +982,7 @@ impl ArmorWorkspace {
             });
             let assets = Arc::clone(&bundle.assets);
             let (asked, named) = (param_index.clone(), display_name.clone());
-            let landed = long_job(move || load_ship_armor_by_param(&assets, &asked, &named, &cancel)).await;
+            let landed = long_job(move || load_ship_at(&assets, &asked, &named, lod, hull, &cancel)).await;
             if !target.is_current_load(started.generation) {
                 // A newer selection in the same pane superseded this load.
                 return;
@@ -1047,7 +1048,8 @@ impl ArmorWorkspace {
         let param_index = target.param_index;
         self.incoming.set(IncomingFire::about(*incoming, param_index.clone()));
         let active = self.active_untracked();
-        if active.loaded_param_index().as_deref() == Some(param_index.as_str()) {
+        let same_hull = active.selected_hull() == target.hull_upgrade;
+        if same_hull && active.loaded_param_index().as_deref() == Some(param_index.as_str()) {
             self.pending_hits.set_value(None);
             active.cancel_load();
             // Already showing it, so only what it has taken has changed.
@@ -1056,8 +1058,24 @@ impl ArmorWorkspace {
                 .with_untracked(|incoming| active.compare_incoming(&incoming.context.taken, &incoming.context.shells));
             return;
         }
-        let started = self.start_ship_load(param_index.clone(), target.display_name);
+        let started = self.start_ship_load(param_index.clone(), target.display_name, target.hull_upgrade);
         self.pending_hits.set_value(started.map(|load| PendingHits { param_index, load, hits, health: None }));
+    }
+
+    /// Takes the attackers' names from a bake of `source`'s battle that named its players again,
+    /// leaving the ship, the pane and the filter as they are.
+    pub fn rename_incoming(self, source: FeedSource, shown: ShowArmor) {
+        if !self.following.get_value().is_some_and(|following| following.source == source) {
+            return;
+        }
+
+        let param_index = shown.target.param_index;
+        let attackers = shown.incoming.attackers;
+        self.incoming.update(|incoming| {
+            if incoming.is_about(&param_index) {
+                incoming.context.attackers = attackers;
+            }
+        });
     }
 
     /// Updates the hits in the pane `source` was shown in as its playback moves. Nothing when that
@@ -1074,7 +1092,9 @@ impl ArmorWorkspace {
             self.playback_at.set(Some(at));
             self.pending_hits.update_value(|pending| {
                 if let Some(pending) = pending {
-                    pending.hits = hits;
+                    if let Some(hits) = hits {
+                        pending.hits = hits;
+                    }
                     pending.health = health;
                 }
             });
@@ -1087,7 +1107,9 @@ impl ArmorWorkspace {
         }
         self.playback_at.set(Some(at));
         viewport.set_hit_health(health);
-        viewport.follow_hits(hits);
+        if let Some(hits) = hits {
+            viewport.follow_hits(hits);
+        }
     }
 
     pub(super) fn pane_untracked(self, id: PaneId) -> Option<ArmorViewportState> {
@@ -1162,6 +1184,38 @@ fn drawable_scene(first: FirstStage) -> Result<FirstStage, ProblemReason> {
             tracing::warn!("armor viewer: {} has nothing to draw: {empty:?}", first.scene.display_name);
             Err(ProblemReason::Empty(empty))
         }
+    }
+}
+
+/// Loads `param_index` with `hull` fitted at the level of detail `lod`, which the pane carries from
+/// the ship before. A ship with fewer levels fails to build its hull at one it lacks, so that load
+/// is made again at the highest detail.
+fn load_ship_at(
+    assets: &wowsunpack::export::ship::ShipAssets,
+    param_index: &str,
+    display_name: &str,
+    lod: usize,
+    hull: Option<String>,
+    cancel: &LoadCancel,
+) -> Result<FirstStage, ShipLoadError> {
+    let load = |lod: usize| {
+        let options = load_ship::build_reload_options(
+            assets,
+            param_index,
+            display_name.to_owned(),
+            lod,
+            hull.clone(),
+            HashMap::new(),
+        )?;
+        load_ship::load_ship_armor_with_options(assets, param_index, options, cancel)
+    };
+
+    match load(lod) {
+        Err(ShipLoadError::HullMeshes(reason)) if lod != load_ship::DEFAULT_LOD => {
+            tracing::warn!("armor viewer: {display_name} has no hull at level of detail {lod}: {reason}");
+            load(load_ship::DEFAULT_LOD)
+        }
+        landed => landed,
     }
 }
 

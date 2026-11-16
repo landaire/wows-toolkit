@@ -760,6 +760,12 @@ impl ArmorViewportState {
         self.update(|this, cx| this.select_hull_upgrade(key, cx));
     }
 
+    /// The level of detail the hull is drawn at, which the next ship opened here is loaded at.
+    pub fn hull_lod(self) -> usize {
+        // A pane already let go of loads nothing, so its level does not matter.
+        self.read_untracked(|this| this.hull_lod).unwrap_or(load_ship::DEFAULT_LOD)
+    }
+
     pub fn select_hull_lod(self, lod: usize) {
         self.update(|this, cx| this.select_hull_lod(lod, cx));
     }

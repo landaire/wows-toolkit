@@ -35,6 +35,7 @@ pub use types::Agreement;
 pub use types::ArcSummary;
 pub use types::CameraRingSettings;
 pub use types::CastShell;
+pub use types::CopiedView;
 pub use types::Isolate;
 pub use types::LoadGeneration;
 pub use types::OpeningLayer;

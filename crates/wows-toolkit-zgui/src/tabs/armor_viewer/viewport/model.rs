@@ -49,6 +49,7 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShellInfo;
 
 use super::types::CameraRingSettings;
+use super::types::CopiedView;
 use super::types::CastShell;
 use super::types::LoadGeneration;
 use super::types::MeshSeed;
@@ -138,7 +139,9 @@ pub(super) struct CastArc {
     pub(super) id: ArcId,
     pub(super) color: ArcColor,
     pub(super) shell: Option<CastShell>,
-    /// The bearing the shell came in on, which a new fall angle is built on.
+    /// Where the shell was aimed and the bearing it came in on, in model space, so a roll of the
+    /// hull carries them with it. Every cast after the first is made again from these.
+    pub(super) aim: Vec3,
     pub(super) approach: Vec3,
     pub(super) trajectory: trajectory::Trajectory,
     /// The lines and markers `trajectory` is drawn with, worked out when it changes rather than on
@@ -214,6 +217,15 @@ pub(super) struct PendingComparison {
     pub(super) shells: HashMap<GameParamId, ShellInfo>,
 }
 
+/// A scene handed over while there was no device, held until there is one.
+pub(super) struct PendingArmor {
+    pub(super) armor: Arc<LoadedShipArmor>,
+    pub(super) layer: OpeningLayer,
+    /// The view of the pane the scene was copied from. The upload frames its own camera and seeds
+    /// its own visibility, so the copy's are put back after it.
+    pub(super) copied: Option<CopiedView>,
+}
+
 pub struct ViewportModel {
     pub(super) viewport: Viewport3D,
     pub(super) gpu: GpuState,
@@ -241,7 +253,7 @@ pub struct ViewportModel {
     /// Movement keys held down, which move the camera every frame while any is.
     pub(super) held_keys: HashSet<MoveKey>,
     /// A scene handed over while there was no device. Uploaded once there is one.
-    pub(super) pending_armor: Option<(Arc<LoadedShipArmor>, OpeningLayer)>,
+    pub(super) pending_armor: Option<PendingArmor>,
     pub(super) mesh_seed: MeshSeed,
     /// The subject being loaded into this viewport, shown in place of the scene.
     pub(super) ship_loading: Option<String>,

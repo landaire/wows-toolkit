@@ -38,12 +38,14 @@ use zgui::reactive::spawn_local;
 
 use crate::long_job::long_job;
 
+use super::model::PendingArmor;
 use super::model::SceneDevice;
 use super::model::ViewportModel;
 use super::state::ArmorViewportState;
 use super::state::ViewCx;
 use super::types::AllVisible;
 use super::types::CameraRingSettings;
+use super::types::CopiedView;
 use super::types::LoadGeneration;
 use super::types::MeshSeed;
 use super::types::OpeningLayer;
@@ -52,6 +54,7 @@ use super::types::PerspectiveSettings;
 use super::types::SceneFeatures;
 use super::types::SceneSource;
 use super::types::SyncedSettings;
+use super::types::ViewportChange;
 
 /// How far the locked camera's aim marker reaches, as a fraction of the model's diagonal, and the
 /// span it is held to so it is legible on any ship.
@@ -194,7 +197,7 @@ impl ViewportModel {
     /// The scene last handed to this pane: the one waiting for the device, which is newer than the
     /// one on screen, or else the one on screen.
     pub(super) fn shown(&self) -> Option<&Arc<LoadedShipArmor>> {
-        self.pending_armor.as_ref().map(|(armor, _)| armor).or(self.current_armor.as_ref())
+        self.pending_armor.as_ref().map(|pending| &pending.armor).or(self.current_armor.as_ref())
     }
 
     /// Which of `armor`'s layers the visibility maps draw any of. An absent part is drawn and an
@@ -287,7 +290,7 @@ impl ViewportModel {
         // to put back, and turning it off puts it back.
         let locked = settings.perspective.enabled;
         self.perspective.camera = settings.perspective.camera;
-        self.set_perspective_enabled(locked, cx);
+        self.switch_perspective(locked, cx);
         self.reupload_current_armor(cx);
         self.viewport.mark_dirty();
         cx.notify();
@@ -324,28 +327,61 @@ impl ViewportModel {
             self.upload_armor_now(armor, layer, cx);
             self.pending_armor = None;
         } else {
-            self.pending_armor = Some((armor, layer));
+            self.pending_armor = Some(PendingArmor { armor, layer, copied: None });
             self.upload_hardpoints();
         }
         cx.notify();
     }
 
-    /// Uploads `armor` and keeps it as the scene shown. A new scene starts at the stock hull, the
-    /// highest detail and stock camo, with the saved visibility, nothing hovered or undoable, and
-    /// the camera framed on it. A no-op without a device.
+    /// Shows `armor` as another pane had it: with its camera, visibility and display. Without a
+    /// device the view is held with the scene, since the upload frames and seeds its own.
+    pub(super) fn show_copy(
+        &mut self,
+        armor: Arc<LoadedShipArmor>,
+        layer: OpeningLayer,
+        view: CopiedView,
+        cx: &mut ViewCx,
+    ) {
+        self.show_armor(armor, layer, cx);
+        match self.pending_armor.as_mut() {
+            Some(pending) => pending.copied = Some(view),
+            None => self.adopt_view(view, cx),
+        }
+    }
+
+    /// Takes another pane's camera and settings.
+    pub(super) fn adopt_view(&mut self, view: CopiedView, cx: &mut ViewCx) {
+        self.set_camera(view.camera, cx);
+        if let Some(settings) = view.settings {
+            self.apply_synced(&settings, cx);
+        }
+    }
+
+    /// Uploads `armor` and keeps it as the scene shown. A new scene starts at the hull and level of
+    /// detail it was loaded with, stock modules and camo, with the saved visibility, nothing
+    /// hovered, burst or undoable, and the camera framed on it. The hull layer and camera-ring mode
+    /// the reader chose on the scene before carry over. A no-op without a device.
     pub(super) fn upload_armor_now(&mut self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, cx: &mut ViewCx) {
         if self.scene().is_none() {
             return;
         }
         let layer = layer.for_scene(&armor);
+        // A ship with no hull meshes says nothing about whether the reader wants the hull shown.
+        if self.current_armor.as_ref().is_some_and(|before| !before.hull_meshes.is_empty()) {
+            self.hull_all_visible = self.all_visible().hull;
+        }
         self.plate_visibility.clear();
         self.hull_mesh_ids.clear();
         self.expanded_hull_groups.clear();
         self.expanded_camo_groups.clear();
-        self.selected_hull = None;
-        self.hull_lod = load_ship::DEFAULT_LOD;
+        self.selected_hull = armor.loaded_hull.clone();
+        self.hull_lod = armor.hull_lod;
         self.selected_modules.clear();
-        self.camera_rings.mode = first_camera_mode(&armor);
+        if !armor.camera_trajectories.iter().any(|(name, _)| Some(name) == self.camera_rings.mode.as_ref()) {
+            self.camera_rings.mode = first_camera_mode(&armor);
+        }
+        self.burst = None;
+        self.splash_mode = false;
         self.selected_camo = None;
         self.camo_generation = self.camo_generation.wrapping_add(1);
         self.camo_texture_cache.clear();
@@ -478,7 +514,8 @@ impl ViewportModel {
     }
 
     /// Heels the hull over. Only the model turns: the waterline and the other world-space
-    /// overlays stay level, which is what makes the angle readable.
+    /// overlays stay level, which is what makes the angle readable. The arcs are cast again, since
+    /// the plates they struck turned under them while the shells still fall straight down.
     pub(super) fn set_model_roll_deg(&mut self, degrees: f32, cx: &mut ViewCx) {
         let radians = degrees.to_radians();
         if (self.viewport.model_roll - radians).abs() < f32::EPSILON {
@@ -486,6 +523,9 @@ impl ViewportModel {
         }
         self.viewport.model_roll = radians;
         self.viewport.mark_dirty();
+        if !self.arcs.is_empty() {
+            self.recast_arcs(cx);
+        }
         cx.notify();
     }
 
@@ -515,12 +555,15 @@ impl ViewportModel {
         self.camera_rings.clone()
     }
 
+    /// Draws the camera orbits another way. A setting like the display's, so a synced pane follows
+    /// it.
     pub(super) fn set_camera_rings(&mut self, settings: CameraRingSettings, cx: &mut ViewCx) {
         if self.camera_rings == settings {
             return;
         }
         self.camera_rings = settings;
         self.reupload_current_armor(cx);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -528,11 +571,21 @@ impl ViewportModel {
         self.perspective
     }
 
-    /// Locks the camera to the ship's own orbit, or lets it go again.
+    /// Locks the camera to the ship's own orbit, or lets it go again, as the reader asked, so a
+    /// synced pane follows it.
+    pub(super) fn set_perspective_enabled(&mut self, on: bool, cx: &mut ViewCx) {
+        if on == self.perspective.enabled {
+            return;
+        }
+        self.switch_perspective(on, cx);
+        cx.emit(ViewportChange::Settings);
+    }
+
+    /// Locks the camera or lets it go, without reporting it.
     ///
     /// The free camera is kept while the lock is on and put back when it comes off, and the lock
     /// starts where the free camera was looking from.
-    pub(super) fn set_perspective_enabled(&mut self, on: bool, cx: &mut ViewCx) {
+    fn switch_perspective(&mut self, on: bool, cx: &mut ViewCx) {
         if on == self.perspective.enabled {
             return;
         }
@@ -557,6 +610,7 @@ impl ViewportModel {
         self.perspective.camera.fov_deg = degrees;
         self.perspective.camera.clamp();
         self.reupload_current_armor(cx);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -568,6 +622,7 @@ impl ViewportModel {
         }
         self.perspective.camera.look_mode = mode;
         self.reupload_current_armor(cx);
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -927,6 +982,11 @@ impl ArmorViewportState {
 
     pub fn show_armor(self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer) {
         self.update(|this, cx| this.show_armor(armor, layer, cx));
+    }
+
+    /// Shows `armor` as another pane had it, with its camera and settings.
+    pub fn show_copy(self, armor: Arc<LoadedShipArmor>, layer: OpeningLayer, view: CopiedView) {
+        self.update(|this, cx| this.show_copy(armor, layer, view, cx));
     }
 
     pub fn set_hardpoint_targets(self, targets: HashSet<HardpointTarget>) {

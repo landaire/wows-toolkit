@@ -68,6 +68,7 @@ use crate::replay_render::annotate::TOOLS;
 use crate::replay_render::annotate::tool_for_key;
 use crate::replay_render::armor::Advance;
 use crate::replay_render::armor::ArmorFollow;
+use crate::replay_render::armor::ArmorFollowed;
 use crate::replay_render::armor::RealtimeArmorFeed;
 use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
@@ -259,7 +260,7 @@ fn feed() -> RealtimeArmorFeed {
     let mut health_history = BTreeMap::new();
     health_history.insert(GameClock(0.0), HealthSnapshot { health: 15400.0, max_health: 15400.0 });
     health_history.insert(GameClock(30.0), HealthSnapshot { health: 12000.0, max_health: 15400.0 });
-    RealtimeArmorFeed::new(ShipShotTimeline { hits: Vec::new(), health_history })
+    RealtimeArmorFeed::new(ShipShotTimeline { hits: Vec::new(), health_history, hull: None })
 }
 
 /// The drawing tools answer to the keys the egui board uses, so a reader who
@@ -2027,7 +2028,7 @@ fn the_armor_item_is_offered_only_for_a_ship_that_was_hit() {
     assert!(!has_armor_to_show(&shots, &[], hit_ship, &game_data), "before the battle has been read");
 
     // A ship with a timeline but nothing in it was never hit.
-    shots.insert(untouched, ShipShotTimeline { hits: Vec::new(), health_history: BTreeMap::new() });
+    shots.insert(untouched, ShipShotTimeline { hits: Vec::new(), health_history: BTreeMap::new(), hull: None });
     assert!(!has_armor_to_show(&shots, &[], untouched, &game_data), "a timeline with no hits is not an offer");
 
     // Asking for one anyway is refused rather than opening an empty viewer:
@@ -2035,33 +2036,35 @@ fn the_armor_item_is_offered_only_for_a_ship_that_was_hit() {
     assert!(ArmorFollow::start(untouched, &[], &shots, GameClock(0.0), &game_data).is_none());
 }
 
-/// A viewer that is open follows playback, and is only disturbed when the
-/// hits it shows actually change: showing them again rebuilds the hull, which
-/// is far more than a frame of playback is worth.
+/// A viewer that is open follows playback: every move tells it the clock and the health, so the
+/// health strip and readout move between hits, but the hits only when they change, since showing
+/// them again rebuilds the hull.
 #[test]
-fn an_open_armor_viewer_follows_playback_but_only_when_it_must() {
-    let track = track((0..20).map(|frame| frame as f32 * 5.0).collect());
-    let mut playback = Playback::new();
+fn an_open_armor_viewer_follows_the_clock_and_only_gets_hits_that_changed() {
     let ship = EntityId::from(7u32);
     // Following starts without a viewer, which is what the menu's own guard
     // is for; seeded here directly.
     let mut seeded = feed();
     seeded.advance_to(GameClock(0.0));
     let mut follow = ArmorFollow::new(ship, seeded);
-    // Where a front end tells the viewer: only when playback moved.
-    let moved_to = |playback: &mut Playback, follow: &mut ArmorFollow, frame: usize| {
-        playback.go_to(&track, FrameIndex::new(frame)) && follow.follow(playback.clock(&track)).is_some()
-    };
+    let mut moved_to = |step: usize| follow.follow(GameClock(step as f32 * 5.0));
 
-    // This battle recorded no hits, so walking it never changes what the
-    // viewer shows.
-    let told = (1..6).filter(|frame| moved_to(&mut playback, &mut follow, *frame)).count();
-    assert_eq!(told, 0, "nothing changed, so the viewer was left alone");
+    // This battle recorded no hits, so walking it hands over no hits, while the clock and the
+    // health still move.
+    let told: Vec<ArmorFollowed> = (1..8).filter_map(&mut moved_to).collect();
+    assert_eq!(told.len(), 7, "every move tells the clock");
+    assert!(told.iter().all(|followed| followed.hits.is_none()), "nothing was hit, so no hits are handed over");
+    assert_eq!(told.last().map(|followed| (followed.at, followed.health)), Some((GameClock(35.0), Some(12000.0))));
+    assert_eq!(told.first().and_then(|followed| followed.health), Some(15400.0), "before the damage at 30 s");
+
+    // Standing still says nothing.
+    assert!(moved_to(7).is_none(), "playback did not move");
 
     // Scrubbing back is the other case: what was drawn can no longer be
     // right, and a hull cannot be un-hit one shell at a time, so the viewer
-    // is told to draw it again.
-    assert!(moved_to(&mut playback, &mut follow, 1), "a step backwards asks for the hull again");
+    // is handed the hits again.
+    let rewound = moved_to(1).expect("a step backwards is told");
+    assert_eq!(rewound.hits.map(|hits| hits.len()), Some(0), "a step backwards hands the hull over again");
 }
 
 /// The clock says where playback is and how long the battle runs, so the end

@@ -20,6 +20,9 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::ShellSimResult;
 use wowsunpack::ballistics::simulate_arc;
 use wowsunpack::ballistics::simulate_shell_through_plates;
+use wowsunpack::export::armor_ray::ArmorRayHit;
+use wowsunpack::export::gltf_export::ArmorTriangleInfo;
+use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
@@ -161,21 +164,44 @@ pub fn approach_xz(shell_dir: &Vec3) -> Vec3 {
     if length > 0.001 { flat / length } else { Vec3::x() }
 }
 
-/// The same plates struck by a shell travelling along `shell_dir`.
+/// The plates of `meshes` a ray from `origin` along the unit `direction` crosses, nearest first,
+/// in the order a shell reaches them. Both are in the meshes' own space; `to_world` places each
+/// hit's position and normal where the viewport draws them.
 ///
-/// The plates are the ones the first cast crossed rather than found again:
-/// a ray cast now would miss every plate hidden since, including the ones
-/// the arc's own isolation hid. A different fall changes how squarely each
-/// is struck and how far apart they lie along the shell's path.
-pub fn reaim(hits: Vec<TrajectoryHit>, shell_dir: &Vec3) -> Vec<TrajectoryHit> {
-    let Some(first) = hits.first().map(|hit| hit.position) else { return hits };
+/// Every plate is cast through, drawn or not, so a shell cast again after a roll or a new range
+/// still meets the plates hidden since, including those its own isolation hid. Only the
+/// triangles `counts` keeps are struck.
+pub fn cast_through(
+    meshes: &[InteractiveArmorMesh],
+    origin: Vec3,
+    direction: Vec3,
+    counts: impl Fn(&ArmorTriangleInfo) -> bool,
+    to_world: impl Fn(Vec3) -> Vec3,
+) -> Vec<TrajectoryHit> {
+    let world_direction = to_world(direction);
+    let crossed = wowsunpack::export::armor_ray::cast_ray(meshes, origin.into(), direction.into());
+    let struck: Vec<(&ArmorTriangleInfo, ArmorRayHit)> = crossed
+        .into_iter()
+        .filter_map(|hit| {
+            let info = meshes.get(hit.mesh_index)?.triangle_info.get(hit.triangle_index)?;
+            counts(info).then_some((info, hit))
+        })
+        .collect();
+    let first_distance = struck.first().map_or(0.0, |(_, hit)| hit.distance.value());
 
-    let direction = shell_dir / shell_dir.norm().max(1e-9);
-    hits.into_iter()
-        .map(|hit| TrajectoryHit {
-            angle_from_normal: impact_angle_from_normal(&direction, &hit.normal),
-            distance_from_start: ShipModelDistance::from((hit.position - first).dot(&direction)),
-            ..hit
+    struck
+        .into_iter()
+        .map(|(info, hit)| {
+            let normal = to_world(Vec3::from(hit.normal));
+            TrajectoryHit {
+                position: to_world(Vec3::from(hit.position)),
+                thickness: Millimeters::from(info.thickness_mm),
+                zone: info.zone.clone(),
+                material: info.material,
+                angle_from_normal: impact_angle_from_normal(&world_direction, &normal),
+                distance_from_start: ShipModelDistance::from(hit.distance.value() - first_distance),
+                normal,
+            }
         })
         .collect()
 }
@@ -392,18 +418,59 @@ mod tests {
         }
     }
 
-    /// A deck is struck more squarely the steeper the shell falls, and the
-    /// spacing between plates is measured along the new path.
+    /// A plain square plate of `thickness`, in the x = `at` plane.
+    fn plate(at: f32, thickness: f32) -> InteractiveArmorMesh {
+        let info = ArmorTriangleInfo {
+            model_index: 1,
+            triangle_index: 0,
+            material_id: 0,
+            material: hull_belt(),
+            zone: "hull".to_string(),
+            thickness_mm: thickness,
+            layers: vec![thickness],
+            color: [0.0; 4],
+            hidden: false,
+        };
+        InteractiveArmorMesh {
+            name: "plate".to_string(),
+            positions: vec![[at, -5.0, -5.0], [at, 5.0, -5.0], [at, 5.0, 5.0], [at, -5.0, 5.0]],
+            normals: vec![[1.0, 0.0, 0.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            colors: vec![[0.0; 4]; 4],
+            triangle_info: vec![info.clone(), info],
+            transform: None,
+        }
+    }
+
+    /// A shell cast through two upright plates at 45 degrees strikes each at 45 degrees from its
+    /// normal, measures their spacing along its own path, and skips what `counts` leaves out.
     #[test]
-    fn a_steeper_fall_strikes_a_deck_more_squarely() {
-        let flat = vec![hit(0.0, 32.0, 90.0), hit(3.0, 19.0, 90.0)];
-        let falling = Vec3::new(1.0, -1.0, 0.0).normalize();
+    fn a_cast_through_the_armor_strikes_each_plate_it_crosses() {
+        let meshes = vec![plate(0.0, 32.0), plate(3.0, 0.0), plate(6.0, 19.0)];
+        let direction = Vec3::new(1.0, -1.0, 0.0).normalize();
+        let origin = Vec3::new(-2.0, 6.0, 0.3);
+        let armored = |info: &ArmorTriangleInfo| info.thickness_mm > 0.0;
 
-        let steeper = reaim(flat, &falling);
+        let hits = cast_through(&meshes, origin, direction, armored, |at| at);
 
-        assert!((steeper[0].angle_from_normal.value() - 45.0).abs() < 1e-3);
-        assert!((steeper[1].distance_from_start.value() - 3.0 / 2f32.sqrt()).abs() < 1e-4);
-        assert_eq!(steeper[1].position, Vec3::new(3.0, 0.0, 0.0), "the plates stay where they were found");
+        let thicknesses: Vec<f32> = hits.iter().map(|hit| hit.thickness.value()).collect();
+        assert_eq!(thicknesses, [32.0, 19.0], "the bare plate between them is not struck");
+        assert!(hits.iter().all(|hit| (hit.angle_from_normal.value() - 45.0).abs() < 1e-3));
+        assert!((hits[1].distance_from_start.value() - 6.0 * 2f32.sqrt()).abs() < 1e-3);
+    }
+
+    /// Hits are placed by `to_world`, and their angle is struck in the same space.
+    #[test]
+    fn a_cast_through_places_its_hits_in_the_world() {
+        let meshes = vec![plate(0.0, 32.0)];
+        // A quarter turn about the vertical, as a hull turned on the water.
+        let turned = |at: Vec3| Vec3::new(at[2], at[1], -at[0]);
+
+        let hits = cast_through(&meshes, Vec3::new(-1.0, 1.0, 2.0), Vec3::x(), |_| true, turned);
+
+        assert_eq!(hits.len(), 1);
+        assert!((hits[0].position - Vec3::new(2.0, 1.0, 0.0)).norm() < 1e-4, "placed at {:?}", hits[0].position);
+        assert!(hits[0].angle_from_normal.value().abs() < 1e-3, "struck head-on");
     }
 
     #[test]

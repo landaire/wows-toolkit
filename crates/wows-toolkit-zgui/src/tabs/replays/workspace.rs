@@ -565,15 +565,24 @@ fn view_armor(shell: Shell, session: RendererSession, source: FeedSource, asked:
             shell.select(crate::shell::tabs::TabKey::App(crate::shell::tabs::AppTab::ArmorViewer));
         }
         // Not shown: renaming the players or playback moving must not pull the reader to the viewer.
-        ArmorRequest::Renamed(shown) => show_armor(shell, session, source, shown),
+        ArmorRequest::Renamed(shown) => shell.armor.send(ViewerFeed::Renamed { source, shown: Box::new(shown) }),
         ArmorRequest::Followed(followed) => shell.armor.send(ViewerFeed::Followed { source, followed }),
     }
 }
 
 /// Hands the Armor Viewer tab a ship to show, whose incoming-fire log seeks this viewport.
 fn show_armor(shell: Shell, session: RendererSession, source: FeedSource, shown: ShowArmor) {
-    let seek = UnsyncCallback::new(move |clock: wows_replays::types::GameClock| session.go_to_clock(clock));
-    shell.armor.send(ViewerFeed::Show { source, shown: Box::new(shown), seek: Some(seek) });
+    shell.armor.send(ViewerFeed::Show { source, shown: Box::new(shown), seek: Some(seek_callback(session)) });
+}
+
+/// Seeks `session`'s playback to a clock. The viewer outlives the replay tab, and a closed
+/// session's state is gone, so a seek after the tab closes does nothing.
+pub(crate) fn seek_callback(session: RendererSession) -> UnsyncCallback<wows_replays::types::GameClock> {
+    UnsyncCallback::new(move |clock: wows_replays::types::GameClock| {
+        if session.is_open() {
+            session.go_to_clock(clock);
+        }
+    })
 }
 
 #[cfg(test)]

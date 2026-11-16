@@ -13,6 +13,7 @@ use wows_toolkit_armor::scene_load::LoadCancel;
 use wows_toolkit_armor::trajectory::ArcColor;
 use wows_toolkit_armor::trajectory::ArcId;
 use wows_toolkit_armor::upload;
+use wows_toolkit_armor::viewport::camera::ArcballCamera;
 use wows_toolkit_armor::viewport::types::LightingSettings;
 use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
 use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
@@ -296,6 +297,13 @@ pub struct SyncedSettings {
     /// Whether the camera is locked to the ship's orbit, and how it aims.
     pub(super) perspective: PerspectiveSettings,
     pub(super) mesh_seed: MeshSeed,
+}
+
+/// What a compare pane takes from the pane it copies: the camera, and the visibility and display
+/// it was showing.
+pub struct CopiedView {
+    pub camera: ArcballCamera,
+    pub settings: Option<SyncedSettings>,
 }
 
 /// What this app's own simulation made of a shell, worded for the log.

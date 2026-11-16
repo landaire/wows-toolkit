@@ -76,8 +76,20 @@ pub struct FeedSource(u64);
 pub enum ViewerFeed {
     /// Opens the ship with what it had taken. `seek` moves the playback behind it.
     Show { source: FeedSource, shown: Box<ShowArmor>, seek: Option<UnsyncCallback<GameClock>> },
-    /// Playback moved and the ship took different hits.
+    /// Playback moved, and with it the clock and health, and perhaps the hits.
     Followed { source: FeedSource, followed: ArmorFollowed },
+    /// The battle was baked again with its players named differently.
+    Renamed { source: FeedSource, shown: Box<ShowArmor> },
+}
+
+impl ViewerFeed {
+    /// Whether this is `source` showing the viewer or moving its hits.
+    pub(super) fn moves_hits_of(&self, source: FeedSource) -> bool {
+        match self {
+            Self::Show { source: from, .. } | Self::Followed { source: from, .. } => *from == source,
+            Self::Renamed { .. } => false,
+        }
+    }
 }
 
 /// The Armor Viewer's data, as one `Copy` handle.
@@ -141,6 +153,12 @@ impl ArmorLibrary {
         })
     }
 
+    /// Whether the ship data failed to load, so nothing asked of the viewer can be opened.
+    /// Tracked.
+    pub fn failed(self) -> bool {
+        self.bundle.with(|bundle| matches!(bundle, BundleState::Failed(_)))
+    }
+
     pub fn ready_untracked(self) -> Option<Arc<ArmorBundle>> {
         match self.bundle.get_untracked() {
             BundleState::Ready(bundle) => Some(bundle),
@@ -184,13 +202,7 @@ impl ArmorLibrary {
     /// Hands the viewer something a replay viewport asked for.
     pub fn send(self, feed: ViewerFeed) {
         self.want();
-        self.feed.update(|held| {
-            // Only a viewport's latest position matters to a viewer that has not taken the last.
-            if let ViewerFeed::Followed { source, .. } = &feed {
-                held.retain(|held| !matches!(held, ViewerFeed::Followed { source: from, .. } if from == source));
-            }
-            held.push(feed);
-        });
+        self.feed.update(|held| push_feed(held, feed));
     }
 
     /// Takes what replay viewports asked for, oldest first, subscribing to the next.
@@ -264,6 +276,20 @@ impl Default for ArmorLibrary {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Adds `feed` to what is waiting for the viewer. Only a viewport's latest position matters to a
+/// viewer that has not taken the last, but never one from before that viewport showed the viewer
+/// again: the show starts its hits afresh.
+fn push_feed(held: &mut Vec<ViewerFeed>, mut feed: ViewerFeed) {
+    if let ViewerFeed::Followed { source, followed } = &mut feed
+        && let Some(at) = held.iter().rposition(|held| held.moves_hits_of(*source))
+        && matches!(held[at], ViewerFeed::Followed { .. })
+        && let ViewerFeed::Followed { followed: earlier, .. } = held.remove(at)
+    {
+        followed.supersede(earlier);
+    }
+    held.push(feed);
 }
 
 /// Every ship in `catalog`, in its nation, class and tier order.

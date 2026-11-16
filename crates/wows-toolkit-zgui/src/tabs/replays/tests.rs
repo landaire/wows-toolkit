@@ -23,6 +23,7 @@ use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::reactive::Callable;
 use zgui::reactive::prelude::Set;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
@@ -233,6 +234,24 @@ fn a_closed_viewport_ends_and_a_popped_out_one_moves() {
     assert!(workspace.open_renderers().is_empty(), "the popped-out viewport left the dock");
     assert!(moving.is_open(), "and its session went with it");
     moving.close();
+}
+
+/// The armor viewer keeps the seek of the viewport that showed it after that viewport's tab closes;
+/// a seek then finds the session's state gone and does nothing.
+#[test]
+fn a_seek_into_a_closed_viewport_does_nothing() {
+    let (mut window, workspace) = open();
+    let path = PathBuf::from("closed.wowsreplay");
+    workspace.render(RenderRequest { path: path.clone(), alts: Vec::new() });
+    window.advance(Duration::from_millis(32));
+    let session = workspace.session_for_test(&path).expect("the viewport has a session");
+    let seek = crate::tabs::replays::workspace::seek_callback(session);
+
+    workspace.remove(&Docked::Renderer(path));
+    window.advance(Duration::from_millis(32));
+    assert!(!session.is_open());
+
+    seek.run(wows_replays::types::GameClock(12.0));
 }
 
 /// A second ask for the same battle's playback brings the open viewport forward.

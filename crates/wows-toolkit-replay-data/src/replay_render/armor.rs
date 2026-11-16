@@ -131,12 +131,16 @@ pub struct IncomingContext {
     pub shells: HashMap<GameParamId, ShellInfo>,
 }
 
-/// Which ship an entity was in, by its game param index, and what it is
-/// called.
+/// Which ship an entity was in, by its game param index, what it is called,
+/// and the hull it was fitted with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArmorTarget {
     pub param_index: String,
     pub display_name: String,
+    /// The hull upgrade the ship carried in the battle, by the key the ship's
+    /// hull upgrades are listed under. `None` when the replay did not say, in
+    /// which case the stock hull is the only one to show.
+    pub hull_upgrade: Option<String>,
 }
 
 /// What an armor viewer opened on a ship is first given.
@@ -150,22 +154,34 @@ pub struct ShowArmor {
     pub incoming: Box<IncomingContext>,
 }
 
-/// What an open armor viewer is told when its ship's hits change as
-/// playback moves.
+/// What an open armor viewer is told as playback moves.
 #[derive(Clone, Debug)]
 pub struct ArmorFollowed {
-    pub hits: Vec<PreExtractedHit>,
+    /// What the ship had taken, when that changed. `None` when the hits are
+    /// the ones last told: showing them again rebuilds the hull's meshes.
+    pub hits: Option<Vec<PreExtractedHit>>,
     pub health: Option<f32>,
     /// Where playback has reached, which the health strip marks.
     pub at: GameClock,
 }
 
+impl ArmorFollowed {
+    /// Takes the place of `earlier`, which the viewer has not been told. Its
+    /// hits are kept when this move carries none: they are what the hull has
+    /// yet to show.
+    pub fn supersede(&mut self, earlier: ArmorFollowed) {
+        if self.hits.is_none() {
+            self.hits = earlier.hits;
+        }
+    }
+}
+
 /// The ship an armor viewer was opened on, and what it had taken when it was
 /// last told.
 ///
-/// Kept so playback only disturbs the viewer when the set of hits actually
-/// changes: showing them again rebuilds the hull's meshes, which is far too
-/// much work for every frame.
+/// Kept so playback only hands the hits over again when the set of hits
+/// actually changes: showing them again rebuilds the hull's meshes, which is
+/// far too much work for every frame.
 pub struct ArmorFollow {
     entity_id: EntityId,
     feed: RealtimeArmorFeed,
@@ -189,8 +205,8 @@ impl ArmorFollow {
         clock: GameClock,
         game_data: &GameDataCache,
     ) -> Option<(Self, ShowArmor)> {
-        let target = armor_target(commands, entity_id, game_data)?;
         let timeline = shots.get(&entity_id)?.clone();
+        let target = armor_target(commands, entity_id, timeline.hull, game_data)?;
 
         let mut feed = RealtimeArmorFeed::new(timeline);
         feed.advance_to(clock);
@@ -211,37 +227,51 @@ impl ArmorFollow {
     }
 
     /// Moves to where playback has reached, and says what the viewer is to be
-    /// told, if anything.
+    /// told. `None` when playback has not moved.
     ///
-    /// Only when the set of hits has changed: telling it again rebuilds the
-    /// hull's meshes, which is far more than a frame of playback is worth.
+    /// The clock and health always, so the health strip and readout move with
+    /// playback; the hits only when they changed, since telling them again
+    /// rebuilds the hull's meshes.
     pub fn follow(&mut self, clock: GameClock) -> Option<ArmorFollowed> {
+        if self.feed.at() == Some(clock) {
+            return None;
+        }
         let changed = match self.feed.advance_to(clock) {
             Advance::Rewound => true,
             Advance::Gained(gained) => !gained.is_empty(),
         };
-        if !changed {
-            return None;
-        }
+        let hits = changed.then(|| self.feed.taken().to_vec());
 
-        Some(ArmorFollowed { hits: self.feed.taken().to_vec(), health: self.feed.health(), at: clock })
+        Some(ArmorFollowed { hits, health: self.feed.health(), at: clock })
     }
 }
 
-/// Which ship `entity_id` was in, and what it is called, when the build
-/// knows.
+/// Which ship `entity_id` was in, what it is called, and the hull upgrade
+/// whose hull module is `hull`, when the build knows.
 ///
 /// Read off the roster the frame already carries: a ship command says who is
 /// in it but not which ship it is, and the roster says both.
-pub fn armor_target(commands: &[DrawCommand], entity_id: EntityId, game_data: &GameDataCache) -> Option<ArmorTarget> {
+pub fn armor_target(
+    commands: &[DrawCommand],
+    entity_id: EntityId,
+    hull: Option<GameParamId>,
+    game_data: &GameDataCache,
+) -> Option<ArmorTarget> {
     let param_id = commands.iter().find_map(|command| {
         let DrawCommand::TeamRoster { rows, .. } = command else { return None };
         rows.iter().find(|row| row.entity_id == entity_id)?.ship_param_id
     })?;
     let loaded = game_data.newest_loaded()?;
-    let param = loaded.provider().game_param_by_id(param_id)?;
+    let provider = loaded.provider();
+    let param = provider.game_param_by_id(param_id)?;
+    // An upgrade is listed under a key that carries its module's param index.
+    let hull_upgrade = hull.and_then(|hull| {
+        let module_index = provider.game_param_by_id(hull)?.index().to_string();
+        let upgrades = param.vehicle()?.hull_upgrades()?;
+        upgrades.keys().find(|key| key.contains(&module_index)).cloned()
+    });
 
-    Some(ArmorTarget { param_index: param.index().to_string(), display_name: param.name().to_string() })
+    Some(ArmorTarget { param_index: param.index().to_string(), display_name: param.name().to_string(), hull_upgrade })
 }
 
 /// Whether `entity_id`'s ship has anything an armor viewer could show.
@@ -255,7 +285,7 @@ pub fn has_armor_to_show(
     game_data: &GameDataCache,
 ) -> bool {
     shots.get(&entity_id).is_some_and(|timeline| !timeline.hits.is_empty())
-        && armor_target(commands, entity_id, game_data).is_some()
+        && armor_target(commands, entity_id, None, game_data).is_some()
 }
 
 /// Who was shooting at `victim`, and which shells are main battery ones.

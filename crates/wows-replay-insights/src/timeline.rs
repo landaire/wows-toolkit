@@ -20,6 +20,7 @@ use wows_replays::packet2::Packet;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -133,6 +134,9 @@ pub struct ShipShotTimeline {
     /// Health over time, keyed by GameClock. BTreeMap allows efficient
     /// lookup of health at any game clock via range queries.
     pub health_history: std::collections::BTreeMap<GameClock, HealthSnapshot>,
+    /// The hull module the ship was fitted with, as its ship config names it. `None` when the
+    /// replay recorded no config for it.
+    pub hull: Option<GameParamId>,
 }
 
 /// Capture points use a negative team id to mean "no team holds this".
@@ -643,11 +647,14 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
 
 struct ShotTimelineCollector {
     timelines: HashMap<EntityId, ShipShotTimeline>,
+    /// Each ship's hull module, read once the battle has been walked, when every config has
+    /// arrived.
+    hulls: HashMap<EntityId, GameParamId>,
 }
 
 impl ShotTimelineCollector {
     fn new() -> Self {
-        Self { timelines: HashMap::new() }
+        Self { timelines: HashMap::new(), hulls: HashMap::new() }
     }
 }
 
@@ -660,11 +667,20 @@ impl WorldScanCollector for ShotTimelineCollector {
                 let mut tl = ShipShotTimeline {
                     hits: Vec::with_capacity(100),
                     health_history: std::collections::BTreeMap::new(),
+                    hull: None,
                 };
                 tl.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
                 self.timelines.insert(hit.victim_entity_id, tl);
             }
         }
+    }
+
+    fn finish(&mut self, view: &BattleView<'_>) {
+        self.hulls = view
+            .vehicle_props_all()
+            .into_iter()
+            .filter_map(|(entity_id, props)| Some((entity_id, props.ship_config().hull()?)))
+            .collect();
     }
 }
 
@@ -693,15 +709,19 @@ pub fn extract_timeline_and_shots(
     let timeline_result = finish_timeline_collector(timeline_col);
 
     for (eid, hh) in &health_histories {
-        shot_col
-            .timelines
-            .entry(*eid)
-            .or_insert_with(|| ShipShotTimeline { hits: Vec::new(), health_history: hh.clone() });
+        shot_col.timelines.entry(*eid).or_insert_with(|| ShipShotTimeline {
+            hits: Vec::new(),
+            health_history: hh.clone(),
+            hull: None,
+        });
         if let Some(tl) = shot_col.timelines.get_mut(eid)
             && tl.health_history.is_empty()
         {
             tl.health_history = hh.clone();
         }
+    }
+    for (eid, timeline) in &mut shot_col.timelines {
+        timeline.hull = shot_col.hulls.get(eid).copied();
     }
 
     tracing::info!(
@@ -1108,7 +1128,7 @@ mod shot_timeline_tests {
         let mut health_history = std::collections::BTreeMap::new();
         health_history.insert(GameClock(10.0), HealthSnapshot { health: 15400.0, max_health: 15400.0 });
         health_history.insert(GameClock(40.0), HealthSnapshot { health: 10358.0, max_health: 15400.0 });
-        ShipShotTimeline { hits: Vec::new(), health_history }
+        ShipShotTimeline { hits: Vec::new(), health_history, hull: None }
     }
 
     /// Health reads the last value at or before the clock, because it is only

@@ -18,6 +18,7 @@ use wows_toolkit_armor::splash;
 use wows_toolkit_armor::trajectory;
 use wows_toolkit_armor::trajectory::ArcColor;
 use wows_toolkit_armor::trajectory::ArcId;
+use wows_toolkit_armor::upload;
 use wows_toolkit_armor::viewport::types::Vec2;
 use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_armor::visibility::VisibilitySnapshot;
@@ -463,11 +464,18 @@ impl ViewportModel {
             return;
         }
         self.continue_on_ricochet = on;
-        let refired: Vec<trajectory::Trajectory> =
+        self.recast_arcs(cx);
+    }
+
+    /// Casts every arc again at its own range and with its own shell, as the plates under it
+    /// moved: the hull was rolled, or how a shell is followed changed.
+    pub(super) fn recast_arcs(&mut self, cx: &mut ViewCx) {
+        let recast: Vec<trajectory::Trajectory> =
             self.arcs.iter().map(|arc| self.refire(arc, arc.trajectory.range, arc.shell.as_ref())).collect();
-        for (arc, trajectory) in self.arcs.iter_mut().zip(refired) {
+        for (arc, trajectory) in self.arcs.iter_mut().zip(recast) {
             arc.set_trajectory(trajectory);
         }
+        self.follow_arc_isolation(cx);
         cx.notify();
     }
 
@@ -542,19 +550,29 @@ impl ViewportModel {
             return Err(CastMiss::NothingUnderPointer);
         };
         let approach = trajectory::approach_xz(&ray);
-        let trajectory = self.fire_at(surface.world_position, approach).ok_or(CastMiss::NoPlateOnPath)?;
+        let aim = surface.world_position;
+        let trajectory = self.fire_at(aim, approach).ok_or(CastMiss::NoPlateOnPath)?;
 
-        Ok(self.add_arc(approach, trajectory, cx))
+        Ok(self.add_arc(aim, approach, trajectory, cx))
     }
 
-    /// Keeps a cast shell, fired with the next cast's ship and shell, in a colour no other arc
-    /// holds, and selects it: the arc just cast is the one the reader means to look at.
-    pub(super) fn add_arc(&mut self, approach: Vec3, trajectory: trajectory::Trajectory, cx: &mut ViewCx) -> ArcId {
+    /// Keeps a shell cast at `aim` on the bearing `approach`, fired with the next cast's ship and
+    /// shell, in a colour no other arc holds, and selects it: the arc just cast is the one the
+    /// reader means to look at.
+    pub(super) fn add_arc(
+        &mut self,
+        aim: Vec3,
+        approach: Vec3,
+        trajectory: trajectory::Trajectory,
+        cx: &mut ViewCx,
+    ) -> ArcId {
         let id = self.next_arc;
         self.next_arc = id.next();
         let color = ArcColor::unused(self.arcs.iter().map(|arc| arc.color));
         let drawing = trajectory::drawing(&trajectory);
-        self.arcs.push(CastArc { id, color, shell: self.cast_shell.clone(), approach, trajectory, drawing });
+        let (aim, approach) = self.viewport.ray_to_model_space(aim, approach);
+        let shell = self.cast_shell.clone();
+        self.arcs.push(CastArc { id, color, shell, aim, approach, trajectory, drawing });
         self.selected_arc = Some(id);
         cx.notify();
 
@@ -580,18 +598,41 @@ impl ViewportModel {
         Some(trajectory::cast(hits, shell_dir, shell, self.model_extent(), self.continue_on_ricochet, self.cast_range))
     }
 
-    /// `arc` fired again from `range` with `shell`, at the plates it first crossed, keeping what
-    /// it isolates.
+    /// `arc` cast again from `range` with `shell`, at the point it was aimed at, keeping what it
+    /// isolates.
+    ///
+    /// The aim and bearing are held in model space, so they turn with the hull; the fall is
+    /// struck against the world, since gravity does not roll with the ship. A new fall finds its
+    /// own plates, so the ray is cast again rather than the first cast's plates struck anew.
     fn refire(&self, arc: &CastArc, range: Km, shell: Option<&CastShell>) -> trajectory::Trajectory {
         let fired = shell.and_then(|shell| shell.fire(range));
-        let shell_dir = fall_direction(arc.approach, fired.as_ref().map(|(_, impact)| impact));
-        let hits = trajectory::reaim(arc.trajectory.hits.clone(), &shell_dir);
+        let approach = trajectory::approach_xz(&self.viewport.pos_to_world_space(arc.approach));
+        let shell_dir = fall_direction(approach, fired.as_ref().map(|(_, impact)| impact));
+        let aim = self.viewport.pos_to_world_space(arc.aim);
+        let hits = self.cast_through_armor(aim, shell_dir);
         let shell = fired.as_ref().map(|(params, impact)| (params, impact));
         let mut refired =
             trajectory::cast(hits, shell_dir, shell, self.model_extent(), self.continue_on_ricochet, range);
         refired.isolating_plates = arc.trajectory.isolating_plates;
         refired.isolating_zones = arc.trajectory.isolating_zones;
         refired
+    }
+
+    /// Every plate of the shown armor a shell aimed at `aim` along `shell_dir` crosses, from
+    /// outside the hull. Drawn or not, so hiding a plate does not let a shell through it; a plate
+    /// with no thickness counts only while such plates are drawn.
+    fn cast_through_armor(&self, aim: Vec3, shell_dir: Vec3) -> Vec<trajectory::TrajectoryHit> {
+        let Some(armor) = self.current_armor.as_ref() else { return Vec::new() };
+
+        let show_zero_mm = self.show_zero_mm();
+        let (origin, direction) = self.viewport.ray_to_model_space(aim - shell_dir * CAST_STANDOFF, shell_dir);
+        trajectory::cast_through(
+            &armor.meshes,
+            origin,
+            direction,
+            |info| show_zero_mm || !upload::is_zero_mm(info.thickness_mm),
+            |at| self.viewport.pos_to_world_space(at),
+        )
     }
 
     /// Every cast arc, as the trajectory section lists them.
@@ -651,8 +692,8 @@ impl ViewportModel {
         cx.notify();
     }
 
-    /// Fires one arc from a different range, leaving the others where they are. The plates it
-    /// crossed stay the same, so what it isolates does too.
+    /// Fires one arc from a different range, leaving the others where they are. A steeper or
+    /// flatter fall crosses different plates, so what it isolates follows them.
     pub(super) fn set_arc_range(&mut self, id: ArcId, range: Km, cx: &mut ViewCx) {
         let Some(index) = self.arcs.iter().position(|arc| arc.id == id) else { return };
         let held = &self.arcs[index];
@@ -662,6 +703,7 @@ impl ViewportModel {
 
         let refired = self.refire(held, range, held.shell.as_ref());
         self.arcs[index].set_trajectory(refired);
+        self.follow_arc_isolation(cx);
         cx.notify();
     }
 
@@ -673,6 +715,7 @@ impl ViewportModel {
         let refired = self.refire(held, held.trajectory.range, Some(&shell));
         self.arcs[index].set_trajectory(refired);
         self.arcs[index].shell = Some(shell);
+        self.follow_arc_isolation(cx);
         cx.notify();
     }
 
@@ -705,12 +748,28 @@ impl ViewportModel {
         self.apply_arc_isolation(cx);
     }
 
-    /// Rebuilds the visibility the arcs' isolation asks for.
+    /// Rebuilds the visibility the arcs' isolation asks for, as one undoable step.
     ///
     /// The whole visibility is recomputed rather than adjusted, because an arc that stops
     /// isolating has to give back exactly what it hid and nothing else. With no arc isolating
     /// anything, the ship goes back to whole.
     pub(super) fn apply_arc_isolation(&mut self, cx: &mut ViewCx) {
+        self.undo_stack.push(VisibilitySnapshot {
+            part_visibility: self.part_visibility.clone(),
+            plate_visibility: self.plate_visibility.clone(),
+        });
+        self.isolate_by_arcs(cx);
+    }
+
+    /// Keeps what the arcs isolate in step with the plates they cross after they were cast again.
+    /// Not an undo step: the reader moved a slider, and did not hide anything.
+    fn follow_arc_isolation(&mut self, cx: &mut ViewCx) {
+        if self.arcs.iter().any(|arc| arc.trajectory.isolating_plates || arc.trajectory.isolating_zones) {
+            self.isolate_by_arcs(cx);
+        }
+    }
+
+    fn isolate_by_arcs(&mut self, cx: &mut ViewCx) {
         let mut hit_zones: HashSet<String> = HashSet::new();
         let mut hit_plates: HashSet<PlateKeyParts> = HashSet::new();
         for cast in self.arcs.iter().map(|arc| &arc.trajectory) {
@@ -728,10 +787,6 @@ impl ViewportModel {
             }
         }
 
-        self.undo_stack.push(VisibilitySnapshot {
-            part_visibility: self.part_visibility.clone(),
-            plate_visibility: self.plate_visibility.clone(),
-        });
         self.part_visibility.clear();
         self.mesh_seed.armor = false;
         self.plate_visibility.clear();
@@ -757,6 +812,8 @@ impl ViewportModel {
                 .collect();
         }
         self.reupload_current_armor(cx);
+        // A change of visibility like any other, so a synced pane follows it.
+        cx.emit(ViewportChange::Settings);
         cx.notify();
     }
 
@@ -937,8 +994,8 @@ impl ArmorViewportState {
 
     /// Keeps a cast shell and selects it. `None` once the state is gone.
     #[cfg(test)]
-    pub fn add_arc(self, approach: Vec3, trajectory: trajectory::Trajectory) -> Option<ArcId> {
-        self.update(|this, cx| this.add_arc(approach, trajectory, cx))
+    pub fn add_arc(self, aim: Vec3, approach: Vec3, trajectory: trajectory::Trajectory) -> Option<ArcId> {
+        self.update(|this, cx| this.add_arc(aim, approach, trajectory, cx))
     }
 
     pub fn arcs(self) -> Vec<ArcSummary> {
@@ -1065,8 +1122,8 @@ mod tests {
     fn a_cast_arc_is_selected_and_a_second_toggle_deselects_it() {
         let mut model = ViewportModel::new();
         let mut cx = ViewCx::for_test();
-        let first = model.add_arc(Vec3::x(), cast(8.0), &mut cx);
-        let second = model.add_arc(Vec3::x(), cast(12.0), &mut cx);
+        let first = model.add_arc(Vec3::zeros(), Vec3::x(), cast(8.0), &mut cx);
+        let second = model.add_arc(Vec3::zeros(), Vec3::x(), cast(12.0), &mut cx);
         assert_eq!(model.selected_arc(), Some((second, Km::new(12.0))));
 
         model.toggle_arc_selection(first, &mut cx);
@@ -1080,8 +1137,8 @@ mod tests {
     fn removing_the_selected_arc_clears_the_selection() {
         let mut model = ViewportModel::new();
         let mut cx = ViewCx::for_test();
-        let first = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
-        let second = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
+        let first = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
+        let second = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
 
         model.remove_arc(first, &mut cx);
         assert_eq!(model.selected_arc().map(|(id, _)| id), Some(second));
@@ -1094,8 +1151,8 @@ mod tests {
     fn isolating_plates_withdraws_zones_and_back() {
         let mut model = ViewportModel::new();
         let mut cx = ViewCx::for_test();
-        let first = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
-        let second = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
+        let first = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
+        let second = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
 
         model.isolate_arc(first, Isolate::Zones, true, &mut cx);
         model.isolate_arc(first, Isolate::Plates, true, &mut cx);
@@ -1116,11 +1173,11 @@ mod tests {
     fn a_waiting_arc_adopts_the_cast_shell_and_a_fired_one_keeps_its_own() {
         let mut model = ViewportModel::new();
         let mut cx = ViewCx::for_test();
-        let waiting = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
+        let waiting = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
         model.set_cast_shell(Some(ship("first")), &mut cx);
-        let fired = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
+        let fired = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
         model.set_cast_shell(None, &mut cx);
-        let late = model.add_arc(Vec3::x(), cast(10.0), &mut cx);
+        let late = model.add_arc(Vec3::zeros(), Vec3::x(), cast(10.0), &mut cx);
 
         model.set_cast_shell(Some(ship("second")), &mut cx);
 

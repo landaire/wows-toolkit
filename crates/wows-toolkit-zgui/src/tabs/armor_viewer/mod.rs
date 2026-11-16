@@ -231,12 +231,13 @@ fn cycle_options_tab(workspace: ArmorWorkspace, ev: &mut EventCx<'_, events::Key
 }
 
 /// Opens what the palette and replay viewports ask for, once the ship data has loaded: a ship
-/// asked for before that waits rather than being dropped.
+/// asked for before that waits rather than being dropped. Once the data has failed to load nothing
+/// can be opened, so what waits is dropped.
 fn take_requests(shell: Shell, workspace: ArmorWorkspace) {
     let library = workspace.library;
     let waiting = StoredValue::new_local(Vec::<Waiting>::new());
     let requests = RenderEffect::new(move |_| {
-        let mut taken: Vec<Waiting> = shell
+        let taken: Vec<Waiting> = shell
             .palette
             .take_requests(AppTab::ArmorViewer)
             .into_iter()
@@ -246,10 +247,24 @@ fn take_requests(shell: Shell, workspace: ArmorWorkspace) {
                     Waiting::Nothing
                 }
             })
+            .chain(library.take_feed().into_iter().map(Waiting::Feed))
             .collect();
-        taken.extend(library.take_feed().into_iter().map(Waiting::Feed));
+        if library.failed() {
+            if !taken.is_empty() {
+                tracing::warn!("armor viewer: the ship data failed to load, so {} requests are dropped", taken.len());
+            }
+            waiting.set_value(Vec::new());
+            return;
+        }
         if !taken.is_empty() {
-            waiting.update_value(|waiting| waiting.extend(taken));
+            waiting.update_value(|waiting| {
+                for asked in taken {
+                    match asked {
+                        Waiting::Feed(feed) => push_waiting_feed(waiting, feed),
+                        asked => waiting.push(asked),
+                    }
+                }
+            });
         }
         if library.ready().is_none() {
             return;
@@ -262,6 +277,7 @@ fn take_requests(shell: Shell, workspace: ArmorWorkspace) {
                     workspace.show_with_hits(source, *shown, seek)
                 }
                 Waiting::Feed(ViewerFeed::Followed { source, followed }) => workspace.follow_hits(source, followed),
+                Waiting::Feed(ViewerFeed::Renamed { source, shown }) => workspace.rename_incoming(source, *shown),
                 Waiting::Nothing => {}
             }
         }
@@ -274,6 +290,19 @@ enum Waiting {
     Open(String, String),
     Feed(ViewerFeed),
     Nothing,
+}
+
+/// Holds `feed` after the rest, keeping only each viewport's latest position as the library does.
+fn push_waiting_feed(waiting: &mut Vec<Waiting>, mut feed: ViewerFeed) {
+    if let ViewerFeed::Followed { source, followed } = &mut feed
+        && let Some(at) = waiting.iter().position(
+            |held| matches!(held, Waiting::Feed(ViewerFeed::Followed { source: from, .. }) if from == source),
+        )
+        && let Waiting::Feed(ViewerFeed::Followed { followed: earlier, .. }) = waiting.remove(at)
+    {
+        followed.supersede(earlier);
+    }
+    waiting.push(Waiting::Feed(feed));
 }
 
 /// Keeps every pane firing the checker's ship, and the checker reading the plate under the pointer.

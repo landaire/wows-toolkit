@@ -375,8 +375,8 @@ fn a_marker_selects_its_arc_for_editing_and_removes_it() {
     assert!(!shown(&window, "armor-arc-markers"), "nothing is cast yet");
 
     let viewport = mounted.viewport;
-    let first = viewport.add_arc(Vec3::x(), cast_from(10.0)).expect("the viewport takes an arc");
-    viewport.add_arc(Vec3::x(), cast_from(12.0)).expect("the viewport takes an arc");
+    let first = viewport.add_arc(Vec3::zeros(), Vec3::x(), cast_from(10.0)).expect("the viewport takes an arc");
+    viewport.add_arc(Vec3::zeros(), Vec3::x(), cast_from(12.0)).expect("the viewport takes an arc");
     window.advance(Duration::from_millis(100));
     assert_eq!(selected(&mut window, "armor-arc-marker-1"), Some(true), "a new arc opens for editing");
     assert_eq!(selected(&mut window, "armor-arc-marker-0"), Some(false));
@@ -416,7 +416,7 @@ fn the_trajectory_section_prompts_a_cast_while_it_has_no_arc() {
     assert!(window.bounds(prompt).is_some_and(|bounds| bounds.size.height.0 > 0.0), "and takes up room");
 
     let viewport = mounted.viewport;
-    viewport.add_arc(Vec3::x(), cast_from(10.0)).expect("the viewport takes an arc");
+    viewport.add_arc(Vec3::zeros(), Vec3::x(), cast_from(10.0)).expect("the viewport takes an arc");
     window.advance(Duration::from_millis(100));
     assert!(!shown(&window, "armor-trajectory-empty"), "an arc replaces the prompt");
 

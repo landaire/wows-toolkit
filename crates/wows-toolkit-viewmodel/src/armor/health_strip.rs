@@ -82,7 +82,7 @@ mod tests {
             .iter()
             .map(|(at, health, max)| (GameClock(*at), HealthSnapshot { health: *health, max_health: *max }))
             .collect();
-        ShipShotTimeline { hits: Vec::new(), health_history }
+        ShipShotTimeline { hits: Vec::new(), health_history, hull: None }
     }
 
     #[test]

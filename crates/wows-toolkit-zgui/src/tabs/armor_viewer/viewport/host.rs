@@ -31,6 +31,7 @@ use zgui::surface::SurfaceRenderer;
 use zgui::surface::wgpu;
 
 use super::model::GpuState;
+use super::model::PendingArmor;
 use super::model::SceneDevice;
 use super::model::ViewportModel;
 use super::state::ArmorViewportState;
@@ -454,7 +455,12 @@ impl ViewportModel {
         // The textures were made on the device being replaced.
         self.hull_textures.clear();
         match self.pending_armor.take() {
-            Some((armor, layer)) => self.upload_armor_now(armor, layer, cx),
+            Some(PendingArmor { armor, layer, copied }) => {
+                self.upload_armor_now(armor, layer, cx);
+                if let Some(view) = copied {
+                    self.adopt_view(view, cx);
+                }
+            }
             None => self.reupload_current_armor(cx),
         }
         // A comparison asked for while there was no device found no hull, and did nothing.
