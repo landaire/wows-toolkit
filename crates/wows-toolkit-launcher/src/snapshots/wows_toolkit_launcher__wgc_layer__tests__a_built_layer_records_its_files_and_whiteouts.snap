@@ -1,0 +1,88 @@
+---
+source: crates/wows-toolkit-launcher/src/wgc_layer.rs
+assertion_line: 783
+expression: "std::fs::read_to_string(dir.join(MANIFEST_FILE)).unwrap()"
+---
+{
+  "locale_version": "15.10.0.0.13567617",
+  "parts": [
+    {
+      "name": "client",
+      "version": "15.10.0.0.13533378"
+    },
+    {
+      "name": "hotfix",
+      "version": "15.10.0.0.13533378"
+    },
+    {
+      "name": "locale",
+      "version": "15.10.0.0.13567617"
+    },
+    {
+      "name": "sdcontent",
+      "version": "15.10.0.0.13533378"
+    }
+  ],
+  "builds": [
+    13357625,
+    13533378
+  ],
+  "files": [
+    {
+      "path": "platform64.dll",
+      "size": 14,
+      "sha256": "d3b87b8ff4f333912a56574d836d517d252963fe8405a9bc291f3246942e251b"
+    },
+    {
+      "path": "wgc_api.dll",
+      "size": 11,
+      "sha256": "da5f3c1d1bec3a2781de2fde992797cee26fbed41d5b9434a274b07c019d2746"
+    },
+    {
+      "path": "bin/13357625/bin64/platform64.dll",
+      "size": 33,
+      "sha256": "0873b679c066691fe0cd6498462f972238f7033c0316b5361d9dbeb3aa4f9e39"
+    },
+    {
+      "path": "bin/13357625/bin64/wgc_api.dll",
+      "size": 30,
+      "sha256": "3f46f220d93925bbd8601ad4266a0a8c9903d91a6634d7260c2302daa3b40eb0"
+    },
+    {
+      "path": "bin/13357625/res/scripts_config.xml",
+      "size": 35,
+      "sha256": "a4d39ce26a00beab286f3c72984b595bc70435171641f6c57fed35aa60f2a6b8"
+    },
+    {
+      "path": "bin/13357625/res/engine_config.xml",
+      "size": 34,
+      "sha256": "c33641efdffc9037c3f888750069f810e2ef48aacce4d8f2e7954e2a47cfc6f3"
+    },
+    {
+      "path": "bin/13533378/bin64/platform64.dll",
+      "size": 33,
+      "sha256": "26157b414d2d65b5b55871a0b7a3b575dd0e00d22653f124ed065ff538a9f188"
+    },
+    {
+      "path": "bin/13533378/bin64/wgc_api.dll",
+      "size": 30,
+      "sha256": "bd1ddd6ec5b9bed89579a70a5151f907935594fcda0440b14b81a1a329d5071f"
+    },
+    {
+      "path": "bin/13533378/res/scripts_config.xml",
+      "size": 35,
+      "sha256": "afb1491a2035e780989528b9c9e8b820547999caa3972615dbff8c85532e3292"
+    },
+    {
+      "path": "bin/13533378/res/engine_config.xml",
+      "size": 34,
+      "sha256": "198a3109caaa4b7b69a0fa19a127eacd24378a4b6d432c63c14d2892b168d03d"
+    }
+  ],
+  "whiteouts": [
+    "steam_api64.dll",
+    "currentrealm.txt",
+    "bin/13357625/bin64/steam_api64.dll",
+    "bin/13533378/bin64/steam_api64.dll"
+  ]
+}

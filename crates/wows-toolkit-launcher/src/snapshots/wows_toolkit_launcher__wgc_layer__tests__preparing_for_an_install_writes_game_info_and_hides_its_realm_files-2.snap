@@ -1,0 +1,29 @@
+---
+source: crates/wows-toolkit-launcher/src/wgc_layer.rs
+assertion_line: 620
+expression: "std::fs::read_to_string(dir.join(\"delta/game_info.xml\")).unwrap()"
+---
+<?xml version="1.0" encoding="utf-8"?>
+<protocol name="game_info" version="2.16" wgc_publisher_id="wargaming">
+    <game>
+        <id>WOWS.WW.PRODUCTION</id>
+        <index>0</index>
+        <installed>true</installed>
+        <localization>EN</localization>
+        <content_localizations>
+            <content_localization realm="asia">de</content_localization>
+            <content_localization realm="eu">de</content_localization>
+            <content_localization realm="na">de</content_localization>
+        </content_localizations>
+        <client_type>high</client_type>
+        <update_urls>
+            <value>https://wgus-eu.wargaming.net/</value>
+        </update_urls>
+        <part_versions>
+            <version name="client" installed="15.10.0.0.13533378" available="15.10.0.0.13533378"/>
+            <version name="hotfix" installed="15.10.0.0.13533378" available="15.10.0.0.13533378"/>
+            <version name="locale" installed="15.10.0.0.13567617" available="15.10.0.0.13567617"/>
+            <version name="sdcontent" installed="15.10.0.0.13533378" available="15.10.0.0.13533378"/>
+        </part_versions>
+    </game>
+</protocol>

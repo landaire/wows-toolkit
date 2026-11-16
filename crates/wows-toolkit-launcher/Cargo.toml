@@ -24,6 +24,8 @@ rand = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 rootcause = { workspace = true }
 serde.workspace = true
+serde_json.workspace = true
+sha2 = { workspace = true }
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 tracing.workspace = true
@@ -34,5 +36,4 @@ test-support = []
 
 [dev-dependencies]
 insta = { workspace = true }
-serde_json.workspace = true
 tempfile = "3"

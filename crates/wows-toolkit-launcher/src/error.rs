@@ -116,6 +116,48 @@ pub enum ReplayCarryError {
     GameRunning(#[from] wows_game_settings::GameRunning),
 }
 
+/// Why the WGC layer for a Steam install could not be found or built.
+#[derive(Debug, Error)]
+pub enum WgcLayerError {
+    #[error("could not ask WG's update service for the Game Center files: {0}")]
+    Catalog(wgc_catalog::error::CatalogError),
+    #[error("WG's update service lists no locale package for World of Warships")]
+    NoLocalePart,
+    #[error("WG's update service lists no client build for World of Warships")]
+    NoClientPart,
+    #[error("WG offers Game Center files for build {offered}, but this install is build {build}")]
+    NoLayerForBuild { build: GameBuild, offered: GameBuild },
+    #[error("the locale package has no web seed to download from")]
+    NoWebSeed,
+    #[error("the locale package has no torrent to download from")]
+    NoTorrent,
+    #[error("the locale torrent does not list the package WG's update service names")]
+    NoLocalePackage,
+    #[error("the locale package has no {path}")]
+    MissingPackageFile { path: PathBuf },
+    #[error("cannot build the download client: {0}")]
+    Client(reqwest::Error),
+    #[error("could not download the Game Center files: {0}")]
+    Download(#[from] wgc_download::DownloadError),
+    #[error("the locale package has no files for the offered build {offered}")]
+    PackageMissesBuild { offered: GameBuild, composed: Vec<GameBuild> },
+    #[error("{path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("the layer task stopped: {0}")]
+    Task(tokio::task::JoinError),
+}
+
+impl WgcLayerError {
+    /// Attaches `path` to an I/O error.
+    pub(crate) fn io(path: &std::path::Path) -> impl FnOnce(std::io::Error) -> WgcLayerError + '_ {
+        move |source| WgcLayerError::Io { path: path.to_path_buf(), source }
+    }
+}
+
 /// Why part of a dev build's launch diagnostics capture failed.
 #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
 #[derive(Debug, Error)]

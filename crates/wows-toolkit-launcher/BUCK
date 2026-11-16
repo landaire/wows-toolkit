@@ -13,6 +13,8 @@ LAUNCHER_DEPS = [
     "//third-party/rust:reqwest",
     "//third-party/rust:rootcause",
     "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sha2",
     "//third-party/rust:thiserror",
     "//third-party/rust:tokio",
     "//third-party/rust:tracing",
@@ -46,7 +48,6 @@ workspace_test(
     deps = LAUNCHER_DEPS,
     test_deps = [
         "//third-party/rust:insta",
-        "//third-party/rust:serde_json",
         "//third-party/rust:tempfile",
     ],
 )

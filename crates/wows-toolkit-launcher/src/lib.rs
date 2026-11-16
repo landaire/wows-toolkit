@@ -21,6 +21,7 @@ mod runner;
 mod settings;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+mod wgc_layer;
 
 pub use accounts::AccountSession;
 pub use accounts::AccountStatus;
@@ -42,6 +43,7 @@ pub use error::NativeReplayError;
 pub use error::PlayError;
 pub use error::ReplayCarryError;
 pub use error::ReplayLaunchError;
+pub use error::WgcLayerError;
 pub use files::InstallSettingsFiles;
 pub use files::ReplayCarry;
 pub use files::carry_replay_settings;
@@ -65,3 +67,5 @@ pub use settings::LauncherSettings;
 pub use settings::SETTINGS_KEY;
 pub use settings::SavedAccount;
 pub use settings::TermsVersion;
+pub use wgc_layer::LayerOffer;
+pub use wgc_layer::WgcLayer;

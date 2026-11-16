@@ -1,0 +1,21 @@
+---
+source: crates/wows-toolkit-launcher/src/wgc_layer.rs
+assertion_line: 619
+expression: entries(&dir.join(DELTA_DIR))
+---
+- added bin/13357625/bin64/platform64.dll
+- added bin/13357625/bin64/wgc_api.dll
+- added bin/13357625/res/engine_config.xml
+- added bin/13357625/res/scripts_config.xml
+- added bin/13533378/bin64/platform64.dll
+- added bin/13533378/bin64/wgc_api.dll
+- added bin/13533378/res/engine_config.xml
+- added bin/13533378/res/scripts_config.xml
+- added game_info.xml
+- added platform64.dll
+- added wgc_api.dll
+- hidden bin/13357625/bin64/steam_api64.dll
+- hidden bin/13533378/bin64/CurrentRealm.txt
+- hidden bin/13533378/bin64/steam_api64.dll
+- hidden currentrealm.txt
+- hidden steam_api64.dll

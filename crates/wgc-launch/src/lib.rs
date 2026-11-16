@@ -44,6 +44,7 @@ pub use crate::lock::SessionLock;
 pub use crate::overlay::OverlayBackend;
 pub use crate::overlay::OverlayLayers;
 pub use crate::overlay::markers::create_whiteout;
+pub use crate::overlay::markers::is_char_whiteout;
 pub use crate::runner::FirstRunWork;
 pub use crate::runner::ResolvedRunner;
 pub use crate::runner::Runner;

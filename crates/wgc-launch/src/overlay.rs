@@ -389,8 +389,9 @@ pub(crate) mod markers {
         Ok(())
     }
 
+    /// Whether `path` is a 0/0 character device, the whiteout [`create_whiteout`] makes.
     #[cfg(unix)]
-    fn is_char_whiteout(path: &Path) -> bool {
+    pub fn is_char_whiteout(path: &Path) -> bool {
         use std::os::unix::fs::FileTypeExt;
         use std::os::unix::fs::MetadataExt;
 
@@ -398,7 +399,7 @@ pub(crate) mod markers {
     }
 
     #[cfg(not(unix))]
-    fn is_char_whiteout(_path: &Path) -> bool {
+    pub fn is_char_whiteout(_path: &Path) -> bool {
         false
     }
 
