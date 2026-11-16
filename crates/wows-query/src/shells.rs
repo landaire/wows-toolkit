@@ -26,9 +26,11 @@ use crate::builds::BuildAlternative;
 use crate::builds::BuildStat;
 use crate::builds::BuildValue;
 use crate::builds::Builds;
+use crate::builds::Planner;
 use crate::builds::StatUnit;
 use crate::data::GameData;
 use crate::error::QueryError;
+use crate::firing_arcs::round_to;
 use crate::names::Interpretations;
 use crate::ships::Ship;
 use crate::ships::ShipArgs;
@@ -135,7 +137,8 @@ pub struct Shell {
     pub caliber_mm: Millimeters,
 
     /// HE or SAP penetration. AP penetration depends on range and impact angle
-    /// and has no single value.
+    /// and has no single value; [`ShellReport::raw_penetration_by_range`]
+    /// gives it head-on per range.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub penetration_mm: Option<Millimeters>,
 
@@ -194,10 +197,22 @@ pub struct ShellReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub penetration: Option<BuildStat<Millimeters>>,
 
+    /// AP only: raw penetration of a plate struck head-on, every 5 km out to
+    /// the battery's best-fit firing range and at that range. Ranges the
+    /// shell cannot reach are left out.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub raw_penetration_by_range: Vec<RangePenetration>,
+
     /// Set when the ricochet angles differ from those most shells of the
     /// ammo type share.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ricochet_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RangePenetration {
+    pub range_km: Km,
+    pub raw_penetration_mm: Millimeters,
 }
 
 /// HE penetration multipliers Inertia Fuse for HE Shells gives one class.
@@ -243,24 +258,68 @@ struct IfheBuild {
 
 impl GameData {
     /// Main and secondary battery shells of one ship across all its gun
-    /// modules, with HE and SAP penetration on the best-fit build.
+    /// modules, with HE and SAP penetration on the best-fit build and AP raw
+    /// penetration by range.
     pub fn ship_shells(&self, args: &ShipArgs) -> Result<ShipShells, QueryError> {
         let mut interpretations = Interpretations::default();
         let ship = self.resolve_ship(&args.ship, &mut interpretations)?;
         let ifhe = self.ifhe_build(ship.class);
         let standards = self.ricochet_standards();
-        let shells = self
-            .shells(ship)
-            .into_iter()
-            .map(|shell| ShellReport {
+        let shells = self.shells(ship);
+
+        let ranges = if shells.iter().any(|shell| shell.ammo == Ammo::Ap) {
+            Some(self.firing_ranges(&Planner::new(self, ship))?)
+        } else {
+            None
+        };
+
+        let mut reports = Vec::with_capacity(shells.len());
+        for shell in shells {
+            let max_range = ranges.as_ref().and_then(|ranges| match shell.battery {
+                Battery::Main => ranges.main_battery.as_ref(),
+                Battery::Secondary => ranges.secondary.as_ref(),
+            });
+            let raw_penetration_by_range = match max_range {
+                Some(range) if shell.ammo == Ammo::Ap => {
+                    self.raw_penetration_by_range(&shell.param, range.builds.best.value)?
+                }
+                _ => Vec::new(),
+            };
+            reports.push(ShellReport {
                 label: format!("{} {} mm {}", shell.battery.label(), shell.caliber_mm.value(), shell.ammo.label()),
                 penetration: penetration_builds(&shell, ship.tier, ifhe.as_ref()),
+                raw_penetration_by_range,
                 ricochet_note: standards.note(&shell),
                 shell,
-            })
-            .collect();
+            });
+        }
 
-        Ok(ShipShells { interpretations, ship: ship.summary(), shells })
+        Ok(ShipShells { interpretations, ship: ship.summary(), shells: reports })
+    }
+
+    /// Head-on raw penetration of the AP shell `param` every 5 km up to
+    /// `max_range`, and at `max_range` when it is not a multiple of 5 km.
+    fn raw_penetration_by_range(&self, param: &str, max_range: Km) -> Result<Vec<RangePenetration>, QueryError> {
+        const STEP_KM: f32 = 5.0;
+
+        let mut ranges: Vec<Km> =
+            (1..).map(|step| step as f32 * STEP_KM).take_while(|km| *km <= max_range.value()).map(Km::new).collect();
+        if max_range.value() % STEP_KM != 0.0 {
+            ranges.push(max_range);
+        }
+
+        let mut rows = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            let Some(impact) = self.shell_impact(param, range)? else {
+                continue;
+            };
+            rows.push(RangePenetration {
+                range_km: range,
+                raw_penetration_mm: Millimeters::new(round_to(impact.raw_penetration.value(), 10.0)),
+            });
+        }
+
+        Ok(rows)
     }
 
     /// Where the shell of GameParams name `param` lands when fired at

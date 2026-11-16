@@ -43,6 +43,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Show a ship's value when the pointer rests on a point or bar in a stats chart, with the game for a point, and mark it on the plot
 - *(wows-query)* List the F key special ability in ship_overview
 - *(wows-query)* Resolve ship names written with a leading "the", and September as Sete de Setembro
+- *(wows-query)* List AP raw penetration every 5 km out to firing range in ship_shells
 
 ### Bug Fixes
 
