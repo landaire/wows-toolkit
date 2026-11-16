@@ -44,6 +44,9 @@ use wows_toolkit_replay_data::replay_folder::WatchPlan;
 use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_services::supervision::NextStep;
 use wows_toolkit_services::supervision::RestartPolicy;
+use wows_toolkit_viewmodel::listing_row::RowFreshness;
+use wows_toolkit_viewmodel::listing_row::file_mtime_secs;
+use wows_toolkit_viewmodel::listing_row::row_freshness;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RenderEffect;
@@ -110,6 +113,9 @@ pub enum ListingEvent {
     Appeared(PathBuf),
     /// A listed replay was written again and read again.
     Changed(PathBuf),
+    /// Listed replays the game wrote again after the index read them, such as a battle whose
+    /// results arrived while the app was closed.
+    Stale(Vec<PathBuf>),
     Removed(PathBuf),
     WatchStopped {
         cause: WatchStopCause,
@@ -175,6 +181,9 @@ struct Work {
     known_groups: HashSet<NodeKey>,
     /// The index scope of each dropped replay, which is its own directory's.
     dropped_scopes: HashMap<PathBuf, SourceScope>,
+    /// Replays already sent to be indexed again, so a row the index cannot freshen is not read
+    /// on every reload of the summaries.
+    reindex_asked: HashSet<PathBuf>,
 }
 
 impl Listing {
@@ -220,6 +229,7 @@ impl Listing {
                 restart: None,
                 known_groups: HashSet::new(),
                 dropped_scopes: HashMap::new(),
+                reindex_asked: HashSet::new(),
             }),
         };
 
@@ -553,6 +563,8 @@ impl Listing {
             .with_untracked(|source| matches!(source, ListingSource::Dropped(_)))
             .then(|| self.work.with_value(|work| work.dropped_scopes.keys().cloned().collect()));
         let services = self.work.with_value(|work| work.services);
+        let listed_paths: Vec<PathBuf> =
+            self.files.with_untracked(|files| files.iter().map(|file| file.path.clone()).collect());
         let Some(pool) = services.settings.pool() else { return };
         let generation = self.work.try_update_value(|work| {
             work.summaries_generation += 1;
@@ -573,7 +585,12 @@ impl Listing {
                                 .filter(|(path, _)| listed.as_ref().is_none_or(|listed| listed.contains(path))),
                         );
                     }
-                    Ok::<_, IndexError>(summaries)
+                    // A file written since the index read it holds what the index lacks.
+                    let stale: Vec<PathBuf> = listed_paths
+                        .into_iter()
+                        .filter(|path| row_freshness(summaries.get(path), file_mtime_secs(path)) == RowFreshness::Stale)
+                        .collect();
+                    Ok::<_, IndexError>((summaries, stale))
                 })
                 .await;
             let current = self.work.try_with_value(|work| work.summaries_generation == generation);
@@ -581,12 +598,38 @@ impl Listing {
                 return;
             }
             match read {
-                Ok(Ok(summaries)) => self.summaries.set(summaries),
+                Ok(Ok((summaries, stale))) => {
+                    self.summaries.set(summaries);
+                    self.reindex(stale);
+                }
                 Ok(Err(err)) => tracing::warn!(error = %err, "the listing's index facts could not be read"),
                 Err(err) => tracing::warn!(error = %err, "the listing's index facts could not be read"),
             }
         });
         self.work.update_value(|work| work.summaries = Some(task));
+    }
+
+    /// Asks for `stale` to be indexed again, leaving out any replay asked for before.
+    fn reindex(self, stale: Vec<PathBuf>) {
+        // Without game data nothing can be read, and a later load of the summaries asks again. A
+        // dropped listing writes nothing to the index.
+        let readable = self.work.with_value(|work| work.services.game_data.cache_untracked()).is_some();
+        if !readable || self.index_scope().is_none() {
+            return;
+        }
+
+        let asked = self.work.try_update_value(|work| {
+            stale.into_iter().filter(|path| work.reindex_asked.insert(path.clone())).collect::<Vec<_>>()
+        });
+        let Some(asked) = asked.filter(|asked| !asked.is_empty()) else { return };
+
+        self.say(ListingEvent::Stale(asked));
+    }
+
+    /// Whether `path` was sent to be indexed again.
+    #[cfg(test)]
+    pub fn asked_to_reindex(self, path: &Path) -> bool {
+        self.work.with_value(|work| work.reindex_asked.contains(path))
     }
 
     /// Drops `path`, which left the directory.

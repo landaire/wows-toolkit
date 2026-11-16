@@ -1230,6 +1230,39 @@ pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
     });
 }
 
+/// Indexes again the replays of tab `id` the game wrote after the index read them, one after
+/// another, then shows what the index learned.
+pub fn reindex_stale(control: BrowserControl, id: FolderId, paths: Vec<PathBuf>) {
+    let services = control.shell().services();
+    let Some(game_data) = services.game_data.cache_untracked() else { return };
+    let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else { return };
+    let Some(listing) = control.listing(id) else { return };
+    let Some(live_root) = paths.first().and_then(|path| path.parent()).map(Path::to_path_buf) else { return };
+    let Some(scope) = listing.index_scope() else { return };
+    let proxy = proxy_url(services);
+
+    control.work.spawn(async move {
+        let indexed = long_job(move || -> Result<bool, IndexOneError> {
+            let now = jiff::Timestamp::now();
+            let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
+            let rating = owner_rating(&runtime, &proxy);
+            for path in &paths {
+                let indexed =
+                    index_one(&runtime, &pool, path, &game_data, rating.as_ref(), source, now, IndexWriteMode::Incremental);
+                if let Err(err) = indexed {
+                    tracing::warn!(path = %path.display(), "replay index: a rewritten replay was not indexed again: {err}");
+                }
+            }
+            Ok(rating.is_some())
+        })
+        .await;
+        match indexed {
+            Ok(rated) => landed_indexed(control, id, rated),
+            Err(err) => tracing::warn!("replay index: the rewritten replays were not indexed again: {err}"),
+        }
+    });
+}
+
 /// Shows what the index learned of a battle that landed in tab `id`, whose row is listed already
 /// but reads its chips from the summaries.
 fn landed_indexed(control: BrowserControl, id: FolderId, rated: bool) {

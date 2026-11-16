@@ -428,12 +428,21 @@ fn a_replay_landing_in_a_pinned_folder_is_indexed_under_its_own_source() {
 /// Writes a battle played in the rating fixture's ship under the Live source rooted at the
 /// install's replays directory, as an index write without a rating table stores it.
 fn store_unrated_battle(control: BrowserControl, install: &tempfile::TempDir) -> PathBuf {
-    let (pool, runtime) = index(control);
     let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
     let path = replays.join("stored.wowsreplay");
+    store_battle(control, &path, None);
+
+    path
+}
+
+/// Writes an unrated battle at `path` under the Live source rooted at its directory, as read when
+/// the file's modification time was `file_mtime`.
+fn store_battle(control: BrowserControl, path: &Path, file_mtime: Option<i64>) {
+    let (pool, runtime) = index(control);
+    let replays = path.parent().expect("the replay is in a directory");
     runtime.block_on(async {
         let now = jiff::Timestamp::now();
-        let source = query::ensure_default_source(&pool, &replays, now).await.expect("the live source is made");
+        let source = query::ensure_default_source(&pool, replays, now).await.expect("the live source is made");
         let arena_id = ArenaId::new(4_100_200_301);
         let indexed = ObjectiveMatch {
             arena_id,
@@ -449,8 +458,8 @@ fn store_unrated_battle(control: BrowserControl, install: &tempfile::TempDir) ->
         let record = ReplayRecord {
             arena_id,
             source_id: source,
-            replay_path: path.clone(),
-            file_mtime: None,
+            replay_path: path.to_path_buf(),
+            file_mtime,
             outcome: MatchOutcome::Win,
             self_account_id: None,
             self_ship_id: Some(FIXTURE_PR_SHIP_ID.into()),
@@ -463,8 +472,45 @@ fn store_unrated_battle(control: BrowserControl, install: &tempfile::TempDir) ->
         };
         query::upsert_record(&pool, &record).await.expect("the record inserts");
     });
+}
 
-    path
+/// A battle the game rewrote, as it does when the results of a battle the player left arrive, is
+/// sent to the index again: the write roots the Live source, which nothing else here makes.
+#[test]
+fn a_rewritten_battle_is_indexed_again() {
+    let (mut window, control) = open();
+    let (pool, runtime) = own_index(control);
+    let install = adopt_install(control, &[FIXTURES[0]]);
+    settle_in_real_time(&mut window);
+    let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
+    let live = || runtime.block_on(query::live_source_id(&pool)).expect("the live source reads");
+    assert_eq!(live(), None, "nothing has made the Live source yet");
+
+    simulated_watch::report(&replays, DirChange::Changed(replays.join(FIXTURES[0])));
+
+    settle_until(&mut window, "the rewritten battle is indexed again", |_| live().is_some());
+}
+
+/// A listed battle whose file changed after the index read it, as when its results arrived while
+/// the app was closed, is sent to the index again once the listing reads the index. One whose
+/// file is as the index read it is left alone.
+#[test]
+fn a_battle_changed_since_it_was_indexed_is_indexed_again() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[FIXTURES[0], FIXTURES[1]]);
+    settle_in_real_time(&mut window);
+    let listing = control.install_listing().expect("the install has a listing");
+    let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
+    let changed = replays.join(FIXTURES[0]);
+    let unchanged = replays.join(FIXTURES[1]);
+    store_battle(control, &changed, Some(1));
+    store_battle(control, &unchanged, wows_toolkit_viewmodel::listing_row::file_mtime_secs(&unchanged));
+
+    listing.load_summaries();
+
+    settle_until(&mut window, "the changed battle is sent to the index", |_| listing.asked_to_reindex(&changed));
+    assert!(!listing.asked_to_reindex(&unchanged), "the unchanged battle is not read again");
 }
 
 /// A battle that lands is listed at once, and its row reads what the index stored of it as soon

@@ -987,8 +987,11 @@ impl BrowserControl {
             }
             ListingEvent::Changed(path) => {
                 self.note_unseen(id, path.clone(), false, motion);
+                // Results the game wrote after the battle reach the row, its group and search.
+                actions::replay_landed(self, id, &path);
                 events.send(ReplayBrowserEvent::ReplayChanged(path));
             }
+            ListingEvent::Stale(paths) => actions::reindex_stale(self, id, paths),
             ListingEvent::Removed(path) => {
                 self.forget_unseen(id, &path);
                 events.send(ReplayBrowserEvent::ReplayRemoved(path));
