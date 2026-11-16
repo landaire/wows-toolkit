@@ -61,6 +61,15 @@ impl Settings {
         self.state.set(SettingsState::Loaded(Box::new(settings)));
     }
 
+    /// Writes this window's saves to an empty database of its own: a test that changes a setting
+    /// or the session must not change what other windows in the process read.
+    #[cfg(test)]
+    pub fn use_private_database_for_test(self) {
+        let runtime = self.runtime.get_value().expect("the test runtime is up");
+        let pool = runtime.block_on(wows_toolkit_config::test_pool());
+        self.writer.set_value(Some(SettingsWriter::new(pool)));
+    }
+
     pub fn fail(self, reason: String) {
         self.state.set(SettingsState::Failed(reason));
     }

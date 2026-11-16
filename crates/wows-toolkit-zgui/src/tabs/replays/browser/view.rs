@@ -37,6 +37,7 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::chip_hue;
 use wows_toolkit_viewmodel::personal_rating::chip_text;
 use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
+use wows_toolkit_viewmodel::stats::session::SessionScope;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -71,6 +72,7 @@ use zgui_ui::AlertDialogHeaderProps;
 use zgui_ui::AlertDialogProps;
 use zgui_ui::AlertDialogTitleProps;
 use zgui_ui::MenuItemProps;
+use zgui_ui::MenuLabelProps;
 use zgui_ui::MenuSeparatorProps;
 
 use crate::icons::AppIconProps;
@@ -93,6 +95,7 @@ use crate::tabs::replays::browser::tree::BrowserTree;
 use crate::tabs::replays::browser::tree::LeafMc;
 use crate::tabs::replays::browser::tree::LeafRow;
 use crate::tabs::replays::browser::tree::NodeKey;
+use crate::tabs::stats::session::opened_label;
 use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-replay-listing";
@@ -651,6 +654,8 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
             );
         })
     };
+    let unavailable = session_unavailable();
+    let session_off = unavailable.is_some();
 
     view! {
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToVideo(paths.clone()))) {
@@ -666,12 +671,13 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
             {t!("ui.replay.context.copy_paths", count = count).into_owned()}
         }
-        MenuItem(on_select = set_session) {
+        MenuItem(disabled = session_off, on_select = set_session) {
             {label("ui.replay.context.set_session_stats_one", "ui.replay.context.set_session_stats_many")}
         }
-        MenuItem(on_select = send(ReplayBrowserEvent::SessionStats { paths, replace: false })) {
+        MenuItem(disabled = session_off, on_select = send(ReplayBrowserEvent::SessionStats { paths, replace: false })) {
             {label("ui.replay.context.add_session_stats_one", "ui.replay.context.add_session_stats_many")}
         }
+        {unavailable.map(session_unavailable_line)}
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| events.force_reindex(listing, &reindexed, Confirm::Always))) {
             {force_reindex_label(count)}
@@ -787,6 +793,9 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
             }
         }
     });
+    let unavailable = session_unavailable();
+    let session_off = unavailable.is_some();
+    let added = session.clone();
 
     AnyView::new(view! {
         {batch_items.map(IntoView::into_view)}
@@ -795,8 +804,9 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         {item(t!("ui.replay.context.render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
         {single_items.map(IntoView::into_view)}
         MenuSeparator()
-        MenuItem(on_select = set_session) {{set_label}}
-        {item(add_label, ReplayBrowserEvent::SessionStats { paths: session.clone(), replace: false })}
+        MenuItem(disabled = session_off, on_select = set_session) {{set_label}}
+        MenuItem(disabled = session_off, on_select = UnsyncCallback::new(move |()| events.send(ReplayBrowserEvent::SessionStats { paths: added.clone(), replace: false }))) {{add_label}}
+        {unavailable.map(session_unavailable_line)}
         MenuItem(on_select = reindex) {{force_reindex_label(count)}}
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), std::slice::from_ref(&copied)))) {
@@ -819,6 +829,23 @@ fn force_reindex_label(count: usize) -> String {
     } else {
         t!("ui.reindex.context_many", count = count).into_owned()
     }
+}
+
+/// Why Set and Add are not offered: they change the saved session, which a session since the app
+/// opened leaves alone. `None` while the session is the saved one.
+fn session_unavailable() -> Option<String> {
+    let session = Services::current().session;
+    if session.scope_untracked() != SessionScope::SinceAppOpened {
+        return None;
+    }
+
+    Some(t!("ui.stats.session_set_add_unavailable", time = opened_label(session.opened())).into_owned())
+}
+
+fn session_unavailable_line(reason: String) -> AnyView {
+    AnyView::new(view! {
+        MenuLabel(attr:data-testid = "replay-session-unavailable") {{reason}}
+    })
 }
 
 /// Asks before running `then`, with a Cancel beside it.

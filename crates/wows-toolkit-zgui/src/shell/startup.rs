@@ -125,6 +125,7 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
     let check_for_updates = settings.check_for_updates;
     let answered = first_run::Answered::of(&settings);
     services.settings.adopt(settings, pool);
+    services.session.read_saved();
     if let Some(on) = debug_mode_chosen {
         shell.save_debug_mode(on);
     }

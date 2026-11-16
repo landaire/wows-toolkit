@@ -9,6 +9,7 @@ mod overview;
 #[cfg(test)]
 mod panel_tests;
 mod rating;
+pub mod session;
 mod ships;
 
 use std::collections::BTreeSet;
@@ -58,6 +59,7 @@ use wows_toolkit_viewmodel::stats::sample;
 use wows_toolkit_viewmodel::stats::sample::SampleCatalog;
 use wows_toolkit_viewmodel::stats::saved_charts;
 use wows_toolkit_viewmodel::stats::saved_charts::CHARTS_SETTINGS_KEY;
+use wows_toolkit_viewmodel::stats::session::SessionScope;
 use wows_toolkit_viewmodel::stats::setting_keys;
 use zgui::component;
 use zgui::css;
@@ -126,6 +128,10 @@ use crate::shell::tabs::panel_side_name;
 use crate::tabs::dock_menu_strings;
 use crate::tabs::stats::chart::StatsChartProps;
 use crate::tabs::stats::overview::StatsOverviewProps;
+use crate::tabs::stats::session::SessionScopeChoiceProps;
+use crate::tabs::stats::session::opened_label;
+use crate::tabs::stats::session::scope_hint;
+use crate::tabs::stats::session::session_state;
 use crate::tabs::stats::ships::StatsShipsProps;
 use crate::tabs::tab_menu_strings;
 
@@ -207,6 +213,24 @@ const CSS: &str = css!(
     }
     .wt-stats__modes[data-narrowed=true] {
         background-color: var(--zui-color-secondary);
+    }
+    .wt-stats__empty {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 24px;
+        color: var(--wt-color-text-dim);
+    }
+    .wt-stats__empty-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--lui-color-text);
+    }
+    .wt-stats__empty-text {
+        max-width: 480px;
     }"
 );
 
@@ -221,27 +245,24 @@ pub enum StatsScope {
     Sample,
 }
 
-/// The recorded session as the Stats tab holds it, for a [`StatsBody`] that clears its games and
-/// saves its filters.
+/// The session's filters, for a [`StatsBody`] that shows the session, clears its games and saves its
+/// filters. The games are [`crate::services::Session`]'s.
 #[derive(Clone, Copy)]
 pub struct SessionStats {
-    pub games: RwSignal<Arc<[PerGameStat]>>,
     pub filters: RwSignal<StatsFilters>,
     /// Whether the reader changed a filter, which then wins over the saved ones a late load reads.
     pub filters_edited: StoredValue<bool>,
 }
 
-/// The Stats tab over the recorded session, read from the config database once it is open.
+/// The Stats tab over the session, whose saved filters are read once the config database is open.
 #[component]
 pub fn StatsTab() -> impl IntoView {
     let services = Services::current();
-    let session = SessionStats {
-        games: RwSignal::new(Arc::from(Vec::new())),
-        filters: RwSignal::new(StatsFilters::default()),
-        filters_edited: StoredValue::new(false),
-    };
+    let session =
+        SessionStats { filters: RwSignal::new(StatsFilters::default()), filters_edited: StoredValue::new(false) };
     let personal_rating = RwSignal::new(None::<Arc<PersonalRatingData>>);
     let load_started = StoredValue::new(false);
+    let saved_filters = RwSignal::new(None::<StatsFilters>);
 
     // The read waits for the startup settings, which is when the pool opens.
     effect(move |_| {
@@ -252,25 +273,10 @@ pub fn StatsTab() -> impl IntoView {
         let Some(pool) = services.settings.pool() else { return };
         load_started.set_value(true);
         spawn_local(async move {
-            let local = services.on_tokio({
-                let pool = pool.clone();
-                async move { wows_toolkit_services::stats::load_games_and_filters(&pool).await }
-            });
+            let local = services.on_tokio(async move { wows_toolkit_services::stats::load_filters(&pool).await });
             match local.await {
-                Ok((games, mut filters)) => {
-                    // A mode saved for games no longer recorded would hide every game.
-                    let modes = all_match_groups(&games);
-                    let before = filters.game_modes.len();
-                    filters.game_modes.retain(|mode| modes.contains(mode));
-                    session.games.set(Arc::from(games));
-                    if !session.filters_edited.get_value() {
-                        if filters.game_modes.len() != before {
-                            save_filters(services, &filters);
-                        }
-                        session.filters.set(filters);
-                    }
-                }
-                Err(err) => tracing::warn!("stats: the session was not read: {err}"),
+                Ok(filters) => saved_filters.set(Some(filters)),
+                Err(err) => tracing::warn!("stats: the saved filters were not read: {err}"),
             }
             // The expected-values refresh may go to the network; the games show before it lands.
             let rating = services
@@ -283,6 +289,29 @@ pub fn StatsTab() -> impl IntoView {
                 Err(err) => tracing::warn!("stats: the personal rating table was not read: {err}"),
             }
         });
+    });
+
+    // The saved filters apply once the saved session is read too: a mode saved for games no
+    // longer recorded would hide every game. A session since the app opened is still filling, so
+    // its modes say nothing about which saved ones are stale.
+    effect(move |_| {
+        if !services.session.is_read() {
+            return;
+        }
+        let Some(mut filters) = saved_filters.get() else { return };
+        saved_filters.set(None);
+        if session.filters_edited.get_value() {
+            return;
+        }
+        if services.session.scope_untracked() == SessionScope::Manual {
+            let modes = services.session.with_saved(all_match_groups);
+            let before = filters.game_modes.len();
+            filters.game_modes.retain(|mode| modes.contains(mode));
+            if filters.game_modes.len() != before {
+                save_filters(services, &filters);
+            }
+        }
+        session.filters.set(filters);
     });
 
     let sample = RwSignal::new(None::<Arc<[PerGameStat]>>);
@@ -310,7 +339,7 @@ pub fn StatsTab() -> impl IntoView {
         } else {
             StatsBody(
                 scope = StatsScope::Session,
-                games = session.games,
+                games = services.session.games(),
                 personal_rating = personal_rating,
                 session = session,
                 attr:data-testid = "stats-tab"
@@ -569,32 +598,85 @@ pub fn StatsBody(
         })
     };
 
+    let locale = services.locale;
+    let shared = services.session;
+    let since_opened = Signal::derive_local(move || shared.scope() == SessionScope::SinceAppOpened);
     let clear_button = move || {
-        session.map(|session| {
-            let empty = Signal::derive_local(move || session.games.with(|games| games.is_empty()));
+        session.map(|_| {
+            let disabled =
+                Signal::derive_local(move || since_opened.get() || shared.games().with(|games| games.is_empty()));
+            let tip = move || {
+                locale.track();
+                if since_opened.get() {
+                    t!("ui.stats.clear_unavailable_since").into_owned()
+                } else {
+                    t!("ui.stats.clear_tooltip").into_owned()
+                }
+            };
             view! {
                 Tooltip {
                     TooltipTrigger {
-                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = empty, attr:data-testid = "stats-clear", on:click = move |_| {
+                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = disabled, attr:data-testid = "stats-clear", on:click = move |_| {
                             if let Some(shell) = shell {
-                                confirm_clear_session(services, shell, session, clear_error);
+                                confirm_clear_session(services, shell, clear_error);
                             }
                         }) {
                             AppIcon(glyph = Glyph::Eraser)
                             text {{t!("ui.stats.clear").into_owned()}}
                         }
                     }
-                    TooltipContent {{t!("ui.stats.clear_tooltip").into_owned()}}
+                    TooltipContent {{tip}}
                 }
             }
             .into_view()
         })
     };
 
-    let locale = services.locale;
+    let session_controls = move || {
+        session.map(|_| {
+            let state = move || {
+                locale.track();
+                session_state(shared)
+            };
+            let hint = move || {
+                locale.track();
+                scope_hint(shared)
+            };
+            view! {
+                row(class = "wt-stats__group", attr:data-testid = "stats-session") {
+                    Tooltip {
+                        TooltipTrigger {
+                            row(class = "wt-stats__group") {
+                                SessionScopeChoice(test_id = "stats-session-scope")
+                            }
+                        }
+                        TooltipContent {{hint}}
+                    }
+                    text(class = "wt-stats__dim", class = "wt-stats__session-count", attr:data-testid = "stats-session-count") {{state}}
+                }
+                Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
+            }
+            .into_view()
+        })
+    };
+
+    // Only the session says why it is empty: what fills it is the reader's choice of scope.
+    let session_empty =
+        Signal::derive_local(move || session.is_some() && shared.is_read() && games.with(|games| games.is_empty()));
+    let empty_text = move || {
+        locale.track();
+        match shared.scope() {
+            SessionScope::Manual => t!("ui.stats.session_empty_manual").into_owned(),
+            SessionScope::SinceAppOpened => {
+                t!("ui.stats.session_empty_since", time = opened_label(shared.opened())).into_owned()
+            }
+        }
+    };
+
     view! {
         box(class = "wt-stats", {..attrs}) {
             row(class = "wt-stats__bar", attr:data-testid = "stats-filter-bar") {
+                {session_controls}
                 row(class = "wt-stats__group") {
                     Tooltip {
                         TooltipTrigger {
@@ -630,19 +712,26 @@ pub fn StatsBody(
                 {move || clear_error.get().map(|reason| view! { text(class = "wt-stats__error", attr:data-testid = "stats-clear-error") {{reason}} }.into_view())}
                 {clear_button}
             }
-            Dock(
-                state = dock,
-                class = "wt-stats__dock",
-                menu = dock_menu_strings(locale),
-                strings = tab_menu_strings(locale),
-                close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
-                tabs_label = Signal::derive_local(locale.text("ui.tabs.stats")),
-                attr:data-testid = match scope {
-                    StatsScope::Session => "stats-dock",
-                    StatsScope::Directory => "directory-stats-dock",
-                    StatsScope::Sample => "stats-sample-dock",
+            if move || session_empty.get() {
+                column(class = "wt-stats__empty", attr:data-testid = "stats-session-empty") {
+                    text(class = "wt-stats__empty-title") {{move || { locale.track(); t!("ui.stats.session_empty_title").into_owned() }}}
+                    text(class = "wt-stats__empty-text") {{empty_text}}
                 }
-            )
+            } else {
+                Dock(
+                    state = dock,
+                    class = "wt-stats__dock",
+                    menu = dock_menu_strings(locale),
+                    strings = tab_menu_strings(locale),
+                    close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
+                    tabs_label = Signal::derive_local(locale.text("ui.tabs.stats")),
+                    attr:data-testid = match scope {
+                        StatsScope::Session => "stats-dock",
+                        StatsScope::Directory => "directory-stats-dock",
+                        StatsScope::Sample => "stats-sample-dock",
+                    }
+                )
+            }
         }
     }
 }
@@ -677,15 +766,18 @@ fn register_panels(dock: DockState, sources: PanelSources) {
             |_| t!("ui.stats.ships").into_owned(),
             move |_| {
                 let on_clear_ship = UnsyncCallback::new(move |ship: GameParamId| {
-                    if let Some(session) = session {
-                        clear_ship(services, session, clear_error, ship);
+                    if session.is_some() {
+                        clear_ship(services, clear_error, ship);
                     }
                 });
+                // A session since the app opened is not saved, so it has nothing to forget.
+                let clearable =
+                    Signal::derive_local(move || session.is_some() && services.session.scope() == SessionScope::Manual);
                 AnyView::new(view! {
                     StatsShips(
                         games = per_ship,
                         personal_rating = personal_rating,
-                        clearable = session.is_some(),
+                        clearable = clearable,
                         on_clear_ship = on_clear_ship
                     )
                 })
@@ -973,7 +1065,7 @@ fn keep_current_layout(
     persistence.saved_layout.set_value(Some(layout));
 }
 
-/// Writes the filter bar's state to the rows `SessionData::load` reads.
+/// Writes the filter bar's state to the rows `load_filters` reads.
 fn save_filters(services: Services, filters: &StatsFilters) {
     let (limit_enabled, count) = match filters.limit {
         GameLimit::All => (false, None),
@@ -987,14 +1079,9 @@ fn save_filters(services: Services, filters: &StatsFilters) {
     services.settings.save(setting_keys::GAME_MODE_FILTER, &filters.game_modes);
 }
 
-/// Asks before forgetting every recorded game.
-fn confirm_clear_session(
-    services: Services,
-    shell: Shell,
-    session: SessionStats,
-    clear_error: RwSignal<Option<String>>,
-) {
-    if session.games.with_untracked(|games| games.is_empty()) {
+/// Asks before forgetting every game in the saved session.
+fn confirm_clear_session(services: Services, shell: Shell, clear_error: RwSignal<Option<String>>) {
+    if services.session.games().with_untracked(|games| games.is_empty()) {
         return;
     }
     shell.dialogs.open(move |handle| {
@@ -1008,7 +1095,7 @@ fn confirm_clear_session(
                     }
                     AlertDialogFooter {
                         AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
-                        AlertDialogAction(attr:data-testid = "stats-clear-confirm", on:click = move |_| clear_session(services, session, clear_error)) {
+                        AlertDialogAction(attr:data-testid = "stats-clear-confirm", on:click = move |_| clear_session(services, clear_error)) {
                             {t!("ui.stats.clear").into_owned()}
                         }
                     }
@@ -1018,38 +1105,20 @@ fn confirm_clear_session(
     });
 }
 
-/// Forgets every recorded game once the delete has gone through, so a failure does not leave an
-/// empty session that comes back at the next start.
-fn clear_session(services: Services, session: SessionStats, clear_error: RwSignal<Option<String>>) {
-    let Some(pool) = services.settings.pool() else { return };
+fn clear_session(services: Services, clear_error: RwSignal<Option<String>>) {
     spawn_local(async move {
-        let cleared = services.on_tokio(async move { queries::clear_session_stats(&pool).await }).await;
-        match cleared {
-            Ok(Ok(_)) => {
-                clear_error.set(None);
-                session.games.set(Arc::from(Vec::new()));
-            }
-            Ok(Err(err)) => report_clear_failure(clear_error, &err.to_string()),
+        match services.session.clear_saved().await {
+            Ok(()) => clear_error.set(None),
             Err(err) => report_clear_failure(clear_error, &err.to_string()),
         }
     });
 }
 
 /// Forgets one ship's games, which the Ships panel asks for.
-fn clear_ship(services: Services, session: SessionStats, clear_error: RwSignal<Option<String>>, ship: GameParamId) {
-    let Some(pool) = services.settings.pool() else { return };
+fn clear_ship(services: Services, clear_error: RwSignal<Option<String>>, ship: GameParamId) {
     spawn_local(async move {
-        let cleared = services
-            .on_tokio(async move { queries::clear_session_stats_for_ship(&pool, ship.raw() as i64).await })
-            .await;
-        match cleared {
-            Ok(Ok(_)) => {
-                clear_error.set(None);
-                session.games.update(|games| {
-                    *games = games.iter().filter(|game| game.ship_id != ship).cloned().collect();
-                });
-            }
-            Ok(Err(err)) => report_clear_failure(clear_error, &err.to_string()),
+        match services.session.clear_saved_ship(ship).await {
+            Ok(()) => clear_error.set(None),
             Err(err) => report_clear_failure(clear_error, &err.to_string()),
         }
     });

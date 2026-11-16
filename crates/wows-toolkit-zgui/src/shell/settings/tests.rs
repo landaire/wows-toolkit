@@ -21,6 +21,7 @@ use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
+use wows_toolkit_viewmodel::stats::session::SessionScope;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Rect;
@@ -75,6 +76,7 @@ pub(crate) fn test_settings() -> StartupSettings {
         data_sharing: DataSharingMode::Off,
         proxy_url: String::new(),
         auto_load_latest_replay: false,
+        session_scope: SessionScope::Manual,
         output_dir: String::new(),
         armor_defaults: None,
         model_show_armor: true,

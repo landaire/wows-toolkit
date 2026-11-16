@@ -15,6 +15,9 @@ use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSettings;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
+use wows_toolkit_viewmodel::stats::session::AppOpened;
+use wows_toolkit_viewmodel::stats::session::SessionScope;
+use wows_toolkit_viewmodel::stats::setting_keys;
 use zgui::view::AnyView;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
@@ -29,6 +32,9 @@ use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
+use crate::interaction_tests::shell;
+use crate::services::Services;
+use crate::services::saved_for_test;
 
 /// A session over three ships, two modes, solo and division games, oldest first.
 fn sample_games() -> Vec<PerGameStat> {
@@ -66,6 +72,8 @@ fn seed_session() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+        // First: the seed must go to the test storage, never the reader's own database.
+        crate::interaction_tests::returning_reader(&runtime);
         runtime.block_on(async {
             let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
             wows_toolkit_config::queries::clear_session_stats(&pool).await.expect("the session clears");
@@ -78,10 +86,11 @@ fn seed_session() {
     });
 }
 
-/// The shell on the Stats tab over the sample session.
+/// The shell on the Stats tab over the sample session. Seeded first: the shell reads the saved
+/// session as it starts.
 fn open_stats(options: HeadlessOptions) -> HeadlessWindow {
-    let mut window = open_shell(options);
     seed_session();
+    let mut window = open_shell(options);
     let tab = window.by_test_id("stats").expect("the strip has a Stats tab");
     window.click(tab).expect("the Stats tab is clicked");
     settle_in_real_time(&mut window);
@@ -355,6 +364,148 @@ fn the_sample_stats_render_in_dark_and_light() {
 fn the_stats_tab_renders_in_dark_and_light() {
     for (appearance, name) in [(Appearance::Dark, "stats-dark"), (Appearance::Light, "stats-light")] {
         let mut window = open_stats(review_options(appearance));
+        println!("{}", save_shot(&mut window, name).display());
+    }
+}
+
+const YAMATO: u64 = 4_288_675_536;
+
+/// When the run in the session tests opened.
+fn opened() -> AppOpened {
+    AppOpened::new(jiff::civil::date(2026, 11, 16).at(14, 32, 0, 0))
+}
+
+/// A Random battle in the Yamato that started at `game_time`.
+fn yamato_at(game_time: &str, damage: u64, win: bool) -> PerGameStat {
+    PerGameStat {
+        ship_name: "Yamato".to_owned(),
+        ship_id: YAMATO.into(),
+        game_time: game_time.to_owned(),
+        sort_key: wows_toolkit_viewmodel::stats::sortable_game_time(game_time),
+        player_id: 1,
+        damage,
+        spotting_damage: 0,
+        frags: 1,
+        raw_xp: 1_000,
+        base_xp: 700,
+        is_win: win,
+        is_loss: !win,
+        is_draw: false,
+        is_div: false,
+        match_group: "pvp".to_owned(),
+        achievements: Vec::new(),
+        match_contribution: None,
+    }
+}
+
+/// The Stats tab over the sample as the saved session, in a window that saves nothing, with this
+/// run's replays read: one battle that started before the app opened and two after.
+fn open_session_stats(options: HeadlessOptions) -> (HeadlessWindow, Services) {
+    let mut window = open_stats(options);
+    let services = shell().services();
+    services.settings.use_private_database_for_test();
+    services.session.choose_scope(SessionScope::Manual);
+    services.session.restart_for_test(opened(), sample_games());
+    for game in [
+        yamato_at("16.11.2026 14:00:00", 120_000, true),
+        yamato_at("16.11.2026 15:00:00", 90_000, true),
+        yamato_at("16.11.2026 15:30:00", 50_000, false),
+    ] {
+        services.session.listed(game);
+    }
+    settle_in_real_time(&mut window);
+
+    (window, services)
+}
+
+fn text_of(window: &HeadlessWindow, class: &str) -> String {
+    window.texts_by_class(class).concat()
+}
+
+fn label_of(window: &mut HeadlessWindow, test_id: &str) -> String {
+    let element = window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is on screen"));
+    window.a11y(element).and_then(|state| state.label).unwrap_or_default()
+}
+
+/// The overview's record, the Ships panel's count and the chart's ships, in that order.
+fn every_view(window: &mut HeadlessWindow) -> (String, String, String) {
+    let overview = t!("ui.stats.overview").into_owned();
+    let tab = window.by_role_and_label(Role::Tab, &overview).expect("the Overview tab is in the dock");
+    window.click(tab).expect("the Overview tab is clicked");
+    window.advance(Duration::from_millis(300));
+    let record = text_of(window, "wt-stats-summary__record");
+
+    let ships = t!("ui.stats.ships").into_owned();
+    let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
+    window.click(tab).expect("the Ships tab is clicked");
+    window.advance(Duration::from_millis(300));
+    let count = text_of(window, "wt-stats-ships__count");
+
+    (record, count, label_of(window, "chart-ship-filter"))
+}
+
+#[test]
+fn the_session_scope_narrows_every_stats_view_to_the_session_and_back() {
+    let (mut window, services) = open_session_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    let saved_view = every_view(&mut window);
+    assert_eq!(saved_view.1, "3/3", "the saved session's three ships are listed");
+    assert!(saved_view.2.ends_with(&t!("ui.stats.ship_selection_count", selected = 3, total = 3).into_owned()));
+
+    click(&mut window, "stats-session-scope-since-opened");
+    settle_in_real_time(&mut window);
+
+    assert_eq!(services.session.scope_untracked(), SessionScope::SinceAppOpened);
+    assert!(
+        saved_for_test().contains(&(setting_keys::SESSION_SCOPE, "\"SinceAppOpened\"".to_owned())),
+        "the scope is saved"
+    );
+    assert_eq!(
+        text_of(&window, "wt-stats__session-count"),
+        t!("ui.stats.session_chip_since", time = "14:32", battles = t!("ui.stats.session_battles_many", count = 2))
+    );
+    let (record, ships, chart) = every_view(&mut window);
+    assert_eq!(record, "1W/1L (50.0%)", "the overview counts the two battles since the app opened");
+    assert_eq!(ships, "1/1", "the Ships panel lists only their ship");
+    assert!(chart.ends_with(&t!("ui.stats.ship_selection_count", selected = 1, total = 1).into_owned()), "{chart}");
+    let clear = window.by_test_id("stats-clear").expect("the clear button is on screen");
+    assert_eq!(
+        window.a11y(clear).map(|state| state.disabled),
+        Some(true),
+        "a session since the app opened is not cleared"
+    );
+
+    click(&mut window, "stats-session-scope-manual");
+    settle_in_real_time(&mut window);
+    assert_eq!(every_view(&mut window), saved_view, "the saved session comes back unchanged");
+}
+
+#[test]
+fn a_session_with_no_battles_says_what_fills_it() {
+    let (mut window, services) = open_session_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    services.session.restart_for_test(opened(), Vec::new());
+    settle_in_real_time(&mut window);
+
+    assert!(window.by_test_id("stats-session-empty").is_some(), "the empty saved session says so");
+    assert!(window.by_test_id("stats-dock").is_none());
+
+    click(&mut window, "stats-session-scope-since-opened");
+    settle_in_real_time(&mut window);
+    let said = window.texts_by_class("wt-stats__empty-text").concat();
+    assert_eq!(said, t!("ui.stats.session_empty_since", time = "14:32"));
+
+    services.session.listed(yamato_at("16.11.2026 15:00:00", 90_000, true));
+    settle_in_real_time(&mut window);
+    assert!(window.by_test_id("stats-session-empty").is_none(), "a battle fills the session at once");
+    assert!(window.by_test_id("stats-dock").is_some());
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the session control"]
+fn the_stats_session_control_renders_in_dark_and_light() {
+    for (appearance, name) in [(Appearance::Dark, "stats-session-dark"), (Appearance::Light, "stats-session-light")] {
+        let (mut window, _services) = open_session_stats(review_options(appearance));
+        click(&mut window, "stats-session-scope-since-opened");
+        settle_in_real_time(&mut window);
         println!("{}", save_shot(&mut window, name).display());
     }
 }

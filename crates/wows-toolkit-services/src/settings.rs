@@ -16,6 +16,8 @@ use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
+use wows_toolkit_viewmodel::stats::session::SessionScope;
+use wows_toolkit_viewmodel::stats::setting_keys as stats_keys;
 use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
@@ -54,6 +56,9 @@ pub struct StartupSettings {
     /// top-level setting, not part of `ReplaySettings`. Backs the
     /// inspector header's "Autoload Latest Replay" checkbox.
     pub auto_load_latest_replay: bool,
+    /// Which battles make up the session stats. The app-run start a session
+    /// since the app opened counts from is not saved: each run has its own.
+    pub session_scope: SessionScope,
     /// Where the unpacker writes extracted files. Empty until the user picks
     /// one, which is the absence this setting has always used; the Extract
     /// control stays disabled while it is.
@@ -145,6 +150,9 @@ impl StartupSettings {
             queries::get_setting::<Option<String>>(pool, keys::PROXY_URL).await.flatten().unwrap_or_default();
         let auto_load_latest_replay =
             queries::get_setting::<bool>(pool, keys::AUTO_LOAD_LATEST_REPLAY).await.unwrap_or(true);
+        // Absent until the reader chooses a scope, and the saved session is the default.
+        let session_scope =
+            queries::get_setting::<SessionScope>(pool, stats_keys::SESSION_SCOPE).await.unwrap_or_default();
         let output_dir = queries::get_setting::<String>(pool, keys::OUTPUT_DIR).await.unwrap_or_default();
         let armor_defaults = match queries::get_armor_viewer_defaults(pool).await {
             Ok(defaults) => defaults,
@@ -206,6 +214,7 @@ impl StartupSettings {
             data_sharing,
             proxy_url,
             auto_load_latest_replay,
+            session_scope,
             output_dir,
             armor_defaults,
             model_show_armor,

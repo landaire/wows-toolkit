@@ -21,6 +21,8 @@ pub mod saved_charts;
 
 pub mod record;
 
+pub mod session;
+
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
@@ -336,6 +338,7 @@ pub mod setting_keys {
     pub const GAME_COUNT: &str = "session_stats_game_count";
     pub const DIVISION_FILTER: &str = "session_stats_division_filter";
     pub const GAME_MODE_FILTER: &str = "session_stats_game_mode_filter";
+    pub const SESSION_SCOPE: &str = "session_stats_scope";
 }
 
 /// How many recent games the tab looks at.

@@ -77,6 +77,7 @@ use crate::tabs::replays::offer::GameDataOffer;
 use crate::tabs::replays::panel::PanelTable;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::TableSlot;
+use crate::tabs::replays::session_stats::SessionReads;
 use crate::tabs::replays::table::PlayerTableProps;
 use crate::tabs::replays::workspace::OpenTarget;
 use crate::tabs::replays::workspace::ReplayWorkspace;
@@ -180,6 +181,7 @@ pub fn ReplaysTab() -> impl IntoView {
     BUILT.with(|built| built.set(Some(workspace)));
     let arrivals = Arrivals::new(workspace, control.sharing_reads());
     let offer = GameDataOffer::new();
+    let session_reads = SessionReads::new(workspace, control);
 
     load_personal_rating(workspace);
     follow_personal_rating(workspace, control);
@@ -196,7 +198,7 @@ pub fn ReplaysTab() -> impl IntoView {
     on_cleanup_local(move || drop(requests));
 
     let on_event = UnsyncCallback::new(move |event: ReplayBrowserEvent| {
-        on_browser_event(workspace, arrivals, offer, event);
+        on_browser_event(workspace, arrivals, session_reads, offer, event);
     });
 
     let listing_open = RwSignal::new_local(true);
@@ -275,7 +277,13 @@ fn carry_out(workspace: ReplayWorkspace, control: BrowserControl, request: Repla
     }
 }
 
-fn on_browser_event(workspace: ReplayWorkspace, arrivals: Arrivals, offer: GameDataOffer, event: ReplayBrowserEvent) {
+fn on_browser_event(
+    workspace: ReplayWorkspace,
+    arrivals: Arrivals,
+    session_reads: SessionReads,
+    offer: GameDataOffer,
+    event: ReplayBrowserEvent,
+) {
     let shell = workspace.shell;
     match event {
         ReplayBrowserEvent::Open(path) => {
@@ -291,9 +299,13 @@ fn on_browser_event(workspace: ReplayWorkspace, arrivals: Arrivals, offer: GameD
         }
         ReplayBrowserEvent::SessionStats { paths, replace } => session_stats::record(workspace, paths, replace),
         ReplayBrowserEvent::ReplayAppeared { path, battle, followed } => {
+            session_reads.landed(path.clone());
             arrivals.appeared(workspace, path, &battle, followed);
         }
-        ReplayBrowserEvent::ReplayChanged(path) => arrivals.changed(workspace, path),
+        ReplayBrowserEvent::ReplayChanged(path) => {
+            session_reads.landed(path.clone());
+            arrivals.changed(workspace, path);
+        }
         // The listing forgets the row itself; an open tab keeps what it read.
         ReplayBrowserEvent::ReplayRemoved(_) => {}
         ReplayBrowserEvent::BuildsMissing(missing) => offer.offer(shell, missing),

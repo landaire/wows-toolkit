@@ -329,7 +329,7 @@ impl ShipsCx {
 pub fn StatsShips(
     #[prop(into)] games: Signal<Arc<[PerGameStat]>>,
     #[prop(into)] personal_rating: Signal<Option<Arc<PersonalRatingData>>>,
-    clearable: bool,
+    #[prop(into)] clearable: Signal<bool, LocalStorage>,
     on_clear_ship: UnsyncCallback<GameParamId>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
@@ -450,7 +450,7 @@ pub fn StatsShips(
                 } else {
                     {move || {
                         locale.track();
-                        ship_grid(cx, rows, sort, clearable)
+                        ship_grid(cx, rows, sort, clearable.get())
                     }}
                 }
             }

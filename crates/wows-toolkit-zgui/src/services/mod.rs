@@ -1,5 +1,5 @@
 //! What the whole process shares: the tokio runtime, the settings, the game data, the running jobs,
-//! the interface language and the MCP server.
+//! the interface language, the session stats and the MCP server.
 //!
 //! [`Services`] is provided once, by `shell::AppRoot`, and is a `Copy` handle: read it with
 //! [`Services::current`] in a component's body and move it into closures.
@@ -10,6 +10,7 @@ mod game_data;
 mod jobs;
 pub mod mcp;
 pub mod progress;
+mod session;
 mod settings;
 mod supervision;
 
@@ -18,6 +19,7 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use wows_toolkit_services::supervision::watchdog::Watchdog;
+use wows_toolkit_viewmodel::stats::session::AppOpened;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::provide_local_context;
@@ -35,6 +37,7 @@ pub use crate::services::jobs::Job;
 pub use crate::services::jobs::JobHandle;
 pub use crate::services::jobs::Jobs;
 pub use crate::services::jobs::Progress;
+pub use crate::services::session::Session;
 pub use crate::services::settings::Settings;
 pub use crate::services::settings::SettingsState;
 #[cfg(test)]
@@ -54,21 +57,25 @@ pub struct Services {
     pub supervision: Supervision,
     pub constants: ConstantsUpdates,
     pub mcp: Mcp,
+    pub session: Session,
 }
 
 impl Services {
     /// Makes the services and publishes them to the scopes below the calling one.
     pub fn provide(runtime: Option<Arc<Runtime>>) -> Self {
         let runtime = StoredValue::new(runtime);
+        let settings = Settings::new(runtime);
         let services = Self {
             runtime,
-            settings: Settings::new(runtime),
+            settings,
             game_data: GameData::new(),
             jobs: Jobs::new(),
             locale: Locale::new(),
             supervision: Supervision::new(),
             constants: ConstantsUpdates::new(),
             mcp: Mcp::new(),
+            // The run starts as the services are made, which is before any window shows.
+            session: Session::new(settings, runtime, AppOpened::now()),
         };
         provide_local_context(services);
 

@@ -54,7 +54,8 @@ impl DirectoryStatsUpdate {
 }
 
 /// What reading one replay produced.
-enum GameRead {
+#[derive(Debug)]
+pub enum GameRead {
     Game(PerGameStat),
     NoResults,
     MissingBuild,
@@ -244,7 +245,7 @@ fn read_header_version(path: &Path) -> Option<Version> {
 }
 
 /// Parses one replay and reads the recording player's game off it.
-fn read_game(path: &Path, game_data: &GameDataCache) -> GameRead {
+pub fn read_game(path: &Path, game_data: &GameDataCache) -> GameRead {
     let parsed = match crate::load::parse_replay(path, game_data, None) {
         Ok(parsed) => parsed,
         Err(ReplayLoadError::UnsupportedVersion { .. }) => return GameRead::MissingBuild,

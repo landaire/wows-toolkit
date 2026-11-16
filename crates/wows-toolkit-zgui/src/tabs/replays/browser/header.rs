@@ -1,5 +1,5 @@
-//! The listing's header: its caption, the selected directory's search and index actions, the
-//! listing's options, and the open actions.
+//! The listing's header: its caption, the session stats' scope, the selected directory's search and
+//! index actions, the listing's options, and the open actions.
 
 use std::path::PathBuf;
 
@@ -60,6 +60,7 @@ use crate::tabs::replays::browser::ReplayBrowserEvent;
 use crate::tabs::replays::browser::actions;
 use crate::tabs::replays::browser::actions::Offer;
 use crate::tabs::replays::browser::folders::BrowserControl;
+use crate::tabs::stats::session::SessionChipProps;
 
 const SHEET: &str = "wt-replay-listing-header";
 
@@ -81,6 +82,13 @@ const CSS: &str = css!(
         white-space: nowrap;
         font-size: 14px;
         font-weight: 700;
+    }
+    .wt-listing-session {
+        display: flex;
+        flex: none;
+        align-items: center;
+        padding: 2px 8px;
+        border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-listing-options {
         display: flex;
@@ -187,6 +195,10 @@ pub fn ListingHeader(control: BrowserControl, events: BrowserEvents) -> impl Int
             )
             ListingOptions(control = control, events = events)
             OpenMenu(control = control)
+        }
+        // A row of its own: the session's state is read at a glance and names a time.
+        row(class = "wt-listing-session") {
+            SessionChip()
         }
     }
 }

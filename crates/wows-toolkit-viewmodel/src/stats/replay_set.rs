@@ -92,6 +92,12 @@ impl ReplaySetGames {
         self.games.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then_with(|| a.player_id.cmp(&b.player_id)));
     }
 
+    /// Keeps only the games `keep` accepts.
+    pub fn retain(&mut self, mut keep: impl FnMut(&PerGameStat) -> bool) {
+        self.games.retain(|game| keep(game));
+        self.keys = self.games.iter().map(|game| (game.game_time.clone(), game.player_id)).collect();
+    }
+
     pub fn games(&self) -> &[PerGameStat] {
         &self.games
     }

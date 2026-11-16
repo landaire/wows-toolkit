@@ -71,5 +71,7 @@ workspace_test(
     crate_root = "src/lib.rs",
     package = "wows-toolkit-services",
     version = "0.1.0",
-    deps = SERVICES_DEPS + SERVICES_PLATFORM_DEPS,
+    # The settings tests read an in-memory database, which only the config
+    # crate's test-support build offers.
+    deps = SERVICES_TEST_SUPPORT_DEPS + SERVICES_PLATFORM_DEPS,
 )

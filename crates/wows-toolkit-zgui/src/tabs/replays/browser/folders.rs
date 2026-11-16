@@ -35,6 +35,7 @@ use wows_toolkit_viewmodel::replay_folders::FOLDER_HISTORY;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
+use wows_toolkit_viewmodel::stats::session::AppOpened;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -549,6 +550,23 @@ impl BrowserControl {
         for listing in listings {
             listing.mark_opened(path);
         }
+    }
+
+    /// Whether the install's listing holds `path`.
+    pub fn install_holds(self, path: &Path) -> bool {
+        self.install_listing().is_some_and(|listing| listing.holds(path))
+    }
+
+    /// The install's replays of battles that started at or after `opened`, subscribing to the
+    /// install's listing and its files.
+    pub fn install_replays_since(self, opened: AppOpened) -> Vec<PathBuf> {
+        let Some(listing) = self.listings.with(|listings| listings.get(&FolderId::INSTALL).copied()) else {
+            return Vec::new();
+        };
+
+        listing.files.with(|files| {
+            files.iter().filter(|file| opened.admits(&file.listed.date_time)).map(|file| file.path.clone()).collect()
+        })
     }
 
     /// Whether the install's directory was listed and holds no replay. `None` while it is being

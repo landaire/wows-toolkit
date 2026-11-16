@@ -65,6 +65,11 @@ url = "2"
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = "0.17"
 
+[dev-dependencies]
+# The settings tests drive a real in-memory database, which needs an executor.
+tokio = { version = "1", features = ["rt", "macros"] }
+wows-toolkit-config = { workspace = true, features = ["test-support"] }
+
 [lints.cargo]
 # Dependents enable test-support from their dev-dependencies, which compiles out
 # the dialog backend that uses ashpd and rfd.

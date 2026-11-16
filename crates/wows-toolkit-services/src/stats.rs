@@ -3,64 +3,26 @@
 //! The rows and the filter settings are the same ones the egui app writes, so
 //! the two apps show the same session without a migration between them.
 
-use std::sync::Arc;
-
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::queries;
-use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::GameLimit;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::setting_keys;
 
-use crate::http::UserAgent;
+/// The saved session's games, oldest first, which is how the recency limit
+/// expects them.
+pub async fn load_saved_games(pool: &SqlitePool) -> Result<Vec<PerGameStat>, sqlx::Error> {
+    let rows = queries::get_all_session_stats(pool).await?;
 
-/// Everything the Stats tab needs at startup.
-#[derive(Default)]
-pub struct SessionData {
-    /// In `sort_key` order, oldest first, which is how the recency limit
-    /// expects them.
-    pub games: Vec<PerGameStat>,
-    pub filters: StatsFilters,
-    /// The expected-values table personal rating is computed against.
-    /// Refreshed on the shared disk cache when it is missing or stale (see
-    /// `crate::personal_rating`), so the two apps keep one copy between them.
-    /// Absent when the fetch fails and there is no cache to fall back on.
-    pub personal_rating: Option<Arc<PersonalRatingData>>,
-}
-
-impl SessionData {
-    /// `proxy_url` is the saved proxy setting, empty for a direct
-    /// connection; the expected-values refresh is the one network call here.
-    /// A future for the tokio runtime.
-    pub async fn load(pool: &SqlitePool, agent: UserAgent, proxy_url: &str) -> Self {
-        let (games, filters) = load_games_and_filters(pool).await;
-        let personal_rating = crate::personal_rating::load_refreshed(agent, proxy_url).await.map(Arc::new);
-
-        Self { games, filters, personal_rating }
-    }
-}
-
-/// The session's games, oldest first, and the filter bar's saved state: the
-/// part of [`SessionData`] read from the database alone, for a front end
-/// that shows them before the expected-values refresh lands.
-pub async fn load_games_and_filters(pool: &SqlitePool) -> (Vec<PerGameStat>, StatsFilters) {
-    let games = match queries::get_all_session_stats(pool).await {
-        Ok(rows) => rows.into_iter().map(PerGameStat::from_row).collect(),
-        Err(err) => {
-            tracing::warn!("stats: could not read the session rows: {err}");
-            Vec::new()
-        }
-    };
-
-    (games, load_filters(pool).await)
+    Ok(rows.into_iter().map(PerGameStat::from_row).collect())
 }
 
 /// Reads the filter bar's saved state. Each miss falls back to that control's
 /// own default rather than to a sentinel: an unset limit means no limit, and
 /// an unset mode set means every mode.
-async fn load_filters(pool: &SqlitePool) -> StatsFilters {
+pub async fn load_filters(pool: &SqlitePool) -> StatsFilters {
     let limit_enabled = queries::get_setting::<bool>(pool, setting_keys::LIMIT_ENABLED).await.unwrap_or(false);
     let game_count = queries::get_setting::<usize>(pool, setting_keys::GAME_COUNT).await;
     let limit = match (limit_enabled, game_count) {
@@ -74,5 +36,59 @@ async fn load_filters(pool: &SqlitePool) -> StatsFilters {
         limit,
         division: queries::get_setting::<DivisionFilter>(pool, setting_keys::DIVISION_FILTER).await.unwrap_or_default(),
         game_modes: queries::get_setting(pool, setting_keys::GAME_MODE_FILTER).await.unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_toolkit_viewmodel::stats::session::SessionScope;
+
+    use super::*;
+    use crate::settings::StartupSettings;
+
+    fn game(game_time: &str, ship: u64) -> PerGameStat {
+        PerGameStat {
+            ship_name: "Ship".to_string(),
+            ship_id: ship.into(),
+            game_time: game_time.to_string(),
+            sort_key: wows_toolkit_viewmodel::stats::sortable_game_time(game_time),
+            player_id: 7,
+            damage: 1_000,
+            spotting_damage: 0,
+            frags: 1,
+            raw_xp: 0,
+            base_xp: 0,
+            is_win: true,
+            is_loss: false,
+            is_draw: false,
+            is_div: false,
+            match_group: "pvp".to_string(),
+            achievements: Vec::new(),
+            match_contribution: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_session_scope_is_saved_and_defaults_to_manual() {
+        let pool = wows_toolkit_config::test_pool().await;
+        assert_eq!(StartupSettings::load(&pool).await.session_scope, SessionScope::Manual);
+
+        queries::set_setting(&pool, setting_keys::SESSION_SCOPE, &SessionScope::SinceAppOpened)
+            .await
+            .expect("the scope is written");
+
+        assert_eq!(StartupSettings::load(&pool).await.session_scope, SessionScope::SinceAppOpened);
+    }
+
+    #[tokio::test]
+    async fn the_saved_session_reads_back_oldest_first() {
+        let pool = wows_toolkit_config::test_pool().await;
+        for game in [game("02.11.2026 20:00:00", 2), game("28.10.2026 21:00:00", 1)] {
+            queries::add_session_stat(&pool, &game.to_row()).await.expect("a session row is written");
+        }
+
+        let games = load_saved_games(&pool).await.expect("the session reads");
+        let times: Vec<&str> = games.iter().map(|game| game.game_time.as_str()).collect();
+        assert_eq!(times, ["28.10.2026 21:00:00", "02.11.2026 20:00:00"]);
     }
 }

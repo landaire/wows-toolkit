@@ -12,6 +12,8 @@ mod folders;
 mod header;
 mod listing;
 #[cfg(test)]
+mod session_tests;
+#[cfg(test)]
 mod tests;
 mod thumbnails;
 mod tree;

@@ -53,18 +53,18 @@ use crate::interaction_tests::settle_in_real_time;
 use crate::tabs::replays::BUILT;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
-const FIXTURES: [&str; 3] = [
+pub(super) const FIXTURES: [&str; 3] = [
     "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay",
     "10000_1767829698_20260107_182737_PJSB018-Yamato-1944_50_Gold_harbor.wowsreplay",
     "10000_1773241614_20260214_215653_PVSB719-Valparaiso_42_Neighbors.wowsreplay",
 ];
 
-fn fixture(name: &str) -> PathBuf {
+pub(super) fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../wows-replay-insights/tests/fixtures/replays").join(name)
 }
 
 /// A directory holding copies of the first `count` fixtures, by its canonical path.
-fn replay_dir(count: usize) -> (tempfile::TempDir, PathBuf) {
+pub(super) fn replay_dir(count: usize) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("a temporary directory can be made");
     let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
     for name in &FIXTURES[..count] {
@@ -75,7 +75,7 @@ fn replay_dir(count: usize) -> (tempfile::TempDir, PathBuf) {
 }
 
 /// The shell, with the replays tab's browser and simulated directory watches.
-fn open() -> (HeadlessWindow, BrowserControl) {
+pub(super) fn open() -> (HeadlessWindow, BrowserControl) {
     simulated_watch::install();
     let window = open_shell(HeadlessOptions::new(WindowSize { width: 900.0, height: 700.0 }));
     let control = MADE.with(std::cell::Cell::get).expect("the replays tab made its browser");
@@ -89,7 +89,7 @@ fn tabs(control: BrowserControl) -> Vec<(FolderSource, bool, FolderState)> {
         .with_untracked(|folders| folders.iter().map(|tab| (tab.source.clone(), tab.pinned, tab.state)).collect())
 }
 
-fn folder_id(control: BrowserControl, root: &Path) -> FolderId {
+pub(super) fn folder_id(control: BrowserControl, root: &Path) -> FolderId {
     control
         .folders
         .with_untracked(|folders| {
@@ -115,7 +115,7 @@ fn row(window: &HeadlessWindow, path: &Path) -> landaire_ui::test_support::Eleme
 }
 
 /// Lands `name` in `root` and has the simulated watch report it.
-fn land(root: &Path, name: &str, window: &mut HeadlessWindow) -> PathBuf {
+pub(super) fn land(root: &Path, name: &str, window: &mut HeadlessWindow) -> PathBuf {
     let path = root.join(format!("landed-{name}"));
     std::fs::copy(fixture(name), &path).expect("the replay is copied");
     simulated_watch::report(root, DirChange::Appeared(path.clone()));
@@ -656,7 +656,7 @@ fn a_missing_pinned_folder_keeps_its_tab_and_can_be_unpinned() {
 }
 
 /// Takes `wows` as the game directory, without saving it.
-fn adopt_game_dir(control: BrowserControl, wows: &Path) {
+pub(super) fn adopt_game_dir(control: BrowserControl, wows: &Path) {
     let services = control.shell().services();
     let pool = services.settings.pool().expect("the settings database is open");
     let runtime = services.runtime().expect("the runtime is up");
@@ -979,7 +979,7 @@ fn a_battle_landing_in_the_folder_on_screen_is_announced_and_one_elsewhere_is_on
 }
 
 /// Game data over nothing, held as loaded.
-fn game_data_ready(control: BrowserControl) {
+pub(super) fn game_data_ready(control: BrowserControl) {
     let provider = wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
         .expect("an empty provider builds");
     let vfs: wowsunpack::vfs::VfsPath = wowsunpack::vfs::MemoryFS::new().into();
