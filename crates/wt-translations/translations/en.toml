@@ -1477,6 +1477,10 @@ action_delete = "Delete"
 action_cancel = "Cancel / Deselect"
 toggle_fill = "Click again to toggle fill"
 clear_all = "Clear All"
+edit = "Edit drawing"
+size = "Size"
+color = "Color"
+filled = "Filled"
 
 [ui.renderer.settings]
 title = "Display Settings"

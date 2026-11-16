@@ -1,5 +1,5 @@
 //! What is drawn over the frame for the drawing tools and a collab session: the shortcut sheet,
-//! peers' cursors and pings, and the rotation handle.
+//! peers' cursors and pings, the rotation handle and the picked shape's edit popup.
 //!
 //! Elements rather than part of the frame: none of it is part of the battle, it moves between
 //! rasters, and it stays out of an exported video.
@@ -20,6 +20,7 @@ use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 
 use crate::windows::renderer::session::RendererSession;
+use crate::windows::renderer::shape_edit::ShapeEditPopupProps;
 
 const SHEET: &str = "wt-renderer-annotations";
 
@@ -79,6 +80,7 @@ pub fn AnnotationOverlay(session: RendererSession) -> impl IntoView {
     view! {
         box(class = "wt-renderer-annotations") {
             RotationHandle(session = session)
+            ShapeEditPopup(session = session)
             PeerMarks(session = session)
             Show(when = move || session.ctrl_held.get()) {
                 ShortcutSheet()

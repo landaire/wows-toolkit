@@ -475,3 +475,71 @@ fn the_primary_modifier_adds_to_the_picked() {
     settle(&mut window);
     assert_eq!(picked(), [1, 0], "the primary modifier adds");
 }
+
+/// A picked circle gets the edit popup beside it. Its fill and size are changed there without the
+/// press reaching the map, its button erases it, and undo puts it back.
+#[test]
+fn the_edit_popup_changes_the_picked_shape() {
+    let (mut window, session) = open();
+    let first = || session.collab.with_untracked(|link| link.annotation_at(0));
+    session.collab.with_untracked(|link| {
+        link.add_annotation(Annotation::Circle {
+            center: [300.0, 400.0],
+            radius: 20.0,
+            color: [255; 4],
+            width: 2.0,
+            filled: false,
+        });
+    });
+    settle(&mut window);
+    assert!(window.by_test_id("replay-renderer-shape-edit").is_none(), "nothing is picked");
+
+    window.click_at(window_point(session, (320.0, 400.0)));
+    settle(&mut window);
+    let (left, _) = corner(&window, "replay-renderer-shape-edit");
+    assert!(left > window_point(session, (320.0, 400.0)).x.0, "beside the circle's right-hand side");
+    assert!(window.by_test_id("replay-renderer-shape-color").is_some(), "its ink is offered");
+    assert!(window.by_test_id("replay-renderer-shape-side").is_none(), "but no side, which only a ship has");
+
+    click(&mut window, "replay-renderer-shape-filled");
+    assert!(matches!(first(), Some(Annotation::Circle { filled: true, .. })), "filled: {:?}", first());
+    assert_eq!(session.annotator.with_untracked(|annotator| annotator.picked().picked().to_vec()), [0], "still picked");
+
+    let bigger = window.by_label("Increase").expect("the size steps");
+    window.click(bigger).expect("the step has a box");
+    settle(&mut window);
+    assert!(
+        matches!(first(), Some(Annotation::Circle { radius, .. }) if radius > 20.5),
+        "a tenth of a kilometre bigger: {:?}",
+        first()
+    );
+
+    click(&mut window, "replay-renderer-shape-delete");
+    assert_eq!(first(), None, "erased");
+    assert!(window.by_test_id("replay-renderer-shape-edit").is_none(), "and the popup went with it");
+    session.annotate(|annotator, link| annotator.undo(link));
+    assert!(matches!(first(), Some(Annotation::Circle { .. })), "undo puts it back");
+}
+
+/// A placed ship's popup offers its side rather than an ink, and a press moves it to the other.
+#[test]
+fn the_edit_popup_moves_a_ship_to_the_other_side() {
+    let (mut window, session) = open();
+    session.collab.with_untracked(|link| {
+        link.add_annotation(Annotation::Ship {
+            pos: [300.0, 400.0],
+            yaw: 0.0,
+            species: "Cruiser".to_owned(),
+            friendly: true,
+            config: None,
+        });
+    });
+    session.annotate(|annotator, link| annotator.pick_at(link, [300.0, 400.0], false));
+    settle(&mut window);
+    assert!(window.by_test_id("replay-renderer-shape-color").is_none(), "a ship is tinted by its side");
+    assert!(window.by_test_id("replay-renderer-shape-size").is_none());
+
+    click(&mut window, "replay-renderer-shape-side");
+    let side = session.collab.with_untracked(|link| link.annotation_at(0));
+    assert!(matches!(side, Some(Annotation::Ship { friendly: false, .. })), "moved to the enemy: {side:?}");
+}

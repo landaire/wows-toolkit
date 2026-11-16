@@ -1726,6 +1726,10 @@ action_delete = "삭제"
 action_cancel = "취소 / 선택 해제"
 toggle_fill = "다시 클릭하면 채우기를 전환합니다"
 clear_all = "모두 지우기"
+edit = "그림 편집"
+size = "크기"
+color = "색상"
+filled = "채우기"
 
 [ui.armor.cast]
 prompt = "%{key}+클릭으로 선체에 착탄 지점을 추가합니다"

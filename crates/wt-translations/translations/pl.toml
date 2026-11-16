@@ -1680,6 +1680,10 @@ action_delete = "Usuń"
 action_cancel = "Anuluj / odznacz"
 toggle_fill = "Kliknij ponownie, aby przełączyć wypełnienie"
 clear_all = "Wyczyść wszystko"
+edit = "Edytuj rysunek"
+size = "Rozmiar"
+color = "Kolor"
+filled = "Wypełniony"
 
 [ui.armor.cast]
 prompt = "%{key}+kliknij kadłub, aby dodać punkt trafienia"

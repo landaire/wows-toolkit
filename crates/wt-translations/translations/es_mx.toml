@@ -1680,6 +1680,10 @@ action_delete = "Eliminar"
 action_cancel = "Cancelar / Deseleccionar"
 toggle_fill = "Haz clic de nuevo para alternar el relleno"
 clear_all = "Borrar todo"
+edit = "Editar dibujo"
+size = "Tamaño"
+color = "Color"
+filled = "Relleno"
 
 [ui.armor.cast]
 prompt = "%{key}+clic en el casco para agregar un punto de impacto"

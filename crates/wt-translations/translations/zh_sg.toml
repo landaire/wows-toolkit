@@ -1726,6 +1726,10 @@ action_delete = "删除"
 action_cancel = "取消 / 取消选择"
 toggle_fill = "再次点击以切换填充"
 clear_all = "全部清除"
+edit = "编辑绘图"
+size = "大小"
+color = "颜色"
+filled = "填充"
 
 [ui.armor.cast]
 prompt = "%{key}+点击舰体以添加命中点"

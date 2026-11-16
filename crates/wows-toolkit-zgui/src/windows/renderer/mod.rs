@@ -30,6 +30,7 @@ mod overlays;
 #[cfg(test)]
 mod renderer_tests;
 pub mod session;
+mod shape_edit;
 mod ship_menu;
 #[cfg(test)]
 mod shot_tests;

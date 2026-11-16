@@ -1726,6 +1726,10 @@ action_delete = "ลบ"
 action_cancel = "ยกเลิก / ยกเลิกการเลือก"
 toggle_fill = "คลิกอีกครั้งเพื่อสลับการเติมสี"
 clear_all = "ล้างทั้งหมด"
+edit = "แก้ไขภาพวาด"
+size = "ขนาด"
+color = "สี"
+filled = "เติมสี"
 
 [ui.armor.cast]
 prompt = "%{key}+คลิกที่ตัวเรือเพื่อเพิ่มจุดกระทบ"

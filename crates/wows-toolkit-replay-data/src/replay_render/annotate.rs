@@ -5,6 +5,8 @@
 //! when nobody else is connected; this is the pointer handling and the
 //! bookkeeping around it.
 
+use std::ops::RangeInclusive;
+
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::collab::CollabLink;
@@ -25,6 +27,8 @@ use wt_collab_client::drawing::can_rotate;
 use wt_collab_client::drawing::move_annotation;
 use wt_collab_client::drawing::rotate_annotation;
 use wt_collab_client::geometry::annotation_commands;
+use wt_collab_client::geometry::km_to_minimap_distance;
+use wt_collab_client::geometry::minimap_distance_to_km;
 use wt_collab_client::geometry::ship_range_commands;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationShipConfig;
@@ -184,6 +188,87 @@ pub struct RotationHandle {
     pub handle: ElementPoint,
     /// Where the stem from the handle meets the shape.
     pub anchor: ElementPoint,
+}
+
+/// The single picked shape, as its edit popup shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PickedShape {
+    pub index: usize,
+    pub annotation: Annotation,
+    /// What the popup sits beside, in element pixels.
+    pub beside: ElementPoint,
+}
+
+/// A change the edit popup makes to the picked shape, as the egui popup offers them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShapeEdit {
+    /// How big a circle, rectangle or triangle is, in minimap units, as [`shape_size`] reads it.
+    Size(f32),
+    Color([u8; 4]),
+    Filled(bool),
+    /// Which side a placed ship is on.
+    Friendly(bool),
+}
+
+/// What the edit popup reads a shape's size in: a circle in kilometres where the map's size is
+/// known, as the egui popup does, and anything else in minimap units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SizeUnit {
+    /// `space_size` is the map's own, in world units.
+    Km {
+        space_size: f32,
+    },
+    Minimap,
+}
+
+impl SizeUnit {
+    /// The unit `annotation`'s size is shown in, on a map `space_size` wide when that is known.
+    pub fn for_shape(annotation: &Annotation, space_size: Option<f32>) -> Self {
+        match (annotation, space_size) {
+            (Annotation::Circle { .. }, Some(space_size)) => Self::Km { space_size },
+            _ => Self::Minimap,
+        }
+    }
+
+    /// What a size may be set to, in this unit: the egui popup's bounds.
+    pub fn range(self) -> RangeInclusive<f32> {
+        match self {
+            Self::Km { .. } => 0.1..=20.0,
+            Self::Minimap => 5.0..=500.0,
+        }
+    }
+
+    /// How far one step of the size moves it.
+    pub fn step(self) -> f32 {
+        match self {
+            Self::Km { .. } => 0.1,
+            Self::Minimap => 1.0,
+        }
+    }
+
+    /// How many places after the point a size is shown to, which is what one step moves.
+    pub fn decimals(self) -> u8 {
+        match self {
+            Self::Km { .. } => 1,
+            Self::Minimap => 0,
+        }
+    }
+
+    /// A size in minimap units, in this unit.
+    pub fn shown(self, size: f32) -> f32 {
+        match self {
+            Self::Km { space_size } => minimap_distance_to_km(size, space_size),
+            Self::Minimap => size,
+        }
+    }
+
+    /// A size in this unit, in minimap units.
+    pub fn size(self, shown: f32) -> f32 {
+        match self {
+            Self::Km { space_size } => km_to_minimap_distance(shown, space_size),
+            Self::Minimap => shown,
+        }
+    }
 }
 
 /// What a press on the map went to.
@@ -465,6 +550,37 @@ impl Annotator {
                 config: Some(AnnotationShipConfig::new(param.id(), display_name)),
             },
         );
+
+        true
+    }
+
+    /// The single picked shape and where its edit popup sits, while it is on screen: beside its
+    /// right-hand side, or over its middle when that side is off the map.
+    pub fn picked_shape(&self, link: &CollabLink, view: &MapView, map_origin: (f32, f32)) -> Option<PickedShape> {
+        let index = self.picked.single()?;
+        let annotation = link.annotation_at(index)?;
+        let [left, top, right, bottom] = annotation_bounds(&annotation);
+        let middle = (top + bottom) / 2.0;
+        let beside = view
+            .element_point((right, middle), map_origin)
+            .or_else(|| view.element_point(((left + right) / 2.0, middle), map_origin))?;
+
+        Some(PickedShape { index, annotation, beside })
+    }
+
+    /// Changes the single picked shape as the edit popup asks. Returns whether it changed: an
+    /// edit the shape does not take, or one that leaves it as it was, is not kept for undo.
+    pub fn edit_picked(&mut self, link: &CollabLink, edit: ShapeEdit) -> bool {
+        let Some(index) = self.picked.single() else { return false };
+        let Some(was) = link.annotation_at(index) else { return false };
+        let mut edited = was.clone();
+        apply_edit(&mut edited, edit);
+        if edited == was {
+            return false;
+        }
+
+        self.remember(link);
+        link.update_annotation(index, edited);
 
         true
     }
@@ -753,6 +869,77 @@ pub fn ship_tool(species: &str, friendly: bool) -> Tool {
 /// its button reads as chosen.
 pub fn places_ship(chosen: &Tool, species: &str, friendly: bool) -> bool {
     matches!(chosen, Tool::Ship { species: in_hand, friendly: side, .. } if in_hand == species && *side == friendly)
+}
+
+/// How big a shape the edit popup resizes is, in minimap units: a circle's or triangle's radius,
+/// the mean of a rectangle's half sides. `None` for a shape with no size to set.
+pub fn shape_size(annotation: &Annotation) -> Option<f32> {
+    match annotation {
+        Annotation::Circle { radius, .. } | Annotation::Triangle { radius, .. } => Some(*radius),
+        Annotation::Rectangle { half_size, .. } => Some((half_size[0] + half_size[1]) / 2.0),
+        _ => None,
+    }
+}
+
+/// The ink a shape is drawn in. `None` for a placed ship, which its side tints instead.
+pub fn shape_color(annotation: &Annotation) -> Option<[u8; 4]> {
+    match annotation {
+        Annotation::Ship { .. } => None,
+        Annotation::FreehandStroke { color, .. }
+        | Annotation::Line { color, .. }
+        | Annotation::Circle { color, .. }
+        | Annotation::Rectangle { color, .. }
+        | Annotation::Triangle { color, .. }
+        | Annotation::Arrow { color, .. }
+        | Annotation::Measurement { color, .. } => Some(*color),
+    }
+}
+
+/// Whether a shape is filled. `None` for one that cannot be.
+pub fn shape_filled(annotation: &Annotation) -> Option<bool> {
+    match annotation {
+        Annotation::Circle { filled, .. }
+        | Annotation::Rectangle { filled, .. }
+        | Annotation::Triangle { filled, .. } => Some(*filled),
+        _ => None,
+    }
+}
+
+/// Applies `edit` to `annotation`, leaving it as it was when the shape does not take that edit.
+fn apply_edit(annotation: &mut Annotation, edit: ShapeEdit) {
+    match (annotation, edit) {
+        (Annotation::Circle { radius, .. } | Annotation::Triangle { radius, .. }, ShapeEdit::Size(size)) => {
+            *radius = size;
+        }
+        (Annotation::Rectangle { half_size, .. }, ShapeEdit::Size(size)) => {
+            // Both sides scale by the same ratio, so the rectangle keeps its proportions.
+            let mean = (half_size[0] + half_size[1]) / 2.0;
+            if mean > 0.0 {
+                let ratio = size / mean;
+                half_size[0] *= ratio;
+                half_size[1] *= ratio;
+            }
+        }
+        (
+            Annotation::FreehandStroke { color, .. }
+            | Annotation::Line { color, .. }
+            | Annotation::Circle { color, .. }
+            | Annotation::Rectangle { color, .. }
+            | Annotation::Triangle { color, .. }
+            | Annotation::Arrow { color, .. }
+            | Annotation::Measurement { color, .. },
+            ShapeEdit::Color(ink),
+        ) => *color = ink,
+        (
+            Annotation::Circle { filled, .. }
+            | Annotation::Rectangle { filled, .. }
+            | Annotation::Triangle { filled, .. },
+            ShapeEdit::Filled(fill),
+        ) => *filled = fill,
+        (Annotation::Ship { friendly, .. }, ShapeEdit::Friendly(side)) => *friendly = side,
+        // The popup offers no such edit for this shape.
+        _ => {}
+    }
 }
 
 /// A ship the loaded build knows, as the chooser for a placed ship offers it.

@@ -64,6 +64,8 @@ use crate::replay_render::annotate::MAX_NIB;
 use crate::replay_render::annotate::MIN_NIB;
 use crate::replay_render::annotate::PointerDown;
 use crate::replay_render::annotate::PointerUp;
+use crate::replay_render::annotate::ShapeEdit;
+use crate::replay_render::annotate::SizeUnit;
 use crate::replay_render::annotate::TOOLS;
 use crate::replay_render::annotate::tool_for_key;
 use crate::replay_render::armor::Advance;
@@ -2013,6 +2015,71 @@ fn clearing_everything_is_one_undo() {
 
     assert!(annotator.undo(&link));
     assert_eq!(link.annotations(), [line(100.0), line(200.0)], "one undo puts them back");
+}
+
+/// The edit popup's changes reach the picked shape and each is kept for undo; one the shape does
+/// not take, or one that changes nothing, is not.
+#[test]
+fn an_edit_changes_the_picked_shape() {
+    let rectangle = |half_size: [f32; 2], color: [u8; 4], filled: bool| Annotation::Rectangle {
+        center: [300.0, 300.0],
+        half_size,
+        rotation: 0.0,
+        color,
+        width: 2.0,
+        filled,
+    };
+    let link = CollabLink::default();
+    link.add_annotation(rectangle([20.0, 10.0], [255; 4], false));
+    let mut annotator = Annotator::new();
+    assert!(!annotator.edit_picked(&link, ShapeEdit::Filled(true)), "nothing is picked");
+
+    annotator.pick_at(&link, [300.0, 300.0], false);
+    assert!(annotator.edit_picked(&link, ShapeEdit::Size(30.0)), "the mean half side goes from 15 to 30");
+    assert!(annotator.edit_picked(&link, ShapeEdit::Color([230, 50, 50, 255])));
+    assert!(annotator.edit_picked(&link, ShapeEdit::Filled(true)));
+    assert!(!annotator.edit_picked(&link, ShapeEdit::Friendly(false)), "a rectangle has no side");
+    assert!(!annotator.edit_picked(&link, ShapeEdit::Filled(true)), "nor is filling it again a change");
+    assert_eq!(link.annotation_at(0), Some(rectangle([40.0, 20.0], [230, 50, 50, 255], true)), "kept in proportion");
+    assert_eq!(annotator.undo_depth(), 3, "one step per change");
+
+    assert!(annotator.undo(&link));
+    assert_eq!(link.annotation_at(0), Some(rectangle([40.0, 20.0], [230, 50, 50, 255], false)), "the fill is undone");
+
+    link.add_annotation(Annotation::Ship {
+        pos: [500.0, 500.0],
+        yaw: 0.0,
+        species: "Destroyer".to_owned(),
+        friendly: true,
+        config: None,
+    });
+    annotator.pick_at(&link, [500.0, 500.0], false);
+    assert!(!annotator.edit_picked(&link, ShapeEdit::Color([0, 0, 0, 255])), "a ship is tinted by its side");
+    assert!(annotator.edit_picked(&link, ShapeEdit::Friendly(false)));
+    assert!(matches!(link.annotation_at(1), Some(Annotation::Ship { friendly: false, .. })), "it changed sides");
+}
+
+/// A circle's size is read in kilometres on a map whose size is known, as the egui popup reads it:
+/// the whole minimap across is the map's width, at 30 metres a world unit.
+#[test]
+fn a_circle_is_sized_in_kilometres() {
+    let circle =
+        Annotation::Circle { center: [300.0, 300.0], radius: 20.0, color: [255; 4], width: 2.0, filled: false };
+    let unit = SizeUnit::for_shape(&circle, Some(1400.0));
+    assert_eq!(unit, SizeUnit::Km { space_size: 1400.0 });
+    assert!((unit.shown(MINIMAP_SIZE as f32) - 42.0).abs() < 0.001, "{}", unit.shown(MINIMAP_SIZE as f32));
+    assert!((unit.size(42.0) - MINIMAP_SIZE as f32).abs() < 0.01);
+
+    assert_eq!(SizeUnit::for_shape(&circle, None), SizeUnit::Minimap, "an unknown map is read in minimap units");
+    let triangle = Annotation::Triangle {
+        center: [300.0, 300.0],
+        radius: 20.0,
+        rotation: 0.0,
+        color: [255; 4],
+        width: 2.0,
+        filled: false,
+    };
+    assert_eq!(SizeUnit::for_shape(&triangle, Some(1400.0)), SizeUnit::Minimap, "as is anything but a circle");
 }
 
 /// Undoing takes the shape off again under the id it was added with.

@@ -1680,6 +1680,10 @@ action_delete = "Smazat"
 action_cancel = "Zrušit / zrušit výběr"
 toggle_fill = "Dalším kliknutím přepnete výplň"
 clear_all = "Vymazat vše"
+edit = "Upravit kresbu"
+size = "Velikost"
+color = "Barva"
+filled = "Vyplněno"
 
 [ui.armor.cast]
 prompt = "%{key}+kliknutím na trup přidáte bod zásahu"

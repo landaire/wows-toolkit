@@ -1680,6 +1680,10 @@ action_delete = "Sil"
 action_cancel = "İptal / Seçimi kaldır"
 toggle_fill = "Dolguyu açıp kapatmak için yeniden tıklayın"
 clear_all = "Tümünü Temizle"
+edit = "Çizimi düzenle"
+size = "Boyut"
+color = "Renk"
+filled = "Dolgulu"
 
 [ui.armor.cast]
 prompt = "Darbe noktası eklemek için gövdeye %{key}+tıklayın"

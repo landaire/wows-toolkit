@@ -1726,6 +1726,10 @@ action_delete = "Löschen"
 action_cancel = "Abbrechen / Abwählen"
 toggle_fill = "Erneut klicken, um die Füllung umzuschalten"
 clear_all = "Alles löschen"
+edit = "Zeichnung bearbeiten"
+size = "Größe"
+color = "Farbe"
+filled = "Gefüllt"
 
 [ui.armor.cast]
 prompt = "%{key}+Klick auf den Rumpf fügt einen Einschlagpunkt hinzu"

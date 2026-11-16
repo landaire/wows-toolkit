@@ -138,3 +138,42 @@ fn the_renderer_draws_a_real_replay() {
     let Some((mut window, _session)) = open(ThemeChoice::Dark, POPPED_OUT_SIZE, true) else { return };
     println!("{}", save_shot(&mut window, "renderer-popped-out-dark").display());
 }
+
+#[test]
+#[ignore = "draws a real replay on the graphics device; run by hand to review the drawing tools"]
+fn the_drawing_tools_on_a_real_replay() {
+    use wt_collab_client::drawing::Tool;
+    use wt_collab_client::types::Annotation;
+
+    let Some((mut window, session)) = open(ThemeChoice::Dark, TAB_SIZE, false) else { return };
+    let toggle = window.by_test_id("replay-renderer-tools-toggle").expect("the tools control is drawn");
+    window.click(toggle).expect("the tools control has a box");
+    run_in_real_time(&mut window);
+    let circle = window.by_test_id("replay-renderer-tool-circle").expect("the circle is offered");
+    window.click(circle).expect("the circle has a box");
+    run_in_real_time(&mut window);
+    println!("{}", save_shot(&mut window, "renderer-tools").display());
+    window.click(toggle).expect("the tools control has a box");
+
+    session.annotate(|annotator, link| {
+        annotator.take_up(Tool::None);
+        link.add_annotation(Annotation::Circle {
+            center: [300.0, 300.0],
+            radius: 40.0,
+            color: [230, 50, 50, 255],
+            width: 2.0,
+            filled: false,
+        });
+        link.add_annotation(Annotation::Measurement {
+            start: [150.0, 550.0],
+            end: [600.0, 450.0],
+            color: [240, 230, 50, 255],
+            width: 2.0,
+        });
+        annotator.pick_at(link, [340.0, 300.0], false);
+    });
+    for _ in 0..5 {
+        run_in_real_time(&mut window);
+    }
+    println!("{}", save_shot(&mut window, "renderer-shape-edit").display());
+}

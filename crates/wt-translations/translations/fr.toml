@@ -1726,6 +1726,10 @@ action_delete = "Supprimer"
 action_cancel = "Annuler / Désélectionner"
 toggle_fill = "Cliquez à nouveau pour activer ou désactiver le remplissage"
 clear_all = "Tout effacer"
+edit = "Modifier le dessin"
+size = "Taille"
+color = "Couleur"
+filled = "Rempli"
 
 [ui.armor.cast]
 prompt = "%{key}+clic sur la coque pour ajouter un point d'impact"
