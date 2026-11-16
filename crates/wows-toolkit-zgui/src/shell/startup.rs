@@ -27,6 +27,7 @@ use crate::long_job::long_job;
 use crate::services::GameDataRequest;
 use crate::services::GameDataState;
 use crate::services::Services;
+use crate::services::TokioError;
 use crate::services::constants::Provenance;
 use crate::services::constants::Wanted;
 use crate::shell::ReplayRequest;
@@ -35,7 +36,6 @@ use crate::shell::crash;
 use crate::shell::first_run;
 use crate::shell::settings::Setting;
 use crate::shell::update;
-use crate::shell::update::Asked;
 
 /// The message key a game directory that holds no install stays up under until it is fixed.
 pub const STUCK_WOWS_DIR: &str = "wows-dir";
@@ -48,6 +48,7 @@ pub fn begin(services: Services, shell: Shell) {
     rebuild_stale_index(services, shell);
 
     let system_locale = sys_locale::get_locale();
+    let fallback_locale = system_locale.clone();
     let loaded = services.on_tokio(async move {
         let pool = wows_toolkit_config::open_db().await?;
         // Before the settings are read, so the language question offers what was saved and the
@@ -70,17 +71,38 @@ pub fn begin(services: Services, shell: Shell) {
 
         match loaded {
             Ok(Ok((settings, pool))) => apply(services, shell, settings, pool),
-            // The defaults already applied stay, and the drawer reports the failure instead of
-            // loading forever.
             Ok(Err(err)) => {
                 tracing::error!("failed to load settings from the config DB: {err:#}");
+                run_on_defaults(services, err.to_string(), fallback_locale, find_install);
+            }
+            // The database was never tried. The install found is not adopted either, which keeps
+            // a shell opened without a runtime, as the tests open it, off the machine's install.
+            Err(err @ TokioError::NoRuntime) => {
+                tracing::error!("settings-load task did not run: {err}");
                 services.settings.fail(err.to_string());
             }
             Err(err) => {
                 tracing::error!("settings-load task did not complete: {err}");
-                services.settings.fail(err.to_string());
+                run_on_defaults(services, err.to_string(), fallback_locale, find_install);
             }
         }
+    });
+}
+
+/// Runs on the defaults when the settings could not be read, as the egui app does: the install
+/// `find` finds still loads. The defaults already applied to the shell stay, and the drawer
+/// reports the failure instead of loading forever.
+fn run_on_defaults<F>(services: Services, reason: String, system_locale: Option<String>, find: F)
+where
+    F: FnOnce() -> Option<PathBuf> + Send + 'static,
+{
+    services.settings.fail(reason);
+
+    let locale = system_locale.as_deref().and_then(wt_translations::system_locale_to_wows).map(LanguageCode::new);
+    spawn_detached(async move {
+        let wows_dir = blocking(find).await;
+        // An empty cache directory is the default location, and auto-dump is off by default.
+        services.game_data.adopt(GameDataRequest { wows_dir, cache_dir: String::new(), locale, auto_dump: false });
     });
 }
 
@@ -135,7 +157,7 @@ pub fn apply(services: Services, shell: Shell, settings: StartupSettings, pool: 
     first_run::ask(services, shell, answered);
     crash::report_last_crash(shell);
     if check_for_updates {
-        update::check_for_update(services, shell, Asked::AtStartup);
+        update::check_unasked(services, shell);
     }
     shell.restart_twitch_poll();
     shell.start_mcp_at_launch();
@@ -331,6 +353,8 @@ mod tests {
 
     use crate::interaction_tests::open_bare_shell;
     use crate::interaction_tests::shell;
+    use crate::services::GameDataState;
+    use crate::services::SettingsState;
     use crate::services::saved_for_test;
 
     fn debug_mode_saves() -> Vec<String> {
@@ -360,5 +384,40 @@ mod tests {
         assert!(shell().debug_mode.get_untracked(), "the loaded settings do not undo the shortcut");
         assert_eq!(debug_mode_saves()[earlier..], ["true"], "the choice is saved over the loaded value");
         assert_eq!(shell().services().settings.read_untracked(|settings| settings.debug_mode), Some(true));
+    }
+
+    /// Settings that could not be read leave the drawer saying so, and the game data still loads
+    /// from the install found.
+    #[test]
+    fn unreadable_settings_still_load_the_install_found() {
+        let mut window = open_bare_shell();
+        let services = shell().services();
+        let install = tempfile::tempdir().expect("a temp directory");
+        std::fs::create_dir(install.path().join("bin")).expect("the install has a bin directory");
+        let found = install.path().to_path_buf();
+
+        super::run_on_defaults(services, "the database is locked".to_owned(), Some("de-DE".to_owned()), move || {
+            Some(found)
+        });
+        window.advance(Duration::from_millis(400));
+
+        let failed = services.settings.with_state(|state| matches!(state, SettingsState::Failed(_)));
+        assert!(failed, "the drawer reports the failure");
+        let state = services.game_data.state_untracked();
+        assert!(!matches!(state, GameDataState::NoInstall), "the install found is loaded rather than none");
+    }
+
+    /// The zoom shortcuts step from the default zoom when the settings could not be read.
+    #[test]
+    fn the_zoom_shortcuts_work_when_the_settings_could_not_be_read() {
+        let mut window = open_bare_shell();
+        let services = shell().services();
+        services.settings.fail("the database is locked".to_owned());
+        let before = shell().appearance.zoom.get_untracked().get();
+
+        window.press_character('=', Modifiers::PRIMARY);
+        window.advance(Duration::from_millis(400));
+
+        assert!(shell().appearance.zoom.get_untracked().get() > before, "the zoom stepped in");
     }
 }

@@ -119,8 +119,9 @@ fn take_step(services: Services, appearance: Appearance, toasts: Toasts, step: Z
     // The message a zoom step says, which the next step's replaces.
     const ZOOM_TOAST: &str = "zoom";
 
-    // The zoom waits for the settings, which hold the zoom it steps from.
-    if services.settings.read_untracked(|_| ()).is_none() {
+    // The zoom waits for the settings, which hold the zoom it steps from. Settings that could not
+    // be read leave the default zoom to step from.
+    if services.settings.is_loading_untracked() {
         return;
     }
 

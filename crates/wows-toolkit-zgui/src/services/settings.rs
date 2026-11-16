@@ -110,6 +110,11 @@ impl Settings {
         self.state.with(read)
     }
 
+    /// Whether the read is still running, without subscribing.
+    pub fn is_loading_untracked(self) -> bool {
+        self.state.with_untracked(|state| matches!(state, SettingsState::Loading))
+    }
+
     /// How player names and clan tags are shown, subscribing to changes. Real names until the
     /// settings are loaded, which is the default the setting itself has.
     pub fn name_display(self) -> NameDisplay {
