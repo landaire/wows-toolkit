@@ -13,6 +13,7 @@
 mod dirs;
 mod env;
 mod error;
+mod external;
 mod host;
 mod lock;
 mod overlay;
@@ -33,6 +34,7 @@ pub use crate::error::SessionLockError;
 pub use crate::error::SpawnError;
 pub use crate::error::ViewError;
 pub use crate::error::WaitError;
+pub use crate::external::ExternalGame;
 pub use crate::host::HostSearch;
 pub use crate::host::ProtonInstall;
 pub use crate::host::ProtonKind;
