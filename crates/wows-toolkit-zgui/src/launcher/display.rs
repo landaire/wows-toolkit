@@ -16,7 +16,11 @@ use wows_toolkit_launcher::DownloadState;
 use wows_toolkit_launcher::GameState;
 use wows_toolkit_launcher::InstallChoice;
 use wows_toolkit_launcher::Launcher;
+use wows_toolkit_launcher::LauncherSettings;
+use wows_toolkit_launcher::PlayRoute;
 use wows_toolkit_launcher::SavedAccount;
+use wows_toolkit_launcher::WgcLayerState;
+use wows_toolkit_launcher::WgcLoginAvailability;
 
 use crate::launcher::model::LauncherState;
 
@@ -93,6 +97,10 @@ pub enum PlayState {
     Paused {
         install: PathBuf,
     },
+    /// A Steam install without the Wargaming login: Play hands it to Steam, with no account.
+    PlayThroughSteam {
+        install: PathBuf,
+    },
     Play(AccountLabel),
     Starting {
         realm: Option<wgc_auth::AccountRealm>,
@@ -130,6 +138,9 @@ impl PlayState {
         let Some(install) = install.filter(|install| install.join("WorldOfWarships.exe").is_file()) else {
             return Self::SetUpGame;
         };
+        if launcher.play_route(&install, settings) == PlayRoute::Steam {
+            return Self::PlayThroughSteam { install };
+        }
         if launcher.needs_runner_setup() {
             return Self::SetUpRunner;
         }
@@ -164,7 +175,7 @@ impl PlayState {
 
     /// Whether the main part of the button is pressed in the accent color.
     pub fn is_primary(&self) -> bool {
-        matches!(self, Self::Play(_) | Self::Update { .. } | Self::AddAccount)
+        matches!(self, Self::Play(_) | Self::PlayThroughSteam { .. } | Self::Update { .. } | Self::AddAccount)
     }
 
     /// The realm whose badge the collapsed button keeps.
@@ -263,6 +274,63 @@ impl InstallView {
 pub enum InstallVersion {
     Known(String),
     ManagedBySteam,
+}
+
+/// The Wargaming login switch of a Steam install, and where its Game Center files stand.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WgcLoginView {
+    pub on: bool,
+    pub status: WgcLoginStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WgcLoginStatus {
+    /// The files are on disk.
+    Ready,
+    /// WG offers the files; they download once the login is on.
+    Fetchable {
+        size: u64,
+    },
+    Downloading {
+        percent: Option<u8>,
+    },
+    Checking,
+    /// No toolkit sign-in is saved.
+    NeedsSignIn,
+    /// Carries the error's text.
+    Unavailable(String),
+}
+
+impl WgcLoginStatus {
+    /// Whether the switch can be turned on.
+    pub fn allows_on(&self) -> bool {
+        matches!(self, Self::Ready | Self::Fetchable { .. } | Self::Downloading { .. })
+    }
+}
+
+impl WgcLoginView {
+    /// The switch for the install at `path`, or `None` where it is not offered: installs Steam
+    /// does not manage, and platforms without the layer.
+    pub fn of(launcher: &Launcher, settings: &LauncherSettings, path: &Path) -> Option<Self> {
+        if !launcher.wgc_login_supported() || launcher.steam_install(path).is_none() {
+            return None;
+        }
+
+        let status = match launcher.wgc_login_availability(path, settings) {
+            WgcLoginAvailability::NeedsSignIn => WgcLoginStatus::NeedsSignIn,
+            WgcLoginAvailability::Checking => WgcLoginStatus::Checking,
+            WgcLoginAvailability::Unavailable(err) => WgcLoginStatus::Unavailable(err.to_string()),
+            WgcLoginAvailability::Available => match launcher.wgc_layer_state(path) {
+                Some(WgcLayerState::Fetchable(offer)) => WgcLoginStatus::Fetchable { size: offer.size() },
+                Some(WgcLayerState::Fetching { done_bytes, total_bytes }) => WgcLoginStatus::Downloading {
+                    percent: Transferred::new(*done_bytes, *total_bytes).map(|done| done.percent() as u8),
+                },
+                _ => WgcLoginStatus::Ready,
+            },
+        };
+
+        Some(Self { on: settings.uses_wgc_login(path), status })
+    }
 }
 
 /// What an install's catalog check found.

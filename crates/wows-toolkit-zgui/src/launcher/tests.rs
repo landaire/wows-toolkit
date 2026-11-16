@@ -30,12 +30,14 @@ use wows_toolkit_launcher::KeyringState;
 use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::RunnerState;
 use wows_toolkit_launcher::SavedAccount;
+use wows_toolkit_launcher::WgcLayerState;
 use wows_toolkit_launcher::test_support;
 use wows_toolkit_launcher::test_support::ScriptedSignIn;
 use wows_toolkit_launcher::test_support::TestSession;
 use zgui::view;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
+use zgui::vocab::Toggled;
 
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::returning_reader;
@@ -1197,4 +1199,198 @@ fn the_account_popover_renders() {
         launcher.press("launcher-play-menu");
         save(&mut launcher, "no-install", suffix);
     }
+}
+
+/// The game build of the fake install.
+fn fake_build() -> wows_toolkit_launcher::GameBuild {
+    wows_toolkit_launcher::GameBuild::new(13_533_378)
+}
+
+fn steam_install(path: &Path) -> GameInstall {
+    GameInstall {
+        source: InstallSource::Steam { app_id: wgc_install::steam::WOWS_STEAM_APP_ID, library: path.to_path_buf() },
+        auto_update: false,
+        ..wgc_install(path)
+    }
+}
+
+/// The fake install found as a Steam install whose WGC layer stands at `layer`, with one
+/// signed-in account when `signed_in` and the Wargaming login on when `on`.
+fn steam_window(launcher: LauncherWindow, signed_in: bool, on: bool, layer: Option<WgcLayerState>) -> LauncherWindow {
+    let mut launcher = launcher;
+    let path = launcher.install.path().to_path_buf();
+    let accounts: &[(AccountKey, &str)] = if signed_in { &[(eu(), "Captain_Ahab")] } else { &[] };
+    let mut settings = launcher.enabled_settings(accounts);
+    if on {
+        settings.wgc_login_installs.push(path.clone());
+    }
+    launcher.adopt(settings);
+    let install = steam_install(&path);
+    launcher.model.update_launcher(|state| test_support::set_installs(state, vec![install]));
+    if let Some(layer) = layer {
+        launcher.model.update_launcher(|state| test_support::set_wgc_layer(state, path, fake_build(), layer));
+    }
+    if signed_in {
+        launcher.set_session(eu(), TestSession::SignedIn("Captain_Ahab".into()));
+    }
+    launcher.settle();
+
+    launcher
+}
+
+fn ready_layer(launcher: &LauncherWindow) -> WgcLayerState {
+    test_support::ready_wgc_layer(launcher.install.path().join("layer"), fake_build())
+}
+
+fn layer_unavailable() -> WgcLayerState {
+    WgcLayerState::Unavailable(Arc::new(wows_toolkit_launcher::WgcLayerError::NoLocalePart))
+}
+
+fn layer_downloading() -> WgcLayerState {
+    WgcLayerState::Fetching { done_bytes: 39_000_000, total_bytes: 78_000_000 }
+}
+
+/// The Settings drawer at the installs row.
+fn open_installs(launcher: &mut LauncherWindow) {
+    launcher.shell.settings_drawer.open_at(wows_toolkit_viewmodel::settings_drawer::Setting::GameInstalls);
+    launcher.settle();
+}
+
+/// Whether the switch `test_id` is on, and whether it refuses a click.
+fn switch_state(launcher: &mut LauncherWindow, test_id: &str) -> (Option<Toggled>, bool) {
+    let element = launcher.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+    let state = launcher.window.a11y(element).unwrap_or_else(|| panic!("{test_id} is in the accessibility tree"));
+    (state.checked, state.disabled)
+}
+
+const SETTINGS_SWITCH: &str = "launcher-wgc-login-0-switch";
+
+fn uses_wgc_login(launcher: &LauncherWindow) -> bool {
+    let path = launcher.install.path().to_path_buf();
+    launcher
+        .model
+        .with_untracked(|state| state.settings.as_ref().is_some_and(|settings| settings.uses_wgc_login(&path)))
+}
+
+#[test]
+fn a_steam_install_with_the_login_off_plays_through_steam() {
+    let launcher = LauncherWindow::open();
+    let layer = ready_layer(&launcher);
+    let mut launcher = steam_window(launcher, true, false, Some(layer));
+    assert_eq!(launcher.play_state(), "play-through-steam");
+    assert_eq!(launcher.text_of("wt-play__label"), "Play through Steam");
+
+    open_installs(&mut launcher);
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::False), false));
+    assert_eq!(launcher.text_of("wt-launcher-wgc-status"), "Game Center files ready");
+
+    launcher.press(SETTINGS_SWITCH);
+    assert!(uses_wgc_login(&launcher), "the click turns the login on");
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::True), false));
+}
+
+#[test]
+fn a_steam_install_with_the_login_on_plays_as_the_account() {
+    let launcher = LauncherWindow::open();
+    let layer = ready_layer(&launcher);
+    let mut launcher = steam_window(launcher, true, true, Some(layer));
+    assert_eq!(launcher.play_state(), "play");
+
+    open_installs(&mut launcher);
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::True), false));
+
+    launcher.press(SETTINGS_SWITCH);
+    assert!(!uses_wgc_login(&launcher), "the click turns the login off");
+    assert_eq!(launcher.play_state(), "play-through-steam");
+}
+
+#[test]
+fn without_an_account_the_login_cannot_be_turned_on() {
+    let launcher = LauncherWindow::open();
+    let layer = ready_layer(&launcher);
+    let mut launcher = steam_window(launcher, false, false, Some(layer));
+    open_installs(&mut launcher);
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::False), true));
+    assert_eq!(launcher.text_of("wt-launcher-wgc-status"), "Add a Wargaming account to the toolkit first.");
+}
+
+#[test]
+fn the_login_waits_while_the_layer_is_looked_up() {
+    let mut launcher = steam_window(LauncherWindow::open(), true, false, Some(WgcLayerState::Probing));
+    open_installs(&mut launcher);
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::False), true));
+    assert_eq!(launcher.text_of("wt-launcher-wgc-status"), "Looking for the Game Center files of this build...");
+}
+
+#[test]
+fn the_login_says_why_a_build_has_no_layer() {
+    let mut launcher = steam_window(LauncherWindow::open(), true, false, Some(layer_unavailable()));
+    open_installs(&mut launcher);
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::False), true));
+    assert_eq!(
+        launcher.text_of("wt-launcher-wgc-status"),
+        "Not available for this build: WG's update service lists no locale package for World of Warships"
+    );
+}
+
+#[test]
+fn the_login_shows_the_layer_download() {
+    let mut launcher = steam_window(LauncherWindow::open(), true, true, Some(layer_downloading()));
+    open_installs(&mut launcher);
+    assert_eq!(switch_state(&mut launcher, SETTINGS_SWITCH), (Some(Toggled::True), false));
+    assert_eq!(launcher.text_of("wt-launcher-wgc-status"), "Downloading the Game Center files: 50%");
+}
+
+#[test]
+fn the_popover_offers_the_login_without_the_explanation() {
+    let launcher = LauncherWindow::open();
+    let layer = ready_layer(&launcher);
+    let mut launcher = steam_window(launcher, true, false, Some(layer));
+    launcher.press("launcher-play-menu");
+    assert_eq!(switch_state(&mut launcher, "launcher-install-wgc-login-switch"), (Some(Toggled::False), false));
+    assert!(!launcher.has("launcher-install-wgc-login-help"), "the popover leaves out the help link");
+}
+
+#[test]
+fn a_wgc_install_offers_no_login_switch() {
+    let mut launcher = ready();
+    open_installs(&mut launcher);
+    assert!(!launcher.has(SETTINGS_SWITCH));
+    assert_eq!(launcher.play_state(), "play");
+}
+
+/// Makes the layer state a rendered case starts from.
+type LayerFor = fn(&LauncherWindow) -> WgcLayerState;
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the Wargaming login switch"]
+fn the_wgc_login_switch_renders() {
+    let shots = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots");
+    let save = |launcher: &mut LauncherWindow, name: &str| {
+        let path = shots.join(format!("launcher-wgc-login-{name}.png"));
+        launcher.window.save_png(&path).expect("the window is drawn");
+        println!("{}", path.display());
+    };
+    let cases: [(&str, bool, bool, LayerFor); 6] = [
+        ("off", true, false, ready_layer),
+        ("on", true, true, ready_layer),
+        ("needs-sign-in", false, false, ready_layer),
+        ("checking", true, false, |_| WgcLayerState::Probing),
+        ("unavailable", true, false, |_| layer_unavailable()),
+        ("downloading", true, true, |_| layer_downloading()),
+    ];
+    for (name, signed_in, on, layer) in cases {
+        let launcher = LauncherWindow::open_drawn(Appearance::Dark);
+        let layer = layer(&launcher);
+        let mut launcher = steam_window(launcher, signed_in, on, Some(layer));
+        open_installs(&mut launcher);
+        save(&mut launcher, name);
+    }
+
+    let launcher = LauncherWindow::open_drawn(Appearance::Dark);
+    let layer = ready_layer(&launcher);
+    let mut launcher = steam_window(launcher, true, false, Some(layer));
+    save(&mut launcher, "play-through-steam");
+    launcher.press("launcher-play-menu");
+    save(&mut launcher, "popover");
 }

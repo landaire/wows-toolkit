@@ -56,6 +56,7 @@ use crate::launcher::play::play;
 use crate::launcher::realm::RealmGlyphProps;
 use crate::launcher::replay;
 use crate::launcher::setup;
+use crate::launcher::steam_login::WgcLoginControlProps;
 use crate::shell::Shell;
 
 const POPOVER_CSS: &str = zgui::css!(
@@ -299,7 +300,9 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
                         }
                     }
                 }),
-                Some((slot, path)) => AnyView::new(view! {
+                Some((slot, path)) => {
+                    let login_path = path.clone();
+                    AnyView::new(view! {
                     column(class = "wt-launcher__column") {
                         text(class = "wt-launcher__dim wt-launcher__truncate") {{path.display().to_string()}}
                         row(class = "wt-launcher__row") {
@@ -325,8 +328,10 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
                             } else {}
                         }
                         DownloadStatus(model = model, shell = shell, target = DownloadTarget::Install(slot))
+                        WgcLoginControl(model = model, path = login_path, test_id = "launcher-install-wgc-login".to_owned(), brief = true)
                     }
-                }),
+                })
+                }
             }}
         }
     }

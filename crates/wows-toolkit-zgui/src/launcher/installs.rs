@@ -29,6 +29,7 @@ use crate::launcher::display::InstallView;
 use crate::launcher::download::DownloadStatusProps;
 use crate::launcher::games::GamesListProps;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::steam_login::WgcLoginControlProps;
 use crate::services::Services;
 use crate::shell::Shell;
 
@@ -110,6 +111,7 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
         InstallVersion::ManagedBySteam => AnyView::new(view! { text {{locale.text("ui.launcher.managed_by_steam")}} }),
     });
     let shown_path = path.display().to_string();
+    let login_path = path.clone();
     let path = StoredValue::new(path);
 
     view! {
@@ -160,6 +162,7 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
                     }
                 }
             }
+            WgcLoginControl(model = model, path = login_path, test_id = format!("launcher-wgc-login-{slot}"), brief = false)
             row(class = "wt-launcher__row") {
                 Button(
                     variant = ButtonVariant::Outline,

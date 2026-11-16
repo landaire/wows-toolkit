@@ -269,6 +269,7 @@ fn label(state: &PlayState) -> String {
         PlayState::Updating { percent: Some(percent), .. } => t!("ui.launcher.play.updating", percent = percent),
         PlayState::Updating { percent: None, .. } => t!("ui.launcher.play.updating_unknown"),
         PlayState::Paused { .. } => t!("ui.launcher.play.paused"),
+        PlayState::PlayThroughSteam { .. } => t!("ui.launcher.play.play_through_steam"),
         PlayState::Starting { .. } => t!("ui.launcher.play.starting"),
         PlayState::Running { .. } => t!("ui.launcher.play.running"),
         PlayState::InBattle { .. } => t!("ui.launcher.play.in_battle"),
@@ -288,6 +289,7 @@ fn state_name(state: &PlayState) -> &'static str {
         PlayState::Update { .. } => "update",
         PlayState::Updating { .. } => "updating",
         PlayState::Paused { .. } => "paused",
+        PlayState::PlayThroughSteam { .. } => "play-through-steam",
         PlayState::Play(_) => "play",
         PlayState::Starting { .. } => "starting",
         PlayState::Running { .. } => "running",
@@ -305,6 +307,7 @@ fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal
         PlayState::Update { install, .. } => start_update(shell, model, install),
         PlayState::Updating { .. } | PlayState::Paused { .. } => popover.set(true),
         PlayState::Play(account) => play(shell, model, account.key, false, PlayOrigin::Default),
+        PlayState::PlayThroughSteam { install } => play_through_steam(shell, model, install),
         PlayState::InBattle { .. } => shell.select(TabKey::App(AppTab::PlayerTracker)),
         // Nothing to do until the state moves on.
         PlayState::Loading | PlayState::Restoring(_) | PlayState::Starting { .. } | PlayState::Running { .. } => {}
@@ -341,6 +344,19 @@ pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: 
         _ => {
             shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
         }
+    }
+}
+
+/// Hands the Steam install at `install` to Steam.
+fn play_through_steam(shell: Shell, model: LauncherModel, install: PathBuf) {
+    let played = model.run(move |launcher, settings, env| {
+        let played = launcher.play_through_steam(&install, false, settings, env, |command| {
+            wows_toolkit_services::child_process::prepare(command);
+        });
+        (played, false)
+    });
+    if let Some(Err(err)) = played {
+        shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
     }
 }
 

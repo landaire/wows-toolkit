@@ -20,6 +20,7 @@ mod popover;
 mod realm;
 pub mod replay;
 mod setup;
+mod steam_login;
 #[cfg(test)]
 pub mod testing;
 #[cfg(test)]
