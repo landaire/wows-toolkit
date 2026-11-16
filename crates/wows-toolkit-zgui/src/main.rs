@@ -213,6 +213,7 @@ fn main() {
     // The view is built once the window has its graphics device, so the check runs after the
     // renderer has made its choice and never delays it.
     let mut adapter_check = asked.gpu_adapter.is_some().then_some(asked);
+    let view_runtime = runtime.clone();
     let ran = app.run(move || {
         // Overlays hook at swapchain creation, which has happened by now, and the panic hook
         // must not list modules itself.
@@ -220,12 +221,17 @@ fn main() {
         if let Some(asked) = adapter_check.take() {
             cli::check_unmatched_adapter(asked);
         }
-        let runtime = runtime.clone();
+        let runtime = view_runtime.clone();
         view! { AppRoot(runtime = runtime) }
     });
     if let Err(err) = ran {
         tracing::error!("the window could not be run: {err}");
         cli::report_startup_message(&title, &format!("{err}\n"), true);
+    }
+
+    // A write still queued at quit is otherwise lost.
+    if let Some(runtime) = runtime {
+        services::finish_pending_writes(&runtime, services::WRITE_GRACE);
     }
 }
 

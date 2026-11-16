@@ -40,6 +40,8 @@ pub use crate::services::jobs::Progress;
 pub use crate::services::session::Session;
 pub use crate::services::settings::Settings;
 pub use crate::services::settings::SettingsState;
+pub use crate::services::settings::WRITE_GRACE;
+pub use crate::services::settings::finish_pending_writes;
 #[cfg(test)]
 pub use crate::services::settings::saved_for_test;
 pub use crate::services::supervision::Supervision;
