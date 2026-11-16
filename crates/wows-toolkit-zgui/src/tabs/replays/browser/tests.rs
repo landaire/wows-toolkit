@@ -27,6 +27,7 @@ use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::vocab::Modifiers;
@@ -1065,6 +1066,119 @@ fn the_listing_renders_in_dark_and_light() {
         window.advance(LANDING_PULSE);
         window.click(row(&window, &landed)).expect("the row has a box");
         window.advance(Duration::from_millis(300));
+
+        println!("{}", save_shot(&mut window, name).display());
+    }
+}
+
+/// The ways a row can be scored, in the order [`scored_listing`] lists them.
+const SCORINGS: [&str; 5] = ["both", "pr-only", "mc-only", "neither", "unrated"];
+
+/// A listing of one replay per entry of [`SCORINGS`], each scored that way, by path.
+fn scored_listing(window: &mut HeadlessWindow, control: BrowserControl) -> (tempfile::TempDir, Vec<PathBuf>) {
+    let random = RatingScope::Rated(RatedBattle::Random);
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+    let paths: Vec<PathBuf> = SCORINGS
+        .iter()
+        .zip(FIXTURES.iter().cycle())
+        .map(|(scoring, name)| {
+            let path = root.join(format!("{scoring}-{name}"));
+            std::fs::copy(fixture(name), &path).expect("the replay is copied");
+            path
+        })
+        .collect();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.open_folder(root.clone());
+    settle_in_real_time(window);
+
+    let summaries = HashMap::from([
+        (paths[0].clone(), summary(MatchOutcome::Win, random, Some(1650.4))),
+        (paths[1].clone(), RowSummary { self_mc: None, ..summary(MatchOutcome::Loss, random, Some(2480.0)) }),
+        (paths[2].clone(), RowSummary { self_mc: Some(980.0), ..summary(MatchOutcome::Win, random, None) }),
+        (paths[3].clone(), summary(MatchOutcome::Draw, random, None)),
+        (paths[4].clone(), summary(MatchOutcome::Loss, RatingScope::Unrated, None)),
+    ]);
+    listing(control, &root).summaries.set(summaries);
+    settle_in_real_time(window);
+
+    (dir, paths)
+}
+
+/// Where a score chip sits in its row.
+#[derive(Clone, Copy, Debug)]
+struct ChipPlace {
+    /// From the row's top.
+    top: f32,
+    /// From the row's top.
+    bottom: f32,
+    /// From the window's left.
+    right: f32,
+}
+
+/// The chip of `kind` drawn inside the row of `path`, if the row has one.
+fn chip_in_row(window: &HeadlessWindow, path: &Path, kind: &str) -> Option<ChipPlace> {
+    let bounds = window.bounds(row(window, path)).expect("the row has a box");
+    let row_top = bounds.origin.y.0;
+    let row_bottom = row_top + bounds.size.height.0;
+    let mut found: Vec<ChipPlace> = window
+        .all_by_attribute("data-rating", kind)
+        .into_iter()
+        .filter_map(|chip| window.bounds(chip))
+        .filter(|chip| row_top <= chip.origin.y.0 && chip.origin.y.0 + chip.size.height.0 <= row_bottom)
+        .map(|chip| ChipPlace {
+            top: chip.origin.y.0 - row_top,
+            bottom: chip.origin.y.0 + chip.size.height.0 - row_top,
+            right: chip.origin.x.0 + chip.size.width.0,
+        })
+        .collect();
+    assert!(found.len() <= 1, "a row shows one {kind} at most, got {found:?}");
+
+    found.pop()
+}
+
+/// A row's PR sits above its MC, inside the row, and each keeps its slot in every row so the
+/// scores line up down the listing.
+#[test]
+fn a_rows_scores_stack_pr_above_mc_and_line_up_across_rows() {
+    let (mut window, control) = open();
+    let (_dir, paths) = scored_listing(&mut window, control);
+    let [both, pr_only, mc_only, neither, unrated] = <[PathBuf; 5]>::try_from(paths).expect("one row per scoring");
+
+    let pr = chip_in_row(&window, &both, "pr").expect("the row shows its PR");
+    let mc = chip_in_row(&window, &both, "mc").expect("the row shows its MC");
+    assert!(pr.bottom <= mc.top, "PR {pr:?} sits above MC {mc:?}");
+    assert_eq!(pr.right, mc.right, "the two end at the same edge");
+
+    // Rows sit at fractional offsets, so a slot's top rounds to within a device pixel.
+    let same_slot = |chip: ChipPlace, slot: ChipPlace| (chip.top - slot.top).abs() <= 1.0 && chip.right == slot.right;
+
+    let alone = chip_in_row(&window, &pr_only, "pr").expect("the row shows its PR");
+    assert!(same_slot(alone, pr), "a PR alone keeps the PR slot: {alone:?} against {pr:?}");
+    assert!(chip_in_row(&window, &pr_only, "mc").is_none());
+
+    let alone = chip_in_row(&window, &mc_only, "mc").expect("the row shows its MC");
+    assert!(same_slot(alone, mc), "an MC alone keeps the MC slot: {alone:?} against {mc:?}");
+    assert!(chip_in_row(&window, &mc_only, "pr").is_none());
+
+    assert!(chip_in_row(&window, &neither, "pr").is_none() && chip_in_row(&window, &neither, "mc").is_none());
+
+    let dash = chip_in_row(&window, &unrated, "pr").expect("an unrated battle shows a dash for PR");
+    assert!(same_slot(dash, pr), "the PR dash keeps the PR slot: {dash:?} against {pr:?}");
+    let dash = chip_in_row(&window, &unrated, "mc").expect("an unrated battle shows a dash for MC");
+    assert!(same_slot(dash, mc), "the MC dash keeps the MC slot: {dash:?} against {mc:?}");
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the listing's scores"]
+fn the_listing_scores_render_in_dark_and_light() {
+    for (appearance, name) in
+        [(Appearance::Dark, "replay-browser-scores-dark"), (Appearance::Light, "replay-browser-scores-light")]
+    {
+        simulated_watch::install();
+        let mut window = open_shell(review_options(appearance));
+        let control = MADE.with(std::cell::Cell::get).expect("the replays tab made its browser");
+        let (_dir, _paths) = scored_listing(&mut window, control);
 
         println!("{}", save_shot(&mut window, name).display());
     }

@@ -198,12 +198,22 @@ const CSS: &str = css!(
         font-size: 12px;
         color: var(--lui-color-accent);
     }
-    .wt-row__spacer { flex: 1; }
-    .wt-row__pr {
+    .wt-row__scores {
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 1px;
+        min-width: 52px;
+        margin-left: 4px;
+    }
+    .wt-row__score-slot { display: flex; justify-content: flex-end; height: 13px; }
+    .wt-row__score {
         flex: none;
         padding: 0 3px;
         border-radius: 2px;
-        font-size: 12px;
+        font-size: 10px;
+        line-height: 13px;
         font-weight: 700;
     }
     .wt-row__stats .wt-row__glyph { width: 1em; height: 1em; margin-right: 3px; }
@@ -479,7 +489,7 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         let style = rating_style(PersonalRatingCategory::from_pr(value));
         AnyView::new(view! {
             text(
-                class = format!("wt-row__pr {TABULAR_CLASS}"),
+                class = format!("wt-row__score {TABULAR_CLASS}"),
                 style = style,
                 attr:data-rating = id,
                 a11y:label = said.clone()
@@ -492,7 +502,7 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
             Tooltip {
                 TooltipTrigger {
                     text(
-                        class = format!("wt-row__pr {TABULAR_CLASS}"),
+                        class = format!("wt-row__score {TABULAR_CLASS}"),
                         attr:data-testid = test_id,
                         attr:data-rating = id,
                         a11y:label = said
@@ -503,22 +513,29 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
         })
     };
     let pr_name = t!("ui.replay.column.personal_rating");
-    let mut chips: Vec<AnyView> = Vec::new();
-    match leaf.personal_rating {
-        Some(BattleRating::Rated(rating)) => chips.push(rating_chip("pr", &pr_name, rating.pr)),
+    let pr = match leaf.personal_rating {
+        Some(BattleRating::Rated(rating)) => Some(rating_chip("pr", &pr_name, rating.pr)),
         Some(BattleRating::Unrated) => {
-            chips.push(unrated_chip("pr", UNRATED_LEAF_ID, t!("ui.personal_rating.unrated_hover").into_owned()))
+            Some(unrated_chip("pr", UNRATED_LEAF_ID, t!("ui.personal_rating.unrated_hover").into_owned()))
         }
-        None => {}
-    }
-    match leaf.match_contribution {
-        Some(LeafMc::Rated(value)) => chips.push(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value)),
+        None => None,
+    };
+    let mc = match leaf.match_contribution {
+        Some(LeafMc::Rated(value)) => Some(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value)),
         Some(LeafMc::Unrated) => {
-            chips.push(unrated_chip("mc", UNRATED_MC_LEAF_ID, MatchContributionWithheld::UnratedBattle.explanation()))
+            Some(unrated_chip("mc", UNRATED_MC_LEAF_ID, MatchContributionWithheld::UnratedBattle.explanation()))
         }
-        None => {}
-    }
-    let rating = (!chips.is_empty()).then(|| view! { box(class = "wt-row__spacer") {} {chips} });
+        None => None,
+    };
+    // PR keeps the upper slot and MC the lower one, so each lines up with its own kind across rows.
+    let scores = (pr.is_some() || mc.is_some()).then(|| {
+        view! {
+            column(class = "wt-row__scores") {
+                box(class = "wt-row__score-slot") {{pr.map(IntoView::into_view)}}
+                box(class = "wt-row__score-slot") {{mc.map(IntoView::into_view)}}
+            }
+        }
+    });
     let stats: Vec<AnyView> = leaf
         .stats
         .into_iter()
@@ -545,10 +562,10 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
                     Show(when = move || arrived.get()) {
                         text(class = "wt-row__new", attr:data-testid = "replay-row-new") {{t!("ui.replay.new_tag").into_owned()}}
                     }
-                    {rating.map(IntoView::into_view)}
                 }
                 row(class = "wt-row__stats") {{stats}}
             }
+            {scores.map(IntoView::into_view)}
         }
     })
 }
