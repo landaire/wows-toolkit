@@ -756,6 +756,52 @@ fn map_only_frame(canvas: &RgbImage) -> BgraFrame {
     BgraFrame::from_rgb_square(canvas, HUD_HEIGHT, side)
 }
 
+/// One moment of a battle someone else is playing: the map with `commands` on it, and the HUD
+/// strip above it, where the score bar and the timer are drawn.
+///
+/// What a collab peer draws the frames it is sent with, over this build's own art for
+/// `map_name`. `None` when no build is open, or the open one ships no art for that map.
+pub fn render_battle(
+    map_name: &str,
+    game_data: &GameDataCache,
+    view: wows_minimap_renderer::viewport::MapViewport,
+    commands: &[DrawCommand],
+) -> Option<BgraFrame> {
+    let loaded = game_data.newest_loaded()?;
+    let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
+    let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    Some(battle_frame(&mut renderer, view, commands))
+}
+
+/// The same, over art the end playing the battle sent. `held_as` names the entry the built
+/// renderer is kept under. `None` when no build is open to draw the fonts and icons with.
+pub fn render_battle_art(
+    held_as: &str,
+    art: &image::RgbImage,
+    game_data: &GameDataCache,
+    view: wows_minimap_renderer::viewport::MapViewport,
+    commands: &[DrawCommand],
+) -> Option<BgraFrame> {
+    let loaded = game_data.newest_loaded()?;
+    let renderer = renderer_for_art(held_as, art, loaded.vfs());
+    let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    Some(battle_frame(&mut renderer, view, commands))
+}
+
+/// The whole canvas `renderer` draws `commands` on, HUD strip included.
+fn battle_frame(
+    renderer: &mut PreviewRenderer,
+    view: wows_minimap_renderer::viewport::MapViewport,
+    commands: &[DrawCommand],
+) -> BgraFrame {
+    let mut bgra = Vec::new();
+    let ((width, height), _) = renderer.render_regions_bgra(view, commands, &mut bgra);
+
+    BgraFrame::from_bgra(width, height, bgra)
+}
+
 /// Walks `replay`'s battle once, keeping the commands of the frames a preview
 /// plays.
 ///
@@ -1210,5 +1256,59 @@ mod tests {
             }
         }
         insta::assert_snapshot!(rosters);
+    }
+
+    /// A watched battle is drawn with the strip above the map, where the score bar and the timer
+    /// are, rather than cropped to the map.
+    ///
+    /// The renderer needs a face to draw its text with and a test has no game files, so any
+    /// TrueType face on the machine stands in. A machine with none skips.
+    #[test]
+    fn a_watched_battle_keeps_its_hud_strip() {
+        use std::io::Write as _;
+
+        use wows_minimap_renderer::CANVAS_HEIGHT;
+        use wows_minimap_renderer::HUD_HEIGHT;
+        use wows_minimap_renderer::MINIMAP_SIZE;
+        use wows_minimap_renderer::draw_command::DrawCommand;
+        use wows_minimap_renderer::drawing::SidePanelLayout;
+        use wows_minimap_renderer::preview::PreviewRenderer;
+        use wows_minimap_renderer::viewport::MapViewport;
+        use wowsunpack::vfs::MemoryFS;
+        use wowsunpack::vfs::VfsPath;
+
+        const FACES: &[&str] = &[
+            "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ];
+        let Some(face) = FACES.iter().find_map(|path| std::fs::read(path).ok()) else {
+            eprintln!("skipped: no TrueType face on this machine");
+            return;
+        };
+        let vfs: VfsPath = MemoryFS::new().into();
+        let font = vfs.join("gui/fonts/Warhelios.ttf").expect("the font's path is valid");
+        font.parent().create_dir_all().expect("the font's directory is made");
+        font.create_file().expect("the font is made").write_all(&face).expect("the font is written");
+        let art = image::RgbImage::from_pixel(MINIMAP_SIZE, MINIMAP_SIZE, image::Rgb([0, 0, 255]));
+        let mut renderer = PreviewRenderer::with_art(art, &vfs, None, SidePanelLayout::None);
+        let score = DrawCommand::ScoreBar {
+            team0: 600,
+            team1: 400,
+            team0_color: [0, 255, 0],
+            team1_color: [255, 0, 0],
+            max_score: 1000,
+            team0_timer: None,
+            team1_timer: None,
+            advantage: None,
+        };
+
+        let frame = super::battle_frame(&mut renderer, MapViewport::default(), &[score]);
+
+        assert_eq!((frame.width(), frame.height()), (MINIMAP_SIZE, CANVAS_HEIGHT), "the whole canvas");
+        let strip = &frame.bytes()[..(frame.bytes_per_row() * HUD_HEIGHT) as usize];
+        let green = strip.as_chunks::<4>().0.iter().any(|bgra| bgra[1] > 200 && bgra[0] < 60 && bgra[2] < 60);
+        assert!(green, "the friendly team's score is drawn in the strip");
     }
 }

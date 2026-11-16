@@ -29,8 +29,8 @@ use wows_replays::types::GameClock;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::minimap_preview::layout_for;
-use wows_toolkit_replay_data::minimap_preview::render_map;
-use wows_toolkit_replay_data::minimap_preview::render_map_art;
+use wows_toolkit_replay_data::minimap_preview::render_battle;
+use wows_toolkit_replay_data::minimap_preview::render_battle_art;
 use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
 use wows_toolkit_replay_data::replay_render::collab::ranges_by_player;
@@ -396,9 +396,9 @@ impl RasterJob {
         let frame = match &self.art {
             Some(art) => {
                 let held_as = format!("watched-{}", self.replay_id.raw());
-                render_map_art(&held_as, art, &self.game_data, view, &self.commands)
+                render_battle_art(&held_as, art, &self.game_data, view, &self.commands)
             }
-            None => render_map(&self.space, &self.game_data, view, &self.commands),
+            None => render_battle(&self.space, &self.game_data, view, &self.commands),
         };
         let Some(frame) = frame else { return false };
         self.sink.push(frame);
@@ -519,8 +519,8 @@ fn WatchedLayers(watch: WatchSession) -> impl IntoView {
     }
 }
 
-/// The toggles a watched frame can show. It is drawn on the map alone, so the layers that need a
-/// gutter beside it are left out.
+/// The toggles a watched frame can show. It is drawn without the gutters beside the map, so the
+/// layers that need one are left out.
 fn map_toggles() -> Vec<&'static Toggle> {
     TOGGLES
         .iter()
