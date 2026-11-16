@@ -29,6 +29,7 @@ use wows_mcp::tool_set::parse_arguments;
 use wows_mcp::tool_set::structured_answer;
 use wows_mcp::tool_set::tool_failure;
 use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::replay_folder::app_install_replay_dirs;
 
 use crate::services::mcp::tools::error::ToolError;
 use crate::services::mcp::tools::files::BuildFiles;
@@ -50,9 +51,14 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
-    /// The live replay folder of the install, the one root known without the index.
+    /// The install's live replay folders, the roots known without the index: in the install and,
+    /// for an install the launcher ran from an overlay, where the game's writes land.
     pub fn replay_roots(&self) -> PathRoots {
-        PathRoots::new(self.wows_dir.iter().map(|dir| dir.join("replays")))
+        PathRoots::new(self.install_replay_dirs())
+    }
+
+    fn install_replay_dirs(&self) -> Vec<PathBuf> {
+        self.wows_dir.iter().flat_map(|dir| app_install_replay_dirs(dir)).collect()
     }
 }
 
@@ -80,10 +86,10 @@ impl ReplayTools {
         self.context().index.ok_or(ToolError::IndexUnavailable)
     }
 
-    /// Every folder a replay may be read from: the install's live folder and each folder the
+    /// Every folder a replay may be read from: the install's live folders and each folder the
     /// index holds replays of.
     async fn replay_roots(&self) -> Result<PathRoots, ToolError> {
-        let mut roots: Vec<PathBuf> = self.context().wows_dir.iter().map(|dir| dir.join("replays")).collect();
+        let mut roots = self.context().install_replay_dirs();
         if let Ok(pool) = self.index() {
             let sources = wows_toolkit_config::index::query::list_sources(&pool)
                 .await
