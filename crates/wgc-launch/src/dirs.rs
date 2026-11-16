@@ -129,6 +129,17 @@ impl InstallStateDir {
     pub fn shader_cache(&self) -> PathBuf {
         self.dir.join("shader-cache")
     }
+
+    /// Overlay state for runs with a delta layer. Its upper is apart from
+    /// plain runs', so the two keep separate preferences and replays.
+    pub fn with_delta(&self) -> InstallStateDir {
+        InstallStateDir { key: self.key.clone(), dir: self.dir.join("delta") }
+    }
+
+    /// Names the delta layer the install's views use, while one is selected.
+    pub fn delta_record(&self) -> PathBuf {
+        self.dir.join("delta-layer")
+    }
 }
 
 fn sanitize(name: &str) -> String {

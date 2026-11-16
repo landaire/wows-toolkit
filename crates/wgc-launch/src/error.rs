@@ -68,6 +68,12 @@ pub enum ViewError {
     UnknownBackendRecord { path: PathBuf, content: String },
     #[error("read-only installs are only supported on Linux")]
     ReadOnlyUnsupported { path: PathBuf },
+    #[error("laying files over the install needs a bwrap overlay or fuse-overlayfs, and neither is available")]
+    NoDeltaBackend,
+    #[error("laying files over the install at {path} is only supported on Linux")]
+    DeltaUnsupported { path: PathBuf },
+    #[error("unreadable delta layer record at {path}")]
+    UnreadableDeltaRecord { path: PathBuf },
 }
 
 #[derive(Debug, Error)]

@@ -343,6 +343,7 @@ mod tests {
     fn layers() -> OverlayLayers {
         OverlayLayers {
             lower: PathBuf::from("/mnt/games/World_of_Warships"),
+            delta: None,
             upper: PathBuf::from("/data/game-runtime/installs/wows/upper"),
             work: PathBuf::from("/data/game-runtime/installs/wows/work"),
             merged: PathBuf::from("/data/game-runtime/installs/wows/merged"),
@@ -371,6 +372,37 @@ mod tests {
             &launch_args(),
             &host_env(),
             &SessionMarker { id: SessionId::new("wows"), install: Some(layers().lower) },
+        );
+
+        let mut snap = snapshot(&plan);
+        let proton_dir = tmp.path().display().to_string();
+        snap.argv.iter_mut().for_each(|arg| *arg = arg.replace(&proton_dir, "[proton-parent]"));
+        insta::assert_yaml_snapshot!(snap);
+    }
+
+    #[test]
+    fn steam_install_with_a_delta_layer_in_kernel_overlay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proton = proton(&tmp.path().join("Proton - Experimental"));
+        let runner = ResolvedRunner::new(
+            Runner::SteamProton { proton, steam_root: PathBuf::from("/home/u/.local/share/Steam") },
+            RuntimeDirs::new(Path::new("/data")),
+        );
+        let layers = OverlayLayers {
+            lower: PathBuf::from("/home/u/.local/share/Steam/steamapps/common/World of Warships"),
+            delta: Some(PathBuf::from("/data/game-runtime/wgc-layers/15.10.0.0.13567617")),
+            upper: PathBuf::from("/data/game-runtime/installs/wows/delta/upper"),
+            work: PathBuf::from("/data/game-runtime/installs/wows/delta/work"),
+            merged: PathBuf::from("/data/game-runtime/installs/wows/delta/merged"),
+        };
+        let view = PlanView::KernelOverlay { bwrap: PathBuf::from("/usr/bin/bwrap"), layers: layers.clone() };
+        let plan = CommandPlan::for_runner(
+            &runner,
+            &view,
+            &relay(),
+            &launch_args(),
+            &host_env(),
+            &SessionMarker { id: SessionId::new("wows"), install: Some(layers.lower) },
         );
 
         let mut snap = snapshot(&plan);

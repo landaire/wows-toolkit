@@ -1,0 +1,21 @@
+---
+source: crates/wgc-launch/src/view.rs
+assertion_line: 601
+expression: "(resolved, listing)"
+---
+- - - platform64.dll
+    - delta/platform64.dll
+  - - steam_api64.dll
+    - absent
+  - - wgc_api.dll
+    - absent
+  - - game_info.xml
+    - delta/game_info.xml
+  - - currentrealm.txt
+    - upper/currentrealm.txt
+  - - bin/1/bin64/platform64.dll
+    - delta/bin/1/bin64/platform64.dll
+  - - bin/1/bin64/steam_api64.dll
+    - absent
+- - - platform64.dll
+    - delta/bin/1/bin64/platform64.dll

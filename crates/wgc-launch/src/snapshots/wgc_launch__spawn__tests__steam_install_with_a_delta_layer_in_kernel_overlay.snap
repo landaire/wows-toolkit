@@ -1,0 +1,46 @@
+---
+source: crates/wgc-launch/src/spawn.rs
+assertion_line: 412
+expression: snap
+---
+argv:
+  - /usr/bin/bwrap
+  - "--dev-bind"
+  - /
+  - /
+  - "--overlay-src"
+  - /home/u/.local/share/Steam/steamapps/common/World of Warships
+  - "--overlay-src"
+  - /data/game-runtime/wgc-layers/15.10.0.0.13567617
+  - "--overlay"
+  - /data/game-runtime/installs/wows/delta/upper
+  - /data/game-runtime/installs/wows/delta/work
+  - /data/game-runtime/installs/wows/delta/merged
+  - "--chdir"
+  - /data/game-runtime/installs/wows/delta/merged
+  - "--"
+  - "[proton-parent]/Proton - Experimental/proton"
+  - run
+  - /data/game-runtime/umu/prefix/drive_c/ProgramData/Wargaming.net/GameCenter/wgc-relay.exe
+  - "Z:\\data\\game-runtime\\installs\\wows\\merged\\WorldOfWarships.exe"
+  - "-safe"
+cwd: /data/game-runtime/installs/wows/delta/merged
+env:
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
+  DISPLAY: ":0"
+  HOME: /home/u
+  LC_TIME: en_GB.UTF-8
+  PATH: "/home/u/.local/bin:/usr/bin"
+  PROTON_LOG: "1"
+  STEAM_COMPAT_CLIENT_INSTALL_PATH: /home/u/.local/share/Steam
+  STEAM_COMPAT_DATA_PATH: /data/game-runtime/proton/compatdata
+  STEAM_COMPAT_INSTALL_PATH: /data/game-runtime/installs/wows/delta/merged
+  SteamAppId: "552990"
+  SteamGameId: "552990"
+  USER: u
+  WAYLAND_DISPLAY: wayland-1
+  WGC_RELAY_ADDR: "127.0.0.1:40000"
+  WGC_RELAY_TOKEN: secret
+  WOWS_TOOLKIT_GAME_INSTALL: /home/u/.local/share/Steam/steamapps/common/World of Warships
+  WOWS_TOOLKIT_GAME_SESSION: wows
+  XDG_RUNTIME_DIR: /run/user/1000

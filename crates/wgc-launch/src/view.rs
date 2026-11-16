@@ -41,27 +41,34 @@ impl InstallView {
 
     pub fn prepare_with(install_root: &Path, dirs: &RuntimeDirs, search: &HostSearch) -> Result<Self, ViewError> {
         let root = canonical_root(install_root)?;
-        let state = dirs.install_state(&root);
+        let plain = dirs.install_state(&root);
+        let delta = read_delta_record(&plain.delta_record())?;
+        let state = if delta.is_some() { plain.with_delta() } else { plain };
         let record_path = state.backend_record();
 
         // An install that has an upper directory keeps using it even if it
         // became writable, so its preferences and replays do not vanish.
         let recorded = read_backend_record(&record_path)?;
 
-        if recorded.is_none() && probe_writable(&root)? == Writability::Writable {
+        if delta.is_none() && recorded.is_none() && probe_writable(&root)? == Writability::Writable {
             return Ok(Self::Direct { root });
         }
         if !cfg!(target_os = "linux") {
-            return Err(ViewError::ReadOnlyUnsupported { path: root });
+            return Err(match delta {
+                Some(_) => ViewError::DeltaUnsupported { path: root },
+                None => ViewError::ReadOnlyUnsupported { path: root },
+            });
         }
 
+        let has_delta = delta.is_some();
         for dir in [state.upper(), state.work(), state.merged()] {
             std::fs::create_dir_all(&dir).map_err(|source| ViewError::StateDir { path: dir, source })?;
         }
         // The stale mount check compares the merged directory with the mount table's resolved paths.
         let state =
             state.canonicalize().map_err(|source| ViewError::StateDir { path: state.dir().to_path_buf(), source })?;
-        let layers = OverlayLayers { lower: root, upper: state.upper(), work: state.work(), merged: state.merged() };
+        let layers =
+            OverlayLayers { lower: root, delta, upper: state.upper(), work: state.work(), merged: state.merged() };
 
         // Probe only when choosing: prepare also runs while a game runs, and
         // overlayfs does not support two mounts sharing one upper directory.
@@ -72,11 +79,38 @@ impl InstallView {
                 let candidates = [OverlayBackend::KernelBwrap, OverlayBackend::FuseOverlayfs]
                     .into_iter()
                     .filter_map(|backend| OverlayTools::find(backend, search));
-                choose_backend(&state, candidates, |tools| tools.probe(&layers, state.dir()))?
+                choose_backend(&state, candidates, |tools| tools.probe(&layers, state.dir())).map_err(
+                    |err| match err {
+                        ViewError::NoOverlayBackend if has_delta => ViewError::NoDeltaBackend,
+                        err => err,
+                    },
+                )?
             }
         };
 
         Ok(Self::Overlay(OverlayView { key: state.key().clone(), layers, tools }))
+    }
+
+    /// Lays the read-only directory `delta` between the install and the
+    /// upper in every later view of the install, or stops when `None`.
+    /// Views with a delta keep their own upper. Call only while no game
+    /// runs from the install.
+    pub fn select_delta(install_root: &Path, dirs: &RuntimeDirs, delta: Option<&Path>) -> Result<(), ViewError> {
+        let root = canonical_root(install_root)?;
+        let state = dirs.install_state(&root);
+        let record = state.delta_record();
+
+        let Some(delta) = delta else {
+            return match std::fs::remove_file(&record) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(source) => Err(ViewError::StateDir { path: record, source }),
+            };
+        };
+
+        std::fs::create_dir_all(state.dir())
+            .map_err(|source| ViewError::StateDir { path: state.dir().to_path_buf(), source })?;
+        std::fs::write(&record, path_to_bytes(delta)).map_err(|source| ViewError::StateDir { path: record, source })
     }
 
     /// The game stub inside the view, as a host path.
@@ -99,6 +133,7 @@ impl InstallView {
             Self::Direct { root } => InstallFiles::Direct { root: root.clone() },
             Self::Overlay(overlay) => InstallFiles::Overlay {
                 lower: overlay.layers.lower.clone(),
+                delta: overlay.layers.delta.clone(),
                 upper: overlay.layers.upper.clone(),
                 backend: overlay.tools.backend(),
             },
@@ -132,7 +167,7 @@ impl OverlayView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallFiles {
     Direct { root: PathBuf },
-    Overlay { lower: PathBuf, upper: PathBuf, backend: OverlayBackend },
+    Overlay { lower: PathBuf, delta: Option<PathBuf>, upper: PathBuf, backend: OverlayBackend },
 }
 
 impl InstallFiles {
@@ -141,10 +176,12 @@ impl InstallFiles {
     /// never run from an overlay is read in place.
     pub fn existing(install_root: &Path, dirs: &RuntimeDirs) -> Result<Self, ViewError> {
         let root = canonical_root(install_root)?;
-        let state = dirs.install_state(&root);
+        let plain = dirs.install_state(&root);
+        let delta = read_delta_record(&plain.delta_record())?;
+        let state = if delta.is_some() { plain.with_delta() } else { plain };
 
         Ok(match read_backend_record(&state.backend_record())? {
-            Some(backend) => Self::Overlay { lower: root, upper: state.upper(), backend },
+            Some(backend) => Self::Overlay { lower: root, delta, upper: state.upper(), backend },
             None => Self::Direct { root },
         })
     }
@@ -153,28 +190,34 @@ impl InstallFiles {
     /// merged view.
     pub fn resolve_read(&self, rel: &Path) -> std::io::Result<Option<PathBuf>> {
         check_relative(rel)?;
-        let (lower, upper) = match self {
+        let (lower, delta, upper) = match self {
             Self::Direct { root } => {
                 let path = root.join(rel);
                 return Ok(path.symlink_metadata().is_ok().then_some(path));
             }
-            Self::Overlay { lower, upper, .. } => (lower, upper),
+            Self::Overlay { lower, delta, upper, .. } => (lower, delta, upper),
         };
 
-        let Some(lower_visible) = upper_ancestors_allow_lower(upper, rel) else {
-            return Ok(None);
-        };
+        // Each layer above the install may hide what lies below it.
+        for layer in std::iter::once(upper).chain(delta) {
+            let Some(below_visible) = upper_ancestors_allow_lower(layer, rel) else {
+                return Ok(None);
+            };
 
-        let upper_path = upper.join(rel);
-        if markers::is_whiteout(&upper_path) {
-            return Ok(None);
-        }
-        if upper_path.symlink_metadata().is_ok() {
-            return Ok(Some(upper_path));
+            let path = layer.join(rel);
+            if markers::is_whiteout(&path) {
+                return Ok(None);
+            }
+            if path.symlink_metadata().is_ok() {
+                return Ok(Some(path));
+            }
+            if !below_visible {
+                return Ok(None);
+            }
         }
 
         let lower_path = lower.join(rel);
-        Ok((lower_visible && lower_path.symlink_metadata().is_ok()).then_some(lower_path))
+        Ok(lower_path.symlink_metadata().is_ok().then_some(lower_path))
     }
 
     /// Where a writer should put `rel`. For an overlay this is in the upper
@@ -214,40 +257,52 @@ impl InstallFiles {
     /// Entries of the directory `rel` in the merged view, sorted by name.
     pub fn list_dir(&self, rel: &Path) -> std::io::Result<Vec<InstallDirEntry>> {
         check_relative(rel)?;
-        let (lower, upper) = match self {
+        let (lower, delta, upper) = match self {
             Self::Direct { root } => {
                 let mut entries = read_entries(&root.join(rel))?;
                 entries.sort_by(|a, b| a.name.cmp(&b.name));
                 return Ok(entries);
             }
-            Self::Overlay { lower, upper, .. } => (lower, upper),
+            Self::Overlay { lower, delta, upper, .. } => (lower, delta, upper),
         };
-
-        let Some(lower_visible) = upper_ancestors_allow_lower(upper, rel) else {
-            return Ok(Vec::new());
-        };
-
-        let upper_dir = upper.join(rel);
-        if markers::is_whiteout(&upper_dir) {
-            return Ok(Vec::new());
-        }
-        let lower_visible = lower_visible && !(upper_dir.is_dir() && markers::is_opaque(&upper_dir));
 
         let mut hidden = std::collections::HashSet::new();
         let mut merged = std::collections::BTreeMap::new();
-        for entry in read_entries(&upper_dir)? {
-            if let Some(name) = markers::hidden_name(&entry.name) {
-                hidden.insert(name.to_owned());
-                continue;
+        let mut lower_visible = true;
+        // Each layer above the install may hide entries of those below it.
+        for layer in std::iter::once(upper).chain(delta) {
+            let Some(below_visible) = upper_ancestors_allow_lower(layer, rel) else {
+                lower_visible = false;
+                break;
+            };
+
+            let layer_dir = layer.join(rel);
+            if markers::is_whiteout(&layer_dir) {
+                lower_visible = false;
+                break;
             }
-            if markers::is_marker_name(&entry.name) {
-                continue;
+
+            for entry in read_entries(&layer_dir)? {
+                if let Some(name) = markers::hidden_name(&entry.name) {
+                    hidden.insert(name.to_owned());
+                    continue;
+                }
+                if markers::is_marker_name(&entry.name) {
+                    continue;
+                }
+                if markers::is_whiteout(&entry.path) {
+                    hidden.insert(entry.name.clone());
+                    continue;
+                }
+                if !hidden.contains(&entry.name) {
+                    merged.entry(entry.name.clone()).or_insert(entry);
+                }
             }
-            if markers::is_whiteout(&entry.path) {
-                hidden.insert(entry.name.clone());
-                continue;
+
+            if !below_visible || (layer_dir.is_dir() && markers::is_opaque(&layer_dir)) {
+                lower_visible = false;
+                break;
             }
-            merged.insert(entry.name.clone(), entry);
         }
 
         if lower_visible {
@@ -267,7 +322,9 @@ impl InstallFiles {
         check_relative(rel)?;
         Ok(match self {
             Self::Direct { root } => vec![root.join(rel)],
-            Self::Overlay { lower, upper, .. } => vec![upper.join(rel), lower.join(rel)],
+            Self::Overlay { lower, delta, upper, .. } => {
+                std::iter::once(upper).chain(delta).chain(std::iter::once(lower)).map(|layer| layer.join(rel)).collect()
+            }
         })
     }
 }
@@ -395,6 +452,44 @@ fn write_backend_record(state: &InstallStateDir, backend: OverlayBackend) -> std
     std::fs::File::open(state.dir())?.sync_all()
 }
 
+fn read_delta_record(record_path: &Path) -> Result<Option<PathBuf>, ViewError> {
+    let bytes = match std::fs::read(record_path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(ViewError::StateDir { path: record_path.to_path_buf(), source }),
+    };
+
+    let delta = bytes_to_path(bytes)
+        .filter(|delta| delta.is_absolute())
+        .ok_or_else(|| ViewError::UnreadableDeltaRecord { path: record_path.to_path_buf() })?;
+
+    Ok(Some(delta))
+}
+
+#[cfg(unix)]
+fn path_to_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn path_to_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().into_owned().into_bytes()
+}
+
+#[cfg(unix)]
+fn bytes_to_path(bytes: Vec<u8>) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+
+    Some(PathBuf::from(OsString::from_vec(bytes)))
+}
+
+#[cfg(not(unix))]
+fn bytes_to_path(bytes: Vec<u8>) -> Option<PathBuf> {
+    String::from_utf8(bytes).ok().map(PathBuf::from)
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
@@ -455,7 +550,7 @@ mod tests {
         rustix::fs::setxattr(upper.join("profile"), "user.overlay.opaque", b"y", rustix::fs::XattrFlags::empty())
             .unwrap();
 
-        (tmp, InstallFiles::Overlay { lower, upper, backend: OverlayBackend::KernelBwrap })
+        (tmp, InstallFiles::Overlay { lower, delta: None, upper, backend: OverlayBackend::KernelBwrap })
     }
 
     fn layer_of(tmp: &Path, path: Option<PathBuf>) -> String {
@@ -497,6 +592,83 @@ mod tests {
             .collect();
 
         insta::assert_yaml_snapshot!(listing);
+    }
+
+    /// An install with files replaced, added and hidden by a delta layer,
+    /// and game writes above it.
+    fn with_delta() -> (tempfile::TempDir, InstallFiles) {
+        let tmp = tempfile::tempdir().unwrap();
+        let lower = tmp.path().join("lower");
+        let delta = tmp.path().join("delta");
+        let upper = tmp.path().join("upper");
+        for rel in ["platform64.dll", "steam_api64.dll", "bin/1/bin64/platform64.dll", "bin/1/bin64/steam_api64.dll"] {
+            write(&lower.join(rel), "lower");
+        }
+        for rel in ["platform64.dll", "wgc_api.dll", "game_info.xml", "bin/1/bin64/platform64.dll"] {
+            write(&delta.join(rel), "delta");
+        }
+        char_whiteout(&delta.join("steam_api64.dll"));
+        char_whiteout(&delta.join("bin/1/bin64/steam_api64.dll"));
+        char_whiteout(&delta.join("currentrealm.txt"));
+        write(&upper.join("currentrealm.txt"), "upper");
+        char_whiteout(&upper.join("wgc_api.dll"));
+
+        (tmp, InstallFiles::Overlay { lower, delta: Some(delta), upper, backend: OverlayBackend::FuseOverlayfs })
+    }
+
+    #[test]
+    fn a_delta_layer_replaces_adds_and_hides_install_files() {
+        let (tmp, files) = with_delta();
+        let resolved: Vec<(String, String)> = [
+            "platform64.dll",
+            "steam_api64.dll",
+            "wgc_api.dll",
+            "game_info.xml",
+            "currentrealm.txt",
+            "bin/1/bin64/platform64.dll",
+            "bin/1/bin64/steam_api64.dll",
+        ]
+        .into_iter()
+        .map(|rel| (rel.to_owned(), layer_of(tmp.path(), files.resolve_read(Path::new(rel)).unwrap())))
+        .collect();
+        let listing: Vec<(String, String)> = files
+            .list_dir(Path::new("bin/1/bin64"))
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.name.to_string_lossy().into_owned(), layer_of(tmp.path(), Some(entry.path))))
+            .collect();
+
+        insta::assert_yaml_snapshot!((resolved, listing));
+    }
+
+    #[test]
+    fn a_selected_delta_gets_its_own_upper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let install = tmp.path().join("install");
+        std::fs::create_dir_all(&install).unwrap();
+        let dirs = RuntimeDirs::new(&tmp.path().join("app"));
+        let state = dirs.install_state(&std::fs::canonicalize(&install).unwrap());
+        write(&state.with_delta().backend_record(), "fuse-overlayfs");
+        let delta = tmp.path().join("delta");
+
+        assert_eq!(
+            InstallFiles::existing(&install, &dirs).unwrap(),
+            InstallFiles::Direct { root: install.canonicalize().unwrap() }
+        );
+
+        InstallView::select_delta(&install, &dirs, Some(&delta)).unwrap();
+        assert_eq!(
+            InstallFiles::existing(&install, &dirs).unwrap(),
+            InstallFiles::Overlay {
+                lower: install.canonicalize().unwrap(),
+                delta: Some(delta),
+                upper: state.with_delta().upper(),
+                backend: OverlayBackend::FuseOverlayfs,
+            }
+        );
+
+        InstallView::select_delta(&install, &dirs, None).unwrap();
+        assert!(matches!(InstallFiles::existing(&install, &dirs).unwrap(), InstallFiles::Direct { .. }));
     }
 
     #[test]

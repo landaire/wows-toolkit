@@ -3,8 +3,10 @@
 //! On Linux a launch is a `ResolvedRunner` (Steam's Proton or umu, with a
 //! toolkit-owned prefix under `RuntimeDirs`) running a `WindowsProgram`
 //! inside an `InstallView`. A read-only install runs from an overlay whose
-//! upper directory keeps everything the game writes. Code that reads or
-//! edits install files (preferences, replays, `res_mods`) goes through
+//! upper directory keeps everything the game writes. An install may also
+//! have a delta layer selected, a read-only directory of replacement files
+//! and whiteouts laid between it and the upper. Code that reads or edits
+//! install files (preferences, replays, `res_mods`) goes through
 //! `InstallView::files()`, never the install path, so it sees the game's
 //! writes whether or not the game is running.
 
@@ -39,6 +41,7 @@ pub use crate::host::SteamRuntime;
 pub use crate::lock::SessionLock;
 pub use crate::overlay::OverlayBackend;
 pub use crate::overlay::OverlayLayers;
+pub use crate::overlay::markers::create_whiteout;
 pub use crate::runner::FirstRunWork;
 pub use crate::runner::ResolvedRunner;
 pub use crate::runner::Runner;

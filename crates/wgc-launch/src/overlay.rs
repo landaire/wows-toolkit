@@ -44,6 +44,9 @@ impl OverlayBackend {
 pub struct OverlayLayers {
     /// The read-only install.
     pub lower: PathBuf,
+    /// Read-only files laid over the install, below the upper: replacements,
+    /// additions and 0/0 character-device whiteouts that hide install files.
+    pub delta: Option<PathBuf>,
     /// Game writes, kept across launches.
     pub upper: PathBuf,
     pub work: PathBuf,
@@ -105,7 +108,13 @@ impl OverlayTools {
                     .is_ok_and(|status| status.success())
             }
             Self::FuseOverlayfs { fuse_overlayfs, fusermount } => {
-                match probe_fuse_mount(&layers.lower, scratch_parent, fuse_overlayfs, fusermount) {
+                match probe_fuse_mount(
+                    &layers.lower,
+                    layers.delta.as_deref(),
+                    scratch_parent,
+                    fuse_overlayfs,
+                    fusermount,
+                ) {
                     Ok(()) => true,
                     Err(err) => {
                         tracing::info!("fuse-overlayfs probe failed: {err}");
@@ -120,13 +129,15 @@ impl OverlayTools {
 /// The argv that runs a command inside a mount namespace with `layers`
 /// mounted at `layers.merged`; the command follows.
 pub(crate) fn bwrap_prefix(bwrap: &Path, layers: &OverlayLayers) -> Vec<OsString> {
-    vec![
-        bwrap.as_os_str().to_owned(),
-        "--dev-bind".into(),
-        "/".into(),
-        "/".into(),
-        "--overlay-src".into(),
-        layers.lower.as_os_str().to_owned(),
+    let mut argv = vec![bwrap.as_os_str().to_owned(), "--dev-bind".into(), "/".into(), "/".into()];
+
+    // The first source is the bottom layer.
+    for source in std::iter::once(&layers.lower).chain(&layers.delta) {
+        argv.push("--overlay-src".into());
+        argv.push(source.as_os_str().to_owned());
+    }
+
+    argv.extend([
         "--overlay".into(),
         layers.upper.as_os_str().to_owned(),
         layers.work.as_os_str().to_owned(),
@@ -134,7 +145,9 @@ pub(crate) fn bwrap_prefix(bwrap: &Path, layers: &OverlayLayers) -> Vec<OsString
         "--chdir".into(),
         layers.merged.as_os_str().to_owned(),
         "--".into(),
-    ]
+    ]);
+
+    argv
 }
 
 /// A mounted fuse-overlayfs. Not unmounted on drop: a game that outlives
@@ -181,6 +194,7 @@ impl FuseMount {
 /// throwaway directories live under `scratch_parent`.
 fn probe_fuse_mount(
     lower: &Path,
+    delta: Option<&Path>,
     scratch_parent: &Path,
     fuse_overlayfs: &Path,
     fusermount: &Path,
@@ -191,6 +205,7 @@ fn probe_fuse_mount(
         .map_err(|source| MountError::ProbeDir { path: scratch_parent.to_path_buf(), source })?;
     let layers = OverlayLayers {
         lower: lower.to_path_buf(),
+        delta: delta.map(Path::to_path_buf),
         upper: scratch.path().join("upper"),
         work: scratch.path().join("work"),
         merged: scratch.path().join("merged"),
@@ -226,7 +241,14 @@ fn fuse_overlayfs_options(layers: &OverlayLayers) -> Result<OsString, MountError
     }
 
     let mut options = Vec::new();
-    push_fuse_option(&mut options, "lowerdir", &escape_layer_path(&layers.lower));
+    // fuse-overlayfs lists lower layers top first, split at unescaped colons.
+    let mut lower = Vec::new();
+    if let Some(delta) = &layers.delta {
+        lower.extend(escape_layer_path(delta));
+        lower.push(b':');
+    }
+    lower.extend(escape_layer_path(&layers.lower));
+    push_fuse_option(&mut options, "lowerdir", &lower);
     push_fuse_option(&mut options, "upperdir", &escape_layer_path(&layers.upper));
     push_fuse_option(&mut options, "workdir", work);
 
@@ -416,6 +438,28 @@ pub(crate) mod markers {
     pub(crate) fn mark_opaque(_dir: &Path, _backend: super::OverlayBackend) -> std::io::Result<()> {
         Ok(())
     }
+
+    /// Hides `path` of the layers below the one holding it: a 0/0 character
+    /// device, which the kernel and fuse-overlayfs both read as a whiteout
+    /// and which needs no privilege to create. Only Linux overlays read
+    /// whiteouts.
+    #[cfg(target_os = "linux")]
+    pub fn create_whiteout(path: &Path) -> std::io::Result<()> {
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            path,
+            rustix::fs::FileType::CharacterDevice,
+            rustix::fs::Mode::empty(),
+            rustix::fs::makedev(0, 0),
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn create_whiteout(_path: &Path) -> std::io::Result<()> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+    }
 }
 
 #[cfg(test)]
@@ -436,6 +480,7 @@ mod tests {
     fn fuse_overlayfs_options_escape_separators_in_paths() {
         let layers = OverlayLayers {
             lower: PathBuf::from(r"/games/a,b:c\d"),
+            delta: None,
             upper: PathBuf::from("/state/up:per"),
             work: PathBuf::from("/state/wo,rk:dir"),
             merged: PathBuf::from("/state/merged"),
@@ -453,11 +498,28 @@ mod tests {
     fn fuse_overlayfs_cannot_take_a_work_dir_with_a_backslash() {
         let layers = OverlayLayers {
             lower: PathBuf::from("/games/wows"),
+            delta: None,
             upper: PathBuf::from("/state/upper"),
             work: PathBuf::from(r"/state/wo\rk"),
             merged: PathBuf::from("/state/merged"),
         };
 
         assert!(matches!(fuse_overlayfs_options(&layers), Err(MountError::WorkDirBackslash { .. })));
+    }
+
+    #[test]
+    fn fuse_overlayfs_stacks_the_delta_over_the_install() {
+        let layers = OverlayLayers {
+            lower: PathBuf::from("/steam/World of Warships"),
+            delta: Some(PathBuf::from("/data/wgc-layer/15.10")),
+            upper: PathBuf::from("/data/installs/wows/delta/upper"),
+            work: PathBuf::from("/data/installs/wows/delta/work"),
+            merged: PathBuf::from("/data/installs/wows/delta/merged"),
+        };
+
+        assert_eq!(
+            fuse_overlayfs_options(&layers).unwrap().to_str().unwrap(),
+            "lowerdir=/data/wgc-layer/15.10:/steam/World of Warships,upperdir=/data/installs/wows/delta/upper,workdir=/data/installs/wows/delta/work"
+        );
     }
 }

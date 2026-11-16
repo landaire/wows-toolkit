@@ -237,6 +237,7 @@ mod tests {
         write(&upper.join(override_path(99)), &engine_config(200, true));
         let files = InstallSettingsFiles(InstallFiles::Overlay {
             lower: lower.clone(),
+            delta: None,
             upper: upper.clone(),
             backend: OverlayBackend::KernelBwrap,
         });
