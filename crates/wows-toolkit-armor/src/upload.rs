@@ -68,7 +68,8 @@ pub struct DisplaySettings {
 }
 
 impl Default for DisplaySettings {
-    /// `ArmorViewerDefaults::default()` (`armor_viewer/state.rs:96-112`).
+    /// `ArmorViewerDefaults::default()` (`armor_viewer/state.rs:96-112`), except that the water
+    /// starts off: the grid marks the waterline without hiding the plates below it.
     fn default() -> Self {
         Self {
             show_plate_edges: true,
@@ -79,7 +80,7 @@ impl Default for DisplaySettings {
             marker_opacity: 1.0,
             show_grid: true,
             show_length_marks: true,
-            show_waterline: true,
+            show_waterline: false,
             waterline_opacity: 0.3,
         }
     }
@@ -596,6 +597,31 @@ mod tests {
     #[test]
     fn display_settings_from_defaults_falls_back_when_no_row() {
         assert_eq!(DisplaySettings::from_defaults(None), DisplaySettings::default());
+    }
+
+    /// The water is off for a reader with no saved row, and stays on for one who saved it on.
+    #[test]
+    fn display_settings_keep_water_a_reader_saved_on() {
+        let row = ArmorViewerDefaultsRow {
+            show_plate_edges: true,
+            show_waterline: true,
+            show_zero_mm: false,
+            armor_opacity: 1.0,
+            waterline_opacity: 0.3,
+            hull_opaque: false,
+            hull_all_visible: false,
+            armor_all_visible: true,
+            show_splash_boxes: false,
+            show_legend: true,
+            legend_collapsed: false,
+            legend_pos_x: None,
+            legend_pos_y: None,
+            lighting: None,
+        };
+
+        assert!(!DisplaySettings::from_defaults(None).show_waterline);
+        assert!(DisplaySettings::from_defaults(Some(&row)).show_waterline);
+        assert!(DisplaySettings::from_defaults(None).show_grid);
     }
 
     #[test]
