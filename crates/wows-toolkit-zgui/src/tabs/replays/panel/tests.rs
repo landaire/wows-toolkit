@@ -43,6 +43,7 @@ use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
@@ -65,6 +66,7 @@ use super::figures::BI_TILE_ID;
 use super::figures::PR_TILE_ID;
 use super::figures::match_contribution_label;
 use super::figures::personal_rating_label;
+use super::land_read;
 use super::loaded_from_model;
 use super::write_export;
 use crate::shell::Shell;
@@ -78,6 +80,8 @@ thread_local! {
     pub(super) static SEED: RefCell<Option<Loaded>> = const { RefCell::new(None) };
     /// The read [`RefusedAlt`] asked for next.
     static ASKED_AGAIN: Cell<Option<ReparseCause>> = const { Cell::new(None) };
+    /// Whether [`SupersededRead`] left the battle on screen, and the read it asked for next.
+    static SUPERSEDED: RefCell<Option<(bool, Option<ReparseCause>)>> = const { RefCell::new(None) };
 }
 
 /// A won battle whose self row dealt exactly the fixture's expected damage and frags, so it
@@ -174,10 +178,13 @@ struct Opening {
     theme: Option<ThemeChoice>,
     drawing: Option<Drawing>,
     size: Option<WindowSize>,
+    /// What the test drives the panel through; a fresh one without one.
+    control: Option<super::PanelControl>,
 }
 
 fn open(opening: Opening) -> Opened {
-    let Opening { seed, events, table, rating, theme, drawing, size } = opening;
+    let Opening { seed, events, table, rating, theme, drawing, size, control } = opening;
+    let control = control.unwrap_or_default();
     let table = table.unwrap_or_else(fake_table);
     SEED.with(|slot| *slot.borrow_mut() = seed);
     let mut options = HeadlessOptions::new(size.unwrap_or(WindowSize { width: 1100.0, height: 700.0 }));
@@ -196,12 +203,12 @@ fn open(opening: Opening) -> Opened {
         match rating {
             Some(rating) => AnyView::new(view! {
                 ShellHarness(theme = theme) {
-                    ReplayPanel(setup = setup, table = table, events = events, personal_rating = rating)
+                    ReplayPanel(setup = setup, table = table, control = control, events = events, personal_rating = rating)
                 }
             }),
             None => AnyView::new(view! {
                 ShellHarness(theme = theme) {
-                    ReplayPanel(setup = setup, table = table, events = events)
+                    ReplayPanel(setup = setup, table = table, control = control, events = events)
                 }
             }),
         }
@@ -616,6 +623,43 @@ fn a_real_replays_ratings_render_with_their_hovers() {
     println!("{}", crate::interaction_tests::save_shot(&mut window, "replay-mc-tile-hover").display());
 }
 
+/// Results that land after the panel showed the battle without them reach the table's cells
+/// without the reader pointing at any of them.
+#[test]
+fn results_that_land_later_fill_the_table() {
+    let complete = sample_model();
+    let received: Vec<String> = complete
+        .rows
+        .iter()
+        .filter(|row| !row.should_hide_stats())
+        .filter_map(|row| row.received_damage_text.clone())
+        .collect();
+    assert!(!received.is_empty(), "the sample's rows carry received damage");
+    let mut pending = sample_model();
+    for row in &mut pending.rows {
+        row.received_damage = None;
+        row.received_damage_text = None;
+    }
+    let control = super::PanelControl::new();
+    let Opened { mut window } = open(Opening {
+        seed: Some(loaded(pending, false)),
+        size: Some(WindowSize { width: 1700.0, height: 950.0 }),
+        table: Some(player_table_slot()),
+        control: Some(control),
+        ..Opening::default()
+    });
+    let shown = window.texts_by_class("wt-pt-text");
+    assert!(!received.iter().any(|text| shown.contains(text)), "no received damage before the results");
+
+    control.state.set(LoadState::Loaded(Rc::new(loaded(complete, true))));
+    window.advance(Duration::from_millis(600));
+
+    let shown = window.texts_by_class("wt-pt-text");
+    let missing: Vec<&String> = received.iter().filter(|text| !shown.contains(text)).collect();
+    assert!(missing.is_empty(), "the cells show the received damage the results brought: missing {missing:?}");
+    assert!(window.by_test_id("replay-incomplete-results").is_none(), "the header drops its warning");
+}
+
 /// Lands a read, asked for with `cause`, that failed on the recording it had on trial.
 #[component]
 fn RefusedAlt(cause: ReparseCause, alts: RwSignal<Vec<PathBuf>, LocalStorage>) -> impl IntoView {
@@ -649,6 +693,45 @@ fn a_refused_recording_is_dropped_and_the_battle_read_again() {
 
     assert!(alts.get_untracked().is_empty(), "the refused recording is dropped");
     assert_eq!(ASKED_AGAIN.get(), Some(ReparseCause::FileRewritten), "the file change is read again");
+}
+
+/// Lands a failed read while another read waits behind it.
+#[component]
+fn SupersededRead() -> impl IntoView {
+    let state = RwSignal::new_local(LoadState::Loaded(Rc::new(loaded(model_at_expected_values(), false))));
+    let cx = ApplyCx {
+        state,
+        alts: RwSignal::new_local(Vec::new()),
+        trial: None,
+        columns_now: StoredValue::new(ReplayColumn::ALL.to_vec()),
+        rating_now: StoredValue::new(None),
+        events: StoredValue::new_local(PanelEvents::default()),
+        shell: Shell::current(),
+        cause: Some(ReparseCause::FileRewritten),
+    };
+    let queued = StoredValue::new(Some(ReparseCause::FileRewritten));
+    let next = land_read(cx, queued, Err(ReplayLoadError::Parse("a half-written file".to_owned())));
+    let shown = state.with_untracked(|state| matches!(state, LoadState::Loaded(_)));
+    SUPERSEDED.with(|slot| *slot.borrow_mut() = Some((shown, next)));
+}
+
+/// A read the file changed under is dropped for the read queued behind it, so the panel keeps the
+/// battle on screen rather than flashing the older read's answer.
+#[test]
+fn a_read_the_file_changed_under_gives_way_to_the_next() {
+    let options = HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 });
+    let _window = HeadlessWindow::open(options, move || {
+        view! {
+            ShellHarness(theme = ThemeChoice::Dark) {
+                SupersededRead()
+            }
+        }
+    })
+    .expect("the harness opens");
+
+    let (shown, next) = SUPERSEDED.with(|slot| slot.borrow_mut().take()).expect("the read landed");
+    assert!(shown, "the battle stays on screen");
+    assert_eq!(next, Some(ReparseCause::FileRewritten), "the queued read runs");
 }
 
 /// Two advantage changes, at 10 and 30 seconds.

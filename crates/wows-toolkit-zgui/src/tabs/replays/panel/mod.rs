@@ -701,13 +701,8 @@ pub fn ReplayPanel(
             };
             underway.set_value(None);
             parsing.set(false);
-            let again =
-                apply_result(ApplyCx { state, alts, trial, columns_now, rating_now, events, shell, cause }, result);
-            if let Some(again) = again {
-                queued.update_value(|queued| *queued = Some(queued.map_or(again, |queued| queued.with(again))));
-            }
-            if let Some(next) = queued.get_value() {
-                queued.set_value(None);
+            let cx = ApplyCx { state, alts, trial, columns_now, rating_now, events, shell, cause };
+            if let Some(next) = land_read(cx, queued, result) {
                 control.reparse(next);
             }
         });
@@ -902,6 +897,26 @@ struct ApplyCx {
     events: StoredValue<PanelEvents, LocalStorage>,
     shell: Shell,
     cause: Option<ReparseCause>,
+}
+
+/// Folds a landed read into the panel, or drops it when a read was asked for while it ran: the
+/// file changed under it, and the read queued behind it shows the newer file. Returns the read to
+/// ask for next, if any.
+fn land_read(
+    cx: ApplyCx,
+    queued: StoredValue<Option<ReparseCause>>,
+    result: Result<ParsedReplay, ReplayLoadError>,
+) -> Option<ReparseCause> {
+    // A read with a recording on trial still lands, since only its answer says whether that
+    // recording reads.
+    let superseded = cx.trial.is_none() && queued.with_value(Option::is_some);
+    // A dropped read's cause rides on the queued read.
+    let again = if superseded { cx.cause } else { apply_result(cx, result) };
+    if let Some(again) = again {
+        queued.update_value(|queued| *queued = Some(queued.map_or(again, |queued| queued.with(again))));
+    }
+
+    queued.try_update_value(Option::take).flatten()
 }
 
 /// Folds a landed read into the panel. Returns the read it asks for next, if any.
