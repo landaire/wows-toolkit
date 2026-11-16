@@ -38,6 +38,13 @@ use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
 use wows_toolkit_replay_data::replay_render::raster::shown_commands;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_replay_data::replay_render::ships::ship_names;
+use wows_toolkit_replay_data::replay_render::track::DEFAULT_MAP_ORIGIN;
+use wows_toolkit_replay_data::replay_render::view::ElementBounds;
+use wows_toolkit_replay_data::replay_render::view::FrameSize;
+use wows_toolkit_replay_data::replay_render::view::MapView;
+use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
+use wows_toolkit_replay_data::replay_render::view::Wheel;
+use wows_toolkit_replay_data::replay_render::view::WindowPoint;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::DisplayVersions;
 use wows_toolkit_services::collab::LatestFrame;
@@ -47,22 +54,29 @@ use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
+use zgui::vocab::PointerButton;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::PopoverContentProps;
@@ -79,6 +93,8 @@ use crate::services::Services;
 use crate::windows::renderer::options;
 use crate::windows::renderer::options::LayerListProps;
 use crate::windows::renderer::session::Layers;
+use crate::windows::renderer::view::element_bounds;
+use crate::windows::renderer::view::window_point;
 
 const SHEET: &str = "wt-watched";
 
@@ -103,6 +119,7 @@ const CSS: &str = css!(
     .wt-watched__fill { height: 100%; border-radius: var(--lui-radius); background-color: var(--lui-color-accent); }
     .wt-watched__rule { flex: none; height: 1px; background-color: var(--lui-color-border); }
     .wt-watched__body { position: relative; flex: 1; min-height: 0; }
+    .wt-watched__body[data-zoomed] { cursor: grab; }
     .wt-watched__frame { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }"
 );
 
@@ -139,6 +156,10 @@ pub struct WatchSession {
     pub drawn: RwSignal<bool, LocalStorage>,
     /// What this end draws of the frames the host sends. The host sends every layer it baked.
     pub layers: RwSignal<Layers, LocalStorage>,
+    /// Which part of the map is shown, and where the frame was last painted.
+    pub map: RwSignal<MapView, LocalStorage>,
+    /// The size of the frame on screen, `None` until the first one lands.
+    pub frame_size: RwSignal<Option<FrameSize>, LocalStorage>,
     run: StoredValue<WatchRun, LocalStorage>,
 }
 
@@ -199,6 +220,8 @@ impl WatchSession {
             drawn: RwSignal::new_local(false),
             // What a renderer opens with, so a battle watched here starts as one played here does.
             layers: RwSignal::new_local(Layers { options: playback_options_hidden(), show_dead_ships: true }),
+            map: RwSignal::new_local(MapView::new()),
+            frame_size: RwSignal::new_local(None),
             run: StoredValue::new_local(WatchRun {
                 replay_id,
                 space: shared.map_name,
@@ -332,6 +355,70 @@ impl WatchSession {
         self.redraw();
     }
 
+    /// Records where the frame sits on screen, which every pointer position is read against.
+    pub fn place(self, bounds: ElementBounds) {
+        // Named in full: `Placement` here is the popover's.
+        let placement = self
+            .frame_size
+            .get_untracked()
+            .map(|frame| wows_toolkit_replay_data::replay_render::view::Placement { bounds, frame });
+        if self.map.with_untracked(|map| map.placement() == placement) {
+            return;
+        }
+        self.map.update(|map| map.set_placement(placement));
+    }
+
+    /// The wheel zooms about whatever is under the pointer.
+    pub fn wheel(self, position: WindowPoint, delta_y: f32) {
+        let wheel = self
+            .map
+            .try_maybe_update(|map| {
+                let wheel = map.zoom_by_wheel(position, delta_y, DEFAULT_MAP_ORIGIN);
+                (wheel == Wheel::Zoomed, wheel)
+            })
+            .unwrap_or(Wheel::Ignored);
+        if wheel == Wheel::Zoomed {
+            self.redraw();
+        }
+    }
+
+    /// A primary press: the start of a drag of a zoomed map.
+    pub fn pointer_down(self, position: WindowPoint) {
+        self.change_map(|map| map.start_pan(position));
+    }
+
+    /// The pointer moved. `held` is whether the primary button is down.
+    pub fn pointer_move(self, position: WindowPoint, held: bool) {
+        if self.change_map(|map| map.pan_to(position, held)) {
+            self.redraw();
+        }
+    }
+
+    pub fn pointer_up(self) {
+        self.change_map(|map| {
+            let panning = map.is_panning();
+            map.end_pan();
+            panning
+        });
+    }
+
+    /// Puts the whole map back, as a double click does in the renderer.
+    pub fn reset_view(self) {
+        if self.change_map(MapView::reset) {
+            self.redraw();
+        }
+    }
+
+    /// Changes the map's view, telling its readers only when `change` says it changed.
+    fn change_map(self, change: impl FnOnce(&mut MapView) -> bool) -> bool {
+        self.map
+            .try_maybe_update(|map| {
+                let changed = change(map);
+                (changed, changed)
+            })
+            .unwrap_or(false)
+    }
+
     /// Draws the frame this viewport last had, off the UI thread.
     fn redraw(self) {
         let Some(commands) = self.shown() else { return };
@@ -350,6 +437,7 @@ impl WatchSession {
                 space: run.space.clone(),
                 art: run.art.clone(),
                 replay_id: run.replay_id,
+                view: self.map.with_untracked(MapView::shaped_view),
                 sink: run.sink.clone(),
             };
             Some((job, run.owner.clone()))
@@ -364,14 +452,18 @@ impl WatchSession {
         });
     }
 
-    fn finish(self, drawn: bool) {
+    fn finish(self, drawn: Option<FrameSize>) {
         let again = self.run.try_update_value(|run| {
             run.rasterising = false;
             std::mem::take(&mut run.stale)
         });
         let Some(again) = again else { return };
-        if drawn && !self.drawn.get_untracked() {
+        if drawn.is_some() && !self.drawn.get_untracked() {
             self.drawn.set(true);
+        }
+        // The view places the frame again as its size changes.
+        if drawn.is_some() && drawn != self.frame_size.get_untracked() {
+            self.frame_size.set(drawn);
         }
         if again {
             self.redraw();
@@ -386,24 +478,25 @@ struct RasterJob {
     space: String,
     art: Option<Arc<image::RgbImage>>,
     replay_id: ReplayId,
+    view: MapViewport,
     sink: FrameSink,
 }
 
 impl RasterJob {
-    /// Draws the frame into the sink. Returns whether there was anything to draw it over.
-    fn run(self) -> bool {
-        let view = MapViewport::default();
+    /// Draws the frame into the sink. Returns its size, or `None` when there was nothing to draw
+    /// it over.
+    fn run(self) -> Option<FrameSize> {
         let frame = match &self.art {
             Some(art) => {
                 let held_as = format!("watched-{}", self.replay_id.raw());
-                render_battle_art(&held_as, art, &self.game_data, view, &self.commands)
+                render_battle_art(&held_as, art, &self.game_data, self.view, &self.commands)
             }
-            None => render_battle(&self.space, &self.game_data, view, &self.commands),
-        };
-        let Some(frame) = frame else { return false };
+            None => render_battle(&self.space, &self.game_data, self.view, &self.commands),
+        }?;
+        let size = FrameSize { width: frame.width(), height: frame.height() };
         self.sink.push(frame);
 
-        true
+        Some(size)
     }
 }
 
@@ -434,12 +527,59 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
     }
     on_cleanup_local(move || watch.stop());
     let sink = watch.sink();
+    let body = NodeRef::new();
+    // The frame's placement follows the element's size and the frame's. Observed once: each call
+    // makes another observer.
+    let border = body.observe_border_box();
+    let placing = RenderEffect::new(move |_| {
+        let _ = watch.frame_size.get();
+        let _ = border.get();
+        place(watch, body);
+    });
+    on_cleanup_local(move || drop(placing));
+    let zoomed = move || watch.map.with(|map| !map.view().is_whole_map()).then(|| "true".to_owned());
+    let pressed = StoredValue::new_local(false);
 
     view! {
         column(class = "wt-watched", attr:data-testid = "watched-playback") {
             HostClockStrip(watch = watch)
             box(class = "wt-watched__rule")
-            box(class = "wt-watched__body") {
+            box(
+                class = "wt-watched__body",
+                node_ref = body,
+                attr:data-testid = "watched-playback-viewport",
+                attr:data-zoomed = zoomed,
+                on:pointer_down = move |ev| {
+                    place(watch, body);
+                    if ev.button == Some(PointerButton::Primary) {
+                        pressed.set_value(true);
+                        watch.pointer_down(window_point(ev.position));
+                    }
+                },
+                on:pointer_move = move |ev| watch.pointer_move(window_point(ev.position), pressed.get_value()),
+                on:pointer_up = move |ev| {
+                    if ev.button == Some(PointerButton::Primary) {
+                        pressed.set_value(false);
+                        watch.pointer_up();
+                    }
+                },
+                on:pointer_cancel = move |_| {
+                    pressed.set_value(false);
+                    watch.pointer_up();
+                },
+                on:pointer_leave = move |_| {
+                    pressed.set_value(false);
+                    watch.pointer_up();
+                },
+                on:double_click = move |_| watch.reset_view(),
+                on:wheel = move |ev| {
+                    place(watch, body);
+                    let delta = ev.delta.to_pixels(zgui::geom::CssPx(SCROLL_LINE_PX)).height.0;
+                    // A wheel turned away from the reader scrolls down, which zooms out.
+                    watch.wheel(window_point(ev.position), -delta);
+                    ev.prevent_default();
+                }
+            ) {
                 Show(when = move || watch.drawn.get()) {
                     FrameView(sink = sink.clone(), class = "wt-watched__frame")
                 }
@@ -453,6 +593,13 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                 }
             }
         }
+    }
+}
+
+/// Records where the frame's element sits.
+fn place(watch: WatchSession, body: NodeRef) {
+    if let Some(bounds) = element_bounds(body) {
+        watch.place(bounds);
     }
 }
 

@@ -11,17 +11,26 @@ use std::time::Duration;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_minimap_renderer::CANVAS_HEIGHT;
+use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::GameClock;
+use wows_toolkit_replay_data::replay_render::view::FrameSize;
+use wows_toolkit_replay_data::replay_render::view::MapView;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::SharedWindow;
 use wt_collab_client::PlaybackFrame;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::DisplayOptionField;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
 
 use crate::services::Services;
@@ -188,4 +197,37 @@ fn the_newest_of_a_burst_of_frames_is_drawn() {
     take_in(&mut window);
 
     assert_eq!(watch.clock.get_untracked().map(|clock| clock.frame), Some(6));
+}
+
+/// The wheel zooms the watched map about the pointer, a drag moves it, and a double click puts the
+/// whole map back, as in the renderer.
+#[test]
+fn the_watched_map_zooms_pans_and_resets() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    // What a drawn frame sets: a pointer is read against the frame's size, HUD strip and all.
+    watch.frame_size.set(Some(FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }));
+    take_in(&mut window);
+    let viewport = window.by_test_id("watched-playback-viewport").expect("the map is drawn");
+
+    window.wheel(viewport, -100.0).expect("the map takes the wheel");
+    take_in(&mut window);
+    let zoomed = watch.map.with_untracked(MapView::view);
+    assert!(zoomed.zoom() > 1.0, "turning the wheel toward the reader zooms in: {zoomed:?}");
+
+    let at = window.bounds(viewport).expect("the map has a box");
+    let to = Point::<DevicePx, Device>::new(
+        DevicePx(at.origin.x.0 + at.size.width.0 / 2.0 + 120.0),
+        DevicePx(at.origin.y.0 + at.size.height.0 / 2.0 + 80.0),
+    );
+    window.drag(viewport, to, 6).expect("the map drags");
+    take_in(&mut window);
+    let dragged = watch.map.with_untracked(MapView::view);
+    assert_ne!(dragged, zoomed, "a drag moves the zoomed map");
+    assert_eq!(dragged.zoom(), zoomed.zoom(), "without zooming it");
+
+    window.double_click(viewport).expect("the map takes a double click");
+    take_in(&mut window);
+    assert!(watch.map.with_untracked(|map| map.view().is_whole_map()), "a double click shows the whole map");
 }

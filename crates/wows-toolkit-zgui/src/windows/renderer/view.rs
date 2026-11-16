@@ -222,15 +222,23 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     }
 }
 
-/// Records where the map element sits, in the window's CSS pixels.
+/// Records where the map element sits.
 fn place(session: RendererSession, map: NodeRef) {
-    let Some(rect) = map.window_bounds() else { return };
-    let scale = map.scale();
-    session.place(ElementBounds {
+    if let Some(bounds) = element_bounds(map) {
+        session.place(bounds);
+    }
+}
+
+/// Where `element` sits, in the window's CSS pixels. `None` before it has been laid out.
+pub(super) fn element_bounds(element: NodeRef) -> Option<ElementBounds> {
+    let rect = element.window_bounds()?;
+    let scale = element.scale();
+
+    Some(ElementBounds {
         origin: WindowPoint { x: rect.origin.x.0 / scale, y: rect.origin.y.0 / scale },
         width: rect.size.width.0 / scale,
         height: rect.size.height.0 / scale,
-    });
+    })
 }
 
 pub(super) fn window_point(position: zgui::geom::Point<zgui::geom::CssPx, zgui::geom::Css>) -> WindowPoint {
