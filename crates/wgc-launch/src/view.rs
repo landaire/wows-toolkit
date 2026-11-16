@@ -34,7 +34,7 @@ pub struct OverlayView {
 
 impl InstallView {
     /// Picks the view for the install at `install_root`. Spawns a short
-    /// bwrap probe the first time a read-only install is prepared.
+    /// overlay probe mount the first time a read-only install is prepared.
     pub fn prepare(install_root: &Path, dirs: &RuntimeDirs) -> Result<Self, ViewError> {
         Self::prepare_with(install_root, dirs, &HostSearch::from_env())
     }
@@ -69,14 +69,10 @@ impl InstallView {
             Some(backend) => OverlayTools::find(backend, search)
                 .ok_or_else(|| ViewError::BackendUnavailable { upper: layers.upper.clone(), recorded: backend })?,
             None => {
-                let tools = [OverlayBackend::KernelBwrap, OverlayBackend::FuseOverlayfs]
+                let candidates = [OverlayBackend::KernelBwrap, OverlayBackend::FuseOverlayfs]
                     .into_iter()
-                    .filter_map(|backend| OverlayTools::find(backend, search))
-                    .find(|tools| tools.probe(&layers))
-                    .ok_or(ViewError::NoOverlayBackend)?;
-                write_backend_record(&state, tools.backend())
-                    .map_err(|source| ViewError::StateDir { path: record_path.clone(), source })?;
-                tools
+                    .filter_map(|backend| OverlayTools::find(backend, search));
+                choose_backend(&state, candidates, |tools| tools.probe(&layers, state.dir()))?
             }
         };
 
@@ -373,6 +369,20 @@ fn read_backend_record(record_path: &Path) -> Result<Option<OverlayBackend>, Vie
     }
 }
 
+/// The first candidate whose probe mounts, recorded only once its probe succeeded.
+fn choose_backend(
+    state: &InstallStateDir,
+    candidates: impl IntoIterator<Item = OverlayTools>,
+    mut probe: impl FnMut(&OverlayTools) -> bool,
+) -> Result<OverlayTools, ViewError> {
+    let tools = candidates.into_iter().find(|tools| probe(tools)).ok_or(ViewError::NoOverlayBackend)?;
+
+    write_backend_record(state, tools.backend())
+        .map_err(|source| ViewError::StateDir { path: state.backend_record(), source })?;
+
+    Ok(tools)
+}
+
 /// Replaces the record through a synced temporary file, so a crash leaves the old record or the
 /// new one and never a partial one that would orphan the upper directory.
 fn write_backend_record(state: &InstallStateDir, backend: OverlayBackend) -> std::io::Result<()> {
@@ -388,6 +398,16 @@ fn write_backend_record(state: &InstallStateDir, backend: OverlayBackend) -> std
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    fn candidates() -> [OverlayTools; 2] {
+        [
+            OverlayTools::KernelBwrap { bwrap: PathBuf::from("/usr/bin/bwrap") },
+            OverlayTools::FuseOverlayfs {
+                fuse_overlayfs: PathBuf::from("/usr/bin/fuse-overlayfs"),
+                fusermount: PathBuf::from("/usr/bin/fusermount3"),
+            },
+        ]
+    }
 
     fn write(path: &Path, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -525,5 +545,35 @@ mod tests {
         if !rustix::process::geteuid().is_root() {
             assert_eq!(read_only, Writability::ReadOnly);
         }
+    }
+
+    #[test]
+    fn backend_is_recorded_only_after_its_probe_mounts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = RuntimeDirs::new(tmp.path()).install_state(tmp.path());
+        std::fs::create_dir_all(state.dir()).unwrap();
+
+        let mut probed = Vec::new();
+        let tools = choose_backend(&state, candidates(), |tools| {
+            probed.push((tools.backend(), read_backend_record(&state.backend_record()).unwrap()));
+            tools.backend() == OverlayBackend::FuseOverlayfs
+        })
+        .unwrap();
+
+        assert_eq!(probed, [(OverlayBackend::KernelBwrap, None), (OverlayBackend::FuseOverlayfs, None)]);
+        assert_eq!(tools.backend(), OverlayBackend::FuseOverlayfs);
+        assert_eq!(read_backend_record(&state.backend_record()).unwrap(), Some(OverlayBackend::FuseOverlayfs));
+    }
+
+    #[test]
+    fn no_backend_is_recorded_when_every_probe_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = RuntimeDirs::new(tmp.path()).install_state(tmp.path());
+        std::fs::create_dir_all(state.dir()).unwrap();
+
+        let chosen = choose_backend(&state, candidates(), |_| false);
+
+        assert!(matches!(chosen, Err(ViewError::NoOverlayBackend)));
+        assert_eq!(read_backend_record(&state.backend_record()).unwrap(), None);
     }
 }

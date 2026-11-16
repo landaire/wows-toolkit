@@ -84,6 +84,12 @@ pub enum MountError {
     MountTable(#[source] std::io::Error),
     #[error("fuse-overlayfs cannot use {path} as its work directory because the path contains a backslash")]
     WorkDirBackslash { path: PathBuf },
+    #[error("could not create the overlay probe directory {path}")]
+    ProbeDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug, Error)]

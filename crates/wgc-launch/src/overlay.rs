@@ -88,7 +88,9 @@ impl OverlayTools {
     /// Whether this backend can mount `layers` here. For bwrap this mounts
     /// the real layers in a throwaway namespace, which also proves that the
     /// kernel accepts the lower filesystem and unprivileged overlay mounts.
-    pub(crate) fn probe(&self, layers: &OverlayLayers) -> bool {
+    /// fuse-overlayfs mounts and unmounts the real lower with throwaway upper,
+    /// work and merged directories under `scratch_parent`.
+    pub(crate) fn probe(&self, layers: &OverlayLayers, scratch_parent: &Path) -> bool {
         match self {
             Self::KernelBwrap { bwrap } => {
                 let mut argv = bwrap_prefix(bwrap, layers);
@@ -102,8 +104,15 @@ impl OverlayTools {
                     .status()
                     .is_ok_and(|status| status.success())
             }
-            // Mounting fuse-overlayfs needs no privilege beyond /dev/fuse, which `find` checked.
-            Self::FuseOverlayfs { .. } => true,
+            Self::FuseOverlayfs { fuse_overlayfs, fusermount } => {
+                match probe_fuse_mount(&layers.lower, scratch_parent, fuse_overlayfs, fusermount) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        tracing::info!("fuse-overlayfs probe failed: {err}");
+                        false
+                    }
+                }
+            }
         }
     }
 }
@@ -166,6 +175,31 @@ impl FuseMount {
         command.arg("-u").arg("-z").arg(&self.merged);
         run_tool(&self.fusermount, command)
     }
+}
+
+/// The upper and work directories must share a filesystem, so all three
+/// throwaway directories live under `scratch_parent`.
+fn probe_fuse_mount(
+    lower: &Path,
+    scratch_parent: &Path,
+    fuse_overlayfs: &Path,
+    fusermount: &Path,
+) -> Result<(), MountError> {
+    let scratch = tempfile::Builder::new()
+        .prefix(".overlay-probe-")
+        .tempdir_in(scratch_parent)
+        .map_err(|source| MountError::ProbeDir { path: scratch_parent.to_path_buf(), source })?;
+    let layers = OverlayLayers {
+        lower: lower.to_path_buf(),
+        upper: scratch.path().join("upper"),
+        work: scratch.path().join("work"),
+        merged: scratch.path().join("merged"),
+    };
+    for dir in [&layers.upper, &layers.work, &layers.merged] {
+        std::fs::create_dir(dir).map_err(|source| MountError::ProbeDir { path: dir.clone(), source })?;
+    }
+
+    FuseMount::mount(&layers, fuse_overlayfs, fusermount)?.unmount()
 }
 
 fn run_tool(program: &Path, mut command: Command) -> Result<(), MountError> {
