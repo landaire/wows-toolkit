@@ -1804,9 +1804,26 @@ impl TabState {
     }
 
     /// Run a launcher operation against the persisted launcher settings,
-    /// saving them when `op` reports it changed them.
+    /// saving them when `op` reports it changed them. Does nothing while the
+    /// launcher is turned off, so a dialog or click that completes after the
+    /// user opts out starts no work.
     #[cfg(all(feature = "launcher", target_os = "linux"))]
     pub fn launcher_op(
+        &mut self,
+        op: impl FnOnce(
+            &mut wows_toolkit_launcher::Launcher,
+            &mut wows_toolkit_launcher::LauncherSettings,
+            &wows_toolkit_launcher::LauncherEnv,
+        ) -> bool,
+    ) {
+        if !self.persisted.read().settings.launcher.is_enabled() {
+            return;
+        }
+        self.launcher_op_unchecked(op);
+    }
+
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    fn launcher_op_unchecked(
         &mut self,
         op: impl FnOnce(
             &mut wows_toolkit_launcher::Launcher,
@@ -1843,7 +1860,7 @@ impl TabState {
 
         // Work started before the launcher was turned off still reports back.
         while let Some(event) = self.launcher_events.try_next() {
-            self.launcher_op(|launcher, settings, env| launcher.apply(event, settings, env));
+            self.launcher_op_unchecked(|launcher, settings, env| launcher.apply(event, settings, env));
             if let Some(failure) = self.launcher.take_launch_failure() {
                 self.toasts.lock().error(format!("Launch failed: {failure}"));
             }
@@ -2747,5 +2764,29 @@ mod tests {
             0,
             "a replay for a closed workspace must not land in the live one"
         );
+    }
+
+    /// A launcher dialog that completes after the user opts out starts no work.
+    #[cfg(all(feature = "launcher", target_os = "linux"))]
+    #[test]
+    fn launcher_operations_run_only_while_enabled() {
+        let mut state = TabState {
+            tokio_runtime: Some(Arc::new(tokio::runtime::Builder::new_current_thread().build().unwrap())),
+            ..TabState::default()
+        };
+        let mut ran = Vec::new();
+
+        state.persisted.write().settings.launcher.enable();
+        state.launcher_op(|_, _, _| {
+            ran.push("enabled");
+            false
+        });
+        state.persisted.write().settings.launcher.disable();
+        state.launcher_op(|_, _, _| {
+            ran.push("disabled");
+            false
+        });
+
+        assert_eq!(ran, ["enabled"]);
     }
 }
