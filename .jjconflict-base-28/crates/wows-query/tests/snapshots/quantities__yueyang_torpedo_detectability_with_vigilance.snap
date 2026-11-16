@@ -1,0 +1,15 @@
+---
+source: crates/wows-query/tests/quantities.rs
+expression: with
+---
+ships:
+  - ship: "T10 Yueyang (destroyer, Pan_Asia)"
+    quantities:
+      - quantity: torpedo.detectability
+        unit: km
+        values:
+          - option: Mark 17 (stock)
+            build: base
+            value: 1
+        note: "with Vigilance on the spotting battleship: x1.25 (torpedoDetectionCoefficient)"
+note: "Values are computed from game data and final: speeds are game knots (2.6854 m/s each on the map), and arming distance, damage falloff, ballistics, skills and upgrades are applied. Quote them; do not convert or estimate."

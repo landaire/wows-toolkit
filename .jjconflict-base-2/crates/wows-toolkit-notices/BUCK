@@ -1,0 +1,29 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "notices_build",
+    crate = "wows_toolkit_notices",
+    package = "wows-toolkit-notices",
+    version = "0.1.0",
+    env = {
+        "PROJECT_LICENSE": "$(location //:license)",
+        "THIRD_PARTY_NOTICES": "$(location //:third_party_notices)",
+    },
+)
+
+workspace_library(
+    name = "wows_toolkit_notices",
+    crate = "wows_toolkit_notices",
+    package = "wows-toolkit-notices",
+    version = "0.1.0",
+    buildscript = buildscript,
+)
+
+workspace_test(
+    name = "wows_toolkit_notices_test",
+    crate = "wows_toolkit_notices",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-notices",
+    version = "0.1.0",
+    buildscript = buildscript,
+)

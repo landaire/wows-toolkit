@@ -1,0 +1,3 @@
+# cookie's build script only probes the rustc version to gate cfg flags that
+# the buck build does not need; do not run it.
+buildscript.run = false

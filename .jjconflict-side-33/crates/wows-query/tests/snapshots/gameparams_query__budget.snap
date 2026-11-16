@@ -1,0 +1,31 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: whole
+---
+matched: 10
+queried: 10
+total_bytes: 768
+truncated: true
+hint: "output is 768 bytes, over the 500-byte budget; narrow the filter: list fields with `keys`, descend with `.Field | keys`, or pick fields with `{a, b}` or `[.[] | .x?]`"
+results:
+  - param: PASC016_Worcester_1948
+    name: Worcester
+    values:
+      - health: ~
+        maxSpeed: ~
+        rudderTime: ~
+        visibilityFactor: ~
+  - param: PASC019_Burlington_1944
+    name: Buffalo
+    values:
+      - health: ~
+        maxSpeed: ~
+        rudderTime: ~
+        visibilityFactor: ~
+  - param: PASC020_Des_Moines_1948
+    name: Des Moines
+    values:
+      - health: 50600
+        maxSpeed: 33
+        rudderTime: 11.22
+        visibilityFactor: 13.44

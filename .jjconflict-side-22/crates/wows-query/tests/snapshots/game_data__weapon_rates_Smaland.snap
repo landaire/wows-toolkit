@@ -1,0 +1,417 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: rates(name)
+---
+torpedoes_per_minute:
+  launchers: 2
+  tubes: 8
+  tubes_per_reload: 8
+  rate:
+    stat: torpedoes per minute
+    unit: torpedoes/min
+    builds:
+      base:
+        torpedoes_per_minute: 4.8
+        bearing: 90
+        all_launchers_ceiling: 4.8
+        by_bearing:
+          - bearing: 0
+            starboard: 0
+            port: 0
+          - bearing: 30
+            starboard: 0
+            port: 0
+          - bearing: 45
+            starboard: 0
+            port: 0
+          - bearing: 60
+            starboard: 0
+            port: 0
+          - bearing: 90
+            starboard: 4.8
+            port: 4.8
+          - bearing: 120
+            starboard: 1.8
+            port: 1.8
+          - bearing: 135
+            starboard: 0
+            port: 0
+          - bearing: 150
+            starboard: 0
+            port: 0
+          - bearing: 180
+            starboard: 0
+            port: 0
+      best:
+        value:
+          torpedoes_per_minute: 6.27
+          bearing: 90
+          all_launchers_ceiling: 6.27
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 0
+              port: 0
+            - bearing: 90
+              starboard: 6.27
+              port: 6.27
+            - bearing: 120
+              starboard: 2.35
+              port: 2.35
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
+        assumed:
+          - Fill the Tubes
+          - Torpedo Tubes Modification 2
+      alternatives:
+        - label: without Fill the Tubes
+          value:
+            torpedoes_per_minute: 5.65
+            bearing: 90
+            all_launchers_ceiling: 5.65
+          assumed:
+            - Torpedo Tubes Modification 2
+        - label: without Torpedo Tubes Modification 2
+          value:
+            torpedoes_per_minute: 5.33
+            bearing: 90
+            all_launchers_ceiling: 5.33
+          assumed:
+            - Fill the Tubes
+main_battery_damage:
+  - ammo: AP
+    damage: 2100
+    barrels: 4
+    rates:
+      stat: main battery AP damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 296471
+          damage_per_second: 4941.2
+          bearing: 90
+          all_barrels_ceiling: 296471
+          by_bearing:
+            - bearing: 0
+              starboard: 148235
+              port: 148235
+            - bearing: 30
+              starboard: 148235
+              port: 148235
+            - bearing: 45
+              starboard: 296471
+              port: 296471
+            - bearing: 60
+              starboard: 296471
+              port: 296471
+            - bearing: 90
+              starboard: 296471
+              port: 296471
+            - bearing: 120
+              starboard: 296471
+              port: 296471
+            - bearing: 135
+              starboard: 296471
+              port: 296471
+            - bearing: 150
+              starboard: 296471
+              port: 296471
+            - bearing: 180
+              starboard: 148235
+              port: 148235
+        best:
+          value:
+            damage_per_minute: 381227
+            damage_per_second: 6353.8
+            bearing: 90
+            all_barrels_ceiling: 381227
+            by_bearing:
+              - bearing: 0
+                starboard: 190614
+                port: 190614
+              - bearing: 30
+                starboard: 190614
+                port: 190614
+              - bearing: 45
+                starboard: 381227
+                port: 381227
+              - bearing: 60
+                starboard: 381227
+                port: 381227
+              - bearing: 90
+                starboard: 381227
+                port: 381227
+              - bearing: 120
+                starboard: 381227
+                port: 381227
+              - bearing: 135
+                starboard: 381227
+                port: 381227
+              - bearing: 150
+                starboard: 381227
+                port: 381227
+              - bearing: 180
+                starboard: 190614
+                port: 190614
+          assumed:
+            - Extra-Heavy Ammunition
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Extra-Heavy Ammunition
+            value:
+              damage_per_minute: 354630
+              damage_per_second: 5910.5
+              bearing: 90
+              all_barrels_ceiling: 354630
+            assumed:
+              - Main Battery and AA Specialist
+              - Main Battery Modification 3
+          - label: without Main Battery and AA Specialist
+            value:
+              damage_per_minute: 362166
+              damage_per_second: 6036.1
+              bearing: 90
+              all_barrels_ceiling: 362166
+            assumed:
+              - Extra-Heavy Ammunition
+              - Main Battery Modification 3
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 335480
+              damage_per_second: 5591.3
+              bearing: 90
+              all_barrels_ceiling: 335480
+            assumed:
+              - Extra-Heavy Ammunition
+              - Main Battery and AA Specialist
+          - label: with Fearless Brawler active
+            value:
+              damage_per_minute: 423586
+              damage_per_second: 7059.8
+              bearing: 90
+              all_barrels_ceiling: 423586
+            assumed:
+              - Extra-Heavy Ammunition
+              - Main Battery and AA Specialist
+              - Main Battery Modification 3
+              - Fearless Brawler
+            note: Reduces main battery reload time while your ship remains detected by an enemy.
+  - ammo: HE
+    damage: 1750
+    barrels: 4
+    rates:
+      stat: main battery HE damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 247059
+          damage_per_second: 4117.6
+          bearing: 90
+          all_barrels_ceiling: 247059
+          by_bearing:
+            - bearing: 0
+              starboard: 123529
+              port: 123529
+            - bearing: 30
+              starboard: 123529
+              port: 123529
+            - bearing: 45
+              starboard: 247059
+              port: 247059
+            - bearing: 60
+              starboard: 247059
+              port: 247059
+            - bearing: 90
+              starboard: 247059
+              port: 247059
+            - bearing: 120
+              starboard: 247059
+              port: 247059
+            - bearing: 135
+              starboard: 247059
+              port: 247059
+            - bearing: 150
+              starboard: 247059
+              port: 247059
+            - bearing: 180
+              starboard: 123529
+              port: 123529
+        best:
+          value:
+            damage_per_minute: 295525
+            damage_per_second: 4925.4
+            bearing: 90
+            all_barrels_ceiling: 295525
+            by_bearing:
+              - bearing: 0
+                starboard: 147762
+                port: 147762
+              - bearing: 30
+                starboard: 147762
+                port: 147762
+              - bearing: 45
+                starboard: 295525
+                port: 295525
+              - bearing: 60
+                starboard: 295525
+                port: 295525
+              - bearing: 90
+                starboard: 295525
+                port: 295525
+              - bearing: 120
+                starboard: 295525
+                port: 295525
+              - bearing: 135
+                starboard: 295525
+                port: 295525
+              - bearing: 150
+                starboard: 295525
+                port: 295525
+              - bearing: 180
+                starboard: 147762
+                port: 147762
+          assumed:
+            - Main Battery and AA Specialist
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery and AA Specialist
+            value:
+              damage_per_minute: 280749
+              damage_per_second: 4679.1
+              bearing: 90
+              all_barrels_ceiling: 280749
+            assumed:
+              - Main Battery Modification 3
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 260062
+              damage_per_second: 4334.4
+              bearing: 90
+              all_barrels_ceiling: 260062
+            assumed:
+              - Main Battery and AA Specialist
+          - label: with Fearless Brawler active
+            value:
+              damage_per_minute: 328361
+              damage_per_second: 5472.7
+              bearing: 90
+              all_barrels_ceiling: 328361
+            assumed:
+              - Main Battery and AA Specialist
+              - Main Battery Modification 3
+              - Fearless Brawler
+            note: Reduces main battery reload time while your ship remains detected by an enemy.
+torpedo_damage:
+  - ammo: Torped M1943 mod 1
+    damage: 10700
+    barrels: 8
+    rates:
+      stat: Torped M1943 mod 1 damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 51360
+          damage_per_second: 856
+          bearing: 90
+          all_barrels_ceiling: 51360
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 0
+              port: 0
+            - bearing: 45
+              starboard: 0
+              port: 0
+            - bearing: 60
+              starboard: 0
+              port: 0
+            - bearing: 90
+              starboard: 51360
+              port: 51360
+            - bearing: 120
+              starboard: 19260
+              port: 19260
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            damage_per_minute: 67137
+            damage_per_second: 1119
+            bearing: 90
+            all_barrels_ceiling: 67137
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 0
+                port: 0
+              - bearing: 45
+                starboard: 0
+                port: 0
+              - bearing: 60
+                starboard: 0
+                port: 0
+              - bearing: 90
+                starboard: 67137
+                port: 67137
+              - bearing: 120
+                starboard: 25176
+                port: 25176
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Fill the Tubes
+            - Torpedo Tubes Modification 2
+        alternatives:
+          - label: without Fill the Tubes
+            value:
+              damage_per_minute: 60424
+              damage_per_second: 1007.1
+              bearing: 90
+              all_barrels_ceiling: 60424
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 57067
+              damage_per_second: 951.1
+              bearing: 90
+              all_barrels_ceiling: 57067
+            assumed:
+              - Fill the Tubes
+rate_notes:
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

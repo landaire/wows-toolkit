@@ -1,0 +1,77 @@
+on:
+  push:
+    # Glob filters, not regexes: alternation is unsupported, so a pre-release
+    # suffix is matched with a trailing *. Kept in step with build.yml so the
+    # tools and the app attach to the same release.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
+    branches: ["ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# The tools and the shipped name of each come from
+# build-support/release-tools.json, and the archive is checked against it.
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Copy the checkout to a short path
+        shell: pwsh
+        run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
+
+      - name: Provision the Buck toolchain
+        shell: pwsh
+        working-directory: C:\w
+        run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+
+      - name: Build the tools
+        shell: pwsh
+        working-directory: C:\w
+        run: |
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
+          $slug = "${{ github.ref_name }}" -replace "/", "-"
+          ./scripts/package-tools.ps1 -Buck2 $buck2 -Slug $slug -TargetPlatform toolchains//windows:windows_x86_64_msvc
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          # The build runs in C:\w, but this glob resolves against
+          # github.workspace, so it has to be absolute.
+          files: C:\w\wows_toolkit_tools_*_win64.zip
+          fail_on_unmatched_files: true
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      - name: Build the tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y zip unzip
+          slug="${GITHUB_REF_NAME//\//-}"
+          bash scripts/package-tools.sh "$slug" nix develop --command buck2
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wows_toolkit_tools_*_linux64.zip
+          fail_on_unmatched_files: true

@@ -1,0 +1,1204 @@
+---
+source: crates/wows-replays/tests/battle_controller.rs
+expression: "&packets"
+---
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 1
+    total: 346.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 2
+    total: 102.6
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 3
+    total: 1386
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 4
+    total: 205.2
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 4
+    total: 205.2
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 3
+    total: 1386
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 5
+    total: 2425.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 1
+    total: 726
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 6
+    total: 2772
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 8
+    total: 3465
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 11
+    total: 4504.5
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Spot
+    count: 1
+    total: 297
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 6
+    total: 3491.25
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 1
+    total: 990
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 3
+    total: 2970
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 6
+    total: 13200
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 4
+    total: 3960
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 18
+    total: 39600
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 6
+    total: 5940
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 7
+    total: 6930
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 9
+    total: 8910
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 10
+    total: 9900
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 14
+    total: 13170
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 15
+    total: 14160
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 17
+    total: 16140
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 19
+    total: 17400
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 22
+    total: 19380
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 26
+    total: 21165
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 27
+    total: 21465
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 29
+    total: 22620
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 33
+    total: 24210
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 37
+    total: 26190
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 38
+    total: 26490
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 39
+    total: 26790
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 42
+    total: 28275
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 43
+    total: 28770
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 44
+    total: 29265
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 46
+    total: 30750
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 48
+    total: 31740
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 51
+    total: 32900
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 5
+    total: 421.65
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 15
+    total: 5890.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 19
+    total: 7140
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 22
+    total: 9219
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 23
+    total: 9912
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 25
+    total: 11298
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 5
+    total: 3124
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 26
+    total: 11991
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 28
+    total: 12684
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 29
+    total: 13030.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 30
+    total: 13377
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 9
+    total: 5522
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 31
+    total: 14070
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 32
+    total: 14763
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 34
+    total: 15666
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 35
+    total: 16359
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 7
+    total: 854.55
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 39
+    total: 18091.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 9
+    total: 1287.45
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 41
+    total: 19131
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 11
+    total: 1720.3500000000001
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 13
+    total: 2153.25
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 44
+    total: 20108.06651809018
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 15
+    total: 2586.1499999999996
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 46
+    total: 20801.06651809018
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 17
+    total: 3019.0499999999993
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 19
+    total: 3451.949999999999
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 48
+    total: 22187.06651809018
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 21
+    total: 3884.8499999999985
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 23
+    total: 4317.749999999998
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 25
+    total: 4750.649999999998
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 27
+    total: 5183.549999999997
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 29
+    total: 5616.449999999997
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 31
+    total: 6049.349999999997
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 50
+    total: 23573.06651809018
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 33
+    total: 6482.249999999996
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 35
+    total: 6915.149999999996
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 52
+    total: 24959.06651809018
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 38
+    total: 7560.299999999996
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 56
+    total: 27731.06651809018
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 42
+    total: 8417.699999999995
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 58
+    total: 29072.97990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 46
+    total: 9275.099999999997
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 60
+    total: 29492.97990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 50
+    total: 10132.499999999998
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 54
+    total: 10989.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 56
+    total: 11414.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 58
+    total: 11838.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 60
+    total: 12263.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 62
+    total: 12687.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 64
+    total: 13112.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 66
+    total: 13536.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 68
+    total: 13961.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 70
+    total: 14385.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 72
+    total: 14810.4
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 63
+    total: 30532.47990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 74
+    total: 15234.9
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 66
+    total: 31571.97990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 76
+    total: 15659.4
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 67
+    total: 31918.47990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 78
+    total: 16083.9
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 68
+    total: 32264.97990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 80
+    total: 16508.4
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 71
+    total: 33167.97990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 82
+    total: 16932.9
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 74
+    total: 34207.47990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 84
+    total: 17357.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 86
+    total: 17781.9
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 75
+    total: 34553.97990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 88
+    total: 18206.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 90
+    total: 18630.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 92
+    total: 19055.4
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 94
+    total: 19479.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 96
+    total: 19904.4
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 78
+    total: 35593.47990929162
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 98
+    total: 20328.9
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 100
+    total: 20753.4
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 1
+    total: 10300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 80
+    total: 36511.588109962155
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 101
+    total: 20965.65
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 82
+    total: 37227.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 12
+    total: 7700
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 15
+    total: 9878
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 19
+    total: 12782
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 85
+    total: 38267.28808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 88
+    total: 39306.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 92
+    total: 40692.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 95
+    total: 41732.28808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 96
+    total: 42078.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 102
+    total: 21089.25
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 98
+    total: 42635.28808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 103
+    total: 21212.85
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 102
+    total: 43884.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 106
+    total: 45270.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 104
+    total: 21265.199999999997
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 109
+    total: 46656.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 106
+    total: 21369.899999999994
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 108
+    total: 21474.59999999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 110
+    total: 21579.29999999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 112
+    total: 21683.999999999985
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 47349.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 112
+    total: 48735.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 114
+    total: 50121.78808443446
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Spot
+    count: 25
+    total: 17138
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 115
+    total: 50814.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 114
+    total: 21788.699999999983
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 116
+    total: 51507.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 116
+    total: 21893.39999999998
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 118
+    total: 52893.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 118
+    total: 21998.099999999977
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 120
+    total: 22102.799999999974
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 122
+    total: 22207.49999999997
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 119
+    total: 53586.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 124
+    total: 22312.199999999968
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 126
+    total: 22416.899999999965
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 128
+    total: 22521.599999999962
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 19
+    total: 41400
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 121
+    total: 54279.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 130
+    total: 22626.29999999996
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 123
+    total: 55665.78808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 132
+    total: 22730.999999999956
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 20
+    total: 43200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 124
+    total: 56012.28808443446
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 134
+    total: 22835.699999999953
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 24
+    total: 50400
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 136
+    total: 22940.39999999995
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 25
+    total: 52200
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 138
+    total: 23045.099999999948
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 29
+    total: 59400
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 34
+    total: 68400
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 4
+    total: 49600
+  - weapon:
+      Known: MainCs
+    category:
+      Known: Agro
+    count: 14
+    total: 25200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 41
+    total: 87000
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 48
+    total: 102600
+- - weapon:
+      Known: MainCs
+    category:
+      Known: Agro
+    count: 26
+    total: 46800
+- - weapon:
+      Known: MainCs
+    category:
+      Known: Agro
+    count: 28
+    total: 50400
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 57
+    total: 127800
+- - weapon:
+      Known: MainCs
+    category:
+      Known: Agro
+    count: 42
+    total: 75600
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 63
+    total: 144600
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 66
+    total: 153000
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 127
+    total: 58091.28808443446
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 55
+    total: 38870
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 56
+    total: 39860
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 59
+    total: 40760
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 62
+    total: 43040
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 66
+    total: 47000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 67
+    total: 47990
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 68
+    total: 48980
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 70
+    total: 50960
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 74
+    total: 53540
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 76
+    total: 55520
+- - weapon:
+      Known: MainCs
+    category:
+      Known: Agro
+    count: 47
+    total: 84600
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 67
+    total: 154800
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 8
+    total: 99200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 79
+    total: 58233.64864602355
+  - weapon:
+      Known: MainCs
+    category:
+      Known: Agro
+    count: 54
+    total: 97200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 69
+    total: 158400
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 82
+    total: 59798.986510152565
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 78
+    total: 183600
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 12
+    total: 151600

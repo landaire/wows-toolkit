@@ -1,0 +1,113 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: output
+---
+commander:
+  name: Yamamoto Isoroku
+  nations:
+    - Japan
+  improved_skills:
+    - name: Preventive Maintenance
+      classes:
+        - classes:
+            - destroyer
+            - battleship
+          points: 1
+          standard:
+            - +15% AA mount survivability
+            - +15% Secondary battery survivability
+            - "-30% Risk of modules becoming incapacitated"
+          improved:
+            - +20% AA mount survivability
+            - +20% Secondary battery survivability
+            - "-45% Risk of modules becoming incapacitated"
+        - classes:
+            - submarine
+          points: 2
+          standard:
+            - "-30% Risk of modules becoming incapacitated"
+          improved:
+            - "-45% Risk of modules becoming incapacitated"
+    - name: Grease the Gears
+      classes:
+        - classes:
+            - destroyer
+            - cruiser
+          points: 1
+          standard:
+            - +15% Main battery traverse speed
+          improved:
+            - +20% Main battery traverse speed
+        - classes:
+            - battleship
+          points: 2
+          standard:
+            - +20% Main battery traverse speed
+          improved:
+            - +25% Main battery traverse speed
+  talents:
+    - name: Second Wind
+      variants:
+        - battle_types: "Random, Co-op, Ranked and Brawl battles"
+          condition: Activates upon destroying a certain number of ships.
+          progression: "The activated effect increases with the number of enemy ships destroyed, up to 3 times per battle."
+          activations_per_battle: 3
+          activations:
+            - activation: 1
+              condition: Activates upon destroying 2 ships.
+              effects:
+                - "-5% Main battery reload time"
+                - "-3% Torpedo tube reload time"
+                - "-3% Aircraft preparation time"
+                - "HP regeneration: restores 0.042% of max HP per second for 120 s, 5.004% of max HP in total"
+            - activation: 2
+              condition: Activates upon destroying 5 ships.
+              effects:
+                - "-25% Main battery reload time"
+                - "-12.5% Torpedo tube reload time"
+                - "-12.5% Aircraft preparation time"
+                - "HP regeneration: restores 0.208% of max HP per second for 120 s, 24.996% of max HP in total"
+            - activation: 3
+              condition: Activates upon destroying 7 ships.
+              effects:
+                - "-40% Main battery reload time"
+                - "-20% Torpedo tube reload time"
+                - "-20% Aircraft preparation time"
+                - "HP regeneration: restores 0.333% of max HP per second for 120 s, 39.96% of max HP in total"
+        - battle_types: Operations
+          condition: Activates upon destroying a certain number of ships.
+          progression: "The activated effect increases with the number of enemy ships destroyed, up to 3 times per battle."
+          activations_per_battle: 3
+          activations:
+            - activation: 1
+              condition: Activates upon destroying 2 ships.
+              effects:
+                - "-5% Main battery reload time"
+                - "-5% Torpedo tube reload time"
+                - "-5% Aircraft preparation time"
+                - "HP regeneration: restores 0.042% of max HP per second for 120 s, 5.004% of max HP in total"
+            - activation: 2
+              condition: Activates upon destroying 5 ships.
+              effects:
+                - "-10% Main battery reload time"
+                - "-10% Torpedo tube reload time"
+                - "-10% Aircraft preparation time"
+                - "HP regeneration: restores 0.083% of max HP per second for 120 s, 9.996% of max HP in total"
+            - activation: 3
+              condition: Activates upon destroying 7 ships.
+              effects:
+                - "-15% Main battery reload time"
+                - "-15% Torpedo tube reload time"
+                - "-15% Aircraft preparation time"
+                - "HP regeneration: restores 0.125% of max HP per second for 120 s, 15% of max HP in total"
+    - name: Emergency Reserve
+      variants:
+        - battle_types: every battle type that allows talents
+          condition: Activates if you are the first in battle to destroy or assist in destroying a ship.
+          activations_per_battle: 1
+          activations:
+            - effects:
+                - +7.5% Ship consumable total usage time
+                - +1 Number of ship consumable charges
+                - +1 Number of squadron consumable charges
+talent_restrictions: Unavailable in Clan and Training Battles.

@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: error.to_string()
+---
+upgrades Main Battery Modification 2 and Aiming Systems Modification 1 both use slot 3; a ship mounts one upgrade per slot

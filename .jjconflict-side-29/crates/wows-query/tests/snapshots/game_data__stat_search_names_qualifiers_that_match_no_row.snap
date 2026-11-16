@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "search[\"unmatched_qualifiers\"]"
+---
+- artillery.shells.damage (HEAT) > 1000 hp

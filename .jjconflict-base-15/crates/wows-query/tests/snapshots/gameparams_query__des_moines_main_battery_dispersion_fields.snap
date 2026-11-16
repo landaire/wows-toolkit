@@ -1,0 +1,16 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: output
+---
+matched: 1
+queried: 1
+total_bytes: 71
+truncated: false
+results:
+  - param: PASC020_Des_Moines_1948
+    name: Des Moines
+    values:
+      - sigmaCount: 2.05
+        taperDist: 4000
+        minDistH: 50
+        minDistV: 110

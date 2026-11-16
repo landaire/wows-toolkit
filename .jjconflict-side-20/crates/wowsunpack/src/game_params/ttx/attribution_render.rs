@@ -1,0 +1,394 @@
+//! Render `ShipStatsProvenance` into translated, formatted attribution lines:
+//! the localized stat label, the base module, and each contributing input with
+//! its magnitude. Mirrors `render::render_stat_rows`.
+
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use crate::data::ResourceLoader;
+use crate::game_params::ttx::labels::TtxStat;
+use crate::game_params::ttx::labels::stat_display_label;
+use crate::game_params::ttx::model::StatRow;
+use crate::game_params::ttx::provenance::Contribution;
+use crate::game_params::ttx::provenance::InputId;
+use crate::game_params::ttx::provenance::Op;
+use crate::game_params::ttx::provenance::ShipStatsProvenance;
+use crate::game_params::ttx::provenance::StatKey;
+use crate::game_params::types::GameParamProvider;
+use crate::recognized::Recognized;
+
+/// One contributing input rendered for display.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContributorLine {
+    /// Localized input name (e.g. "Main Battery Mod 3", "Adrenaline Rush").
+    pub label: String,
+    /// The applied magnitude, formatted: "x0.95" (Mul) or "+350" (Add).
+    pub effect: String,
+    /// The modifier or module coefficient the step applies (`Contribution::modifier_name`).
+    pub modifier_name: String,
+    /// The raw applied magnitude (`effect` unformatted).
+    pub operand: f32,
+    /// The signed amount this step moved the stat, in its units, trimmed
+    /// ("+1000", "-1.2"). Per-step deltas sum to `value - base_value`; for an
+    /// `order_sensitive` stat a multiplicative step's delta reflects its position
+    /// in the game formula.
+    pub delta: String,
+    /// The raw signed delta in the stat's units (`delta` unformatted). Surfaced
+    /// so a caller can apply its own good/bad polarity and formatting; the model
+    /// does not encode whether higher or lower is better.
+    pub delta_raw: f32,
+    /// The running stat value after this step applies, trimmed (the waterfall
+    /// absolute; the last contributor's equals the final `value`).
+    pub value_after: String,
+    /// The raw running value after this step (`value_after` unformatted).
+    pub value_after_raw: f32,
+}
+
+/// One stat's full attribution, rendered.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttributionLine {
+    pub stat: TtxStat,
+    pub qualifier: Option<String>,
+    pub label: String,
+    pub value: String,
+    pub base_label: String,
+    pub base_value: String,
+    pub contributors: Vec<ContributorLine>,
+    /// Upstream stats this value is derived from (e.g. rotation time from
+    /// rotation speed). A consumer can resolve each key against the rendered
+    /// set to recurse into the upstream stat's contributors.
+    pub derived_from: Vec<StatKey>,
+    /// True when this stat's chain interleaves multiply and add. The per-step
+    /// `delta`s still sum to the total change, but a multiplicative step's delta
+    /// reflects its position in the game formula (an additive input applied before
+    /// a later multiply is amplified), so consumers may want to note that.
+    pub order_sensitive: bool,
+    /// Causes inherited from the `derived_from` upstream stats (transitively): the
+    /// inputs that moved an upstream stat this value derives from (e.g. range
+    /// modifiers behind a dispersion stat, concealment behind on-fire detection).
+    /// Distinct from `contributors` because these do NOT sum into this stat's
+    /// change and their magnitudes are in the UPSTREAM stat's units (see
+    /// `via_stat`). Empty when no upstream stat is modified.
+    pub inherited: Vec<InheritedContributor>,
+}
+
+/// One contributor inherited from an upstream `derived_from` stat, labeled with
+/// the stat it came through. The `line`'s delta/value_after are in that upstream
+/// stat's units, not this stat's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InheritedContributor {
+    /// Localized label of the upstream stat this cause comes through (e.g.
+    /// "Firing Range", "Surface Detectability").
+    pub via_stat: String,
+    /// The upstream stat's qualifier, if any.
+    pub via_qualifier: Option<String>,
+    /// The upstream stat's contributor (its input label, effect, and
+    /// upstream-unit delta/value_after).
+    pub line: ContributorLine,
+}
+
+/// The display label for an attribution input. Module/Upgrade names are resolved
+/// through the loader/provider where possible, falling back to the raw key.
+fn input_label(input: &InputId, loader: &dyn ResourceLoader, provider: &dyn GameParamProvider) -> String {
+    match input {
+        InputId::Module { name, .. } | InputId::Upgrade { name } => resolve_param_label(name, loader, provider),
+        InputId::Skill { name } => name.as_str().to_string(),
+        InputId::Consumable(c) => match c {
+            Recognized::Known(k) => k.name().to_string(),
+            Recognized::Unknown(raw) => raw.clone(),
+        },
+        InputId::Innate { skill_type } => skill_type.clone(),
+    }
+}
+
+/// Resolve a param key to a localized name, falling back to the key itself.
+fn resolve_param_label(key: &str, loader: &dyn ResourceLoader, provider: &dyn GameParamProvider) -> String {
+    provider
+        .game_param_by_name(key)
+        .and_then(|p| loader.localized_name_from_param(&p))
+        .unwrap_or_else(|| key.to_string())
+}
+
+/// Format a single contribution's magnitude. ASCII `x` / `+`, no unicode.
+fn format_effect(c: &Contribution) -> String {
+    match c.op {
+        Op::Mul => format!("x{}", trim(c.operand)),
+        Op::Add => format!("+{}", trim(c.operand)),
+    }
+}
+
+/// Format a signed unit delta: "+1000", "-1.2" (`trim` already carries the minus).
+fn format_delta(d: f32) -> String {
+    let s = trim(d);
+    if d >= 0.0 { format!("+{s}") } else { s }
+}
+
+/// Trim a float to at most 3 decimals without trailing zeros.
+fn trim(v: f32) -> String {
+    let s = format!("{v:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    s.to_string()
+}
+
+/// Render provenance attributions into display lines. Each line carries the
+/// localized stat label, the displayed value sourced from the model `rows`
+/// (so units are preserved),
+/// the base module name and its value, and per-contributor effects.
+///
+/// `rows` must be the `ShipStats::rows()` matching the card the provenance was
+/// recorded for; keys are `(stat, qualifier)` pairs. If a key is absent (should
+/// not occur when Task 10 coverage holds), the numeric `a.value` is trimmed as
+/// a fallback.
+pub fn render_attributions(
+    prov: &ShipStatsProvenance,
+    rows: &[StatRow],
+    loader: &dyn ResourceLoader,
+    provider: &dyn GameParamProvider,
+) -> Vec<AttributionLine> {
+    let display: HashMap<(TtxStat, Option<String>), String> =
+        rows.iter().map(|r| ((r.stat, r.qualifier.clone()), r.value.to_string())).collect();
+
+    let mut lines: Vec<AttributionLine> = prov
+        .attributions
+        .iter()
+        .map(|a| {
+            let key = (a.stat, a.qualifier.clone());
+            debug_assert!(
+                display.contains_key(&key),
+                "render_attributions: stat {:?} qualifier {:?} absent from rows map; provenance key-set diverged from rows()",
+                a.stat,
+                a.qualifier
+            );
+            let value = display.get(&key).cloned().unwrap_or_else(|| trim(a.value));
+            let base_value = if a.steps.is_empty() {
+                // No contributors: base IS the final value. Reuse the StatValue
+                // display string so units match the value column.
+                value.clone()
+            } else {
+                trim(a.base_value)
+            };
+            AttributionLine {
+                stat: a.stat,
+                qualifier: a.qualifier.clone(),
+                label: stat_display_label(a.stat, loader),
+                value,
+                base_label: input_label(&a.base_source, loader, provider),
+                base_value,
+                contributors: a
+                    .steps
+                    .iter()
+                    .zip(a.step_deltas())
+                    .zip(a.running_values())
+                    .map(|((c, delta), running)| ContributorLine {
+                        label: input_label(&c.input, loader, provider),
+                        effect: format_effect(c),
+                        modifier_name: c.modifier_name.clone(),
+                        operand: c.operand,
+                        delta: format_delta(delta),
+                        delta_raw: delta,
+                        value_after: trim(running),
+                        value_after_raw: running,
+                    })
+                    .collect(),
+                derived_from: a.derived_from.clone(),
+                order_sensitive: a.order_sensitive(),
+                inherited: Vec::new(),
+            }
+        })
+        .collect();
+
+    // Second pass: surface each line's transitive `derived_from` causes inline.
+    let index: HashMap<StatKey, usize> =
+        lines.iter().enumerate().map(|(i, l)| (StatKey { stat: l.stat, qualifier: l.qualifier.clone() }, i)).collect();
+    let all_inherited: Vec<Vec<InheritedContributor>> = (0..lines.len())
+        .map(|i| {
+            let mut out = Vec::new();
+            let mut visited: HashSet<StatKey> = HashSet::new();
+            visited.insert(StatKey { stat: lines[i].stat, qualifier: lines[i].qualifier.clone() });
+            let mut stack: Vec<StatKey> = lines[i].derived_from.clone();
+            while let Some(key) = stack.pop() {
+                if !visited.insert(key.clone()) {
+                    continue;
+                }
+                if let Some(&j) = index.get(&key) {
+                    for c in &lines[j].contributors {
+                        out.push(InheritedContributor {
+                            via_stat: lines[j].label.clone(),
+                            via_qualifier: lines[j].qualifier.clone(),
+                            line: c.clone(),
+                        });
+                    }
+                    stack.extend(lines[j].derived_from.clone());
+                }
+            }
+            out
+        })
+        .collect();
+    for (line, inherited) in lines.iter_mut().zip(all_inherited) {
+        line.inherited = inherited;
+    }
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Rc;
+
+    const BASE_HEALTH: f32 = 19400.0;
+    const HEALTH_COEFF: f32 = 1.05;
+    const HEALTH_BONUS: f32 = 3500.0;
+    const HEALTH_FINAL: f32 = 23870.0;
+    const RENDER_EPS: f32 = 1e-3;
+
+    use crate::game_params::ttx::model::Hp;
+    use crate::game_params::ttx::model::StatValue;
+    use crate::game_params::ttx::module_options::ModuleSlot;
+    use crate::game_params::ttx::provenance::StatAttribution;
+    use crate::game_params::types::CrewSkillName;
+    use crate::game_params::types::Param;
+
+    struct EchoLoader;
+    impl ResourceLoader for EchoLoader {
+        fn localized_name_from_param(&self, _p: &Param) -> Option<String> {
+            None
+        }
+        fn localized_name_from_id(&self, id: &crate::data::TranslationKey) -> Option<String> {
+            Some(id.as_str().to_string())
+        }
+        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn entity_specs(&self) -> &[crate::rpc::entitydefs::EntitySpec] {
+            &[]
+        }
+    }
+
+    struct EmptyProvider;
+    impl GameParamProvider for EmptyProvider {
+        fn game_param_by_id(&self, _id: crate::game_types::GameParamId) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_index(&self, _i: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn game_param_by_name(&self, _n: &str) -> Option<Rc<Param>> {
+            None
+        }
+        fn params(&self) -> &[Rc<Param>] {
+            &[]
+        }
+    }
+
+    #[test]
+    fn renders_base_and_contributors() {
+        let prov = ShipStatsProvenance {
+            attributions: vec![StatAttribution {
+                stat: TtxStat::Health,
+                qualifier: None,
+                base_value: BASE_HEALTH,
+                base_source: InputId::Module { slot: ModuleSlot::Hull, name: "PAUH911".into() },
+                steps: vec![
+                    Contribution {
+                        input: InputId::Skill { name: CrewSkillName::from("AdrenalineRush") },
+                        modifier_name: "healthHullCoeff".into(),
+                        op: Op::Mul,
+                        operand: HEALTH_COEFF,
+                    },
+                    Contribution {
+                        input: InputId::Upgrade { name: "PCM030".into() },
+                        modifier_name: "healthPerLevel".into(),
+                        op: Op::Add,
+                        operand: HEALTH_BONUS,
+                    },
+                ],
+                derived_from: Vec::new(),
+                value: HEALTH_FINAL,
+            }],
+        };
+        let rows =
+            vec![StatRow { stat: TtxStat::Health, qualifier: None, value: StatValue::Hp(Hp::from(HEALTH_FINAL)) }];
+        let lines = render_attributions(&prov, &rows, &EchoLoader, &EmptyProvider);
+        assert_eq!(lines.len(), 1);
+        let l = &lines[0];
+        assert_eq!(l.base_label, "PAUH911");
+        assert_eq!(l.base_value, "19400");
+        assert_eq!(l.value, "23870");
+        assert_eq!(l.contributors.len(), 2);
+        assert_eq!(l.contributors[0].label, "AdrenalineRush");
+        assert_eq!(l.contributors[0].effect, "x1.05");
+        assert_eq!(l.contributors[1].effect, "+3500");
+        // Mixed Mul+Add chain: order-sensitive, and each contributor carries its
+        // signed unit delta. x1.05 on 19400 adds 970; +3500 adds 3500; they sum to
+        // the 4470 total change (23870 - 19400).
+        assert!(l.order_sensitive);
+        assert_eq!(l.contributors[0].delta, "+970");
+        assert_eq!(l.contributors[1].delta, "+3500");
+        // Running waterfall absolutes: 19400 -> 20370 -> 23870 (= final value).
+        assert_eq!(l.contributors[0].value_after, "20370");
+        assert_eq!(l.contributors[1].value_after, "23870");
+        // Raw numeric fields let a caller apply its own polarity/formatting.
+        assert!((l.contributors[0].delta_raw - BASE_HEALTH * (HEALTH_COEFF - 1.0)).abs() < RENDER_EPS);
+        assert!((l.contributors[1].delta_raw - HEALTH_BONUS).abs() < RENDER_EPS);
+        assert!((l.contributors[0].value_after_raw - BASE_HEALTH * HEALTH_COEFF).abs() < RENDER_EPS);
+        assert!((l.contributors[1].value_after_raw - HEALTH_FINAL).abs() < RENDER_EPS);
+    }
+
+    #[test]
+    fn derived_stat_surfaces_inherited_upstream_contributors() {
+        // Dispersion derives from range; a range modifier should appear on the
+        // dispersion line as an inherited cause, labeled via the range stat, with
+        // its magnitude in the upstream (range) units.
+        let range_mod = InputId::Upgrade { name: "ArtilleryPlottingRoomMod".into() };
+        let prov = ShipStatsProvenance {
+            attributions: vec![
+                StatAttribution {
+                    stat: TtxStat::ArtilleryRange,
+                    qualifier: None,
+                    base_value: 16.0,
+                    base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".into() },
+                    steps: vec![Contribution {
+                        input: range_mod.clone(),
+                        modifier_name: "GMMaxDist".into(),
+                        op: Op::Mul,
+                        operand: 1.16,
+                    }],
+                    derived_from: Vec::new(),
+                    value: 16.0 * 1.16,
+                },
+                StatAttribution {
+                    stat: TtxStat::ArtilleryDispersion,
+                    qualifier: None,
+                    base_value: 100.0,
+                    base_source: InputId::Module { slot: ModuleSlot::Hull, name: "A".into() },
+                    steps: vec![Contribution {
+                        input: InputId::Upgrade { name: "AimingSystemsMod".into() },
+                        modifier_name: "GMIdealRadius".into(),
+                        op: Op::Mul,
+                        operand: 0.95,
+                    }],
+                    derived_from: vec![StatKey { stat: TtxStat::ArtilleryRange, qualifier: None }],
+                    value: 95.0,
+                },
+            ],
+        };
+        let rows = vec![
+            StatRow { stat: TtxStat::ArtilleryRange, qualifier: None, value: StatValue::Float(16.0 * 1.16) },
+            StatRow { stat: TtxStat::ArtilleryDispersion, qualifier: None, value: StatValue::Float(95.0) },
+        ];
+        let lines = render_attributions(&prov, &rows, &EchoLoader, &EmptyProvider);
+        let disp = lines.iter().find(|l| l.stat == TtxStat::ArtilleryDispersion).expect("dispersion line");
+        let range = lines.iter().find(|l| l.stat == TtxStat::ArtilleryRange).expect("range line");
+        // Its own direct contributor is the aiming mod (in dispersion units).
+        assert_eq!(disp.contributors.len(), 1);
+        assert_eq!(disp.contributors[0].label, "AimingSystemsMod");
+        // The range mod is surfaced as an inherited cause via the range stat, with
+        // the range-unit magnitude (x1.16), NOT mixed into the direct contributors.
+        assert_eq!(disp.inherited.len(), 1);
+        assert_eq!(disp.inherited[0].via_stat, range.label);
+        assert_eq!(disp.inherited[0].line.label, "ArtilleryPlottingRoomMod");
+        assert_eq!(disp.inherited[0].line.effect, "x1.16");
+        // Range itself is not derived, so it has no inherited causes.
+        assert!(range.inherited.is_empty());
+    }
+}

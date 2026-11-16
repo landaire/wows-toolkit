@@ -1,0 +1,184 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/wows-toolkit",
+    "crates/wows-toolkit-config",
+    "crates/wows-toolkit-hardening",
+    "crates/wows-toolkit-gpui",
+    "crates/wows-toolkit-zgui",
+    "crates/wows-toolkit-viewmodel",
+    "crates/wows-toolkit-replay-data",
+    "crates/wows-toolkit-services",
+    "crates/wows-toolkit-armor",
+    "crates/wows-toolkit-launcher",
+    "crates/wows-toolkit-icons",
+    "crates/wows-core",
+    "crates/wowsunpack",
+    "crates/wows-replays",
+    "crates/minimap-renderer",
+    "crates/replayshark",
+    "crates/wows-data-mgr",
+    "crates/wt-collab-client",
+    "crates/wt-collab-protocol",
+    "crates/wt-collab-egui",
+    "crates/wt-web",
+    "crates/wt-translations",
+    "crates/wows-replay-insights",
+    "crates/wgcheck",
+    "crates/wgc-core",
+    "crates/wgc-install",
+    "crates/wgc-catalog",
+    "crates/wgc-download",
+    "crates/wgc-launch",
+    "crates/wgc-auth",
+    "crates/wows-battle-world",
+    "crates/wows-query",
+    "crates/wows-ship-stats",
+    "crates/wows-mcp",
+    "crates/landaire-ui",
+    "build-support/buck/reindeer-features",
+]
+exclude = ["third-party/rust/vendor"]
+
+[workspace.package]
+version = "1.1.0-beta4"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+
+[workspace.metadata.crane]
+name = "wows-toolkit"
+
+[workspace.dependencies]
+# Internal crates (versions synced by scripts/bump-versions.sh)
+wows-core = { version = "0.15.0", path = "crates/wows-core", default-features = false }
+wowsunpack = { version = "0.47.1", path = "crates/wowsunpack", default-features = false }
+wows_replays = { version = "0.48.0", path = "crates/wows-replays", default-features = false }
+wows_minimap_renderer = { version = "0.41.0", path = "crates/minimap-renderer", default-features = false }
+wows-battle-world = { version = "0.15.0", path = "crates/wows-battle-world", default-features = false }
+wows-data-mgr = { version = "0.23.0", path = "crates/wows-data-mgr", default-features = false }
+wows-replay-insights = { version = "0.15.0", path = "crates/wows-replay-insights", default-features = false }
+replayshark = { path = "crates/replayshark" }
+wows-query = { path = "crates/wows-query" }
+wows-ship-stats = { path = "crates/wows-ship-stats" }
+wt-collab-client = { path = "crates/wt-collab-client" }
+wt-collab-protocol = { path = "crates/wt-collab-protocol" }
+wt-collab-egui = { path = "crates/wt-collab-egui" }
+wt-translations = { version = "0.17.1", path = "crates/wt-translations" }
+wows-toolkit-config = { path = "crates/wows-toolkit-config" }
+wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
+wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
+wows-toolkit-replay-data = { path = "crates/wows-toolkit-replay-data" }
+wows-toolkit-services = { path = "crates/wows-toolkit-services" }
+wows-toolkit-armor = { path = "crates/wows-toolkit-armor" }
+wows-toolkit-launcher = { path = "crates/wows-toolkit-launcher" }
+wows-toolkit-icons = { path = "crates/wows-toolkit-icons" }
+landaire-ui = { path = "crates/landaire-ui" }
+wgc-core = { version = "0.1.0", path = "crates/wgc-core", default-features = false }
+wgc-install = { version = "0.1.0", path = "crates/wgc-install", default-features = false }
+wgc-catalog = { version = "0.1.0", path = "crates/wgc-catalog", default-features = false }
+wgc-download = { version = "0.1.0", path = "crates/wgc-download", default-features = false }
+wgc-launch = { version = "0.1.0", path = "crates/wgc-launch", default-features = false }
+wgc-auth = { version = "0.1.0", path = "crates/wgc-auth", default-features = false }
+steamroom = "0.3"
+steamroom-client = "0.3"
+# Shared UI dependencies
+egui = "0.37"
+# egui 0.37 ports of egui-phosphor and egui_dock are not released upstream.
+egui-phosphor = { git = "https://github.com/landaire-contrib/egui-phosphor", rev = "9b98fa3e49ed6c7d0fd9c3ddde5257065c9ca5e8" }
+egui_dock = { git = "https://github.com/landaire-contrib/egui_dock", rev = "fdb395d4fbe91f39c0166651bc69c31824bc6ffb" }
+eframe = { version = "0.37", default-features = false }
+# Pin to match eframe's wgpu version so backend features unify correctly.
+# This dependency with `default-features = true` is also needed to ensure
+# that targets are properly initialized.
+wgpu = { version = "30", default-features = true }
+# Shared external dependencies
+bon = "3.9.3"
+data-encoding = "2.11.1"
+bytemuck = { version = "1", features = ["derive"] }
+flate2 = { version = "1.1", features = ["zlib-rs"], default-features = false }
+gettext = "0.4"
+image = { version = "0.25", default-features = false }
+image_dds = { version = "0.7", default-features = false }
+itertools = "0.14"
+paste = "1"
+pickled = { version = "2.0.0-alpha10" }
+iroh = { version = "1.0.3", default-features = false, features = ["tls-ring"] }
+rkyv = "0.8.18"
+rootcause = "0.12"
+roxmltree = "0.21"
+schemars = "1.2"
+serde = { version = "1", features = ["derive"] }
+ciborium = "0.2"
+serde_json = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+web-time = "1"
+winnow = "1.0"
+# Shared tool/CLI dependencies
+clap = { version = "4.6.6", features = ["derive"] }
+convert_case = "0.11"
+glob = "0.3"
+jiff = "0.2"
+indicatif = "0.18.6"
+toml = "1.1"
+tracing-subscriber = "0.3"
+walkdir = "2.5"
+insta = { version = "1.48", features = ["yaml"] }
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+sha2 = "0.10"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+rust-i18n = "3.1.5"
+sys-locale = "0.3"
+# landaire-contrib/zgui, branch `wows-toolkit`.
+zgui = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui-icons = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui-primitives = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-ui-tokens = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-image = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-css = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-platform-headless = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-render-wgpu = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-render-vector-vello = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+zgui-testkit-scene = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+# The accessibility tree zgui publishes, read back as a screen reader reads it.
+accesskit_consumer = "0.38"
+
+[patch.crates-io]
+# zgui's copy of fontique, which keeps resolved font families across queries
+# and caches the system font collection between launches.
+fontique = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+# GPUI Fast from our fork: the wgpu renderer on every desktop platform and the
+# dynamic textures the armor viewport and replay renderer draw into. The branch
+# holds the fork's generated release workspace, so the crates keep their
+# crates.io names and use the registry wgpu.
+gpui-fast = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-apple = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-linux = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-macos = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-macros = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-platform = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-web = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-wgpu = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+gpui-fast-windows = { git = "https://github.com/landaire-contrib/gpui-fast", branch = "wows-toolkit-release" }
+# pickled = { path = "../pickled" }
+# egui = { git = "https://github.com/emilk/egui", branch = "main" }
+# eframe = { git = "https://github.com/emilk/egui", branch = "main" }
+# epaint = { git = "https://github.com/emilk/egui", branch = "main" }
+# emath = { git = "https://github.com/emilk/egui", branch = "main" }
+# egui_glow = { git = "https://github.com/emilk/egui", branch = "main" }
+# egui-wgpu = { git = "https://github.com/emilk/egui", branch = "main" }
+# egui-winit = { git = "https://github.com/emilk/egui", branch = "main" }
+# egui_extras = { git = "https://github.com/emilk/egui", branch = "main" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.profiling]
+inherits = "release"
+debug = true

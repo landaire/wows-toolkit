@@ -1,0 +1,69 @@
+[package]
+name = "wows-toolkit-viewmodel"
+description = "Toolkit logic that decides what the UI shows, independent of any UI toolkit"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_viewmodel"
+path = "src/lib.rs"
+
+[features]
+# The shipped rating table, for the tests of crates that rate battles.
+test-support = []
+
+[dependencies]
+# Camera math the armor viewports share, in the vector type both use.
+nalgebra = "0.34"
+# The annotations a saved tactics board holds, in the shape the session
+# protocol already names them.
+wt-collab-protocol = { workspace = true }
+# The game's own commands.scheme.xml, for the replay keyboard reference.
+roxmltree = { workspace = true }
+ciborium.workspace = true
+# HTML entities in game chat, which the export decodes before writing.
+escaper = "0.1.1"
+tracing = "0.1"
+glob.workspace = true
+pickled.workspace = true
+jiff.workspace = true
+language-tags = "0.3"
+# The Twitch login/in-game-name similarity rule.
+levenshtein = "1.0.5"
+regex = "1"
+# The query bar's pill labels and completions are user-facing strings, so the
+# shared half translates them rather than handing keys to each front end.
+# `i18n!` generates its lookup per crate; the catalog behind it is parsed once
+# per process (see `wt_translations::backend`).
+rust-i18n = { workspace = true }
+wt-translations = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+# Comparing this build against the newest published release.
+semver = "1.0"
+thiserror.workspace = true
+thousands = "0.2.0"
+# ASCII folding for typed-text filters, the version the gpui and egui apps
+# already pin.
+unidecode = "0.3"
+wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
+wows_replays = { workspace = true }
+wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }
+sqlx = { workspace = true }
+wows-toolkit-config = { workspace = true }
+
+# The Windows proxy configuration, which `proxy::resolve_proxy` reads when
+# neither a manual setting nor the environment names one.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+
+[dev-dependencies]
+# The store's tests drive a real in-memory database, which needs an executor.
+tokio = { version = "1.53", features = ["rt", "macros"] }
+wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
+# `ZoneGuard`, so the query bar's date assertions read a fixed zone rather than
+# the machine's.
+wows-toolkit-config = { workspace = true, features = ["test-support"] }

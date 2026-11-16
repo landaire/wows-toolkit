@@ -1,0 +1,421 @@
+on:
+  push:
+    # These are glob filters, not regexes: [0-9] and + are honoured, but
+    # alternation is not, so a pre-release suffix is matched with a trailing *.
+    # Any vX.Y.Z-<suffix> tag publishes as a GitHub prerelease.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
+    # A ci/** branch rehearses the whole pipeline and publishes nothing, so the
+    # release path can be exercised without notifying anyone watching releases.
+    branches: ["ci/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    outputs:
+      binary: ${{ steps.desktop.outputs.binary }}
+      target: ${{ steps.desktop.outputs.target }}
+      frontend: ${{ steps.desktop.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select desktop frontend
+        id: desktop
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+
+          with open("Cargo.toml", "rb") as manifest:
+              version = tomllib.load(manifest)["workspace"]["package"]["version"]
+          if os.environ["GITHUB_REF"].startswith("refs/tags/"):
+              tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+              if tag_version != version:
+                  raise SystemExit(f"Release tag {tag_version} does not match workspace version {version}")
+          frontend = "zgui" if "-" in version else "egui"
+          # The alias names the front end; the binary keeps its crate's name.
+          binary = "wows_toolkit_zgui" if frontend == "zgui" else "wows_toolkit"
+          target = f"//:wows_toolkit_{frontend}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"frontend={frontend}", file=output)
+              print(f"binary={binary}", file=output)
+              print(f"target={target}", file=output)
+          PY
+
+      - name: Extract release notes for this tag
+        id: notes
+        # Pull the RELEASE_NOTES.md section for the tag (## x.y.z - <date> ...
+        # up to the next ## heading) and use it as the release body. Fall back
+        # to auto-generated notes if the tag has no release-notes entry.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # A heading is "## <version>" alone or followed by a date. Requiring
+          # the line to end there, or to continue with a space, is what keeps
+          # 0.1.6 from matching 0.1.69. Stop at the next "## " heading.
+          extract() {
+            awk -v ver="$1" '
+              $0 == "## " ver || index($0, "## " ver " ") == 1 { flag = 1; next }
+              flag && index($0, "## ") == 1 { exit }
+              flag { print }
+            ' RELEASE_NOTES.md | sed -e '/./,$!d'
+          }
+          extract "$version" > release_notes.md
+          # A pre-release ships the notes of the version it is a candidate for,
+          # which is the section that exists while the suffixed one does not.
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            extract "${version%%-*}" > release_notes.md
+          fi
+          if grep -q '[^[:space:]]' release_notes.md; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          generate_release_notes: ${{ steps.notes.outputs.found == 'false' }}
+          # A suffixed tag (vX.Y.Z-beta1) must not become the latest release:
+          # the in-app updater reads /releases/latest, which skips prereleases,
+          # and would otherwise pull a beta onto every install.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  windows:
+    name: Windows
+    needs: create-release
+    runs-on: windows-latest
+    env:
+      APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_TARGET: ${{ needs.create-release.outputs.target }}
+      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
+    environment: release-signing
+    defaults:
+      run:
+        working-directory: C:\w
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the offline Buck toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\bo
+          key: windows-buck-toolchain-${{ hashFiles('toolchains/windows/toolchain-manifest.json') }}
+
+      - name: Copy the checkout to a short path
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
+
+      # Visual Studio caps the length of its install root too, hence C:\bt.
+      - name: Provision the Buck toolchain
+        shell: pwsh
+        run: |
+          try {
+            ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+          } catch {
+            # ::error:: text lands in the check annotations, which are readable
+            # without a token; the job log is not.
+            $msg = (($_ | Out-String) -replace "`r?`n", " | ")
+            Write-Host "::error::PROVISION: $msg"
+            Get-ChildItem $env:TEMP -Filter *.log -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-25) } |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+                $tail = ((Get-Content $_.FullName -Tail 30) -join " | ")
+                if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
+                Write-Host "::error::$($_.Name): $tail"
+              }
+            exit 1
+          }
+
+      - name: Build the executable and installer
+        id: buck
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
+          $common = @("-m", "release", "-c", "release.frontend=$env:APP_FRONTEND", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
+
+          $slug = "${{ github.ref_name }}" -replace "/", "-"
+          $msiName = "wows-toolkit-$slug-windows-x86_64.msi"
+
+          $target = $env:APP_TARGET
+          $exeOut = & $buck2 build @common --show-output $target "${target}[pdb]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msiOut = & $buck2 build @common --show-output toolchains//windows:wows_toolkit_msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $exe = ($exeOut | Select-String -Pattern "$([regex]::Escape($env:APP_BINARY))\.exe$" | Select-Object -Last 1).ToString().Split(" ")[-1]
+          $pdb = ($exeOut | Select-String -Pattern "$([regex]::Escape($env:APP_BINARY))\.pdb$" | Select-Object -Last 1).ToString().Split(" ")[-1]
+          $msi = ($msiOut | Select-String -Pattern '\.msi$' | Select-Object -Last 1).ToString().Split(" ")[-1]
+
+          # Buck outputs are read-only, and signing rewrites in place.
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item $exe dist/wows_toolkit.exe
+          Copy-Item $pdb dist/wows_toolkit.pdb
+          Copy-Item $msi "dist/$msiName"
+          Get-ChildItem dist | ForEach-Object { $_.IsReadOnly = $false }
+
+          # A backtrace on a user's machine looks beside the executable for the PDB file its debug
+          # directory names (the CodeView "RSDS" record), so that name must be the shipped one.
+          $image = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("dist/wows_toolkit.exe"))
+          if ($image -notmatch 'RSDS[\s\S]{20}(?:[^\x00]*\\)?wows_toolkit\.pdb\x00') {
+            Write-Host "::error::wows_toolkit.exe does not name wows_toolkit.pdb in its debug directory"
+            exit 1
+          }
+          "msi=C:\w\dist\$msiName" >> $env:GITHUB_OUTPUT
+          "slug=$slug" >> $env:GITHUB_OUTPUT
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The installer is built before this runs, so it carries an unsigned
+      # executable. Closing that needs the two-pass repackaging in Task 6.
+      - name: Sign executable
+        uses: azure/trusted-signing-action@v1
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: wows-toolkit
+          certificate-profile-name: wows-toolkit
+          files: C:\w\dist\wows_toolkit.exe
+          file-digest: SHA256
+
+      - name: Sign MSI
+        uses: azure/trusted-signing-action@v1
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: wows-toolkit
+          certificate-profile-name: wows-toolkit
+          files: ${{ steps.buck.outputs.msi }}
+          file-digest: SHA256
+
+      - name: Create zip archive
+        shell: pwsh
+        run: |
+          $slug = "${{ steps.buck.outputs.slug }}"
+          Copy-Item -Recurse "crates/wt-translations/translations" "translations" -Force
+          Compress-Archive -Path "dist/wows_toolkit.exe","dist/wows_toolkit.pdb","LICENSE","THIRD_PARTY_NOTICES.txt","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            C:\w\dist\*.zip
+            C:\w\dist\*.msi
+            C:\w\dist\wows_toolkit.pdb
+          fail_on_unmatched_files: true
+
+  linux:
+    name: Linux Flatpak
+    needs: create-release
+    runs-on: ubuntu-22.04
+    env:
+      APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_TARGET: ${{ needs.create-release.outputs.target }}
+      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      - name: Build the release binary
+        id: buck
+        run: |
+          out=$(nix develop --command buck2 build -m release --show-output "$APP_TARGET")
+          echo "$out"
+          rel=$(echo "$out" | awk -v binary="$APP_BINARY" '$NF ~ ("/" binary "$") { print $NF }' | tail -1)
+          mkdir -p dist
+          cp "$rel" dist/wows_toolkit
+          chmod +w dist/wows_toolkit
+
+      # Buck links the GUI against the host's loader, but the dev shell's
+      # NIX_LDFLAGS adds a runpath to the checkout, which the Flatpak runtime
+      # does not have.
+      - name: Remove the dev shell runpath
+        run: |
+          nix develop --command patchelf --remove-rpath dist/wows_toolkit
+          readelf -l dist/wows_toolkit | grep -F '/lib64/ld-linux-x86-64.so.2'
+
+      - name: Install Flatpak
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+
+      - name: Set up Flatpak
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+
+      - name: Build Flatpak bundle
+        run: |
+          APP_ID="io.github.landaire.WoWsToolkit"
+
+          flatpak build-init build-dir "$APP_ID" org.freedesktop.Sdk org.freedesktop.Platform 24.08
+
+          mkdir -p build-dir/files/bin
+          cp dist/wows_toolkit build-dir/files/bin/
+          cp -r crates/wt-translations/translations build-dir/files/bin/translations
+
+          mkdir -p build-dir/files/share/applications
+          cp assets/wows-toolkit.desktop "build-dir/files/share/applications/${APP_ID}.desktop"
+
+          mkdir -p build-dir/files/share/icons/hicolor/256x256/apps
+          cp assets/icon-256.png "build-dir/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+
+          mkdir -p build-dir/files/share/metainfo
+          cp "assets/${APP_ID}.metainfo.xml" build-dir/files/share/metainfo/
+
+          mkdir -p "build-dir/files/share/licenses/${APP_ID}"
+          cp LICENSE THIRD_PARTY_NOTICES.txt "build-dir/files/share/licenses/${APP_ID}/"
+
+          flatpak build-finish build-dir             --share=ipc             --share=network             --socket=x11             --socket=wayland             --socket=fallback-x11             --device=dri             --filesystem=host:ro             --command=wows_toolkit
+
+          flatpak build-export repo build-dir
+          flatpak build-bundle repo "WoWs_Toolkit-x86_64.flatpak" "$APP_ID"
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WoWs_Toolkit-x86_64.flatpak
+          fail_on_unmatched_files: true
+
+  macos:
+    name: macOS
+    needs: create-release
+    runs-on: macos-15
+    env:
+      APP_BINARY: ${{ needs.create-release.outputs.binary }}
+      APP_TARGET: ${{ needs.create-release.outputs.target }}
+      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # check-macos-sdk.nu asserts the pinned SDK is the one in use, so no host
+      # Xcode is involved and the frameworks come from the flake.
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      - name: Build the release binary
+        run: |
+          out=$(nix develop --command buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 --show-output "$APP_TARGET")
+          echo "$out"
+          rel=$(echo "$out" | awk -v binary="$APP_BINARY" '$NF ~ ("/" binary "$") { print $NF }' | tail -1)
+          mkdir -p dist
+          cp "$rel" dist/wows_toolkit
+          chmod +w dist/wows_toolkit
+          otool -L dist/wows_toolkit | head -20
+          # The binary is staged, and the runner does not have room for
+          # buck-out plus the nix store plus a disk image.
+          df -h / | tail -1
+          nix develop --command buck2 clean
+          df -h / | tail -1
+
+      - name: Name the artifacts
+        id: name
+        run: echo "slug=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate .icns icon
+        run: |
+          mkdir -p wows_toolkit.iconset
+          sips -z 16 16     assets/icon-1024.png --out wows_toolkit.iconset/icon_16x16.png
+          sips -z 32 32     assets/icon-1024.png --out wows_toolkit.iconset/icon_16x16@2x.png
+          sips -z 32 32     assets/icon-1024.png --out wows_toolkit.iconset/icon_32x32.png
+          sips -z 64 64     assets/icon-1024.png --out wows_toolkit.iconset/icon_32x32@2x.png
+          sips -z 128 128   assets/icon-1024.png --out wows_toolkit.iconset/icon_128x128.png
+          sips -z 256 256   assets/icon-1024.png --out wows_toolkit.iconset/icon_128x128@2x.png
+          sips -z 256 256   assets/icon-1024.png --out wows_toolkit.iconset/icon_256x256.png
+          sips -z 512 512   assets/icon-1024.png --out wows_toolkit.iconset/icon_256x256@2x.png
+          sips -z 512 512   assets/icon-1024.png --out wows_toolkit.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/icon-1024.png --out wows_toolkit.iconset/icon_512x512@2x.png
+          iconutil -c icns wows_toolkit.iconset
+
+      - name: Create .app bundle
+        run: |
+          APP="WoWs Toolkit.app"
+          VERSION="${{ github.ref_name }}"
+
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
+
+          cp dist/wows_toolkit "$APP/Contents/MacOS/wows_toolkit"
+          chmod +x "$APP/Contents/MacOS/wows_toolkit"
+          cp wows_toolkit.icns "$APP/Contents/Resources/"
+          cp -r crates/wt-translations/translations "$APP/Contents/MacOS/translations"
+          # Inside the bundle so the notices stay with the app after it is
+          # dragged out of the disk image.
+          cp LICENSE THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/"
+
+          cat > "$APP/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>WoWs Toolkit</string>
+              <key>CFBundleDisplayName</key>
+              <string>WoWs Toolkit</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.github.landaire.wows-toolkit</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleExecutable</key>
+              <string>wows_toolkit</string>
+              <key>CFBundleIconFile</key>
+              <string>wows_toolkit</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create .dmg
+        # hdiutil's size estimate from -srcfolder can leave the image too small
+        # for the desktop binary, so size it from the bundle with headroom.
+        run: |
+          size_mb=$(( $(du -sm "WoWs Toolkit.app" | cut -f1) * 12 / 10 + 32 ))
+          hdiutil create -volname "WoWs Toolkit" \
+            -srcfolder "WoWs Toolkit.app" \
+            -size "${size_mb}m" \
+            -ov -format UDZO \
+            "wows_toolkit_${{ steps.name.outputs.slug }}_macos.dmg"
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wows_toolkit_${{ steps.name.outputs.slug }}_macos.dmg
+          fail_on_unmatched_files: true

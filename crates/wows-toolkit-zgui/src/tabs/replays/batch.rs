@@ -12,9 +12,9 @@ use wows_toolkit_replay_data::replay_render::export::BatchOutcome;
 use wows_toolkit_replay_data::replay_render::export::batch_export;
 use wows_toolkit_replay_data::replay_render::export::temporary_batch_dir;
 use wows_toolkit_replay_data::replay_render::options::playback_options;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Progress;
 use crate::shell::palette::chosen;
@@ -79,7 +79,7 @@ pub fn render_many(workspace: ReplayWorkspace, paths: Vec<PathBuf>, target: Batc
             let (report, mut steps) = mpsc::unbounded();
             let bake_options =
                 RenderOptions { player_names: services.settings.name_display_untracked(), ..playback_options() };
-            let batch = blocking(move || {
+            let batch = long_job(move || {
                 batch_export(paths, &game_data, &out_dir, &defaults, bake_options, |step| {
                     let _ = report.unbounded_send(step);
                 })

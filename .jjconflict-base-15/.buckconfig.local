@@ -1,0 +1,13 @@
+[nix_toolchain]
+root = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain
+
+[hermetic_tools]
+ar = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain/bin/ar
+cc = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain/bin/clang
+cxx = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain/bin/clang++
+nasm = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain/bin/nasm
+python = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain/bin/python3
+rustfmt = /nix/store/c5gn6g2kncy36chcn21447683011d4pi-wows-toolkit-buck-toolchain/bin/rustfmt
+
+[native_build]
+debuginfo = line-tables-only

@@ -1,0 +1,55 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Yamato
+  - kind: guns
+    name: 460 mm/45 Type 94 in a triple-gun turret
+main_battery:
+  - layout: 3 x 3 460 mm
+    mounts: 3
+    barrels_per_mount: 3
+    caliber_mm: 460
+secondary_battery:
+  - layout: 2 x 3 155 mm
+    mounts: 2
+    barrels_per_mount: 3
+    caliber_mm: 155
+  - layout: 12 x 2 127 mm
+    mounts: 12
+    barrels_per_mount: 2
+    caliber_mm: 127
+torpedoes: none
+anti_submarine:
+  summary: "no ship-mounted depth charge launchers; has a depth charge air strike (1 x Kawanishi H6K, 2 depth charges per plane, 4900 damage each, 2 charges, 30 s reload, up to 11 km away); no submarine detection consumable"
+  depth_charge_launchers: none
+  depth_charge_air_strike:
+    aircraft: Kawanishi H6K
+    planes: 1
+    depth_charges_per_plane: 2
+    damage_per_depth_charge: 4900
+    splash_radius_m: 12.5
+    charges: 2
+    reload_s: 30
+    range_km: 11
+  submarine_detection: none
+aircraft:
+  squadrons: none
+  air_strike:
+    aircraft: Kawanishi H6K
+    ordnance: depth_charge
+    uses: 2
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Repair Party
+  - slot: 3
+    choice: "choose one of: Spotting Aircraft, Fighters"
+    options:
+      - Spotting Aircraft
+      - Fighters

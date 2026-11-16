@@ -1,0 +1,161 @@
+//! Rasterising baked draw commands to an image.
+//!
+//! The hover preview shows a replay's minimap as a small animation. The egui
+//! app draws the same commands through egui's painter; a front end that has
+//! no painter of its own can render them here instead and display the
+//! resulting image, which is also what the video export does.
+//!
+//! Assets are loaded once per renderer rather than per frame: a preview plays
+//! dozens of frames off one build's icons, and reloading them from the VFS
+//! each time would dominate the cost of drawing.
+
+use std::collections::HashMap;
+
+use image::RgbImage;
+use wowsunpack::vfs::VfsPath;
+
+use crate::assets;
+use crate::draw_command::DrawCommand;
+use crate::draw_command::RenderTarget;
+use crate::drawing::ImageTarget;
+use crate::viewport::MapViewport;
+use wowsunpack::data::Version;
+
+/// Why a preview could not be rendered.
+///
+/// Written out rather than derived: this crate carries no `thiserror`, and
+/// `error.rs` states its errors the same way. Callers match the variant; the
+/// message is for logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewRenderError {
+    NoMapArt { map: String },
+}
+
+impl std::fmt::Display for PreviewRenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoMapArt { map } => write!(f, "the build ships no map art for {map:?}"),
+        }
+    }
+}
+
+impl std::error::Error for PreviewRenderError {}
+
+/// A renderer bound to one build's assets and one map.
+pub struct PreviewRenderer {
+    target: ImageTarget,
+}
+
+impl PreviewRenderer {
+    /// Loads the assets a preview of `map_name` needs from `vfs`.
+    ///
+    /// `version` selects the asset layout, which moved between builds; the
+    /// loaders fall back on their own when it is absent.
+    pub fn new(vfs: &VfsPath, version: Option<&Version>, map_name: &str) -> Result<Self, PreviewRenderError> {
+        Self::with_layout(vfs, version, map_name, crate::drawing::SidePanelLayout::None)
+    }
+
+    /// Loads the assets a preview of `map_name` needs, on a canvas laid out
+    /// for `layout`.
+    ///
+    /// The layout decides the canvas width and where the map sits in it, so a
+    /// viewport that shows the team rosters needs its own renderer rather
+    /// than the one every hover preview of that map shares.
+    pub fn with_layout(
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        map_name: &str,
+        layout: crate::drawing::SidePanelLayout,
+    ) -> Result<Self, PreviewRenderError> {
+        let map_image = assets::load_map_image(map_name, vfs)
+            .ok_or_else(|| PreviewRenderError::NoMapArt { map: map_name.to_string() })?;
+        Ok(Self::with_art(map_image, vfs, version, layout))
+    }
+
+    /// The same, drawing art the caller already holds.
+    ///
+    /// For a map this build has no art for: a collab peer is sent the art of the
+    /// board it is joining, which may come from a build it does not have. Only
+    /// the art is supplied; the fonts and icons drawn over it are this build's,
+    /// because they are what the reader's own other windows draw with.
+    pub fn with_art(
+        map_image: RgbImage,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        layout: crate::drawing::SidePanelLayout,
+    ) -> Self {
+        let target = ImageTarget::with_side_panel(
+            Some(map_image),
+            assets::load_game_fonts(vfs),
+            assets::load_ship_icons(vfs, version),
+            assets::load_plane_icons(vfs, version),
+            assets::load_building_icons(vfs, version),
+            assets::load_consumable_icons(vfs, version),
+            // The preview draws no ribbons: they belong to the stats panel,
+            // which a preview does not show.
+            HashMap::new(),
+            HashMap::new(),
+            // The kill feed draws these, at the same size the CPU renderer's
+            // own target uses (`main.rs`). Zero would resize them to nothing.
+            assets::load_death_cause_icons(vfs, crate::ICON_SIZE, version),
+            assets::load_powerup_icons(vfs, crate::ICON_SIZE, version),
+            layout,
+        );
+
+        Self { target }
+    }
+
+    /// The pixel size of every frame this renderer produces.
+    pub fn canvas_size(&self) -> (u32, u32) {
+        self.target.canvas_size()
+    }
+
+    /// Where the map's top-left corner sits in the frames this renderer
+    /// produces.
+    pub fn map_origin(&self) -> (u32, u32) {
+        self.target.map_origin()
+    }
+
+    /// One frame of `commands`, drawn over the whole map.
+    ///
+    /// Takes any sequence of borrowed commands, so a caller showing a subset
+    /// of a track filters it here rather than cloning the commands it keeps.
+    pub fn render<'a>(&mut self, commands: impl IntoIterator<Item = &'a DrawCommand>) -> RgbImage {
+        self.draw(MapViewport::default(), commands);
+        self.target.frame()
+    }
+
+    /// One frame of `commands`, drawn over the part of the map `viewport`
+    /// shows.
+    ///
+    /// The viewport is given per frame rather than kept, because one renderer
+    /// is shared by every preview of a map: one that remembered a zoom would
+    /// zoom the others with it.
+    pub fn render_at(&mut self, viewport: MapViewport, commands: &[DrawCommand]) -> RgbImage {
+        self.draw(viewport, commands);
+        self.target.frame()
+    }
+
+    /// The same, with what the frame drew that a pointer can rest on.
+    ///
+    /// Handed back with the frame rather than kept: one renderer is shared by
+    /// every preview of a map, so regions left on it would belong to whichever
+    /// frame was drawn last.
+    pub fn render_regions(
+        &mut self,
+        viewport: MapViewport,
+        commands: &[DrawCommand],
+    ) -> (RgbImage, Vec<crate::drawing::DrawnRegion>) {
+        self.draw(viewport, commands);
+        (self.target.frame(), self.target.drawn_regions().to_vec())
+    }
+
+    fn draw<'a>(&mut self, viewport: MapViewport, commands: impl IntoIterator<Item = &'a DrawCommand>) {
+        self.target.set_map_viewport(viewport);
+        self.target.begin_frame();
+        for command in commands {
+            self.target.draw(command);
+        }
+        self.target.end_frame();
+    }
+}

@@ -1,0 +1,3 @@
+# The build script generates the property code with Python, which it finds
+# through PYTHON3. native_buildscript_env pins that to the toolchain's.
+buildscript.run = true

@@ -1,0 +1,14 @@
+# The build script only feeds the helper sources to `gcc`, so they are declared
+# directly: the C helpers use GNU inline assembly, MSVC gets the MASM versions.
+buildscript.run = false
+
+[['cfg(not(target_env = "msvc"))'.cxx_library]]
+name = "rust_crypto_helpers"
+srcs = ["src/util_helpers.c", "src/aesni_helpers.c"]
+preferred_linkage = "static"
+
+[['cfg(target_env = "msvc")'.cxx_library]]
+name = "rust_crypto_helpers-msvc"
+srcs = ["src/util_helpers.asm", "src/aesni_helpers.asm"]
+compiler_flags = ["/DX64"]
+preferred_linkage = "static"

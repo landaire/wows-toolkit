@@ -34,8 +34,9 @@ use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::ttx::armor_material::ArmorMaterial;
 use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_params::types::Species;
-use zgui::reactive::blocking;
 use zgui::reactive::spawn_local;
+
+use crate::long_job::long_job;
 
 use super::model::SceneDevice;
 use super::model::ViewportModel;
@@ -714,7 +715,7 @@ impl ViewportModel {
                 let job_cancel = cancel.clone();
                 let scene = Arc::clone(&scene);
                 spawn_local(async move {
-                    match blocking(move || job.run(&job_scene, &job_cancel)).await {
+                    match long_job(move || job.run(&job_scene, &job_cancel)).await {
                         Ok(()) => {}
                         Err(RestJobError::Cancelled(_)) => return,
                         Err(e) => {

@@ -1,0 +1,26 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "(&main.coverage, &main.all_barrels_bear)"
+---
+- bow:
+    barrels: 8
+    bearings:
+      - 331-29
+    fewest_barrels: 8
+  stern:
+    barrels: 8
+    bearings:
+      - 151-209
+    fewest_barrels: 8
+  starboard:
+    barrels: 16
+    bearings:
+      - 77-98
+    fewest_barrels: 10
+  port:
+    barrels: 16
+    bearings:
+      - 262-283
+    fewest_barrels: 10
+- - 77-98
+  - 262-283

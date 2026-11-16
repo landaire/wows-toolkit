@@ -1,0 +1,99 @@
+# Mirrors prelude//platforms:defs.bzl, with the executor able to read and write
+# the remote action cache. The prelude's own platform hardcodes
+# remote_enabled = False, from which remote_cache_enabled also defaults to
+# false, so no RE client is instantiated and [buck2_re_client] is ignored.
+
+load("@prelude//cfg/exec_platform:marker.bzl", "get_exec_platform_marker")
+
+def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
+    constraints = dict()
+    constraints.update(ctx.attrs.cpu_configuration[ConfigurationInfo].constraints)
+    constraints.update(ctx.attrs.os_configuration[ConfigurationInfo].constraints)
+    mode = ctx.attrs.build_mode[ConstraintValueInfo]
+    constraints[mode.setting.label] = mode
+    cfg = ConfigurationInfo(constraints = constraints, values = {})
+
+    name = ctx.label.raw_target()
+    platform = ExecutionPlatformInfo(
+        label = name,
+        configuration = cfg,
+        executor_config = CommandExecutorConfig(
+            local_enabled = True,
+            remote_enabled = False,
+            remote_cache_enabled = ctx.attrs.remote_cache_enabled,
+            allow_cache_uploads = ctx.attrs.remote_cache_enabled,
+            use_windows_path_separators = ctx.attrs.use_windows_path_separators,
+        ),
+    )
+
+    return [
+        DefaultInfo(),
+        platform,
+        PlatformInfo(label = str(name), configuration = cfg),
+    ]
+
+# One platform per build mode, because a build script or proc macro is built in
+# its execution platform's configuration, not its dependent's. Cargo builds
+# them without debug assertions in release, and some build scripts read that
+# (gpui's Windows backend compiles its shaders only then). The Rust and C++
+# toolchains require the platform whose mode matches the target's.
+execution_platform = rule(
+    impl = _execution_platform_impl,
+    attrs = {
+        "build_mode": attrs.dep(providers = [ConstraintValueInfo]),
+        "cpu_configuration": attrs.dep(providers = [ConfigurationInfo]),
+        "os_configuration": attrs.dep(providers = [ConfigurationInfo]),
+        "remote_cache_enabled": attrs.bool(),
+        "use_windows_path_separators": attrs.bool(),
+    },
+)
+
+def _execution_platforms_impl(ctx: AnalysisContext) -> list[Provider]:
+    return [
+        DefaultInfo(),
+        ExecutionPlatformRegistrationInfo(
+            platforms = [p[ExecutionPlatformInfo] for p in ctx.attrs.platforms],
+            exec_marker_constraint = get_exec_platform_marker(),
+        ),
+    ]
+
+execution_platforms = rule(
+    impl = _execution_platforms_impl,
+    attrs = {"platforms": attrs.list(attrs.dep(providers = [ExecutionPlatformInfo]))},
+)
+
+def _host_cpu_configuration() -> str:
+    arch = host_info().arch
+    if arch.is_aarch64:
+        return "prelude//cpu:arm64"
+    elif arch.is_arm:
+        return "prelude//cpu:arm32"
+    elif arch.is_i386:
+        return "prelude//cpu:x86_32"
+    elif arch.is_riscv64:
+        return "prelude//cpu:riscv64"
+    else:
+        return "prelude//cpu:x86_64"
+
+def _host_os_configuration() -> str:
+    os = host_info().os
+    if os.is_macos:
+        return "prelude//os:macos"
+    elif os.is_windows:
+        return "prelude//os:windows"
+    else:
+        return "prelude//os:linux"
+
+host_configuration = struct(
+    cpu = _host_cpu_configuration(),
+    os = _host_os_configuration(),
+)
+
+def remote_cache_configured() -> bool:
+    """Whether this checkout has an action cache to talk to.
+
+    Enabling the cache without one is fatal, not a fallback to local: every
+    action fails with "No engine address". CI has no [buck2_re_client] section,
+    so it must build with the cache off.
+    """
+    return read_root_config("buck2_re_client", "engine_address") != None

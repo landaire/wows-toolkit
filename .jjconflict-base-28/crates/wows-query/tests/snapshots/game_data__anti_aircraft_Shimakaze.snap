@@ -1,0 +1,146 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3848
+expression: anti_aircraft
+---
+auras:
+  - band: short-range
+    range: 2.5
+    hit_chance: 95
+    mounts:
+      - 2 x 25 mm triple
+      - 14 x 25 mm single
+      - 1 x 25 mm twin
+    damage_per_second:
+      stat: short-range AA damage per second
+      unit: hp/s
+      builds:
+        base: 98
+        best:
+          value: 124
+          assumed:
+            - Main Battery and AA Specialist
+            - Auxiliary Armaments Modification 2
+        alternatives:
+          - label: without Main Battery and AA Specialist
+            value: 113
+            assumed:
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value: 108
+            assumed:
+              - Main Battery and AA Specialist
+  - band: long-range
+    range: 5.8
+    hit_chance: 100
+    mounts:
+      - 3 x 127 mm twin
+    damage_per_second:
+      stat: long-range AA damage per second
+      unit: hp/s
+      builds:
+        base: 49
+        best:
+          value: 62
+          assumed:
+            - Main Battery and AA Specialist
+            - Auxiliary Armaments Modification 2
+        alternatives:
+          - label: without Main Battery and AA Specialist
+            value: 56
+            assumed:
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value: 54
+            assumed:
+              - Main Battery and AA Specialist
+flak:
+  zone: 3.5 to 5.8 km
+  hit_chance: 100
+  bursts:
+    stat: flak bursts per salvo
+    unit: bursts
+    builds:
+      base: 2
+      best:
+        value: 4
+        assumed:
+          - Fearless Brawler
+          - Auxiliary Armaments Modification 2
+      alternatives:
+        - label: without Fearless Brawler
+          value: 3
+          assumed:
+            - Auxiliary Armaments Modification 2
+        - label: without Auxiliary Armaments Modification 2
+          value: 3
+          assumed:
+            - Fearless Brawler
+  damage_per_burst:
+    stat: flak burst damage
+    unit: hp
+    builds:
+      base: 1610
+      best:
+        value: 2129
+        assumed:
+          - Main Battery and AA Expert
+          - Auxiliary Armaments Modification 2
+      alternatives:
+        - label: without Main Battery and AA Expert
+          value: 1852
+          assumed:
+            - Auxiliary Armaments Modification 2
+        - label: without Auxiliary Armaments Modification 2
+          value: 1852
+          assumed:
+            - Main Battery and AA Expert
+priority_sector:
+  instant_damage: 5
+  damage_multiplier: 1.35
+  duration: 10
+  cooldown: 10
+rating:
+  method: "Damage the AA deals to one plane flying straight in at 150 knots (2.69 m/s per knot on the game map) from the edge of the farthest aura to the ship: for each aura, seconds inside it times damage per second times hit chance, plus the flak bursts the client spawns on the way (bursts x hit chance every 2.02 s) times burst damage times 0.1, the share counted as hitting. A judgment to compare ships of one class and tier: players dodge flak and do not fly straight in. The priority sector is left out, and so is Defensive AA Fire except in the alternatives that name it."
+  rating:
+    stat: "AA rating, damage to one plane flying straight in"
+    unit: hp
+    builds:
+      base: 2159
+      best:
+        value: 3988
+        assumed:
+          - Fearless Brawler
+          - Main Battery and AA Expert
+          - Main Battery and AA Specialist
+          - Auxiliary Armaments Modification 2
+      alternatives:
+        - label: without Fearless Brawler
+          value: 3386
+          assumed:
+            - Main Battery and AA Expert
+            - Main Battery and AA Specialist
+            - Auxiliary Armaments Modification 2
+        - label: without Main Battery and AA Expert
+          value: 3674
+          assumed:
+            - Fearless Brawler
+            - Main Battery and AA Specialist
+            - Auxiliary Armaments Modification 2
+        - label: without Main Battery and AA Specialist
+          value: 3844
+          assumed:
+            - Fearless Brawler
+            - Main Battery and AA Expert
+            - Auxiliary Armaments Modification 2
+        - label: without Auxiliary Armaments Modification 2
+          value: 2944
+          assumed:
+            - Fearless Brawler
+            - Main Battery and AA Expert
+            - Main Battery and AA Specialist
+  breakdown:
+    - "short-range: up to 5.96 s inside, 117.77 hp/s after hit chance, 702 hp"
+    - "long-range: up to 14.15 s inside, 61.99 hp/s after hit chance, 877 hp"
+    - "flak: 4 bursts of 2129 hp, 1 hit chance, 2409 hp"
+    - "total: 3988 hp"

@@ -1,0 +1,909 @@
+use crate::data::parser_utils::WResult;
+#[cfg(feature = "serde")]
+use serde::ser::SerializeMap;
+#[cfg(feature = "serde")]
+use serde::ser::SerializeSeq;
+#[cfg(feature = "serde")]
+use serde::ser::SerializeTuple;
+use std::collections::HashMap;
+use std::convert::TryInto;
+use winnow::Parser;
+use winnow::binary::le_f32;
+use winnow::binary::le_f64;
+use winnow::binary::le_i8;
+use winnow::binary::le_i16;
+use winnow::binary::le_i32;
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
+use winnow::token::take;
+
+/// Type alias matching winnow's default error for binary parsers.
+type WinnowErr = winnow::error::ErrMode<winnow::error::ContextError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum RpcError {
+    #[error("{0}")]
+    Parse(WinnowErr),
+    #[error("Unknown FixedDict flag: {flag:#x}")]
+    UnknownFixedDictFlag { flag: u8 },
+}
+
+impl From<WinnowErr> for RpcError {
+    fn from(e: WinnowErr) -> Self {
+        RpcError::Parse(e)
+    }
+}
+
+type IResult<T> = Result<T, RpcError>;
+
+pub type TypeAliases = HashMap<String, ArgType>;
+
+fn child_by_name<'a, 'b>(node: &roxmltree::Node<'a, 'b>, name: &str) -> Option<roxmltree::Node<'a, 'b>> {
+    node.children().find(|&child| child.tag_name().name() == name)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PrimitiveType {
+    Uint8,
+    Uint16,
+    Uint32,
+    Uint64,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
+    Vector2,
+    Vector3,
+    String,
+    UnicodeString,
+    Blob,
+}
+
+impl PrimitiveType {
+    fn parse_value<'a>(&self, input: &mut &'a [u8]) -> WResult<ArgValue<'a>> {
+        Ok(match self {
+            PrimitiveType::Uint8 => ArgValue::Uint8(le_u8.parse_next(input)?),
+            PrimitiveType::Uint16 => ArgValue::Uint16(le_u16.parse_next(input)?),
+            PrimitiveType::Uint32 => ArgValue::Uint32(le_u32.parse_next(input)?),
+            PrimitiveType::Uint64 => ArgValue::Uint64(le_u64.parse_next(input)?),
+            PrimitiveType::Int8 => ArgValue::Int8(le_i8.parse_next(input)?),
+            PrimitiveType::Int16 => ArgValue::Int16(le_i16.parse_next(input)?),
+            PrimitiveType::Int32 => ArgValue::Int32(le_i32.parse_next(input)?),
+            PrimitiveType::Int64 => ArgValue::Int64(le_i64.parse_next(input)?),
+            PrimitiveType::Float32 => ArgValue::Float32(le_f32.parse_next(input)?),
+            PrimitiveType::Float64 => ArgValue::Float64(le_f64.parse_next(input)?),
+            PrimitiveType::Vector2 => {
+                let x = le_f32.parse_next(input)?;
+                let y = le_f32.parse_next(input)?;
+                ArgValue::Vector2((x, y))
+            }
+            PrimitiveType::Vector3 => {
+                let x = le_f32.parse_next(input)?;
+                let y = le_f32.parse_next(input)?;
+                let z = le_f32.parse_next(input)?;
+                ArgValue::Vector3((x, y, z))
+            }
+            PrimitiveType::Blob => {
+                let data = parse_length_prefixed_bytes(input)?;
+                ArgValue::Blob(data)
+            }
+            PrimitiveType::String => {
+                let data = parse_length_prefixed_bytes(input)?;
+                ArgValue::String(data)
+            }
+            PrimitiveType::UnicodeString => {
+                let data = parse_length_prefixed_bytes(input)?;
+                ArgValue::UnicodeString(data)
+            }
+        })
+    }
+}
+
+/// Helper to read a single u8 via winnow.
+fn read_u8(input: &mut &[u8]) -> IResult<u8> {
+    Ok(le_u8::<_, WinnowErr>.parse_next(input)?)
+}
+
+/// Parse a length-prefixed byte sequence: u8 length, or 0xFF then u16 length + u8 unknown.
+fn parse_length_prefixed_bytes<'a>(input: &mut &'a [u8]) -> WResult<&'a [u8]> {
+    let size = le_u8.parse_next(input)?;
+    if size == 0xff {
+        let size = le_u16.parse_next(input)?;
+        let _unknown = le_u8.parse_next(input)?;
+        take(size as usize).parse_next(input)
+    } else {
+        take(size as usize).parse_next(input)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FixedDictProperty {
+    pub name: String,
+    pub prop_type: ArgType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArgType {
+    Primitive(PrimitiveType),
+    Array((Option<usize>, Box<ArgType>)),
+
+    /// (allow_none, properties)
+    FixedDict((bool, Vec<FixedDictProperty>)),
+    Tuple((Box<ArgType>, usize)),
+
+    /// A type referenced through a def alias or named composite. Transparent:
+    /// layout and parsed value come from `inner`; `name` is the game's own
+    /// semantic type name (e.g. "ENTITY_ID", "WEATHER_LOGIC_PARAMS").
+    Named {
+        name: String,
+        inner: Box<ArgType>,
+    },
+
+    /// A `USER_TYPE` (a converter-backed custom type). Its value streams as the
+    /// bare `inner` network type (transparent, no length prefix), but for
+    /// exposed-method index ordering BigWorld treats every USER_TYPE as
+    /// variable-size (its converter's stream size is unbounded) — so it sorts
+    /// into the variable region regardless of the inner's fixed size. Conflating
+    /// it with the plain inner type shifts every later exposed-method id.
+    UserType(Box<ArgType>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArgValue<'argtype> {
+    Uint8(u8),
+    Uint16(u16),
+    Uint32(u32),
+    Uint64(u64),
+    Int8(i8),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
+    Vector2((f32, f32)),
+    Vector3((f32, f32, f32)),
+    String(&'argtype [u8]),
+    UnicodeString(&'argtype [u8]),
+    Blob(&'argtype [u8]),
+    Array(Vec<ArgValue<'argtype>>),
+    FixedDict(HashMap<&'argtype str, ArgValue<'argtype>>),
+    NullableFixedDict(Option<HashMap<&'argtype str, ArgValue<'argtype>>>),
+    Tuple(Vec<ArgValue<'argtype>>),
+}
+
+variant_accessors!(ArgValue<'argtype> {
+    tuple Uint8(u8) => uint_8;
+    tuple Uint16(u16) => uint_16;
+    tuple Uint32(u32) => uint_32;
+    tuple Uint64(u64) => uint_64;
+    tuple Int8(i8) => int_8;
+    tuple Int16(i16) => int_16;
+    tuple Int32(i32) => int_32;
+    tuple Int64(i64) => int_64;
+    tuple Float32(f32) => float_32;
+    tuple Float64(f64) => float_64;
+    tuple Vector2((f32, f32)) => vector_2;
+    tuple Vector3((f32, f32, f32)) => vector_3;
+    tuple String(&'argtype [u8]) => string;
+    tuple UnicodeString(&'argtype [u8]) => unicode_string;
+    tuple Blob(&'argtype [u8]) => blob;
+    tuple Array(Vec<ArgValue<'argtype>>) => array;
+    tuple FixedDict(HashMap<&'argtype str, ArgValue<'argtype>>) => fixed_dict;
+    tuple NullableFixedDict(Option<HashMap<&'argtype str, ArgValue<'argtype>>>) => nullable_fixed_dict;
+    tuple Tuple(Vec<ArgValue<'argtype>>) => tuple;
+});
+
+impl<'argtype> ArgValue<'argtype> {
+    /// Convert any integer variant to i32 (widening or narrowing as needed).
+    pub fn as_i32(&self) -> Option<i32> {
+        match self {
+            Self::Int8(v) => Some(*v as i32),
+            Self::Int16(v) => Some(*v as i32),
+            Self::Int32(v) => Some(*v),
+            Self::Int64(v) => Some(*v as i32),
+            Self::Uint8(v) => Some(*v as i32),
+            Self::Uint16(v) => Some(*v as i32),
+            Self::Uint32(v) => Some(*v as i32),
+            Self::Uint64(v) => Some(*v as i32),
+            _ => None,
+        }
+    }
+
+    /// Convert any integer variant to u32 (widening or narrowing as needed).
+    pub fn as_u32(&self) -> Option<u32> {
+        match self {
+            Self::Int8(v) => Some(*v as u32),
+            Self::Int16(v) => Some(*v as u32),
+            Self::Int32(v) => Some(*v as u32),
+            Self::Int64(v) => Some(*v as u32),
+            Self::Uint8(v) => Some(*v as u32),
+            Self::Uint16(v) => Some(*v as u32),
+            Self::Uint32(v) => Some(*v),
+            Self::Uint64(v) => Some(*v as u32),
+            _ => None,
+        }
+    }
+
+    /// Convert any integer variant to i64 (always lossless for signed).
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Self::Int8(v) => Some(*v as i64),
+            Self::Int16(v) => Some(*v as i64),
+            Self::Int32(v) => Some(*v as i64),
+            Self::Int64(v) => Some(*v),
+            Self::Uint8(v) => Some(*v as i64),
+            Self::Uint16(v) => Some(*v as i64),
+            Self::Uint32(v) => Some(*v as i64),
+            Self::Uint64(v) => Some(*v as i64),
+            _ => None,
+        }
+    }
+
+    /// Convert any integer variant to u64 (widening or narrowing as needed).
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            Self::Int8(v) => Some(*v as u64),
+            Self::Int16(v) => Some(*v as u64),
+            Self::Int32(v) => Some(*v as u64),
+            Self::Int64(v) => Some(*v as u64),
+            Self::Uint8(v) => Some(*v as u64),
+            Self::Uint16(v) => Some(*v as u64),
+            Self::Uint32(v) => Some(*v as u64),
+            Self::Uint64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Convert any numeric variant to f32.
+    pub fn as_f32(&self) -> Option<f32> {
+        match self {
+            Self::Float32(v) => Some(*v),
+            Self::Float64(v) => Some(*v as f32),
+            Self::Int8(v) => Some(*v as f32),
+            Self::Int16(v) => Some(*v as f32),
+            Self::Int32(v) => Some(*v as f32),
+            Self::Int64(v) => Some(*v as f32),
+            Self::Uint8(v) => Some(*v as f32),
+            Self::Uint16(v) => Some(*v as f32),
+            Self::Uint32(v) => Some(*v as f32),
+            Self::Uint64(v) => Some(*v as f32),
+            _ => None,
+        }
+    }
+
+    /// Convert any numeric variant to f64.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Float64(v) => Some(*v),
+            Self::Float32(v) => Some(*v as f64),
+            Self::Int8(v) => Some(*v as f64),
+            Self::Int16(v) => Some(*v as f64),
+            Self::Int32(v) => Some(*v as f64),
+            Self::Int64(v) => Some(*v as f64),
+            Self::Uint8(v) => Some(*v as f64),
+            Self::Uint16(v) => Some(*v as f64),
+            Self::Uint32(v) => Some(*v as f64),
+            Self::Uint64(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'argtype> serde::Serialize for ArgValue<'argtype> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        //serializer.serialize_i32(5)
+        match self {
+            Self::Uint8(i) => serializer.serialize_u8(*i),
+            Self::Uint16(i) => serializer.serialize_u16(*i),
+            Self::Uint32(i) => serializer.serialize_u32(*i),
+            Self::Uint64(i) => serializer.serialize_u64(*i),
+            Self::Int8(i) => serializer.serialize_i8(*i),
+            Self::Int16(i) => serializer.serialize_i16(*i),
+            Self::Int32(i) => serializer.serialize_i32(*i),
+            Self::Int64(i) => serializer.serialize_i64(*i),
+            Self::Float32(f) => serializer.serialize_f32(*f),
+            Self::Float64(f) => serializer.serialize_f64(*f),
+            Self::Vector2((x, y)) => {
+                let mut tup = serializer.serialize_tuple(2)?;
+                tup.serialize_element(x)?;
+                tup.serialize_element(y)?;
+                tup.end()
+            }
+            Self::Vector3((x, y, z)) => {
+                let mut tup = serializer.serialize_tuple(3)?;
+                tup.serialize_element(x)?;
+                tup.serialize_element(y)?;
+                tup.serialize_element(z)?;
+                tup.end()
+            }
+            Self::String(s) => serializer.serialize_bytes(s),
+            Self::UnicodeString(s) => serializer.serialize_bytes(s),
+            Self::Blob(blob) => {
+                // TODO: Determine when we can/can't pickle-decode this
+                // Also, make pickled::Value implement Serialize
+                #[cfg(feature = "json")]
+                {
+                    let decoded: Result<serde_json::Value, _> =
+                        pickled::from_slice(blob, pickled::de::DeOptions::new());
+                    match decoded {
+                        Ok(v) => serializer.serialize_some(&v),
+                        Err(_) => serializer.serialize_bytes(blob),
+                    }
+                }
+                #[cfg(not(feature = "json"))]
+                {
+                    serializer.serialize_bytes(blob)
+                }
+            }
+            Self::Array(a) => {
+                let mut seq = serializer.serialize_seq(Some(a.len()))?;
+                for element in a.iter() {
+                    seq.serialize_element(element)?;
+                }
+                seq.end()
+            }
+            Self::FixedDict(d) => {
+                let mut obj = serializer.serialize_map(Some(d.len()))?;
+                for (k, v) in d.iter() {
+                    obj.serialize_entry(k, v)?;
+                }
+                obj.end()
+            }
+            Self::NullableFixedDict(Some(d)) => {
+                let mut obj = serializer.serialize_map(Some(d.len()))?;
+                for (k, v) in d.iter() {
+                    obj.serialize_entry(k, v)?;
+                }
+                obj.end()
+            }
+            Self::NullableFixedDict(None) => serializer.serialize_none(),
+            Self::Tuple(elements) => {
+                let mut seq = serializer.serialize_seq(Some(elements.len()))?;
+                for element in elements.iter() {
+                    seq.serialize_element(element)?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
+const INFINITY: usize = 0xffff;
+
+impl ArgType {
+    /// The outermost def type name, if this type was referenced via an alias
+    /// or named composite.
+    pub fn semantic_name(&self) -> Option<&str> {
+        match self {
+            Self::Named { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Strip any `Named` wrappers down to the structural type.
+    pub fn peeled(&self) -> &ArgType {
+        match self {
+            Self::Named { inner, .. } => inner.peeled(),
+            Self::UserType(inner) => inner.peeled(),
+            other => other,
+        }
+    }
+
+    pub fn sort_size(&self) -> usize {
+        match self {
+            Self::Primitive(PrimitiveType::Uint8) => 1,
+            Self::Primitive(PrimitiveType::Uint16) => 2,
+            Self::Primitive(PrimitiveType::Uint32) => 4,
+            Self::Primitive(PrimitiveType::Uint64) => 8,
+            Self::Primitive(PrimitiveType::Int8) => 1,
+            Self::Primitive(PrimitiveType::Int16) => 2,
+            Self::Primitive(PrimitiveType::Int32) => 4,
+            Self::Primitive(PrimitiveType::Int64) => 8,
+            Self::Primitive(PrimitiveType::Float32) => 4,
+            Self::Primitive(PrimitiveType::Float64) => 8,
+            Self::Primitive(PrimitiveType::Vector2) => 8,
+            Self::Primitive(PrimitiveType::Vector3) => 12,
+            Self::Primitive(PrimitiveType::String) => INFINITY,
+            Self::Primitive(PrimitiveType::UnicodeString) => INFINITY,
+            Self::Primitive(PrimitiveType::Blob) => INFINITY,
+            Self::Array((None, _)) => INFINITY,
+            Self::Array((Some(count), t)) => {
+                let sort_size = t.sort_size();
+                if sort_size == INFINITY { INFINITY } else { sort_size * count }
+            }
+            Self::FixedDict((allow_none, props)) => {
+                if *allow_none {
+                    return INFINITY;
+                }
+                props
+                    .iter()
+                    .map(|x| x.prop_type.sort_size())
+                    .fold(0, |a, b| if a == INFINITY || b == INFINITY { INFINITY } else { a + b })
+            }
+            Self::Tuple((t, count)) => {
+                let sort_size = t.sort_size();
+                if sort_size == INFINITY { INFINITY } else { sort_size * count }
+            }
+            Self::Named { inner, .. } => inner.sort_size(),
+            // A USER_TYPE is variable-size for exposed-method ordering even when
+            // its inner streams a fixed number of bytes.
+            Self::UserType(_) => INFINITY,
+        }
+    }
+
+    pub fn parse_value<'a, 'b: 'a>(&'b self, input: &mut &'a [u8]) -> IResult<ArgValue<'a>> {
+        match self {
+            Self::Primitive(p) => Ok(p.parse_value(input)?),
+            Self::Array((count, atype)) => {
+                let length = match count {
+                    Some(count) => *count,
+                    None => read_u8(input)? as usize,
+                };
+                let mut values = Vec::with_capacity(length);
+                for _ in 0..length {
+                    values.push(atype.parse_value(input)?);
+                }
+                Ok(ArgValue::Array(values))
+            }
+            Self::FixedDict((allow_none, props)) => {
+                if *allow_none {
+                    let flag = read_u8(input)?;
+                    if flag == 0 {
+                        return Ok(ArgValue::NullableFixedDict(None));
+                    } else if flag != 1 {
+                        return Err(RpcError::UnknownFixedDictFlag { flag });
+                    }
+                }
+                let mut dict: HashMap<&'a str, ArgValue<'a>> = HashMap::new();
+                for property in props.iter() {
+                    let element = property.prop_type.parse_value(input)?;
+                    dict.insert(&property.name, element);
+                }
+                if *allow_none { Ok(ArgValue::NullableFixedDict(Some(dict))) } else { Ok(ArgValue::FixedDict(dict)) }
+            }
+            Self::Tuple((t, count)) => {
+                // A TUPLE is a fixed-size sequence: `count` elements back to back
+                // with no length prefix (the size is fixed in the schema), the
+                // same wire layout as a sized array.
+                let mut values = Vec::with_capacity(*count);
+                for _ in 0..*count {
+                    values.push(t.parse_value(input)?);
+                }
+                Ok(ArgValue::Tuple(values))
+            }
+            Self::Named { inner, .. } => inner.parse_value(input),
+            // Transparent on the wire: the value is the bare inner type.
+            Self::UserType(inner) => inner.parse_value(input),
+        }
+    }
+
+    /// Collect every def semantic name appearing anywhere in this type tree.
+    pub fn collect_semantic_names(&self, out: &mut std::collections::BTreeSet<String>) {
+        match self {
+            Self::Named { name, inner } => {
+                out.insert(name.clone());
+                inner.collect_semantic_names(out);
+            }
+            Self::Array((_, inner)) => inner.collect_semantic_names(out),
+            Self::UserType(inner) => inner.collect_semantic_names(out),
+            Self::Tuple((inner, _)) => inner.collect_semantic_names(out),
+            Self::FixedDict((_, props)) => {
+                for p in props {
+                    p.prop_type.collect_semantic_names(out);
+                }
+            }
+            Self::Primitive(_) => {}
+        }
+    }
+}
+
+pub fn parse_type(arg: &roxmltree::Node, aliases: &HashMap<String, ArgType>) -> ArgType {
+    let t = arg.first_child().unwrap().text().unwrap().trim();
+    if t == "UINT8" {
+        ArgType::Primitive(PrimitiveType::Uint8)
+    } else if t == "UINT16" {
+        ArgType::Primitive(PrimitiveType::Uint16)
+    } else if t == "UINT32" {
+        ArgType::Primitive(PrimitiveType::Uint32)
+    } else if t == "UINT64" {
+        ArgType::Primitive(PrimitiveType::Uint64)
+    } else if t == "INT8" {
+        ArgType::Primitive(PrimitiveType::Int8)
+    } else if t == "INT16" {
+        ArgType::Primitive(PrimitiveType::Int16)
+    } else if t == "INT32" {
+        ArgType::Primitive(PrimitiveType::Int32)
+    } else if t == "INT64" {
+        ArgType::Primitive(PrimitiveType::Int64)
+    } else if t == "FLOAT64" {
+        ArgType::Primitive(PrimitiveType::Float64)
+    } else if t == "FLOAT32" {
+        ArgType::Primitive(PrimitiveType::Float32)
+    } else if t == "FLOAT" {
+        // Note that "FLOAT64" is Float64
+        ArgType::Primitive(PrimitiveType::Float32)
+    } else if t == "STRING" {
+        ArgType::Primitive(PrimitiveType::String)
+    } else if t == "UNICODE_STRING" {
+        ArgType::Primitive(PrimitiveType::UnicodeString)
+    } else if t == "VECTOR2" {
+        ArgType::Primitive(PrimitiveType::Vector2)
+    } else if t == "VECTOR3" {
+        ArgType::Primitive(PrimitiveType::Vector3)
+    } else if t == "BLOB" {
+        ArgType::Primitive(PrimitiveType::Blob)
+    } else if t == "USER_TYPE" {
+        // A USER_TYPE's value streams as the network type declared by its inner
+        // <Type> (e.g. FLAT_VECTOR streams as VECTOR2, GUN_DIRECTIONS as UINT16),
+        // transparently with no length prefix. But for exposed-method index
+        // ordering BigWorld treats every USER_TYPE as variable-size, so it must
+        // be wrapped (not collapsed to the inner) to sort into the variable
+        // region. Without an inner <Type> the type is converter-defined and
+        // opaque, streamed as a length-prefixed blob (already variable).
+        match child_by_name(arg, "Type") {
+            Some(inner) => ArgType::UserType(Box::new(parse_type(&inner, aliases))),
+            None => ArgType::Primitive(PrimitiveType::Blob),
+        }
+    } else if t == "MAILBOX" || t == "PYTHON" {
+        // Engine-internal references with no stable on-wire schema we model.
+        ArgType::Primitive(PrimitiveType::Blob)
+    } else if t == "ARRAY" {
+        let subtype = parse_type(&child_by_name(arg, "of").unwrap(), aliases);
+        /*let subtype = match subtype {
+            ArgType::Primitive(p) => p,
+            _ => {
+                panic!("Unsupported array subtype {:?}", subtype);
+            }
+        };*/
+        let count = child_by_name(arg, "size").map(|count| count.text().unwrap().trim().parse::<usize>().unwrap());
+        ArgType::Array((count, Box::new(subtype)))
+    } else if t == "FIXED_DICT" {
+        let mut props = vec![];
+        //println!("{:#?}", arg);
+        let allow_none = child_by_name(arg, "AllowNone").is_some();
+        let properties = match child_by_name(arg, "Properties") {
+            Some(p) => p,
+            None => {
+                return ArgType::FixedDict((allow_none, vec![]));
+            }
+        };
+        for prop in properties.children() {
+            if !prop.is_element() {
+                continue;
+            }
+            let name = prop.tag_name().name();
+            let prop_type = child_by_name(&prop, "Type").unwrap();
+            let prop_type = parse_type(&prop_type, aliases);
+            props.push(FixedDictProperty { name: name.to_string(), prop_type });
+        }
+        ArgType::FixedDict((allow_none, props))
+    } else if t == "TUPLE" {
+        let subtype = parse_type(&child_by_name(arg, "of").unwrap(), aliases);
+        let count = child_by_name(arg, "size").unwrap().text().unwrap().trim().parse::<usize>().unwrap();
+        ArgType::Tuple((Box::new(subtype), count))
+    } else if let Some(resolved) = aliases.get(t) {
+        ArgType::Named { name: t.to_string(), inner: Box::new(resolved.clone()) }
+    } else {
+        panic!("Unrecognized type {t}");
+    }
+}
+
+pub fn parse_aliases(def: &[u8]) -> HashMap<String, ArgType> {
+    let def = std::str::from_utf8(def).unwrap();
+    let mut aliases = HashMap::new();
+
+    //let def = std::fs::read_to_string(&file).unwrap();
+    let doc = roxmltree::Document::parse(def).unwrap();
+    let root = doc.root();
+
+    for t in root.first_child().unwrap().children() {
+        if !t.is_element() {
+            continue;
+        }
+        //println!("{}", t.tag_name().name());
+        aliases.insert(t.tag_name().name().to_string(), parse_type(&t, &aliases));
+    }
+    //println!("Found {} type aliases", aliases.len());
+    aliases
+}
+
+macro_rules! into_unwrappable_type {
+    ($t: ty, $tag: path) => {
+        impl<'a> std::convert::TryInto<$t> for &ArgValue<'a> {
+            type Error = ();
+
+            fn try_into(self) -> Result<$t, Self::Error> {
+                match self {
+                    $tag(i) => Ok(*i),
+                    _ => Err(()),
+                }
+            }
+        }
+    };
+}
+
+into_unwrappable_type!(u8, ArgValue::Uint8);
+into_unwrappable_type!(u16, ArgValue::Uint16);
+into_unwrappable_type!(u32, ArgValue::Uint32);
+into_unwrappable_type!(u64, ArgValue::Uint64);
+into_unwrappable_type!(i8, ArgValue::Int8);
+into_unwrappable_type!(i16, ArgValue::Int16);
+into_unwrappable_type!(i32, ArgValue::Int32);
+into_unwrappable_type!(i64, ArgValue::Int64);
+into_unwrappable_type!(f32, ArgValue::Float32);
+into_unwrappable_type!(f64, ArgValue::Float64);
+
+impl<'a, 'b, T> std::convert::TryFrom<&'b ArgValue<'a>> for Vec<T>
+where
+    &'b ArgValue<'a>: std::convert::TryInto<T, Error = ()>,
+{
+    type Error = ();
+
+    fn try_from(value: &'b ArgValue<'a>) -> Result<Self, Self::Error> {
+        match value {
+            ArgValue::Array(v) => {
+                let result: Result<Vec<T>, Self::Error> = v.iter().map(|x| x.try_into()).collect();
+                result
+            }
+            _ => Err(()),
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! unpack_rpc_args {
+    ($args: ident, $($t: ty),+) => {
+        {
+            let mut i = 0;
+            ($({
+                let x: $t = <&$crate::rpc::typedefs::ArgValue as std::convert::TryInto<$t>>::try_into(&$args[i]).unwrap();
+                i += 1;
+                let _ = i; // Ignore "assigned variable never read" error
+                x
+            }),+,)
+        }
+    };
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_argtype() {
+        let doc = "<Arg> UINT8 </Arg>";
+        let doc = roxmltree::Document::parse(doc).unwrap();
+        let root = doc.root();
+        assert_eq!(parse_type(&root, &HashMap::new()), ArgType::Primitive(PrimitiveType::Uint8));
+    }
+
+    #[test]
+    fn test_int16() {
+        let doc = "<Arg> INT16 </Arg>";
+        let doc = roxmltree::Document::parse(doc).unwrap();
+        let root = doc.root();
+        assert_eq!(parse_type(&root, &HashMap::new()), ArgType::Primitive(PrimitiveType::Int16));
+    }
+
+    #[test]
+    fn alias_preserves_semantic_name() {
+        let mut aliases = HashMap::new();
+        aliases.insert("ENTITY_ID".to_string(), ArgType::Primitive(PrimitiveType::Int32));
+
+        let doc = roxmltree::Document::parse("<Arg>ENTITY_ID</Arg>").unwrap();
+        let root = doc.root();
+        let t = parse_type(&root, &aliases);
+
+        // The semantic name survives, but the type is otherwise transparent.
+        assert_eq!(t.semantic_name(), Some("ENTITY_ID"));
+        assert_eq!(t.peeled(), &ArgType::Primitive(PrimitiveType::Int32));
+        assert_eq!(t.sort_size(), 4);
+
+        let data = [5, 0, 0, 0];
+        let mut input = &data[..];
+        assert_eq!(t.parse_value(&mut input).unwrap(), ArgValue::Int32(5));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn test_fixed_dict() {
+        let doc = "<Arg>
+            FIXED_DICT
+            <Properties>
+                <byShip><Type>FLOAT</Type></byShip>
+                <byPlane><Type>FLOAT</Type></byPlane>
+                <bySmoke><Type>FLOAT</Type></bySmoke>
+            </Properties>
+        </Arg>";
+        let doc = roxmltree::Document::parse(doc).unwrap();
+        let root = doc.root_element();
+        let t = parse_type(&root, &HashMap::new());
+        assert_eq!(
+            t,
+            ArgType::FixedDict((
+                false,
+                vec![
+                    FixedDictProperty {
+                        name: "byShip".to_string(),
+                        prop_type: ArgType::Primitive(PrimitiveType::Float32),
+                    },
+                    FixedDictProperty {
+                        name: "byPlane".to_string(),
+                        prop_type: ArgType::Primitive(PrimitiveType::Float32),
+                    },
+                    FixedDictProperty {
+                        name: "bySmoke".to_string(),
+                        prop_type: ArgType::Primitive(PrimitiveType::Float32),
+                    }
+                ]
+            ))
+        );
+        assert_eq!(t.sort_size(), 12);
+    }
+
+    #[test]
+    fn test_crew_modifiers() {
+        let alias = "<CREW_MODIFIERS_COMPACT_PARAMS>
+            FIXED_DICT
+            <Properties>
+                <paramsId><Type>UINT32</Type></paramsId>
+                <isInAdaptation><Type>BOOL</Type></isInAdaptation>
+                <learnedSkills><Type>ARRAY<of>ARRAY<of>UINT8</of></of></Type></learnedSkills>
+            </Properties>
+            <implementedBy>CrewModifiers.crewModifiersCompactParamsConverter</implementedBy>
+        </CREW_MODIFIERS_COMPACT_PARAMS>";
+        let doc = roxmltree::Document::parse(alias).unwrap();
+        let root = doc.root_element();
+        let mut aliases = HashMap::new();
+        aliases.insert("BOOL".to_string(), ArgType::Primitive(PrimitiveType::Uint8));
+        aliases.insert("CREW_MODIFIERS_COMPACT_PARAMS".to_string(), parse_type(&root, &aliases));
+
+        let proptype = "<Type>CREW_MODIFIERS_COMPACT_PARAMS</Type>";
+        let doc = roxmltree::Document::parse(proptype).unwrap();
+        let root = doc.root();
+        let t = parse_type(&root, &aliases);
+        assert_eq!(t.sort_size(), 65535);
+    }
+
+    #[test]
+    fn test_fixeddict_allownone() {
+        let spec = "<TRIGGERS_STATE>
+            FIXED_DICT
+            <Properties>
+                <modifier><Type> MODIFIER_STATE </Type></modifier>
+            </Properties>
+            <AllowNone>true</AllowNone>
+        </TRIGGERS_STATE>";
+        let mut aliases = HashMap::new();
+        aliases.insert("MODIFIER_STATE".to_string(), ArgType::Primitive(PrimitiveType::Uint32));
+
+        let doc = roxmltree::Document::parse(spec).unwrap();
+        let root = doc.root_element();
+        let t = parse_type(&root, &aliases);
+        //println!("{:#?}", t);
+
+        let data = [0];
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty());
+        assert_eq!(result, ArgValue::NullableFixedDict(None));
+
+        let data = [1, 5, 0, 0, 0];
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty());
+        let m = match result {
+            ArgValue::NullableFixedDict(Some(h)) => h,
+            _ => panic!(),
+        };
+        assert_eq!(*m.get("modifier").unwrap(), ArgValue::Uint32(5));
+    }
+
+    #[test]
+    fn test_tuple_parses_fixed_count_without_prefix() {
+        // A TUPLE is `count` elements back to back with no length prefix.
+        let t = ArgType::Tuple((Box::new(ArgType::Primitive(PrimitiveType::Uint8)), 3));
+        let data = [7u8, 8, 9];
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty(), "all bytes consumed, no length prefix");
+        assert_eq!(result, ArgValue::Tuple(vec![ArgValue::Uint8(7), ArgValue::Uint8(8), ArgValue::Uint8(9)]));
+
+        // It serializes as a JSON array.
+        let json = serde_json::to_string(&result).unwrap();
+        assert_eq!(json, "[7,8,9]");
+    }
+
+    #[test]
+    fn user_type_is_variable_for_ordering_but_parses_as_inner() {
+        // A USER_TYPE whose inner streams as a fixed VECTOR2. On the wire its
+        // value is the bare inner (transparent, 8 bytes, no length prefix), but
+        // for exposed-method ordering BigWorld classifies USER_TYPE as variable
+        // (its converter's stream size is unbounded), so sort_size must be
+        // INFINITY. Getting this wrong sorts USER_TYPE methods into the
+        // fixed-size region and shifts every later exposed-method id.
+        let spec = "<Type>USER_TYPE<Type>VECTOR2</Type></Type>";
+        let doc = roxmltree::Document::parse(spec).unwrap();
+        let root = doc.root_element();
+        let aliases = HashMap::new();
+        let t = parse_type(&root, &aliases);
+
+        assert_eq!(t.sort_size(), INFINITY, "USER_TYPE is variable-size for ordering");
+
+        // Parsing is transparent: the inner VECTOR2's 8 bytes, no length prefix.
+        let data = [0, 0, 0x80, 0x3f, 0, 0, 0, 0x40]; // (1.0, 2.0)
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty(), "transparent: all 8 bytes consumed, no length prefix");
+        assert_eq!(result, ArgValue::Vector2((1.0, 2.0)));
+    }
+
+    #[test]
+    fn test_fixedsize_array() {
+        let spec = "<Type>ARRAY<of>UINT16</of><size>2</size></Type>";
+        let doc = roxmltree::Document::parse(spec).unwrap();
+        let root = doc.root_element();
+        let aliases = HashMap::new();
+        let t = parse_type(&root, &aliases);
+        //println!("{:#?}", t);
+
+        let data = [1, 0, 3, 0];
+        let mut input = &data[..];
+        let result = t.parse_value(&mut input).unwrap();
+        assert!(input.is_empty());
+        assert_eq!(result, ArgValue::Array(vec![ArgValue::Uint16(1), ArgValue::Uint16(3)]));
+    }
+
+    #[test]
+    fn test_unpacker_macro_single() {
+        let args = [ArgValue::Uint8(5)];
+        let (u8_arg,) = unpack_rpc_args!(args, u8);
+        assert_eq!(u8_arg, 5);
+    }
+
+    #[test]
+    #[allow(clippy::useless_vec)]
+    fn test_unpacker_macro() {
+        let args = vec![
+            ArgValue::Uint8(5),
+            ArgValue::Int32(-54),
+            ArgValue::Array(vec![ArgValue::Uint16(1), ArgValue::Uint16(3)]),
+            //ArgValue::NullableFixedDict(None),
+            //ArgValue::NullableFixedDict(Some(HashMap::new())),
+            //ArgValue::String("Hello, world!".to_string()),
+        ];
+        let args = unpack_rpc_args!(args, u8, i32, Vec<u16>);
+        assert_eq!(args.0, 5);
+        assert_eq!(args.1, -54);
+        assert_eq!(args.2, vec![1, 3]);
+    }
+
+    #[test]
+    fn collect_semantic_names_recurses() {
+        use std::collections::BTreeSet;
+
+        let t = ArgType::Named {
+            name: "WEAPON_LOCKS".to_string(),
+            inner: Box::new(ArgType::Array((
+                None,
+                Box::new(ArgType::Named {
+                    name: "ENTITY_ID".to_string(),
+                    inner: Box::new(ArgType::Primitive(PrimitiveType::Int32)),
+                }),
+            ))),
+        };
+
+        let mut names = BTreeSet::new();
+        t.collect_semantic_names(&mut names);
+
+        assert!(names.contains("WEAPON_LOCKS"));
+        assert!(names.contains("ENTITY_ID"));
+        assert_eq!(names.len(), 2);
+    }
+}

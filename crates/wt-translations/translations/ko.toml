@@ -69,6 +69,7 @@ file = "파일"
 check_updates = "업데이트 확인"
 about = "정보"
 quit = "종료"
+licenses = "라이선스"
 
 # -- 창 제목 --
 
@@ -85,6 +86,7 @@ software_encode = "GPU 비디오 인코더 없음"
 about = "정보"
 refresh_persisted_data = "저장된 리플레이 데이터 새로 고침"
 tactics_board = "전술 보드"
+licenses = "라이선스"
 
 # -- 대화상자 메시지 --
 
@@ -126,6 +128,11 @@ and = " 및 "
 suppress_warning = "다시 표시하지 않음"
 more_info = "더 보기"
 loading_replays = "%{count}개의 리플레이 로딩 중..."
+app_version = "버전 %{version}"
+project_license = "WoWs Toolkit은 %{license} 라이선스로 배포됩니다."
+third_party_notices = "타사 고지"
+notices_search_hint = "고지 검색"
+no_matching_notices = "검색과 일치하는 고지가 없습니다."
 
 # -- 알림 메시지 --
 
@@ -1561,6 +1568,11 @@ token = "로그인 토큰"
 monitored_channel_description = "감시할 채널. 비워 두면 자신의 채널을 감시합니다."
 armor_defaults = "저장된 기본값"
 armor_saved_description = "모델 뷰어 옵션에서 저장됨"
+
+[ui.settings.licenses]
+title = "정보 및 라이선스"
+back = "설정으로 돌아가기"
+third_party_intro = "이 애플리케이션에는 아래에 나열된 서드파티 구성 요소가 포함되어 있습니다. 항목을 선택하면 해당 항목을 사용하는 크레이트와 전체 라이선스 텍스트가 표시됩니다."
 
 [ui.settings.armor]
 no_defaults = "(저장된 기본값 없음)"

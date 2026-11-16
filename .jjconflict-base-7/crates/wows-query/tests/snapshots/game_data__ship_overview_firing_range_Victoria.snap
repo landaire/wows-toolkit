@@ -1,0 +1,42 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 589
+expression: overview.firing_range
+---
+main_battery:
+  stat: main battery range
+  unit: km
+  builds:
+    base: 23.9
+    best:
+      value: 27.72
+      assumed:
+        - Gun Fire Control System Modification 2
+    alternatives:
+      - label: without Gun Fire Control System Modification 2
+        value: 23.9
+        assumed: []
+      - label: with Spotting Aircraft active
+        value: 33.27
+        assumed:
+          - Gun Fire Control System Modification 2
+          - Spotting Aircraft
+secondary:
+  stat: secondary battery range
+  unit: km
+  builds:
+    base: 6.95
+    best:
+      value: 10.01
+      assumed:
+        - Long-Range Secondary Battery Shells
+        - Secondary Battery Modification 1
+    alternatives:
+      - label: without Long-Range Secondary Battery Shells
+        value: 8.34
+        assumed:
+          - Secondary Battery Modification 1
+      - label: without Secondary Battery Modification 1
+        value: 8.34
+        assumed:
+          - Long-Range Secondary Battery Shells

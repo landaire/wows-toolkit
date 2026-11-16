@@ -1,0 +1,11 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 8
+payload:
+  OnGameRoomStateChanged:
+    player_states:
+      - id: 805618790
+        isConnected: true

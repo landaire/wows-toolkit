@@ -1,0 +1,254 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: output
+---
+group: tier 10 destroyers
+classes:
+  - destroyer
+tiers:
+  min: 10
+  max: 10
+ships:
+  total: 33
+  by_class:
+    destroyer: 33
+options: 39
+order: worst
+entries:
+  - rank: 39
+    ship: "T10 Marceau (destroyer, France, premium)"
+    torpedo: 550 mm 23DT
+    score: 28.3
+    strengths:
+      - launchers bear across 136 deg of one side
+      - launchers fire from 20 deg off the bow
+      - launchers fire from 24 deg off the stern
+    weaknesses:
+      - "low damage per minute at one target, 49158 HP/min"
+      - "slow, 66.15 kn"
+      - "slow reload, 108.63 s"
+    factors:
+      broadside_dpm: "49158 HP/min (rank 37/39, p5)"
+      broadside_alpha: "88998 HP (rank 34/39, p13)"
+      torpedoes_per_broadside: "6 torpedoes (rank 27/39, p25)"
+      damage: "14833 HP (rank 29/39, p26)"
+      damage_at_max_range: "14833 HP (rank 27/39, p32)"
+      reload: "108.63 s (rank 36/39, p8)"
+      reaction_time: "7.32 s (rank 29/39, p26)"
+      speed: "66.15 kn (rank 34/39, p12)"
+      range: "9 km (rank 33/39, p16)"
+      detectability: "1.3 km (rank 9/39, p71)"
+      flood_coefficient: "2.46x (rank 28/39, p29)"
+      firing_arc: "136 deg (rank 3/39, p95)"
+      bow_dead_zone: "20 deg (rank 3/39, p95)"
+      stern_dead_zone: "24 deg (rank 3/39, p95)"
+      targets: 100% of classes (hits every class)
+  - rank: 38
+    ship: "T10 Småland (destroyer, Europe, premium)"
+    torpedo: Torped M1943 mod 1
+    score: 31.1
+    strengths:
+      - "fast, 83.79 kn"
+      - "fast reload, 76.5 s"
+    weaknesses:
+      - "light broadside launch, 85600 HP"
+      - "low damage per hit, 10700 HP"
+      - "low damage per minute at one target, 67137 HP/min"
+    factors:
+      broadside_dpm: "67137 HP/min (rank 32/39, p18)"
+      broadside_alpha: "85600 HP (rank 35/39, p11)"
+      torpedoes_per_broadside: "8 torpedoes (rank 21/39, p41)"
+      damage: "10700 HP (rank 38/39, p1)"
+      damage_at_max_range: "10700 HP (rank 37/39, p4)"
+      reload: "76.5 s (rank 14/39, p61)"
+      reaction_time: "7.11 s (rank 19/39, p53)"
+      speed: "83.79 kn (rank 4/39, p89)"
+      range: "12 km (rank 14/39, p57)"
+      detectability: "1.6 km (rank 28/39, p28)"
+      flood_coefficient: "1.73x (rank 38/39, p1)"
+      firing_arc: "58 deg (rank 36/39, p8)"
+      bow_dead_zone: "63 deg (rank 38/39, p3)"
+      stern_dead_zone: "60 deg (rank 29/39, p24)"
+      targets: 100% of classes (hits every class)
+  - rank: 37
+    ship: "T10 Z-42 (destroyer, Germany, premium)"
+    torpedo: G7a T1
+    score: 35.8
+    strengths:
+      - launchers fire from 44 deg off the bow
+      - "fast reload, 76.5 s"
+      - spotted only from 1.3 km
+    weaknesses:
+      - "low damage per hit, 13700 HP"
+      - "light broadside launch, 109600 HP"
+      - "low damage per minute at one target, 85961 HP/min"
+    factors:
+      broadside_dpm: "85961 HP/min (rank 27/39, p32)"
+      broadside_alpha: "109600 HP (rank 29/39, p26)"
+      torpedoes_per_broadside: "8 torpedoes (rank 21/39, p41)"
+      damage: "13700 HP (rank 36/39, p8)"
+      damage_at_max_range: "13700 HP (rank 34/39, p13)"
+      reload: "76.5 s (rank 14/39, p61)"
+      reaction_time: "7.08 s (rank 17/39, p57)"
+      speed: "68.35 kn (rank 30/39, p20)"
+      range: "9.99 km (rank 28/39, p24)"
+      detectability: "1.3 km (rank 9/39, p71)"
+      flood_coefficient: "2.27x (rank 35/39, p11)"
+      firing_arc: "87 deg (rank 15/39, p63)"
+      bow_dead_zone: "44 deg (rank 10/39, p76)"
+      stern_dead_zone: "50 deg (rank 17/39, p51)"
+      targets: 100% of classes (hits every class)
+  - rank: 35
+    ship: "T10 Grozovoi (destroyer, Russia)"
+    torpedo: 53-49M
+    score: 36
+    strengths:
+      - 10 torpedoes per broadside
+    weaknesses:
+      - "short range, 8.01 km"
+      - "low damage per hit, 14600 HP"
+      - "low damage per minute at one target, 88767 HP/min"
+    factors:
+      broadside_dpm: "88767 HP/min (rank 25/39, p37)"
+      broadside_alpha: "146000 HP (rank 17/39, p58)"
+      torpedoes_per_broadside: "10 torpedoes (rank 6/39, p68)"
+      damage: "14600 HP (rank 30/39, p24)"
+      damage_at_max_range: "14600 HP (rank 28/39, p29)"
+      reload: "98.68 s (rank 27/39, p28)"
+      reaction_time: "7.16 s (rank 20/39, p39)"
+      speed: "72.76 kn (rank 18/39, p43)"
+      range: "8.01 km (rank 34/39, p9)"
+      detectability: "1.4 km (rank 16/39, p47)"
+      flood_coefficient: "2.44x (rank 29/39, p26)"
+      firing_arc: "59 deg (rank 33/39, p13)"
+      bow_dead_zone: "56 deg (rank 26/39, p28)"
+      stern_dead_zone: "66 deg (rank 36/39, p7)"
+      targets: 100% of classes (hits every class)
+  - rank: 35
+    ship: "T10 20 de Julio (destroyer, Pan_America)"
+    torpedo: 533 mm Mk 15B
+    score: 36
+    strengths:
+      - targets get only 5.99 s to react after spotting it
+      - "fast reload, 74.21 s"
+      - spotted only from 1.1 km
+    weaknesses:
+      - "low damage per minute at one target, 53797 HP/min"
+      - only 4 torpedoes per broadside
+      - "slow, 68.35 kn"
+    factors:
+      broadside_dpm: "53797 HP/min (rank 35/39, p11)"
+      broadside_alpha: "66532 HP (rank 36/39, p8)"
+      torpedoes_per_broadside: "4 torpedoes (rank 35/39, p9)"
+      damage: "16633 HP (rank 24/39, p39)"
+      damage_at_max_range: "16633 HP (rank 22/39, p45)"
+      reload: "74.21 s (rank 13/39, p68)"
+      reaction_time: "5.99 s (rank 4/39, p92)"
+      speed: "68.35 kn (rank 30/39, p20)"
+      range: "10 km (rank 27/39, p32)"
+      detectability: "1.1 km (rank 6/39, p87)"
+      flood_coefficient: "2.79x (rank 23/39, p41)"
+      firing_arc: "70 deg (rank 27/39, p32)"
+      bow_dead_zone: "61 deg (rank 35/39, p8)"
+      stern_dead_zone: "50 deg (rank 17/39, p51)"
+      targets: 100% of classes (hits every class)
+  - rank: 33
+    ship: "T10 Hull (destroyer, USA, premium)"
+    torpedo: Mk17
+    score: 36.4
+    strengths:
+      - "long range, 16.5 km"
+      - "fast reload, 55.84 s"
+    weaknesses:
+      - "low damage per minute at one target, 38464 HP/min"
+      - only 2 torpedoes per broadside
+      - launchers bear only from 43 to 45 deg off the bow
+    factors:
+      broadside_dpm: "38464 HP/min (rank 38/39, p1)"
+      broadside_alpha: "35800 HP (rank 38/39, p1)"
+      torpedoes_per_broadside: "2 torpedoes (rank 38/39, p1)"
+      damage: "17900 HP (rank 17/39, p53)"
+      damage_at_max_range: "17900 HP (rank 15/39, p58)"
+      reload: "55.84 s (rank 2/39, p96)"
+      reaction_time: "7.16 s (rank 20/39, p39)"
+      speed: "72.76 kn (rank 18/39, p43)"
+      range: "16.5 km (rank 3/39, p91)"
+      detectability: "1.4 km (rank 16/39, p47)"
+      flood_coefficient: "3.01x (rank 16/39, p55)"
+      firing_arc: "3 deg (rank 38/39, p1)"
+      bow_dead_zone: "43 deg (rank 8/39, p80)"
+      stern_dead_zone: "135 deg (rank 38/39, p1)"
+      targets: 100% of classes (hits every class)
+  - rank: 33
+    ship: "T10 F. Sherman (destroyer, USA, premium)"
+    torpedo: Mk17
+    score: 36.4
+    strengths:
+      - "long range, 16.5 km"
+      - "fast reload, 55.84 s"
+    weaknesses:
+      - "low damage per minute at one target, 38464 HP/min"
+      - only 2 torpedoes per broadside
+      - launchers bear only from 43 to 45 deg off the bow
+    factors:
+      broadside_dpm: "38464 HP/min (rank 38/39, p1)"
+      broadside_alpha: "35800 HP (rank 38/39, p1)"
+      torpedoes_per_broadside: "2 torpedoes (rank 38/39, p1)"
+      damage: "17900 HP (rank 17/39, p53)"
+      damage_at_max_range: "17900 HP (rank 15/39, p58)"
+      reload: "55.84 s (rank 2/39, p96)"
+      reaction_time: "7.16 s (rank 20/39, p39)"
+      speed: "72.76 kn (rank 18/39, p43)"
+      range: "16.5 km (rank 3/39, p91)"
+      detectability: "1.4 km (rank 16/39, p47)"
+      flood_coefficient: "3.01x (rank 16/39, p55)"
+      firing_arc: "3 deg (rank 38/39, p1)"
+      bow_dead_zone: "43 deg (rank 8/39, p80)"
+      stern_dead_zone: "135 deg (rank 38/39, p1)"
+      targets: 100% of classes (hits every class)
+  - rank: 32
+    ship: "T10 Halland (destroyer, Europe)"
+    torpedo: Torped M1947 mod 1
+    score: 38.8
+    strengths:
+      - "fast, 94.81 kn"
+      - "long range, 15 km"
+      - 10 torpedoes per broadside
+    weaknesses:
+      - "low damage per hit, 10700 HP"
+      - "light broadside launch, 107000 HP"
+      - "low damage per minute at one target, 83922 HP/min"
+    factors:
+      broadside_dpm: "83922 HP/min (rank 28/39, p29)"
+      broadside_alpha: "107000 HP (rank 30/39, p24)"
+      torpedoes_per_broadside: "10 torpedoes (rank 6/39, p68)"
+      damage: "10700 HP (rank 38/39, p1)"
+      damage_at_max_range: "10700 HP (rank 37/39, p4)"
+      reload: "76.5 s (rank 14/39, p61)"
+      reaction_time: "7.07 s (rank 16/39, p61)"
+      speed: "94.81 kn (rank 1/39, p99)"
+      range: "15 km (rank 7/39, p84)"
+      detectability: "1.8 km (rank 34/39, p8)"
+      flood_coefficient: "1.73x (rank 38/39, p1)"
+      firing_arc: "55 deg (rank 37/39, p5)"
+      bow_dead_zone: "64 deg (rank 39/39, p0)"
+      stern_dead_zone: "62 deg (rank 35/39, p11)"
+      targets: 100% of classes (hits every class)
+omitted: 31
+weights:
+  - "broadside_dpm 12 (HP/min, higher is better): sustained damage against one target at the best bearing: tubes bearing, reload and damage together"
+  - "broadside_alpha 10 (HP, higher is better): damage of one launch at one target, every torpedo hitting"
+  - "torpedoes_per_broadside 8 (torpedoes, higher is better): torpedoes in one spread at one target; a wider, denser spread is harder to dodge"
+  - "damage 8 (HP, higher is better): damage of each hit"
+  - "damage_at_max_range 6 (HP, higher is better): damage of a hit at the end of the run; torpedoes with damage falloff lose it on long launches"
+  - "reload 6 (s, lower is better): how often the launchers fire"
+  - "reaction_time 10 (s, lower is better): time a target has to turn away after spotting the torpedo, the main limit on hits"
+  - "speed 7 (kn, higher is better): time to the target, in which it can leave the spread"
+  - "range 7 (km, higher is better): launch distance, which lets a launch come from beyond detection"
+  - "detectability 3 (km, lower is better): distance at which ships spot the torpedo; most of its effect is already in reaction_time"
+  - "flood_coefficient 3 (x, higher is better): flooding chance of a hit, damage on top of the hit"
+  - "firing_arc 4 (deg, higher is better): degrees of one side, out of 179, at which a launcher fires; a narrow arc needs a precise turn to launch"
+  - "bow_dead_zone 3 (deg, lower is better): angle off the bow inside which no launcher fires; a small one launches while closing bow-in"
+  - "stern_dead_zone 3 (deg, lower is better): angle off the stern inside which no launcher fires; a small one launches while retreating"
+  - "targets 10 (% of classes, higher is better): share of the five ship classes the torpedo can hit; the score loses this weight times the share it cannot hit, as deep-water torpedoes pass under destroyers and submarines"
+rule: "Classes considered: destroyers. Each torpedo option (a torpedo a ship can carry; a ship with alternative torpedoes has one option per torpedo) ranks within the group on each factor. A factor's standing is pNN, the share of the other options it beats in the direction better for that factor, ties counting half. score = sum of weight x standing over the factors the option has other than targets / sum of those weights, minus the targets weight x the share of the five ship classes the torpedo cannot hit (4 for a deep-water torpedo hitting cruisers, battleships and carriers; 6 for one hitting only battleships and carriers), from 0 to 100, higher better. Lower is better for reload, reaction_time, detectability, bow_dead_zone and stern_dead_zone: a torpedo spotted only from 0.6 km is seen later than one spotted from 1.5 km, a strength. reaction_time = detectability / speed. Values are on each ship's best-fit build for each factor, so speed may assume Torpedo Acceleration while range does not. torpedoes_per_broadside, broadside_alpha (torpedoes_per_broadside x damage), firing_arc and the dead zones come from each launcher's firing arcs on the hull, on the module combination carrying the torpedo with the most tubes bearing at one bearing on either broadside; a centerline launcher counts on both sides. firing_arc counts the bearings of one side at which any launcher fires; the dead zones are the smallest angles off the bow and off the stern at which any launcher fires. broadside_dpm is the damage per minute of the launchers bearing on one target at the bearing where the most tubes bear, on its own best-fit build; it is left out where the launcher facings are unknown. Damage figures assume every torpedo hits. strengths and weaknesses name up to three factors each, those moving the score most, among standings more than 10 points above or below the middle of the group (p50; for targets, below 90); broadside_alpha is not named beside torpedoes_per_broadside, which it follows from, nor damage_at_max_range beside an equal damage, and the dead zones are not named strengths when firing_arc is in the narrowest quarter of the group. The score is a judgment from game data and these weights, not win rates or hit rates: say so when quoting it, and explain a rank from strengths and weaknesses."

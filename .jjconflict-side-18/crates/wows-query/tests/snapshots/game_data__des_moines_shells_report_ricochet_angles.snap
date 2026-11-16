@@ -1,0 +1,78 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1921
+expression: shells
+---
+ship:
+  name: Des Moines
+  index: PASC020
+  tier: 10
+  class: cruiser
+  nation: USA
+  group: upgradeable
+  category: tech_tree
+  status: released
+shells:
+  - label: main battery 203 mm HE
+    name: 203 mm HE/HC Mk25
+    param: PAPA002_Shell_203mm_HE_HC_Mk_25
+    battery: main
+    ammo: HE
+    caliber_mm: 203
+    penetration_mm: 34
+    alpha_damage: 2800
+    muzzle_velocity_mps: 823
+    fire_chance_pct: 14
+    penetration:
+      stat: HE penetration (main battery 203 mm HE/HC Mk25)
+      unit: mm
+      builds:
+        base: 34
+        best:
+          value: 34
+          assumed: []
+        alternatives:
+          - label: with Inertia Fuse for HE Shells
+            value: 42
+            assumed:
+              - Inertia Fuse for HE Shells
+            note: "Main battery HE: 34 mm base; 42 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 34 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
+  - label: main battery 203 mm AP
+    name: 203 mm AP Mk21
+    param: PAPA012_Shell_203mm_AP_AP_Mk_21
+    battery: main
+    ammo: AP
+    caliber_mm: 203
+    overmatches_up_to_mm: 14
+    alpha_damage: 5000
+    muzzle_velocity_mps: 762
+    ricochet:
+      from_deg: 60
+      always_from_deg: 67.5
+    fuse_time_s: 0.033
+    fuse_threshold_mm: 34
+    ricochet_note: "AP ricochets from 60 deg, always at 67.5 deg (standard 45 / 60)"
+  - label: secondary battery 127 mm HE
+    name: 127 mm HE Mk32
+    param: PAPA018_Main_127mm_HE_C_Mk_32
+    battery: secondary
+    ammo: HE
+    caliber_mm: 127
+    penetration_mm: 21
+    alpha_damage: 1800
+    muzzle_velocity_mps: 792
+    fire_chance_pct: 5
+    penetration:
+      stat: HE penetration (secondary battery 127 mm HE Mk32)
+      unit: mm
+      builds:
+        base: 21
+        best:
+          value: 21
+          assumed: []
+        alternatives:
+          - label: with Inertia Fuse for HE Shells
+            value: 26
+            assumed:
+              - Inertia Fuse for HE Shells
+            note: "Secondary battery HE: 21 mm base; 26 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because even 26 mm does not penetrate the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."

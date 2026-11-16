@@ -1,0 +1,75 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({ \"total\": replicas.len(), \"series\": series })"
+---
+total: 154
+series:
+  arpeggio:
+    count: 11
+    examples:
+      - ARP Yamato -> Yamato
+      - ARP Maya -> Atago
+      - ARP Takao -> Atago
+      - ARP Ashigara -> Myōkō
+  azurlane:
+    count: 14
+    examples:
+      - AL Shimakaze -> Shimakaze
+      - AL Shinano -> Shinano
+      - AL Azuma -> Azuma
+      - AL Marco Polo -> Marco Polo
+  ba:
+    count: 7
+    examples:
+      - "BA Arona's Whale -> I-56 '44"
+      - BA Montana -> Montana
+      - BA Hovercraft -> Zarya S.
+      - BA Takahashi -> Takahashi
+  ch_dragons:
+    count: 4
+    examples:
+      - Wujing -> Alsace
+      - Sanzang -> Saipan
+      - E. Dragon -> Myōkō
+      - S. Dragon -> Myōkō
+  corona:
+    count: 1
+    examples:
+      - Xuan Ming -> Sun Yat-Sen
+  decorative:
+    count: 46
+    examples:
+      - Aki G -> Aki
+      - Bremen G -> Bremen
+      - Conqueror CLR -> Conqueror
+      - Hawaii G -> Hawaii
+  highSchoolFleet:
+    count: 2
+    examples:
+      - HSF Graf Spee -> Graf Spee
+      - HSF Hiei -> Kongō
+  megadeth:
+    count: 1
+    examples:
+      - Rattlehead -> Marblehead
+  none:
+    count: 63
+    examples:
+      - AL Hindenburg -> Hindenburg
+      - Brisbane B -> Brisbane
+      - G. Hoffmann G -> G. Hoffmann
+      - Kléber CLR -> Kléber
+  rangers:
+    count: 2
+    examples:
+      - STAR Kitakaze -> Kitakaze
+      - STAR Edinburgh -> Edinburgh
+  reconstruction:
+    count: 1
+    examples:
+      - "Eiserner Kanzler -> Bismarck '41"
+  warhammer:
+    count: 2
+    examples:
+      - Cross of Dorn -> Mainz
+      - Ship Smasha -> Fenyang

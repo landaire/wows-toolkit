@@ -1,0 +1,27 @@
+---
+source: crates/wowsunpack/src/export/model_catalog.rs
+expression: categories
+---
+[
+    "CM110_Propeller4_L | Propeller",
+    "RM869_Rudder_Indicator | Instrument",
+    "AM116_Boat_Winch_2 | DeckFitting",
+    "ZM519_Longboat_34ft | Boat",
+    "AM6242_Motor_boat_35ft_Black | Boat",
+    "ZM971_Anchor_Capstan_high | Anchor",
+    "RM296_Cran_of_Boats | Crane",
+    "WM864_Running_Lights_R | Searchlight",
+    "AM1023_Code_Signal_Flags | Flag",
+    "GM179_Crest_Mecklenburg | Insignia",
+    "WM5136_Leer_Skoda_1 | Railing",
+    "AM601_Skylight_Hatch | Hatch",
+    "ZM818_Ventilation_Mushroom | Ventilation",
+    "WM5048_Radar_type_285 | Antenna",
+    "AM6059_Compass_Binnacle | Instrument",
+    "JM495_Gun_Deck_Rangefinder | Instrument",
+    "WM5234_Gun_Deck_L | Weapon",
+    "GM041_52mm_SK_L55 | Weapon",
+    "XM085_Wood_Box_2_Ice | Stowage",
+    "XM289_YHAR_FranceArc_M_1 | Other",
+    "RM884 | Other",
+]

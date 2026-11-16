@@ -1,0 +1,467 @@
+//! Panic-isolated, two-ledger reconciliation primitives shared by the startup
+//! pass and the on-demand "Index all replays" command.
+
+use std::panic::UnwindSafe;
+use std::panic::catch_unwind;
+use std::path::Path;
+
+use tracing::warn;
+use wows_toolkit_config::upload_skips::ReplayFileIdentity;
+use wows_toolkit_config::upload_skips::StableUploadSkips;
+
+use crate::data::settings::DataSharingMode;
+
+/// Wall-clock instant after which an incomplete replay's raw upload proceeds
+/// without end-of-battle results. Shared with the port, which waits out the same
+/// window.
+pub use wows_toolkit_viewmodel::upload::RawUploadDeadline;
+
+/// Result of a single background parse attempt, distinguishing genuinely
+/// un-processable files from retryable conditions so the caller can blacklist
+/// only the former.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseOutcome {
+    /// Parsed successfully and the upload completed.
+    ParsedAndSent,
+    /// Parsed successfully, but the raw upload waits for end-of-battle results
+    /// until the deadline lapses.
+    ParsedAwaitingResults { deadline: RawUploadDeadline },
+    /// Parsed successfully, but replay contents make it permanently ineligible.
+    ParsedAndStableSkipped { identity: Option<ReplayFileIdentity> },
+    /// Parsed successfully while sharing was disabled.
+    ParsedAndDeferred,
+    /// Parsed successfully (and indexed) but the upload hit a transient error.
+    /// Left unsent so the upload is retried next launch.
+    ParsedNotSent,
+    /// A retryable non-parse condition: no game data for this build yet.
+    /// Left unsent and unindexed; retried next launch.
+    Transient,
+    /// The replay is malformed / unparseable after the retries. Blacklist it.
+    HardFailure,
+}
+
+/// Upload disposition retained after a successful replay parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParsedUploadDisposition {
+    Sent,
+    AwaitingResults { deadline: RawUploadDeadline },
+    StableSkipped { identity: Option<ReplayFileIdentity> },
+    Deferred,
+    Retryable,
+}
+
+/// Whether upload work is still needed before startup reconciliation can skip
+/// an already-indexed replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadReconciliation {
+    Pending,
+    Satisfied,
+}
+
+pub fn startup_upload_reconciliation(
+    mode: DataSharingMode,
+    sent: bool,
+    stable_ineligible: bool,
+) -> UploadReconciliation {
+    if sent || stable_ineligible || !mode.shares_anything() {
+        UploadReconciliation::Satisfied
+    } else {
+        UploadReconciliation::Pending
+    }
+}
+
+/// Reconciliation decision for one replay file, consumed by the startup scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileOutcome {
+    /// Both ledgers already satisfied; the parse closure was not run.
+    Skipped,
+    /// Parsed successfully with the upload disposition preserved.
+    Parsed { upload: ParsedUploadDisposition },
+    /// A retryable condition; leave the file for a later launch, do not blacklist.
+    Transient,
+    /// A hard parse failure or a panic; record in the persistent blacklist.
+    HardFailure,
+}
+
+/// Process one replay file. Skips when both ledgers are already satisfied.
+/// Otherwise runs `parse_and_index` inside `catch_unwind` so a parser panic on
+/// one file cannot abort the pass. A panic is mapped to [`FileOutcome::HardFailure`]
+/// exactly like a hard parse failure.
+pub fn reconcile_one<F>(path: &Path, indexed: bool, upload: UploadReconciliation, parse_and_index: F) -> FileOutcome
+where
+    F: FnOnce() -> ParseOutcome + UnwindSafe,
+{
+    if indexed && upload == UploadReconciliation::Satisfied {
+        return FileOutcome::Skipped;
+    }
+    match catch_unwind(parse_and_index) {
+        Ok(ParseOutcome::ParsedAndSent) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Sent },
+        Ok(ParseOutcome::ParsedAwaitingResults { deadline }) => {
+            FileOutcome::Parsed { upload: ParsedUploadDisposition::AwaitingResults { deadline } }
+        }
+        Ok(ParseOutcome::ParsedAndStableSkipped { identity }) => {
+            FileOutcome::Parsed { upload: ParsedUploadDisposition::StableSkipped { identity } }
+        }
+        Ok(ParseOutcome::ParsedAndDeferred) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Deferred },
+        Ok(ParseOutcome::ParsedNotSent) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Retryable },
+        Ok(ParseOutcome::Transient) => FileOutcome::Transient,
+        Ok(ParseOutcome::HardFailure) => {
+            warn!("failed to parse replay {} (blacklisted)", path.display());
+            FileOutcome::HardFailure
+        }
+        Err(_) => {
+            warn!("panic while parsing replay {} (blacklisted)", path.display());
+            FileOutcome::HardFailure
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupFileOutcome {
+    pub file: FileOutcome,
+    pub stable_skip_changed: bool,
+}
+
+pub fn reconcile_startup_one<F>(
+    path: &Path,
+    indexed: bool,
+    sent: bool,
+    mode: DataSharingMode,
+    stable_upload_skips: &mut StableUploadSkips,
+    parse_and_index: F,
+) -> StartupFileOutcome
+where
+    F: FnOnce() -> ParseOutcome + UnwindSafe,
+{
+    let upload = startup_upload_reconciliation(mode, sent, stable_upload_skips.contains(path));
+    let file = reconcile_one(path, indexed, upload, parse_and_index);
+    let stable_skip_changed = match &file {
+        FileOutcome::Parsed { upload: ParsedUploadDisposition::StableSkipped { identity: Some(identity) } } => {
+            stable_upload_skips.insert(identity.clone())
+        }
+        _ => false,
+    };
+    StartupFileOutcome { file, stable_skip_changed }
+}
+
+/// The instant this replay was first observed by the uploader, recording `now`
+/// if this is its first sight.
+///
+/// The raw-upload grace window anchors here rather than on the file's mtime: an
+/// archived replay carries an mtime from months ago and would be past due the
+/// moment it is first indexed, so the window would never hold anything outside
+/// a live battle. Stored per path rather than in shared memory because both the
+/// background parser and the manual batch decide uploads independently.
+pub async fn raw_upload_first_seen(
+    pool: &sqlx::SqlitePool,
+    path: &Path,
+    now: jiff::Timestamp,
+) -> Result<jiff::Timestamp, sqlx::Error> {
+    wows_toolkit_config::queries::raw_upload_first_seen(pool, &path.to_string_lossy(), now).await
+}
+
+/// The files a parse could not read, remembered so they are not retried every
+/// launch.
+///
+/// Moved to `wows_toolkit_config::index::unindexable` so the GPUI port shares the
+/// one ledger: it is a single row in the settings table, and both apps walk the
+/// same directory.
+pub use wows_toolkit_config::index::unindexable::Unindexable;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::settings::DataSharingMode;
+    use std::collections::HashSet;
+    use std::io::Write;
+    use std::panic::AssertUnwindSafe;
+    use std::path::Path;
+    use std::time::Duration;
+    use std::time::SystemTime;
+
+    #[test]
+    fn skips_when_both_ledgers_satisfied() {
+        let mut called = false;
+        let out = reconcile_one(
+            Path::new("a"),
+            true,
+            UploadReconciliation::Satisfied,
+            AssertUnwindSafe(|| {
+                called = true;
+                ParseOutcome::ParsedAndSent
+            }),
+        );
+        assert_eq!(out, FileOutcome::Skipped);
+        assert!(!called, "must not parse when already indexed and sent");
+    }
+
+    #[test]
+    fn a_panicking_parse_is_isolated_and_reported_as_hard_failure() {
+        let out = crate::test_utils::with_silenced_panic_hook(|| {
+            reconcile_one(
+                Path::new("b"),
+                false,
+                UploadReconciliation::Pending,
+                AssertUnwindSafe(|| -> ParseOutcome { panic!("boom") }),
+            )
+        });
+        assert_eq!(out, FileOutcome::HardFailure);
+    }
+
+    #[test]
+    fn a_transient_condition_is_not_a_hard_failure() {
+        let out = reconcile_one(
+            Path::new("t"),
+            false,
+            UploadReconciliation::Pending,
+            AssertUnwindSafe(|| ParseOutcome::Transient),
+        );
+        assert_eq!(out, FileOutcome::Transient);
+    }
+
+    #[test]
+    fn a_parse_awaiting_results_carries_its_deadline_through() {
+        let deadline = RawUploadDeadline(jiff::Timestamp::from_second(1_200).unwrap());
+        let out = reconcile_one(
+            Path::new("w"),
+            false,
+            UploadReconciliation::Pending,
+            AssertUnwindSafe(|| ParseOutcome::ParsedAwaitingResults { deadline }),
+        );
+        assert_eq!(out, FileOutcome::Parsed { upload: ParsedUploadDisposition::AwaitingResults { deadline } });
+    }
+
+    #[test]
+    fn a_parsed_but_unsent_replay_is_not_blacklisted() {
+        let out = reconcile_one(
+            Path::new("p"),
+            false,
+            UploadReconciliation::Pending,
+            AssertUnwindSafe(|| ParseOutcome::ParsedNotSent),
+        );
+        assert_eq!(out, FileOutcome::Parsed { upload: ParsedUploadDisposition::Retryable });
+    }
+
+    #[test]
+    fn a_parsed_replay_with_a_stable_skip_is_not_marked_sent() {
+        let out = reconcile_one(
+            Path::new("p"),
+            false,
+            UploadReconciliation::Pending,
+            AssertUnwindSafe(|| ParseOutcome::ParsedAndStableSkipped { identity: None }),
+        );
+        assert_eq!(out, FileOutcome::Parsed { upload: ParsedUploadDisposition::StableSkipped { identity: None } });
+    }
+
+    #[test]
+    fn an_indexed_replay_is_satisfied_while_sharing_is_off_without_being_sent() {
+        let sent = false;
+        let mut stable_upload_skips = StableUploadSkips::default();
+        let mut parsed = false;
+
+        let out = reconcile_startup_one(
+            Path::new("indexed.wowsreplay"),
+            true,
+            sent,
+            DataSharingMode::Off,
+            &mut stable_upload_skips,
+            AssertUnwindSafe(|| {
+                parsed = true;
+                ParseOutcome::ParsedAndSent
+            }),
+        );
+
+        assert_eq!(out.file, FileOutcome::Skipped);
+        assert!(!out.stable_skip_changed);
+        assert!(!parsed);
+        assert!(!sent, "reconciliation satisfaction must not change upload history");
+    }
+
+    #[test]
+    fn a_stably_ineligible_replay_is_not_reparsed_on_the_next_launch() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let pool = runtime
+            .block_on(sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:"))
+            .unwrap();
+        runtime
+            .block_on(
+                sqlx::query("CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)")
+                    .execute(&pool),
+            )
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ineligible.wowsreplay");
+        std::fs::write(&path, b"stable identity").unwrap();
+        let parsed_identity = ReplayFileIdentity::from_path(&path);
+        let sent_replays = HashSet::<String>::new();
+
+        let mut first_launch = StableUploadSkips::default();
+        let first = reconcile_startup_one(
+            &path,
+            false,
+            false,
+            DataSharingMode::BuildData,
+            &mut first_launch,
+            AssertUnwindSafe(|| ParseOutcome::ParsedAndStableSkipped { identity: parsed_identity.clone() }),
+        );
+        assert_eq!(
+            first.file,
+            FileOutcome::Parsed { upload: ParsedUploadDisposition::StableSkipped { identity: parsed_identity } }
+        );
+        assert!(first.stable_skip_changed);
+
+        runtime.block_on(first_launch.save(&pool)).unwrap();
+        drop(first_launch);
+
+        let second_launch = runtime.block_on(StableUploadSkips::load(&pool));
+        let mut second_launch = second_launch;
+        let mut reparsed = false;
+        let second = reconcile_startup_one(
+            &path,
+            true,
+            sent_replays.contains(path.to_string_lossy().as_ref()),
+            DataSharingMode::BuildData,
+            &mut second_launch,
+            AssertUnwindSafe(|| {
+                reparsed = true;
+                ParseOutcome::ParsedAndSent
+            }),
+        );
+
+        assert_eq!(second.file, FileOutcome::Skipped);
+        assert!(!second.stable_skip_changed);
+        assert!(!reparsed);
+        assert!(sent_replays.is_empty(), "stable ineligibility is not upload success");
+    }
+
+    #[test]
+    fn a_stable_skip_does_not_suppress_a_replacement_that_was_not_parsed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("replaced.wowsreplay");
+        std::fs::write(&path, b"parsed snapshot").unwrap();
+        let parsed_identity = ReplayFileIdentity::from_path(&path).unwrap();
+        let parsed_modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap();
+        file.write_all(b"latest snapshot").unwrap();
+        file.set_modified(parsed_modified).unwrap();
+        drop(file);
+
+        let mut stable_upload_skips = StableUploadSkips::default();
+        assert!(stable_upload_skips.insert(parsed_identity));
+        let mut parsed_replacement = false;
+        let outcome = reconcile_startup_one(
+            &path,
+            true,
+            false,
+            DataSharingMode::BuildData,
+            &mut stable_upload_skips,
+            AssertUnwindSafe(|| {
+                parsed_replacement = true;
+                ParseOutcome::ParsedAndSent
+            }),
+        );
+
+        assert_eq!(outcome.file, FileOutcome::Parsed { upload: ParsedUploadDisposition::Sent });
+        assert!(!outcome.stable_skip_changed);
+        assert!(parsed_replacement);
+        assert!(!stable_upload_skips.contains(&path), "replacement bytes must invalidate the stable skip");
+    }
+
+    #[test]
+    fn a_good_parse_after_a_bad_one_still_parses() {
+        let bad = crate::test_utils::with_silenced_panic_hook(|| {
+            reconcile_one(
+                Path::new("b"),
+                false,
+                UploadReconciliation::Pending,
+                AssertUnwindSafe(|| -> ParseOutcome { panic!("x") }),
+            )
+        });
+        let good = reconcile_one(
+            Path::new("c"),
+            false,
+            UploadReconciliation::Pending,
+            AssertUnwindSafe(|| ParseOutcome::ParsedAndSent),
+        );
+        assert_eq!(bad, FileOutcome::HardFailure);
+        assert_eq!(good, FileOutcome::Parsed { upload: ParsedUploadDisposition::Sent });
+    }
+
+    fn instant(second: i64) -> jiff::Timestamp {
+        jiff::Timestamp::from_second(second).unwrap()
+    }
+
+    fn first_seen_pool(runtime: &tokio::runtime::Runtime) -> sqlx::SqlitePool {
+        let pool = runtime
+            .block_on(sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:"))
+            .unwrap();
+        runtime
+            .block_on(
+                sqlx::query(
+                    "CREATE TABLE raw_upload_first_seen (replay_path TEXT PRIMARY KEY, first_seen INTEGER NOT NULL)",
+                )
+                .execute(&pool),
+            )
+            .unwrap();
+        pool
+    }
+
+    #[test]
+    fn the_first_sight_of_a_replay_records_and_returns_now() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let pool = first_seen_pool(&runtime);
+
+        let anchor = runtime.block_on(raw_upload_first_seen(&pool, Path::new("a.wowsreplay"), instant(1_000))).unwrap();
+
+        assert_eq!(anchor, instant(1_000));
+    }
+
+    /// The whole point of the anchor: a later launch must not slide the window
+    /// forward, or a results-less replay would be deferred forever.
+    #[test]
+    fn a_later_sight_returns_the_original_anchor_and_does_not_move_it() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let pool = first_seen_pool(&runtime);
+        runtime.block_on(raw_upload_first_seen(&pool, Path::new("a.wowsreplay"), instant(1_000))).unwrap();
+
+        let anchor = runtime.block_on(raw_upload_first_seen(&pool, Path::new("a.wowsreplay"), instant(9_999))).unwrap();
+
+        assert_eq!(anchor, instant(1_000), "the anchor must survive a restart and never slide forward");
+    }
+
+    #[test]
+    fn each_replay_gets_its_own_anchor() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let pool = first_seen_pool(&runtime);
+        runtime.block_on(raw_upload_first_seen(&pool, Path::new("a.wowsreplay"), instant(1_000))).unwrap();
+
+        let anchor = runtime.block_on(raw_upload_first_seen(&pool, Path::new("b.wowsreplay"), instant(2_000))).unwrap();
+
+        assert_eq!(anchor, instant(2_000));
+    }
+
+    #[test]
+    fn unindexable_contains_insert_roundtrip_is_mtime_keyed() {
+        let path = std::env::temp_dir().join(format!("wt_unindexable_test_{}.tmp", std::process::id()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(b"x").unwrap();
+        }
+
+        let mut u = Unindexable::default();
+        assert!(!u.contains(&path), "fresh set contains nothing");
+        assert!(u.insert(&path), "first insert reports a new entry");
+        assert!(!u.insert(&path), "second insert of the same key is not new");
+        assert!(u.contains(&path), "just-inserted path must be contained");
+
+        // A replaced file (newer mtime) must not match the stored key.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(SystemTime::now() + Duration::from_secs(10)).unwrap();
+        drop(f);
+        assert!(!u.contains(&path), "mtime change must invalidate the blacklist entry");
+
+        // A missing file has no key and is never contained.
+        let _ = std::fs::remove_file(&path);
+        assert!(!u.contains(&path), "missing file is never contained");
+    }
+}

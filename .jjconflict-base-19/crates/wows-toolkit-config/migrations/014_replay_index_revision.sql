@@ -1,0 +1,1 @@
+ALTER TABLE replay_record ADD COLUMN index_revision INTEGER NOT NULL DEFAULT 0;

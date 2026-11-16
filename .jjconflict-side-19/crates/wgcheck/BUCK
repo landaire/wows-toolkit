@@ -1,0 +1,27 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library")
+
+workspace_library(
+    name = "wgcheck",
+    crate = "wgcheck",
+    package = "wgcheck",
+    version = "0.1.0",
+    deps = [
+        "//third-party/rust:cbc",
+        "//third-party/rust:des",
+        "//third-party/rust:flate2",
+        "//third-party/rust:rootcause",
+    ],
+)
+
+workspace_binary(
+    name = "wgcheck_bin",
+    crate = "wgcheck",
+    package = "wgcheck",
+    version = "0.1.0",
+    crate_root = "src/main.rs",
+    deps = [
+        ":wgcheck",
+        "//third-party/rust:clap",
+        "//third-party/rust:rootcause",
+    ],
+)

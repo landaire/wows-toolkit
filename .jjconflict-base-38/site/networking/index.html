@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>WoWs Toolkit: Networking</title>
+        <meta name="color-scheme" content="dark light" />
+        <link rel="icon" type="image/png" href="../img/favicon.png" />
+        <script>
+            // Apply the stored or system theme before first paint.
+            (function () {
+                var t = localStorage.getItem("wt-theme");
+                if (t !== "light" && t !== "dark") {
+                    t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+                }
+                document.documentElement.dataset.theme = t;
+            })();
+        </script>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="../css/site.css" />
+    </head>
+    <body class="plain">
+        <header class="top">
+            <div class="wrap">
+                <a class="brand" href="../">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="5.5" stroke-dasharray="2 2" />
+                        <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                        <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+                    </svg>
+                    WoWs Toolkit
+                </a>
+                <nav aria-label="Primary">
+                    <a href="../#features">Features</a>
+                    <a class="optional" href="../#new">Changes</a>
+                    <a href="../#download">Download</a>
+                    <a class="optional" href="https://github.com/landaire/wows-toolkit">Source</a>
+                    <a class="optional js-discord" href="#" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
+                </nav>
+                <button class="theme-toggle" type="button" aria-label="Toggle dark mode" data-theme-toggle><svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
+            </div>
+        </header>
+
+        <main class="wrap prose">
+            <h1>How Connections Work</h1>
+
+                <p>
+                    Sessions are end-to-end encrypted using
+                    <a href="https://www.iroh.computer/">iroh</a> to manage
+                    connections. When connecting to other people in a session,
+                    they join using a session token like:
+                </p>
+
+                <pre><code>toolkit-eNoNycEBwCAIA8CVkIDWcQyY_Uew9z3F_ECMzbKFrmqPHIorIZUmqihX4HLmoh_YP-s4OrjvA1SEEm4</code></pre>
+
+                <p>
+                    This token only contains an <code>EndpointId</code> of the
+                    session host:
+                </p>
+
+                <pre><code><span class="prompt">$ </span>echo 'eNoNycEBwCAIA8CVkIDWcQyY_Uew9z3F_ECMzbKFrmqPHIorIZUmqihX4HLmoh_YP-s4OrjvA1SEEm4' \
+  | base64 -d | crabz -d -f zlib
+
+<span class="output">f4683b319bc073dccd2451f4eff35f50fbfcbf2f43eb657b2a30f357a23d4b9e</span></code></pre>
+
+                <h2>Connection Establishment</h2>
+
+                <p>
+                    The <code>EndpointId</code> is a cryptographic identifier
+                    which is used to connect to the host. To establish this
+                    connection, a relay server is used to find your peer and
+                    relay communications to them until a direct peer-to-peer
+                    connection can be established.
+                </p>
+
+                <p>
+                    Once a direct connection is negotiated, all traffic flows
+                    directly between peers over QUIC. The relay is no
+                    longer in the path. If a direct connection cannot be
+                    established (e.g. due to restrictive NAT), the relay
+                    continues to forward encrypted traffic. In either case, the
+                    relay server cannot read the contents of your messages
+                    because the connection is end-to-end encrypted.
+                </p>
+
+                <div class="note">
+                    <p>
+                        <strong>tl;dr:</strong> Connections are secure and use a
+                        central relay to establish the initial connection until a
+                        direct connection between peers in the session can be
+                        established.
+                    </p>
+                </div>
+
+                <div class="diagram">
+                    <svg class="diagram-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" fill="none" role="img" aria-label="Connection diagram">
+
+                        <!-- Host box -->
+                        <rect x="40" y="130" width="140" height="80" rx="0" style="stroke: var(--line-2)" style="fill: var(--panel-solid)"/>
+                        <text x="110" y="162" text-anchor="middle" style="fill: var(--ink)" font-size="13" font-weight="600">HOST</text>
+                        <text x="110" y="182" text-anchor="middle" style="fill: var(--dim)" font-size="10">EndpointId</text>
+                        <text x="110" y="196" text-anchor="middle" style="fill: var(--dim)" font-size="10">f4683b31...</text>
+
+                        <!-- Relay box -->
+                        <rect x="260" y="40" width="160" height="60" rx="0" style="stroke: var(--line-2)" style="fill: var(--panel-solid)"/>
+                        <text x="340" y="67" text-anchor="middle" style="fill: var(--accent)" font-size="13" font-weight="600">RELAY SERVER</text>
+                        <text x="340" y="85" text-anchor="middle" style="fill: var(--dim)" font-size="10">cannot read traffic</text>
+
+                        <!-- Peer box -->
+                        <rect x="500" y="130" width="140" height="80" rx="0" style="stroke: var(--line-2)" style="fill: var(--panel-solid)"/>
+                        <text x="570" y="162" text-anchor="middle" style="fill: var(--ink)" font-size="13" font-weight="600">PEER</text>
+                        <text x="570" y="182" text-anchor="middle" style="fill: var(--dim)" font-size="10">joins with</text>
+                        <text x="570" y="196" text-anchor="middle" style="fill: var(--dim)" font-size="10">session token</text>
+
+                        <!-- Phase 1: Relay lines (dashed) -->
+                        <!-- Host to Relay -->
+                        <line x1="155" y1="130" x2="270" y2="100" style="stroke: var(--dim)" stroke-width="1" stroke-dasharray="6 4"/>
+                        <!-- Relay to Peer -->
+                        <line x1="410" y1="100" x2="525" y2="130" style="stroke: var(--dim)" stroke-width="1" stroke-dasharray="6 4"/>
+
+                        <!-- Phase 1 label -->
+                        <text x="340" y="128" text-anchor="middle" style="fill: var(--dim)" font-size="10">1. initial relay</text>
+
+                        <!-- Phase 2: Direct connection (solid, bright) -->
+                        <line x1="180" y1="180" x2="500" y2="180" style="stroke: var(--ok)" stroke-width="2"/>
+                        <!-- Arrow head -->
+                        <polygon points="500,180 490,174 490,186" style="fill: var(--ok)"/>
+                        <polygon points="180,180 190,174 190,186" style="fill: var(--ok)"/>
+
+                        <!-- Phase 2 label -->
+                        <text x="340" y="202" text-anchor="middle" style="fill: var(--ok)" font-size="10">2. direct P2P (QUIC, encrypted)</text>
+
+                        <!-- Lock icon (simplified) -->
+                        <rect x="326" y="228" width="28" height="20" rx="3" style="stroke: var(--ok)" stroke-width="1.5" fill="none"/>
+                        <path d="M333 228 V221 A7 7 0 0 1 347 221 V228" style="stroke: var(--ok)" stroke-width="1.5" fill="none"/>
+
+                        <!-- Encryption label -->
+                        <text x="340" y="268" text-anchor="middle" style="fill: var(--ok)" font-size="10" opacity="0.7">end-to-end encrypted</text>
+
+                        <!-- Token flow -->
+                        <text x="340" y="300" text-anchor="middle" style="fill: var(--dim)" font-size="10">token = toolkit-&lt;base64(zlib(EndpointId))&gt;</text>
+                        <text x="340" y="320" text-anchor="middle" style="fill: var(--dim)" font-size="9" opacity="0.6">shared out-of-band (copy/paste)</text>
+                    </svg>
+                </div>
+
+                <h2>Protocol Messages</h2>
+
+                <p>
+                    All messages are serialized with
+                    <a href="https://rkyv.org/">rkyv</a> (zero-copy
+                    deserialization), zlib-compressed, and framed as
+                    <code>[u32 compressed_length][zlib(rkyv payload)]</code>
+                    on each QUIC stream. Permission enforcement is
+                    client-side: each receiver decides what to accept based
+                    on the sender's role.
+                </p>
+
+                <div class="msg-group">
+                    <h3>Handshake</h3>
+                    <span class="msg-direction">Peer to Host, then Host to Peer</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Join / SessionInfo</td>
+                            <td>Peer sends client type (desktop or web) + display name; host responds with the peer list, assigned identity, open replays, and current frame source.</td>
+                        </tr>
+                        <tr>
+                            <td>PeerAnnounce / MeshHello</td>
+                            <td>Host introduces the new joiner to existing peers, then the joiner establishes direct mesh connections.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Session Sync</h3>
+                    <span class="msg-direction">Any peer and All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Cursors &amp; Pings</td>
+                            <td>Live minimap cursor positions and map pings shared between all peers.</td>
+                        </tr>
+                        <tr>
+                            <td>Annotations</td>
+                            <td>ID-based drawing annotations (lines, circles, arrows, freehand, shapes, measurements, ship placements) synced in real time. Supports per-replay and per-tactics-board contexts.</td>
+                        </tr>
+                        <tr>
+                            <td>Display Overrides</td>
+                            <td>Per-ship range ring and trail visibility overrides.</td>
+                        </tr>
+                        <tr>
+                            <td>Heartbeat</td>
+                            <td>Sent every 10s per connection. 30s without any message = connection considered dead.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Replay Streaming</h3>
+                    <span class="msg-direction">Frame source to All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Frames</td>
+                            <td>Draw commands streamed from the current frame source, tagged with a replay ID.</td>
+                        </tr>
+                        <tr>
+                            <td>Replay Lifecycle</td>
+                            <td>ReplayOpened / ReplayClosed notifications when replays are loaded or unloaded on the host.</td>
+                        </tr>
+                        <tr>
+                            <td>Playback &amp; Display</td>
+                            <td>Play/pause, speed, and 31 toggleable render options (ship names, range rings, trails, etc.).</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Tactics Boards</h3>
+                    <span class="msg-direction">Any peer and All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Board Lifecycle</td>
+                            <td>TacticsMapOpened / TacticsMapClosed with map image, name, and coordinate metadata.</td>
+                        </tr>
+                        <tr>
+                            <td>Capture Points</td>
+                            <td>Add, remove, and sync capture points on tactics boards.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Host Authority</h3>
+                    <span class="msg-direction">Host / Co-host to All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Permissions</td>
+                            <td>Lock or unlock annotations and display settings for regular peers.</td>
+                        </tr>
+                        <tr>
+                            <td>Roster</td>
+                            <td>UserJoined / UserLeft notifications and co-host promotion.</td>
+                        </tr>
+                        <tr>
+                            <td>Window Management</td>
+                            <td>Request all peers to open a specific replay or tactics board window.</td>
+                        </tr>
+                        <tr>
+                            <td>Asset Delivery</td>
+                            <td>Ship/plane/consumable icons and game fonts sent to web clients for rendering.</td>
+                        </tr>
+                    </table>
+                </div>
+        </main>
+
+        <footer>
+            <div class="wrap">
+                <nav>
+                    <a href="https://github.com/landaire/wows-toolkit">GitHub</a>
+                    <a href="https://github.com/landaire/wows-toolkit/releases/latest">Releases</a>
+                    <a href="./">Networking</a>
+                    <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
+                </nav>
+                <p>
+                    Not affiliated with or endorsed by Wargaming.net. World of Warships is a trademark of
+                    Wargaming.net.
+                </p>
+            </div>
+        </footer>
+
+        <script type="module">
+            const root = document.documentElement;
+            const scheme = matchMedia("(prefers-color-scheme: light)");
+            document.querySelector("[data-theme-toggle]").addEventListener("click", () => {
+                const t = root.dataset.theme === "dark" ? "light" : "dark";
+                root.dataset.theme = t;
+                localStorage.setItem("wt-theme", t);
+            });
+            scheme.addEventListener("change", (e) => {
+                localStorage.removeItem("wt-theme");
+                root.dataset.theme = e.matches ? "light" : "dark";
+            });
+
+            // The Discord invite is ROT13-encoded so scrapers cannot harvest it from the
+            // page source. It is decoded only on click.
+            function rot13(s) {
+                return s.replace(/[a-z]/gi, (c) => {
+                    const base = c <= "Z" ? 65 : 97;
+                    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+                });
+            }
+            for (const a of document.querySelectorAll("a.js-discord")) {
+                a.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    window.open(rot13(a.dataset.h), "_blank", "noopener,noreferrer");
+                });
+            }
+        </script>
+    </body>
+</html>

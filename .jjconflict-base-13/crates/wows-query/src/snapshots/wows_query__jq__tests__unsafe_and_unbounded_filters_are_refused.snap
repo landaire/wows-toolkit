@@ -1,0 +1,16 @@
+---
+source: crates/wows-query/src/jq.rs
+expression: outcomes
+---
+- Err: env is not available
+- Err: jq filter uses undefined variable $ENV
+- Err: the filter exceeded its loop step limit; iterate over less data
+- Err: the filter exceeded its loop step limit; iterate over less data
+- Err: the filter exceeded its loop step limit; iterate over less data
+- Err: the filter exceeded its loop step limit; iterate over less data
+- Err: names starting with __ are reserved; the filter uses __range
+- Err: "jq modules (import, include) are not available"
+- Err: "jq modules (import, include) are not available"
+- Err: "jq syntax error: expected term at byte 4 (end of filter)"
+- Err: "jq syntax error: expected closing quote at byte 6 (end of filter); expected closing parenthesis at byte 6 (end of filter)"
+- Err: jq filter uses undefined filter foo/1

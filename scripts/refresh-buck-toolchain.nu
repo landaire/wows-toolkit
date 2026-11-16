@@ -5,7 +5,9 @@ if $nu.os-info.name == "macos" {
     nu build-support/check-macos-sdk.nu $macos_sdk
 }
 
-let toolchain_root = (^nix build --no-link --print-out-paths .#buck-toolchain | str trim)
+# .buckconfig.local names the store path directly, so keep a GC root for it;
+# without one, `nix-collect-garbage` deletes the toolchain out from under Buck.
+let toolchain_root = (^nix build --out-link .tools/buck-toolchain --print-out-paths .#buck-toolchain | str trim)
 
 let required = [
     "ar"

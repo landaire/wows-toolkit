@@ -1,0 +1,14 @@
+[package]
+name = "wows-ship-stats"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "World of Warships ship stats for a build: captain skills, upgrades and modules applied to the port stat card, plus stats derived from it"
+
+[dependencies]
+wowsunpack = { workspace = true, features = ["parsing", "serde"] }
+wows-core = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }

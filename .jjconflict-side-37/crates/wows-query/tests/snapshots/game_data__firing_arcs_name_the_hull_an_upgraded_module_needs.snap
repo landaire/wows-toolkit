@@ -1,0 +1,6 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "[alone.to_string(), torpedoes.to_string()]"
+---
+- "module 203 mm/55 Mk.14 on a triple mount/twin mount (upgraded) does not fit Pensacola (old)'s Hull A; add Hull B to modules"
+- "module 53-39 mod. 1 does not fit Ognevoi (OLD)'s Hull A; add Hull B to modules"

@@ -1,0 +1,87 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 5
+payload:
+  EntityCreate:
+    entity_id: 201872
+    entity_type: InteractiveZone
+    position:
+      x: 72.69499969482422
+      y: 0
+      z: 112.19300079345703
+    props:
+      componentsState:
+        captureLogic:
+          bothInside: 0
+          captureSpeed: 1
+          captureTime: 40
+          hasInvaders: 0
+          invaderTeam: -1
+          isEnabled: 0
+          isVisible: 0
+          progress: 0
+        controlPoint:
+          buoyVisualId: 4293248944
+          index: 3
+          nextControlPoint: -1
+          timerName: []
+          type: 1
+      innerRadius: 0
+      interactionBuoyancies:
+        - 0
+      name:
+        - 52
+        - 52
+        - 50
+        - 68
+        - 49
+        - 48
+        - 54
+        - 50
+        - 46
+        - 52
+        - 54
+        - 50
+        - 65
+        - 55
+        - 48
+        - 66
+        - 66
+        - 46
+        - 49
+        - 54
+        - 48
+        - 56
+        - 49
+        - 66
+        - 56
+        - 70
+        - 46
+        - 56
+        - 50
+        - 66
+        - 52
+        - 57
+        - 56
+        - 53
+        - 68
+      ownerId: 0
+      radius: 66
+      teamId: 1
+      type: 9
+      useRing: 0
+      visualState:
+        forAllies: 0
+        forEnemies: 0
+        forOwner: 0
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: 0
+    space_id: 0
+    spec_idx: 14
+    state_length: 101
+    vehicle_id: 2840

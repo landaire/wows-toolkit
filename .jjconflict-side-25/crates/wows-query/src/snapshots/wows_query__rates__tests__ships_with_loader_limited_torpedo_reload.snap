@@ -1,0 +1,31 @@
+---
+source: crates/wows-query/src/rates.rs
+assertion_line: 583
+expression: "(limited.len(), limited)"
+---
+- 25
+- - Archerfish
+  - Balao
+  - Balao (old)
+  - Balao 2
+  - Barfleur
+  - Barracuda
+  - Cachalot
+  - Cachalot (old)
+  - Foca
+  - Gato
+  - Gerfalcon
+  - K-1
+  - Killer Whale
+  - Kitakami
+  - L-20
+  - Orzeł
+  - S-1
+  - Salmon
+  - Salmon (old)
+  - Seelöwe
+  - Selkie
+  - Sturdy
+  - Thrasher
+  - Undine
+  - Xin Zhong Guo 14

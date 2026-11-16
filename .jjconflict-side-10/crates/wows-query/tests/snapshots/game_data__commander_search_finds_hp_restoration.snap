@@ -1,0 +1,139 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+matched: 5
+commanders:
+  - name: Günther Lütjens
+    nations:
+      - Germany
+    talents:
+      - name: Resilient
+        variants:
+          - battle_types: every battle type that allows talents
+            condition: "Activates each time you spot three ships.\n\nThe talent's action time in seconds matches the ship's tier."
+            activations_per_battle: unlimited
+            activations:
+              - effects:
+                  - "HP regeneration: restores 300 HP per second for the ship's tier in seconds"
+  - name: John Augustine Collins
+    nations:
+      - Commonwealth
+    talents:
+      - name: Rise and Fight Again
+        variants:
+          - battle_types: every battle type that allows talents
+            condition: "Activates when your ship's HP falls to 10% or below.\n\nCan be activated once per battle."
+            activations_per_battle: 1
+            activations:
+              - effects:
+                  - "HP regeneration: restores 2% of max HP per second for 5 s, 10% of max HP in total"
+  - name: Nikolay Kuznetsov
+    nations:
+      - Russia
+    talents:
+      - name: Will for Victory
+        variants:
+          - battle_types: "Random, Co-op, Ranked and Brawl battles"
+            condition: "Activates when your ship's HP falls to 10% or below.\n\nCan be activated once per battle."
+            activations_per_battle: 1
+            activations:
+              - effects:
+                  - "Extinguishes fires, removes instances of flooding, and repairs damaged modules.\nPrevents enemy submarine-launched torpedoes from homing. Action time: 15 s."
+                  - "HP regeneration: restores 0.35% of max HP per second for 15 s, 5.25% of max HP in total"
+                  - +20% Dispersion of shells fired by enemies attacking your ship for 15 s
+          - battle_types: Operations
+            condition: "Activates when your ship's HP falls to 10% or below.\n\nCan be activated once per battle."
+            activations_per_battle: 1
+            activations:
+              - effects:
+                  - "Extinguishes fires, removes instances of flooding, and repairs damaged modules.\nPrevents enemy submarine-launched torpedoes from homing. Action time: 15 s."
+                  - "HP regeneration: restores 1% of max HP per second for 15 s, 15% of max HP in total"
+                  - +20% Dispersion of shells fired by enemies attacking your ship for 15 s
+  - name: Pascual Cervera y Topete
+    nations:
+      - Spain
+    talents:
+      - name: La Orden se Cumplirá
+        variants:
+          - battle_types: every battle type that allows talents
+            condition: "Activates when your ship's HP falls to 75%, 50%, and 25% of her total HP (once per threshold).\n\nCan be activated up to three times."
+            activations_per_battle: 3
+            activations:
+              - activation: 1
+                effects:
+                  - "-6% Consumable cooldown time, except Damage Control Party and Repair Party"
+                  - "-3% Damage Control Party consumable cooldown time"
+                  - "-3% Repair Party consumable cooldown time"
+                  - "HP regeneration: restores 20 HP per second times the ship's tier for 10 s, 200 HP times the ship's tier in total"
+              - activation: 2
+                effects:
+                  - "-11.64% Consumable cooldown time, except Damage Control Party and Repair Party"
+                  - "-5.9% Damage Control Party consumable cooldown time"
+                  - "-5.9% Repair Party consumable cooldown time"
+                  - "HP regeneration: restores 20 HP per second times the ship's tier for 10 s, 200 HP times the ship's tier in total"
+              - activation: 3
+                effects:
+                  - "-16.942% Consumable cooldown time, except Damage Control Party and Repair Party"
+                  - "-8.7% Damage Control Party consumable cooldown time"
+                  - "-8.7% Repair Party consumable cooldown time"
+                  - "HP regeneration: restores 20 HP per second times the ship's tier for 10 s, 200 HP times the ship's tier in total"
+  - name: Yamamoto Isoroku
+    nations:
+      - Japan
+    talents:
+      - name: Second Wind
+        variants:
+          - battle_types: "Random, Co-op, Ranked and Brawl battles"
+            condition: Activates upon destroying a certain number of ships.
+            progression: "The activated effect increases with the number of enemy ships destroyed, up to 3 times per battle."
+            activations_per_battle: 3
+            activations:
+              - activation: 1
+                condition: Activates upon destroying 2 ships.
+                effects:
+                  - "-5% Main battery reload time"
+                  - "-3% Torpedo tube reload time"
+                  - "-3% Aircraft preparation time"
+                  - "HP regeneration: restores 0.042% of max HP per second for 120 s, 5.004% of max HP in total"
+              - activation: 2
+                condition: Activates upon destroying 5 ships.
+                effects:
+                  - "-25% Main battery reload time"
+                  - "-12.5% Torpedo tube reload time"
+                  - "-12.5% Aircraft preparation time"
+                  - "HP regeneration: restores 0.208% of max HP per second for 120 s, 24.996% of max HP in total"
+              - activation: 3
+                condition: Activates upon destroying 7 ships.
+                effects:
+                  - "-40% Main battery reload time"
+                  - "-20% Torpedo tube reload time"
+                  - "-20% Aircraft preparation time"
+                  - "HP regeneration: restores 0.333% of max HP per second for 120 s, 39.96% of max HP in total"
+          - battle_types: Operations
+            condition: Activates upon destroying a certain number of ships.
+            progression: "The activated effect increases with the number of enemy ships destroyed, up to 3 times per battle."
+            activations_per_battle: 3
+            activations:
+              - activation: 1
+                condition: Activates upon destroying 2 ships.
+                effects:
+                  - "-5% Main battery reload time"
+                  - "-5% Torpedo tube reload time"
+                  - "-5% Aircraft preparation time"
+                  - "HP regeneration: restores 0.042% of max HP per second for 120 s, 5.004% of max HP in total"
+              - activation: 2
+                condition: Activates upon destroying 5 ships.
+                effects:
+                  - "-10% Main battery reload time"
+                  - "-10% Torpedo tube reload time"
+                  - "-10% Aircraft preparation time"
+                  - "HP regeneration: restores 0.083% of max HP per second for 120 s, 9.996% of max HP in total"
+              - activation: 3
+                condition: Activates upon destroying 7 ships.
+                effects:
+                  - "-15% Main battery reload time"
+                  - "-15% Torpedo tube reload time"
+                  - "-15% Aircraft preparation time"
+                  - "HP regeneration: restores 0.125% of max HP per second for 120 s, 15% of max HP in total"
+talent_restrictions: Unavailable in Clan and Training Battles.

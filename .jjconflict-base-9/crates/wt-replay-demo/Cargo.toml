@@ -1,0 +1,31 @@
+[package]
+name = "wt-replay-demo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "WASM replay playback demo for the WoWs Toolkit website"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wows_minimap_renderer = { workspace = true, default-features = false, features = ["track-file"] }
+wows_replays = { workspace = true, default-features = false }
+png = "0.18"
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wt-collab-egui = { workspace = true }
+wt-translations = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
+wgpu = { workspace = true, features = ["webgl"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location", "Document", "Element", "HtmlElement", "Node", "HtmlCanvasElement", "Response", "console"] }
+js-sys = "0.3"
+# wt-collab-egui reaches iroh through wt-collab-protocol, and its random and
+# crypto dependencies need their browser backends on wasm32.
+getrandom = { version = "0.4", features = ["wasm_js"] }
+ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }

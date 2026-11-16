@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output.conclusion
+---
+"At 12 km, a 39.2% longer main battery range (20.61 km to 28.69 km with Spotting Aircraft + Gun Fire Control System Modification 2) shrinks vertical dispersion from 93 m to 81.2 m; horizontal is unchanged at 180 m. With sigma 1.8, half of the shells land within 35.3% of the ellipse (63.5 m by 32.8 m) and 66.8% within its inner half; a higher sigma packs more shells toward the aim point. Aiming Systems Modification 1 narrows both: horizontal 180 m to 167.4 m, vertical 93 m to 86.5 m."

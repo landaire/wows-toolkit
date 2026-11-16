@@ -1,0 +1,29 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 799
+expression: resolved
+---
+- IFA -> Incoming Fire Alert
+- IFHE -> Inertia Fuse for HE Shells
+- CE -> Concealment Expert
+- "SE -> error: Survivability Expert (SE) is not in the battleship skill tree (Vermont); it is in the destroyer, cruiser and aircraft carrier trees"
+- AR -> Adrenaline Rush
+- "BFT -> error: Main Battery and AA Specialist (BFT) is not in the battleship skill tree (Vermont); it is in the destroyer tree"
+- "AFT -> error: Main Battery and AA Expert (AFT) is not in the battleship skill tree (Vermont); it is in the destroyer tree"
+- FP -> Fire Prevention Expert
+- FPE -> Fire Prevention Expert
+- PM -> Preventive Maintenance
+- PT -> Priority Target
+- DE -> Demolition Expert
+- CQC -> Close Quarters Combat
+- MSBA -> Manual Secondary Battery Aiming
+- MFCSA -> Manual Secondary Battery Aiming
+- "SI -> error: Superintendent (SI) is not in the battleship skill tree (Vermont); it is in the destroyer, cruiser and submarine trees"
+- BoS -> Basics of Survivability
+- "RL -> error: Radio Location (RL) is not in the battleship skill tree (Vermont); it is in the destroyer and cruiser trees"
+- "RPF -> error: Radio Location (RPF) is not in the battleship skill tree (Vermont); it is in the destroyer and cruiser trees"
+- "LS -> error: Last Stand (LS) is not in the battleship skill tree (Vermont); it is in the destroyer, cruiser and submarine trees"
+- GtG -> Grease the Gears
+- SHAP -> Super-Heavy AP Shells
+- "EM -> error: \"EM\" matches several captain skills: Emergency Repair Expert, Emergency Repair Specialist; ask again with the exact name"
+- "PA -> error: \"PA\" matches several captain skills: Pack a Punch, Patrol Group Leader; ask again with the exact name"

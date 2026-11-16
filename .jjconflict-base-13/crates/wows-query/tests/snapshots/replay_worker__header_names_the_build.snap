@@ -1,0 +1,15 @@
+---
+source: crates/wows-query/tests/replay_worker.rs
+expression: header
+---
+version:
+  major: 15
+  minor: 4
+  patch: 0
+  build: 12506899
+client_version: "15,4,0,12506899"
+player: Alpine_Mustache
+player_ship: PASD008-Benson-1945
+map: spaces/52_Britain
+game_type: RandomBattle
+date_time: "04.06.2026 17:23:36"

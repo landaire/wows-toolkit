@@ -1,0 +1,52 @@
+# cargo-about configuration for scripts/update_third_party_notices.nu.
+
+# In priority order: a crate offered under a choice of licenses is distributed
+# under the first one listed here. No copyleft license is accepted, so a crate
+# offered only under one fails the generator instead of entering the notices.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "0BSD",
+    "MIT-0",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "MPL-2.0",
+]
+
+# The desktop release platforms. A root in notices.toml can name its own.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+ignore-dev-dependencies = true
+
+# clearlydefined.io answers differently over time, which would make the output
+# depend on when it was generated. Only the crate sources are read.
+no-clearly-defined = true
+
+# Unpublished workspace members are first-party; LICENSE covers them.
+private = { ignore = true }
+
+# Built-in clarifications for crates that package their licenses in a form
+# askalono cannot read. Each applies only when the crate is in the graph.
+workarounds = [
+    "bitvec",
+    "chrono",
+    "cocoa",
+    "ring",
+    "rustix",
+    "rustls",
+    "wasmtime",
+]

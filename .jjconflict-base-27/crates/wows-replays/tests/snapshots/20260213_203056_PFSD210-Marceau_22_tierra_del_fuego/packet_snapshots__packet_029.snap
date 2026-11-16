@@ -1,0 +1,106 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 8
+payload:
+  MinimapUpdate:
+    arg1: []
+    updates:
+      - disappearing: false
+        entity_id: 1214209
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.8984375
+          y: 0.859375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214213
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.931640625
+          y: 0.818359375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214219
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 1.05859375
+          y: 0.73828125
+        unknown: false
+      - disappearing: false
+        entity_id: 1214223
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.40234375
+          y: 0.939453125
+        unknown: false
+      - disappearing: false
+        entity_id: 1214225
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.01953125
+          y: 0.818359375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214227
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.083984375
+          y: 0.8984375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214229
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.05078125
+          y: 0.859375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214231
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.40234375
+          y: 0.859375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214189
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.5
+          y: 0.8984375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214191
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.01953125
+          y: 0.73828125
+        unknown: false
+      - disappearing: false
+        entity_id: 1214193
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.466796875
+          y: 0.859375
+        unknown: false
+      - disappearing: false
+        entity_id: 1214201
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.931640625
+          y: 0.8984375
+        unknown: false

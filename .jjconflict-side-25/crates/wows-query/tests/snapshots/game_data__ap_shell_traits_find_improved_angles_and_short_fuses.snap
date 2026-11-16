@@ -1,0 +1,155 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 776
+expression: "json!({\n    \"standards\": improved[\"standards\"], \"fuse_threshold_caliber_ratio\":\n    improved[\"fuse_threshold_caliber_ratio\"], \"improved_ricochet\":\n    {\n        \"considered\": improved[\"considered\"], \"qualifying\":\n        improved[\"qualifying\"], \"ships\": improved_rows,\n    }, \"short_fuse\":\n    {\n        \"considered\": short[\"considered\"], \"qualifying\": short[\"qualifying\"],\n        \"omitted\": short[\"omitted\"], \"ships\": short_rows,\n    }, \"slightly_short_fuse\":\n    {\n        \"qualifying\": slightly_short[\"qualifying\"], \"omitted\":\n        slightly_short[\"omitted\"],\n    },\n})"
+---
+standards:
+  - class: destroyer
+    ricochet:
+      from_deg: 45
+      always_from_deg: 60
+    fuse_time_s: 0.01
+    shells: 138
+  - class: cruiser
+    ricochet:
+      from_deg: 45
+      always_from_deg: 60
+    fuse_time_s: 0.033
+    shells: 238
+  - class: battleship
+    ricochet:
+      from_deg: 45
+      always_from_deg: 60
+    fuse_time_s: 0.033
+    shells: 193
+  - class: submarine
+    ricochet:
+      from_deg: 45
+      always_from_deg: 60
+    fuse_time_s: 0.033
+    shells: 1
+fuse_threshold_caliber_ratio: 6
+improved_ricochet:
+  considered:
+    total: 145
+    by_class:
+      cruiser: 145
+  qualifying:
+    total: 42
+    by_class:
+      cruiser: 42
+  ships:
+    - "T10 Gibraltar (cruiser, United_Kingdom, premium): 234 mm AP 6 CRH, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T10 Minotaur (cruiser, United_Kingdom): 152 mm AP Mk V, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T10 Plymouth (cruiser, United_Kingdom, premium): 152 mm AP 6crh Mk IV, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T10 San Martín (cruiser, Pan_America): 152 mm AP 130 lb Mk35, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T9 Aberdeen (cruiser, United_Kingdom, premium): 152 mm AP 6crh Mk IV, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T9 Neptune (cruiser, United_Kingdom): 152 mm AP Mk V, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T9 Santander (cruiser, Pan_America): 152 mm AP 130 lb Mk35, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T8 Edinburgh (cruiser, United_Kingdom): 152 mm AP 6crh Mk IV, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T8 Hampshire (cruiser, United_Kingdom, premium): 203 mm AP 256 lb, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T8 I. Allende (cruiser, Pan_America): 152 mm AP 130 lb Mk35, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T8 Tiger '59 (cruiser, United_Kingdom, premium): 152 mm AP Mk V, ricochets from 60 deg, always at 75 deg; cruiser standard 45 / 60 deg"
+    - "T10 Defence (cruiser, United_Kingdom, premium): 356 mm AP Mk VIIb, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T10 Des Moines (cruiser, USA): 203 mm AP Mk21, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T10 Incheon (cruiser, Pan_Asia, premium): 203 mm AP Mk21 mod. 1, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T10 Monmouth (cruiser, United_Kingdom, premium): 234 mm AP 6 CRH, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T10 Puerto Rico (cruiser, USA, premium): 305 mm AP Mk18 mod. 1, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T10 Salem (cruiser, USA, premium): 203 mm AP Mk21, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T9 Alaska (cruiser, USA, premium): 305 mm AP Mk18 mod. 1, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T9 Buffalo (cruiser, USA): 203 mm AP Mk21, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T9 Cambridge (cruiser, USA, premium): 305 mm AP Mk18 mod. 1, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T9 Fort Worth (cruiser, USA, premium): 254 mm AP Mk1, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T9 Tulsa (cruiser, USA, premium): 203 mm AP Mk21, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T8 Anchorage (cruiser, USA, premium): 203 mm AP Mk19, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T8 Baltimore (cruiser, USA): 203 mm AP Mk21, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T8 Bridgeport (cruiser, USA, premium): 203 mm AP Mk22, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T8 Congress (cruiser, USA, premium): 305 mm AP Mk18 mod. 1, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T8 Rochester (cruiser, USA, premium): 203 mm AP Mk21, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T8 Wichita (cruiser, USA, premium): 203 mm AP Mk19, ricochets from 60 deg, always at 67.5 deg; cruiser standard 45 / 60 deg"
+    - "T10 Stalingrad (cruiser, Russia, premium): 305 mm AP Model 1928, ricochets from 55 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T9 Blücher (cruiser, Germany, premium): 203 mm P.Spr.Gr. L/4.4 Vers., ricochets from 55 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T8 P. Bagration (cruiser, Russia, premium): AP-32, ricochets from 55 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T8 Prinz Eugen (cruiser, Germany, premium): 203 mm P.Spr.Gr. L/4.4, ricochets from 55 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T10 Komissar (cruiser, Russia, premium): 240 mm AP Model 1944, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T10 Petropavlovsk (cruiser, Russia): 220 mm AP Model 1944, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T10 Sevastopol (cruiser, Russia, premium): 380 mm AP Model 1939, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T9 Baotou (cruiser, Pan_Asia, premium): AP-32, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T9 Riga (cruiser, Russia): 220 mm AP Model 1943, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T9 Tianjin (cruiser, Pan_Asia, premium): 220 mm AP Model 1944, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T8 C. Aguirre (cruiser, Pan_America, premium): 203 mm P.Spr.Gr. L/4.6, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T8 D. Pozharsky (cruiser, Russia, premium): B-36, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T8 Tallinn (cruiser, Russia): AP-33, ricochets from 50 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+    - "T8 Cheshire (cruiser, United_Kingdom, premium): 234 mm AP 6 CRH, ricochets from 45 deg, always at 65 deg; cruiser standard 45 / 60 deg"
+short_fuse:
+  considered:
+    total: 353
+    by_class:
+      destroyer: 92
+      cruiser: 145
+      battleship: 115
+      submarine: 1
+  qualifying:
+    total: 99
+    by_class:
+      destroyer: 74
+      cruiser: 25
+  omitted: 49
+  ships:
+    - "T10 Druid (destroyer, United_Kingdom, premium): 127 mm AP 58 lb Mk N2, fuse 0.005 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Gibraltar (cruiser, United_Kingdom, premium): 234 mm AP 6 CRH, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Minotaur (cruiser, United_Kingdom): 152 mm AP Mk V, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Plymouth (cruiser, United_Kingdom, premium): 152 mm AP 6crh Mk IV, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T9 Aberdeen (cruiser, United_Kingdom, premium): 152 mm AP 6crh Mk IV, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T9 Neptune (cruiser, United_Kingdom): 152 mm AP Mk V, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T8 Edinburgh (cruiser, United_Kingdom): 152 mm AP 6crh Mk IV, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T8 Hampshire (cruiser, United_Kingdom, premium): 203 mm AP 256 lb, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T8 Tiger '59 (cruiser, United_Kingdom, premium): 152 mm AP Mk V, fuse 0.005 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 20 de Julio (destroyer, Pan_America): 120 mm AP M1950, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Cassard (destroyer, France): 127 mm AP Mark 43, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Châteaurenault (destroyer, France, premium): 105 mm P.Spr.Gr., fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Daring (destroyer, United_Kingdom): 113 mm SAP 55 lb, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Delny (destroyer, Russia): SAP-42, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Fuyutsuki (destroyer, Japan, premium): 100 mm AP Type 98, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Gearing (destroyer, USA): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Grozovoi (destroyer, Russia): SAP-42, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Halland (destroyer, Europe): 120 mm AP M1950, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Harugumo (destroyer, Japan): 100 mm AP Type99, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Hawaii (cruiser, USA, premium): 127 mm AP Mk.38, fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Hayate (destroyer, Japan, premium): 127 mm AP Type0, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Jinan (cruiser, Pan_Asia): 127 mm AP/SC Mk38 Mod 2, fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Khabarovsk (destroyer, Russia, premium): SAP-46, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 La Pampa (destroyer, Pan_America, premium): 113 mm SAP 55 lb, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Laffey (destroyer, USA, premium): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Lüshun (destroyer, Pan_Asia, premium): SAP-42, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Shimakaze (destroyer, Japan): 127 mm AP Type0, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Smolensk (cruiser, Russia, premium): SAP-42, fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Småland (destroyer, Europe, premium): 120 mm AP M1950, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Somers (destroyer, USA, premium): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Taejong (cruiser, Pan_Asia, premium): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Utrecht (cruiser, Netherlands): 128 mm P.Spr.Gr., fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T10 Vampire II (destroyer, Commonwealth, premium): 113 mm SAP 55 lb, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Yueyang (destroyer, Pan_Asia): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Z-42 (destroyer, Germany, premium): 105 mm P.Spr.Gr., fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Z-52 (destroyer, Germany): 128 mm P.Spr.Gr. Ausf.B, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T10 Álvaro de Bazán (destroyer, Spain, premium): 135 mm obús perforante AP 1938 it, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Barfleur (destroyer, United_Kingdom, premium): 113 mm SAP 55 lb, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Benham (destroyer, USA, premium): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Black (destroyer, USA, premium): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Błyskawica '52 (destroyer, Europe, premium): 100 mm AP, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Cayuga (destroyer, Commonwealth, premium): 102 mm AP 35 lb, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Chung Mu (destroyer, Pan_Asia): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Dalian (cruiser, Pan_Asia, premium): 130 mm SAP-42, fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+    - "T9 Fletcher (destroyer, USA): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Friesland (destroyer, Europe, premium): 120 mm Pantserprojectiel M/50, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Halford (destroyer, USA, premium): 127 mm AP/SC Mk38, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Jutland (destroyer, United_Kingdom): 113 mm SAP 55 lb, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 Kitakaze (destroyer, Japan): 100 mm AP Type 98, fuse 0.01 s (short: below 0.015 s); destroyer standard 0.01 s"
+    - "T9 M. van Coehoorn (cruiser, Netherlands): 128 mm P.Spr.Gr., fuse 0.01 s (short: below 0.015 s); cruiser standard 0.033 s"
+slightly_short_fuse:
+  qualifying:
+    total: 49
+    by_class:
+      cruiser: 39
+      battleship: 10
+  omitted: ~

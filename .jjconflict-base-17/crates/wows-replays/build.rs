@@ -1,0 +1,185 @@
+//! Detects available game data builds and emits cfg flags for conditional test compilation.
+//!
+//! Emits:
+//! - `has_game_data` — at least one build is available
+//! - `has_build_NNNNN` — specific build number is available
+//!
+//! Tests can use:
+//! ```ignore
+//! #[test]
+//! #[cfg_attr(not(has_game_data), ignore)]
+//! fn test_needs_game_data() { ... }
+//! ```
+
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::path::PathBuf;
+
+#[derive(Deserialize, Default)]
+struct Registry {
+    latest_path: Option<PathBuf>,
+    #[serde(default)]
+    builds: BTreeMap<String, RegistryEntry>,
+}
+
+#[derive(Deserialize)]
+struct RegistryEntry {
+    #[allow(dead_code)]
+    version: String,
+}
+
+struct GameDataSource {
+    registry_path: PathBuf,
+    data_dir: PathBuf,
+    scan_data_directories: bool,
+}
+
+fn find_workspace_root() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
+    let mut dir = manifest_dir.as_path();
+    loop {
+        if dir.join("game_versions.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+fn game_data_source() -> Option<GameDataSource> {
+    if let Some(path) = std::env::var_os("WOWS_GAME_DATA") {
+        let path = PathBuf::from(path);
+        let registry_path = if path.file_name().is_some_and(|name| name == "versions.toml") {
+            path.clone()
+        } else {
+            path.join("versions.toml")
+        };
+        let data_dir = registry_path.parent()?.to_path_buf();
+        return Some(GameDataSource {
+            registry_path,
+            data_dir,
+            scan_data_directories: std::env::var_os("WOWS_HERMETIC_BUILD").is_none(),
+        });
+    }
+
+    let data_dir = find_workspace_root()?.join("game_data");
+    Some(GameDataSource { registry_path: data_dir.join("versions.toml"), data_dir, scan_data_directories: true })
+}
+
+fn scan_bin_dir(path: &Path) -> Vec<u32> {
+    let bin_dir = path.join("bin");
+    let Ok(entries) = std::fs::read_dir(&bin_dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()))
+        .collect()
+}
+
+fn discover_builds(source: &GameDataSource) -> Vec<u32> {
+    let registry: Registry =
+        std::fs::read_to_string(&source.registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+
+    let mut builds: Vec<u32> = Vec::new();
+
+    if source.scan_data_directories {
+        // Builds from registry
+        for key in registry.builds.keys() {
+            if let Ok(build) = key.parse::<u32>() {
+                // For downloaded builds, verify the directory exists
+                let build_dir = source.data_dir.join("builds").join(key);
+                if build_dir.exists() {
+                    builds.push(build);
+                }
+            }
+        }
+
+        // Builds from latest_path
+        if let Some(ref latest) = registry.latest_path {
+            for build in scan_bin_dir(latest) {
+                if !builds.contains(&build) {
+                    builds.push(build);
+                }
+            }
+        }
+
+        // Also scan game_data/builds/ for any unregistered builds
+        let builds_dir = source.data_dir.join("builds");
+        if builds_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&builds_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && let Some(build) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok())
+                    && !builds.contains(&build)
+                {
+                    builds.push(build);
+                }
+            }
+        }
+    }
+
+    builds.sort();
+    builds
+}
+
+/// Build numbers referenced by tests that may not be locally available.
+/// Declared here so check-cfg doesn't warn about unknown cfgs.
+const KNOWN_TEST_BUILDS: &[u32] = &[
+    297724,   // v0.6.13
+    303746,   // v0.6.14
+    329111,   // v0.7.3
+    344738,   // v0.7.5
+    1427460,  // v0.8.2
+    1631917,  // v0.8.5
+    2171354,  // v0.9.0
+    3343484,  // v0.10.0
+    4046169,  // v0.10.5
+    5045210,  // v0.11.0
+    6359964,  // v0.11.9
+    6965290,  // v12.3 (S-189 submarine replay)
+    7266701,  // v12.6
+    8151735,  // v13.2 (Annapolis replay)
+    8260685,  // v13.3
+    9129736,  // v13.10 (Colbert replay)
+    9531281,  // v14.1 (Hull DD replay)
+    9643943,  // v14.2 (Oland replay)
+    10695045, // v14.9 (Ocean CV event replay)
+    11791718, // v15.0 (Forrest Sherman replay)
+    11965230, // v15.1 (Vermont, Marceau, Narai replays)
+];
+
+fn main() {
+    // Declare all possible cfgs to satisfy check-cfg
+    println!("cargo:rustc-check-cfg=cfg(has_game_data)");
+
+    // Pre-declare check-cfg for all known test builds
+    for &build in KNOWN_TEST_BUILDS {
+        println!("cargo:rustc-check-cfg=cfg(has_build_{build})");
+    }
+
+    let Some(source) = game_data_source() else {
+        return;
+    };
+
+    let builds = discover_builds(&source);
+
+    for &build in &builds {
+        // Declare check-cfg for any discovered build not in the known list
+        if !KNOWN_TEST_BUILDS.contains(&build) {
+            println!("cargo:rustc-check-cfg=cfg(has_build_{build})");
+        }
+        println!("cargo:rustc-cfg=has_build_{build}");
+    }
+
+    if !builds.is_empty() {
+        println!("cargo:rustc-cfg=has_game_data");
+    }
+
+    // Re-run if registry changes
+    println!("cargo:rerun-if-changed={}", source.registry_path.display());
+    println!("cargo:rerun-if-env-changed=WOWS_GAME_DATA");
+    println!("cargo:rerun-if-env-changed=WOWS_HERMETIC_BUILD");
+}

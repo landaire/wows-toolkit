@@ -1,0 +1,113 @@
+[package]
+name = "wows_minimap_renderer"
+version = "0.41.0"
+publish = true
+description = """
+Library/CLI application for rendering World of Warships replay files as a minimap render
+""""
+repository = "https://github.com/landaire/wows-toolkit"
+# Draw-command parity snapshots need a replay corpus and a real game install.
+exclude = ["BUCK", "tests/"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "wows_minimap_renderer"
+
+[[bin]]
+name = "minimap_renderer"
+path = "src/main.rs"
+required-features = ["bin"]
+
+[features]
+default = ["bin", "vulkan", "videotoolbox", "cpu", "cpu-av1", "cpu-av1-asm", "arc"]
+rendering = [
+    "dep:image",
+    "dep:ab_glyph",
+    "dep:muxide",
+    "dep:convert_case",
+    "dep:roxmltree",
+    "dep:resvg",
+    "dep:tiny-skia",
+    "dep:rootcause",
+    "dep:wows-replay-insights",
+    "dep:wows-battle-world",
+    "wows_replays/parsing",
+    "wows_replays/vfs",
+    "wowsunpack/json",
+    "wowsunpack/vfs-mmap",
+    "wowsunpack/parsing",
+]
+bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
+rkyv = ["dep:rkyv", "wows-core/rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
+# The single-file clip format a viewer with no game install plays.
+track-file = ["rkyv", "dep:flate2", "dep:thiserror"]
+vulkan = ["dep:gpu-video", "dep:yuvutils-rs", "rendering"]
+videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
+cpu = ["dep:openh264", "rendering"]
+cpu-av1 = ["dep:rav1e", "dep:yuvutils-rs", "rendering"]
+# Opt in to rav1e's hand-tuned x86 SIMD (~3x faster). Requires NASM at build time.
+cpu-av1-asm = ["cpu-av1", "rav1e/asm"]
+arc = ["wows_replays/arc", "wows-replay-insights?/arc"]
+vfs = ["wows-battle-world?/vfs", "wows_replays/vfs", "wowsunpack/vfs-mmap"]
+
+[dependencies]
+wows_replays = { workspace = true, default-features = false }
+wows-core = { workspace = true }
+wowsunpack = { workspace = true, default-features = false }
+wows-replay-insights = { workspace = true, optional = true, features = ["build"] }
+wows-battle-world = { workspace = true, optional = true }
+wt-translations = { workspace = true }
+image = { workspace = true, features = ["png", "jpeg"], optional = true }
+ab_glyph = { version = "0.2", optional = true }
+clap = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
+convert_case = { workspace = true, optional = true }
+gettext = { workspace = true, optional = true }
+roxmltree = { workspace = true, optional = true }
+resvg = { version = "0.47", optional = true }
+tiny-skia = { version = "0.12", optional = true }
+indicatif = { workspace = true, optional = true }
+rootcause = { workspace = true, optional = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+rkyv = { workspace = true, optional = true }
+wows-data-mgr = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+yuvutils-rs = { version = "0.8", optional = true }
+
+openh264 = { version = "0.9", features = ["source"], optional = true }
+rav1e = { version = "0.8.1", default-features = false, features = ["threading"], optional = true }
+muxide = { version = "0.2.5", optional = true }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# The encoder uploads CPU frames, so gpu-video's wgpu interop stays off and its
+# wgpu version does not constrain the workspace's.
+gpu-video = { version = "0.4.0", default-features = false, optional = true }
+
+# VideoToolbox encoder (macOS only)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true }
+objc2-core-foundation = { version = "0.3", optional = true }
+objc2-core-media = { version = "0.3", optional = true }
+objc2-core-video = { version = "0.3", optional = true }
+objc2-video-toolbox = { version = "0.3", optional = true }
+
+[dev-dependencies]
+# The saved-options tests read a stored row. The library needs serde_json only
+# under `bin`, so it stays optional there and unconditional here.
+serde_json = { workspace = true }
+wows-data-mgr = { workspace = true }
+wows-battle-world = { workspace = true, features = ["vfs"] }
+wows-replay-insights = { workspace = true, features = ["build"] }
+insta = { workspace = true }
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }

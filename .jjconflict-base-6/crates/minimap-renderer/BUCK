@@ -1,0 +1,153 @@
+load("//build-support/buck:workspace_rules.bzl", "os_select", "wasm_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "minimap-renderer-buildscript",
+    crate = "wows_minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
+)
+
+MINIMAP_CPU_DEPS = [
+    "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-core:wows_core",
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:ab_glyph",
+    "//third-party/rust:clap",
+    "//third-party/rust:convert_case",
+    "//third-party/rust:flate2",
+    "//third-party/rust:gettext",
+    "//third-party/rust:image",
+    "//third-party/rust:indicatif",
+    "//third-party/rust:muxide",
+    "//third-party/rust:openh264",
+    "//third-party/rust:rav1e",
+    "//third-party/rust:resvg",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:roxmltree",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tiny-skia",
+    "//third-party/rust:toml",
+    "//third-party/rust:tracing",
+    "//third-party/rust:tracing-subscriber",
+    "//third-party/rust:yuvutils-rs",
+]
+
+MINIMAP_DEPS = MINIMAP_CPU_DEPS + os_select(
+    # VideoToolbox on macOS, Vulkan Video GPU encode everywhere else, matching
+    # the cfg-gated dependency sections of Cargo.toml.
+    macos = [
+        "//third-party/rust:objc2",
+        "//third-party/rust:objc2-core-foundation",
+        "//third-party/rust:objc2-core-media",
+        "//third-party/rust:objc2-core-video",
+        "//third-party/rust:objc2-foundation",
+        "//third-party/rust:objc2-video-toolbox",
+    ],
+    linux = [
+        "//third-party/rust:gpu-video",
+    ],
+    windows = [
+        "//third-party/rust:gpu-video",
+    ],
+)
+
+# The CPU encoders (openh264, rav1e) are always compiled in; the os_select
+# adds hardware encode on top. The _cpu variant below is exactly this list
+# without it.
+MINIMAP_CPU_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv", "track-file"]
+
+MINIMAP_FEATURES = MINIMAP_CPU_FEATURES + os_select(
+    macos = ["videotoolbox"],
+    linux = ["vulkan"],
+    windows = ["vulkan"],
+)
+
+# What Cargo resolves for wt-web: the replay data types, no rendering.
+MINIMAP_WASM_DEPS = [
+    "//crates/wows-core:wows_core",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:flate2",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
+workspace_library(
+    name = "wows_minimap_renderer",
+    crate = "wows_minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    features = wasm_select(wasm = ["rkyv", "track-file"], native = MINIMAP_FEATURES),
+    deps = wasm_select(wasm = MINIMAP_WASM_DEPS, native = MINIMAP_DEPS),
+    buildscript = buildscript,
+)
+
+workspace_binary(
+    name = "minimap_renderer_bin",
+    crate = "minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    crate_root = "src/main.rs",
+    features = MINIMAP_FEATURES,
+    deps = [":wows_minimap_renderer"] + MINIMAP_DEPS,
+)
+
+# Ships alongside the default binary for hosts with no usable GPU encoder.
+# It needs its own library: the default one is compiled with vulkan, and the
+# feature is what gates the gpu-video code path. Both carry the same
+# crate name, so main.rs resolves `wows_minimap_renderer` either way.
+workspace_library(
+    name = "wows_minimap_renderer_cpu",
+    crate = "wows_minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    features = MINIMAP_CPU_FEATURES,
+    deps = MINIMAP_CPU_DEPS,
+    buildscript = buildscript,
+)
+
+# The crate name is what the prelude uses for the output filename, so it is
+# what makes this land in the release zip as minimap_renderer_cpu.
+workspace_binary(
+    name = "minimap_renderer_cpu_bin",
+    crate = "minimap_renderer_cpu",
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    crate_root = "src/main.rs",
+    features = MINIMAP_CPU_FEATURES,
+    deps = [":wows_minimap_renderer_cpu"] + MINIMAP_CPU_DEPS,
+)
+
+MINIMAP_TEST_DEPS = ["//third-party/rust:insta"]
+
+workspace_test(
+    name = "wows_minimap_renderer_test",
+    crate = "wows_minimap_renderer",
+    crate_root = "src/lib.rs",
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    features = MINIMAP_FEATURES,
+    deps = MINIMAP_DEPS,
+    test_deps = MINIMAP_TEST_DEPS,
+    buildscript = buildscript,
+)
+
+workspace_integration_tests(
+    package = "wows_minimap_renderer",
+    version = "0.41.0",
+    library = ":wows_minimap_renderer",
+    features = MINIMAP_FEATURES,
+    deps = MINIMAP_DEPS,
+    test_deps = MINIMAP_TEST_DEPS,
+)

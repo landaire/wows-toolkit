@@ -1,0 +1,3 @@
+# Keeps where each store field was defined, as reactive_graph does, so a
+# disposed-field panic in a release build names the definition and the access.
+rustc_flags = ["--cfg=leptos_debuginfo"]

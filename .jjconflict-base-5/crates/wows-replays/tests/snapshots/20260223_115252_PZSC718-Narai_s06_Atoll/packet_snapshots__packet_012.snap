@@ -1,0 +1,88 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 8
+payload:
+  MinimapUpdate:
+    arg1:
+      - packedData: 929455148
+        vehicleID: 433424
+      - packedData: 57148331
+        vehicleID: 433425
+      - packedData: 1021666303
+        vehicleID: 433426
+      - packedData: 526996443
+        vehicleID: 433427
+      - packedData: 333982637
+        vehicleID: 433428
+      - packedData: 791186475
+        vehicleID: 433429
+      - packedData: 145052623
+        vehicleID: 433430
+    updates:
+      - disappearing: false
+        entity_id: 433440
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.427734375
+          y: 0.828125
+        unknown: false
+      - disappearing: false
+        entity_id: 433442
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.48046875
+          y: 0.828125
+        unknown: false
+      - disappearing: false
+        entity_id: 433444
+        heading: -14.0625
+        is_sentinel: false
+        position:
+          x: 1.0703125
+          y: 0.095703125
+        unknown: false
+      - disappearing: false
+        entity_id: 433452
+        heading: 109.6875
+        is_sentinel: false
+        position:
+          x: 0.3671875
+          y: 1.00390625
+        unknown: false
+      - disappearing: false
+        entity_id: 433432
+        heading: 178.59375
+        is_sentinel: false
+        position:
+          x: 0.455078125
+          y: 0.810546875
+        unknown: false
+      - disappearing: false
+        entity_id: 433434
+        heading: -14.0625
+        is_sentinel: false
+        position:
+          x: 1.03125
+          y: 0.125
+        unknown: false
+      - disappearing: false
+        entity_id: 433436
+        heading: -14.0625
+        is_sentinel: false
+        position:
+          x: 1.0625
+          y: 0.130859375
+        unknown: false
+      - disappearing: false
+        entity_id: 433438
+        heading: -14.0625
+        is_sentinel: false
+        position:
+          x: 1.04296875
+          y: 0.14453125
+        unknown: false

@@ -1,0 +1,20 @@
+load(":defs.bzl", "constraint_transition")
+
+# Selects the test-support features of the gpui crates (see their fixups). Only
+# a test target reaches it, through `transition`.
+constraint_setting(
+    name = "test_support",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "enabled",
+    constraint_setting = ":test_support",
+    visibility = ["PUBLIC"],
+)
+
+constraint_transition(
+    name = "transition",
+    constraint_value = ":enabled",
+    visibility = ["PUBLIC"],
+)

@@ -1,0 +1,59 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 640
+expression: rankings
+---
+- stat: asw.best_damage_per_attack
+  order: asc
+  ranked: 153
+  ships:
+    - "T10 Audacious (aircraft_carrier, United_Kingdom) 4900 hp (depth charge air strike)"
+    - "T10 Essex (aircraft_carrier, USA) [replicas: Piñatapolis] 4900 hp (depth charge air strike)"
+    - "T10 F. D. Roosevelt (aircraft_carrier, USA, premium) 4900 hp (depth charge air strike)"
+    - "T10 Hakuryū (aircraft_carrier, Japan) 4900 hp (depth charge air strike)"
+    - "T10 Independencia (aircraft_carrier, Pan_America, premium) 4900 hp (depth charge air strike)"
+- stat: asw.best_damage_per_attack
+  order: desc
+  ranked: 153
+  ships:
+    - "T10 Burrows (destroyer, USA) 81600 hp (ship-mounted depth charges)"
+    - "T10 Châteaurenault (destroyer, France, premium) 81600 hp (ship-mounted depth charges)"
+    - "T10 F. Sherman (destroyer, USA, premium) 81600 hp (ship-mounted depth charges)"
+    - "T10 Daring (destroyer, United_Kingdom) 80000 hp (ship-mounted depth charges)"
+    - "T10 Shimakaze (destroyer, Japan) [replicas: AL Shimakaze] 73600 hp (ship-mounted depth charges)"
+- stat: asw.depth_charge.splash_radius
+  order: asc
+  ranked: 54
+  ships:
+    - "T10 20 de Julio (destroyer, Pan_America) 26.67 m (ship-mounted depth charges)"
+    - "T10 A. Nevsky (cruiser, Russia) 26.67 m (ship-mounted depth charges)"
+    - "T10 A. Regolo (destroyer, Italy) 26.67 m (ship-mounted depth charges)"
+    - "T10 A. da Barbiano (destroyer, Italy, premium) 26.67 m (ship-mounted depth charges)"
+    - "T10 Austin (cruiser, USA, premium) 26.67 m (ship-mounted depth charges)"
+- stat: asw.depth_charge.splash_radius
+  order: desc
+  ranked: 54
+  ships:
+    - "T10 20 de Julio (destroyer, Pan_America) 26.67 m (ship-mounted depth charges)"
+    - "T10 A. Nevsky (cruiser, Russia) 26.67 m (ship-mounted depth charges)"
+    - "T10 A. Regolo (destroyer, Italy) 26.67 m (ship-mounted depth charges)"
+    - "T10 A. da Barbiano (destroyer, Italy, premium) 26.67 m (ship-mounted depth charges)"
+    - "T10 Austin (cruiser, USA, premium) 26.67 m (ship-mounted depth charges)"
+- stat: asw.airstrike.splash_radius
+  order: asc
+  ranked: 99
+  ships:
+    - "T10 Cerberus (cruiser, Commonwealth) 10 m (depth charge air strike)"
+    - "T10 Pioneer (cruiser, Commonwealth, premium) 10 m (depth charge air strike)"
+    - "T10 Aki (battleship, Japan, premium) [replicas: Aki G] 12.5 m (depth charge air strike)"
+    - "T10 Almte. Irízar (cruiser, Pan_America, premium) 12.5 m (depth charge air strike)"
+    - "T10 Amiral Lartigue (cruiser, France, premium) 12.5 m (depth charge air strike)"
+- stat: asw.airstrike.splash_radius
+  order: desc
+  ranked: 99
+  ships:
+    - "T10 Audacious (aircraft_carrier, United_Kingdom) 20 m (depth charge air strike)"
+    - "T10 Essex (aircraft_carrier, USA) [replicas: Piñatapolis] 20 m (depth charge air strike)"
+    - "T10 F. D. Roosevelt (aircraft_carrier, USA, premium) 20 m (depth charge air strike)"
+    - "T10 Hakuryū (aircraft_carrier, Japan) 20 m (depth charge air strike)"
+    - "T10 Independencia (aircraft_carrier, Pan_America, premium) 20 m (depth charge air strike)"

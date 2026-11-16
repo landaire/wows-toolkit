@@ -1,0 +1,37 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: output
+---
+commander:
+  name: John Doe
+  nations:
+    - USA
+  improved_skills:
+    - name: Gun Feeder
+      classes:
+        - classes:
+            - destroyer
+            - cruiser
+            - battleship
+          points: 1
+          standard:
+            - "-40% Main battery shell type switching time"
+          improved:
+            - "-60% Main battery shell type switching time"
+    - name: Grease the Gears
+      classes:
+        - classes:
+            - destroyer
+            - cruiser
+          points: 1
+          standard:
+            - +15% Main battery traverse speed
+          improved:
+            - +20% Main battery traverse speed
+        - classes:
+            - battleship
+          points: 2
+          standard:
+            - +20% Main battery traverse speed
+          improved:
+            - +25% Main battery traverse speed

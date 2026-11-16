@@ -1,0 +1,243 @@
+name: Buck
+
+on:
+  push:
+    branches: [main, "ci/**"]
+  pull_request:
+  # A manual run checks everything.
+  workflow_dispatch:
+
+# Builds the public binaries through the native Buck graph and proves the graph
+# stays hermetic. Buck downloads crate sources itself, each checked against the
+# checksum Cargo.lock pins or fetched at its locked commit.
+#
+# Each run checks only the first-party targets whose code or dependencies differ
+# from the last successful run on main (ci/affected.nu). A change to the build
+# configuration, toolchains, or the checks themselves checks everything.
+
+permissions:
+  contents: read
+  # Finding the last successful run on main.
+  actions: read
+
+jobs:
+  select:
+    name: Select affected targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      - name: Select the affected targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            nix develop --command buck2 run //ci:affected -- --full --out affected.json
+            exit 0
+          fi
+          # No answer means no base, which checks everything.
+          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/buck.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""') || base=""
+          nix develop --command buck2 run //ci:affected -- --base "$base" --out affected.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: affected-targets
+          path: affected.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # The three phases overlap instead of adding their wall clock. Each starts from
+  # a cold buck-out, which is still cheaper in wall clock than a serial run.
+  linux:
+    name: Linux x86_64 (${{ matrix.phase }})
+    needs: select
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [checks, release, graph-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: affected-targets
+
+      # The wt-web site's release link runs ThinLTO over the whole wasm graph
+      # in one rustc, which outgrows the runner's 16 GB on its own.
+      - name: Expand runner swap
+        if: matrix.phase == 'release'
+        run: bash scripts/expand-runner-swap.sh 16
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      # Installs DotSlash and the Buck2 release toolchains/buck2 pins, then the
+      # toolchain. Every step after it is a buck2 command; the devShell puts
+      # bin/buck2 first on PATH, so the scripts behind //ci run the same Buck2.
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      - name: Build the affected aliases
+        if: matrix.phase == 'checks'
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 build $aliases
+
+      - name: Build the affected aliases in release mode
+        if: matrix.phase == 'release'
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 build -m release $aliases
+
+      - name: Check the action graph is hermetic
+        if: matrix.phase == 'checks'
+        run: |
+          if jq -e .full affected.json >/dev/null; then
+            nix develop --command buck2 run //ci:hermetic
+            exit 0
+          fi
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 run //ci:hermetic -- $aliases
+
+      # bxl/lint.bxl builds the [clippy.json] sub-target of every first-party
+      # rust target in one invocation, and lint.nu decides pass or fail from
+      # the diagnostics: the prelude builds them with infallible_diagnostics,
+      # so the action succeeds even when compilation does not.
+      - name: Lint
+        if: matrix.phase == 'checks'
+        run: |
+          lint=$(jq -r '.lint // empty' affected.json)
+          if [ -z "$lint" ]; then echo "No first-party Rust target is affected."; exit 0; fi
+          nix develop --command buck2 run //ci:lint -- --target "$lint"
+
+      # The crates' tests, and the checks over the repository's own pins and
+      # manifests.
+      - name: Test
+        if: matrix.phase == 'checks'
+        run: nix develop --command buck2 test $(jq -r '.tests | join(" ")' affected.json)
+
+      - name: Build-graph tests
+        if: matrix.phase == 'graph-tests'
+        run: |
+          if ! jq -e .graph_tests affected.json >/dev/null; then echo "No BUCK file or manifest changed."; exit 0; fi
+          nix develop --command buck2 run //ci:graph_tests
+
+  macos:
+    name: macOS arm64
+    needs: select
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: affected-targets
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      - name: Bootstrap Buck2 and the toolchain
+        run: ./bootstrap.sh
+
+      # One mode only: macOS runner minutes bill at a multiple of Linux, and the
+      # graph itself is already covered there in both modes. The wasm sites are
+      # host-independent, and the tactics site's release link needs more memory
+      # than this runner has, so only Linux builds them.
+      - name: Build the affected aliases
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command bash -euo pipefail -c '
+            targets=$(buck2 uquery "set($0) - root//:wt_web_site - root//:replay_demo_site")
+            if [ -z "$targets" ]; then echo "No alias is affected."; exit 0; fi
+            buck2 build -m release --target-platforms toolchains//platforms:macos_arm64 $targets
+          ' "$aliases"
+
+  windows:
+    name: Windows x86_64
+    needs: select
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: C:\w
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the offline Buck toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\bo
+          key: windows-buck-toolchain-${{ hashFiles('toolchains/windows/toolchain-manifest.json') }}
+
+      - name: Copy the checkout to a short path
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: affected-targets
+          path: C:\w
+
+      - name: Provision the Buck toolchain
+        shell: pwsh
+        run: |
+          try {
+            ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+          } catch {
+            $msg = (($_ | Out-String) -replace "`r?`n", " | ")
+            Write-Host "::error::PROVISION: $msg"
+            Get-ChildItem $env:TEMP -Filter *.log -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-25) } |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+                $tail = ((Get-Content $_.FullName -Tail 30) -join " | ")
+                if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
+                Write-Host "::error::$($_.Name): $tail"
+              }
+            exit 1
+          }
+
+      - name: Build the affected aliases
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
+          $aliases = @((Get-Content -Raw affected.json | ConvertFrom-Json).aliases)
+          if ($aliases.Count -eq 0) {
+            Write-Host "No alias is affected."
+            exit 0
+          }
+          $query = "set(" + ($aliases -join " ") + ") - root//:wt_web_site - root//:replay_demo_site"
+          $targets = @(& $buck2 uquery $query)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($targets.Count -eq 0) {
+            Write-Host "No Windows alias is affected."
+            exit 0
+          }
+          & $buck2 build -m release --target-platforms toolchains//windows:windows_x86_64_msvc @targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

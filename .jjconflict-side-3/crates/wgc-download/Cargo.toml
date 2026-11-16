@@ -1,0 +1,36 @@
+[package]
+name = "wgc-download"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Parses WG .torrent (bencode) manifests and downloads WGC-managed game builds over HTTP webseeds"
+
+[dependencies]
+thiserror = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Pure-Rust bencode decoder (no C deps); serde-backed, so the wire structs
+# below are plain #[derive(Deserialize)] structs like the rest of this repo's
+# XML/JSON parsers.
+serde_bencode = "0.2"
+# Lets bencode byte-string fields (pieces, the WG per-file sha1 extension)
+# deserialize as raw Vec<u8> instead of requiring valid UTF-8.
+serde_bytes = "0.11"
+data-encoding = { workspace = true }
+# TLS features mirror crates/wows-toolkit/Cargo.toml's reqwest line: rustls
+# with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
+# "stream" enables Response::bytes_stream() for the webseed downloader.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "gzip"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs"] }
+sha1 = "0.10"
+futures = "0.3"
+hex = "0.4"
+# Pure-Rust 7z extractor (no C deps, buck-friendly). Decoding-only: WG's
+# .dspkg archives are never written by this crate, and LZMA/LZMA2/BCJ
+# codecs (what WG uses) decode with no extra feature flags.
+sevenz-rust2 = { version = "0.21", default-features = false }
+
+[dev-dependencies]
+# "compress" is dev-only: the path-traversal test builds a malicious 7z
+# fixture in-process to prove unpack_dspkg rejects it.
+sevenz-rust2 = { version = "0.21", default-features = false, features = ["compress"] }

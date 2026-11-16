@@ -1,0 +1,9 @@
+# winapi's build script emits the cfgs for every module a requested feature
+# depends on, and the import libraries those modules link. Elsewhere the crate
+# is empty, so the script has nothing to do. The upstream template also adds
+# `shim//third-party/toolchains/win:*.lib` deps for a cell this repo does not
+# define; the MSVC toolchain's LIB path resolves the same libraries.
+buildscript.run = false
+
+['cfg(target_os = "windows")']
+buildscript.run = true

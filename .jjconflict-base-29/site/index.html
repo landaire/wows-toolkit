@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>WoWs Toolkit</title>
+        <meta
+            name="description"
+            content="Open-source desktop tool for World of Warships: replay analysis, minimap playback, session stats, player tracking, an armor viewer, and a game file browser."
+        />
+        <meta name="color-scheme" content="dark light" />
+        <link rel="icon" type="image/png" href="img/favicon.png" />
+        <script>
+            // Apply the stored or system theme before first paint.
+            (function () {
+                var t = localStorage.getItem("wt-theme");
+                if (t !== "light" && t !== "dark") {
+                    t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+                }
+                document.documentElement.dataset.theme = t;
+            })();
+        </script>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="css/site.css" />
+        <link rel="modulepreload" href="js/scene.js" />
+        <link rel="preload" href="assets/benchy.bin" as="fetch" crossorigin />
+    </head>
+    <body>
+        <canvas id="scene" aria-hidden="true"></canvas>
+        <div class="graticule" aria-hidden="true"></div>
+
+        <header class="top">
+            <div class="wrap">
+                <a class="brand" href="#top">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="5.5" stroke-dasharray="2 2" />
+                        <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                        <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+                    </svg>
+                    WoWs Toolkit
+                </a>
+                <nav aria-label="Primary">
+                    <a href="#features">Features</a>
+                    <a class="optional" href="#new">Changes</a>
+                    <a href="#download">Download</a>
+                    <a class="optional" href="https://github.com/landaire/wows-toolkit">Source</a>
+                    <a class="optional js-discord" href="#" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
+                </nav>
+                <button class="theme-toggle" type="button" aria-label="Switch to light theme" data-theme-toggle>
+                    <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" /></svg>
+                    <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+                </button>
+            </div>
+        </header>
+
+        <main id="top">
+            <section class="hero" aria-labelledby="hero-title">
+                <div class="wrap">
+                    <div class="hero-copy">
+                        <h1 id="hero-title">WoWs Toolkit</h1>
+                        <p class="lede">An open-source desktop tool for players who want to understand World of Warships in more depth.</p>
+                        <div class="ctas">
+                            <a
+                                id="download-btn"
+                                class="btn primary"
+                                href="https://github.com/landaire/wows-toolkit/releases/latest"
+                                >Download <span id="download-version" class="tag"></span
+                            ></a>
+                            <a class="btn" href="https://github.com/landaire/wows-toolkit">Source</a>
+                        </div>
+                        <p class="meta">Windows, Linux, macOS. MIT license. Runs locally.</p>
+                        <button class="cmd" type="button" aria-label="Copy the command nix run github:landaire/wows-toolkit">nix run github:landaire/wows-toolkit</button>
+                    </div>
+                </div>
+            </section>
+
+            <div class="model-ctl" id="model-ctl">
+                <button class="toggle" type="button" data-mode-toggle aria-pressed="false">
+                    <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                    Armor view
+                </button>
+            </div>
+
+            <div class="armor-hud" aria-label="Armor view controls">
+                <div class="card">
+                    <h3>Armor view</h3>
+                    <p class="hint">Drag to orbit. Hover a plate to read it. Click to fire a shell from your viewing direction. The armor values on this model are samples.</p>
+                    <div class="field wide">
+                        <span>Shell</span>
+                        <div class="switch shell-pick" role="group" aria-label="Shell">
+                            <button type="button" data-shell="ap203" aria-pressed="true">203 AP</button>
+                            <button type="button" data-shell="ap460" aria-pressed="false">460 AP</button>
+                            <button type="button" data-shell="he152" aria-pressed="false">152 HE</button>
+                        </div>
+                    </div>
+                    <label class="field">
+                        <span>Range</span>
+                        <input id="range-km" type="range" min="4" max="22" step="1" value="12" />
+                        <output id="range-out">12 km</output>
+                    </label>
+                    <label class="field">
+                        <span>Section</span>
+                        <input id="section" type="range" min="0.5" max="1" step="0.01" value="1" />
+                        <output id="section-out">off</output>
+                    </label>
+                </div>
+                <div class="card legend-card">
+                    <h3>Thickness, mm</h3>
+                    <div class="legend" id="legend"></div>
+                    <div class="legend-scale"><span>0</span><span>33</span><span>160</span><span>999</span></div>
+                </div>
+                <div class="card result" id="shot-card" hidden>
+                    <div class="result-head">
+                        <span class="label">Last shot</span>
+                        <span class="outcome" id="shot-outcome"></span>
+                    </div>
+                    <table class="plates">
+                        <thead>
+                            <tr>
+                                <th>Plate</th>
+                                <th class="num">mm</th>
+                                <th class="num">Angle</th>
+                                <th class="num">Eff.</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="shot-plates"></tbody>
+                    </table>
+                </div>
+                <div class="card teaser">
+                    <p>Want to see this for every ship? The armor viewer in WoWs Toolkit loads the real armor model of every ship from your game files.</p>
+                    <a class="btn primary" href="https://github.com/landaire/wows-toolkit/releases/latest" data-download>Try it in WoWs Toolkit</a>
+                </div>
+            </div>
+
+            <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+
+            <div class="viewer-overlay" aria-hidden="true">
+                <div class="ruler" id="ruler"></div>
+                <svg class="gizmo" id="gizmo" viewBox="-32 -32 64 64">
+                    <line data-axis="x" x1="0" y1="0" x2="20" y2="0" />
+                    <line data-axis="y" x1="0" y1="0" x2="0" y2="-20" />
+                    <line data-axis="z" x1="0" y1="0" x2="0" y2="20" />
+                    <circle data-axis="x" cx="20" cy="0" r="5.5" /><text data-axis="x" x="20" y="0">X</text>
+                    <circle data-axis="y" cx="0" cy="-20" r="5.5" /><text data-axis="y" x="0" y="-20">Y</text>
+                    <circle data-axis="z" cx="0" cy="20" r="5.5" /><text data-axis="z" x="0" y="20">Z</text>
+                </svg>
+                <div class="dims">Length 60.0 mm, beam 31.0 mm</div>
+            </div>
+
+            <section id="features" class="surface">
+                <div class="wrap">
+                    <div class="section-head reveal">
+                        <div class="index">01</div>
+                        <div>
+                            <h2>Features</h2>
+                            <p>The toolkit reads the replays in your game folder and the game's own data files.</p>
+                        </div>
+                    </div>
+
+                    <div class="features">
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Replays</div>
+                                <h3 class="feature-title">Replay inspector</h3>
+                                <p>Post-battle statistics for every player in a replay.</p>
+                                <ul class="ticks">
+                                    <li>Damage dealt and received by type: AP, HE, SAP, fire, flooding, torpedoes</li>
+                                    <li>Spotting damage, potential damage, ribbons, and achievements</li>
+                                    <li>Builds, captain skills, and consumables for both teams</li>
+                                    <li>Damage between each pair of players</li>
+                                    <li>Chat log and match export</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Replay inspector</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/replay-dark.webp" alt="Replay inspector with the player table for both teams" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/replay-light.webp" alt="Replay inspector with the player table for both teams" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Ratings <span class="badge">New</span></div>
+                                <h3 class="feature-title">Battle impact</h3>
+                                <p>Battle impact (BI) rates a player's performance in one battle on the personal rating (PR) scale. Hover either rating to see its breakdown.</p>
+                                <ul class="ticks">
+                                    <li>Shown in the replay table, search results, and stats</li>
+                                    <li>Stored in the replay index with the formula version</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Rating breakdown</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/rating-dark.webp" alt="Rating breakdown hover card over the replay table" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/rating-light.webp" alt="Rating breakdown hover card over the replay table" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature wide reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Renderer</div>
+                                <h3 class="feature-title">Replay renderer</h3>
+                                <p>Animated minimap playback of a replay. The player below is the toolkit's renderer compiled to WebAssembly, playing three and a half minutes of a recorded battle. Change the layers, speed, or position while it plays.</p>
+                                <ul class="ticks">
+                                    <li>Timeline scrubbing and playback speed</li>
+                                    <li>Detection, firing, and radar ranges per ship</li>
+                                    <li>Kill feed, chat, and roster overlays</li>
+                                    <li>Video export</li>
+                                </ul>
+                            </div>
+                            <figure class="shot live" data-live="replay-demo/">
+                                <div class="bar"><i></i><i></i><i></i><span>Replay renderer</span></div>
+                                <div class="live-frame">
+                                    <img class="dark" loading="lazy" src="img/shots/renderer-dark.webp" alt="Minimap playback of a replay" width="1600" height="1000" />
+                                    <img class="light" loading="lazy" src="img/shots/renderer-light.webp" alt="Minimap playback of a replay" width="1600" height="1000" />
+                                    <button class="live-play btn primary" type="button">Run the renderer in your browser</button>
+                                </div>
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal" id="armor">
+                            <div class="feature-copy">
+                                <div class="kicker">Armor</div>
+                                <h3 class="feature-title">Armor and model viewer</h3>
+                                <p>The 3D armor model of any ship, colored by thickness with the game's color scale. Any other model in the game can be opened too, including armored buildings and gun mounts.</p>
+                                <ul class="ticks">
+                                    <li>Shell trajectory through each plate, with overmatch, ricochet, and penetration results</li>
+                                    <li>Penetration checker</li>
+                                    <li>Incoming fire from a replay plotted on the hull</li>
+                                    <li>Camouflage rendering and GLB export</li>
+                                </ul>
+                                <p class="aside">The model at the top of this page has an armor view with sample values. <button class="link" type="button" data-mode-jump="armor">Show it</button></p>
+                            </div>
+                            <figure class="shot views" data-zoom data-view="armor">
+                                <div class="bar">
+                                    <i></i><i></i><i></i>
+                                    <div class="switch small" role="group" aria-label="View">
+                                        <button type="button" data-show="model" aria-pressed="false">Model</button>
+                                        <button type="button" data-show="armor" aria-pressed="true">Armor</button>
+                                    </div>
+                                    <span>Model viewer</span>
+                                </div>
+                                <img class="dark" data-view="model" loading="lazy" src="img/shots/model-dark.webp" alt="Model viewer showing a ship's textured hull" width="1600" height="1000" />
+                                <img class="light" data-view="model" loading="lazy" src="img/shots/model-light.webp" alt="Model viewer showing a ship's textured hull" width="1600" height="1000" />
+                                <img class="dark" data-view="armor" loading="lazy" src="img/shots/armor-dark.webp" alt="Model viewer showing a ship's armor plates colored by thickness" width="1600" height="1000" />
+                                <img class="light" data-view="armor" loading="lazy" src="img/shots/armor-light.webp" alt="Model viewer showing a ship's armor plates colored by thickness" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Stats</div>
+                                <h3 class="feature-title">Session stats</h3>
+                                <p>Win rate, personal rating, damage, and other statistics across a session or a folder of replays.</p>
+                                <ul class="ticks">
+                                    <li>Filters for division, game mode, and number of games</li>
+                                    <li>Per-ship table</li>
+                                    <li>Charts for any statistic</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Session stats</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/stats-dark.webp" alt="Session statistics with per-ship table and chart" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/stats-light.webp" alt="Session statistics with per-ship table and chart" width="1600" height="1000" />
+                            </figure>
+                        </article>
+
+                        <article class="feature reveal">
+                            <div class="feature-copy">
+                                <div class="kicker">Players <span class="badge">Redesigned</span></div>
+                                <h3 class="feature-title">Current match and player tracker</h3>
+                                <p>During a battle, the current match view lists every player with their win rate, PR, average damage, and battles, for the whole account or for the ship they are in.</p>
+                                <ul class="ticks">
+                                    <li>Team averages for win rate and PR</li>
+                                    <li>How often you have met each player, and your notes on them</li>
+                                    <li>Players and clans you have met over a chosen time period</li>
+                                    <li>Marks players who may be watching your Twitch stream</li>
+                                </ul>
+                            </div>
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Current match</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/tracker-dark.webp" alt="Current match view with stats for both teams" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/tracker-light.webp" alt="Current match view with stats for both teams" width="1600" height="1000" />
+                            </figure>
+                        </article>
+                    </div>
+
+                    <div class="gallery">
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Search</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/search-dark.webp" alt="Search tab with a query and results" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/search-light.webp" alt="Search tab with a query and results" width="1600" height="1000" />
+                            </figure>
+                            <h4>Search</h4>
+                            <p>Search all indexed battles with a query language, for example <code class="mono">outcome:win map:ocean self.damage&gt;=150000</code>.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Unpacker</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/unpacker-dark.webp" alt="Unpacker browsing game archives" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/unpacker-light.webp" alt="Unpacker browsing game archives" width="1600" height="1000" />
+                            </figure>
+                            <h4>Unpacker</h4>
+                            <p>Browse and extract files from the game's packed archives.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Launcher</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/launcher-dark.webp" alt="Launcher showing game installs" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/launcher-light.webp" alt="Launcher showing game installs" width="1600" height="1000" />
+                            </figure>
+                            <h4>Launcher <span class="badge">New</span></h4>
+                            <p>Sign in to Wargaming Game Center, download and install game builds, and start the game. Supports Proton on Linux.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Tactics board</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/tactics-dark.webp" alt="Tactics board with ships and capture points on a map" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/tactics-light.webp" alt="Tactics board with ships and capture points on a map" width="1600" height="1000" />
+                            </figure>
+                            <h4>Tactics board</h4>
+                            <p>Place ships, capture points, and drawings on any map. A <a href="tactics/">browser version</a> is also available.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Listing</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/listing-dark.webp" alt="Replay listing with a minimap hover preview" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/listing-light.webp" alt="Replay listing with a minimap hover preview" width="1600" height="1000" />
+                            </figure>
+                            <h4>Listing previews</h4>
+                            <p>Hover a replay in the listing to see a minimap preview.</p>
+                        </div>
+                        <div class="gallery-item reveal">
+                            <figure class="shot" data-zoom>
+                                <div class="bar"><i></i><i></i><i></i><span>Command palette</span></div>
+                                <img class="dark" loading="lazy" src="img/shots/palette-dark.webp" alt="Command palette open over the app" width="1600" height="1000" />
+                                <img class="light" loading="lazy" src="img/shots/palette-light.webp" alt="Command palette open over the app" width="1600" height="1000" />
+                            </figure>
+                            <h4>Command palette</h4>
+                            <p>Ctrl+K opens a command palette for navigation, replays, players, and settings.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="new" class="surface">
+                <div class="wrap">
+                    <div class="section-head reveal">
+                        <div class="index">02</div>
+                        <div>
+                            <h2>Changes since 1.0</h2>
+                            <p>These are in the <a href="https://github.com/landaire/wows-toolkit/releases">1.1 beta releases</a>.</p>
+                        </div>
+                    </div>
+                    <div class="changes reveal">
+                        <div class="change">
+                            <div class="num">01</div>
+                            <h4>New interface</h4>
+                            <p>A new desktop interface with panels that dock and split, and light and dark themes.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">02</div>
+                            <h4>Launcher</h4>
+                            <p>Sign in to your Wargaming account, update or install the game, and launch it, with safe mode and Proton on Linux.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">03</div>
+                            <h4>Battle impact</h4>
+                            <p>A per-battle rating on the PR scale, shown beside PR in replays, search, and stats. Hover either rating for its breakdown.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">04</div>
+                            <h4>Model viewer</h4>
+                            <p>Open any model in the game, including armored buildings and gun mounts, and export it to GLB with its textures.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">05</div>
+                            <h4>Current match and player tracker</h4>
+                            <p>Redesigned. Current match, players, and clans are panels you can place side by side, and your filters are kept.</p>
+                        </div>
+                        <div class="change">
+                            <div class="num">06</div>
+                            <h4>Anonymized names</h4>
+                            <p>Replace every player name and clan tag with a generated one before you share a screenshot or stream.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="download" class="surface">
+                <div class="wrap">
+                    <div class="section-head reveal">
+                        <div class="index">03</div>
+                        <div>
+                            <h2>Download</h2>
+                            <p>Releases are published on GitHub. No account is required.</p>
+                        </div>
+                    </div>
+                    <div class="platforms reveal">
+                        <a class="card platform" data-asset="windows" href="https://github.com/landaire/wows-toolkit/releases/latest">
+                            <span class="os">Windows</span><span class="pkg">.msi installer or portable .zip</span><span class="go">Download</span>
+                        </a>
+                        <a class="card platform" data-asset="macos" href="https://github.com/landaire/wows-toolkit/releases/latest">
+                            <span class="os">macOS</span><span class="pkg">.dmg</span><span class="go">Download</span>
+                        </a>
+                        <a class="card platform" data-asset="linux" href="https://github.com/landaire/wows-toolkit/releases/latest">
+                            <span class="os">Linux</span><span class="pkg">Flatpak bundle</span><span class="go">Download</span>
+                        </a>
+                        <a class="card platform" href="https://github.com/landaire/wows-toolkit">
+                            <span class="os">Nix</span><span class="pkg">nix run github:landaire/wows-toolkit</span><span class="go">Source</span>
+                        </a>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="wrap">
+                <nav>
+                    <a href="https://github.com/landaire/wows-toolkit">GitHub</a>
+                    <a href="https://github.com/landaire/wows-toolkit/releases/latest">Releases</a>
+                    <a href="networking/">Networking</a>
+                    <a href="#" class="js-discord" data-h="uggcf://qvfpbeq.tt/EWXjXHw7eu">Discord</a>
+                </nav>
+                <p>
+                    Not affiliated with or endorsed by Wargaming.net. World of Warships is a trademark of
+                    Wargaming.net. Background model: 3DBenchy by Creative Tools, public domain.
+                </p>
+            </div>
+        </footer>
+
+        <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" tabindex="-1">
+            <img alt="" />
+        </div>
+
+        <script type="module" src="js/main.js"></script>
+    </body>
+</html>

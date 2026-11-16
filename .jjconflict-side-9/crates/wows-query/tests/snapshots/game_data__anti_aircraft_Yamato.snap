@@ -1,0 +1,136 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3848
+expression: anti_aircraft
+---
+auras:
+  - band: short-range
+    range: 2.5
+    hit_chance: 85
+    mounts:
+      - 6 x 25 mm single
+      - 52 x 25 mm triple
+      - 2 x 13 mm twin
+    damage_per_second:
+      stat: short-range AA damage per second
+      unit: hp/s
+      builds:
+        base: 389
+        best:
+          value: 514
+          assumed:
+            - AA Defense and ASW Expert
+            - Auxiliary Armaments Modification 2
+        alternatives:
+          - label: without AA Defense and ASW Expert
+            value: 447
+            assumed:
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value: 447
+            assumed:
+              - AA Defense and ASW Expert
+  - band: long-range
+    range: 5.8
+    hit_chance: 75
+    mounts:
+      - 12 x 127 mm twin
+    damage_per_second:
+      stat: long-range AA damage per second
+      unit: hp/s
+      builds:
+        base: 147
+        best:
+          value: 194
+          assumed:
+            - AA Defense and ASW Expert
+            - Auxiliary Armaments Modification 2
+        alternatives:
+          - label: without AA Defense and ASW Expert
+            value: 169
+            assumed:
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value: 169
+            assumed:
+              - AA Defense and ASW Expert
+flak:
+  zone: 3.5 to 5.8 km
+  hit_chance: 75
+  bursts:
+    stat: flak bursts per salvo
+    unit: bursts
+    builds:
+      base: 6
+      best:
+        value: 8
+        assumed:
+          - Focus Fire Training
+          - Auxiliary Armaments Modification 2
+      alternatives:
+        - label: without Focus Fire Training
+          value: 7
+          assumed:
+            - Auxiliary Armaments Modification 2
+        - label: without Auxiliary Armaments Modification 2
+          value: 7
+          assumed:
+            - Focus Fire Training
+  damage_per_burst:
+    stat: flak burst damage
+    unit: hp
+    builds:
+      base: 1610
+      best:
+        value: 2129
+        assumed:
+          - AA Defense and ASW Expert
+          - Auxiliary Armaments Modification 2
+      alternatives:
+        - label: without AA Defense and ASW Expert
+          value: 1852
+          assumed:
+            - Auxiliary Armaments Modification 2
+        - label: without Auxiliary Armaments Modification 2
+          value: 1852
+          assumed:
+            - AA Defense and ASW Expert
+priority_sector:
+  instant_damage: 3.5
+  damage_multiplier: 1.35
+  duration: 15
+  cooldown: 15
+rating:
+  method: "Damage the AA deals to one plane flying straight in at 150 knots (2.69 m/s per knot on the game map) from the edge of the farthest aura to the ship: for each aura, seconds inside it times damage per second times hit chance, plus the flak bursts the client spawns on the way (bursts x hit chance every 2.02 s) times burst damage times 0.1, the share counted as hitting. A judgment to compare ships of one class and tier: players dodge flak and do not fly straight in. The priority sector is left out, and so is Defensive AA Fire except in the alternatives that name it."
+  rating:
+    stat: "AA rating, damage to one plane flying straight in"
+    unit: hp
+    builds:
+      base: 5580
+      best:
+        value: 8282
+        assumed:
+          - AA Defense and ASW Expert
+          - Focus Fire Training
+          - Auxiliary Armaments Modification 2
+      alternatives:
+        - label: without AA Defense and ASW Expert
+          value: 7202
+          assumed:
+            - Focus Fire Training
+            - Auxiliary Armaments Modification 2
+        - label: without Focus Fire Training
+          value: 7831
+          assumed:
+            - AA Defense and ASW Expert
+            - Auxiliary Armaments Modification 2
+        - label: without Auxiliary Armaments Modification 2
+          value: 6809
+          assumed:
+            - AA Defense and ASW Expert
+            - Focus Fire Training
+  breakdown:
+    - "short-range: up to 5.96 s inside, 437.28 hp/s after hit chance, 2605 hp"
+    - "long-range: up to 14.15 s inside, 145.81 hp/s after hit chance, 2063 hp"
+    - "flak: 8 bursts of 2129 hp, 0.75 hit chance, 3614 hp"
+    - "total: 8282 hp"

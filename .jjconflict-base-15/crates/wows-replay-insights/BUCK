@@ -1,0 +1,49 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+INSIGHTS_DEPS = [
+    "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-core:wows_core",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:tempfile",
+    "//third-party/rust:nalgebra",
+    "//third-party/rust:data-encoding",
+    "//third-party/rust:flate2",
+    "//third-party/rust:jiff",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
+INSIGHTS_FEATURES = ["arc", "battle-report", "build", "fire-sections", "serde", "wowssb"]
+
+workspace_library(
+    name = "wows_replay_insights",
+    crate = "wows_replay_insights",
+    package = "wows-replay-insights",
+    version = "0.15.0",
+    features = INSIGHTS_FEATURES,
+    deps = INSIGHTS_DEPS,
+)
+
+workspace_test(
+    name = "wows_replay_insights_test",
+    crate = "wows_replay_insights",
+    crate_root = "src/lib.rs",
+    package = "wows-replay-insights",
+    version = "0.15.0",
+    features = INSIGHTS_FEATURES,
+    deps = INSIGHTS_DEPS,
+    test_deps = ["//crates/wows-data-mgr:wows_data_mgr"],
+)
+
+workspace_integration_tests(
+    package = "wows-replay-insights",
+    version = "0.15.0",
+    library = ":wows_replay_insights",
+    features = INSIGHTS_FEATURES,
+    deps = INSIGHTS_DEPS,
+    test_deps = ["//crates/wows-data-mgr:wows_data_mgr"],
+)

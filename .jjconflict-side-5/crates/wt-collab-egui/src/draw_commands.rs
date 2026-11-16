@@ -1,0 +1,2636 @@
+//! Shared rendering of replay DrawCommands for both the desktop app and the web client.
+//!
+//! The desktop's `replay_renderer/shapes.rs` was the authoritative source; this module
+//! is a direct port. All consumers (desktop + web) call into here.
+
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use egui::Color32;
+use egui::CornerRadius;
+use egui::Pos2;
+use egui::Rect;
+use egui::Shape;
+use egui::Stroke;
+use egui::TextureHandle;
+use egui::Vec2;
+
+use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::activity_feed as feed;
+use wows_minimap_renderer::activity_feed::FeedIcon;
+use wows_minimap_renderer::activity_feed::FlowItem;
+use wows_minimap_renderer::activity_feed::FlowLayout;
+use wows_minimap_renderer::activity_feed::PlacedContent;
+use wows_minimap_renderer::activity_feed::RowExtent;
+use wows_minimap_renderer::draw_command::ActivityFeedEntry;
+use wows_minimap_renderer::draw_command::ActivityFeedKind;
+use wows_minimap_renderer::draw_command::CAMERA_DIRECTION_ALPHA;
+use wows_minimap_renderer::draw_command::CameraDirectionWedge;
+use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::RowShade;
+use wt_translations::TextResolver;
+use wt_translations::TranslatableText;
+
+use crate::rendering::game_font;
+use crate::rendering::make_rotated_icon_mesh;
+use crate::transforms::MapTransform;
+
+// ─── Public Types ────────────────────────────────────────────────────────────
+
+/// Texture resources for DrawCommand rendering.
+///
+/// Desktop provides all fields; web may leave desktop-only sets as `None`.
+pub struct DrawCommandTextures<'a> {
+    pub ship_icons: &'a HashMap<String, TextureHandle>,
+    /// Gold icon-shaped outlines for detected-teammate highlight (desktop only).
+    pub ship_icon_outlines: Option<&'a HashMap<String, TextureHandle>>,
+    pub plane_icons: &'a HashMap<String, TextureHandle>,
+    pub building_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub consumable_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub ribbon_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub subribbon_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub death_cause_icons: Option<&'a HashMap<String, TextureHandle>>,
+    pub powerup_icons: Option<&'a HashMap<String, TextureHandle>>,
+    /// Ship silhouette for the stats panel HP overlay (desktop only).
+    pub silhouette_texture: Option<&'a TextureHandle>,
+}
+
+/// A hoverable consumable slot rectangle plus the data needed to render its
+/// tooltip. `draw_command_to_shapes` collects one per painted icon when given
+/// an output buffer; the caller attaches `Response::on_hover_ui` to each.
+pub struct ConsumableHoverRegion {
+    pub rect: Rect,
+    /// The roster's own entry, so a tooltip reads it through
+    /// `draw_command::consumable_lines` rather than restating its fields.
+    pub consumable: wows_minimap_renderer::draw_command::RosterConsumable,
+}
+
+/// A hoverable region over a roster row's player-name header. The desktop
+/// renderer uses this to attach a build popover; web clients can ignore it.
+/// The `entity_id` keys back into the per-player build snapshot the desktop
+/// maintains alongside the live BattleController.
+pub struct PlayerBuildHoverRegion {
+    pub rect: Rect,
+    pub entity_id: wows_replays::types::EntityId,
+    /// Raw arena-side team id, used by the desktop popover to decide whether
+    /// to render the build (own team is always allowed; enemy teams require
+    /// a merged replay from that team).
+    pub team_id: i64,
+    pub player_name: String,
+    pub ship_name: String,
+    pub clan_tag: Option<String>,
+}
+
+/// Controls which labels are shown on ships and dead ships.
+///
+/// Desktop constructs this from `RenderOptions`; web uses `Default` (show all).
+pub struct DrawCommandLabelOptions {
+    pub show_player_names: bool,
+    pub show_ship_names: bool,
+    pub show_dead_ship_names: bool,
+    /// When true, use `name_color` from Ship commands to tint ship-name labels.
+    pub show_armament_color: bool,
+}
+
+impl Default for DrawCommandLabelOptions {
+    fn default() -> Self {
+        Self { show_player_names: true, show_ship_names: true, show_dead_ship_names: true, show_armament_color: false }
+    }
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+/// Default icon size in minimap-space pixels.
+const ICON_SIZE: f32 = wows_minimap_renderer::ICON_SIZE as f32;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+pub fn color_from_rgb(rgb: [u8; 3]) -> Color32 {
+    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+}
+
+pub fn color_from_rgba(rgb: [u8; 3], alpha: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], (alpha * 255.0) as u8)
+}
+
+/// Build an unrotated textured quad mesh for a plane/consumable icon.
+fn make_icon_mesh(texture_id: egui::TextureId, center: Pos2, w: f32, h: f32) -> Shape {
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let rect = Rect::from_min_max(
+        Pos2::new(center.x - half_w, center.y - half_h),
+        Pos2::new(center.x + half_w, center.y + half_h),
+    );
+    let mut mesh = egui::Mesh::with_texture(texture_id);
+    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+    Shape::Mesh(mesh.into())
+}
+
+/// Draw player name and/or ship name labels centered above an icon.
+///
+/// `armament_color` is applied to `ship_name` if shown, otherwise `player_name`.
+pub fn draw_ship_labels(
+    ctx: &egui::Context,
+    center: Pos2,
+    scale: f32,
+    player_name: Option<&str>,
+    ship_name: Option<&str>,
+    armament_color: Option<Color32>,
+    shapes: &mut Vec<Shape>,
+) {
+    let label_font = game_font(10.0 * scale);
+    let line_height = 12.0 * scale;
+    let label_color = Color32::WHITE;
+    let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
+    let shadow_offset = (1.0 * scale).min(2.0);
+
+    let line_count = player_name.is_some() as i32 + ship_name.is_some() as i32;
+    if line_count == 0 {
+        return;
+    }
+
+    // Armament color goes on ship_name if shown, else on player_name
+    let (pn_color, sn_color) = if ship_name.is_some() {
+        (label_color, armament_color.unwrap_or(label_color))
+    } else {
+        (armament_color.unwrap_or(label_color), label_color)
+    };
+
+    let base_y = center.y - 14.0 * scale - line_count as f32 * line_height;
+    let mut cur_y = base_y;
+
+    if let Some(name) = player_name {
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), pn_color));
+        let text_w = galley.size().x;
+        let tx = center.x - text_w / 2.0;
+        let shadow_galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), shadow_color));
+        shapes.push(Shape::galley(Pos2::new(tx + shadow_offset, cur_y + shadow_offset), shadow_galley, shadow_color));
+        shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, pn_color));
+        cur_y += line_height;
+    }
+
+    if let Some(name) = ship_name {
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), sn_color));
+        let text_w = galley.size().x;
+        let tx = center.x - text_w / 2.0;
+        let shadow_galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), shadow_color));
+        shapes.push(Shape::galley(Pos2::new(tx + shadow_offset, cur_y + shadow_offset), shadow_galley, shadow_color));
+        shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, sn_color));
+    }
+}
+
+/// Map a `DeathCause` to the icon key used in the `death_cause_icons` HashMap.
+fn death_cause_icon_key(cause: &wows_minimap_renderer::draw_command::KillFeedEntry) -> &'static str {
+    use wows_replays::analyzer::decoder::DeathCause;
+    match cause.cause.as_ref().and_then(|cause| cause.known()) {
+        Some(DeathCause::Artillery | DeathCause::ApShell | DeathCause::HeShell | DeathCause::CsShell) => "main_caliber",
+        Some(DeathCause::Secondaries) => "atba",
+        Some(DeathCause::Torpedo | DeathCause::AerialTorpedo) => "torpedo",
+        Some(DeathCause::Fire) => "burning",
+        Some(DeathCause::Flooding) => "flood",
+        Some(DeathCause::DiveBomber) => "bomb",
+        Some(DeathCause::SkipBombs) => "skip",
+        Some(DeathCause::AerialRocket) => "rocket",
+        Some(DeathCause::Detonation) => "detonate",
+        Some(DeathCause::Ramming) => "ram",
+        Some(DeathCause::DepthCharge | DeathCause::AerialDepthCharge) => "depthbomb",
+        Some(DeathCause::Missile) => "missile",
+        _ => "main_caliber",
+    }
+}
+
+/// Stroke width of the activity feed's top border, before window scale.
+const FEED_BORDER_WIDTH: f32 = 0.5;
+
+/// The rect a command's shapes must be clipped to, for commands whose content
+/// can slide past their own edges. Callers paint those shapes through a
+/// painter clipped to it.
+pub fn command_clip_rect(cmd: &DrawCommand, transform: &MapTransform) -> Option<Rect> {
+    let DrawCommand::StatsActivityFeed { x, y, width, height, .. } = cmd else { return None };
+
+    // The top border is stroked on the panel's top edge; leave room for the
+    // half of it above the edge and its one-point anti-aliasing feather.
+    let mut rect = hud_rect(transform, *x, *y, *width, *height);
+    rect.min.y -= FEED_BORDER_WIDTH * transform.window_scale / 2.0 + 1.0;
+
+    Some(rect)
+}
+
+/// A rect given in HUD canvas pixels, on screen.
+fn hud_rect(transform: &MapTransform, x: i32, y: i32, width: i32, height: i32) -> Rect {
+    let ws = transform.window_scale;
+
+    Rect::from_min_size(transform.hud_pos(x as f32, y as f32), Vec2::new(width as f32 * ws, height as f32 * ws))
+}
+
+#[derive(Clone, Copy)]
+enum FeedFont {
+    Name,
+    Message,
+}
+
+/// Text style of a run in the activity feed.
+#[derive(Clone, Copy)]
+struct FeedStyle {
+    font: FeedFont,
+    color: [u8; 3],
+}
+
+struct FeedRowLayout<'e> {
+    header: FlowLayout<'e, FeedStyle, FeedIcon<'e>>,
+    message: Option<FlowLayout<'e, FeedStyle, FeedIcon<'e>>>,
+}
+
+/// Lays out and paints activity feed rows at one window scale.
+struct FeedPainter<'a, 't> {
+    textures: &'a DrawCommandTextures<'t>,
+    ctx: &'a egui::Context,
+    ws: f32,
+    inner_w: f32,
+    name_font: egui::FontId,
+    message_font: egui::FontId,
+}
+
+impl<'t> FeedPainter<'_, 't> {
+    fn galley(&self, style: FeedStyle, text: &str, opacity: f32) -> Arc<egui::Galley> {
+        let font = match style.font {
+            FeedFont::Name => self.name_font.clone(),
+            FeedFont::Message => self.message_font.clone(),
+        };
+        let color = color_from_rgb(style.color).gamma_multiply(opacity);
+
+        self.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, color))
+    }
+
+    fn icon_texture(&self, icon: &FeedIcon<'_>) -> Option<&'t TextureHandle> {
+        match icon {
+            FeedIcon::KillShip { species, .. } | FeedIcon::ChatShip { species, .. } => {
+                self.textures.ship_icons.get(*species)
+            }
+            FeedIcon::DeathCause(kill) => {
+                self.textures.death_cause_icons.and_then(|icons| icons.get(death_cause_icon_key(kill)))
+            }
+        }
+    }
+
+    fn row_height(&self, layout: &FeedRowLayout<'_>) -> f32 {
+        feed::row_height(layout.header.lines, layout.message.as_ref().map(|message| message.lines)) * self.ws
+    }
+
+    fn layout_row<'e>(&self, entry: &'e ActivityFeedEntry) -> FeedRowLayout<'e> {
+        let measure = |style: FeedStyle, text: &str| self.galley(style, text, 1.0).size().x;
+        let gap = feed::ITEM_GAP * self.ws;
+
+        let header_items = feed::header_items(
+            &entry.kind,
+            feed::ICON_SIZE * self.ws,
+            |_, color| FeedStyle { font: FeedFont::Name, color },
+            |icon| self.icon_texture(icon).is_some(),
+        );
+        let header = feed::flow(&header_items, self.inner_w, gap, measure);
+
+        let message = match &entry.kind {
+            ActivityFeedKind::Chat(chat) => {
+                let style = FeedStyle { font: FeedFont::Message, color: chat.message_color };
+                let items: [FlowItem<'e, FeedStyle, FeedIcon<'e>>; 1] =
+                    [FlowItem::Text { text: Cow::Borrowed(&chat.message), style }];
+                Some(feed::flow(&items, self.inner_w, gap, measure))
+            }
+            ActivityFeedKind::Kill(_) => None,
+        };
+
+        FeedRowLayout { header, message }
+    }
+
+    fn draw_row(
+        &self,
+        shapes: &mut Vec<Shape>,
+        layout: &FeedRowLayout<'_>,
+        shade: RowShade,
+        panel: Rect,
+        top: f32,
+        opacity: f32,
+    ) {
+        let ws = self.ws;
+        if shade == RowShade::Banded {
+            let band = Rect::from_min_size(
+                Pos2::new(panel.min.x + feed::BAND_INSET * ws, top),
+                Vec2::new(panel.width() - 2.0 * feed::BAND_INSET * ws, self.row_height(layout)),
+            );
+            let fill = color_from_rgba(feed::BANDED_ROW_RGB, feed::BANDED_ROW_ALPHA * opacity);
+            shapes.push(Shape::rect_filled(band, CornerRadius::ZERO, fill));
+        }
+
+        let left = panel.min.x + feed::SIDE_PADDING * ws;
+        let line_h = feed::NAME_LINE_HEIGHT * ws;
+        let icon_size = feed::ICON_SIZE * ws;
+        let lines_top = top + feed::ROW_PADDING * ws;
+        for piece in &layout.header.pieces {
+            let x = left + piece.x;
+            let line_top = lines_top + piece.line as f32 * line_h;
+            let line_center = line_top + line_h / 2.0;
+            match &piece.content {
+                PlacedContent::Text { text, style } => {
+                    let galley = self.galley(*style, text, opacity);
+                    let text_y = line_center - galley.size().y / 2.0;
+                    shapes.push(Shape::galley(Pos2::new(x, text_y), galley, Color32::TRANSPARENT));
+                }
+                PlacedContent::Icon { icon } => {
+                    let Some(texture) = self.icon_texture(icon) else { continue };
+                    let center = Pos2::new(x + icon_size / 2.0, line_center);
+                    match *icon {
+                        // Friendly ships face left, enemies right.
+                        FeedIcon::KillShip { color, friendly, .. } => {
+                            let angle = if friendly { std::f32::consts::PI } else { 0.0 };
+                            let tint = color_from_rgb(color).gamma_multiply(opacity);
+                            shapes.push(make_rotated_icon_mesh(texture.id(), center, icon_size, angle, tint));
+                        }
+                        FeedIcon::ChatShip { color, .. } => {
+                            let tint = color_from_rgb(color).gamma_multiply(opacity);
+                            shapes.push(make_rotated_icon_mesh(texture.id(), center, icon_size, 0.0, tint));
+                        }
+                        FeedIcon::DeathCause(_) => {
+                            let mut mesh = egui::Mesh::with_texture(texture.id());
+                            mesh.add_rect_with_uv(
+                                Rect::from_center_size(center, Vec2::splat(icon_size)),
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                Color32::WHITE.gamma_multiply(opacity),
+                            );
+                            shapes.push(Shape::Mesh(mesh.into()));
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(message) = &layout.message else { return };
+        let message_top = lines_top + layout.header.lines.max(1) as f32 * line_h;
+        for piece in &message.pieces {
+            let PlacedContent::Text { text, style } = &piece.content else { continue };
+            let y = message_top + piece.line as f32 * feed::MESSAGE_LINE_HEIGHT * ws;
+            let galley = self.galley(*style, text, opacity);
+            shapes.push(Shape::galley(Pos2::new(left + piece.x, y), galley, Color32::TRANSPARENT));
+        }
+    }
+}
+
+/// Shapes of the stats panel's merged kill and chat feed. Rows may extend
+/// past the panel while animating; see [`command_clip_rect`].
+fn activity_feed_shapes(
+    shapes: &mut Vec<Shape>,
+    panel: Rect,
+    ws: f32,
+    entries: &[ActivityFeedEntry],
+    textures: &DrawCommandTextures,
+    ctx: &egui::Context,
+) {
+    shapes.push(Shape::rect_filled(panel, CornerRadius::same(2), Color32::from_rgba_unmultiplied(24, 28, 36, 200)));
+    shapes.push(Shape::LineSegment {
+        points: [Pos2::new(panel.min.x + 4.0 * ws, panel.min.y), Pos2::new(panel.max.x - 4.0 * ws, panel.min.y)],
+        stroke: Stroke::new(FEED_BORDER_WIDTH * ws, Color32::from_rgba_unmultiplied(55, 60, 72, 150)),
+    });
+
+    let inset = feed::AREA_INSET * ws;
+    let area_h = panel.height() - 2.0 * inset;
+    if area_h <= 0.0 {
+        return;
+    }
+
+    let painter = FeedPainter {
+        textures,
+        ctx,
+        ws,
+        inner_w: panel.width() - 2.0 * feed::SIDE_PADDING * ws,
+        name_font: game_font(feed::NAME_FONT_SIZE * ws),
+        message_font: game_font(feed::MESSAGE_FONT_SIZE * ws),
+    };
+    let mut layouts: Vec<FeedRowLayout<'_>> = Vec::new();
+    let rows = feed::stack_rows(entries.len(), area_h, |index| {
+        let entry = &entries[index];
+        let layout = painter.layout_row(entry);
+        let height = painter.row_height(&layout);
+        layouts.push(layout);
+        RowExtent { height, reveal: entry.reveal }
+    });
+
+    for row in rows {
+        let entry = &entries[row.index];
+        // `stack_rows` asked for rows once each, newest first.
+        let layout = &layouts[entries.len() - 1 - row.index];
+        painter.draw_row(shapes, layout, entry.shade, panel, panel.min.y + inset + row.top, row.opacity);
+    }
+}
+
+// ─── Core Rendering ──────────────────────────────────────────────────────────
+
+/// Render a centered glow-text overlay (used by BattleResultOverlay and PreBattleCountdown).
+fn render_glow_text_overlay(
+    text: &str,
+    subtitle: Option<&str>,
+    color: &[u8; 3],
+    subtitle_above: bool,
+    transform: &MapTransform,
+    ctx: &egui::Context,
+) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    let ws = transform.window_scale;
+    let canvas_w = transform.screen_hud_width();
+    let canvas_h = transform.canvas_height * transform.window_scale;
+    let center_x = transform.origin.x + canvas_w / 2.0;
+    let center_y = transform.origin.y + canvas_h / 2.0;
+
+    // Pre/post-battle hero text follows the map zoom (the canvas itself is
+    // intentionally locked to fit-scale) so streamers see VICTORY / countdown
+    // text grow when they zoom in.
+    let font_size = (canvas_w / 8.0) * transform.zoom;
+    let main_font = game_font(font_size);
+    let main_galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), main_font, Color32::WHITE));
+    let main_w = main_galley.size().x;
+    let main_h = main_galley.size().y;
+
+    let sub_galley = subtitle.map(|s| {
+        let sub_font = game_font(font_size / 4.0);
+        ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), sub_font, Color32::from_gray(200)))
+    });
+    let sub_h = sub_galley.as_ref().map(|g| g.size().y).unwrap_or(0.0);
+    let gap = if subtitle.is_some() { 8.0 * ws } else { 0.0 };
+    let total_h = main_h + gap + sub_h;
+
+    let block_top = center_y - total_h / 2.0;
+    let (text_x, text_y, sub_top) = if subtitle_above {
+        (center_x - main_w / 2.0, block_top + sub_h + gap, block_top)
+    } else {
+        (center_x - main_w / 2.0, block_top, block_top + main_h + gap)
+    };
+
+    let offsets: &[(f32, f32)] =
+        &[(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
+    let glow_layers: &[(f32, [u8; 3], f32)] = &[
+        (6.0, [0, 0, 0], 0.15),
+        (4.0, [0, 0, 0], 0.25),
+        (3.0, *color, 0.30),
+        (2.0, *color, 0.50),
+        (1.0, *color, 0.70),
+    ];
+
+    for &(dist, c, opacity) in glow_layers {
+        let layer_color = Color32::from_rgba_premultiplied(
+            (c[0] as f32 * opacity) as u8,
+            (c[1] as f32 * opacity) as u8,
+            (c[2] as f32 * opacity) as u8,
+            (255.0 * opacity) as u8,
+        );
+        let glow_font = game_font(font_size);
+        for &(dx, dy) in offsets {
+            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), glow_font.clone(), layer_color));
+            shapes.push(Shape::galley(Pos2::new(text_x + dx * dist, text_y + dy * dist), galley, Color32::TRANSPARENT));
+        }
+    }
+
+    shapes.push(Shape::galley(Pos2::new(text_x, text_y), main_galley, Color32::TRANSPARENT));
+
+    if let Some(sub_galley) = sub_galley {
+        let sub_w = sub_galley.size().x;
+        let sub_x = center_x - sub_w / 2.0;
+        let sub_y = sub_top;
+
+        let sub_font = game_font(font_size / 4.0);
+        for &(dx, dy) in offsets {
+            let outline = ctx.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    subtitle.unwrap().to_string(),
+                    sub_font.clone(),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 180),
+                )
+            });
+            shapes.push(Shape::galley(Pos2::new(sub_x + dx * 2.0, sub_y + dy * 2.0), outline, Color32::TRANSPARENT));
+        }
+
+        shapes.push(Shape::galley(Pos2::new(sub_x, sub_y), sub_galley, Color32::TRANSPARENT));
+    }
+
+    shapes
+}
+
+/// Convert a single DrawCommand into epaint shapes.
+///
+/// `placed_labels` is used by `ShipConfigCircle` to avoid label overlap. Pass `None`
+/// if you don't need label collision detection (web client).
+///
+/// `hover_regions` collects one entry per painted roster consumable icon so
+/// the caller can attach `Response::on_hover_ui` for tooltips. Pass `None`
+/// to skip hover collection.
+///
+/// `player_build_regions` collects one entry per roster row's player-name
+/// header for desktop build popovers. Pass `None` (web client) to skip.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_command_to_shapes(
+    cmd: &DrawCommand,
+    transform: &MapTransform,
+    textures: &DrawCommandTextures,
+    ctx: &egui::Context,
+    label_opts: &DrawCommandLabelOptions,
+    placed_labels: Option<&mut Vec<Rect>>,
+    text_resolver: &dyn TextResolver,
+    mut hover_regions: Option<&mut Vec<ConsumableHoverRegion>>,
+    mut player_build_regions: Option<&mut Vec<PlayerBuildHoverRegion>>,
+) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    let ws = transform.window_scale;
+
+    match cmd {
+        DrawCommand::ShotTracer { from, to, color } => {
+            let p1 = transform.minimap_to_screen(from);
+            let p2 = transform.minimap_to_screen(to);
+            shapes.push(Shape::LineSegment {
+                points: [p1, p2],
+                stroke: Stroke::new(transform.scale_stroke(1.0), color_from_rgb(*color)),
+            });
+        }
+
+        DrawCommand::Annotation { shape, color, width } => {
+            use wows_minimap_renderer::draw_command::AnnotationShape;
+
+            // A drawn line was put on the map, so it thickens with the map
+            // rather than holding a screen width as the renderer's own
+            // strokes do.
+            let drawn = color_from_rgba([color[0], color[1], color[2]], color[3] as f32 / 255.0);
+            let stroke = Stroke::new(transform.scale_distance(*width), drawn);
+            match shape {
+                AnnotationShape::Polyline { points } => {
+                    let points: Vec<Pos2> = points.iter().map(|at| transform.minimap_to_screen(at)).collect();
+                    shapes.push(Shape::line(points, stroke));
+                }
+                AnnotationShape::Polygon { points, filled } => {
+                    let points: Vec<Pos2> = points.iter().map(|at| transform.minimap_to_screen(at)).collect();
+                    if *filled {
+                        shapes.push(Shape::convex_polygon(points, drawn, Stroke::NONE));
+                    } else {
+                        shapes.push(Shape::closed_line(points, stroke));
+                    }
+                }
+                AnnotationShape::Circle { center, radius, filled } => {
+                    let center = transform.minimap_to_screen(center);
+                    let radius = transform.scale_distance(*radius);
+                    if *filled {
+                        shapes.push(Shape::circle_filled(center, radius, drawn));
+                    } else {
+                        shapes.push(Shape::circle_stroke(center, radius, stroke));
+                    }
+                }
+            }
+        }
+
+        DrawCommand::ShotTracerTip { at, color } => {
+            let p = transform.minimap_to_screen(at);
+            // Tip a bit wider than the tracer line so the ammo color is noticeable
+            // without ballooning. Window-scaled (non-zoom) so it tracks the line at any zoom.
+            shapes.push(Shape::circle_filled(
+                p,
+                transform.scale_stroke(1.25),
+                color_from_rgba(*color, wows_minimap_renderer::draw_command::SHOT_TIP_ALPHA),
+            ));
+        }
+
+        DrawCommand::SecondaryShotTracer { from, to, color } => {
+            let p1 = transform.minimap_to_screen(from);
+            let p2 = transform.minimap_to_screen(to);
+            shapes.push(Shape::LineSegment {
+                points: [p1, p2],
+                stroke: Stroke::new(
+                    transform.scale_stroke(1.0),
+                    color_from_rgba(*color, wows_minimap_renderer::draw_command::SECONDARY_SHOT_ALPHA),
+                ),
+            });
+        }
+
+        DrawCommand::SecondaryShotTracerTip { at, color } => {
+            let p = transform.minimap_to_screen(at);
+            shapes.push(Shape::circle_filled(
+                p,
+                transform.scale_stroke(1.25),
+                color_from_rgba(*color, wows_minimap_renderer::draw_command::SECONDARY_SHOT_ALPHA),
+            ));
+        }
+
+        DrawCommand::Torpedo { pos, color } => {
+            let center = transform.minimap_to_screen(pos);
+            shapes.push(Shape::circle_filled(center, transform.scale_distance(2.0), color_from_rgb(*color)));
+        }
+
+        DrawCommand::Smoke { pos, radius, color, alpha } => {
+            let center = transform.minimap_to_screen(pos);
+            shapes.push(Shape::circle_filled(
+                center,
+                transform.scale_distance(*radius as f32),
+                color_from_rgba(*color, *alpha),
+            ));
+        }
+
+        DrawCommand::Ship {
+            pos,
+            yaw,
+            species,
+            color,
+            visibility,
+            opacity,
+            is_self,
+            player_name,
+            ship_name,
+            is_detected_teammate,
+            is_disconnected,
+            name_color,
+            ..
+        } => {
+            let center = transform.minimap_to_screen(pos);
+            let icon_size = transform.scale_distance(ICON_SIZE);
+
+            {
+                let fallback_key = match (*visibility, *is_self) {
+                    (wows_minimap_renderer::ShipVisibility::Visible, true) => "Auxiliary_self",
+                    (wows_minimap_renderer::ShipVisibility::Visible, false) => "Auxiliary",
+                    (
+                        wows_minimap_renderer::ShipVisibility::MinimapOnly
+                        | wows_minimap_renderer::ShipVisibility::Undetected,
+                        _,
+                    ) => "Auxiliary_invisible",
+                };
+
+                let (variant_key, texture) = if let Some(sp) = species {
+                    let variant_key = match (*visibility, *is_self) {
+                        (wows_minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
+                        (wows_minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
+                        (
+                            wows_minimap_renderer::ShipVisibility::MinimapOnly
+                            | wows_minimap_renderer::ShipVisibility::Undetected,
+                            _,
+                        ) => {
+                            format!("{}_invisible", sp)
+                        }
+                    };
+                    let tex = textures
+                        .ship_icons
+                        .get(&variant_key)
+                        .or_else(|| textures.ship_icons.get(sp))
+                        .or_else(|| textures.ship_icons.get(fallback_key));
+                    (Some(variant_key), tex)
+                } else {
+                    (None, textures.ship_icons.get(fallback_key))
+                };
+
+                // Gold icon-shaped outline for detected teammates (drawn before icon).
+                // The outline texture is padded by SHIP_ICON_OUTLINE_THICKNESS pixels
+                // on each side, so draw it at the corresponding screen size so the
+                // halo wraps around the icon's silhouette instead of being squeezed
+                // back into the icon's footprint.
+                if *is_detected_teammate && let Some(outlines) = textures.ship_icon_outlines {
+                    let outline_tex = variant_key
+                        .as_ref()
+                        .and_then(|vk| outlines.get(vk))
+                        .or_else(|| species.as_ref().and_then(|sp| outlines.get(sp)));
+                    if let Some(otex) = outline_tex {
+                        let outline_size = icon_size
+                            * (ICON_SIZE + 2.0 * wows_minimap_renderer::SHIP_ICON_OUTLINE_THICKNESS as f32)
+                            / ICON_SIZE;
+                        shapes.push(make_rotated_icon_mesh(otex.id(), center, outline_size, *yaw, Color32::WHITE));
+                    }
+                }
+                if *is_disconnected && let Some(outlines) = textures.ship_icon_outlines {
+                    let outline_tex = variant_key
+                        .as_ref()
+                        .and_then(|vk| outlines.get(vk))
+                        .or_else(|| species.as_ref().and_then(|sp| outlines.get(sp)));
+                    if let Some(otex) = outline_tex {
+                        let outline_size = icon_size
+                            * (ICON_SIZE + 2.0 * wows_minimap_renderer::SHIP_ICON_OUTLINE_THICKNESS as f32)
+                            / ICON_SIZE;
+                        shapes.push(make_rotated_icon_mesh(otex.id(), center, outline_size, *yaw, Color32::RED));
+                    }
+                }
+
+                if let Some(tex) = texture {
+                    let tint = if let Some(c) = color {
+                        Color32::from_rgba_unmultiplied(c[0], c[1], c[2], (*opacity * 255.0) as u8)
+                    } else {
+                        Color32::from_rgba_unmultiplied(255, 255, 255, (*opacity * 255.0) as u8)
+                    };
+                    shapes.push(make_rotated_icon_mesh(tex.id(), center, icon_size, *yaw, tint));
+                }
+            }
+            let pname = if label_opts.show_player_names { player_name.as_deref() } else { None };
+            let sname = if label_opts.show_ship_names { ship_name.as_deref() } else { None };
+            let arm_color = if label_opts.show_armament_color {
+                name_color.map(|c| Color32::from_rgb(c[0], c[1], c[2]))
+            } else {
+                None
+            };
+            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, arm_color, &mut shapes);
+        }
+
+        DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha, .. } => {
+            let bar_w = transform.scale_distance(20.0);
+            let bar_h = transform.scale_distance(3.0);
+            let center = transform.minimap_to_screen(pos);
+            let bar_x = center.x - bar_w / 2.0;
+            let bar_y = center.y + transform.scale_distance(10.0);
+
+            let bg_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(bar_w, bar_h));
+            shapes.push(Shape::rect_filled(
+                bg_rect,
+                CornerRadius::ZERO,
+                color_from_rgba(*background_color, *background_alpha),
+            ));
+
+            let fill_w = fraction.clamp(0.0, 1.0) * bar_w;
+            if fill_w > 0.0 {
+                let fill_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(fill_w, bar_h));
+                shapes.push(Shape::rect_filled(fill_rect, CornerRadius::ZERO, color_from_rgb(*fill_color)));
+            }
+        }
+
+        DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            let icon_size = transform.scale_distance(ICON_SIZE);
+            {
+                let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
+                let variant_key = species
+                    .as_ref()
+                    .map(|sp| if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) });
+
+                let texture = variant_key
+                    .as_ref()
+                    .and_then(|vk| textures.ship_icons.get(vk))
+                    .or_else(|| species.as_ref().and_then(|sp| textures.ship_icons.get(sp)))
+                    .or_else(|| textures.ship_icons.get(fallback_key));
+
+                if let Some(tex) = texture {
+                    let tint = if let Some(c) = color { Color32::from_rgb(c[0], c[1], c[2]) } else { Color32::WHITE };
+                    shapes.push(make_rotated_icon_mesh(tex.id(), center, icon_size, *yaw, tint));
+                } else {
+                    let s = transform.scale_distance(6.0);
+                    let stroke = Stroke::new(transform.scale_stroke(2.0), Color32::RED);
+                    shapes.push(Shape::LineSegment {
+                        points: [Pos2::new(center.x - s, center.y - s), Pos2::new(center.x + s, center.y + s)],
+                        stroke,
+                    });
+                    shapes.push(Shape::LineSegment {
+                        points: [Pos2::new(center.x + s, center.y - s), Pos2::new(center.x - s, center.y + s)],
+                        stroke,
+                    });
+                }
+            }
+            if label_opts.show_dead_ship_names {
+                let pname = if label_opts.show_player_names { player_name.as_deref() } else { None };
+                let sname = if label_opts.show_ship_names { ship_name.as_deref() } else { None };
+                draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, None, &mut shapes);
+            }
+        }
+
+        DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            if let Some(tex) = textures.plane_icons.get(icon_key) {
+                let size = tex.size();
+                let w = transform.scale_distance(size[0] as f32);
+                let h = transform.scale_distance(size[1] as f32);
+                shapes.push(make_icon_mesh(tex.id(), center, w, h));
+            } else {
+                shapes.push(Shape::circle_filled(center, transform.scale_distance(3.0), Color32::YELLOW));
+            }
+            let pname = if label_opts.show_player_names { player_name.as_deref() } else { None };
+            let sname = if label_opts.show_ship_names { ship_name.as_deref() } else { None };
+            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, None, &mut shapes);
+        }
+
+        DrawCommand::ScoreBar {
+            team0,
+            team1,
+            team0_color,
+            team1_color,
+            max_score,
+            team0_timer,
+            team1_timer,
+            advantage,
+        } => {
+            let advantage_label = advantage
+                .map(|(level, _)| text_resolver.resolve(&TranslatableText::Advantage(level)))
+                .unwrap_or_default();
+            let advantage_team = advantage.map(|(_, team)| team as i32).unwrap_or(-1);
+            let canvas_w = transform.screen_hud_width();
+            let bar_height = HUD_HEIGHT as f32 * ws;
+            let max_score = *max_score as f32;
+            let half = canvas_w / 2.0;
+            let center_gap = 2.0 * ws;
+
+            let bar_origin = transform.hud_pos(0.0, 0.0);
+
+            // Dark background
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(bar_origin, Vec2::new(canvas_w, bar_height)),
+                CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(30, 30, 30, 204),
+            ));
+
+            // Team 0 progress: grows from left edge toward center
+            let t0_frac = (*team0 as f32 / max_score).clamp(0.0, 1.0);
+            let t0_width = t0_frac * (half - center_gap);
+            if t0_width > 0.0 {
+                shapes.push(Shape::rect_filled(
+                    Rect::from_min_size(bar_origin, Vec2::new(t0_width, bar_height)),
+                    CornerRadius::ZERO,
+                    color_from_rgb(*team0_color),
+                ));
+            }
+
+            // Team 1 progress: grows from right edge toward center
+            let t1_frac = (*team1 as f32 / max_score).clamp(0.0, 1.0);
+            let t1_width = t1_frac * (half - center_gap);
+            if t1_width > 0.0 {
+                shapes.push(Shape::rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(bar_origin.x + canvas_w - t1_width, bar_origin.y),
+                        Vec2::new(t1_width, bar_height),
+                    ),
+                    CornerRadius::ZERO,
+                    color_from_rgb(*team1_color),
+                ));
+            }
+
+            let score_font = game_font(14.0 * ws);
+            let timer_font = game_font(12.0 * ws);
+            let adv_font = game_font(11.0 * ws);
+            let t0_text = format!("{}", team0);
+            let t1_text = format!("{}", team1);
+            let timer_color = Color32::from_rgb(200, 200, 200);
+            let pill_color = Color32::from_rgba_unmultiplied(0, 0, 0, 140);
+            let pill_pad_x = 4.0 * ws;
+            let pill_pad_y = 1.0 * ws;
+            let pill_rounding = CornerRadius::same((3.0 * ws) as u8);
+
+            // ── Measure all team 0 elements ──
+            let t0_score_g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text.clone(), score_font.clone(), Color32::WHITE));
+            let t0_score_w = t0_score_g.size().x;
+            let t0_score_h = t0_score_g.size().y;
+            drop(t0_score_g);
+
+            let t0_timer_w = team0_timer.as_ref().map(|t| {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(t.clone(), timer_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                w
+            });
+
+            let t0_adv_w = if advantage_team == 0 && !advantage_label.is_empty() {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                Some(w)
+            } else {
+                None
+            };
+
+            let mut t0_total_w = t0_score_w;
+            if let Some(tw) = t0_timer_w {
+                t0_total_w += 4.0 * ws + tw;
+            }
+            if let Some(aw) = t0_adv_w {
+                t0_total_w += 6.0 * ws + aw;
+            }
+
+            let pill_h = t0_score_h + pill_pad_y * 2.0;
+            let pill_y = bar_origin.y + (bar_height - pill_h) / 2.0;
+
+            let t0_pill_x = bar_origin.x + 8.0 * ws - pill_pad_x;
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(Pos2::new(t0_pill_x, pill_y), Vec2::new(t0_total_w + pill_pad_x * 2.0, pill_h)),
+                pill_rounding,
+                pill_color,
+            ));
+
+            let pill_cy = pill_y + pill_h / 2.0;
+
+            let mut t0_cursor = bar_origin.x + 8.0 * ws;
+            let t0_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
+            let score_top = pill_cy - t0_score_galley.size().y / 2.0;
+            shapes.push(Shape::galley(Pos2::new(t0_cursor, score_top), t0_score_galley, Color32::WHITE));
+            t0_cursor += t0_score_w;
+
+            if let Some(timer) = team0_timer {
+                t0_cursor += 4.0 * ws;
+                let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), timer_color));
+                let tw = tg.size().x;
+                let ty = score_top + (t0_score_h - tg.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, ty), tg, timer_color));
+                t0_cursor += tw;
+            }
+
+            if t0_adv_w.is_some() {
+                t0_cursor += 6.0 * ws;
+                let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
+                let ay = score_top + (t0_score_h - ag.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, ay), ag, Color32::WHITE));
+            }
+
+            // ── Measure all team 1 elements ──
+            let t1_score_g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text.clone(), score_font.clone(), Color32::WHITE));
+            let t1_score_w = t1_score_g.size().x;
+            let t1_score_h = t1_score_g.size().y;
+            drop(t1_score_g);
+
+            let t1_timer_w = team1_timer.as_ref().map(|t| {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(t.clone(), timer_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                w
+            });
+
+            let t1_adv_w = if advantage_team == 1 && !advantage_label.is_empty() {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                Some(w)
+            } else {
+                None
+            };
+
+            let mut t1_total_w = t1_score_w;
+            if let Some(tw) = t1_timer_w {
+                t1_total_w += 4.0 * ws + tw;
+            }
+            if let Some(aw) = t1_adv_w {
+                t1_total_w += 6.0 * ws + aw;
+            }
+
+            let t1_pill_x = bar_origin.x + canvas_w - 8.0 * ws - t1_total_w - pill_pad_x;
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(Pos2::new(t1_pill_x, pill_y), Vec2::new(t1_total_w + pill_pad_x * 2.0, pill_h)),
+                pill_rounding,
+                pill_color,
+            ));
+
+            let mut t1_cursor = bar_origin.x + canvas_w - 8.0 * ws;
+
+            t1_cursor -= t1_score_w;
+            let t1_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
+            let t1_score_top = pill_cy - t1_score_galley.size().y / 2.0;
+            shapes.push(Shape::galley(Pos2::new(t1_cursor, t1_score_top), t1_score_galley, Color32::WHITE));
+
+            if let Some(timer) = team1_timer {
+                let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
+                let tw = tg.size().x;
+                t1_cursor -= 4.0 * ws + tw;
+                let ty = t1_score_top + (t1_score_h - tg.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, ty), tg, timer_color));
+            }
+
+            if let Some(aw) = t1_adv_w {
+                t1_cursor -= 6.0 * ws + aw;
+                let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font, Color32::WHITE));
+                let ay = t1_score_top + (t1_score_h - ag.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, ay), ag, Color32::WHITE));
+            }
+        }
+
+        DrawCommand::Timer { time_remaining, elapsed } => {
+            if elapsed.seconds() <= 0.0 {
+                return shapes;
+            }
+            let canvas_w = transform.screen_hud_width();
+            let main_font = game_font(16.0 * ws);
+            let pill_color = Color32::from_rgba_unmultiplied(0, 0, 0, 140);
+            let pill_pad_x = 4.0 * ws;
+            let pill_pad_y = 1.0 * ws;
+            let pill_rounding = CornerRadius::same((3.0 * ws) as u8);
+
+            let hud_h = HUD_HEIGHT as f32 * ws;
+            if let Some(remaining) = time_remaining {
+                let r = (*remaining).max(0) as u32;
+                let remaining_text = format!("{:02}:{:02}", r / 60, r % 60);
+                let small_font = game_font(11.0 * ws);
+                let e = elapsed.seconds().max(0.0) as u32;
+                let elapsed_text = format!("+{:02}:{:02}", e / 60, e % 60);
+                let gray = Color32::from_rgb(180, 180, 180);
+
+                let rg = ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text, main_font, Color32::WHITE));
+                let r_w = rg.size().x;
+                let eg = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text, small_font, gray));
+                let e_w = eg.size().x;
+
+                let hud_origin = transform.hud_pos(0.0, 0.0);
+                let main_pos = transform.hud_pos(0.0, 2.0);
+                let elapsed_pos = transform.hud_pos(0.0, 18.0);
+
+                let pill_w = r_w.max(e_w);
+                let pill_top = main_pos.y - pill_pad_y;
+                let pill_bottom = hud_origin.y + hud_h;
+                let pill_h = (pill_bottom - pill_top).max(0.0);
+                let pill_x = main_pos.x + canvas_w / 2.0 - pill_w / 2.0 - pill_pad_x;
+                shapes.push(Shape::rect_filled(
+                    Rect::from_min_size(Pos2::new(pill_x, pill_top), Vec2::new(pill_w + pill_pad_x * 2.0, pill_h)),
+                    pill_rounding,
+                    pill_color,
+                ));
+
+                let r_x = main_pos.x + canvas_w / 2.0 - r_w / 2.0;
+                shapes.push(Shape::galley(Pos2::new(r_x, main_pos.y), rg, Color32::WHITE));
+
+                let e_x = main_pos.x + canvas_w / 2.0 - e_w / 2.0;
+                shapes.push(Shape::galley(Pos2::new(e_x, elapsed_pos.y), eg, gray));
+            } else {
+                let e = elapsed.seconds().max(0.0) as u32;
+                let text = format!("{:02}:{:02}", e / 60, e % 60);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, main_font, Color32::WHITE));
+                let text_w = galley.size().x;
+                let hud_origin = transform.hud_pos(0.0, 0.0);
+                let pos = transform.hud_pos(0.0, 2.0);
+                let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
+                let pill_top = pos.y - pill_pad_y;
+                let pill_bottom = hud_origin.y + hud_h;
+                let pill_h = (pill_bottom - pill_top).max(0.0);
+                shapes.push(Shape::rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(x - pill_pad_x, pill_top),
+                        Vec2::new(text_w + pill_pad_x * 2.0, pill_h),
+                    ),
+                    pill_rounding,
+                    pill_color,
+                ));
+                shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, Color32::WHITE));
+            }
+        }
+
+        DrawCommand::PreBattleCountdown { seconds } => {
+            let text = format!("{}", seconds);
+            let subtitle = text_resolver.resolve(&TranslatableText::PreBattleLabel);
+            let color: [u8; 3] = [255, 200, 50];
+            let subtitle_above = true;
+            shapes.extend(render_glow_text_overlay(&text, Some(&subtitle), &color, subtitle_above, transform, ctx));
+        }
+
+        DrawCommand::TeamAdvantage { .. } => {
+            // Rendering handled by ScoreBar; this command is kept for tooltip interaction only
+        }
+
+        DrawCommand::WeatherZone { pos, radius } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius as f32);
+            shapes.push(Shape::circle_filled(center, r, Color32::from_rgba_unmultiplied(100, 100, 120, 40)));
+            shapes.push(Shape::circle_stroke(
+                center,
+                r,
+                Stroke::new(transform.scale_stroke(1.0), Color32::from_rgba_unmultiplied(120, 120, 150, 80)),
+            ));
+        }
+
+        DrawCommand::KillFeed { entries } => {
+            let name_font = game_font(12.0 * ws);
+            let line_h = 20.0 * ws;
+            let icon_size = ICON_SIZE * ws;
+            let cause_icon_size = icon_size;
+            let gap = 2.0 * ws;
+            let right_margin = 4.0 * ws;
+            let start = transform.hud_pos(0.0, HUD_HEIGHT as f32);
+            // The kill feed anchors to the right edge of the minimap, not the
+            // full HUD width — otherwise a left-gutter roster pushes the feed
+            // out past the right-gutter roster (off-screen / overlapping the
+            // panel) since `hud_width` spans both gutters together.
+            let map_right_edge = transform.origin.x
+                + (transform.map_x_offset + wows_minimap_renderer::MINIMAP_SIZE as f32) * transform.window_scale;
+
+            for (i, entry) in entries.iter().take(5).enumerate() {
+                let y = start.y + i as f32 * line_h;
+
+                let killer_color = color_from_rgb(entry.killer_color);
+                let victim_color = color_from_rgb(entry.victim_color);
+
+                let cause_key = death_cause_icon_key(entry);
+
+                // A kill with no responsible ship draws no killer name.
+                let killer_name = entry.killer_name.clone().unwrap_or_default();
+                let killer_galley = ctx.fonts_mut(|f| f.layout_no_wrap(killer_name, name_font.clone(), killer_color));
+                let victim_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(entry.victim_name.clone(), name_font.clone(), victim_color));
+                let killer_name_w = killer_galley.size().x;
+                let victim_name_w = victim_galley.size().x;
+
+                let ship_font = name_font.clone();
+                let killer_ship = entry.killer_ship_name.as_deref().unwrap_or("");
+                let victim_ship = entry.victim_ship_name.as_deref().unwrap_or("");
+                let killer_ship_galley = if !killer_ship.is_empty() {
+                    Some(ctx.fonts_mut(|f| f.layout_no_wrap(killer_ship.to_string(), ship_font.clone(), killer_color)))
+                } else {
+                    None
+                };
+                let victim_ship_galley = if !victim_ship.is_empty() {
+                    Some(ctx.fonts_mut(|f| f.layout_no_wrap(victim_ship.to_string(), ship_font.clone(), victim_color)))
+                } else {
+                    None
+                };
+                let killer_ship_w = killer_ship_galley.as_ref().map_or(0.0, |g| g.size().x);
+                let victim_ship_w = victim_ship_galley.as_ref().map_or(0.0, |g| g.size().x);
+
+                let has_cause_icon =
+                    textures.death_cause_icons.as_ref().is_some_and(|icons| icons.contains_key(cause_key));
+                let cause_w = if has_cause_icon { cause_icon_size } else { 0.0 };
+
+                let has_killer_icon =
+                    entry.killer_species.as_ref().is_some_and(|sp| textures.ship_icons.contains_key(sp.as_str()));
+                let has_victim_icon =
+                    entry.victim_species.as_ref().is_some_and(|sp| textures.ship_icons.contains_key(sp.as_str()));
+
+                let mut total_w = killer_name_w;
+                if has_killer_icon {
+                    total_w += gap + icon_size + gap;
+                } else if killer_ship_w > 0.0 {
+                    total_w += gap;
+                }
+                if killer_ship_w > 0.0 {
+                    total_w += killer_ship_w;
+                }
+                total_w += gap * 2.0 + cause_w + gap * 2.0;
+                total_w += victim_name_w;
+                if has_victim_icon {
+                    total_w += gap + icon_size + gap;
+                } else if victim_ship_w > 0.0 {
+                    total_w += gap;
+                }
+                if victim_ship_w > 0.0 {
+                    total_w += victim_ship_w;
+                }
+
+                // If we don't have death cause icons, fall back to simple text-only layout
+                if !has_cause_icon && !has_killer_icon && !has_victim_icon {
+                    // Simple text kill feed: "killer ⚔ victim"
+                    let text = match &entry.killer_name {
+                        Some(killer_name) => format!("{killer_name} \u{2694} {}", entry.victim_name),
+                        None => format!("\u{2694} {}", entry.victim_name),
+                    };
+                    let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, name_font.clone(), Color32::WHITE));
+                    let text_w = galley.size().x;
+                    let x = map_right_edge - right_margin - text_w;
+                    let line_height = 14.0 * ws;
+                    let pill_rect = Rect::from_min_size(
+                        Pos2::new(x - 3.0 * ws, y - 1.0 * ws),
+                        Vec2::new(text_w + 6.0 * ws, line_height),
+                    );
+                    shapes.push(Shape::rect_filled(
+                        pill_rect,
+                        CornerRadius::same((2.0 * ws) as u8),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 140),
+                    ));
+                    shapes.push(Shape::galley(Pos2::new(x, y), galley, Color32::WHITE));
+                    continue;
+                }
+
+                // Rich kill feed with icons
+                let bg_x = map_right_edge - total_w - right_margin * 2.0;
+                let bg_rect =
+                    Rect::from_min_size(Pos2::new(bg_x, y - 1.0 * ws), Vec2::new(total_w + right_margin * 2.0, line_h));
+                shapes.push(Shape::rect_filled(bg_rect, CornerRadius::ZERO, Color32::from_black_alpha(128)));
+
+                let mut x = map_right_edge - total_w - right_margin;
+                let row_rect = killer_galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::ZERO);
+                let icon_center_y = y + row_rect.center().y;
+
+                // Killer name
+                shapes.push(Shape::galley(Pos2::new(x, y), killer_galley, Color32::TRANSPARENT));
+                x += killer_name_w;
+
+                // Killer ship icon (friendly=points left (PI), enemy=points right (0))
+                if has_killer_icon {
+                    x += gap;
+                    let sp = entry.killer_species.as_ref().unwrap();
+                    if let Some(tex) = textures.ship_icons.get(sp.as_str()) {
+                        let tint =
+                            Color32::from_rgb(entry.killer_color[0], entry.killer_color[1], entry.killer_color[2]);
+                        let angle = if entry.killer_is_friendly { std::f32::consts::PI } else { 0.0 };
+                        shapes.push(make_rotated_icon_mesh(
+                            tex.id(),
+                            Pos2::new(x + icon_size / 2.0, icon_center_y),
+                            icon_size,
+                            angle,
+                            tint,
+                        ));
+                    }
+                    x += icon_size + gap;
+                } else if killer_ship_w > 0.0 {
+                    x += gap;
+                }
+
+                // Killer ship name
+                if let Some(galley) = killer_ship_galley {
+                    shapes.push(Shape::galley(Pos2::new(x, y), galley, Color32::TRANSPARENT));
+                    x += killer_ship_w;
+                }
+
+                // Death cause icon
+                x += gap * 2.0;
+                if let Some(icons) = textures.death_cause_icons
+                    && let Some(tex) = icons.get(cause_key)
+                {
+                    let half = cause_icon_size / 2.0;
+                    let mut mesh = egui::Mesh::with_texture(tex.id());
+                    let rect = Rect::from_min_max(
+                        Pos2::new(x, icon_center_y - half),
+                        Pos2::new(x + cause_icon_size, icon_center_y + half),
+                    );
+                    mesh.add_rect_with_uv(
+                        rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    shapes.push(Shape::Mesh(mesh.into()));
+                }
+                x += cause_w + gap * 2.0;
+
+                // Victim name
+                shapes.push(Shape::galley(Pos2::new(x, y), victim_galley, Color32::TRANSPARENT));
+                x += victim_name_w;
+
+                // Victim ship icon (friendly=points left (PI), enemy=points right (0))
+                if has_victim_icon {
+                    x += gap;
+                    let sp = entry.victim_species.as_ref().unwrap();
+                    if let Some(tex) = textures.ship_icons.get(sp.as_str()) {
+                        let tint =
+                            Color32::from_rgb(entry.victim_color[0], entry.victim_color[1], entry.victim_color[2]);
+                        let angle = if entry.victim_is_friendly { std::f32::consts::PI } else { 0.0 };
+                        shapes.push(make_rotated_icon_mesh(
+                            tex.id(),
+                            Pos2::new(x + icon_size / 2.0, icon_center_y),
+                            icon_size,
+                            angle,
+                            tint,
+                        ));
+                    }
+                    x += icon_size + gap;
+                } else if victim_ship_w > 0.0 {
+                    x += gap;
+                }
+
+                // Victim ship name
+                if let Some(galley) = victim_ship_galley {
+                    shapes.push(Shape::galley(Pos2::new(x, y), galley, Color32::TRANSPARENT));
+                }
+            }
+        }
+
+        DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius as f32);
+
+            shapes.push(Shape::circle_filled(center, r, color_from_rgba(*color, *alpha)));
+
+            if *progress > 0.001
+                && let Some(inv_color) = invader_color
+            {
+                let fill_alpha = (*alpha + 0.10).min(1.0);
+                let sweep = *progress * std::f32::consts::TAU;
+                let segments = 64;
+                let start_angle = -std::f32::consts::FRAC_PI_2;
+                let pie_color = color_from_rgba(*inv_color, fill_alpha);
+
+                let mut mesh = egui::Mesh::default();
+                mesh.vertices.push(egui::epaint::Vertex { pos: center, uv: egui::pos2(0.0, 0.0), color: pie_color });
+                let step_count = ((segments as f32 * (*progress)).ceil() as usize).max(1);
+                let angle_step = sweep / step_count as f32;
+                for i in 0..=step_count {
+                    let angle = start_angle + i as f32 * angle_step;
+                    let px = center.x + r * angle.cos();
+                    let py = center.y + r * angle.sin();
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: egui::pos2(px, py),
+                        uv: egui::pos2(0.0, 0.0),
+                        color: pie_color,
+                    });
+                    if i > 0 {
+                        let vi = mesh.vertices.len() as u32;
+                        mesh.indices.extend_from_slice(&[0, vi - 2, vi - 1]);
+                    }
+                }
+                shapes.push(Shape::Mesh(mesh.into()));
+            }
+
+            let outline_color = if *progress > 0.001 {
+                invader_color.map(color_from_rgb).unwrap_or_else(|| color_from_rgb(*color))
+            } else {
+                color_from_rgb(*color)
+            };
+            shapes.push(Shape::circle_stroke(center, r, Stroke::new(transform.scale_stroke(1.5), outline_color)));
+
+            if !label.is_empty() {
+                let font = game_font(11.0 * ws);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font, Color32::WHITE));
+                let text_w = galley.size().x;
+                let text_h = galley.size().y;
+                shapes.push(Shape::galley(
+                    Pos2::new(center.x - text_w / 2.0, center.y - text_h / 2.0),
+                    galley,
+                    Color32::WHITE,
+                ));
+            }
+        }
+
+        DrawCommand::Building { pos, color, is_alive, icon_type, relation } => {
+            let center = transform.minimap_to_screen(pos);
+            let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
+            let icon = icon_key.as_ref().and_then(|k| textures.building_icons.and_then(|icons| icons.get(k)));
+            if let Some(tex) = icon {
+                let size = transform.scale_distance(ICON_SIZE);
+                shapes.push(make_icon_mesh(tex.id(), center, size, size));
+            } else {
+                let r = if *is_alive { transform.scale_distance(2.0) } else { transform.scale_distance(1.5) };
+                shapes.push(Shape::circle_filled(center, r, color_from_rgb(*color)));
+            }
+        }
+
+        DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
+            let wedge = CameraDirectionWedge::new(*pos, *yaw, *length as f32);
+            let corners = wedge.corners().map(|at| transform.minimap_to_screen(&at));
+            let fill = color_from_rgba(*color, CAMERA_DIRECTION_ALPHA);
+            shapes.push(Shape::convex_polygon(corners.to_vec(), fill, Stroke::NONE));
+        }
+
+        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius_px as f32);
+            let fill_color = color_from_rgba(*color, *alpha);
+            shapes.push(Shape::circle_filled(center, r, fill_color));
+            let outline_color = color_from_rgba(*color, 0.5);
+            let stroke_w = transform.scale_stroke(2.0);
+            shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
+        }
+
+        DrawCommand::PatrolRadius { pos, radius_px, color, alpha, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius_px as f32);
+            let fill_color = color_from_rgba(*color, *alpha);
+            shapes.push(Shape::circle_filled(center, r, fill_color));
+        }
+
+        DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
+            if let Some(consumable_icons) = textures.consumable_icons {
+                let center = transform.minimap_to_screen(pos);
+                let base_offset = if *has_hp_bar { 26.0 } else { 23.0 };
+                let icon_y = center.y + transform.scale_distance(base_offset);
+                let icon_sz = transform.scale_distance(16.0);
+                let gap = transform.scale_distance(1.0);
+                let count = icon_keys.len() as f32;
+                let total_width = count * icon_sz + (count - 1.0) * gap;
+                let start_x = center.x - total_width / 2.0 + icon_sz / 2.0;
+                for (i, icon_key) in icon_keys.iter().enumerate() {
+                    let icon_x = start_x + i as f32 * (icon_sz + gap);
+                    if let Some(tex) = consumable_icons.get(icon_key) {
+                        let half = icon_sz / 2.0;
+                        let mut mesh = egui::Mesh::with_texture(tex.id());
+                        let rect = Rect::from_min_max(
+                            Pos2::new(icon_x - half, icon_y - half),
+                            Pos2::new(icon_x + half, icon_y + half),
+                        );
+                        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+                        shapes.push(Shape::Mesh(mesh.into()));
+                    }
+                }
+            }
+        }
+
+        DrawCommand::PositionTrail { points, .. } => {
+            let dot_radius = transform.scale_distance(1.5);
+            for (pos, color) in points {
+                let center = transform.minimap_to_screen(pos);
+                shapes.push(Shape::circle_filled(center, dot_radius, color_from_rgb(*color)));
+            }
+        }
+
+        DrawCommand::ShipConfigCircle { pos, radius_px, color, alpha, dashed, label, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            let screen_radius = transform.scale_distance(*radius_px);
+            crate::rendering::draw_range_circle(
+                ctx,
+                &mut shapes,
+                center,
+                screen_radius,
+                *color,
+                *alpha,
+                *dashed,
+                label.as_deref(),
+                placed_labels,
+            );
+        }
+
+        DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius as f32);
+
+            shapes.push(Shape::circle_filled(center, r, color_from_rgba(*color, *alpha)));
+            shapes.push(Shape::circle_stroke(
+                center,
+                r,
+                Stroke::new(transform.scale_stroke(1.5), color_from_rgba(*color, 0.6)),
+            ));
+
+            if let Some(name) = marker_name
+                && let Some(powerup_icons) = textures.powerup_icons
+                && let Some(tex) = powerup_icons.get(name.as_str())
+            {
+                let icon_size = transform.scale_distance(16.0);
+                let half = icon_size / 2.0;
+                let mut mesh = egui::Mesh::with_texture(tex.id());
+                let rect = Rect::from_min_max(
+                    Pos2::new(center.x - half, center.y - half),
+                    Pos2::new(center.x + half, center.y + half),
+                );
+                mesh.add_rect_with_uv(
+                    rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+                shapes.push(Shape::Mesh(mesh.into()));
+            }
+        }
+
+        DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
+            let text = text_resolver.resolve(&TranslatableText::BattleResult(*result));
+            let subtitle = finish_type
+                .as_ref()
+                .map(|ft| text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase());
+            shapes.extend(render_glow_text_overlay(&text, subtitle.as_deref(), color, *subtitle_above, transform, ctx));
+        }
+
+        DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
+            if let Some(powerup_icons) = textures.powerup_icons {
+                let canvas_w = transform.screen_hud_width();
+                let icon_sz = 16.0 * ws;
+                let gap = 2.0 * ws;
+                let buff_y = transform.hud_pos(0.0, HUD_HEIGHT as f32).y;
+                let origin_x = transform.hud_pos(0.0, 0.0).x;
+
+                // Friendly buffs: left side
+                let mut x = origin_x + 4.0 * ws;
+                for (marker, count) in friendly_buffs {
+                    if let Some(tex) = powerup_icons.get(marker.as_str()) {
+                        let mut mesh = egui::Mesh::with_texture(tex.id());
+                        let rect = Rect::from_min_size(Pos2::new(x, buff_y), Vec2::new(icon_sz, icon_sz));
+                        mesh.add_rect_with_uv(
+                            rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                        shapes.push(Shape::Mesh(mesh.into()));
+
+                        if *count > 1 {
+                            let label = format!("{}", count);
+                            let font = game_font(10.0 * ws);
+                            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label, font, Color32::WHITE));
+                            let tw = galley.size().x;
+                            shapes.push(Shape::galley(
+                                Pos2::new(x + icon_sz, buff_y + 4.0 * ws),
+                                galley,
+                                Color32::TRANSPARENT,
+                            ));
+                            x += icon_sz + tw + gap;
+                        } else {
+                            x += icon_sz + gap;
+                        }
+                    }
+                }
+
+                // Enemy buffs: right side
+                let mut x = origin_x + canvas_w - 4.0 * ws;
+                for (marker, count) in enemy_buffs {
+                    if let Some(tex) = powerup_icons.get(marker.as_str()) {
+                        if *count > 1 {
+                            let label = format!("{}", count);
+                            let font = game_font(10.0 * ws);
+                            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label, font, Color32::WHITE));
+                            let tw = galley.size().x;
+                            x -= tw;
+                            shapes.push(Shape::galley(Pos2::new(x, buff_y + 4.0 * ws), galley, Color32::TRANSPARENT));
+                            x -= icon_sz;
+                        } else {
+                            x -= icon_sz;
+                        }
+
+                        let mut mesh = egui::Mesh::with_texture(tex.id());
+                        let rect = Rect::from_min_size(Pos2::new(x, buff_y), Vec2::new(icon_sz, icon_sz));
+                        mesh.add_rect_with_uv(
+                            rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                        shapes.push(Shape::Mesh(mesh.into()));
+                        x -= gap;
+                    }
+                }
+            }
+        }
+
+        DrawCommand::ChatOverlay { entries } => {
+            // Minimap region in logical pixels (excludes the roster gutters) so
+            // chat sits inside the map instead of under a side panel.
+            let minimap_w = transform.hud_width - 2.0 * transform.map_x_offset;
+            let header_font = game_font(11.0 * ws);
+            let msg_font = game_font(11.0 * ws);
+            let line_h = 14.0 * ws;
+            let icon_sz = 12.0 * ws;
+            let padding = 6.0 * ws;
+            let entry_gap = 6.0 * ws;
+
+            let box_w = minimap_w * 0.25 * ws;
+            let box_x = transform.origin.x + (transform.map_x_offset + 4.0) * ws;
+            let inner_w = box_w - padding * 2.0;
+
+            struct ChatLayout {
+                clan_galley: Option<std::sync::Arc<egui::Galley>>,
+                name_galley: std::sync::Arc<egui::Galley>,
+                ship_icon_species: Option<String>,
+                ship_name_galley: Option<std::sync::Arc<egui::Galley>>,
+                msg_galleys: Vec<std::sync::Arc<egui::Galley>>,
+                opacity: f32,
+                team_color: [u8; 3],
+            }
+
+            let mut layouts = Vec::new();
+            let mut total_h = padding;
+            for entry in entries {
+                let opacity = entry.opacity;
+                let alpha = (opacity * 255.0) as u8;
+                let team_color = entry.team_color;
+                let team_c = Color32::from_rgba_unmultiplied(team_color[0], team_color[1], team_color[2], alpha);
+
+                let clan_galley =
+                    if !entry.clan_tag.is_empty() {
+                        let clan_c = if let Some(cc) = entry.clan_color {
+                            Color32::from_rgba_unmultiplied(cc[0], cc[1], cc[2], alpha)
+                        } else {
+                            team_c
+                        };
+                        Some(ctx.fonts_mut(|f| {
+                            f.layout_no_wrap(format!("[{}] ", entry.clan_tag), header_font.clone(), clan_c)
+                        }))
+                    } else {
+                        None
+                    };
+                let name_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(entry.player_name.clone(), header_font.clone(), team_c));
+
+                let ship_name_galley = entry
+                    .ship_name
+                    .as_ref()
+                    .map(|sn| ctx.fonts_mut(|f| f.layout_no_wrap(sn.clone(), header_font.clone(), team_c)));
+                let has_ship_line = ship_name_galley.is_some();
+
+                let msg_color = Color32::from_rgba_unmultiplied(
+                    entry.message_color[0],
+                    entry.message_color[1],
+                    entry.message_color[2],
+                    alpha,
+                );
+                let msg_galleys = ctx.fonts_mut(|f| {
+                    let job =
+                        egui::text::LayoutJob::simple(entry.message.clone(), msg_font.clone(), msg_color, inner_w);
+                    let galley = f.layout_job(job);
+                    vec![galley]
+                });
+
+                let msg_lines: usize = msg_galleys.iter().map(|g| g.rows.len().max(1)).sum();
+                let line_count = 1 + has_ship_line as usize + msg_lines;
+                total_h += line_count as f32 * line_h + entry_gap;
+
+                layouts.push(ChatLayout {
+                    clan_galley,
+                    name_galley,
+                    ship_icon_species: entry.ship_species.clone(),
+                    ship_name_galley,
+                    msg_galleys,
+                    opacity,
+                    team_color,
+                });
+            }
+
+            if !layouts.is_empty() {
+                total_h += padding;
+                let map_mid_y = transform.origin.y + (transform.hud_height + minimap_w / 2.0) * ws;
+                let box_y = map_mid_y - total_h / 2.0;
+
+                let bg_rect = Rect::from_min_size(Pos2::new(box_x, box_y), Vec2::new(box_w, total_h));
+                shapes.push(Shape::rect_filled(bg_rect, CornerRadius::same(3), Color32::from_black_alpha(90)));
+
+                let mut y = box_y + padding;
+                for layout in &layouts {
+                    let alpha = (layout.opacity * 255.0) as u8;
+                    let x = box_x + padding;
+
+                    let mut nx = x;
+                    if let Some(ref cg) = layout.clan_galley {
+                        shapes.push(Shape::galley(Pos2::new(nx, y), cg.clone(), Color32::TRANSPARENT));
+                        nx += cg.size().x;
+                    }
+                    shapes.push(Shape::galley(Pos2::new(nx, y), layout.name_galley.clone(), Color32::TRANSPARENT));
+                    y += line_h;
+
+                    if let Some(ref sng) = layout.ship_name_galley {
+                        let mut sx = x;
+                        if let Some(ref species) = layout.ship_icon_species {
+                            if let Some(tex) = textures.ship_icons.get(species.as_str()) {
+                                let tc = layout.team_color;
+                                let tint = Color32::from_rgba_unmultiplied(tc[0], tc[1], tc[2], alpha);
+                                let icon_center_y = y + sng.size().y / 2.0;
+                                shapes.push(make_rotated_icon_mesh(
+                                    tex.id(),
+                                    Pos2::new(sx + icon_sz / 2.0, icon_center_y),
+                                    icon_sz,
+                                    0.0,
+                                    tint,
+                                ));
+                            }
+                            sx += icon_sz + 2.0 * ws;
+                        }
+                        shapes.push(Shape::galley(Pos2::new(sx, y), sng.clone(), Color32::TRANSPARENT));
+                        y += line_h;
+                    }
+
+                    for galley in &layout.msg_galleys {
+                        shapes.push(Shape::galley(Pos2::new(x, y), galley.clone(), Color32::TRANSPARENT));
+                        y += galley.rows.len().max(1) as f32 * line_h;
+                    }
+
+                    y += entry_gap;
+                }
+            }
+        }
+        DrawCommand::StatsPanel { x, width } => {
+            let origin = transform.hud_pos(*x as f32, 0.0);
+            let size = Vec2::new(
+                *width as f32 * ws,
+                transform.hud_pos(0.0, wows_minimap_renderer::CANVAS_HEIGHT as f32).y - origin.y,
+            );
+            // Dark panel background
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(origin, size),
+                CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(30, 34, 42, 245),
+            ));
+            // Left border line
+            shapes.push(Shape::LineSegment {
+                points: [origin, Pos2::new(origin.x, origin.y + size.y)],
+                stroke: Stroke::new(ws, Color32::from_rgba_unmultiplied(55, 60, 72, 200)),
+            });
+        }
+
+        DrawCommand::StatsSilhouette {
+            x,
+            y,
+            width,
+            height,
+            ship_param_id: _,
+            hp,
+            heal_availability,
+            player_name,
+            clan_tag,
+            clan_color,
+            ship_name,
+            ..
+        } => {
+            let padding = 8.0 * ws;
+            let origin = transform.hud_pos(*x as f32, *y as f32);
+            let inner_x = origin.x + padding;
+            let inner_w = *width as f32 * ws - padding * 2.0;
+
+            // Draw clan tag + player name, and ship name above the silhouette
+            let label_font = game_font(12.0 * ws);
+            let label_small_font = game_font(10.0 * ws);
+            let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
+            let shadow_off = (1.0 * ws).min(2.0);
+            let mut label_y = origin.y + 2.0 * ws;
+            let line_h = 13.0 * ws;
+
+            if player_name.is_some() || clan_tag.is_some() {
+                // Build "[CLAN] PlayerName" with clan part colored
+                let clan_prefix = clan_tag.as_ref().filter(|t| !t.is_empty()).map(|t| format!("[{t}] "));
+                let name_part = player_name.as_deref().unwrap_or("");
+
+                let mut total_w = 0.0;
+                let clan_galley = clan_prefix.as_ref().map(|cp| {
+                    let clan_c = clan_color.map(|cc| Color32::from_rgb(cc[0], cc[1], cc[2])).unwrap_or(Color32::WHITE);
+                    let g = ctx.fonts_mut(|f| f.layout_no_wrap(cp.clone(), label_font.clone(), clan_c));
+                    total_w += g.size().x;
+                    g
+                });
+                let name_galley = if !name_part.is_empty() {
+                    let g =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(name_part.to_owned(), label_font.clone(), Color32::WHITE));
+                    total_w += g.size().x;
+                    Some(g)
+                } else {
+                    None
+                };
+
+                let mut cx = inner_x + (inner_w - total_w) / 2.0;
+                if let Some(cg) = clan_galley {
+                    let w = cg.size().x;
+                    let shadow_g = ctx.fonts_mut(|f| {
+                        f.layout_no_wrap(clan_prefix.as_ref().unwrap().clone(), label_font.clone(), shadow_color)
+                    });
+                    shapes.push(Shape::galley(
+                        Pos2::new(cx + shadow_off, label_y + shadow_off),
+                        shadow_g,
+                        shadow_color,
+                    ));
+                    shapes.push(Shape::galley(Pos2::new(cx, label_y), cg, Color32::TRANSPARENT));
+                    cx += w;
+                }
+                if let Some(ng) = name_galley {
+                    let shadow_g =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(name_part.to_owned(), label_font.clone(), shadow_color));
+                    shapes.push(Shape::galley(
+                        Pos2::new(cx + shadow_off, label_y + shadow_off),
+                        shadow_g,
+                        shadow_color,
+                    ));
+                    shapes.push(Shape::galley(Pos2::new(cx, label_y), ng, Color32::WHITE));
+                }
+                label_y += line_h;
+            }
+            if let Some(name) = ship_name {
+                let color = Color32::from_rgb(180, 180, 180);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.clone(), label_small_font.clone(), color));
+                let tx = inner_x + (inner_w - galley.size().x) / 2.0;
+                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(name.clone(), label_small_font.clone(), shadow_color));
+                shapes.push(Shape::galley(Pos2::new(tx + shadow_off, label_y + shadow_off), shadow, shadow_color));
+                shapes.push(Shape::galley(Pos2::new(tx, label_y), galley, color));
+                label_y += line_h;
+            }
+
+            // Remaining area for silhouette + HP text
+            let sil_top = label_y + 1.0 * ws;
+            let total_h = *height as f32 * ws;
+            let hp_text_h = 20.0 * ws;
+            let sil_area_h = (origin.y + total_h - hp_text_h - sil_top).max(0.0);
+
+            // Draw silhouette with three-region HP overlay if texture is available
+            if let Some(sil_tex) = textures.silhouette_texture {
+                let tex_size = sil_tex.size_vec2();
+                let aspect = tex_size.x / tex_size.y;
+                // Fit silhouette into available area preserving aspect ratio
+                let fit_w = inner_w.min(sil_area_h * aspect);
+                let fit_h = fit_w / aspect;
+                let sil_x = inner_x + (inner_w - fit_w) / 2.0;
+                let sil_y = sil_top + (sil_area_h - fit_h) / 2.0;
+                let sil_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(fit_w, fit_h));
+
+                // Charcoal silhouette base (unhealable lost HP shows through)
+                let mut base_mesh = egui::Mesh::with_texture(sil_tex.id());
+                base_mesh.add_rect_with_uv(sil_rect, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), {
+                    let [r, g, b] = wows_minimap_renderer::draw_command::SILHOUETTE_BASE_RGB;
+                    Color32::from_rgb(r, g, b)
+                });
+                shapes.push(Shape::Mesh(base_mesh.into()));
+
+                if let Some(hp) = hp {
+                    let regions = wows_minimap_renderer::panel_math::silhouette_regions(
+                        hp.current,
+                        hp.healable,
+                        hp.healable_per_charge,
+                        hp.max,
+                    );
+
+                    // Colored region: current HP, clipped from the left by regions.colored
+                    let hp_color = hp_bar_color_egui(hp.fraction());
+                    let colored_w = fit_w * regions.colored;
+                    if colored_w > 0.0 {
+                        let clip_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(colored_w, fit_h));
+                        let mut hp_mesh = egui::Mesh::with_texture(sil_tex.id());
+                        hp_mesh.add_rect_with_uv(
+                            clip_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(regions.colored, 1.0)),
+                            hp_color,
+                        );
+                        shapes.push(Shape::Mesh(hp_mesh.into()));
+                    }
+
+                    // Healable region: bright = HP the next heal charge restores,
+                    // dim = the regenerable pool beyond that charge. Gray when a heal
+                    // is ready, white while healing, hidden when unavailable.
+                    if let Some([r, g, b]) = heal_availability.healable_rgb() {
+                        let bright = Color32::from_rgb(r, g, b);
+                        let [dr, dg, db] = wows_minimap_renderer::panel_math::darken([r, g, b], 0.5);
+                        let dim = Color32::from_rgb(dr, dg, db);
+                        let mut draw_region = |start: f32, w_frac: f32, color: Color32| {
+                            let region_w = fit_w * w_frac;
+                            if region_w > 0.0 {
+                                let clip_rect = Rect::from_min_size(
+                                    Pos2::new(sil_x + fit_w * start, sil_y),
+                                    Vec2::new(region_w, fit_h),
+                                );
+                                let mut region_mesh = egui::Mesh::with_texture(sil_tex.id());
+                                region_mesh.add_rect_with_uv(
+                                    clip_rect,
+                                    Rect::from_min_max(egui::pos2(start, 0.0), egui::pos2(start + w_frac, 1.0)),
+                                    color,
+                                );
+                                shapes.push(Shape::Mesh(region_mesh.into()));
+                            }
+                        };
+                        draw_region(regions.colored, regions.healable_bright, bright);
+                        draw_region(regions.colored + regions.healable_bright, regions.healable_dim, dim);
+                    }
+                }
+            } else {
+                // Fallback: simple HP bar when no silhouette texture
+                let bar_y = sil_top + 10.0 * ws;
+                let bar_h = sil_area_h - 10.0 * ws;
+                if bar_h > 0.0 {
+                    shapes.push(Shape::rect_filled(
+                        Rect::from_min_size(Pos2::new(inner_x, bar_y), Vec2::new(inner_w, bar_h)),
+                        CornerRadius::same(2),
+                        Color32::from_rgb(40, 40, 40),
+                    ));
+                    if let Some(hp) = hp {
+                        let hp_fraction = hp.fraction();
+                        let hp_color = hp_bar_color_egui(hp_fraction);
+                        let fill_w = inner_w * hp_fraction;
+                        if fill_w > 0.0 {
+                            shapes.push(Shape::rect_filled(
+                                Rect::from_min_size(Pos2::new(inner_x, bar_y), Vec2::new(fill_w, bar_h)),
+                                CornerRadius::same(2),
+                                hp_color,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // HP text: "12,345 / 42,750"
+            if let Some(hp) = hp {
+                let hp_text =
+                    format!("{} / {}", format_number_egui(hp.current as i64), format_number_egui(hp.max as i64));
+                let hp_font = game_font(16.0 * ws);
+                let hp_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_text, hp_font, Color32::from_rgb(220, 220, 220)));
+                let hp_x = inner_x + (inner_w - hp_galley.size().x) / 2.0;
+                let hp_y = sil_top + sil_area_h;
+                shapes.push(Shape::galley(Pos2::new(hp_x, hp_y), hp_galley, Color32::TRANSPARENT));
+            }
+        }
+
+        DrawCommand::StatsDamage {
+            x,
+            y,
+            width,
+            breakdowns,
+            damage_spotting,
+            spotting_breakdowns,
+            damage_potential,
+            potential_breakdowns,
+        } => {
+            let padding = 8.0 * ws;
+            let origin = transform.hud_pos(*x as f32, *y as f32);
+            let inner_x = origin.x + padding;
+            let indent_x = inner_x + 12.0 * ws;
+            let right_x = origin.x + *width as f32 * ws - padding;
+
+            let header_font = game_font(16.0 * ws);
+            let breakdown_font = game_font(13.0 * ws);
+            let header_row_h = 22.0 * ws;
+            let breakdown_row_h = 18.0 * ws;
+            let label_color = Color32::from_rgb(140, 140, 140);
+
+            let mut cur_y = origin.y + 4.0 * ws;
+
+            // Total enemy damage header
+            let total_damage: f64 = breakdowns.iter().map(|e| e.damage).sum();
+            let header_galley = ctx.fonts_mut(|f| {
+                f.layout_no_wrap("DMG".to_string(), header_font.clone(), Color32::from_rgb(200, 200, 200))
+            });
+            shapes.push(Shape::galley(Pos2::new(inner_x, cur_y), header_galley, Color32::TRANSPARENT));
+            let total_str = format_number_egui(total_damage as i64);
+            let total_galley =
+                ctx.fonts_mut(|f| f.layout_no_wrap(total_str, header_font.clone(), Color32::from_rgb(255, 220, 100)));
+            let total_x = right_x - total_galley.size().x;
+            shapes.push(Shape::galley(Pos2::new(total_x, cur_y), total_galley, Color32::TRANSPARENT));
+            cur_y += header_row_h;
+
+            // Indented breakdown rows (smaller font)
+            for entry in breakdowns.iter() {
+                let color = damage_label_color(&entry.label);
+                let label_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(entry.label.clone(), breakdown_font.clone(), label_color));
+                shapes.push(Shape::galley(Pos2::new(indent_x, cur_y), label_galley, Color32::TRANSPARENT));
+
+                let val_str = format_number_egui(entry.damage as i64);
+                let val_galley = ctx.fonts_mut(|f| f.layout_no_wrap(val_str, breakdown_font.clone(), color));
+                let val_x = right_x - val_galley.size().x;
+                shapes.push(Shape::galley(Pos2::new(val_x, cur_y), val_galley, Color32::TRANSPARENT));
+                cur_y += breakdown_row_h;
+            }
+
+            // Separator before spot/potential
+            if !breakdowns.is_empty() {
+                let sep_y = cur_y - 1.0 * ws;
+                shapes.push(Shape::LineSegment {
+                    points: [Pos2::new(inner_x, sep_y), Pos2::new(right_x, sep_y)],
+                    stroke: Stroke::new(ws * 0.5, Color32::from_rgba_unmultiplied(60, 60, 60, 150)),
+                });
+                cur_y += 2.0 * ws;
+            }
+
+            // Spotting + Potential: header row with total, then indented sub-breakdowns
+            let summary_sections: [(&str, f64, &[DamageBreakdownEntry], Color32); 2] = [
+                ("SPOT", *damage_spotting, spotting_breakdowns, Color32::from_rgb(120, 200, 255)),
+                ("POT", *damage_potential, potential_breakdowns, Color32::from_rgb(180, 180, 180)),
+            ];
+            for (label, total, sub_breakdowns, color) in &summary_sections {
+                // Header row
+                let label_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(label.to_string(), breakdown_font.clone(), label_color));
+                shapes.push(Shape::galley(Pos2::new(inner_x, cur_y), label_galley, Color32::TRANSPARENT));
+
+                let val_str = format_number_egui(*total as i64);
+                let val_galley = ctx.fonts_mut(|f| f.layout_no_wrap(val_str, breakdown_font.clone(), *color));
+                let val_x = right_x - val_galley.size().x;
+                shapes.push(Shape::galley(Pos2::new(val_x, cur_y), val_galley, Color32::TRANSPARENT));
+                cur_y += breakdown_row_h;
+
+                // Sub-breakdown rows (indented, dimmer)
+                for entry in sub_breakdowns.iter() {
+                    let sub_color = damage_label_color(&entry.label);
+                    let sub_label =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(entry.label.clone(), breakdown_font.clone(), label_color));
+                    shapes.push(Shape::galley(Pos2::new(indent_x, cur_y), sub_label, Color32::TRANSPARENT));
+
+                    let sub_val_str = format_number_egui(entry.damage as i64);
+                    let sub_val = ctx.fonts_mut(|f| f.layout_no_wrap(sub_val_str, breakdown_font.clone(), sub_color));
+                    let sub_val_x = right_x - sub_val.size().x;
+                    shapes.push(Shape::galley(Pos2::new(sub_val_x, cur_y), sub_val, Color32::TRANSPARENT));
+                    cur_y += breakdown_row_h;
+                }
+            }
+        }
+
+        DrawCommand::StatsRibbons { x, y, width, ribbons } => {
+            use wows_minimap_renderer::draw_command::STATS_RIBBON_CELL_W;
+            use wows_minimap_renderer::draw_command::STATS_RIBBON_ICON;
+            use wows_minimap_renderer::draw_command::STATS_RIBBON_ROW_H;
+            let padding = 8.0 * ws;
+            let origin = transform.hud_pos(*x as f32, *y as f32);
+            let inner_x = origin.x + padding;
+            let inner_w = *width as f32 * ws - padding * 2.0;
+            let icon_h = STATS_RIBBON_ICON as f32 * ws;
+            let row_h = STATS_RIBBON_ROW_H as f32 * ws;
+            let cell_w = STATS_RIBBON_CELL_W as f32 * ws;
+            let gap = 2.0 * ws;
+            let font = game_font(14.0 * ws);
+            let count_color = Color32::WHITE;
+            let name_color = Color32::from_rgb(180, 180, 180);
+
+            let mut cur_x = inner_x;
+            let mut cur_y = origin.y;
+            for rc in ribbons.iter() {
+                // Fixed-width cell: wrap when the next whole cell would overflow.
+                // Matches the emitter's `inner_w / cell_w` row math so the feed
+                // below never lands on top of a wrapped row.
+                if cur_x > inner_x && cur_x + cell_w > inner_x + inner_w {
+                    cur_x = inner_x;
+                    cur_y += row_h;
+                }
+                let sub_key = format!("sub{}", rc.icon_key);
+                let rib = textures.ribbon_icons.and_then(|m| m.get(&rc.icon_key));
+                let subrib = textures.subribbon_icons.and_then(|m| m.get(&sub_key));
+                let icon = if rc.is_subribbon { subrib.or(rib) } else { rib.or(subrib) };
+                let count_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(format!("x{}", rc.count), font.clone(), count_color));
+
+                // Icon drawn at fixed height with aspect-preserved width (ribbon
+                // icons are wide); fall back to a truncated name when no icon.
+                let lead_w = if let Some(tex) = icon {
+                    let sz = tex.size();
+                    let aspect = if sz[1] > 0 { sz[0] as f32 / sz[1] as f32 } else { 1.0 };
+                    let w = icon_h * aspect;
+                    let rect = Rect::from_min_size(Pos2::new(cur_x, cur_y), Vec2::new(w, icon_h));
+                    let mut mesh = egui::Mesh::with_texture(tex.id());
+                    mesh.add_rect_with_uv(
+                        rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    shapes.push(Shape::Mesh(mesh.into()));
+                    w
+                } else {
+                    let label: String = rc.display_name.chars().take(8).collect();
+                    let g = ctx.fonts_mut(|f| f.layout_no_wrap(label, font.clone(), name_color));
+                    let w = g.size().x;
+                    let ny = cur_y + (icon_h - g.size().y) / 2.0;
+                    shapes.push(Shape::galley(Pos2::new(cur_x, ny), g, Color32::TRANSPARENT));
+                    w
+                };
+                let count_x = cur_x + lead_w + gap;
+                let count_y = cur_y + (icon_h - count_galley.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(count_x, count_y), count_galley, Color32::TRANSPARENT));
+                cur_x += cell_w;
+            }
+        }
+
+        DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {
+            let panel = hud_rect(transform, *x, *y, *width, *height);
+            activity_feed_shapes(&mut shapes, panel, ws, entries, textures, ctx);
+        }
+
+        DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
+            use wows_minimap_renderer::draw_command::ChargeCount as RosterCharge;
+            use wows_minimap_renderer::draw_command::RosterSide;
+            use wows_minimap_renderer::panel_math::darken;
+            use wows_minimap_renderer::panel_math::team_hp_fraction;
+
+            let origin = transform.hud_pos(*x as f32, *y as f32);
+            let panel_size = Vec2::new(*width as f32 * ws, *height as f32 * ws);
+            let panel_rect = Rect::from_min_size(origin, panel_size);
+
+            shapes.push(Shape::rect_filled(
+                panel_rect,
+                CornerRadius::same(2),
+                Color32::from_rgba_unmultiplied(20, 24, 32, 200),
+            ));
+            let accent_rgb = match side {
+                RosterSide::Friendly => [80u8, 200, 120],
+                RosterSide::Enemy => [220u8, 90, 90],
+            };
+            let accent = Color32::from_rgb(accent_rgb[0], accent_rgb[1], accent_rgb[2]);
+
+            // Team HP bar replaces the old 1px accent line.
+            let bar_h = 14.0 * ws;
+            let track_rgb = darken(accent_rgb, 0.4);
+            let track_rect = Rect::from_min_size(origin, Vec2::new(panel_size.x, bar_h));
+            shapes.push(Shape::rect_filled(
+                track_rect,
+                CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(track_rgb[0], track_rgb[1], track_rgb[2], 242),
+            ));
+            if let Some(frac) = team_hp_fraction(rows.iter().filter_map(|r| r.hp).map(|hp| (hp.current, hp.max))) {
+                let fill_rect = Rect::from_min_size(origin, Vec2::new(panel_size.x * frac, bar_h));
+                shapes.push(Shape::rect_filled(fill_rect, CornerRadius::ZERO, accent));
+            }
+            let total_cur: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.current.max(0.0)).sum();
+            let total_max: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.max).sum();
+            let hp_bar_text =
+                format!("{} / {}", format_number_egui(total_cur as i64), format_number_egui(total_max as i64));
+            let bar_font = game_font(10.0 * ws);
+            let bar_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_bar_text, bar_font.clone(), Color32::WHITE));
+            let bar_galley_size = bar_galley.size();
+            let bt_margin = 4.0 * ws;
+            let bt_x = origin.x + panel_size.x - bar_galley_size.x - bt_margin;
+            let bt_y = origin.y + (bar_h - bar_galley_size.y) * 0.5;
+            let shadow_galley =
+                ctx.fonts_mut(|f| f.layout_no_wrap(bar_galley.text().to_owned(), bar_font.clone(), Color32::BLACK));
+            shapes.push(Shape::galley(Pos2::new(bt_x + 1.0, bt_y + 1.0), shadow_galley, Color32::TRANSPARENT));
+            shapes.push(Shape::galley(Pos2::new(bt_x, bt_y), bar_galley, Color32::TRANSPARENT));
+
+            let row_height = 64.0 * ws;
+            let row_padding = 4.0 * ws;
+            let inner_x = origin.x + row_padding;
+            let inner_w = panel_size.x - row_padding * 2.0;
+            let name_font = game_font(15.0 * ws);
+            let ship_font = game_font(13.0 * ws);
+            let hp_font = game_font(12.0 * ws);
+            let charges_font = game_font(10.0 * ws);
+
+            // Friendly icons point right (toward the map), enemy icons point
+            // left (also toward the map) — the eye reads "facing the action."
+            let icon_angle = match side {
+                RosterSide::Friendly => 0.0,
+                RosterSide::Enemy => std::f32::consts::PI,
+            };
+
+            for (idx, row) in rows.iter().enumerate() {
+                let row_top = origin.y + bar_h + idx as f32 * row_height + row_padding;
+                if row_top + row_height > origin.y + panel_size.y {
+                    break;
+                }
+                let row_rect =
+                    Rect::from_min_size(Pos2::new(inner_x, row_top), Vec2::new(inner_w, row_height - row_padding));
+
+                // Zebra-stripe: every other row gets a faint tint so player
+                // blocks read as discrete groups even at glance distance.
+                if idx % 2 == 1 {
+                    shapes.push(Shape::rect_filled(
+                        row_rect,
+                        CornerRadius::same(1),
+                        Color32::from_rgba_unmultiplied(255, 255, 255, 8),
+                    ));
+                }
+                if row.is_dead {
+                    shapes.push(Shape::rect_filled(
+                        row_rect,
+                        CornerRadius::same(1),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 80),
+                    ));
+                }
+
+                // Header line: clan + player name on the left, damage and
+                // kill count on the right.
+                let header_text = match &row.clan_tag {
+                    Some(tag) => format!("[{tag}] {}", row.player_name),
+                    None => row.player_name.clone(),
+                };
+                let header_color = if row.is_dead {
+                    Color32::from_rgba_unmultiplied(180, 180, 180, 180)
+                } else if row.is_spotted {
+                    Color32::from_rgb(255, 220, 80)
+                } else {
+                    accent
+                };
+                let header_galley = ctx.fonts_mut(|f| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        &header_text,
+                        0.0,
+                        egui::TextFormat { font_id: name_font.clone(), color: header_color, ..Default::default() },
+                    );
+                    f.layout_job(job)
+                });
+                let header_size = header_galley.size();
+                shapes.push(Shape::galley(Pos2::new(inner_x, row_top), header_galley.clone(), Color32::TRANSPARENT));
+
+                if let Some(sink) = player_build_regions.as_deref_mut() {
+                    sink.push(PlayerBuildHoverRegion {
+                        rect: Rect::from_min_size(Pos2::new(inner_x, row_top), header_size),
+                        entity_id: row.entity_id,
+                        team_id: row.team_id,
+                        player_name: row.player_name.clone(),
+                        ship_name: row.ship_name.clone(),
+                        clan_tag: row.clan_tag.clone(),
+                    });
+                }
+
+                let stats_color = if row.is_dead {
+                    Color32::from_rgba_unmultiplied(180, 180, 180, 160)
+                } else {
+                    Color32::from_rgba_unmultiplied(230, 230, 230, 230)
+                };
+                let damage_text = format_number_egui(row.damage_dealt.round() as i64);
+                let damage_galley = ctx.fonts_mut(|f| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        &damage_text,
+                        0.0,
+                        egui::TextFormat { font_id: name_font.clone(), color: stats_color, ..Default::default() },
+                    );
+                    f.layout_job(job)
+                });
+
+                let frag_icon = textures.death_cause_icons.and_then(|m| m.get("frags"));
+                let frag_icon_size = name_font.size;
+                let frag_gap = 4.0 * ws;
+                let inter_gap = 8.0 * ws;
+                let kills_galley = (row.kills > 0).then(|| {
+                    let text = row.kills.to_string();
+                    ctx.fonts_mut(|f| {
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(
+                            &text,
+                            0.0,
+                            egui::TextFormat { font_id: name_font.clone(), color: stats_color, ..Default::default() },
+                        );
+                        f.layout_job(job)
+                    })
+                });
+
+                let damage_size = damage_galley.size();
+                let kills_w = kills_galley.as_ref().map(|g| g.size().x).unwrap_or(0.0);
+                let kills_block_w = if kills_galley.is_some() {
+                    if frag_icon.is_some() { frag_icon_size + frag_gap + kills_w } else { kills_w }
+                } else {
+                    0.0
+                };
+                let total_w = damage_size.x + if kills_block_w > 0.0 { inter_gap + kills_block_w } else { 0.0 };
+                let block_x = inner_x + inner_w - total_w;
+
+                shapes.push(Shape::galley(Pos2::new(block_x, row_top), damage_galley, Color32::TRANSPARENT));
+
+                if let Some(kg) = kills_galley {
+                    let mut cx = block_x + damage_size.x + inter_gap;
+                    if let Some(tex) = frag_icon {
+                        let icon_y = row_top + (name_font.size - frag_icon_size) * 0.5;
+                        let icon_rect =
+                            Rect::from_min_size(Pos2::new(cx, icon_y), Vec2::new(frag_icon_size, frag_icon_size));
+                        let tint = if row.is_dead {
+                            Color32::from_rgba_unmultiplied(220, 220, 220, 160)
+                        } else {
+                            Color32::WHITE
+                        };
+                        let mut mesh = egui::Mesh::with_texture(tex.id());
+                        mesh.add_rect_with_uv(
+                            icon_rect,
+                            Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                            tint,
+                        );
+                        shapes.push(Shape::mesh(std::sync::Arc::new(mesh)));
+                        cx += frag_icon_size + frag_gap;
+                    }
+                    shapes.push(Shape::galley(Pos2::new(cx, row_top), kg, Color32::TRANSPARENT));
+                }
+
+                // Ship row: rotated class icon (DD/CA/BB/CV/SS) + ship name.
+                let class_icon_size = 18.0 * ws;
+                let class_icon_padding = 4.0 * ws;
+                let ship_row_y = row_top + name_font.size + 4.0 * ws;
+                let ship_text_x = if let Some(ref class_key) = row.class_icon_key
+                    && let Some(class_tex) = textures.ship_icons.get(class_key)
+                {
+                    let center = Pos2::new(inner_x + class_icon_size * 0.5, ship_row_y + ship_font.size * 0.5);
+                    let tint = if row.is_dead { Color32::from_rgba_unmultiplied(180, 180, 180, 140) } else { accent };
+                    shapes.push(crate::rendering::make_rotated_icon_mesh(
+                        class_tex.id(),
+                        center,
+                        class_icon_size,
+                        icon_angle,
+                        tint,
+                    ));
+                    inner_x + class_icon_size + class_icon_padding
+                } else {
+                    inner_x
+                };
+
+                let ship_galley = ctx.fonts_mut(|f| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        &row.ship_name,
+                        0.0,
+                        egui::TextFormat {
+                            font_id: ship_font.clone(),
+                            color: Color32::from_rgba_unmultiplied(210, 210, 210, 230),
+                            ..Default::default()
+                        },
+                    );
+                    f.layout_job(job)
+                });
+                shapes.push(Shape::galley(Pos2::new(ship_text_x, ship_row_y), ship_galley, Color32::TRANSPARENT));
+
+                // HP bar shares its row with the consumable strip: bar on the
+                // left, up to 6 consumable icons on the right. Fixed widths
+                // keep both halves aligned regardless of how many consumables
+                // a given ship carries.
+                const MAX_CONSUMABLE_SLOTS: usize = 6;
+                let icon_size = 20.0 * ws;
+                let icon_gap = 2.0 * ws;
+                let consumables_strip_w =
+                    MAX_CONSUMABLE_SLOTS as f32 * icon_size + (MAX_CONSUMABLE_SLOTS as f32 - 1.0) * icon_gap;
+                let strip_gap = 6.0 * ws;
+                let hp_bar_w = (inner_w - consumables_strip_w - strip_gap).max(40.0 * ws);
+                let hp_bar_y = row_top + name_font.size + ship_font.size + 6.0 * ws;
+                let hp_bar_h = 18.0 * ws;
+                let hp_bar_rect = Rect::from_min_size(Pos2::new(inner_x, hp_bar_y), Vec2::new(hp_bar_w, hp_bar_h));
+                shapes.push(Shape::rect_filled(
+                    hp_bar_rect,
+                    CornerRadius::same(1),
+                    Color32::from_rgba_unmultiplied(40, 40, 40, 220),
+                ));
+                if let Some(hp) = row.hp
+                    && !row.is_dead
+                {
+                    let fill_ratio = hp.fraction();
+                    let fill_w = hp_bar_w * fill_ratio;
+                    let fill_color = hp_bar_color_egui(fill_ratio);
+                    shapes.push(Shape::rect_filled(
+                        Rect::from_min_size(Pos2::new(inner_x, hp_bar_y), Vec2::new(fill_w, hp_bar_h)),
+                        CornerRadius::same(1),
+                        fill_color,
+                    ));
+                    if let Some([r, g, b]) = row.heal_availability.healable_rgb()
+                        && hp.healable > 0.0
+                    {
+                        // Bright = HP the next heal charge restores; dim = the
+                        // regenerable pool beyond that charge.
+                        let bright = Color32::from_rgba_unmultiplied(r, g, b, 217);
+                        let [dr, dg, db] = wows_minimap_renderer::panel_math::darken([r, g, b], 0.5);
+                        let dim = Color32::from_rgba_unmultiplied(dr, dg, db, 217);
+                        let bright_w = (hp_bar_w * (hp.healable_per_charge.min(hp.healable) / hp.max))
+                            .clamp(0.0, hp_bar_w - fill_w);
+                        if bright_w > 0.0 {
+                            shapes.push(Shape::rect_filled(
+                                Rect::from_min_size(
+                                    Pos2::new(inner_x + fill_w, hp_bar_y),
+                                    Vec2::new(bright_w, hp_bar_h),
+                                ),
+                                CornerRadius::same(1),
+                                bright,
+                            ));
+                        }
+                        let dim_total = (hp_bar_w * (hp.healable / hp.max)).min(hp_bar_w - fill_w);
+                        let dim_w = (dim_total - bright_w).max(0.0);
+                        if dim_w > 0.0 {
+                            shapes.push(Shape::rect_filled(
+                                Rect::from_min_size(
+                                    Pos2::new(inner_x + fill_w + bright_w, hp_bar_y),
+                                    Vec2::new(dim_w, hp_bar_h),
+                                ),
+                                CornerRadius::same(1),
+                                dim,
+                            ));
+                        }
+                    }
+                }
+
+                if let Some(hp) = row.hp {
+                    let hp_text = format!(
+                        "{} / {}",
+                        format_number_egui(hp.current.max(0.0) as i64),
+                        format_number_egui(hp.max as i64),
+                    );
+                    let hp_color =
+                        if row.is_dead { Color32::from_rgba_unmultiplied(200, 200, 200, 200) } else { Color32::WHITE };
+                    let hp_galley = ctx.fonts_mut(|f| {
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(
+                            &hp_text,
+                            0.0,
+                            egui::TextFormat { font_id: hp_font.clone(), color: hp_color, ..Default::default() },
+                        );
+                        f.layout_job(job)
+                    });
+                    let hp_galley_size = hp_galley.size();
+                    let hp_text_y = hp_bar_y + (hp_bar_h - hp_galley_size.y) * 0.5;
+                    let hp_text_x = inner_x + hp_bar_w - hp_galley_size.x - 6.0 * ws;
+                    // 4-direction outline against the green/yellow/red fill so the
+                    // numeric overlay stays readable at any HP fraction.
+                    let outline_color = Color32::from_rgba_unmultiplied(0, 0, 0, 220);
+                    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                        let outline_galley = ctx.fonts_mut(|f| {
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(
+                                &hp_text,
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: hp_font.clone(),
+                                    color: outline_color,
+                                    ..Default::default()
+                                },
+                            );
+                            f.layout_job(job)
+                        });
+                        shapes.push(Shape::galley(
+                            Pos2::new(hp_text_x + dx * ws, hp_text_y + dy * ws),
+                            outline_galley,
+                            Color32::TRANSPARENT,
+                        ));
+                    }
+                    shapes.push(Shape::galley(Pos2::new(hp_text_x, hp_text_y), hp_galley, Color32::TRANSPARENT));
+                }
+
+                // Consumable strip shares the HP-bar row, sitting flush to the
+                // panel's right edge. `icon_size` and `icon_gap` are the same
+                // values the HP-bar layout above used when computing
+                // `consumables_strip_w`, so the strip stays aligned with that
+                // reserved slot regardless of how many consumables are filled.
+                let strip_y = hp_bar_y + (hp_bar_h - icon_size) * 0.5;
+                let strip_x = inner_x + inner_w - consumables_strip_w;
+                let gap = icon_gap;
+
+                if row.consumables.is_empty() {
+                    // A faint asterisk signals "consumable data wasn't
+                    // captured for this ship from any perspective" without
+                    // shouting. Common for enemies in single-replay sessions
+                    // and for ships the merge never spotted fully.
+                    let marker = ctx.fonts_mut(|f| {
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(
+                            "*",
+                            0.0,
+                            egui::TextFormat {
+                                font_id: charges_font.clone(),
+                                color: Color32::from_rgba_unmultiplied(180, 180, 180, 140),
+                                ..Default::default()
+                            },
+                        );
+                        f.layout_job(job)
+                    });
+                    shapes.push(Shape::galley(
+                        Pos2::new(strip_x, strip_y + (icon_size - 9.0 * ws) * 0.5),
+                        marker,
+                        Color32::TRANSPARENT,
+                    ));
+                } else if let Some(icons) = textures.consumable_icons {
+                    let mut hover_sink = hover_regions.as_deref_mut();
+                    for (i, cons) in row.consumables.iter().enumerate() {
+                        let icon_x = strip_x + i as f32 * (icon_size + gap);
+                        let icon_rect =
+                            Rect::from_min_size(Pos2::new(icon_x, strip_y), Vec2::new(icon_size, icon_size));
+                        let charges_remaining = cons.total_charges.remaining(cons.charges_used);
+                        let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
+                        let is_active = cons.active_remaining_secs.is_some();
+                        if let Some(sink) = hover_sink.as_deref_mut() {
+                            sink.push(ConsumableHoverRegion { rect: icon_rect, consumable: cons.clone() });
+                        }
+
+                        if let Some(tex) = icons.get(&cons.icon_key) {
+                            let tint = if row.is_dead || is_exhausted {
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 90)
+                            } else if is_active {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 220)
+                            };
+                            let mut mesh = egui::Mesh::with_texture(tex.id());
+                            mesh.add_rect_with_uv(
+                                icon_rect,
+                                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                                tint,
+                            );
+                            shapes.push(Shape::mesh(std::sync::Arc::new(mesh)));
+                        } else {
+                            shapes.push(Shape::rect_filled(
+                                icon_rect,
+                                CornerRadius::same(1),
+                                Color32::from_rgba_unmultiplied(60, 60, 60, 180),
+                            ));
+                        }
+
+                        // Unlimited-charge consumables (e.g. base Damage
+                        // Control) don't get a count overlay; the absence of
+                        // a number implicitly conveys infinite charges.
+                        let label_text = match (cons.active_remaining_secs, &charges_remaining, &cons.total_charges) {
+                            (Some(sec), _, _) => format!("{:.0}s", sec.max(0.0)),
+                            (None, RosterCharge::Unlimited, _) | (None, _, RosterCharge::Unlimited) => String::new(),
+                            (None, RosterCharge::Finite(n), RosterCharge::Finite(t)) => format!("{n}/{t}"),
+                        };
+                        if label_text.is_empty() {
+                            continue;
+                        }
+                        let label_color = {
+                            let [r, g, b] = cons.availability.charge_count_rgb();
+                            Color32::from_rgb(r, g, b)
+                        };
+                        // Render the charges/timer text overlaid on the
+                        // bottom-right of the icon, with a dark drop shadow so
+                        // it stays readable against any icon. Keeps the row
+                        // height tight.
+                        let label_galley = ctx.fonts_mut(|f| {
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(
+                                &label_text,
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: charges_font.clone(),
+                                    color: label_color,
+                                    ..Default::default()
+                                },
+                            );
+                            f.layout_job(job)
+                        });
+                        let label_size = label_galley.size();
+                        let label_x = icon_x + icon_size - label_size.x - 1.0 * ws;
+                        let label_y = strip_y + icon_size - label_size.y;
+                        // Shadow
+                        let shadow_galley = ctx.fonts_mut(|f| {
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(
+                                &label_text,
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: charges_font.clone(),
+                                    color: Color32::from_rgba_unmultiplied(0, 0, 0, 200),
+                                    ..Default::default()
+                                },
+                            );
+                            f.layout_job(job)
+                        });
+                        shapes.push(Shape::galley(
+                            Pos2::new(label_x + 1.0, label_y + 1.0),
+                            shadow_galley,
+                            Color32::TRANSPARENT,
+                        ));
+                        shapes.push(Shape::galley(Pos2::new(label_x, label_y), label_galley, Color32::TRANSPARENT));
+                    }
+                }
+            }
+        }
+    }
+
+    shapes
+}
+
+// ─── Stats panel helpers ──────────────────────────────────────────────────
+
+fn format_number_egui(n: i64) -> String {
+    if n < 0 {
+        return format!("-{}", format_number_egui(-n));
+    }
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+fn damage_label_color(label: &str) -> Color32 {
+    match label {
+        "AP" => Color32::from_rgb(255, 200, 80),
+        "HE" => Color32::from_rgb(255, 140, 50),
+        "SAP" => Color32::from_rgb(200, 180, 255),
+        "MAIN" => Color32::from_rgb(255, 200, 80),
+        "SEC" => Color32::from_rgb(255, 170, 60),
+        "TORP" => Color32::from_rgb(100, 200, 255),
+        "FIRE" => Color32::from_rgb(255, 120, 50),
+        "FLOOD" => Color32::from_rgb(80, 160, 255),
+        "BOMB" => Color32::from_rgb(220, 180, 100),
+        "ROCKET" => Color32::from_rgb(230, 150, 80),
+        "DC" => Color32::from_rgb(160, 200, 160),
+        "RAM" => Color32::from_rgb(200, 100, 100),
+        "MISSILE" => Color32::from_rgb(220, 130, 220),
+        _ => Color32::from_rgb(180, 180, 180),
+    }
+}
+
+fn hp_bar_color_egui(fraction: f32) -> Color32 {
+    // Matches `hp_bar_color_lerp` in minimap_renderer::drawing: soft green at
+    // full HP, lerped through amber to a muted red. The previous primaries
+    // (`[0,255,0]` etc.) were too harsh against the roster background.
+    const GREEN: [f32; 3] = [85.0, 175.0, 110.0];
+    const AMBER: [f32; 3] = [220.0, 195.0, 90.0];
+    const RED: [f32; 3] = [215.0, 95.0, 85.0];
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        Color32::from_rgb(
+            (a[0] + (b[0] - a[0]) * t) as u8,
+            (a[1] + (b[1] - a[1]) * t) as u8,
+            (a[2] + (b[2] - a[2]) * t) as u8,
+        )
+    };
+    if fraction > 0.5 { lerp(AMBER, GREEN, (fraction - 0.5) / 0.5) } else { lerp(RED, AMBER, fraction / 0.5) }
+}
+
+#[cfg(test)]
+mod camera_direction_tests {
+    use super::*;
+    use wows_minimap_renderer::CANVAS_HEIGHT;
+    use wows_minimap_renderer::MINIMAP_SIZE;
+    use wows_minimap_renderer::MinimapPos;
+    use wows_replays::types::EntityId;
+    use wt_translations::DefaultTextResolver;
+
+    /// A wedge is one filled triangle from the icon's center to one drawn
+    /// icon length out, at any zoom, pan and window scale.
+    #[test]
+    fn a_camera_direction_is_a_triangle_one_drawn_icon_long() {
+        let transform = MapTransform {
+            origin: Pos2::new(10.0, 20.0),
+            window_scale: 1.5,
+            zoom: 3.0,
+            pan: Vec2::new(40.0, 60.0),
+            hud_height: HUD_HEIGHT as f32,
+            canvas_height: CANVAS_HEIGHT as f32,
+            canvas_width: MINIMAP_SIZE as f32,
+            hud_width: MINIMAP_SIZE as f32,
+            map_x_offset: 0.0,
+        };
+        let ship_icons = HashMap::new();
+        let plane_icons = HashMap::new();
+        let textures = DrawCommandTextures {
+            ship_icons: &ship_icons,
+            ship_icon_outlines: None,
+            plane_icons: &plane_icons,
+            building_icons: None,
+            consumable_icons: None,
+            ribbon_icons: None,
+            subribbon_icons: None,
+            death_cause_icons: None,
+            powerup_icons: None,
+            silhouette_texture: None,
+        };
+        let pos = MinimapPos { x: 300.0, y: 400.0 };
+        let command = DrawCommand::CameraDirection {
+            entity_id: EntityId::from(7u32),
+            pos,
+            yaw: 0.0,
+            color: [255, 0, 0],
+            length: wows_minimap_renderer::ICON_SIZE as i32,
+        };
+
+        let shapes = draw_command_to_shapes(
+            &command,
+            &transform,
+            &textures,
+            &egui::Context::default(),
+            &DrawCommandLabelOptions::default(),
+            None,
+            &DefaultTextResolver,
+            None,
+            None,
+        );
+
+        let [Shape::Path(path)] = shapes.as_slice() else { panic!("one filled path, got {shapes:?}") };
+        assert!(path.closed);
+        assert_eq!(path.fill, color_from_rgba([255, 0, 0], CAMERA_DIRECTION_ALPHA));
+        let [left, tip, right] = path.points[..] else { panic!("a triangle, got {:?}", path.points) };
+        let center = transform.minimap_to_screen(&pos);
+        let drawn_icon = transform.scale_distance(ICON_SIZE);
+        assert!((tip - center - Vec2::new(drawn_icon, 0.0)).length() < 1e-3, "tip {tip:?}, center {center:?}");
+        assert!(((left.to_vec2() + right.to_vec2()) / 2.0 - center.to_vec2()).length() < 1e-3, "{left:?} {right:?}");
+    }
+}

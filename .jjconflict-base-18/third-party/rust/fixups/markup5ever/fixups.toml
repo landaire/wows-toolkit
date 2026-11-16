@@ -1,0 +1,2 @@
+# Generates the named entity table and the interned string atoms.
+buildscript.run = true

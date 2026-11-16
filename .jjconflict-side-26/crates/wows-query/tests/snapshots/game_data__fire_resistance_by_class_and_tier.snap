@@ -1,0 +1,124 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: table
+---
+AirCarrier:
+  4:
+    - "fire chance reduction 49.95%, 4 fires of 45 s at 0.3%/s; 2 floods of 30 s at 0.25%/s"
+  6:
+    - "fire chance reduction 49.95%, 4 fires of 45 s at 0.3%/s; 2 floods of 30 s at 0.25%/s"
+  8:
+    - "fire chance reduction 49.95%, 4 fires of 45 s at 0.3%/s; 2 floods of 30 s at 0.25%/s"
+  10:
+    - "fire chance reduction 49.95%, 4 fires of 45 s at 0.3%/s; 2 floods of 30 s at 0.25%/s"
+    - "fire chance reduction 49.95%, 4 fires of 45 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  11:
+    - "fire chance reduction 49.95%, 4 fires of 45 s at 0.3%/s; 2 floods of 30 s at 0.25%/s"
+Battleship:
+  2:
+    - "fire chance reduction 0.00%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  3:
+    - "fire chance reduction 0.00%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 3.33%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  4:
+    - "fire chance reduction 16.65%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 6.66%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 9.99%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  5:
+    - "fire chance reduction 13.32%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 16.65%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  6:
+    - "fire chance reduction 19.98%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 23.31%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  7:
+    - "fire chance reduction 26.64%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 29.97%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  8:
+    - "fire chance reduction 33.30%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 36.63%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  9:
+    - "fire chance reduction 39.96%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 43.29%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  10:
+    - "fire chance reduction 49.95%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  11:
+    - "fire chance reduction 56.61%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+Cruiser:
+  1:
+    - "fire chance reduction 20.00%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  2:
+    - "fire chance reduction 0.00%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  3:
+    - "fire chance reduction 0.00%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 3.33%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  4:
+    - "fire chance reduction 6.66%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 9.99%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  5:
+    - "fire chance reduction 13.32%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 16.65%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  6:
+    - "fire chance reduction 19.98%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 19.98%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 23.31%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 23.31%, 4 fires of 45 s at 0.3%/s; 2 floods of 40 s at 0.375%/s"
+    - "fire chance reduction 23.31%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  7:
+    - "fire chance reduction 26.64%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 26.64%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 29.97%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 29.97%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  8:
+    - "fire chance reduction 33.30%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 33.30%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 36.63%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 36.63%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  9:
+    - "fire chance reduction 39.96%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 39.96%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+    - "fire chance reduction 43.29%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 43.29%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 43.29%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  10:
+    - "fire chance reduction 49.95%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 49.95%, 4 fires of 60 s at 0.3%/s; 2 floods of 40 s at 0.5%/s"
+  11:
+    - "fire chance reduction 56.61%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+Destroyer:
+  2:
+    - "fire chance reduction 0.00%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  3:
+    - "fire chance reduction 0.00%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 3.33%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  4:
+    - "fire chance reduction 6.66%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 9.99%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  5:
+    - "fire chance reduction 13.32%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 16.65%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  6:
+    - "fire chance reduction 19.98%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 23.31%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  7:
+    - "fire chance reduction 26.64%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 29.97%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 36.63%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  8:
+    - "fire chance reduction 33.30%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 36.63%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  9:
+    - "fire chance reduction 39.96%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+    - "fire chance reduction 43.29%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  10:
+    - "fire chance reduction 49.95%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+  11:
+    - "fire chance reduction 56.61%, 4 fires of 30 s at 0.3%/s; 2 floods of 40 s at 0.25%/s"
+Submarine:
+  6:
+    - "fire chance reduction 19.98%, 1 fires of 30 s at 1%/s; 1 floods of 30 s at 0.33%/s"
+    - "fire chance reduction 23.31%, 1 fires of 30 s at 1%/s; 1 floods of 30 s at 0.33%/s"
+  8:
+    - "fire chance reduction 33.30%, 1 fires of 30 s at 1%/s; 1 floods of 30 s at 0.33%/s"
+    - "fire chance reduction 36.63%, 1 fires of 30 s at 1%/s; 1 floods of 30 s at 0.33%/s"
+  10:
+    - "fire chance reduction 49.95%, 1 fires of 30 s at 1%/s; 1 floods of 30 s at 0.33%/s"

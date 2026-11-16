@@ -1,0 +1,70 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: by_index
+---
+matched: 1
+queried: 1
+total_bytes: 884
+truncated: false
+results:
+  - param: PASC020_Des_Moines_1948
+    name: Des Moines
+    values:
+      - - A1_Artillery
+        - A1_Engine
+        - A1_FireControl
+        - AIParams
+        - A_ATBA
+        - A_AirArmament
+        - A_AirDefense
+        - A_AirSupport
+        - A_Directors
+        - A_Hull
+        - A_Radars
+        - BattleUpgradeInfo
+        - Cameras
+        - DockCamera
+        - RarityCategory
+        - ShipAbilities
+        - ShipUpgradeInfo
+        - Specials
+        - UnderwaterCamera
+        - alternateFlags
+        - apDamageLimitCoeff
+        - archetype
+        - battleSignalsModifiersOrder
+        - battleSignalsOrder
+        - canCharge
+        - canEquipCamouflage
+        - defaultCrew
+        - flagsScale
+        - foghornEventName
+        - group
+        - id
+        - index
+        - isPaperShip
+        - level
+        - maxEquippedFlags
+        - multiboosts
+        - name
+        - nationFlagScale
+        - nativeMultiboost
+        - nativePermoflage
+        - navalFlag
+        - needShowProjectYear
+        - originShipName
+        - peculiarity
+        - peculiarityEffects
+        - peculiarityFlag
+        - peculiarityModels
+        - peculiarityStateMachines
+        - permoflages
+        - pveAutoPickCard
+        - shipBattleCards
+        - steerAngle
+        - steerDist
+        - subnation
+        - tags
+        - typeinfo
+        - unpeculiarShip
+        - usePeculiaritySounds

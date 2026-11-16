@@ -1,0 +1,275 @@
+//! The `Copy` handle a pane holds on one viewport, and what a change made through it carries out.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use landaire_ui::MotionPreference;
+use landaire_ui::motion_preference;
+use wows_toolkit_armor::hull_picking::HullMeshIndex;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
+use zgui::reactive::UnsyncCallback;
+use zgui::reactive::on_cleanup_local;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::WithValue;
+use zgui::surface::SurfaceInvalidator;
+use zgui::view::AnyView;
+
+use super::host::ScreenshotReply;
+use super::model::ViewportModel;
+use super::types::ViewportChange;
+
+/// What the viewport's context menu offers from the pane around it.
+#[derive(Clone)]
+pub struct PaneMenu {
+    pub toggle_options: UnsyncCallback<()>,
+    /// The pane's quick toggles, appended to the menu.
+    pub quick_toggles: UnsyncCallback<(), Vec<AnyView>>,
+}
+
+/// One viewport's state, shared by the viewport element, its pane and the panels around it.
+///
+/// Reads through [`Self::read`] follow every change a panel cares about; the pointer's hovers
+/// and the camera move the overlay only, through [`Self::read_overlay`]. Every method is a no-op,
+/// or answers with nothing, once the owner the state was made under is gone.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ArmorViewportState {
+    pub(super) model: StoredValue<ViewportModel, LocalStorage>,
+    /// Moved by every change a panel reads.
+    revision: RwSignal<u64, LocalStorage>,
+    /// Moved by every change at all, which is what the overlay and the tooltips follow.
+    overlay: RwSignal<u64, LocalStorage>,
+    shared: StoredValue<Shared, LocalStorage>,
+}
+
+/// What the handle holds besides the model.
+struct Shared {
+    /// Asks the surface to draw the scene again.
+    invalidator: SurfaceInvalidator,
+    listeners: Vec<Rc<dyn Fn(ViewportChange)>>,
+    pane_menu: Option<PaneMenu>,
+    motion: Signal<MotionPreference, LocalStorage>,
+    /// Screenshots asked for, answered by the next frame.
+    screenshots: Vec<ScreenshotReply>,
+    /// Whether the surface is drawing right now, which draws whatever a change made meanwhile.
+    rendering: bool,
+}
+
+/// What a change made through [`ArmorViewportState::update`] asks for once the model is no longer
+/// borrowed.
+pub(super) struct ViewCx {
+    notify: bool,
+    events: Vec<ViewportChange>,
+    deferred: Vec<Box<dyn FnOnce(ArmorViewportState)>>,
+    reduce_motion: bool,
+}
+
+impl ViewCx {
+    /// The panels reading the state draw again.
+    pub(super) fn notify(&mut self) {
+        self.notify = true;
+    }
+
+    /// Tells the pane a user-driven change happened.
+    pub(super) fn emit(&mut self, change: ViewportChange) {
+        if !self.events.contains(&change) {
+            self.events.push(change);
+        }
+    }
+
+    /// Runs `then` with the handle once the change is done, for work that spawns a task or
+    /// reaches other viewports.
+    pub(super) fn defer(&mut self, then: impl FnOnce(ArmorViewportState) + 'static) {
+        self.deferred.push(Box::new(then));
+    }
+
+    pub(super) fn reduce_motion(&self) -> bool {
+        self.reduce_motion
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_test() -> Self {
+        Self { notify: false, events: Vec::new(), deferred: Vec::new(), reduce_motion: false }
+    }
+
+    #[cfg(test)]
+    pub(super) fn events(&self) -> &[ViewportChange] {
+        &self.events
+    }
+
+    #[cfg(test)]
+    pub(super) fn notified(&self) -> bool {
+        self.notify
+    }
+}
+
+thread_local! {
+    /// Every live viewport, so a background stage shared by several of them reaches each.
+    static LIVE: RefCell<Vec<ArmorViewportState>> = const { RefCell::new(Vec::new()) };
+}
+
+impl ArmorViewportState {
+    /// A viewport showing nothing. Made under the owner of the pane it belongs to, whose disposal
+    /// cancels its loads and lets its meshes go.
+    pub fn new() -> Self {
+        let state = Self {
+            model: StoredValue::new_local(ViewportModel::new()),
+            revision: RwSignal::new_local(0),
+            overlay: RwSignal::new_local(0),
+            shared: StoredValue::new_local(Shared {
+                invalidator: SurfaceInvalidator::new(),
+                listeners: Vec::new(),
+                pane_menu: None,
+                motion: motion_preference(),
+                screenshots: Vec::new(),
+                rendering: false,
+            }),
+        };
+        LIVE.with(|live| live.borrow_mut().push(state));
+        on_cleanup_local(move || {
+            LIVE.with(|live| live.borrow_mut().retain(|held| !held.is(state)));
+            state.model.try_update_value(|model| model.release());
+        });
+
+        state
+    }
+
+    /// Whether `other` is this same viewport.
+    pub fn is(self, other: Self) -> bool {
+        self.model == other.model
+    }
+
+    /// Every viewport still alive.
+    pub(super) fn live() -> Vec<Self> {
+        LIVE.with(|live| live.borrow().clone())
+    }
+
+    /// Reads the model, following every change a panel cares about.
+    pub fn read<R>(self, read: impl FnOnce(&ViewportModel) -> R) -> Option<R> {
+        self.revision.try_get()?;
+        self.model.try_with_value(read)
+    }
+
+    /// Reads the model, following every change, the pointer's included.
+    pub(super) fn read_overlay<R>(self, read: impl FnOnce(&ViewportModel) -> R) -> Option<R> {
+        self.overlay.try_get()?;
+        self.model.try_with_value(read)
+    }
+
+    /// Which scene was last handed to the pane, by identity, following it: moves when another
+    /// scene is handed over and only then.
+    pub fn scene_key(self) -> Option<usize> {
+        self.read(|model| model.shown().map(|armor| Arc::as_ptr(armor) as usize)).flatten()
+    }
+
+    /// Reads the model without following it.
+    pub fn read_untracked<R>(self, read: impl FnOnce(&ViewportModel) -> R) -> Option<R> {
+        self.model.try_with_value(read)
+    }
+
+    /// The hull mesh under the pointer while no plate is, following the pointer.
+    pub fn hovered_hull_mesh(self) -> Option<HullMeshIndex> {
+        self.read_overlay(|model| model.hovered_mesh.as_ref().map(|hover| hover.mesh)).flatten()
+    }
+
+    pub fn hovered_hull_mesh_untracked(self) -> Option<HullMeshIndex> {
+        self.read_untracked(|model| model.hovered_mesh.as_ref().map(|hover| hover.mesh)).flatten()
+    }
+
+    /// Changes the model, then carries out what the change asked for: the panels and the overlay
+    /// follow, the scene is drawn again when it changed, the pane hears of user-driven changes and
+    /// deferred work runs. `None` once the state is gone.
+    pub(super) fn update<R>(self, change: impl FnOnce(&mut ViewportModel, &mut ViewCx) -> R) -> Option<R> {
+        let reduce_motion =
+            self.shared.try_with_value(|shared| shared.motion.get_untracked() == MotionPreference::Reduced)?;
+        let mut cx = ViewCx { notify: false, events: Vec::new(), deferred: Vec::new(), reduce_motion };
+        let (result, dirty) = self.model.try_update_value(|model| {
+            let result = change(model, &mut cx);
+            (result, model.viewport.is_dirty())
+        })?;
+        self.settle(cx, dirty);
+        Some(result)
+    }
+
+    fn settle(self, cx: ViewCx, dirty: bool) {
+        let ViewCx { notify, events, deferred, .. } = cx;
+        if notify {
+            self.revision.try_update(|revision| *revision = revision.wrapping_add(1));
+        }
+        self.overlay.try_update(|revision| *revision = revision.wrapping_add(1));
+        if dirty && !self.shared.try_with_value(|shared| shared.rendering).unwrap_or(true) {
+            self.shared.with_value(|shared| shared.invalidator.invalidate());
+        }
+        if !events.is_empty() {
+            let listeners = self.shared.try_with_value(|shared| shared.listeners.clone()).unwrap_or_default();
+            for event in events {
+                for listener in &listeners {
+                    listener(event);
+                }
+            }
+        }
+        for then in deferred {
+            then(self);
+        }
+    }
+
+    /// Runs `draw` as the surface's frame: changes made meanwhile are drawn by it rather than
+    /// asking for another.
+    pub(super) fn rendering<R>(self, draw: impl FnOnce() -> R) -> R {
+        self.shared.try_update_value(|shared| shared.rendering = true);
+        let result = draw();
+        self.shared.try_update_value(|shared| shared.rendering = false);
+        result
+    }
+
+    /// Queues a screenshot for the next frame and asks for it. `false` once the state is gone.
+    #[cfg(test)]
+    pub(super) fn ask_screenshot(self, reply: ScreenshotReply) -> bool {
+        let asked = self.shared.try_update_value(|shared| shared.screenshots.push(reply)).is_some();
+        if asked {
+            self.shared.with_value(|shared| shared.invalidator.invalidate());
+        }
+        asked
+    }
+
+    pub(super) fn take_screenshots(self) -> Vec<ScreenshotReply> {
+        self.shared.try_update_value(|shared| std::mem::take(&mut shared.screenshots)).unwrap_or_default()
+    }
+
+    /// Moves the overlay without touching the model: a frame of an animation it draws.
+    pub(super) fn repaint_overlay(self) {
+        self.overlay.try_update(|revision| *revision = revision.wrapping_add(1));
+    }
+
+    /// The invalidator the surface drawing this viewport is bound to.
+    pub(super) fn invalidator(self) -> Option<SurfaceInvalidator> {
+        self.shared.try_with_value(|shared| shared.invalidator.clone())
+    }
+
+    /// Calls `listener` with every user-driven camera or settings change, for a pane that mirrors
+    /// one viewport onto the others.
+    pub fn on_change(self, listener: impl Fn(ViewportChange) + 'static) {
+        self.shared.try_update_value(|shared| shared.listeners.push(Rc::new(listener)));
+    }
+
+    /// What the context menu offers from the pane.
+    pub fn set_pane_menu(self, menu: PaneMenu) {
+        self.shared.try_update_value(|shared| shared.pane_menu = Some(menu));
+    }
+
+    pub(super) fn pane_menu(self) -> Option<PaneMenu> {
+        self.shared.try_with_value(|shared| shared.pane_menu.clone()).flatten()
+    }
+}
+
+impl Default for ArmorViewportState {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -1,0 +1,95 @@
+//! Shared fixture-loading helper for integration tests.
+//!
+//! Loads game resources from a dumped build archive (the layout produced by
+//! wows-data-mgr: a build dir with `vfs/`, `game_params.rkyv`, `constants.json`),
+//! resolved via `wows_data_mgr::game_dir_for_build`. This mirrors replayshark's
+//! extracted-dir loader, not the raw-install `load_game_resources` path.
+//!
+//! Parsed game resources are cached per build so a corpus of fixtures sharing a
+//! build parses GameParams only once per test binary.
+#![cfg(feature = "vfs")]
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+use wows_replays::ReplayFile;
+use wows_replays::game_constants::GameConstants;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::rpc::entitydefs::EntitySpec;
+
+fn fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("tests")
+        .join("fixtures")
+        .join("replays")
+}
+
+#[derive(Clone, Copy)]
+struct BuildResources {
+    provider: &'static GameMetadataProvider,
+    constants: &'static GameConstants,
+}
+
+pub struct Handle {
+    pub replay: ReplayFile,
+    pub game_params: &'static GameMetadataProvider,
+    pub game_constants: &'static GameConstants,
+    pub specs: &'static [EntitySpec],
+    pub version: Version,
+}
+
+fn build_cache() -> &'static Mutex<HashMap<u32, BuildResources>> {
+    static CACHE: OnceLock<Mutex<HashMap<u32, BuildResources>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn resources_for_build(version: &Version) -> BuildResources {
+    let build = version.build_number().expect("replay version carries a build");
+    if let Some(res) = build_cache().lock().unwrap().get(&build) {
+        return *res;
+    }
+
+    let dir = wows_data_mgr::game_dir_for_build(build)
+        .unwrap_or_else(|| panic!("game data for build {} not available", build));
+
+    // Read the dump through `BuildCas`, the way the app does, rather than
+    // assuming a physical `vfs/` tree. A CAS-format dump serves its files out
+    // of the shared `common/` store, and opening one prunes any leftover
+    // symlinked `vfs/` directory, so requiring that directory here made the
+    // fixtures fail as soon as anything had opened the same dump.
+    let cas = wows_data_mgr::cas_vfs::BuildCas::open(&dir)
+        .unwrap_or_else(|| panic!("no readable metadata.toml for build {build} at {}", dir.display()));
+    let vfs = cas.vfs();
+
+    let rkyv_path = cas.derived_path("game_params.rkyv");
+    let provider = match rkyv_path.as_deref().and_then(wowsunpack::game_params::cache::load) {
+        Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
+            .unwrap_or_else(|e| panic!("failed to build game metadata for build {build}: {e:?}")),
+        None => GameMetadataProvider::from_vfs(&vfs)
+            .unwrap_or_else(|e| panic!("failed to load GameParams for build {build}: {e:?}")),
+    };
+    let constants = GameConstants::from_vfs(&vfs);
+
+    let res = BuildResources { provider: Box::leak(Box::new(provider)), constants: Box::leak(Box::new(constants)) };
+    build_cache().lock().unwrap().insert(build, res);
+    res
+}
+
+pub fn load(filename: &str) -> Handle {
+    let path = fixtures_dir().join(filename);
+    let replay = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
+    let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+
+    let res = resources_for_build(&version);
+    let specs: &'static [EntitySpec] = res.provider.entity_specs();
+
+    Handle { replay, game_params: res.provider, game_constants: res.constants, specs, version }
+}

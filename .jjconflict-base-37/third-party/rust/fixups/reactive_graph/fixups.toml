@@ -1,0 +1,7 @@
+# The build script only asks whether rustc is a nightly. The pinned toolchain
+# is stable, so it would emit nothing.
+buildscript.run = false
+
+# Keeps where each signal was defined, so a release build's disposed-signal
+# panic names the definition and the access instead of only that one happened.
+rustc_flags = ["--cfg=leptos_debuginfo"]

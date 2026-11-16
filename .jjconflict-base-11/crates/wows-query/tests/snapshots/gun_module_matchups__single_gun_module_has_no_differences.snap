@@ -1,0 +1,35 @@
+---
+source: crates/wows-query/tests/gun_module_matchups.rs
+expression: output
+---
+ship: "T10 Yamato (battleship, Japan)"
+ammo: AP
+range_km: 12
+aspect: broadside
+targets:
+  class: battleship
+  tiers:
+    min: 10
+    max: 10
+  ships: 43
+  test: 11
+  with_citadel: 43
+modules:
+  - module: 460 mm/45 Type 94 in a triple-gun turret
+    stock: true
+    shell: 460 mm AP/APC Type91
+    caliber_mm: 460
+    raw_penetration_mm: 636.9
+    overmatches_up_to_mm: 32
+    fuse_threshold_mm: 77
+    penetrates_armor: 43
+    citadels: 40
+    citadels_often: 27
+conclusion: "At 12 km against the 43 tier 10 battleships with a citadel (broadside), AP from Yamato's 460 mm guns (636.9 mm raw penetration) gets through the armor over the citadel of 43, citadels 40 at least sometimes and 27 often; it has no other gun module."
+assumptions:
+  - "Targets are released ships of the class and tiers, test ships included and marked \"test\", on their stock hulls. Ships sharing one armor model are traced once and each counted."
+  - "Rays 1 m apart are cast over each target along the line of fire at range_km and traced as armor_trace traces them. Only rays that cross a citadel plate count: they meet the belt, decks and slopes over the citadel. Rays whose first armor contact is below the waterline are not modelled. Shares are by area, not weighted by dispersion or aim."
+  - "penetrates_armor counts a target when the shell is stopped by armor (shatters or spends its velocity) on at most 10% of the rays over its citadel that do not ricochet. Ricochets depend on the strike angle, not on penetration; overmatch, which prevents them, shows in the citadel counts."
+  - "citadels counts a target when at least 5% of the rays over its citadel detonate inside it, the share armor_trace answers sometimes at; citadels_often when at least 25%, where it answers yes. HE and SAP are tested against the first plate only, so they reach the citadel only where citadel armor is struck first."
+  - "differences name a ship only when one module meets the threshold, the other does not, and their shares differ by at least 5 percentage points; smaller differences come from where the ray grid falls, which shifts with each shell's fall angle. The counts of each module are not filtered this way."
+  - Strikes between the ricochet start and always-ricochet angles ricochet at random in the game and are treated as no ricochet.

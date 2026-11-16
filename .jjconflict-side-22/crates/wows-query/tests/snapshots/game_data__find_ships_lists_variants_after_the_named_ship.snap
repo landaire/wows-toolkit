@@ -1,0 +1,15 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: listed
+---
+- "Essex false: T10 Essex (PASA020, TechTree, Some(Named))"
+- "Essex true: T10 Essex (PASA020, TechTree, Some(Named))"
+- "Essex true: T9 Essex (old) (PASA013, Old, Some(Variant))"
+- "Essex true: T10 Essex (PASA910, Removed, Some(Variant))"
+- "old Essex false: T9 Essex (old) (PASA013, Old, Some(Named))"
+- "old Essex false: T10 Essex (PASA020, TechTree, Some(Variant))"
+- "Zao true: T10 Zaō (PJSC034, TechTree, Some(Named))"
+- "Zao true: T10 [Zaō] (PJSC934, ClanRental, Some(Variant))"
+- "Zao true: T10 Zaō P (PJSC810, Removed, Some(Partial))"
+- "[Zao] false: T10 [Zaō] (PJSC934, ClanRental, Some(Named))"
+- "[Zao] false: T10 Zaō (PJSC034, TechTree, Some(Variant))"

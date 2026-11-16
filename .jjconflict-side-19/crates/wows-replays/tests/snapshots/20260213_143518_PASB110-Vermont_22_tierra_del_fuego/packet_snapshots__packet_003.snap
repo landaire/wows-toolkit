@@ -1,0 +1,17 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+assertion_line: 85
+expression: value
+---
+clock: 0
+packet_type: 38
+payload:
+  BasePlayerCreate:
+    component_data:
+      - 0
+      - 0
+      - 0
+      - 0
+    entity_id: 968070
+    entity_type: Account
+    props: {}

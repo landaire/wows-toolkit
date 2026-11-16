@@ -1,0 +1,56 @@
+[package]
+name = "wows_replays"
+version = "0.48.0"
+authors = ["landaire"]
+description = "A parser for World of Warships replay files"
+repository = "https://github.com/landaire/wows-toolkit"
+# Snapshot corpora and the replays they cover are not usable from the published
+# crate; the tests need replay files and game data that ship separately.
+exclude = ["BUCK", "tests/"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+winnow = { workspace = true, optional = true }
+flate2 = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true }
+roxmltree = { workspace = true, optional = true }
+pickled = { workspace = true, optional = true }
+kinded = "0.5"
+tracing = { workspace = true }
+wowsunpack = { workspace = true, default-features = false }
+bon = { workspace = true, optional = true }
+rootcause = { workspace = true, optional = true }
+modular-bitfield = { version = "0.13", optional = true }
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+rust-crypto = "0.2.36"
+insta = { workspace = true }
+sha2 = { workspace = true }
+wows-data-mgr = { workspace = true }
+
+[features]
+default = ["arc", "parsing"]
+# Sans-io parsing: decrypt, decompress, and walk packets entirely in memory.
+# Compiles for wasm32. Does not pull in the filesystem-backed VFS.
+parsing = [
+    "dep:winnow",
+    "dep:pickled",
+    "dep:modular-bitfield",
+    "dep:bon",
+    "dep:serde_json",
+    "dep:rootcause",
+    "wowsunpack/json",
+    "wowsunpack/parsing",
+]
+# Adds the filesystem-backed VFS loaders (GameConstants::from_vfs etc.).
+# Not wasm-compatible (pulls in memmap2).
+vfs = ["parsing", "wowsunpack/vfs"]
+arc = ["wowsunpack/arc"]

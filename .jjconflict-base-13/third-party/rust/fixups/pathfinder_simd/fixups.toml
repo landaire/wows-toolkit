@@ -1,0 +1,2 @@
+# Emits a cfg for nightly rustc only.
+buildscript.run = false

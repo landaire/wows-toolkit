@@ -1,0 +1,12 @@
+---
+source: crates/wows-query/src/skills.rs
+assertion_line: 415
+expression: audit
+---
+checked: 1124
+implausible:
+  - "upgrade Aerosol Smoke Curtain System (aircraft_carrier): +300% Consumable action time"
+  - "upgrade Aerosol Smoke Curtain System (battleship): +300% Consumable action time"
+  - "upgrade Aerosol Smoke Curtain System (cruiser): +300% Consumable action time"
+  - "upgrade Aerosol Smoke Curtain System (destroyer): +300% Consumable action time"
+  - "upgrade Aerosol Smoke Curtain System (submarine): +300% Consumable action time"

@@ -1,0 +1,5 @@
+[buildscript.build]
+extra_deps = ["//build-support/no-game-data:versions_toml"]
+
+[buildscript.run]
+env = { WOWS_GAME_DATA = "$(location //build-support/no-game-data:versions_toml)", WOWS_HERMETIC_BUILD = "1" }

@@ -1,0 +1,36 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "he_penetration(\"Conqueror\")"
+---
+- battery: main
+  caliber_mm: 419
+  penetration:
+    stat: HE penetration (main battery 419 mm HE Mk I)
+    unit: mm
+    builds:
+      base: 105
+      best:
+        value: 105
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 131
+          assumed:
+            - Inertia Fuse for HE Shells
+          note: "Main battery HE: 105 mm base; 131 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 105 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
+- battery: secondary
+  caliber_mm: 133
+  penetration:
+    stat: HE penetration (secondary battery 133 mm HE Mk IC)
+    unit: mm
+    builds:
+      base: 22
+      best:
+        value: 27
+        assumed:
+          - Inertia Fuse for HE Shells
+      alternatives:
+        - label: without Inertia Fuse for HE Shells
+          value: 22
+          assumed: []
+          note: "Secondary battery HE: 22 mm base; 27 mm with Inertia Fuse for HE Shells. Best-fit builds take the skill because only with it does the shell penetrate the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."

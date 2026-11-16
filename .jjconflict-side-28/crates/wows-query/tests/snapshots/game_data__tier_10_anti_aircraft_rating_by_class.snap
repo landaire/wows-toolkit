@@ -1,0 +1,73 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3892
+expression: table
+---
+aircraft carriers strongest:
+  - "1 T10 Midway (aircraft_carrier, USA): 17086 hp (base 13012 hp)"
+  - "2 T10 Nakhimov (aircraft_carrier, Russia): 17081 hp (base 12922 hp)"
+  - "2 T10 Orlov (aircraft_carrier, Russia, test): 17081 hp (base 12922 hp)"
+  - "4 T10 Hakuryū (aircraft_carrier, Japan): 15882 hp (base 12119 hp)"
+  - "5 T10 F. D. Roosevelt (aircraft_carrier, USA, premium): 15268 hp (base 11575 hp)"
+  - "6 T10 M. Richthofen (aircraft_carrier, Germany) [replicas: Süsshofen]: 13454 hp (base 10313 hp)"
+  - "6 T10 W. Voss (aircraft_carrier, Germany, test): 13454 hp (base 10313 hp)"
+  - "8 T10 Essex (aircraft_carrier, USA) [replicas: Piñatapolis]: 12290 hp (base 9260 hp)"
+  - "9 T10 Shinano (aircraft_carrier, Japan, premium) [replicas: AL Shinano]: 11400 hp (base 8576 hp)"
+  - "10 T10 O. Lilienthal (aircraft_carrier, Germany, test): 11345 hp (base 10313 hp)"
+aircraft carriers weakest:
+  - "1 T10 Independencia (aircraft_carrier, Pan_America, premium): 2584 hp (base 2043 hp)"
+  - "2 T10 Ocean (aircraft_carrier, United_Kingdom, premium): 4378 hp (base 3461 hp)"
+  - "3 T10 Audacious (aircraft_carrier, United_Kingdom): 8960 hp (base 6667 hp)"
+  - "4 T10 Malta (aircraft_carrier, United_Kingdom, premium): 9766 hp (base 7285 hp)"
+  - "5 T10 M. Immelmann (aircraft_carrier, Germany, premium): 10597 hp (base 8055 hp)"
+battleships strongest:
+  - "1 T10 Thor (battleship, Europe): 19667 hp (base 13999 hp)"
+  - "2 T10 Slava (battleship, Russia, premium): 15398 hp (base 10642 hp)"
+  - "3 T10 Kremlin (battleship, Russia): 14967 hp (base 10317 hp)"
+  - "3 T10 Sibir (battleship, Russia, premium): 14967 hp (base 10317 hp)"
+  - "5 T10 Neptunus (battleship, Netherlands, test): 14534 hp (base 10183 hp)"
+  - "6 T10 Ohio (battleship, USA, premium): 13804 hp (base 9663 hp)"
+  - "7 T10 Louisiana (battleship, USA): 13558 hp (base 9477 hp)"
+  - "8 T10 Montana (battleship, USA) [replicas: BA Montana]: 13539 hp (base 9463 hp)"
+  - "8 T10 Montana 2 (battleship, USA, test): 13539 hp (base 9463 hp)"
+  - "10 T10 Rhode Island (battleship, USA, premium) [replicas: Rhode Island B]: 13344 hp (base 9377 hp)"
+battleships weakest:
+  - "1 T10 A. Vespucci (battleship, Italy, test): 7148 hp (base 6074 hp)"
+  - "2 T10 R. Lauria (battleship, Italy, premium) [replicas: Tempesta Nera]: 7177 hp (base 4944 hp)"
+  - "3 T10 Pérez Gacitúa (battleship, Pan_America, test): 8123 hp (base 5637 hp)"
+  - "4 T10 Yamato (battleship, Japan) [replicas: ARP Yamato, Yamato Kai]: 8282 hp (base 5580 hp)"
+  - "5 T10 C. Colombo (battleship, Italy): 8408 hp (base 6074 hp)"
+cruisers strongest:
+  - "1 T10 Hawaii (cruiser, USA, premium) [replicas: Hawaii G]: 19145 hp (base 12350 hp)"
+  - "2 T10 Brisbane (cruiser, Commonwealth, premium) [replicas: Brisbane B]: 18450 hp (base 11412 hp)"
+  - "3 T10 Minotaur (cruiser, United_Kingdom): 18133 hp (base 11192 hp)"
+  - "4 T10 Taejong (cruiser, Pan_Asia, premium): 17951 hp (base 11481 hp)"
+  - "5 T10 Austin (cruiser, USA, premium): 17544 hp (base 11197 hp)"
+  - "6 T10 Worcester (cruiser, USA): 17438 hp (base 10708 hp)"
+  - "7 T10 Vanadis (cruiser, Europe, premium): 17168 hp (base 10521 hp)"
+  - "8 T10 Yodo (cruiser, Japan): 17089 hp (base 10624 hp)"
+  - "9 T10 Stalingrad (cruiser, Russia, premium): 16752 hp (base 10404 hp)"
+  - "10 T10 Petropavlovsk (cruiser, Russia) [replicas: PTRPVLSK]: 16188 hp (base 10012 hp)"
+cruisers weakest:
+  - "1 T10 Kitakami (cruiser, Japan, premium): 80 hp (base 56 hp)"
+  - "2 T10 Napoli (cruiser, Italy, premium) [replicas: Napoli B]: 7269 hp (base 4716 hp)"
+  - "3 T10 Plymouth (cruiser, United_Kingdom, premium): 8138 hp (base 4949 hp)"
+  - "3 T10 Fearmaw (cruiser, United_Kingdom, test): 8138 hp (base 4949 hp)"
+  - "5 T10 Cerberus (cruiser, Commonwealth): 8650 hp (base 5304 hp)"
+destroyers strongest:
+  - "1 T10 20 de Julio (destroyer, Pan_America): 13351 hp (base 9101 hp)"
+  - "2 T10 Halland (destroyer, Europe): 13066 hp (base 8955 hp)"
+  - "2 T10 Småland (destroyer, Europe, premium) [replicas: Oväsen]: 13066 hp (base 8955 hp)"
+  - "4 T10 Ragnar (destroyer, Europe, premium): 13052 hp (base 8658 hp)"
+  - "5 T10 Hull (destroyer, USA, premium): 12091 hp (base 7387 hp)"
+  - "6 T10 Södermanland (destroyer, Europe, test): 10694 hp (base 8955 hp)"
+  - "7 T10 Harugumo (destroyer, Japan): 8754 hp (base 5890 hp)"
+  - "8 T10 Elbing (destroyer, Germany): 8570 hp (base 5178 hp)"
+  - "9 T10 Druid (destroyer, United_Kingdom, premium): 7944 hp (base 5110 hp)"
+  - "10 T10 G. Hoffmann (destroyer, Germany, premium) [replicas: G. Hoffmann G]: 7868 hp (base 4623 hp)"
+destroyers weakest:
+  - "1 T10 Somers (destroyer, USA, premium): 220 hp (base 174 hp)"
+  - "2 T10 Peredovoy (destroyer, Russia, test): 1761 hp (base 1392 hp)"
+  - "3 T10 A. Regolo (destroyer, Italy): 2121 hp (base 1677 hp)"
+  - "4 T10 Kléber (destroyer, France) [replicas: Kléber CLR]: 2440 hp (base 1929 hp)"
+  - "4 T10 Kléber TE (destroyer, France, test): 2440 hp (base 1929 hp)"

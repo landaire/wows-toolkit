@@ -1,0 +1,16 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "explain(json!({ \"ship\": \"Shimakaze\", \"value\": 21400, \"unit\": \"hp\" }))"
+---
+ship: "T10 Shimakaze (destroyer, Japan) [replicas: AL Shimakaze]"
+value: 21400 hp
+rule: "A match is a stat of this ship whose value rounds to the number at its decimals, on the stock modules or another module combination, alone or with up to three captain skills (21 points, a skill on every cheaper tier) and upgrades (one per slot); conditional skills count with their trigger met only where marked active, and the ship's special ability only where named. Fewer assumptions rank first. Signals, camouflage and commander talents are not searched."
+matches:
+  - stat: durability.health
+    label: Hit Points
+    value: 21400 hp
+    base: 17900 hp
+    build:
+      - Survivability Expert
+    because:
+      - Survivability Expert +3500 (+3500)

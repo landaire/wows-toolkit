@@ -1,0 +1,206 @@
+[package]
+name = "wows_toolkit"
+version.workspace = true
+authors = ["Lander Brandt <landaire>"]
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+default-run = "wows_toolkit"
+
+[package.metadata.winresource]
+
+[dependencies]
+# All of these need to be bumped with egui releases
+clap = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = [
+    "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
+    "default_fonts", # Embed the default egui fonts.
+    # "glow",
+    "wgpu",
+    "wayland",       # To support Linux (and CI)
+] }
+egui_extras = { version = "0.35", features = ["syntect", "image", "svg", "datepicker", "serde"] }
+egui_dock = { workspace = true, features = ["serde"] }
+egui-phosphor = { workspace = true }
+egui_table = "0.9.0"
+egui_commonmark = "0.24"
+egui_ltreeview = { version = "0.8.0", features = ["persistence"] }
+egui_plot = "0.36.0"
+egui_taffy = "0.13.0"
+egui-palette = "0.6.0"
+egui-notify = { git = "https://github.com/ItsEthra/egui-notify", rev = "3dfaa2473e385b69e22656b8ea7a13bb74ff7576" }
+wgpu = { workspace = true }
+
+tracing = { workspace = true }
+wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
+serde = { workspace = true }
+wowsunpack = { workspace = true, features = [
+    "arc",
+    "cbor",
+    "json",
+    "models",
+    "rkyv",
+    "vfs-mmap",
+] }
+bytemuck = { workspace = true }
+wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "cpu-av1", "arc", "rkyv"] }
+wows-battle-world = { workspace = true }
+wt-translations = { workspace = true }
+rfd = "0.17"
+pollster = "0.4"
+humansize = "2.1.3"
+thiserror = { workspace = true }
+glob = { workspace = true }
+home = "0.5"
+wows-data-mgr = { workspace = true, features = ["constants", "download"] }
+wows-replay-insights = { workspace = true, features = ["wowssb", "arc", "battle-report", "fire-sections"] }
+itertools = { workspace = true }
+convert_case = { workspace = true }
+gettext = { workspace = true }
+language-tags = "0.3"
+pickled = { workspace = true }
+flate2 = { workspace = true }
+thousands = "0.2.0"
+notify = "8.2.0"
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
+image = { workspace = true, features = ["jpeg", "png"] }
+image_dds = { workspace = true, features = ["ddsfile", "image"] }
+octocrab = "0.49"
+hyper-http-proxy = { version = "1", default-features = false, features = ["rustls-tls-native-roots"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "native-tokio", "ring"] }
+hyper-timeout = "0.5"
+hyper-util = { version = "0.1", features = ["client-legacy", "tokio"] }
+tower = { version = "0.5", default-features = false, features = ["retry"] }
+tower-http = { version = "0.6", default-features = false, features = ["follow-redirect"] }
+http = "1"
+semver = "1.0"
+tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "macros"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+ciborium = { workspace = true }
+parking_lot = { version = "0.12.5", features = ["serde"] }
+twitch_api = { version = "0.7.2", features = [
+    "helix",
+    "client",
+    "reqwest",
+] }
+levenshtein = "1.0.5"
+escaper = "0.1.1"
+http-body = "1.1.0"
+http-body-util = "0.1.4"
+toml = { workspace = true }
+tar = { version = "0.4.46", optional = true }
+scopeguard = { version = "1.2.0", optional = true }
+csv = "1.4.0"
+jiff = { workspace = true, features = ["serde"] }
+rootcause = { workspace = true }
+arboard = "3.6.1"
+iroh = { workspace = true, default-features = false, features = ["fast-apple-datapath", "portmapper"] }
+wt-collab-client = { workspace = true }
+wt-collab-protocol = { workspace = true, features = ["egui"] }
+wt-collab-egui = { workspace = true }
+wows-toolkit-config = { workspace = true }
+wows-toolkit-hardening = { workspace = true }
+wows-toolkit-viewmodel = { workspace = true }
+web-time = { workspace = true }
+rand = "0.10"
+rkyv = { workspace = true }
+sqlx = { workspace = true }
+tempfile = "3.27.0"
+unidecode = "0.3.0"
+roxmltree = { workspace = true }
+nalgebra = "0.34.2"
+regex = "1.13"
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rust-i18n = { workspace = true }
+sys-locale = { workspace = true }
+ron = "0.12.2"
+egui_inbox = "0.12.0"
+memmap2 = "0.9"
+walkdir = { workspace = true }
+mimalloc = { version = "0.1.52", optional = true }
+wgc-auth = { workspace = true, optional = true }
+wgc-catalog = { workspace = true, optional = true }
+wgc-download = { workspace = true, optional = true }
+wows-toolkit-launcher = { workspace = true, optional = true }
+
+[dev-dependencies]
+egui_kittest = { version = "0.35.0", features = ["snapshot", "wgpu"] }
+insta = { workspace = true }
+# `test-support` for `ZoneGuard`: the query bar's tests assert on text the
+# config crate's timestamp printer produces, which reads the local zone.
+wows-toolkit-config = { workspace = true, features = ["test-support"] }
+# `test-support` for the shipped rating table the rating tests run against.
+wows-toolkit-viewmodel = { workspace = true, features = ["test-support"] }
+
+[build-dependencies]
+winresource = "0.1.31"
+serde = { workspace = true }
+toml = { workspace = true }
+
+# native:
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-appender = { version = "0.2", optional = true }
+tracing-subscriber = { workspace = true, features = [
+    "local-time",
+    "time",
+    "env-filter",
+], optional = true }
+dhat = { version = "0.3", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+windows-sys = { version = "0.61", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Environment",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# The helper binaries are declared only to carry `required-features`, which an
+# auto-discovered target cannot. Without it cargo builds and links both on every
+# `cargo build` and `cargo test`, purely to produce a `main` that prints how to
+# rebuild them.
+[[bin]]
+name = "dhat_load"
+path = "src/bin/dhat_load.rs"
+required-features = ["dhat-heap"]
+
+[[bin]]
+name = "profile_replay"
+path = "src/bin/profile_replay.rs"
+required-features = ["profile-bins"]
+
+[[bin]]
+name = "profile_memory"
+path = "src/bin/profile_memory.rs"
+required-features = ["profile-bins"]
+
+[features]
+default = ["logging"]
+shipbuilds_debugging = []
+mod_manager = ["dep:tar", "dep:scopeguard"]
+logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
+panic_handler = []
+dhat-heap = ["dep:dhat"]
+# Stage-timing and memory binaries (`profile_replay`, `profile_memory`). Kept
+# off by default so release builds don't carry the instrumentation module.
+profile-bins = []
+# Opt in to rav1e's hand-tuned x86 SIMD for AV1 (~3x faster encode). Requires
+# NASM at build time, so it's off by default to keep local builds NASM-free;
+# the release CI enables it. Plain (non-asm) AV1 is always available via the
+# `cpu-av1` feature wired on the dependency above.
+av1-asm = ["wows_minimap_renderer/cpu-av1-asm"]
+# A/B test the global allocator in `profile_replay`. The Windows process heap
+# shows up heavily in profiles of the replay load; this measures what a
+# different allocator is worth before committing the app to one.
+mimalloc = ["dep:mimalloc"]
+launcher = ["dep:wgc-auth", "dep:wgc-catalog", "dep:wgc-download", "dep:wows-toolkit-launcher"]

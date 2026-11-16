@@ -1,0 +1,6 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 1563
+expression: error.to_string()
+---
+Missouri does not end a tech tree line; name a tier 10 tech tree ship

@@ -1,0 +1,2 @@
+# pkg_config::find_library("fontconfig"), which is host state. X11 only.
+buildscript.run = false

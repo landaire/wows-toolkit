@@ -11,6 +11,8 @@ use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_replay_data::force_reindex::version_said;
+use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
+use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;

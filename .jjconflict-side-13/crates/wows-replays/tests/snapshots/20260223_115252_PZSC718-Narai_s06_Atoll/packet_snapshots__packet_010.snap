@@ -1,0 +1,111 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 1
+payload:
+  CellPlayerCreate:
+    component_data:
+      - 2
+    entity_id: 433435
+    entity_type: Avatar
+    position:
+      x: 705.0451049804688
+      y: 0
+      z: -459.3214111328125
+    props:
+      allyTargetsCapture: 0
+      hasFullPing: 0
+      intuitionActive: 0
+      isAlive: 1
+      isFlyMode: 1
+      isInMinefield: 0
+      ownShipId: 433436
+      playerModeState:
+        observedTeamId: 0
+        playerModeType: 0
+      privateBattleLogicState:
+        battleItems: []
+        diplomacyTickets: ~
+        leveling: ~
+        missions:
+          pullTargets: []
+          reachDestination: []
+        respawns: ~
+        triggers: ~
+      privateVehicleState:
+        battleCards: ~
+        buffs:
+          buffItems: []
+        missiles: ~
+        rageMode: ~
+        ribbons: []
+      selectedTorpedoGroup: 0
+      selectedWeapon: 0
+      spottedEntities: []
+      squadronWeatherParams:
+        AAMaxDist: 1
+        GMIdealRadius: 1
+        GSIdealRadius: 1
+        GSMIdealRadius: 1
+        airDefenseVisibilityTime: 2
+        bad: 0
+        burnDamage: 1
+        burnTime: 1
+        maxPlaneVisionDistance: 2000
+        maxShipVisionDistance: 2000
+        maxVisibilityDistance: 2000
+        maxVisibilityDistanceByPlane: 2000
+        mgVisibilityTime: 20
+        planeMaxVisibilityDistance: 2000
+        planeMaxVisibilityDistanceByPlane: 2000
+        planeSpeed: 1
+        planeVisibilityFactor: 1
+        planeVisibilityFactorByPlane: 1
+        shootShift: 1
+        speedCoef: 1
+        transparency: 1
+        visibilityFactor: 1
+        visibilityFactorByPlane: 1
+      teamId: 0
+      useATBAandAirDefense: 1
+      vehiclePosition:
+        - 0
+        - 0
+        - 0
+      visibilityDistances:
+        byPlane: 230.0399932861328
+        byShip: 306.7200012207031
+        bySmoke: 66.66666412353516
+      weatherParams:
+        AAMaxDist: 1
+        GMIdealRadius: 1
+        GSIdealRadius: 1
+        GSMIdealRadius: 1
+        airDefenseVisibilityTime: 2
+        bad: 0
+        burnDamage: 1
+        burnTime: 1
+        maxPlaneVisionDistance: 2000
+        maxShipVisionDistance: 2000
+        maxVisibilityDistance: 2000
+        maxVisibilityDistanceByPlane: 2000
+        mgVisibilityTime: 20
+        planeMaxVisibilityDistance: 2000
+        planeMaxVisibilityDistanceByPlane: 2000
+        planeSpeed: 1
+        planeVisibilityFactor: 1
+        planeVisibilityFactorByPlane: 1
+        shootShift: 1
+        speedCoef: 1
+        transparency: 1
+        visibilityFactor: 1
+        visibilityFactorByPlane: 1
+      willBeDeadAtTime: 0
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: -0.22683632373809814
+    space_id: 2840
+    vehicle_id: 0

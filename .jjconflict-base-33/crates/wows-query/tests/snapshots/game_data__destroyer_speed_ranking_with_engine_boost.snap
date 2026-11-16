@@ -1,0 +1,85 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3427
+expression: ranking
+---
+stat: "mobility.speed (kn), highest first, on the build that raises it most, the usual build, with Engine Boost held"
+rule: "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank. That is the usual build, the one players run for the stat, whichever order the ships are listed in. With the condition \"Engine Boost\": each ship that has it is ranked on its ship_stats speed alternative with it held, on top of that build; its entry names the alternative under condition. A ship without it is ranked on its always-on best build and its entry has no condition."
+ranked: 40
+ships:
+  - rank: 1
+    ship: "T10 Kléber TE (destroyer, France, test)"
+    value: 57.2 kn
+    base: 44 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 2
+    ship: "T10 Kléber (destroyer, France) [replicas: Kléber CLR]"
+    value: 52.8 kn
+    base: 44 kn
+    build:
+      - Engine Boost
+    tied: true
+    condition: with Engine Boost active
+  - rank: 2
+    ship: "T10 Marceau (destroyer, France, premium)"
+    value: 52.8 kn
+    base: 44 kn
+    build:
+      - Engine Boost
+    tied: true
+    condition: with Engine Boost active
+  - rank: 4
+    ship: "T10 A. Regolo (destroyer, Italy)"
+    value: 51.25 kn
+    base: 41 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 5
+    ship: "T10 Peredovoy (destroyer, Russia, test)"
+    value: 51 kn
+    base: 42.5 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 6
+    ship: "T10 Châteaurenault (destroyer, France, premium)"
+    value: 49.2 kn
+    base: 41 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 7
+    ship: "T10 Delny (destroyer, Russia)"
+    value: 46.98 kn
+    base: 43.5 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 8
+    ship: "T10 Khabarovsk (destroyer, Russia, premium)"
+    value: 46.44 kn
+    base: 43 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 9
+    ship: "T10 A. da Barbiano (destroyer, Italy, premium)"
+    value: 45.54 kn
+    base: 39.6 kn
+    build:
+      - Engine Boost
+    condition: with Engine Boost active
+  - rank: 10
+    ship: "T10 Ragnar (destroyer, Europe, premium)"
+    value: 45.5 kn
+    base: 35 kn
+    build:
+      - Engine Boost
+    tied: true
+    condition: with Engine Boost active
+tied_beyond_limit:
+  - "T10 Småland (destroyer, Europe, premium) [replicas: Oväsen]"
+omitted: 30

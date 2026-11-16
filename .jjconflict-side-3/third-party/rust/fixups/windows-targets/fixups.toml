@@ -1,0 +1,9 @@
+# Link the system DLLs directly instead of through the bundled import libraries.
+#
+# Those .lib files live inside the windows_x86_64_msvc crate and are found only
+# through a link search path that its build script emits. A build script's
+# search path does not reach the final link under Buck, and declaring the
+# library as a prebuilt dependency does not satisfy the bare `#[link]` name the
+# macro expands to. raw-dylib needs no import library at all, and is what the
+# newer windows-link crate does unconditionally.
+cfgs = ["windows_raw_dylib"]

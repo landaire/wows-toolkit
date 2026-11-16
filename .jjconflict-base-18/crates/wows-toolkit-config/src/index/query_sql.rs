@@ -1,0 +1,978 @@
+//! Compiles a `MatchExpr` into a `sqlx` WHERE clause.
+//!
+//! Column names always come from a closed match on the field enums and are
+//! never interpolated from user text; every value is bound.
+
+use sqlx::QueryBuilder;
+use sqlx::Sqlite;
+use wows_core::game_types::GameMode;
+use wows_core::game_types::PersonalRatingCategory;
+
+use super::query_ast::CmpOp;
+use super::query_ast::DivisionScope;
+use super::query_ast::Expr;
+use super::query_ast::MapCatalog;
+use super::query_ast::MatchExpr;
+use super::query_ast::MatchField;
+use super::query_ast::MatchTerm;
+use super::query_ast::Op;
+use super::query_ast::Quant;
+use super::query_ast::RosterExpr;
+use super::query_ast::RosterTerm;
+use super::query_ast::Value;
+use super::query_ast::ValueKind;
+
+/// Compilation inputs that are not part of the query itself.
+#[derive(Debug, Clone, Copy)]
+pub struct CompileCtx<'a> {
+    pub maps: &'a MapCatalog,
+}
+
+impl Default for CompileCtx<'_> {
+    fn default() -> Self {
+        const EMPTY: &MapCatalog = &MapCatalog::const_empty();
+        CompileCtx { maps: EMPTY }
+    }
+}
+
+/// Renders a leaf. The match level captures its `CompileCtx` here so the tree
+/// walker itself stays generic over what a leaf is.
+type PushLeaf<'a, L> = dyn FnMut(&mut QueryBuilder<'_, Sqlite>, &L) + 'a;
+
+/// Render a boolean tree, delegating leaves to `leaf`. Shared by the match and
+/// the roster level, the same way `print_expr` is shared by the printer.
+fn push_expr<L>(qb: &mut QueryBuilder<'_, Sqlite>, expr: &Expr<L>, leaf: &mut PushLeaf<'_, L>) {
+    match expr {
+        Expr::All(cs) if cs.is_empty() => {
+            qb.push("1=1");
+        }
+        Expr::Any(cs) if cs.is_empty() => {
+            qb.push("1=0");
+        }
+        Expr::All(cs) => push_joined(qb, cs, " AND ", leaf),
+        Expr::Any(cs) => push_joined(qb, cs, " OR ", leaf),
+        Expr::Not(inner) => {
+            qb.push("NOT (");
+            push_expr(qb, inner, leaf);
+            qb.push(")");
+        }
+        Expr::Leaf(l) => leaf(qb, l),
+    }
+}
+
+fn push_joined<L>(qb: &mut QueryBuilder<'_, Sqlite>, cs: &[Expr<L>], join: &str, leaf: &mut PushLeaf<'_, L>) {
+    qb.push("(");
+    for (i, c) in cs.iter().enumerate() {
+        if i > 0 {
+            qb.push(join);
+        }
+        push_expr(qb, c, leaf);
+    }
+    qb.push(")");
+}
+
+pub fn push_match_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &MatchExpr, ctx: &CompileCtx<'_>) {
+    push_expr(qb, expr, &mut |qb, term| push_match_term(qb, term, ctx));
+}
+
+fn push_match_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &MatchTerm, ctx: &CompileCtx<'_>) {
+    match term {
+        // A nullary op (IsSet/IsNotSet) on Map must go through the same
+        // nullary-first ordering as every other field, not the catalogue path.
+        MatchTerm::Field(MatchField::Map, op, Value::Text(needle)) if !op.is_nullary() => {
+            push_map(qb, *op, needle, ctx)
+        }
+        MatchTerm::Field(field, op, value) => push_field(qb, *field, *op, value),
+        MatchTerm::Roster { quant, pred } => push_roster(qb, *quant, pred),
+        MatchTerm::FreeText(needle) => push_free_text(qb, needle),
+    }
+}
+
+/// The column each match field reads, qualified by the alias the outer query
+/// uses (`m` for `indexed_match`, `r` for `replay_record`).
+fn match_column(field: MatchField) -> &'static str {
+    match field {
+        MatchField::Map => "m.map",
+        MatchField::GameType => "m.game_type",
+        MatchField::GameMode => "m.game_mode_id",
+        MatchField::MatchGroup => "m.match_group",
+        MatchField::Date => "m.timestamp",
+        MatchField::Build => "m.version_build",
+        MatchField::Outcome => "r.outcome",
+        MatchField::Group => "r.source_id",
+        MatchField::ResultsAvailable => "r.results_available",
+    }
+}
+
+fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, value: &Value) {
+    let col = match_column(field);
+    if op.is_nullary() {
+        let sql = if matches!(op, Op::IsSet) { "IS NOT NULL" } else { "IS NULL" };
+        qb.push(format!("{col} {sql}"));
+        return;
+    }
+    // Equality and inequality on `Date` always widen to a half-open range
+    // over the bound value's local day, regardless of whether that value is
+    // a bare date or a fully-specified instant: `date=2026-07-23T14:32:00Z`
+    // matches that whole day too, since the AST carries only a `Timestamp`
+    // and cannot tell "the user typed a day" from "the user typed a precise
+    // instant". Every other comparison on `Date` already means what it says
+    // (`date>=X` is "at or after this instant") and is left to the numeric
+    // path below.
+    if let (MatchField::Date, Value::Timestamp(t)) = (field, value)
+        && matches!(op, Op::Eq | Op::Ne)
+    {
+        push_date_day_range(qb, col, op, *t);
+        return;
+    }
+    // Dispatch on both the field's declared kind and the value's actual
+    // variant: a value that does not fit its field is a bug upstream, and
+    // must narrow the result set, not widen it.
+    match (field.value_kind(), value) {
+        (ValueKind::Text, Value::Text(s)) => push_text(qb, col, op, s),
+        (ValueKind::Int, Value::Int(n)) => push_num_i64(qb, col, op, *n),
+        (ValueKind::Timestamp, Value::Timestamp(t)) => push_num_i64(qb, col, op, t.as_second()),
+        (ValueKind::Outcome, Value::Outcome(o)) => push_eq_str(qb, col, op, o.as_db_str()),
+        (ValueKind::Source, Value::Source(s)) => push_num_i64(qb, col, op, s.0),
+        (ValueKind::Bool, Value::Bool(b)) => push_eq_bool(qb, col, op, *b),
+        (ValueKind::GameMode, Value::GameMode(m)) => push_game_mode(qb, col, op, m),
+        _ => {
+            qb.push("1=0");
+        }
+    }
+}
+
+/// Emits the half-open range `[start, end)` of the local day containing `t`
+/// (`Eq`) or its negation (any other operator this is called for), resolved
+/// through `current_zone()`. This is `Eq`/`Ne` on `Date`'s whole meaning: `t`
+/// may be a bare date's local midnight or a fully-specified instant midday,
+/// and either way the range is the local day that instant falls in. The
+/// bounds come from the day's own start and its own following day rather
+/// than a fixed 86400 seconds, so a DST-transition day (23 or 25 hours)
+/// still gets its real boundaries.
+fn push_date_day_range(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, t: jiff::Timestamp) {
+    let zoned = t.to_zoned(super::query_text::current_zone());
+    // `start_of_day`/`tomorrow` disambiguate a local midnight that falls in a
+    // DST gap or fold, rather than assuming the wall clock reads 00:00:00.
+    let start = zoned.start_of_day().unwrap_or(zoned.clone());
+    let end = start.tomorrow().unwrap_or_else(|_| start.clone());
+    let (start, end) = (start.timestamp().as_second(), end.timestamp().as_second());
+    match op {
+        Op::Eq => {
+            qb.push(format!("({col} >= ")).push_bind(start);
+            qb.push(format!(" AND {col} < ")).push_bind(end);
+            qb.push(")");
+        }
+        _ => {
+            qb.push(format!("({col} < ")).push_bind(start);
+            qb.push(format!(" OR {col} >= ")).push_bind(end);
+            qb.push(")");
+        }
+    }
+}
+
+/// A `map` term compares the raw space name the column holds and, when the
+/// catalogue is loaded, the display names the user actually reads.
+///
+/// Both halves answer the operator that was given. A contains resolves the
+/// catalogue by substring; anything else by an exact display name. A negated
+/// operator joins the halves with AND rather than OR, because the negation of
+/// "the raw name matches or the display name does" is "neither does": an OR
+/// would be satisfied by the raw name alone and turn the term into its opposite.
+fn push_map(qb: &mut QueryBuilder<'_, Sqlite>, op: Op, needle: &str, ctx: &CompileCtx<'_>) {
+    let raws = match op {
+        Op::Contains => ctx.maps.raw_names_matching(needle),
+        _ => ctx.maps.raw_names_named(needle),
+    };
+    if raws.is_empty() {
+        push_text(qb, "m.map", op, needle);
+        return;
+    }
+    let negated = matches!(op, Op::NotEquals | Op::Ne | Op::IsNot);
+    qb.push("(");
+    push_text(qb, "m.map", op, needle);
+    qb.push(if negated { " AND m.map NOT IN (" } else { " OR m.map IN (" });
+    for (i, raw) in raws.iter().enumerate() {
+        if i > 0 {
+            qb.push(", ");
+        }
+        qb.push_bind(raw.to_string());
+    }
+    qb.push("))");
+}
+
+fn push_text(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, s: &str) {
+    match op {
+        Op::Contains => {
+            qb.push(format!("LOWER({col}) LIKE '%' || LOWER(")).push_bind(s.to_string()).push(") || '%'");
+        }
+        Op::NotEquals | Op::Ne | Op::IsNot => {
+            qb.push(format!("LOWER({col}) <> LOWER(")).push_bind(s.to_string()).push(")");
+        }
+        _ => {
+            qb.push(format!("LOWER({col}) = LOWER(")).push_bind(s.to_string()).push(")");
+        }
+    }
+}
+
+/// A bare word. `m.map` is on the outer row, so it compares directly; the three
+/// roster columns need their own arena-correlated EXISTS.
+fn push_free_text(qb: &mut QueryBuilder<'_, Sqlite>, needle: &str) {
+    qb.push("(");
+    push_text(qb, "m.map", Op::Contains, needle);
+    qb.push(" OR EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND (");
+    push_text(qb, "v.player_name", Op::Contains, needle);
+    qb.push(" OR ");
+    push_text(qb, "v.clan", Op::Contains, needle);
+    qb.push(" OR ");
+    push_text(qb, "v.ship_name", Op::Contains, needle);
+    qb.push(")))");
+}
+
+/// The comparison an `Op` makes when applied to a numeric column.
+fn num_cmp(op: Op) -> CmpOp {
+    match op {
+        Op::Ne | Op::NotEquals | Op::IsNot => CmpOp::Ne,
+        Op::Gt => CmpOp::Gt,
+        Op::Ge => CmpOp::Ge,
+        Op::Lt => CmpOp::Lt,
+        Op::Le => CmpOp::Le,
+        _ => CmpOp::Eq,
+    }
+}
+
+fn push_num_i64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: i64) {
+    qb.push(format!("{col} {} ", num_cmp(op).as_sql())).push_bind(n);
+}
+
+fn push_eq_str(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: &str) {
+    let sql = if matches!(op, Op::IsNot | Op::NotEquals | Op::Ne) { "<>" } else { "=" };
+    qb.push(format!("{col} {sql} ")).push_bind(val.to_string());
+}
+
+/// The `game_mode_id` column stores the game's own numeric id, so this
+/// compiles straight to `id()`. A NULL row (an old row, or a build the id
+/// table does not cover) fails the comparison under SQL's normal
+/// three-valued logic for both `=` and `<>`, which is exactly "does not
+/// match this filter" and needs no special-casing here.
+fn push_game_mode(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, mode: &GameMode) {
+    push_num_i64(qb, col, op, i64::from(mode.id()));
+}
+
+fn push_eq_bool(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, b: bool) {
+    let sql = if matches!(op, Op::IsNot | Op::NotEquals | Op::Ne) { "<>" } else { "=" };
+    qb.push(format!("{col} {sql} ")).push_bind(b);
+}
+
+fn push_roster(qb: &mut QueryBuilder<'_, Sqlite>, quant: Quant, pred: &RosterExpr) {
+    match quant {
+        Quant::Any => {
+            qb.push("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ");
+            push_roster_expr(qb, pred);
+            qb.push(")");
+        }
+        Quant::None => {
+            qb.push("NOT EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ");
+            push_roster_expr(qb, pred);
+            qb.push(")");
+        }
+        Quant::Count(op, n) => {
+            qb.push("(SELECT COUNT(*) FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND ");
+            push_roster_expr(qb, pred);
+            qb.push(format!(") {} ", op.as_sql())).push_bind(i64::from(n));
+        }
+    }
+}
+
+pub fn push_roster_expr(qb: &mut QueryBuilder<'_, Sqlite>, expr: &RosterExpr) {
+    push_expr(qb, expr, &mut push_roster_term);
+}
+
+/// Dispatch is on `(field.value_kind(), value)`, not on the value alone: a
+/// `RosterField::Tier` term carrying a `Value::Text` must fall through to the
+/// mismatch arm rather than reach the text comparison for an integer column.
+/// Task 2's `push_field` pairs the same way.
+fn push_roster_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &RosterTerm) {
+    let col = format!("v.{}", term.field.column());
+    if term.op.is_nullary() {
+        let sql = if matches!(term.op, Op::IsSet) { "IS NOT NULL" } else { "IS NULL" };
+        qb.push(format!("{col} {sql}"));
+        return;
+    }
+    match (term.field.value_kind(), &term.value) {
+        (ValueKind::Division, Value::Division(scope)) => push_division(qb, term.op, *scope),
+        (ValueKind::Text, Value::Text(s)) => push_text(qb, &col, term.op, s),
+        (ValueKind::Int, Value::Int(n)) => push_num_i64(qb, &col, term.op, *n),
+        (ValueKind::Float, Value::Float(f)) => push_num_f64(qb, &col, term.op, *f),
+        (ValueKind::Bool, Value::Bool(b)) => push_eq_bool(qb, &col, term.op, *b),
+        (ValueKind::Class, Value::Class(c)) => push_eq_str(qb, &col, term.op, c.as_db_str()),
+        (ValueKind::Relation, Value::Relation(r)) => push_eq_str(qb, &col, term.op, r.as_db_str()),
+        (ValueKind::Account, Value::Account(a)) => push_num_i64(qb, &col, term.op, a.raw()),
+        (ValueKind::Ship, Value::Ship(s)) => push_num_i64(qb, &col, term.op, s.raw() as i64),
+        (ValueKind::Rating, Value::Rating(band)) => push_rating(qb, &col, term.op, *band),
+        // A value that does not fit the field is a bug upstream. Narrow, do not widen.
+        _ => {
+            qb.push("1=0");
+        }
+    }
+}
+
+/// `Mine` correlates to the perspective player's own division. The
+/// `relation IN ('self', 'ally')` clause assumes nothing about whether
+/// `division_id` (the server's prebattle id) can collide across teams: a
+/// division is always same-team, so the constraint cannot exclude a correct
+/// row. When the self row has a NULL `division_id` (the player was solo) the
+/// equality yields NULL for every row and the quantifier is false, which is
+/// correct.
+fn push_division(qb: &mut QueryBuilder<'_, Sqlite>, op: Op, scope: DivisionScope) {
+    let negated = matches!(op, Op::IsNot | Op::NotEquals | Op::Ne);
+    if negated {
+        qb.push("NOT (");
+    }
+    match scope {
+        DivisionScope::Mine => {
+            qb.push(
+                "(v.division_id IS NOT NULL AND v.relation IN ('self', 'ally') \
+                 AND v.division_id = (SELECT s.division_id FROM indexed_vehicle s \
+                 WHERE s.arena_id = m.arena_id AND s.relation = 'self'))",
+            );
+        }
+        DivisionScope::Any => {
+            qb.push("v.division_id IS NOT NULL");
+        }
+        DivisionScope::None => {
+            qb.push("v.division_id IS NULL");
+        }
+    }
+    if negated {
+        qb.push(")");
+    }
+}
+
+fn push_num_f64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: f64) {
+    qb.push(format!("{col} {} ", num_cmp(op).as_sql())).push_bind(n);
+}
+
+/// A rating band is a half-open range on the PR column, never a stored value,
+/// which is what lets this filter run against rows indexed before it existed.
+///
+/// Equality is the band's own range. A comparison is the open threshold at
+/// whichever of its ends the operator points at, so `rating >= unicum` reads as
+/// the PR threshold a person means by it. `Bad` has no floor and `SuperUnicum`
+/// no ceiling, so a threshold can fall off either end: off the low end it means
+/// every row that has a rating at all, off the high end it means none.
+///
+/// A NULL `pr` matches no form. The real comparisons exclude it under SQL's
+/// three-valued logic (including the negated one, where `NOT NULL` is still
+/// NULL), and the open low end says `IS NOT NULL` rather than accepting every
+/// row: a player with no recorded PR is not secretly `Bad`.
+fn push_rating(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, band: PersonalRatingCategory) {
+    match op {
+        Op::IsNot | Op::NotEquals | Op::Ne => {
+            qb.push("NOT (");
+            push_rating_range(qb, col, band);
+            qb.push(")");
+        }
+        // Strictly above the band starts at its exclusive ceiling.
+        Op::Gt => match band.ceiling() {
+            Some(ceiling) => push_at_least(qb, col, ceiling),
+            None => {
+                qb.push("1=0");
+            }
+        },
+        Op::Ge => match band.floor() {
+            Some(floor) => push_at_least(qb, col, floor),
+            None => push_has_rating(qb, col),
+        },
+        Op::Lt => match band.floor() {
+            Some(floor) => push_below(qb, col, floor),
+            None => {
+                qb.push("1=0");
+            }
+        },
+        Op::Le => match band.ceiling() {
+            Some(ceiling) => push_below(qb, col, ceiling),
+            None => push_has_rating(qb, col),
+        },
+        _ => push_rating_range(qb, col, band),
+    }
+}
+
+fn push_rating_range(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, band: PersonalRatingCategory) {
+    match (band.floor(), band.ceiling()) {
+        (Some(floor), Some(ceiling)) => {
+            qb.push("(");
+            push_at_least(qb, col, floor);
+            qb.push(" AND ");
+            push_below(qb, col, ceiling);
+            qb.push(")");
+        }
+        (Some(floor), None) => push_at_least(qb, col, floor),
+        (None, Some(ceiling)) => push_below(qb, col, ceiling),
+        (None, None) => push_has_rating(qb, col),
+    }
+}
+
+fn push_at_least(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, bound: f64) {
+    qb.push(format!("{col} >= ")).push_bind(bound);
+}
+
+fn push_below(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, bound: f64) {
+    qb.push(format!("{col} < ")).push_bind(bound);
+}
+
+fn push_has_rating(qb: &mut QueryBuilder<'_, Sqlite>, col: &str) {
+    qb.push(format!("{col} IS NOT NULL"));
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::QueryBuilder;
+    use sqlx::Sqlite;
+
+    use super::*;
+    use crate::index::query_ast::CmpOp;
+    use crate::index::query_ast::DivisionScope;
+    use crate::index::query_ast::MatchField;
+    use crate::index::query_ast::MatchTerm;
+    use crate::index::query_ast::Op;
+    use crate::index::query_ast::Quant;
+    use crate::index::query_ast::RosterExpr;
+    use crate::index::query_ast::RosterField;
+    use crate::index::query_ast::RosterTerm;
+    use crate::index::query_ast::ShipClass;
+    use crate::index::query_ast::Value;
+    use crate::index::rows::MatchOutcome;
+    use crate::index::rows::VehicleRelation;
+    use wows_core::game_types::AccountId;
+    use wows_core::game_types::GameParamId;
+
+    fn sql_for(expr: &MatchExpr) -> String {
+        let ctx = CompileCtx::default();
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("");
+        push_match_expr(&mut qb, expr, &ctx);
+        qb.sql().to_string()
+    }
+
+    fn leaf(f: MatchField, op: Op, v: Value) -> MatchExpr {
+        Expr::Leaf(MatchTerm::Field(f, op, v))
+    }
+
+    #[test]
+    fn empty_all_matches_everything_and_empty_any_matches_nothing() {
+        assert_eq!(sql_for(&Expr::All(vec![])), "1=1");
+        assert_eq!(sql_for(&Expr::Any(vec![])), "1=0");
+    }
+
+    #[test]
+    fn conjunction_and_disjunction_are_parenthesised() {
+        let a = leaf(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win));
+        let b = leaf(MatchField::Build, Op::Ge, Value::Int(1234));
+        let and = sql_for(&Expr::All(vec![a.clone(), b.clone()]));
+        assert!(and.starts_with('(') && and.ends_with(')'), "got {and}");
+        assert!(and.contains(" AND "), "got {and}");
+        let or = sql_for(&Expr::Any(vec![a, b]));
+        assert!(or.contains(" OR "), "got {or}");
+    }
+
+    #[test]
+    fn negation_wraps_in_not() {
+        let inner = leaf(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Loss));
+        let sql = sql_for(&Expr::Not(Box::new(inner)));
+        assert!(sql.starts_with("NOT ("), "got {sql}");
+    }
+
+    #[test]
+    fn text_contains_is_case_insensitive_and_bound() {
+        let sql = sql_for(&leaf(MatchField::GameType, Op::Contains, Value::Text("pvp".into())));
+        assert!(sql.contains("LOWER(m.game_type)"), "got {sql}");
+        assert!(sql.contains("LIKE"), "got {sql}");
+        // The needle must be a bind placeholder, never inlined.
+        assert!(!sql.contains("pvp"), "value was inlined into SQL: {sql}");
+    }
+
+    #[test]
+    fn date_compares_against_the_timestamp_column() {
+        let ts = jiff::Timestamp::from_second(1_700_000_000).unwrap();
+        let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Timestamp(ts)));
+        assert!(sql.contains("m.timestamp >="), "got {sql}");
+    }
+
+    /// Parses a one-term query and returns the `Timestamp` it carries.
+    fn parse_one_timestamp(input: &str) -> jiff::Timestamp {
+        match crate::index::query_text::parse_query(input).unwrap_or_else(|e| panic!("{input:?}: {e}")) {
+            Expr::Leaf(MatchTerm::Field(_, _, Value::Timestamp(t))) => t,
+            other => panic!("expected a single timestamp term, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_equality_on_a_date_matches_the_whole_day() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-07-23");
+        let sql = sql_for(&leaf(MatchField::Date, Op::Eq, Value::Timestamp(ts)));
+        assert!(sql.contains(">="), "got {sql}");
+        assert!(sql.contains("<"), "got {sql}");
+        assert!(!sql.contains("m.timestamp ="), "still an instant comparison: {sql}");
+    }
+
+    /// Substring-matching the generated SQL cannot tell an `OR` from an `AND`
+    /// joining the two halves, and an `AND` here is a bug that matches
+    /// nothing at all (a value cannot be both `< start` and `>= end` in a
+    /// half-open range). Only running the query against real rows on and
+    /// around the boundary proves the join is right.
+    #[tokio::test]
+    async fn an_inequality_on_a_date_excludes_only_that_days_rows() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-07-23");
+        let start = ts.as_second();
+        let end = start + 24 * 3600; // an ordinary day: no DST transition in July
+        let ne_term = leaf(MatchField::Date, Op::Ne, Value::Timestamp(ts));
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, timestamp INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, timestamp) VALUES (1, ?), (2, ?), (3, ?), (4, ?), (5, ?)")
+            .bind(start - 1) // last second of the previous day: must match
+            .bind(start) // first second of this day: must not
+            .bind(start + 12 * 3600) // midday this day: must not
+            .bind(end - 1) // last second of this day: must not
+            .bind(end) // first second of the next day: must match
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &ne_term, &CompileCtx::default());
+        let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
+        assert_eq!(matched, vec![1, 5], "got {matched:?}");
+    }
+
+    #[test]
+    fn an_ordering_comparison_on_a_date_stays_an_instant() {
+        // `date>=X` already means what the user expects. Only equality changes.
+        let ts = parse_one_timestamp("date>=2026-07-23");
+        let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Timestamp(ts)));
+        assert!(sql.contains("m.timestamp >="), "got {sql}");
+    }
+
+    /// 2026-03-08 is the US spring-forward day in America/New_York: local
+    /// midnight to local midnight is 23 hours (82800s), not the 86400s a
+    /// `start + 86400` implementation would assume. A row sitting in that
+    /// missing hour must not match, and a row at the day's real last second
+    /// must.
+    #[tokio::test]
+    async fn an_equality_on_a_dst_day_uses_that_day_s_own_length() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-03-08");
+        let real_start = ts.as_second();
+        let real_end = real_start + 23 * 3600;
+        let naive_end = real_start + 24 * 3600;
+        let eq_term = leaf(MatchField::Date, Op::Eq, Value::Timestamp(ts));
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, timestamp INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, timestamp) VALUES (1, ?), (2, ?), (3, ?)")
+            .bind(real_end - 1) // the day's real last second: must match
+            .bind(real_end) // the following real day's first second: must not
+            .bind(naive_end - 1) // inside a naive 24h window, outside the real 23h day: must not
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &eq_term, &CompileCtx::default());
+        let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
+        assert_eq!(matched, vec![1], "got {matched:?}");
+    }
+
+    /// 2026-11-01 is the US fall-back day in America/New_York: local midnight
+    /// to local midnight is 25 hours (90000s). A `start + 86400`
+    /// implementation would cut this day an hour short; a row sitting in
+    /// that last real hour must still match.
+    #[tokio::test]
+    async fn an_equality_on_a_dst_fall_back_day_uses_that_day_s_own_length() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-11-01");
+        let real_start = ts.as_second();
+        let real_end = real_start + 25 * 3600;
+        let naive_end = real_start + 24 * 3600;
+        let eq_term = leaf(MatchField::Date, Op::Eq, Value::Timestamp(ts));
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, timestamp INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, timestamp) VALUES (1, ?), (2, ?), (3, ?)")
+            .bind(naive_end) // inside the real 25h day, past a naive 24h window: must match
+            .bind(real_end - 1) // the day's real last second: must match
+            .bind(real_end) // the following real day's first second: must not
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &eq_term, &CompileCtx::default());
+        let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
+        assert_eq!(matched, vec![1, 2], "got {matched:?}");
+    }
+
+    #[test]
+    fn the_game_mode_filter_compiles_against_the_numeric_column() {
+        // The display string is not stable across locales or versions, so the
+        // filter must never compare against it.
+        let sql = sql_for(&leaf(MatchField::GameMode, Op::Is, Value::GameMode(GameMode::ArmsRace)));
+        assert!(sql.contains("m.game_mode_id"), "got {sql}");
+        assert!(!sql.contains("m.game_mode "), "compared against the display string: {sql}");
+    }
+
+    /// A row with no recorded mode must fail both the positive and the
+    /// negated form, not just one of them: SQL's three-valued logic makes
+    /// `col = x` and `col <> x` both NULL (not TRUE) when `col` is NULL, and
+    /// `WHERE` treats NULL the same as FALSE. Verified against a real SQLite
+    /// connection rather than assumed from the generated SQL text.
+    #[tokio::test]
+    async fn a_null_game_mode_row_matches_neither_is_nor_is_not() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, game_mode_id INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, game_mode_id) VALUES (1, NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let is_term = leaf(MatchField::GameMode, Op::Is, Value::GameMode(GameMode::ArmsRace));
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT COUNT(*) FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &is_term, &CompileCtx::default());
+        let is_count: i64 = qb.build_query_scalar().fetch_one(&pool).await.unwrap();
+        assert_eq!(is_count, 0, "a NULL row must not satisfy game-mode is arms-race");
+
+        let is_not_term = leaf(MatchField::GameMode, Op::IsNot, Value::GameMode(GameMode::ArmsRace));
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT COUNT(*) FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &is_not_term, &CompileCtx::default());
+        let is_not_count: i64 = qb.build_query_scalar().fetch_one(&pool).await.unwrap();
+        assert_eq!(is_not_count, 0, "a NULL row must not satisfy game-mode is not arms-race either");
+    }
+
+    #[test]
+    fn is_set_and_is_not_set_compile_to_null_checks_with_no_bind() {
+        let set = sql_for(&leaf(MatchField::Build, Op::IsSet, Value::NoOperand));
+        assert_eq!(set, "m.version_build IS NOT NULL");
+        let unset = sql_for(&leaf(MatchField::Build, Op::IsNotSet, Value::NoOperand));
+        assert_eq!(unset, "m.version_build IS NULL");
+    }
+
+    #[test]
+    fn map_without_a_catalogue_falls_back_to_the_raw_column() {
+        let sql = sql_for(&leaf(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
+        assert!(sql.contains("LOWER(m.map)"), "got {sql}");
+        assert!(!sql.contains(" IN ("), "empty catalogue must not emit an IN list: {sql}");
+    }
+
+    fn sql_with(expr: &MatchExpr, maps: &MapCatalog) -> String {
+        let ctx = CompileCtx { maps };
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("");
+        push_match_expr(&mut qb, expr, &ctx);
+        qb.sql().to_string()
+    }
+
+    fn two_oceans() -> MapCatalog {
+        MapCatalog::from_pairs(vec![
+            ("spaces/13_OC_new_dawn".into(), "Ocean".into()),
+            ("spaces/40_okinawa".into(), "Ocean Rift".into()),
+        ])
+    }
+
+    #[test]
+    fn map_with_a_catalogue_unions_an_in_list_with_the_raw_match() {
+        let maps = MapCatalog::from_pairs(vec![("spaces/13_OC_new_dawn".into(), "Ocean".into())]);
+        let sql = sql_with(&leaf(MatchField::Map, Op::Contains, Value::Text("ocean".into())), &maps);
+        assert!(sql.contains("m.map IN ("), "got {sql}");
+        assert!(sql.contains(" OR "), "got {sql}");
+        assert!(sql.contains("LOWER(m.map)"), "got {sql}");
+    }
+
+    /// The negation of "the raw name matches or its display name does" is
+    /// "neither does". An OR here is satisfied by the raw name alone, which
+    /// returns exactly the rows the term asked to exclude.
+    #[test]
+    fn a_negated_map_term_intersects_the_catalogue_instead_of_unioning_it() {
+        let maps = MapCatalog::from_pairs(vec![("spaces/13_OC_new_dawn".into(), "Ocean".into())]);
+        let sql = sql_with(&leaf(MatchField::Map, Op::NotEquals, Value::Text("ocean".into())), &maps);
+        assert_eq!(sql, "(LOWER(m.map) <> LOWER(?) AND m.map NOT IN (?))");
+    }
+
+    #[test]
+    fn the_catalogue_half_resolves_by_substring_only_for_contains() {
+        let maps = two_oceans();
+        // Two display names contain "ocean", so a contains term lists both.
+        let contains = sql_with(&leaf(MatchField::Map, Op::Contains, Value::Text("ocean".into())), &maps);
+        assert!(contains.contains("m.map IN (?, ?)"), "got {contains}");
+        // Only one is named "ocean", so an equality lists that one.
+        let equals = sql_with(&leaf(MatchField::Map, Op::Equals, Value::Text("ocean".into())), &maps);
+        assert!(equals.contains("m.map IN (?)"), "got {equals}");
+        let not_equals = sql_with(&leaf(MatchField::Map, Op::NotEquals, Value::Text("ocean".into())), &maps);
+        assert!(not_equals.contains("m.map NOT IN (?)"), "got {not_equals}");
+    }
+
+    #[test]
+    fn map_with_a_nullary_op_narrows_instead_of_rendering_a_text_comparison() {
+        // Map's allowed_ops is TEXT_OPS, so this term is malformed upstream.
+        // It must go through the same nullary-first ordering as every other
+        // field, not the catalogue path, and never render a live comparison
+        // against the stray value.
+        let sql = sql_for(&leaf(MatchField::Map, Op::IsSet, Value::Text("ocean".into())));
+        assert_eq!(sql, "m.map IS NOT NULL");
+    }
+
+    #[test]
+    fn a_term_whose_value_does_not_match_its_field_compiles_to_a_false_predicate() {
+        // The parser and the UI both prevent this; a mismatch reaching here is a
+        // bug, and must not silently widen the result set.
+        let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Text("nonsense".into())));
+        assert_eq!(sql, "1=0");
+    }
+
+    fn roster(quant: Quant, pred: RosterExpr) -> MatchExpr {
+        Expr::Leaf(MatchTerm::Roster { quant, pred })
+    }
+
+    fn rleaf(field: RosterField, op: Op, value: Value) -> RosterExpr {
+        Expr::Leaf(RosterTerm { field, op, value })
+    }
+
+    #[test]
+    fn any_compiles_to_exists_correlated_on_arena() {
+        let sql = sql_for(&roster(Quant::Any, rleaf(RosterField::Tier, Op::Eq, Value::Int(10))));
+        assert!(
+            sql.starts_with("EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND "),
+            "got {sql}"
+        );
+        assert!(sql.contains("v.tier ="), "got {sql}");
+    }
+
+    #[test]
+    fn none_compiles_to_not_exists() {
+        let sql = sql_for(&roster(Quant::None, rleaf(RosterField::Class, Op::Is, Value::Class(ShipClass::AirCarrier))));
+        assert!(sql.starts_with("NOT EXISTS ("), "got {sql}");
+        assert!(sql.contains("v.species"), "got {sql}");
+    }
+
+    #[test]
+    fn count_compiles_to_a_correlated_aggregate_comparison() {
+        let sql = sql_for(&roster(
+            Quant::Count(CmpOp::Ge, 3),
+            Expr::All(vec![
+                rleaf(RosterField::Relation, Op::Is, Value::Relation(VehicleRelation::Enemy)),
+                rleaf(RosterField::Damage, Op::Gt, Value::Int(100_000)),
+            ]),
+        ));
+        assert!(sql.contains("SELECT COUNT(*) FROM indexed_vehicle v"), "got {sql}");
+        assert!(sql.contains("v.arena_id = m.arena_id"), "got {sql}");
+        assert!(sql.contains(") >= "), "got {sql}");
+        assert!(sql.contains("v.relation"), "got {sql}");
+        assert!(sql.contains("v.damage >"), "got {sql}");
+    }
+
+    #[test]
+    fn division_mine_correlates_to_the_self_rows_division_and_stays_same_team() {
+        let sql =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::Mine))));
+        assert!(sql.contains("v.division_id IS NOT NULL"), "got {sql}");
+        assert!(sql.contains("v.relation IN ('self', 'ally')"), "got {sql}");
+        assert!(sql.contains("SELECT s.division_id FROM indexed_vehicle s"), "got {sql}");
+        assert!(sql.contains("s.arena_id = m.arena_id"), "got {sql}");
+        assert!(sql.contains("s.relation = 'self'"), "got {sql}");
+    }
+
+    #[test]
+    fn division_any_and_none_are_plain_null_checks() {
+        let any =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::Any))));
+        assert!(any.contains("v.division_id IS NOT NULL"), "got {any}");
+        assert!(!any.contains("s.division_id"), "Any must not correlate to the self row: {any}");
+
+        let none =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::None))));
+        assert!(none.contains("v.division_id IS NULL"), "got {none}");
+    }
+
+    #[test]
+    fn roster_predicates_nest_with_and_or_and_not() {
+        let sql = sql_for(&roster(
+            Quant::Any,
+            Expr::All(vec![
+                rleaf(RosterField::Division, Op::Is, Value::Division(DivisionScope::Mine)),
+                Expr::Not(Box::new(rleaf(RosterField::TestShip, Op::Is, Value::Bool(true)))),
+                Expr::Any(vec![
+                    rleaf(RosterField::Tier, Op::Eq, Value::Int(9)),
+                    rleaf(RosterField::Tier, Op::Eq, Value::Int(10)),
+                ]),
+            ]),
+        ));
+        assert!(sql.contains(" AND "), "got {sql}");
+        assert!(sql.contains(" OR "), "got {sql}");
+        assert!(sql.contains("NOT ("), "got {sql}");
+    }
+
+    #[test]
+    fn roster_is_set_needs_no_bind() {
+        let sql = sql_for(&roster(Quant::Any, rleaf(RosterField::Damage, Op::IsSet, Value::NoOperand)));
+        assert!(sql.contains("v.damage IS NOT NULL"), "got {sql}");
+    }
+
+    #[test]
+    fn a_roster_term_whose_value_does_not_match_its_field_compiles_to_a_false_predicate() {
+        // tier is an integer column; a text value is an upstream bug and must
+        // narrow the result set, not reach the text comparison.
+        let sql = sql_for(&roster(Quant::Any, rleaf(RosterField::Tier, Op::Eq, Value::Text("ten".into()))));
+        assert!(sql.contains("1=0"), "got {sql}");
+        assert!(!sql.contains("LOWER(v.tier)"), "got {sql}");
+    }
+
+    #[test]
+    fn account_and_ship_bind_their_newtype_inner_values() {
+        let acct = sql_for(&roster(Quant::Any, rleaf(RosterField::Account, Op::Is, Value::Account(AccountId(7)))));
+        assert!(acct.contains("v.account_id ="), "got {acct}");
+        let ship =
+            sql_for(&roster(Quant::Any, rleaf(RosterField::Ship, Op::Is, Value::Ship(GameParamId::from(999u64)))));
+        assert!(ship.contains("v.ship_id ="), "got {ship}");
+    }
+
+    #[test]
+    fn every_band_boundary_maps_to_the_band_it_names() {
+        // Pins the constants this filter compiles against, so a future edit to
+        // them is a visible failure rather than a silent reclassification of
+        // every historical row.
+        //
+        // Each boundary is checked from both sides. Asserting only that the
+        // boundary value lands in the band it names is one-sided: lowering a
+        // floor leaves that value inside the band and passes, so the second
+        // assertion -- that one PR below the boundary is still the band under
+        // it -- is what makes a move in either direction visible.
+        for (pr, expected) in [
+            (0.0, PersonalRatingCategory::Bad),
+            (749.0, PersonalRatingCategory::Bad),
+            (750.0, PersonalRatingCategory::BelowAverage),
+            (1100.0, PersonalRatingCategory::Average),
+            (1350.0, PersonalRatingCategory::Good),
+            (1550.0, PersonalRatingCategory::VeryGood),
+            (1750.0, PersonalRatingCategory::Great),
+            (2100.0, PersonalRatingCategory::Unicum),
+            (2450.0, PersonalRatingCategory::SuperUnicum),
+        ] {
+            assert_eq!(PersonalRatingCategory::from_pr(pr), expected, "pr {pr}");
+            let Some(below) = PersonalRatingCategory::ALL.into_iter().rev().find(|b| *b < expected) else {
+                continue;
+            };
+            assert_eq!(
+                PersonalRatingCategory::from_pr(pr - 1.0),
+                below,
+                "pr {} must still be below {expected:?}",
+                pr - 1.0
+            );
+        }
+    }
+
+    /// An in-memory index holding one match per PR, each with a single roster
+    /// row, so a quantifier over the roster and the match it returns are the
+    /// same thing and the assertions can talk about PRs directly.
+    async fn test_db_with_vehicle_prs(prs: &[f64]) -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE indexed_vehicle (arena_id INTEGER, pr REAL)").execute(&pool).await.unwrap();
+        for &pr in prs {
+            insert_vehicle_with_pr(&pool, Some(pr)).await;
+        }
+        pool
+    }
+
+    async fn insert_vehicle_with_pr(pool: &sqlx::SqlitePool, pr: Option<f64>) {
+        let arena_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(arena_id), 0) + 1 FROM indexed_match")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id) VALUES (?)").bind(arena_id).execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO indexed_vehicle (arena_id, pr) VALUES (?, ?)")
+            .bind(arena_id)
+            .bind(pr)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    /// Runs `query` through the real parser and the real compiler against real
+    /// SQLite, in insertion order. Substring-matching the generated SQL cannot
+    /// tell a range that matches the right rows from one that matches none.
+    async fn search(pool: &sqlx::SqlitePool, query: &str) -> Vec<Option<f64>> {
+        let expr = crate::index::query_text::parse_query(query).unwrap_or_else(|e| panic!("{query:?}: {e}"));
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "SELECT vr.pr FROM indexed_match m JOIN indexed_vehicle vr ON vr.arena_id = m.arena_id WHERE ",
+        );
+        push_match_expr(&mut qb, &expr, &CompileCtx::default());
+        qb.push(" ORDER BY m.arena_id");
+        qb.build_query_scalar().fetch_all(pool).await.unwrap()
+    }
+
+    /// Panics rather than dropping a matched row with no recorded PR, so a
+    /// NULL that slipped through a rating filter cannot be silently discarded
+    /// on the way to an assertion about the PRs that matched.
+    fn prs_of(hits: &[Option<f64>]) -> Vec<f64> {
+        hits.iter().map(|pr| pr.expect("a matched row had no recorded PR")).collect()
+    }
+
+    #[tokio::test]
+    async fn an_equality_on_a_band_matches_only_that_bands_range() {
+        let db = test_db_with_vehicle_prs(&[700.0, 2200.0, 2500.0]).await;
+        let hits = search(&db, "any(rating:unicum)").await;
+        assert_eq!(prs_of(&hits), vec![2200.0], "matched outside the band");
+    }
+
+    #[tokio::test]
+    async fn a_comparison_on_a_band_is_an_open_threshold() {
+        let db = test_db_with_vehicle_prs(&[700.0, 2200.0, 2500.0]).await;
+        let hits = search(&db, "any(rating>=unicum)").await;
+        assert_eq!(prs_of(&hits), vec![2200.0, 2500.0]);
+    }
+
+    /// `Bad` has no floor and `SuperUnicum` no ceiling, so a threshold can fall
+    /// off either end of the band order. Off the low end it means every row
+    /// that has a rating; off the high end it means none.
+    #[tokio::test]
+    async fn a_threshold_past_either_end_of_the_band_order_stays_meaningful() {
+        let db = test_db_with_vehicle_prs(&[700.0, 2200.0, 2500.0]).await;
+        assert_eq!(prs_of(&search(&db, "any(rating>=bad)").await), vec![700.0, 2200.0, 2500.0]);
+        assert_eq!(prs_of(&search(&db, "any(rating<=super-unicum)").await), vec![700.0, 2200.0, 2500.0]);
+        assert!(search(&db, "any(rating<bad)").await.is_empty(), "nothing sits below Bad");
+        assert!(search(&db, "any(rating>super-unicum)").await.is_empty(), "nothing sits above SuperUnicum");
+    }
+
+    #[tokio::test]
+    async fn a_null_pr_matches_no_rating_filter() {
+        // Not equality, not a comparison, not a negation. A player with no
+        // recorded PR is not secretly Bad.
+        let db = test_db_with_vehicle_prs(&[]).await;
+        insert_vehicle_with_pr(&db, None).await;
+        for query in ["any(rating:bad)", "any(rating>=bad)", "any(rating<superunicum)", "any(rating!=unicum)"] {
+            assert!(search(&db, query).await.is_empty(), "{query} matched a NULL pr");
+        }
+    }
+
+    #[test]
+    fn free_text_searches_map_player_clan_and_ship_name() {
+        let sql = sql_for(&Expr::Leaf(MatchTerm::FreeText("yamato".into())));
+        assert_eq!(
+            sql,
+            "(LOWER(m.map) LIKE '%' || LOWER(?) || '%' OR EXISTS (SELECT 1 FROM indexed_vehicle v WHERE v.arena_id = m.arena_id AND (LOWER(v.player_name) LIKE '%' || LOWER(?) || '%' OR LOWER(v.clan) LIKE '%' || LOWER(?) || '%' OR LOWER(v.ship_name) LIKE '%' || LOWER(?) || '%')))"
+        );
+        assert!(!sql.contains("yamato"), "needle was inlined into SQL: {sql}");
+    }
+}

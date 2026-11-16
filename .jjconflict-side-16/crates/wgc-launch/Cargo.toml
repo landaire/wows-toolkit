@@ -1,0 +1,15 @@
+[package]
+name = "wgc-launch"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Launch World of Warships natively (Windows) or via Proton (Linux)"
+
+[dependencies]
+wgc-core = { workspace = true }
+wgc-install = { workspace = true }
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

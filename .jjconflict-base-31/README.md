@@ -1,0 +1,142 @@
+# WoWs Toolkit
+
+A monorepo of tools for interacting with World of Warships game data, replays, and assets.
+
+<p>
+  <img src="assets/replay_inspector.png" alt="Replay Inspector" width="800">
+</p>
+<p>
+  <img src="assets/armor_viewer.png" alt="Armor Viewer" width="800">
+</p>
+
+## Crates
+
+| Crate | Description | CLI Binary |
+|-------|-------------|------------|
+| [`wows-toolkit`](crates/wows-toolkit) | GUI application for browsing replays, extracting game files, and viewing armor models | `wows_toolkit` |
+| [`wowsunpack`](crates/wowsunpack) | Library and CLI for unpacking World of Warships game assets (IDX/PKG files, GameParams) | `wowsunpack` |
+| [`wows-replays`](crates/wows-replays) | Core replay file parser library (`wows_replays`) | - |
+| [`minimap-renderer`](crates/minimap-renderer) | Library and CLI for rendering replay minimaps as images or video (`wows_minimap_renderer`) | `minimap_renderer` |
+| [`replayshark`](crates/replayshark) | CLI tool for dumping and analyzing replay files | `replayshark` |
+
+## Documentation
+
+Reverse engineering notes and format specifications live in [`docs/`](docs/):
+
+- [BALLISTICS.md](docs/BALLISTICS.md) - Trajectory simulation, penetration, and splash mechanics
+- [MODELS.md](docs/MODELS.md) - `.geometry` file format specification
+- [TEAM_ADVANTAGE_SCORING.md](docs/TEAM_ADVANTAGE_SCORING.md) - Team advantage calculation algorithm
+- [format_templates/](docs/format_templates/) - Binary format templates for 010 Editor
+
+## Community Discussion
+
+If you'd like to discuss the toolkit features, bugs, or whatever, please feel free to open an issue here on GitHub or join the community Discord linked on the [project site](https://landaire.github.io/wows-toolkit/).
+
+## Pre-Built Application Binaries
+
+Pre-built binaries for Windows are provided at https://github.com/landaire/wows-toolkit/releases/latest Download the `
+wows-toolkit_v(VERSION)_x86_64-pc-windows-gnu.zip` file, extract the application somewhere, and you're good to go! For all other platforms you will have to compile yourself.
+
+## Usage
+
+1. Run the application
+2. Set the World of Warships directory in the settings tab (defaults to `C:\Games\World_of_Warships` if it exists)
+3. ???
+4. Do things
+
+The application will automatically check for updates on startup and, if available, will present update details in-app.
+
+This is not considered a World of Warships mod and does not modify your World of Warships install at all. It passively reads game files required for parsing replays, and parses replay files directly.
+
+## Features
+
+- Can read replay files and display statistics such as damage dealt, time lived, spotting damage, and potential damage.
+- Can view player builds by clicking the "Actions" button on a player row and choosing to open the build in your web browser.
+- Can browse and extract packed game files.
+- Automatically sends **builds** (not raw replays) to shipbuilds.com for build statistic gathering from **Randoms** and **Ranked** games. Training rooms are not sent. Sending replay data can be disabled in the application settings tab.
+
+## For Developers
+
+If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
+
+You can build with either Cargo or Buck2. Cargo is fine for day-to-day work; CI builds everything with Buck2 and all releases ship from CI, so a change has to build under Buck2 to land.
+
+### Building with Cargo
+
+Make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
+
+To build the CLI tools:
+
+```
+cargo build --release -p wowsunpack
+cargo build --release -p wows_minimap_renderer --features bin
+cargo build --release -p replayshark
+```
+
+On Linux you need to first run:
+
+`sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev`
+
+On Fedora Rawhide you need to run:
+
+`dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
+
+#### NASM (optional — full rav1e optimization suite)
+
+The minimap renderer's default features include a CPU AV1 encoder (rav1e).
+rav1e itself doesn't require NASM, but its `asm` feature compiles
+hand-tuned x86 SIMD that runs ~3x faster than the pure-Rust path.
+That `asm` feature is gated behind our `cpu-av1-asm` crate feature (on by
+default in the CLI binary).
+
+**Quick reference:**
+
+| Need | What to do |
+|---|---|
+| Default build, full AV1 perf | Install NASM (see below) |
+| Default build, no NASM | `--no-default-features --features bin,vulkan,videotoolbox,cpu,cpu-av1,arc` |
+| Skip AV1 entirely | `--no-default-features --features bin,vulkan,videotoolbox,cpu,arc` |
+
+`mise.toml` adds the project-local `.tooling/nasm` directory and the winget
+default install location (`C:\Program Files\NASM`) to `PATH` via mise's
+`[env]._.path` block, so plain `cargo build` works inside any shell with
+`mise activate` (and inside `mise exec -- ...`) without needing to fix
+your system PATH. rust-analyzer and other IDE integrations pick this up
+automatically when launched from a mise-activated shell.
+
+Installing NASM:
+
+- **Windows (recommended):** `winget install -e --id NASM.NASM`
+- **Windows (no admin, scripted):** `mise run setup` — downloads NASM into a
+  gitignored `.tooling/` directory and exports it on PATH for the current
+  process.
+- **Linux:** `sudo apt-get install nasm` (or your distro's equivalent)
+- **macOS:** `brew install nasm`
+- **Nix:** already provisioned in the flake's devShell
+
+### Building with Buck
+
+One-time setup, then build any root alias:
+
+```
+./bootstrap.sh                                          # macOS and Linux, needs nix
+powershell -ExecutionPolicy Bypass -File bootstrap.ps1  # Windows, from an elevated shell
+
+bin/buck2 build //:wows_toolkit_egui
+bin/buck2 build //:wows_toolkit_egui?release
+```
+
+The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. `wows_toolkit_egui` and `wows_toolkit_gpui` build the two desktop apps, and `buck2 build root//:` builds everything.
+
+See [DEVELOPING.md](DEVELOPING.md#buck) for the hermeticity check, dependency updates, fixups, and troubleshooting.
+
+### Nix
+
+A Nix flake is provided with a devShell and packages for the CLI tools:
+
+```
+nix develop          # Enter dev shell
+nix build .#wowsunpack
+nix build .#minimap-renderer
+nix build .#replayshark
+```

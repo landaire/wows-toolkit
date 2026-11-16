@@ -1,0 +1,125 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3399
+expression: speed
+---
+surface:
+  stat: top speed on the surface
+  unit: kn
+  builds:
+    base: 32
+    best:
+      value: 32
+      assumed: []
+    alternatives:
+      - label: with Enlarged Propeller Shaft active
+        value: 37.76
+        assumed:
+          - Enlarged Propeller Shaft
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Sierra Mike signal
+        value: 33.6
+        assumed:
+          - Sierra Mike signal
+      - label: with Enlarged Propeller Shaft active and Sierra Mike signal
+        value: 39.65
+        assumed:
+          - Enlarged Propeller Shaft
+          - Sierra Mike signal
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Engine Boost active
+        value: 34.56
+        assumed:
+          - Engine Boost
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Enlarged Propeller Shaft active and Engine Boost active
+        value: 40.32
+        assumed:
+          - Enlarged Propeller Shaft
+          - Engine Boost
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Engine Boost active and Sierra Mike signal
+        value: 36.16
+        assumed:
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Enlarged Propeller Shaft active and Engine Boost active and Sierra Mike signal
+        value: 42.21
+        assumed:
+          - Enlarged Propeller Shaft
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+periscope_depth:
+  stat: "top speed at periscope depth, just below the surface; not the underwater speed"
+  unit: kn
+  builds:
+    base: 32
+    best:
+      value: 32
+      assumed: []
+    alternatives:
+      - label: with Enlarged Propeller Shaft active
+        value: 37.76
+        assumed:
+          - Enlarged Propeller Shaft
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Sierra Mike signal
+        value: 33.6
+        assumed:
+          - Sierra Mike signal
+      - label: with Enlarged Propeller Shaft active and Sierra Mike signal
+        value: 39.65
+        assumed:
+          - Enlarged Propeller Shaft
+          - Sierra Mike signal
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Engine Boost active
+        value: 34.56
+        assumed:
+          - Engine Boost
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Enlarged Propeller Shaft active and Engine Boost active
+        value: 40.32
+        assumed:
+          - Enlarged Propeller Shaft
+          - Engine Boost
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+      - label: with Engine Boost active and Sierra Mike signal
+        value: 36.16
+        assumed:
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Enlarged Propeller Shaft active and Engine Boost active and Sierra Mike signal
+        value: 42.21
+        assumed:
+          - Enlarged Propeller Shaft
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Increases running speed on the surface and at periscope depth while less than 50% of your sub's maximum dive capacity remains."
+submerged:
+  stat: "submerged speed: top speed fully underwater, at maximum depth"
+  unit: kn
+  builds:
+    base: 16
+    best:
+      value: 16
+      assumed: []
+    alternatives:
+      - label: with Sierra Mike signal
+        value: 16.8
+        assumed:
+          - Sierra Mike signal
+      - label: with Engine Boost active
+        value: 17.28
+        assumed:
+          - Engine Boost
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Engine Boost active and Sierra Mike signal
+        value: 18.08
+        assumed:
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."

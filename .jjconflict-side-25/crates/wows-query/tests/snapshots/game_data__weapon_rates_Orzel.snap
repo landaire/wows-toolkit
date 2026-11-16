@@ -1,0 +1,220 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: rates(name)
+---
+torpedoes_per_minute:
+  launchers: 10
+  tubes: 12
+  loader_groups:
+    - direction: bow
+      launchers: 4
+      tubes: 4
+      loaders: 2
+      tubes_per_reload: 2
+    - direction: rotating
+      launchers: 1
+      tubes: 2
+      loaders: 1
+      tubes_per_reload: 2
+    - direction: rotating
+      launchers: 1
+      tubes: 2
+      loaders: 1
+      tubes_per_reload: 2
+    - direction: stern
+      launchers: 4
+      tubes: 4
+      loaders: 2
+      tubes_per_reload: 2
+  tubes_per_reload: 8
+  limit: "2 of the 4 bow launchers (2 of the 4 tubes) reload at a time. 2 of the 4 stern launchers (2 of the 4 tubes) reload at a time. 8 of the 12 tubes reload per reload time, not all 12."
+  rate:
+    stat: torpedoes per minute
+    unit: torpedoes/min
+    builds:
+      base:
+        torpedoes_per_minute: 7.74
+      best:
+        value:
+          torpedoes_per_minute: 9.11
+        assumed:
+          - Torpedo Tubes Modification 2
+      alternatives:
+        - label: without Torpedo Tubes Modification 2
+          value:
+            torpedoes_per_minute: 7.74
+          assumed: []
+        - label: with Torpedo Crew Training active
+          value:
+            torpedoes_per_minute: 10.72
+          assumed:
+            - Torpedo Tubes Modification 2
+            - Torpedo Crew Training
+          note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
+main_battery_damage:
+  - ammo: SAP
+    damage: 2250
+    barrels: 1
+    rates:
+      stat: main battery SAP damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 27000
+          damage_per_second: 450
+          bearing: 90
+          all_barrels_ceiling: 27000
+          by_bearing:
+            - bearing: 0
+              starboard: 27000
+              port: 27000
+            - bearing: 30
+              starboard: 27000
+              port: 27000
+            - bearing: 45
+              starboard: 27000
+              port: 27000
+            - bearing: 60
+              starboard: 27000
+              port: 27000
+            - bearing: 90
+              starboard: 27000
+              port: 27000
+            - bearing: 120
+              starboard: 27000
+              port: 27000
+            - bearing: 135
+              starboard: 0
+              port: 0
+            - bearing: 150
+              starboard: 0
+              port: 0
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            damage_per_minute: 30682
+            damage_per_second: 511.4
+            bearing: 90
+            all_barrels_ceiling: 30682
+            by_bearing:
+              - bearing: 0
+                starboard: 30682
+                port: 30682
+              - bearing: 30
+                starboard: 30682
+                port: 30682
+              - bearing: 45
+                starboard: 30682
+                port: 30682
+              - bearing: 60
+                starboard: 30682
+                port: 30682
+              - bearing: 90
+                starboard: 30682
+                port: 30682
+              - bearing: 120
+                starboard: 30682
+                port: 30682
+              - bearing: 135
+                starboard: 0
+                port: 0
+              - bearing: 150
+                starboard: 0
+                port: 0
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value:
+              damage_per_minute: 27000
+              damage_per_second: 450
+              bearing: 90
+              all_barrels_ceiling: 27000
+            assumed: []
+torpedo_damage:
+  - ammo: 533 mm wz.AB akustyczna
+    damage: 7833
+    barrels: 12
+    rates:
+      stat: 533 mm wz.AB akustyczna damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 60645
+          damage_per_second: 1010.8
+        best:
+          value:
+            damage_per_minute: 76342
+            damage_per_second: 1272.4
+          assumed:
+            - Torpedo Tubes Modification 3
+            - Torpedo Tubes Modification 2
+        alternatives:
+          - label: without Torpedo Tubes Modification 3
+            value:
+              damage_per_minute: 71347
+              damage_per_second: 1189.1
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 64890
+              damage_per_second: 1081.5
+            assumed:
+              - Torpedo Tubes Modification 3
+          - label: with Torpedo Crew Training active
+            value:
+              damage_per_minute: 89814
+              damage_per_second: 1496.9
+            assumed:
+              - Torpedo Tubes Modification 3
+              - Torpedo Tubes Modification 2
+              - Torpedo Crew Training
+            note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
+  - ammo: 533 mm wz.AB
+    damage: 17133
+    barrels: 12
+    rates:
+      stat: 533 mm wz.AB damage rate
+      unit: HP/min
+      builds:
+        base:
+          damage_per_minute: 132645
+          damage_per_second: 2210.8
+        best:
+          value:
+            damage_per_minute: 166977
+            damage_per_second: 2782.9
+          assumed:
+            - Torpedo Tubes Modification 3
+            - Torpedo Tubes Modification 2
+        alternatives:
+          - label: without Torpedo Tubes Modification 3
+            value:
+              damage_per_minute: 156053
+              damage_per_second: 2600.9
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              damage_per_minute: 141930
+              damage_per_second: 2365.5
+            assumed:
+              - Torpedo Tubes Modification 3
+          - label: with Torpedo Crew Training active
+            value:
+              damage_per_minute: 196443
+              damage_per_second: 3274.1
+            assumed:
+              - Torpedo Tubes Modification 3
+              - Torpedo Tubes Modification 2
+              - Torpedo Crew Training
+            note: Reduces torpedo tube reload time while your ship remains detected by an enemy.
+rate_notes:
+  - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+  - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."

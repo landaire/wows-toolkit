@@ -1,0 +1,16 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+workspace_library(
+    name = "wows_toolkit_icons",
+    crate = "wows_toolkit_icons",
+    package = "wows-toolkit-icons",
+    version = "0.1.0",
+)
+
+workspace_test(
+    name = "wows_toolkit_icons_test",
+    crate = "wows_toolkit_icons",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-icons",
+    version = "0.1.0",
+)

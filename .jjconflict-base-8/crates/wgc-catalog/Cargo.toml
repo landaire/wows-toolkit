@@ -1,0 +1,19 @@
+[package]
+name = "wgc-catalog"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Typed models and parsers for the WGC update-service (WGUS) XML protocol"
+
+[dependencies]
+quick-xml = { version = "0.36", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+url = "2"
+# TLS features mirror crates/wows-toolkit/Cargo.toml's reqwest line: rustls
+# with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
+# No "json" feature: this crate speaks XML only.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "gzip"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

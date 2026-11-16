@@ -61,6 +61,7 @@ file = "Soubor"
 check_updates = "Zkontrolovat aktualizace"
 about = "O aplikaci"
 quit = "Ukončit"
+licenses = "Licence"
 
 [ui.windows]
 build_consent = "Souhlas se sběrem buildů"
@@ -75,6 +76,7 @@ software_encode = "Žádný GPU kodér videa"
 about = "O aplikaci"
 refresh_persisted_data = "Obnovit uložená data záznamů"
 tactics_board = "Taktická tabule"
+licenses = "Licence"
 
 [ui.dialogs]
 build_consent_message = "Chcete odesílat informace o buildech hráčů z hodnocených a náhodných bitev vývojáři? Tento sběr dat pomáhá komunitě hromadně analyzovat buildy hráčů. Kdykoli se můžete odhlásit v nastavení."
@@ -112,6 +114,11 @@ and = " a "
 suppress_warning = "Příště nezobrazovat"
 more_info = "Více informací"
 loading_replays = "Načítání %{count} záznamů..."
+app_version = "Verze %{version}"
+project_license = "WoWs Toolkit je distribuován pod licencí %{license}."
+third_party_notices = "Upozornění třetích stran"
+notices_search_hint = "Hledat v upozorněních"
+no_matching_notices = "Hledání neodpovídá žádné upozornění."
 
 [ui.messages]
 bug_report_info_copied = "Informace pro hlášení chyby byly zkopírovány."
@@ -1515,6 +1522,11 @@ token = "Přihlašovací token"
 monitored_channel_description = "Sledovaný kanál. Ponechte prázdné pro sledování vlastního."
 armor_defaults = "Uložené výchozí hodnoty"
 armor_saved_description = "Uloženo z možností prohlížeče modelů"
+
+[ui.settings.licenses]
+title = "O aplikaci a licence"
+back = "Zpět na nastavení"
+third_party_intro = "Tato aplikace obsahuje níže uvedené komponenty třetích stran. Vyberte položku pro zobrazení balíčků, které ji používají, a úplného textu licence."
 
 [ui.settings.armor]
 no_defaults = "(žádné uložené výchozí hodnoty)"

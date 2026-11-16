@@ -1,0 +1,3669 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+
+use ab_glyph::Font;
+use ab_glyph::FontArc;
+use ab_glyph::PxScale;
+use ab_glyph::ScaleFont;
+use image::Rgb;
+use image::RgbImage;
+use image::RgbaImage;
+use tiny_skia::BlendMode;
+use tiny_skia::FillRule;
+use tiny_skia::FilterQuality;
+use tiny_skia::LineCap;
+use tiny_skia::LineJoin;
+use tiny_skia::Paint;
+use tiny_skia::PathBuilder;
+use tiny_skia::Pixmap;
+use tiny_skia::PixmapPaint;
+use tiny_skia::Stroke;
+use tiny_skia::StrokeDash;
+use tiny_skia::Transform;
+
+use std::sync::Arc;
+
+use crate::STATS_PANEL_WIDTH;
+use crate::activity_feed as feed;
+use crate::activity_feed::FeedIcon;
+use crate::activity_feed::FlowItem;
+use crate::activity_feed::FlowLayout;
+use crate::activity_feed::PlacedContent;
+use crate::activity_feed::RowExtent;
+use crate::assets::GameFonts;
+
+use crate::SHIP_ICON_OUTLINE_THICKNESS;
+
+use crate::draw_command::ActivityFeedEntry;
+use crate::draw_command::ActivityFeedKind;
+use crate::draw_command::AnnotationShape;
+use crate::draw_command::CAMERA_DIRECTION_ALPHA;
+use crate::draw_command::CameraDirectionWedge;
+use crate::draw_command::ChatEntry;
+use crate::draw_command::DrawCommand;
+use crate::draw_command::FontHint;
+use crate::draw_command::KillFeedEntry;
+use crate::draw_command::RenderTarget;
+use crate::draw_command::RowShade;
+use crate::draw_command::ShipVisibility;
+use wows_replays::types::ElapsedClock;
+use wt_translations::DefaultTextResolver;
+use wt_translations::TextResolver;
+use wt_translations::TranslatableText;
+
+// ── Pixmap conversion helpers ──────────────────────────────────────────────
+
+/// Convert an RGB image (no alpha) to a tiny-skia Pixmap (opaque RGBA, premultiplied).
+fn rgb_to_pixmap(img: &RgbImage) -> Pixmap {
+    let w = img.width();
+    let h = img.height();
+    let mut pm = Pixmap::new(w, h).expect("failed to create pixmap");
+    let data = pm.data_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let px = img.get_pixel(x, y).0;
+            let idx = (y * w + x) as usize * 4;
+            data[idx] = px[0];
+            data[idx + 1] = px[1];
+            data[idx + 2] = px[2];
+            data[idx + 3] = 255;
+        }
+    }
+    pm
+}
+
+/// Convert a tiny-skia Pixmap (premultiplied RGBA) back to an RGB image.
+fn pixmap_to_rgb(pm: &Pixmap) -> RgbImage {
+    let w = pm.width();
+    let h = pm.height();
+    let data = pm.data();
+    let mut img = RgbImage::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize * 4;
+            let a = data[idx + 3] as f32 / 255.0;
+            // Unpremultiply alpha
+            let (r, g, b) = if a > 0.001 {
+                (
+                    (data[idx] as f32 / a).min(255.0) as u8,
+                    (data[idx + 1] as f32 / a).min(255.0) as u8,
+                    (data[idx + 2] as f32 / a).min(255.0) as u8,
+                )
+            } else {
+                (0, 0, 0)
+            };
+            img.put_pixel(x, y, Rgb([r, g, b]));
+        }
+    }
+    img
+}
+
+/// Convert an RGBA image to a tiny-skia Pixmap (premultiplied alpha).
+///
+/// `None` for an image with no pixels, which is what an asset that failed to
+/// load leaves behind: a frame missing one icon is worth more than a panic in
+/// whatever thread is drawing it.
+fn rgba_to_pixmap(img: &RgbaImage) -> Option<Pixmap> {
+    let w = img.width();
+    let h = img.height();
+    let mut pm = Pixmap::new(w, h)?;
+    let data = pm.data_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let px = img.get_pixel(x, y).0;
+            let idx = (y * w + x) as usize * 4;
+            let a = px[3] as f32 / 255.0;
+            // Premultiply
+            data[idx] = (px[0] as f32 * a) as u8;
+            data[idx + 1] = (px[1] as f32 * a) as u8;
+            data[idx + 2] = (px[2] as f32 * a) as u8;
+            data[idx + 3] = px[3];
+        }
+    }
+    Some(pm)
+}
+
+// ── Paint helpers ──────────────────────────────────────────────────────────
+
+/// Create a solid-color paint with the given RGBA values.
+fn solid_paint(r: u8, g: u8, b: u8, a: u8) -> Paint<'static> {
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(r, g, b, a);
+    paint.anti_alias = true;
+    paint
+}
+
+/// Create a solid-color paint from an [u8; 3] array with alpha.
+fn color_paint(color: [u8; 3], alpha: f32) -> Paint<'static> {
+    let a = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+    solid_paint(color[0], color[1], color[2], a)
+}
+
+// ── Text rendering directly onto Pixmap ────────────────────────────────────
+
+/// Draw anti-aliased text onto a Pixmap at (x, y) with the given color.
+///
+/// Uses ab_glyph's per-pixel coverage callback for proper anti-aliasing.
+/// Coordinates are in pixel space (x = left edge, y = top edge of text).
+fn draw_text(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+    let scaled = font.as_scaled(scale);
+    let mut cursor_x = x as f32;
+    let baseline_y = y as f32 + scaled.ascent();
+    let w = pm.width() as i32;
+    let h = pm.height() as i32;
+    let data = pm.data_mut();
+
+    let mut last_glyph_id = None;
+    for c in text.chars() {
+        let glyph_id = scaled.glyph_id(c);
+        if let Some(last) = last_glyph_id {
+            cursor_x += scaled.kern(last, glyph_id);
+        }
+        let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(cursor_x, baseline_y));
+        if let Some(outlined) = font.outline_glyph(glyph) {
+            let bounds = outlined.px_bounds();
+            outlined.draw(|gx, gy, coverage| {
+                let px = gx as i32 + bounds.min.x as i32;
+                let py = gy as i32 + bounds.min.y as i32;
+                if px < 0 || px >= w || py < 0 || py >= h {
+                    return;
+                }
+                let cov = coverage.clamp(0.0, 1.0);
+                if cov < 0.01 {
+                    return;
+                }
+                let idx = (py as usize * w as usize + px as usize) * 4;
+                // Read existing premultiplied pixel
+                let bg_r = data[idx] as f32;
+                let bg_g = data[idx + 1] as f32;
+                let bg_b = data[idx + 2] as f32;
+                let bg_a = data[idx + 3] as f32;
+                // Source color (premultiplied by coverage)
+                let src_r = color[0] as f32 * cov;
+                let src_g = color[1] as f32 * cov;
+                let src_b = color[2] as f32 * cov;
+                let src_a = 255.0 * cov;
+                // Source-over compositing
+                let inv_a = 1.0 - cov;
+                data[idx] = (src_r + bg_r * inv_a).min(255.0) as u8;
+                data[idx + 1] = (src_g + bg_g * inv_a).min(255.0) as u8;
+                data[idx + 2] = (src_b + bg_b * inv_a).min(255.0) as u8;
+                data[idx + 3] = (src_a + bg_a * inv_a).min(255.0) as u8;
+            });
+        }
+        cursor_x += scaled.h_advance(glyph_id);
+        last_glyph_id = Some(glyph_id);
+    }
+}
+
+/// Measure the width and height of text at the given scale.
+fn text_size(scale: PxScale, font: &impl Font, text: &str) -> (u32, u32) {
+    let scaled = font.as_scaled(scale);
+    let mut w = 0.0f32;
+    let mut last_glyph_id = None;
+    for c in text.chars() {
+        let glyph_id = scaled.glyph_id(c);
+        if let Some(last) = last_glyph_id {
+            w += scaled.kern(last, glyph_id);
+        }
+        w += scaled.h_advance(glyph_id);
+        last_glyph_id = Some(glyph_id);
+    }
+    let h = scaled.ascent() - scaled.descent();
+    (w.ceil() as u32, h.ceil() as u32)
+}
+
+/// Draw text with a shadow (black offset by +1,+1).
+fn draw_text_shadow(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+    draw_text(pm, [0, 0, 0], x + 1, y + 1, scale, font, text);
+    draw_text(pm, color, x, y, scale, font, text);
+}
+
+// ── Drawing primitives ─────────────────────────────────────────────────────
+
+/// Draw an anti-aliased line.
+fn draw_line(pm: &mut Pixmap, x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3], alpha: f32, width: f32) {
+    let mut pb = PathBuilder::new();
+    pb.move_to(x1, y1);
+    pb.line_to(x2, y2);
+    let Some(path) = pb.finish() else { return };
+    let paint = color_paint(color, alpha);
+    let stroke = Stroke { width, line_cap: LineCap::Round, line_join: LineJoin::Round, miter_limit: 4.0, dash: None };
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+}
+
+/// Stroke or fill a run of points, closing it first when it is a polygon.
+///
+/// A width in map space rather than on screen: a reader drew the line over
+/// the map, so it belongs to the map and thickens with it, unlike the
+/// renderer's own strokes.
+fn draw_run(pm: &mut Pixmap, points: &[(f32, f32)], closed: bool, filled: bool, color: [u8; 4], width: f32) {
+    if points.len() < 2 {
+        return;
+    }
+    let mut pb = PathBuilder::new();
+    pb.move_to(points[0].0, points[0].1);
+    for point in &points[1..] {
+        pb.line_to(point.0, point.1);
+    }
+    if closed {
+        pb.close();
+    }
+    let Some(path) = pb.finish() else { return };
+
+    let rgb = [color[0], color[1], color[2]];
+    let alpha = color[3] as f32 / 255.0;
+    let paint = color_paint(rgb, alpha);
+    if filled {
+        pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        return;
+    }
+    let stroke = Stroke {
+        width: width.max(0.1),
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        miter_limit: 4.0,
+        dash: None,
+    };
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+}
+
+/// Draw an anti-aliased filled circle.
+fn draw_filled_circle(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32) {
+    let Some(path) = PathBuilder::from_circle(cx, cy, radius) else {
+        return;
+    };
+    let paint = color_paint(color, alpha);
+    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+}
+
+/// Draw an anti-aliased circle outline.
+fn draw_circle_outline(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32, width: f32) {
+    let Some(path) = PathBuilder::from_circle(cx, cy, radius) else {
+        return;
+    };
+    let paint = color_paint(color, alpha);
+    let stroke = Stroke { width, line_cap: LineCap::Butt, line_join: LineJoin::Miter, miter_limit: 4.0, dash: None };
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+}
+
+/// Draw an anti-aliased dashed circle outline.
+fn draw_dashed_circle(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32, width: f32) {
+    let Some(path) = PathBuilder::from_circle(cx, cy, radius) else {
+        return;
+    };
+    let paint = color_paint(color, alpha);
+    // Dash pattern: 8px on, 8px off
+    let dash = StrokeDash::new(vec![8.0, 8.0], 0.0);
+    let stroke = Stroke { width, line_cap: LineCap::Butt, line_join: LineJoin::Miter, miter_limit: 4.0, dash };
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+}
+
+/// Draw a filled rectangle.
+fn draw_filled_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, color: [u8; 3], alpha: f32) {
+    let Some(rect) = tiny_skia::Rect::from_xywh(x, y, w, h) else {
+        return;
+    };
+    let paint = color_paint(color, alpha);
+    pm.fill_rect(rect, &paint, Transform::identity(), None);
+}
+
+fn draw_rounded_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, radius: f32, color: [u8; 3], alpha: f32) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let r = radius.min(w / 2.0).min(h / 2.0);
+    let mut pb = PathBuilder::new();
+    pb.move_to(x + r, y);
+    pb.line_to(x + w - r, y);
+    pb.quad_to(x + w, y, x + w, y + r);
+    pb.line_to(x + w, y + h - r);
+    pb.quad_to(x + w, y + h, x + w - r, y + h);
+    pb.line_to(x + r, y + h);
+    pb.quad_to(x, y + h, x, y + h - r);
+    pb.line_to(x, y + r);
+    pb.quad_to(x, y, x + r, y);
+    pb.close();
+    let Some(path) = pb.finish() else {
+        return;
+    };
+    let paint = color_paint(color, alpha);
+    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+}
+
+// ── Composite drawing functions ────────────────────────────────────────────
+
+/// Draw a capture point zone: filled circle + progress pie + outline + label.
+fn draw_capture_point(
+    pm: &mut Pixmap,
+    x: f32,
+    y: f32,
+    radius: f32,
+    color: [u8; 3],
+    alpha: f32,
+    label: &str,
+    progress: f32,
+    invader_color: Option<[u8; 3]>,
+    flag_icon: Option<&RgbaImage>,
+    fonts: &GameFonts,
+    scale: f32,
+) {
+    // Base filled circle with owner's color
+    draw_filled_circle(pm, x, y, radius, color, alpha);
+
+    // If capture in progress, draw a pie-slice fill in the invader's color
+    if progress > 0.001
+        && let Some(inv_color) = invader_color
+    {
+        let fill_alpha = alpha + 0.10;
+        // Pie-slice from top (-PI/2), sweeping clockwise by progress * 2*PI
+        let start_angle = -std::f32::consts::FRAC_PI_2;
+        let sweep = progress * std::f32::consts::TAU;
+
+        let mut pb = PathBuilder::new();
+        pb.move_to(x, y);
+        // Starting point on circle
+        let sx = x + radius * (start_angle).cos();
+        let sy = y + radius * (start_angle).sin();
+        pb.line_to(sx, sy);
+
+        // Approximate the arc with line segments (smooth enough at this scale)
+        let steps = ((sweep / std::f32::consts::TAU) * 64.0).max(4.0) as i32;
+        for i in 1..=steps {
+            let t = i as f32 / steps as f32;
+            let angle = start_angle + sweep * t;
+            let px = x + radius * angle.cos();
+            let py = y + radius * angle.sin();
+            pb.line_to(px, py);
+        }
+        pb.close();
+
+        if let Some(path) = pb.finish() {
+            let paint = color_paint(inv_color, fill_alpha);
+            pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        }
+    }
+
+    // Circle outline
+    let outline_color = if let Some(ic) = invader_color
+        && progress > 0.001
+    {
+        ic
+    } else {
+        color
+    };
+    draw_circle_outline(pm, x, y, radius, outline_color, 0.6, 2.0);
+
+    // Centered label: icon for base-type, text for domination
+    if let Some(icon) = flag_icon {
+        draw_icon(pm, icon, x, y, scale);
+    } else {
+        let label_scale = fonts.scale(16.0 * scale);
+        let (tw, th) = text_size(label_scale, &fonts.primary, label);
+        let tx = x as i32 - tw as i32 / 2;
+        let ty = y as i32 - th as i32 / 2;
+        draw_text_shadow(pm, [255, 255, 255], tx, ty, label_scale, &fonts.primary, label);
+    }
+}
+
+/// Draw player name and/or ship name labels centered above a ship icon.
+fn draw_ship_labels(
+    pm: &mut Pixmap,
+    x: f32,
+    y: f32,
+    player_name: Option<&str>,
+    ship_name: Option<&str>,
+    name_color: Option<[u8; 3]>,
+    fonts: &GameFonts,
+    scale: f32,
+) {
+    let line_height = (12.0 * scale).round().max(1.0) as i32;
+    let line_count = player_name.is_some() as i32 + ship_name.is_some() as i32;
+    if line_count == 0 {
+        return;
+    }
+
+    // Apply armament color to ship_name if shown, otherwise player_name
+    let color_on_ship = ship_name.is_some();
+
+    let x = x.round() as i32;
+    let y = y.round() as i32;
+
+    // Position lines above the icon (icon radius ~12px)
+    let base_y = y - (14.0 * scale).round() as i32 - line_count * line_height;
+    let mut cur_y = base_y;
+
+    if let Some(name) = player_name {
+        let (font, scale) = fonts.font_and_scale(name, 10.0 * scale);
+        let color = if !color_on_ship { name_color.unwrap_or([255, 255, 255]) } else { [255, 255, 255] };
+        let (w, _) = text_size(scale, font, name);
+        let tx = x - w as i32 / 2;
+        draw_text_shadow(pm, color, tx, cur_y, scale, font, name);
+        cur_y += line_height;
+    }
+    if let Some(name) = ship_name {
+        let (font, scale) = fonts.font_and_scale(name, 10.0 * scale);
+        let color = name_color.unwrap_or([255, 255, 255]);
+        let (w, _) = text_size(scale, font, name);
+        let tx = x - w as i32 / 2;
+        draw_text_shadow(pm, color, tx, cur_y, scale, font, name);
+    }
+}
+
+/// Draw a health bar below a ship icon.
+fn draw_health_bar(
+    pm: &mut Pixmap,
+    x: f32,
+    y: f32,
+    fraction: f32,
+    fill_color: [u8; 3],
+    bg_color: [u8; 3],
+    bg_alpha: f32,
+    scale: f32,
+) {
+    let bar_w = 20.0 * scale;
+    let bar_h = 3.0 * scale;
+    let bar_x = x - bar_w / 2.0;
+    let bar_y = y + 10.0 * scale;
+
+    let fill_w = (fraction.clamp(0.0, 1.0) * bar_w).round();
+
+    // Background portion
+    if fill_w < bar_w {
+        draw_filled_rect(pm, bar_x + fill_w, bar_y, bar_w - fill_w, bar_h, bg_color, bg_alpha);
+    }
+    // Filled portion
+    if fill_w > 0.0 {
+        draw_filled_rect(pm, bar_x, bar_y, fill_w, bar_h, fill_color, 1.0);
+    }
+}
+
+/// Draw a ship icon rotated by yaw, with optional team-color tinting.
+///
+/// Uses tiny-skia's bilinear-filtered transform compositing for smooth rotation
+/// and sub-pixel placement.
+#[allow(clippy::too_many_arguments)]
+fn draw_ship_icon(
+    pm: &mut Pixmap,
+    icon: &RgbaImage,
+    x: f32,
+    y: f32,
+    yaw: f32,
+    color: Option<[u8; 3]>,
+    opacity: f32,
+    scale: f32,
+) {
+    let iw = icon.width();
+    let ih = icon.height();
+    let cx = iw as f32 / 2.0;
+    let cy = ih as f32 / 2.0;
+
+    // Create a tinted copy of the icon as a Pixmap
+    let mut icon_pm = Pixmap::new(iw, ih).expect("failed to create icon pixmap");
+    let data = icon_pm.data_mut();
+    for iy in 0..ih {
+        for ix in 0..iw {
+            let px = icon.get_pixel(ix, iy).0;
+            let idx = (iy * iw + ix) as usize * 4;
+            let a = px[3] as f32 / 255.0;
+            if a < 0.01 {
+                continue;
+            }
+            let (r, g, b) = if let Some(c) = color {
+                // Tint: use luminance as intensity
+                let luminance = (px[0] as f32 * 0.299 + px[1] as f32 * 0.587 + px[2] as f32 * 0.114) / 255.0;
+                ((c[0] as f32 * luminance) as u8, (c[1] as f32 * luminance) as u8, (c[2] as f32 * luminance) as u8)
+            } else {
+                (px[0], px[1], px[2])
+            };
+            // Premultiply
+            data[idx] = (r as f32 * a) as u8;
+            data[idx + 1] = (g as f32 * a) as u8;
+            data[idx + 2] = (b as f32 * a) as u8;
+            data[idx + 3] = px[3];
+        }
+    }
+
+    // The SVG icons point upward (north = -Y). In game coordinates,
+    // yaw=0 means east and increases counter-clockwise.
+    // Screen rotation: R = PI/2 - yaw, converted to degrees for tiny-skia.
+    let angle_deg = (std::f32::consts::FRAC_PI_2 - yaw).to_degrees();
+
+    // Grow about the destination, put the icon's centre on it, then rotate
+    // around it. An icon grows with the map, as the egui renderer's does.
+    let transform = Transform::from_scale(scale, scale)
+        .post_translate(x - cx * scale, y - cy * scale)
+        .post_rotate_at(angle_deg, x, y);
+
+    let paint = PixmapPaint { opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
+
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
+}
+
+/// Build a padded outline image for a ship icon: the icon's silhouette dilated
+/// by `thickness` pixels, colored gold, on a canvas large enough to hold the
+/// extension beyond the original icon bounds. The original icon area itself is
+/// left transparent so it composites cleanly under the real icon.
+fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alpha: u8) -> RgbaImage {
+    let t = thickness;
+    let iw = icon.width();
+    let ih = icon.height();
+    let ow = iw + 2 * t;
+    let oh = ih + 2 * t;
+    let mut out = RgbaImage::from_pixel(ow, oh, image::Rgba([0, 0, 0, 0]));
+
+    let alpha_at = |x: i32, y: i32| -> u8 {
+        let ix = x - t as i32;
+        let iy = y - t as i32;
+        if ix < 0 || iy < 0 || ix >= iw as i32 || iy >= ih as i32 {
+            0
+        } else {
+            icon.get_pixel(ix as u32, iy as u32).0[3]
+        }
+    };
+
+    let t_i = t as i32;
+    let t_sq = t_i * t_i;
+    for y in 0..oh as i32 {
+        for x in 0..ow as i32 {
+            if alpha_at(x, y) > 128 {
+                continue;
+            }
+            let mut hit = false;
+            'scan: for dy in -t_i..=t_i {
+                for dx in -t_i..=t_i {
+                    if dx * dx + dy * dy > t_sq {
+                        continue;
+                    }
+                    if alpha_at(x + dx, y + dy) > 128 {
+                        hit = true;
+                        break 'scan;
+                    }
+                }
+            }
+            if hit {
+                out.put_pixel(x as u32, y as u32, image::Rgba([color[0], color[1], color[2], alpha]));
+            }
+        }
+    }
+    out
+}
+
+/// Draw a plane/consumable icon (pre-colored RGBA, no rotation).
+fn draw_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, scale: f32) {
+    let iw = icon.width();
+    let ih = icon.height();
+    let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
+    let transform =
+        Transform::from_scale(scale, scale).post_translate(x - iw as f32 * scale / 2.0, y - ih as f32 * scale / 2.0);
+    let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
+}
+
+/// Draw the team score bar at the top of the frame.
+///
+/// Two independent progress bars growing toward the center. Each bar represents
+/// progress toward 1000 points. Team 0 (friendly) grows left→center,
+/// team 1 (enemy) grows right→center.
+fn draw_score_bar(
+    pm: &mut Pixmap,
+    team0_score: i32,
+    team1_score: i32,
+    team0_color: [u8; 3],
+    team1_color: [u8; 3],
+    max_score: i32,
+    team0_timer: Option<&str>,
+    team1_timer: Option<&str>,
+    advantage_label: &str,
+    advantage_team: i32,
+    fonts: &GameFonts,
+    map_width: u32,
+) {
+    let width = map_width as f32;
+    let bar_height = crate::HUD_HEIGHT as f32;
+    let max_score = max_score as f32;
+    let half = width / 2.0;
+    let center_gap = 2.0f32; // small gap between the two bars
+
+    // Dark background for the entire bar area
+    draw_filled_rect(pm, 0.0, 0.0, width, bar_height, [30, 30, 30], 0.8);
+
+    // Team 0 progress: grows from left edge toward center
+    let t0_frac = (team0_score as f32 / max_score).clamp(0.0, 1.0);
+    let t0_width = t0_frac * (half - center_gap);
+    if t0_width > 0.0 {
+        draw_filled_rect(pm, 0.0, 0.0, t0_width, bar_height, team0_color, 1.0);
+    }
+
+    // Team 1 progress: grows from right edge toward center
+    let t1_frac = (team1_score as f32 / max_score).clamp(0.0, 1.0);
+    let t1_width = t1_frac * (half - center_gap);
+    if t1_width > 0.0 {
+        draw_filled_rect(pm, width - t1_width, 0.0, t1_width, bar_height, team1_color, 1.0);
+    }
+
+    let font = &fonts.primary;
+    let timer_color: [u8; 3] = [200, 200, 200];
+    let pill_pad_x = 4.0f32;
+    let pill_pad_y = 1.0f32;
+    let pill_margin = 2.0f32;
+    let pill_radius = 3.0f32;
+    let pill_color: [u8; 3] = [0, 0, 0];
+    let pill_alpha = 0.55f32;
+
+    let score_scale = fonts.scale(14.0);
+    let timer_scale = fonts.scale(12.0);
+    let advantage_scale = fonts.scale(11.0);
+
+    let t0 = format!("{}", team0_score);
+    let t1 = format!("{}", team1_score);
+    let (t0w, t0h) = text_size(score_scale, font, &t0);
+    let (t1w, _) = text_size(score_scale, font, &t1);
+
+    let pill_h = (t0h as f32 + pill_pad_y * 2.0).min(bar_height - pill_margin * 2.0);
+    let pill_y = (bar_height - pill_h) / 2.0;
+    let text_y = pill_y as i32 + pill_pad_y as i32;
+
+    // ── Measure team 0 pill width ──
+    let mut t0_total_w = t0w as f32;
+    if let Some(timer) = team0_timer {
+        let (tw, _) = text_size(timer_scale, font, timer);
+        t0_total_w += 4.0 + tw as f32;
+    }
+    if advantage_team == 0 && !advantage_label.is_empty() {
+        let (aw, _) = text_size(advantage_scale, font, advantage_label);
+        t0_total_w += 6.0 + aw as f32;
+    }
+
+    // ── Measure team 1 pill width ──
+    let mut t1_total_w = t1w as f32;
+    if let Some(timer) = team1_timer {
+        let (tw, _) = text_size(timer_scale, font, timer);
+        t1_total_w += 4.0 + tw as f32;
+    }
+    if advantage_team == 1 && !advantage_label.is_empty() {
+        let (aw, _) = text_size(advantage_scale, font, advantage_label);
+        t1_total_w += 6.0 + aw as f32;
+    }
+
+    // ── Draw team 0 pill background + text ──
+    let t0_pill_x = 8.0 - pill_pad_x;
+    draw_rounded_rect(
+        pm,
+        t0_pill_x,
+        pill_y,
+        t0_total_w + pill_pad_x * 2.0,
+        pill_h,
+        pill_radius,
+        pill_color,
+        pill_alpha,
+    );
+
+    let mut t0_cursor = 8i32;
+    draw_text(pm, [255, 255, 255], t0_cursor, text_y, score_scale, font, &t0);
+    t0_cursor += t0w as i32;
+    if let Some(timer) = team0_timer {
+        t0_cursor += 4;
+        draw_text(pm, timer_color, t0_cursor, text_y + 1, timer_scale, font, timer);
+        let (tw, _) = text_size(timer_scale, font, timer);
+        t0_cursor += tw as i32;
+    }
+    if advantage_team == 0 && !advantage_label.is_empty() {
+        t0_cursor += 6;
+        draw_text(pm, [255, 255, 255], t0_cursor, text_y + 2, advantage_scale, font, advantage_label);
+    }
+
+    // ── Draw team 1 pill background + text ──
+    let t1_pill_x = width - 8.0 - t1_total_w - pill_pad_x;
+    draw_rounded_rect(
+        pm,
+        t1_pill_x,
+        pill_y,
+        t1_total_w + pill_pad_x * 2.0,
+        pill_h,
+        pill_radius,
+        pill_color,
+        pill_alpha,
+    );
+
+    // Team 1 draws right-to-left: [advantage] [timer] [score]
+    let mut t1_cursor = (width - 8.0) as i32; // right edge of score
+    // Score (rightmost)
+    let t1_x = t1_cursor - t1w as i32;
+    draw_text(pm, [255, 255, 255], t1_x, text_y, score_scale, font, &t1);
+    t1_cursor = t1_x;
+    // Timer (left of score)
+    if let Some(timer) = team1_timer {
+        let (tw, _) = text_size(timer_scale, font, timer);
+        t1_cursor -= 4;
+        let tx = t1_cursor - tw as i32;
+        draw_text(pm, timer_color, tx, text_y + 1, timer_scale, font, timer);
+        t1_cursor = tx;
+    }
+    // Advantage (leftmost)
+    if advantage_team == 1 && !advantage_label.is_empty() {
+        let (aw, _) = text_size(advantage_scale, font, advantage_label);
+        t1_cursor -= 6;
+        let ax = t1_cursor - aw as i32;
+        draw_text(pm, [255, 255, 255], ax, text_y + 2, advantage_scale, font, advantage_label);
+    }
+}
+
+/// Draw the game timer.
+fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedClock, fonts: &GameFonts, map_width: u32) {
+    let font = &fonts.primary;
+    let center_x = map_width as i32 / 2;
+    let main_scale = fonts.scale(16.0);
+    let small_scale = fonts.scale(11.0);
+
+    if let Some(remaining) = time_remaining {
+        // Show time remaining as main timer (centered)
+        let r_mins = remaining / 60;
+        let r_secs = remaining % 60;
+        let remaining_text = format!("{:02}:{:02}", r_mins, r_secs);
+        let (rw, _) = text_size(main_scale, font, &remaining_text);
+        let rx = center_x - rw as i32 / 2;
+        draw_text_shadow(pm, [255, 255, 255], rx, 2, main_scale, font, &remaining_text);
+
+        // Show elapsed as smaller text below
+        let e_mins = (elapsed.seconds() as i32) / 60;
+        let e_secs = (elapsed.seconds() as i32) % 60;
+        let elapsed_text = format!("+{:02}:{:02}", e_mins, e_secs);
+        let (ew, _) = text_size(small_scale, font, &elapsed_text);
+        let ex = center_x - ew as i32 / 2;
+        draw_text_shadow(pm, [180, 180, 180], ex, 18, small_scale, font, &elapsed_text);
+    } else {
+        // Fallback: just show elapsed time centered (no timeLeft data yet)
+        let mins = (elapsed.seconds() as i32) / 60;
+        let secs = (elapsed.seconds() as i32) % 60;
+        let text = format!("{:02}:{:02}", mins, secs);
+        let (w, _) = text_size(main_scale, font, &text);
+        let x = center_x - w as i32 / 2;
+        draw_text_shadow(pm, [255, 255, 255], x, 2, main_scale, font, &text);
+    }
+}
+
+fn draw_pre_battle_countdown(
+    pm: &mut Pixmap,
+    seconds: i64,
+    fonts: &GameFonts,
+    resolver: &dyn TextResolver,
+    map_width: u32,
+) {
+    let text = format!("{}", seconds);
+    let subtitle = resolver.resolve(&TranslatableText::PreBattleLabel);
+    let glow_color: [u8; 3] = [255, 200, 50]; // gold
+    draw_battle_result_overlay(pm, &text, Some(&subtitle), glow_color, true, fonts, map_width);
+}
+
+/// Map a DeathCause to the icon key used in the death_cause_icons HashMap.
+///
+/// Keys correspond to the base name portion of `icon_frag_{key}.png` files
+/// in `gui/battle_hud/icon_frag/`.
+fn death_cause_icon_key(
+    cause: Option<&wows_replays::analyzer::decoder::Recognized<wows_replays::analyzer::decoder::DeathCause>>,
+) -> &'static str {
+    use wows_replays::analyzer::decoder::DeathCause;
+    match cause.and_then(|cause| cause.known()) {
+        Some(DeathCause::Artillery | DeathCause::ApShell | DeathCause::HeShell | DeathCause::CsShell) => "main_caliber",
+        Some(DeathCause::Secondaries) => "atba",
+        Some(DeathCause::Torpedo | DeathCause::AerialTorpedo) => "torpedo",
+        Some(DeathCause::Fire) => "burning",
+        Some(DeathCause::Flooding) => "flood",
+        Some(DeathCause::DiveBomber) => "bomb",
+        Some(DeathCause::SkipBombs) => "skip",
+        Some(DeathCause::AerialRocket) => "rocket",
+        Some(DeathCause::Detonation) => "detonate",
+        Some(DeathCause::Ramming) => "ram",
+        Some(DeathCause::DepthCharge | DeathCause::AerialDepthCharge) => "depthbomb",
+        Some(DeathCause::Missile) => "missile",
+        _ => "main_caliber",
+    }
+}
+
+/// Draw rich kill feed entries in the top-right corner.
+///
+/// Layout per line (right-aligned):
+/// `KILLER_NAME [icon] ship_name  [cause]  VICTIM_NAME [icon] ship_name`
+fn draw_kill_feed(
+    pm: &mut Pixmap,
+    entries: &[KillFeedEntry],
+    fonts: &GameFonts,
+    ship_icons: &HashMap<String, ShipIcon>,
+    death_cause_icons: &HashMap<String, RgbaImage>,
+    right_edge: u32,
+) {
+    let default_font = &fonts.primary;
+    let default_name_scale = fonts.scale(12.0);
+    let line_height = 20i32;
+    let right_margin = 4i32;
+    let icon_size = crate::ICON_SIZE as i32;
+    let cause_icon_size = icon_size;
+    let gap = 2i32; // gap between elements
+    // `right_edge` is the canvas x at which entries align flush right.
+    // Callers pass the minimap's right edge so the feed stays inside the map
+    // area when team rosters reserve a right-side gutter.
+    let width = right_edge as i32;
+
+    let (_, text_h) = text_size(default_name_scale, default_font, "Ag");
+    let text_h = text_h as i32;
+
+    for (i, entry) in entries.iter().take(5).enumerate() {
+        let y = crate::HUD_HEIGHT as i32 + i as i32 * line_height;
+        let icon_y = y + (text_h - icon_size) / 2;
+
+        // Get death cause icon key
+        let cause_key = death_cause_icon_key(entry.cause.as_ref());
+        let has_cause_icon = death_cause_icons.contains_key(cause_key);
+        let cause_w = if has_cause_icon { cause_icon_size } else { 0 } as u32;
+
+        // Pick appropriate fonts for each text segment
+        let killer_name = entry.killer_name.as_deref().unwrap_or("");
+        let (killer_name_font, killer_name_scale) = fonts.font_and_scale(killer_name, 12.0);
+        let (victim_name_font, victim_name_scale) = fonts.font_and_scale(&entry.victim_name, 12.0);
+        let killer_ship = entry.killer_ship_name.as_deref().unwrap_or("");
+        let victim_ship = entry.victim_ship_name.as_deref().unwrap_or("");
+        let (killer_ship_font, killer_ship_scale) = fonts.font_and_scale(killer_ship, 12.0);
+        let (victim_ship_font, victim_ship_scale) = fonts.font_and_scale(victim_ship, 12.0);
+
+        // Measure all text segments
+        let (killer_name_w, _) = text_size(killer_name_scale, killer_name_font, killer_name);
+        let (killer_ship_w, _) =
+            if !killer_ship.is_empty() { text_size(killer_ship_scale, killer_ship_font, killer_ship) } else { (0, 0) };
+        let (victim_name_w, _) = text_size(victim_name_scale, victim_name_font, &entry.victim_name);
+        let (victim_ship_w, _) =
+            if !victim_ship.is_empty() { text_size(victim_ship_scale, victim_ship_font, victim_ship) } else { (0, 0) };
+
+        // Determine if we have icons
+        let has_killer_icon =
+            entry.killer_species.is_some() && ship_icons.contains_key(entry.killer_species.as_ref().unwrap());
+        let has_victim_icon =
+            entry.victim_species.is_some() && ship_icons.contains_key(entry.victim_species.as_ref().unwrap());
+
+        // Total width calculation:
+        // killer_name [gap icon gap] killer_ship gap cause gap victim_name [gap icon gap] victim_ship
+        let mut total_w = killer_name_w as i32;
+        if has_killer_icon {
+            total_w += gap + icon_size + gap;
+        } else if killer_ship_w > 0 {
+            total_w += gap;
+        }
+        if killer_ship_w > 0 {
+            total_w += killer_ship_w as i32;
+        }
+        total_w += gap * 2 + cause_w as i32 + gap * 2;
+        total_w += victim_name_w as i32;
+        if has_victim_icon {
+            total_w += gap + icon_size + gap;
+        } else if victim_ship_w > 0 {
+            total_w += gap;
+        }
+        if victim_ship_w > 0 {
+            total_w += victim_ship_w as i32;
+        }
+
+        // Draw a semi-transparent background for readability
+        let bg_x = (width - total_w - right_margin * 2) as f32;
+        let bg_y = y as f32 - 1.0;
+        draw_filled_rect(pm, bg_x, bg_y, (total_w + right_margin * 2) as f32, (line_height) as f32, [0, 0, 0], 0.5);
+
+        let mut x = width - total_w - right_margin;
+
+        // Killer name (team-colored)
+        draw_text_shadow(pm, entry.killer_color, x, y, killer_name_scale, killer_name_font, killer_name);
+        x += killer_name_w as i32;
+
+        // Killer ship icon (friendly=left, enemy=right)
+        if has_killer_icon {
+            x += gap;
+            let icon = &ship_icons[entry.killer_species.as_ref().unwrap()];
+            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.killer_color, !entry.killer_is_friendly);
+            x += icon_size + gap;
+        } else if killer_ship_w > 0 {
+            x += gap;
+        }
+
+        // Killer ship name
+        if killer_ship_w > 0 {
+            draw_text_shadow(pm, entry.killer_color, x, y, killer_ship_scale, killer_ship_font, killer_ship);
+            x += killer_ship_w as i32;
+        }
+
+        // Death cause icon (or fallback gap)
+        x += gap * 2;
+        if let Some(cause_icon) = death_cause_icons.get(cause_key) {
+            let cause_center_y = icon_y + cause_icon_size / 2;
+            draw_icon(pm, cause_icon, (x + cause_icon_size / 2) as f32, cause_center_y as f32, 1.0);
+        }
+        x += cause_w as i32 + gap * 2;
+
+        // Victim name (team-colored)
+        draw_text_shadow(pm, entry.victim_color, x, y, victim_name_scale, victim_name_font, &entry.victim_name);
+        x += victim_name_w as i32;
+
+        // Victim ship icon (friendly=left, enemy=right)
+        if has_victim_icon {
+            x += gap;
+            let icon = &ship_icons[entry.victim_species.as_ref().unwrap()];
+            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.victim_color, !entry.victim_is_friendly);
+            x += icon_size + gap;
+        } else if victim_ship_w > 0 {
+            x += gap;
+        }
+
+        // Victim ship name
+        if victim_ship_w > 0 {
+            draw_text_shadow(pm, entry.victim_color, x, y, victim_ship_scale, victim_ship_font, victim_ship);
+        }
+    }
+}
+
+/// Draw a small ship icon for the kill feed, tinted with team color.
+/// If `flip` is true, the icon faces left (horizontally mirrored).
+fn draw_kill_feed_icon(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32, size: i32, color: [u8; 3], flip: bool) {
+    let iw = icon.width();
+    let ih = icon.height();
+    let scale = size as f32 / iw.max(ih) as f32;
+
+    // Create a tinted icon pixmap
+    let mut icon_pm = Pixmap::new(iw, ih).expect("failed to create icon pixmap");
+    let data = icon_pm.data_mut();
+    for iy in 0..ih {
+        for ix in 0..iw {
+            let px = icon.get_pixel(ix, iy).0;
+            let idx = (iy * iw + ix) as usize * 4;
+            let a = px[3] as f32 / 255.0;
+            if a < 0.01 {
+                continue;
+            }
+            let luminance = (px[0] as f32 * 0.299 + px[1] as f32 * 0.587 + px[2] as f32 * 0.114) / 255.0;
+            let r = (color[0] as f32 * luminance) as u8;
+            let g = (color[1] as f32 * luminance) as u8;
+            let b = (color[2] as f32 * luminance) as u8;
+            // Premultiply
+            data[idx] = (r as f32 * a) as u8;
+            data[idx + 1] = (g as f32 * a) as u8;
+            data[idx + 2] = (b as f32 * a) as u8;
+            data[idx + 3] = px[3];
+        }
+    }
+
+    // The ship icons point up (north). For kill feed we want them pointing
+    // right (victim) or left (killer). Rotate 90° CW for right, 90° CCW for left.
+    let angle_deg = if flip { -90.0 } else { 90.0 };
+
+    let cx = iw as f32 / 2.0;
+    let cy = ih as f32 / 2.0;
+    // Center the icon at (x + size/2, y + size/2) with scaling
+    let dest_cx = x as f32 + size as f32 / 2.0;
+    let dest_cy = y as f32 + size as f32 / 2.0;
+
+    let transform = Transform::from_translate(dest_cx - cx * scale, dest_cy - cy * scale)
+        .pre_scale(scale, scale)
+        .post_rotate_at(angle_deg, dest_cx, dest_cy);
+
+    let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
+
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
+}
+
+/// Word-wrap text to fit within `max_width` pixels, breaking on word boundaries.
+///
+/// Returns a vector of lines. Each line fits within `max_width` when rendered at `scale`.
+fn word_wrap(text: &str, max_width: u32, scale: PxScale, font: &impl Font) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for word in text.split_whitespace() {
+        if current_line.is_empty() {
+            // First word on the line — force-break if it alone exceeds max_width
+            let (w, _) = text_size(scale, font, word);
+            if w > max_width {
+                force_break_word(word, max_width, scale, font, &mut lines);
+                current_line = lines.pop().unwrap_or_default();
+            } else {
+                current_line = word.to_string();
+            }
+        } else {
+            let candidate = format!("{} {}", current_line, word);
+            let (w, _) = text_size(scale, font, &candidate);
+            if w > max_width {
+                // Push the current line and start a new one
+                lines.push(current_line);
+                // The new word itself might also be too wide
+                let (ww, _) = text_size(scale, font, word);
+                if ww > max_width {
+                    force_break_word(word, max_width, scale, font, &mut lines);
+                    current_line = lines.pop().unwrap_or_default();
+                } else {
+                    current_line = word.to_string();
+                }
+            } else {
+                current_line = candidate;
+            }
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+/// Break a single word into lines that each fit within `max_width`.
+/// Completed lines are pushed to `lines`; the last (possibly partial) segment
+/// is also pushed so the caller can pop it to continue accumulating.
+fn force_break_word(word: &str, max_width: u32, scale: PxScale, font: &impl Font, lines: &mut Vec<String>) {
+    let mut segment = String::new();
+    for ch in word.chars() {
+        let candidate = format!("{}{}", segment, ch);
+        let (w, _) = text_size(scale, font, &candidate);
+        if w > max_width && !segment.is_empty() {
+            lines.push(segment);
+            segment = ch.to_string();
+        } else {
+            segment = candidate;
+        }
+    }
+    if !segment.is_empty() {
+        lines.push(segment);
+    }
+}
+
+/// Truncate `text` with ellipsis so it fits within `max_width` pixels.
+/// Returns the original string if it already fits.
+fn truncate_to_fit(text: &str, max_width: u32, scale: PxScale, font: &impl Font) -> String {
+    let (w, _) = text_size(scale, font, text);
+    if w <= max_width {
+        return text.to_string();
+    }
+    let ellipsis = "..";
+    let (ew, _) = text_size(scale, font, ellipsis);
+    if ew >= max_width {
+        return ellipsis.to_string();
+    }
+    let target = max_width - ew;
+    let mut truncated = String::new();
+    for ch in text.chars() {
+        let candidate = format!("{}{}", truncated, ch);
+        let (cw, _) = text_size(scale, font, &candidate);
+        if cw > target {
+            break;
+        }
+        truncated = candidate;
+    }
+    format!("{}{}", truncated, ellipsis)
+}
+
+/// Text style of a run in the activity feed.
+#[derive(Clone, Copy)]
+struct FeedStyle<'f> {
+    font: &'f FontArc,
+    scale: PxScale,
+    color: [u8; 3],
+}
+
+struct FeedRowLayout<'e, 'f> {
+    header: FlowLayout<'e, FeedStyle<'f>, FeedIcon<'e>>,
+    message: Option<FlowLayout<'e, FeedStyle<'f>, FeedIcon<'e>>>,
+}
+
+impl FeedRowLayout<'_, '_> {
+    fn height(&self) -> f32 {
+        feed::row_height(self.header.lines, self.message.as_ref().map(|message| message.lines))
+    }
+}
+
+/// Icons and fonts the activity feed draws with.
+struct FeedAssets<'a> {
+    fonts: &'a GameFonts,
+    ship_icons: &'a HashMap<String, ShipIcon>,
+    death_cause_icons: &'a HashMap<String, RgbaImage>,
+}
+
+impl<'a> FeedAssets<'a> {
+    fn icon(&self, icon: &FeedIcon<'_>) -> Option<&'a RgbaImage> {
+        match icon {
+            FeedIcon::KillShip { species, .. } | FeedIcon::ChatShip { species, .. } => self.ship_icons.get(*species),
+            FeedIcon::DeathCause(kill) => self.death_cause_icons.get(death_cause_icon_key(kill.cause.as_ref())),
+        }
+    }
+
+    fn layout_row<'e>(&self, entry: &'e ActivityFeedEntry, inner_w: f32) -> FeedRowLayout<'e, 'a> {
+        let fonts = self.fonts;
+        let measure = |style: FeedStyle<'_>, text: &str| text_size(style.scale, style.font, text).0 as f32;
+
+        let header_items = feed::header_items(
+            &entry.kind,
+            feed::ICON_SIZE,
+            |text, color| {
+                let (font, scale) = fonts.font_and_scale(text, feed::NAME_FONT_SIZE);
+                FeedStyle { font, scale, color }
+            },
+            |icon| self.icon(icon).is_some(),
+        );
+        let header = feed::flow(&header_items, inner_w, feed::ITEM_GAP, measure);
+
+        let message = match &entry.kind {
+            ActivityFeedKind::Chat(chat) => {
+                let font = match chat.font_hint {
+                    FontHint::Primary => &fonts.primary,
+                    FontHint::Fallback(idx) => fonts.fallbacks.get(idx).unwrap_or(&fonts.primary),
+                };
+                let style = FeedStyle { font, scale: fonts.scale(feed::MESSAGE_FONT_SIZE), color: chat.message_color };
+                let items: [FlowItem<'e, FeedStyle<'a>, FeedIcon<'e>>; 1] =
+                    [FlowItem::Text { text: Cow::Borrowed(&chat.message), style }];
+                Some(feed::flow(&items, inner_w, feed::ITEM_GAP, measure))
+            }
+            ActivityFeedKind::Kill(_) => None,
+        };
+
+        FeedRowLayout { header, message }
+    }
+
+    fn draw_row(&self, pm: &mut Pixmap, layout: &FeedRowLayout<'_, '_>, shade: RowShade, top: f32, width: f32) {
+        if shade == RowShade::Banded {
+            draw_filled_rect(
+                pm,
+                feed::BAND_INSET,
+                top,
+                width - 2.0 * feed::BAND_INSET,
+                layout.height(),
+                feed::BANDED_ROW_RGB,
+                feed::BANDED_ROW_ALPHA,
+            );
+        }
+
+        let lines_top = top + feed::ROW_PADDING;
+        for piece in &layout.header.pieces {
+            let x = feed::SIDE_PADDING + piece.x;
+            let line_top = lines_top + piece.line as f32 * feed::NAME_LINE_HEIGHT;
+            match &piece.content {
+                PlacedContent::Text { text, style } => {
+                    let (_, text_h) = text_size(style.scale, style.font, text);
+                    let text_y = line_top + (feed::NAME_LINE_HEIGHT - text_h as f32) / 2.0;
+                    draw_text_shadow(pm, style.color, x as i32, text_y as i32, style.scale, style.font, text);
+                }
+                PlacedContent::Icon { icon } => {
+                    let Some(image) = self.icon(icon) else { continue };
+                    let icon_y = line_top + (feed::NAME_LINE_HEIGHT - feed::ICON_SIZE) / 2.0;
+                    let size = feed::ICON_SIZE as i32;
+                    match *icon {
+                        // Friendly ships face left, enemies right.
+                        FeedIcon::KillShip { color, friendly, .. } => {
+                            draw_kill_feed_icon(pm, image, x as i32, icon_y as i32, size, color, !friendly);
+                        }
+                        FeedIcon::ChatShip { color, .. } => {
+                            draw_kill_feed_icon(pm, image, x as i32, icon_y as i32, size, color, false);
+                        }
+                        FeedIcon::DeathCause(_) => {
+                            let half = feed::ICON_SIZE / 2.0;
+                            draw_icon(pm, image, x + half, icon_y + half, 1.0);
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(message) = &layout.message else { return };
+        let message_top = lines_top + layout.header.lines.max(1) as f32 * feed::NAME_LINE_HEIGHT;
+        for piece in &message.pieces {
+            let PlacedContent::Text { text, style } = &piece.content else { continue };
+            let y = message_top + piece.line as f32 * feed::MESSAGE_LINE_HEIGHT;
+            draw_text_shadow(
+                pm,
+                style.color,
+                (feed::SIDE_PADDING + piece.x) as i32,
+                y as i32,
+                style.scale,
+                style.font,
+                text,
+            );
+        }
+    }
+}
+
+/// Draw the stats panel's merged kill and chat feed.
+fn draw_activity_feed(
+    pm: &mut Pixmap,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    entries: &[ActivityFeedEntry],
+    assets: &FeedAssets<'_>,
+) {
+    draw_filled_rect(pm, x as f32, y as f32, width as f32, height as f32, [24, 28, 36], 0.8);
+    draw_line(pm, x as f32 + 4.0, y as f32, (x + width - 4) as f32, y as f32, [55, 60, 72], 0.6, 1.0);
+
+    // Rows are drawn on a copy of the panel so ones sliding past its edges
+    // are cut off there.
+    let inset = feed::AREA_INSET;
+    let area_h = height as f32 - 2.0 * inset;
+    if width <= 0 || area_h <= 0.0 {
+        return;
+    }
+    let Some(panel_rect) = tiny_skia::IntRect::from_xywh(x, y, width as u32, height as u32) else { return };
+    let Some(mut panel) = pm.clone_rect(panel_rect) else { return };
+
+    let inner_w = width as f32 - 2.0 * feed::SIDE_PADDING;
+    let mut layouts: Vec<FeedRowLayout<'_, '_>> = Vec::new();
+    let rows = feed::stack_rows(entries.len(), area_h, |index| {
+        let entry = &entries[index];
+        let layout = assets.layout_row(entry, inner_w);
+        let height = layout.height();
+        layouts.push(layout);
+        RowExtent { height, reveal: entry.reveal }
+    });
+
+    for row in rows {
+        let entry = &entries[row.index];
+        // `stack_rows` asked for rows once each, newest first.
+        let layout = &layouts[entries.len() - 1 - row.index];
+        let top = inset + row.top;
+        if row.opacity >= 1.0 {
+            assets.draw_row(&mut panel, layout, entry.shade, top, width as f32);
+            continue;
+        }
+
+        // A fading row is drawn on its own layer, then blended in. The layer
+        // keeps the row's offset within a pixel so it lands where an opaque
+        // row would.
+        let layer_top = top.floor();
+        let layer_h = (top - layer_top + layout.height()).ceil() as u32 + 1;
+        let Some(mut layer) = Pixmap::new(width as u32, layer_h) else { continue };
+        assets.draw_row(&mut layer, layout, entry.shade, top - layer_top, width as f32);
+        let paint =
+            PixmapPaint { opacity: row.opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
+        panel.draw_pixmap(0, layer_top as i32, layer.as_ref(), &paint, Transform::identity(), None);
+    }
+
+    let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::Source, quality: FilterQuality::Nearest };
+    pm.draw_pixmap(panel_rect.x(), panel_rect.y(), panel.as_ref(), &paint, Transform::identity(), None);
+}
+
+/// Draw the chat overlay on the left side of the minimap.
+///
+/// Each entry shows:
+///   Line 1: `[CLAN] PlayerName` (truncated to fit)
+///   Line 2: `<ship_icon> ShipName:`
+///   Line 3+: message text, word-wrapped
+/// The whole thing sits in a semi-translucent dark box.
+fn draw_chat_overlay(
+    pm: &mut Pixmap,
+    entries: &[ChatEntry],
+    fonts: &GameFonts,
+    ship_icons: &HashMap<String, ShipIcon>,
+    y_offset: u32,
+    x_offset: u32,
+) {
+    let font = &fonts.primary;
+    if entries.is_empty() {
+        return;
+    }
+
+    let minimap_w = crate::MINIMAP_SIZE;
+    let max_box_width = (minimap_w / 4) as i32; // 1/4 of minimap = 192px
+    let margin = 6i32;
+    let inner_width = (max_box_width - margin * 2) as u32;
+    let header_scale = fonts.scale(11.0);
+    let msg_scale = fonts.scale(11.0);
+    let line_height = 14i32;
+    let entry_gap = 6i32;
+    let icon_size = 12i32;
+
+    // Pre-compute layout for each entry
+    struct EntryLayout {
+        /// Line 1: truncated "[CLAN] PlayerName"
+        name_line: String,
+        /// Color for clan tag portion (if present)
+        clan_color: Option<[u8; 3]>,
+        /// Length of clan tag prefix (including brackets and space), 0 if none
+        clan_prefix_len: usize,
+        /// Line 2: ship species key for icon + ship name
+        ship_line: Option<String>,
+        ship_species: Option<String>,
+        /// Message lines (word-wrapped)
+        msg_lines: Vec<String>,
+        total_height: i32,
+    }
+
+    let mut layouts: Vec<EntryLayout> = Vec::new();
+    let mut total_height = margin; // top padding
+
+    for entry in entries {
+        // Line 1: "[CLAN] PlayerName" -- pick font based on player name
+        let clan_prefix = if !entry.clan_tag.is_empty() { format!("[{}] ", entry.clan_tag) } else { String::new() };
+        let full_name_line = format!("{}{}", clan_prefix, entry.player_name);
+        let (name_font, name_font_scale) = fonts.font_and_scale(&entry.player_name, 11.0);
+        let name_line = truncate_to_fit(&full_name_line, inner_width, name_font_scale, name_font);
+        let clan_color =
+            if !entry.clan_tag.is_empty() { Some(entry.clan_color.unwrap_or(entry.team_color)) } else { None };
+
+        // Line 2: ship icon + ship name (if available)
+        let has_ship_line = entry.ship_name.is_some();
+        let ship_line = entry.ship_name.as_ref().map(|name| {
+            let (sf, ss) = fonts.font_and_scale(name, 11.0);
+            let icon_reserved = (icon_size + 2) as u32;
+            let available = inner_width.saturating_sub(icon_reserved);
+            truncate_to_fit(name, available, ss, sf)
+        });
+
+        // Message lines (word-wrapped), using the font selected by font_hint
+        let msg_font = match entry.font_hint {
+            FontHint::Primary => &fonts.primary,
+            FontHint::Fallback(i) => fonts.fallbacks.get(i).unwrap_or(&fonts.primary),
+        };
+        let entry_msg_scale = fonts.scale_for_hint(11.0, entry.font_hint);
+        let msg_lines = word_wrap(&entry.message, inner_width, entry_msg_scale, msg_font);
+
+        let line_count = 1 + has_ship_line as i32 + msg_lines.len() as i32;
+        let entry_height = line_count * line_height;
+
+        total_height += entry_height + entry_gap;
+        layouts.push(EntryLayout {
+            name_line,
+            clan_color,
+            clan_prefix_len: clan_prefix.len(),
+            ship_line,
+            ship_species: entry.ship_species.clone(),
+            msg_lines,
+            total_height: entry_height,
+        });
+    }
+    total_height -= entry_gap; // remove trailing gap
+    total_height += margin; // bottom padding
+
+    // Position: middle-left of the minimap area, shifted right by the
+    // left-side roster gutter (if any) so chat stays inside the map.
+    let box_x = x_offset as i32;
+    let map_mid_y = y_offset as i32 + (minimap_w as i32) / 2;
+    let box_y = map_mid_y - total_height / 2;
+
+    // Find the overall max opacity for the background alpha
+    let max_opacity = entries.iter().map(|e| e.opacity).fold(0.0f32, f32::max);
+
+    // Draw semi-translucent background
+    draw_filled_rect(
+        pm,
+        box_x as f32,
+        box_y as f32,
+        max_box_width as f32,
+        total_height as f32,
+        [0, 0, 0],
+        0.35 * max_opacity,
+    );
+
+    // Draw each entry
+    let mut cur_y = box_y + margin;
+    for (entry, layout) in entries.iter().zip(layouts.iter()) {
+        let opacity = entry.opacity;
+        if opacity < 0.01 {
+            cur_y += layout.total_height + entry_gap;
+            continue;
+        }
+
+        let apply_opacity = |color: [u8; 3], op: f32| -> [u8; 3] {
+            [(color[0] as f32 * op) as u8, (color[1] as f32 * op) as u8, (color[2] as f32 * op) as u8]
+        };
+
+        // Line 1: [CLAN] PlayerName
+        let x = box_x + margin;
+        if let Some(clan_rgb) = layout.clan_color {
+            // Draw clan prefix in clan color, rest in team color
+            let clan_text: String = layout.name_line.chars().take(layout.clan_prefix_len).collect();
+            let name_text: String = layout.name_line.chars().skip(layout.clan_prefix_len).collect();
+            let (cw, _) = text_size(header_scale, font, &clan_text);
+            draw_text(pm, apply_opacity(clan_rgb, opacity), x, cur_y, header_scale, font, &clan_text);
+            draw_text(
+                pm,
+                apply_opacity(entry.team_color, opacity),
+                x + cw as i32,
+                cur_y,
+                header_scale,
+                font,
+                &name_text,
+            );
+        } else {
+            draw_text(pm, apply_opacity(entry.team_color, opacity), x, cur_y, header_scale, font, &layout.name_line);
+        }
+        cur_y += line_height;
+
+        // Line 2: ship icon + ship name
+        if let Some(ref ship_name) = layout.ship_line {
+            let mut sx = x;
+            if let Some(ref species_key) = layout.ship_species {
+                if let Some(icon) = ship_icons.get(species_key) {
+                    let icon_y = cur_y + (line_height - icon_size) / 2;
+                    draw_kill_feed_icon(
+                        pm,
+                        icon,
+                        sx,
+                        icon_y,
+                        icon_size,
+                        apply_opacity(entry.team_color, opacity),
+                        false,
+                    );
+                }
+                sx += icon_size + 2;
+            }
+            draw_text(pm, apply_opacity(entry.team_color, opacity), sx, cur_y, header_scale, font, ship_name);
+            cur_y += line_height;
+        }
+
+        // Message lines (using font selected by font_hint)
+        let msg_font: &FontArc = match entry.font_hint {
+            FontHint::Primary => &fonts.primary,
+            FontHint::Fallback(i) => fonts.fallbacks.get(i).unwrap_or(&fonts.primary),
+        };
+        let msg_color = apply_opacity(entry.message_color, opacity);
+        for line in &layout.msg_lines {
+            draw_text(pm, msg_color, box_x + margin, cur_y, msg_scale, msg_font, line);
+            cur_y += line_height;
+        }
+
+        cur_y += entry_gap;
+    }
+}
+
+/// Draw the 10x10 grid overlay with labels.
+/// Draws the map's ten-by-ten grid and its row and column labels.
+///
+/// Lines and labels sit in map space, so they move and grow with the map when
+/// it is zoomed; the stroke does not, which is what keeps a line one pixel
+/// wide at every zoom. The egui renderer's grid behaves the same way.
+fn draw_grid(pm: &mut Pixmap, viewport: MapViewport, fonts: &GameFonts) {
+    let font = &fonts.primary;
+    let cell = MINIMAP_SIZE as f32 / 10.0;
+    let grid_color = [180, 180, 180];
+    let alpha = 0.25f32;
+    let label_scale = fonts.scale(11.0);
+
+    for i in 1..10 {
+        let offset = i as f32 * cell;
+        draw_line(
+            pm,
+            viewport.x(offset),
+            viewport.y(0.0),
+            viewport.x(offset),
+            viewport.y(MINIMAP_SIZE as f32),
+            grid_color,
+            alpha,
+            1.0,
+        );
+        draw_line(
+            pm,
+            viewport.x(0.0),
+            viewport.y(offset),
+            viewport.x(MINIMAP_SIZE as f32),
+            viewport.y(offset),
+            grid_color,
+            alpha,
+            1.0,
+        );
+    }
+
+    for i in 0..10 {
+        let label = format!("{}", i + 1);
+        let x = viewport.x(i as f32 * cell + cell / 2.0 - 3.0) as i32;
+        let y = viewport.y(2.0) as i32;
+        draw_text_shadow(pm, [255, 255, 255], x, y, label_scale, font, &label);
+    }
+    let labels_row = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    for (i, &ch) in labels_row.iter().enumerate() {
+        let label = ch.to_string();
+        let x = viewport.x(3.0) as i32;
+        let y = viewport.y(i as f32 * cell + cell / 2.0 - 5.0) as i32;
+        draw_text_shadow(pm, [255, 255, 255], x, y, label_scale, font, &label);
+    }
+}
+
+/// The drawn map at `viewport`: the art resampled to the window, with the
+/// grid over it.
+///
+/// Sampled through the viewport rather than cropped and resized, because the
+/// window's edges do not fall on whole source pixels and a crop would have to
+/// round them.
+fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> Pixmap {
+    let size = MINIMAP_SIZE;
+    let width = drawn_map_width(viewport);
+    let mut art = RgbImage::from_pixel(width, size, Rgb([30, 40, 60]));
+    if viewport.is_whole_map() {
+        // The art is already drawn at the map's own size, so the whole map is
+        // a copy. Resampling it would land on the same pixels at four times
+        // the cost, and every preview and every exported frame pays this.
+        for y in 0..size.min(map.height()) {
+            for x in 0..size.min(map.width()) {
+                art.put_pixel(x, y, *map.get_pixel(x, y));
+            }
+        }
+    } else if map.width() > 0 && map.height() > 0 {
+        for y in 0..size {
+            for x in 0..width {
+                let (sx, sy) = viewport.to_map(x as f32, y as f32);
+                art.put_pixel(x, y, sample_bilinear(map, sx, sy));
+            }
+        }
+    }
+    let mut base = rgb_to_pixmap(&art);
+    draw_grid(&mut base, viewport, fonts);
+    base
+}
+
+/// How wide the drawn map is, in whole pixels.
+///
+/// A window wider than it is tall is drawn on a wider layer: the map it
+/// shows is wider, not squeezed into the same square.
+pub fn drawn_map_width(viewport: MapViewport) -> u32 {
+    (viewport.drawn_width().round() as u32).max(1)
+}
+
+/// `image` at a fractional point, blended from the four pixels around it.
+///
+/// Zooming magnifies, so nearest sampling would show the map's own pixels as
+/// squares. A point outside the image takes the nearest edge pixel, which
+/// only happens on the half-pixel border.
+fn sample_bilinear(image: &RgbImage, x: f32, y: f32) -> Rgb<u8> {
+    let (width, height) = (image.width(), image.height());
+    let clamp_x = |value: i64| value.clamp(0, width as i64 - 1) as u32;
+    let clamp_y = |value: i64| value.clamp(0, height as i64 - 1) as u32;
+
+    let x0 = x.floor();
+    let y0 = y.floor();
+    let fx = x - x0;
+    let fy = y - y0;
+    let (x0, y0) = (x0 as i64, y0 as i64);
+
+    let corners = [
+        image.get_pixel(clamp_x(x0), clamp_y(y0)).0,
+        image.get_pixel(clamp_x(x0 + 1), clamp_y(y0)).0,
+        image.get_pixel(clamp_x(x0), clamp_y(y0 + 1)).0,
+        image.get_pixel(clamp_x(x0 + 1), clamp_y(y0 + 1)).0,
+    ];
+    let weights = [(1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy];
+
+    let mut out = [0u8; 3];
+    for (channel, value) in out.iter_mut().enumerate() {
+        let sum: f32 = corners.iter().zip(weights).map(|(corner, weight)| corner[channel] as f32 * weight).sum();
+        *value = sum.round().clamp(0.0, 255.0) as u8;
+    }
+    Rgb(out)
+}
+
+/// Draw a large centered battle result text with a colored glow effect.
+///
+/// The glow is created by drawing the text multiple times at increasing offsets
+/// with decreasing opacity in the glow color, creating a soft halo effect.
+fn draw_battle_result_overlay(
+    pm: &mut Pixmap,
+    text: &str,
+    subtitle: Option<&str>,
+    glow_color: [u8; 3],
+    subtitle_above: bool,
+    fonts: &GameFonts,
+    map_width: u32,
+) {
+    let font = &fonts.primary;
+    let w = map_width;
+    let h = pm.height();
+
+    let font_height = w as f32 / 8.0;
+    let scale = fonts.scale(font_height);
+    let (tw, th) = text_size(scale, font, text);
+
+    let sub_scale = fonts.scale(font_height / 4.0);
+    let sub_height = subtitle.map(|s| text_size(sub_scale, font, s).1).unwrap_or(0);
+    let gap = if subtitle.is_some() { 8 } else { 0 };
+    let total_height = th + gap as u32 + sub_height;
+
+    let x = (w as i32 - tw as i32) / 2;
+    let center_y = (h as i32 - total_height as i32) / 2;
+
+    // When subtitle is above, subtitle comes first then main text;
+    // when below, main text comes first then subtitle.
+    let (main_y, sub_y) = if subtitle_above {
+        (center_y + sub_height as i32 + gap, center_y)
+    } else {
+        (center_y, center_y + th as i32 + gap)
+    };
+
+    // Dark shadow behind text for contrast, then colored glow, then white text
+    let glow_layers: &[(i32, [u8; 3], f32)] = &[
+        (8, [0, 0, 0], 0.15),
+        (6, [0, 0, 0], 0.25),
+        (4, glow_color, 0.30),
+        (3, glow_color, 0.45),
+        (2, glow_color, 0.60),
+        (1, glow_color, 0.80),
+    ];
+    let offsets: &[(i32, i32)] = &[(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
+    for &(dist, color, opacity) in glow_layers {
+        let c =
+            [(color[0] as f32 * opacity) as u8, (color[1] as f32 * opacity) as u8, (color[2] as f32 * opacity) as u8];
+        for &(dx, dy) in offsets {
+            draw_text(pm, c, x + dx * dist, main_y + dy * dist, scale, font, text);
+        }
+    }
+    draw_text(pm, [255, 255, 255], x, main_y, scale, font, text);
+
+    // Subtitle
+    if let Some(sub) = subtitle {
+        let (sw, _) = text_size(sub_scale, font, sub);
+        let sx = (w as i32 - sw as i32) / 2;
+        // Subtle dark outline for readability
+        for &(dx, dy) in offsets {
+            draw_text(pm, [0, 0, 0], sx + dx * 2, sub_y + dy * 2, sub_scale, font, sub);
+        }
+        draw_text(pm, [200, 200, 200], sx, sub_y, sub_scale, font, sub);
+    }
+}
+
+// ── Stats panel helpers ─────────────────────────────────────────────────────
+
+/// Tint a silhouette image (alpha-masked) with a solid color.
+fn tint_silhouette(img: &RgbaImage, color: [u8; 3]) -> RgbaImage {
+    let mut out = img.clone();
+    for px in out.pixels_mut() {
+        let a = px.0[3];
+        if a > 0 {
+            px.0[0] = color[0];
+            px.0[1] = color[1];
+            px.0[2] = color[2];
+            // Keep original alpha
+        }
+    }
+    out
+}
+
+/// HP bar color lerp: soft green at full HP, lerped through amber to a muted
+/// red. The previous gradient ran between pure primaries (`[0,255,0]` →
+/// `[255,255,0]` → `[255,0,0]`) which read as eye-searing lime / sodium yellow
+/// against the roster background; these stops desaturate the endpoints while
+/// keeping the same semantic gradient.
+fn hp_bar_color_lerp(fraction: f32) -> [u8; 3] {
+    const GREEN: [f32; 3] = [85.0, 175.0, 110.0];
+    const AMBER: [f32; 3] = [220.0, 195.0, 90.0];
+    const RED: [f32; 3] = [215.0, 95.0, 85.0];
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| -> [u8; 3] {
+        let t = t.clamp(0.0, 1.0);
+        [(a[0] + (b[0] - a[0]) * t) as u8, (a[1] + (b[1] - a[1]) * t) as u8, (a[2] + (b[2] - a[2]) * t) as u8]
+    };
+    if fraction > 0.5 { lerp(AMBER, GREEN, (fraction - 0.5) / 0.5) } else { lerp(RED, AMBER, fraction / 0.5) }
+}
+
+/// Draw an RGBA image at a non-centered position (top-left corner).
+fn draw_icon_at(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32) {
+    let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
+    pm.draw_pixmap(x, y, icon_pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+}
+
+/// Format a number with thousands separators (e.g. 12345 → "12,345").
+fn format_number(n: i64) -> String {
+    if n < 0 {
+        return format!("-{}", format_number(-n));
+    }
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+/// Short display name for a ribbon variant (for the compact stats panel).
+fn damage_label_color_rgb(label: &str) -> [u8; 3] {
+    match label {
+        "AP" => [255, 200, 80],
+        "HE" => [255, 140, 50],
+        "SAP" => [200, 180, 255],
+        "MAIN" => [255, 200, 80],
+        "SEC" => [255, 170, 60],
+        "TORP" => [100, 200, 255],
+        "FIRE" => [255, 120, 50],
+        "FLOOD" => [80, 160, 255],
+        "BOMB" => [220, 180, 100],
+        "ROCKET" => [230, 150, 80],
+        "DC" => [160, 200, 160],
+        "RAM" => [200, 100, 100],
+        "MISSILE" => [220, 130, 220],
+        _ => [180, 180, 180],
+    }
+}
+
+// ── Team roster rendering ──────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn draw_team_roster(
+    pm: &mut Pixmap,
+    side: crate::draw_command::RosterSide,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    rows: &[crate::draw_command::RosterRow],
+    fonts: &GameFonts,
+    ship_icons: &HashMap<String, ShipIcon>,
+    consumable_icons: &HashMap<String, RgbaImage>,
+    death_cause_icons: &HashMap<String, RgbaImage>,
+    regions: &mut Vec<DrawnRegion>,
+) {
+    use crate::draw_command::ChargeCount as RosterCharge;
+    use crate::draw_command::RosterSide;
+
+    let panel_x = x as f32;
+    let panel_y = y as f32;
+    let panel_w = width as f32;
+    let panel_h = height as f32;
+
+    use crate::panel_math::darken;
+    use crate::panel_math::team_hp_fraction;
+
+    // Panel background.
+    draw_filled_rect(pm, panel_x, panel_y, panel_w, panel_h, [20, 24, 32], 0.78);
+    let accent: [u8; 3] = match side {
+        RosterSide::Friendly => [80, 200, 120],
+        RosterSide::Enemy => [220, 90, 90],
+    };
+
+    // Team HP bar replaces the old 1px accent line.
+    let bar_h: f32 = 14.0;
+    draw_filled_rect(pm, panel_x, panel_y, panel_w, bar_h, darken(accent, 0.4), 0.95);
+    if let Some(frac) = team_hp_fraction(rows.iter().filter_map(|r| r.hp).map(|hp| (hp.current, hp.max))) {
+        draw_filled_rect(pm, panel_x, panel_y, panel_w * frac, bar_h, accent, 1.0);
+    }
+    let total_cur: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.current.max(0.0)).sum();
+    let total_max: f32 = rows.iter().filter_map(|r| r.hp).map(|hp| hp.max).sum();
+    let hp_bar_text = format!("{} / {}", format_number(total_cur as i64), format_number(total_max as i64));
+    let bar_text_scale = fonts.scale(10.0);
+    let (btw_u, bth_u) = text_size(bar_text_scale, &fonts.primary, &hp_bar_text);
+    let btw = btw_u as f32;
+    let bth = bth_u as f32;
+    let bt_margin: f32 = 4.0;
+    let bt_x = panel_x + panel_w - btw - bt_margin;
+    let bt_y = panel_y + (bar_h - bth) * 0.5;
+    draw_text(pm, [0, 0, 0], (bt_x + 1.0) as i32, (bt_y + 1.0) as i32, bar_text_scale, &fonts.primary, &hp_bar_text);
+    draw_text(pm, [255, 255, 255], bt_x as i32, bt_y as i32, bar_text_scale, &fonts.primary, &hp_bar_text);
+
+    let row_height: f32 = 64.0;
+    let row_padding: f32 = 4.0;
+    let inner_x = panel_x + row_padding;
+    let inner_w = panel_w - row_padding * 2.0;
+    let name_scale = fonts.scale(15.0);
+    let ship_scale = fonts.scale(13.0);
+    let hp_scale = fonts.scale(11.0);
+
+    // Friendly icons point right (toward the map), enemy icons point left —
+    // mirrors the egui layout's "facing the action" convention.
+    let icon_yaw: f32 = match side {
+        RosterSide::Friendly => 0.0,
+        RosterSide::Enemy => std::f32::consts::PI,
+    };
+
+    const MAX_CONSUMABLE_SLOTS: usize = 6;
+    let icon_size: f32 = 20.0;
+    let icon_gap: f32 = 2.0;
+    let consumables_strip_w = MAX_CONSUMABLE_SLOTS as f32 * icon_size + (MAX_CONSUMABLE_SLOTS as f32 - 1.0) * icon_gap;
+    let strip_gap: f32 = 6.0;
+    let hp_bar_w = (inner_w - consumables_strip_w - strip_gap).max(40.0);
+
+    for (idx, row) in rows.iter().enumerate() {
+        let row_top = panel_y + bar_h + idx as f32 * row_height + row_padding;
+        if row_top + row_height > panel_y + panel_h {
+            break;
+        }
+        let row_rect_w = inner_w;
+        let row_rect_h = row_height - row_padding;
+
+        // Zebra stripe + dead overlay.
+        if idx % 2 == 1 {
+            draw_filled_rect(pm, inner_x, row_top, row_rect_w, row_rect_h, [255, 255, 255], 0.03);
+        }
+        if row.is_dead {
+            draw_filled_rect(pm, inner_x, row_top, row_rect_w, row_rect_h, [0, 0, 0], 0.32);
+        }
+
+        // ── Header line: clan/player name on the left, damage + frag count
+        // ── on the right ────────────────────────────────────────────────
+        let header_text = match &row.clan_tag {
+            Some(tag) => format!("[{tag}] {}", row.player_name),
+            None => row.player_name.clone(),
+        };
+        let header_color = if row.is_dead {
+            [180, 180, 180]
+        } else if row.is_spotted {
+            [255, 220, 80]
+        } else {
+            accent
+        };
+        let (name_font, name_text_scale) = fonts.font_and_scale(&header_text, 15.0);
+        draw_text(pm, header_color, inner_x as i32, row_top as i32, name_text_scale, name_font, &header_text);
+
+        let stats_color = if row.is_dead { [180, 180, 180] } else { [230, 230, 230] };
+        let damage_text = format_number(row.damage_dealt.round() as i64);
+        let (damage_w_u, _) = text_size(name_scale, &fonts.primary, &damage_text);
+        let damage_w = damage_w_u as f32;
+
+        let frag_icon = death_cause_icons.get("frags");
+        let frag_icon_size = name_scale.y;
+        let frag_gap: f32 = 4.0;
+        let inter_gap: f32 = 8.0;
+        let kills_text = (row.kills > 0).then(|| row.kills.to_string());
+        let kills_w = kills_text.as_ref().map(|t| text_size(name_scale, &fonts.primary, t).0 as f32).unwrap_or(0.0);
+        let kills_block_w = if kills_text.is_some() {
+            if frag_icon.is_some() { frag_icon_size + frag_gap + kills_w } else { kills_w }
+        } else {
+            0.0
+        };
+        let total_w = damage_w + if kills_block_w > 0.0 { inter_gap + kills_block_w } else { 0.0 };
+        let block_x = inner_x + inner_w - total_w;
+        draw_text(pm, stats_color, block_x as i32, row_top as i32, name_scale, &fonts.primary, &damage_text);
+
+        if let Some(kt) = kills_text {
+            let mut cx = block_x + damage_w + inter_gap;
+            if let Some(icon) = frag_icon {
+                let icon_y_top = row_top + (name_scale.y - frag_icon_size) * 0.5;
+                let resized = image::imageops::resize(
+                    icon,
+                    frag_icon_size.round() as u32,
+                    frag_icon_size.round() as u32,
+                    image::imageops::FilterType::Lanczos3,
+                );
+                let tinted = if row.is_dead {
+                    let mut img = resized.clone();
+                    for px in img.pixels_mut() {
+                        px.0[3] = (px.0[3] as f32 * 0.7) as u8;
+                    }
+                    img
+                } else {
+                    resized
+                };
+                let cx_center = cx + frag_icon_size * 0.5;
+                let cy_center = icon_y_top + frag_icon_size * 0.5;
+                draw_icon(pm, &tinted, cx_center, cy_center, 1.0);
+                cx += frag_icon_size + frag_gap;
+            }
+            draw_text(pm, stats_color, cx as i32, row_top as i32, name_scale, &fonts.primary, &kt);
+        }
+
+        // ── Ship row: rotated class icon + ship name ───────────────────
+        let class_icon_size: f32 = 18.0;
+        let class_icon_padding: f32 = 4.0;
+        let ship_row_y = row_top + name_scale.y + 4.0;
+        let ship_text_x = if let Some(ref class_key) = row.class_icon_key {
+            if let Some(class_icon) = ship_icons.get(class_key) {
+                // Pre-resize then route through the icon helper so the rotation
+                // path matches the in-map ship glyphs.
+                let resized = image::imageops::resize(
+                    class_icon,
+                    class_icon_size.round() as u32,
+                    class_icon_size.round() as u32,
+                    image::imageops::FilterType::Lanczos3,
+                );
+                let tint = if row.is_dead { Some([180u8, 180, 180]) } else { Some(accent) };
+                let opacity = if row.is_dead { 0.55 } else { 1.0 };
+                let cx = inner_x + class_icon_size * 0.5;
+                let cy = ship_row_y + ship_scale.y * 0.5;
+                draw_ship_icon(pm, &resized, cx, cy, icon_yaw, tint, opacity, 1.0);
+                inner_x + class_icon_size + class_icon_padding
+            } else {
+                inner_x
+            }
+        } else {
+            inner_x
+        };
+        let (ship_name_font, ship_text_scale) = fonts.font_and_scale(&row.ship_name, 13.0);
+        draw_text(
+            pm,
+            [210, 210, 210],
+            ship_text_x as i32,
+            ship_row_y as i32,
+            ship_text_scale,
+            ship_name_font,
+            &row.ship_name,
+        );
+
+        // ── HP bar + consumables row ───────────────────────────────────
+        let hp_bar_y = row_top + name_scale.y + ship_scale.y + 6.0;
+        let hp_bar_h: f32 = 18.0;
+        draw_filled_rect(pm, inner_x, hp_bar_y, hp_bar_w, hp_bar_h, [40, 40, 40], 0.86);
+        if let Some(hp) = row.hp
+            && !row.is_dead
+        {
+            let fill_ratio = hp.fraction();
+            let fill_w = hp_bar_w * fill_ratio;
+            let fill_color = hp_bar_color_lerp(fill_ratio);
+            draw_filled_rect(pm, inner_x, hp_bar_y, fill_w, hp_bar_h, fill_color, 1.0);
+            if let Some(color) = row.heal_availability.healable_rgb()
+                && hp.healable > 0.0
+            {
+                // Bright = HP the next heal charge restores; dim = the regenerable
+                // pool beyond that charge.
+                let bright_w =
+                    (hp_bar_w * (hp.healable_per_charge.min(hp.healable) / hp.max)).clamp(0.0, hp_bar_w - fill_w);
+                if bright_w > 0.0 {
+                    draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, bright_w, hp_bar_h, color, 0.85);
+                }
+                let dim_total = (hp_bar_w * (hp.healable / hp.max)).min(hp_bar_w - fill_w);
+                let dim_w = (dim_total - bright_w).max(0.0);
+                if dim_w > 0.0 {
+                    draw_filled_rect(
+                        pm,
+                        inner_x + fill_w + bright_w,
+                        hp_bar_y,
+                        dim_w,
+                        hp_bar_h,
+                        darken(color, 0.5),
+                        0.85,
+                    );
+                }
+            }
+        }
+
+        if let Some(hp) = row.hp {
+            let hp_text = format!("{} / {}", format_number(hp.current.max(0.0) as i64), format_number(hp.max as i64));
+            let hp_text_color = if row.is_dead { [220, 220, 220] } else { [255, 255, 255] };
+            let (hp_text_w_u, hp_text_h_u) = text_size(hp_scale, &fonts.primary, &hp_text);
+            let hp_text_w = hp_text_w_u as f32;
+            let hp_text_h = hp_text_h_u as f32;
+            let hp_text_y = hp_bar_y + (hp_bar_h - hp_text_h) * 0.5;
+            let hp_text_x = inner_x + hp_bar_w - hp_text_w - 4.0;
+            // Strong drop shadow rather than a backing pill. A pill at this size
+            // covered most of the HP fill (the bar is only ~18px tall and the
+            // text is ~12 of those), so the colored portion got drowned out.
+            // Doubling up the shadow keeps the white legible against any fill.
+            draw_text(
+                pm,
+                [0, 0, 0],
+                (hp_text_x + 1.0) as i32,
+                (hp_text_y + 1.0) as i32,
+                hp_scale,
+                &fonts.primary,
+                &hp_text,
+            );
+            draw_text(pm, [0, 0, 0], (hp_text_x + 1.0) as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+            draw_text(pm, hp_text_color, hp_text_x as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+        }
+
+        // Consumable strip: 6 fixed slots aligned to the right of the row.
+        let strip_y = hp_bar_y + (hp_bar_h - icon_size) * 0.5;
+        let strip_x = inner_x + inner_w - consumables_strip_w;
+        if row.consumables.is_empty() {
+            // Faint asterisk marker so missing inventory data is visible
+            // without shouting.
+            draw_text(
+                pm,
+                [180, 180, 180],
+                strip_x as i32,
+                (strip_y + 4.0) as i32,
+                fonts.scale(11.0),
+                &fonts.primary,
+                "*",
+            );
+        } else {
+            for (i, cons) in row.consumables.iter().enumerate() {
+                let icon_x = strip_x + i as f32 * (icon_size + icon_gap);
+                regions.push(DrawnRegion {
+                    rect: [icon_x, strip_y, icon_size, icon_size],
+                    kind: RegionKind::RosterConsumable { entity_id: row.entity_id, index: i },
+                });
+                let charges_remaining = cons.total_charges.remaining(cons.charges_used);
+                let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
+
+                if let Some(icon) = consumable_icons.get(&cons.icon_key) {
+                    let resized = image::imageops::resize(
+                        icon,
+                        icon_size as u32,
+                        icon_size as u32,
+                        image::imageops::FilterType::Lanczos3,
+                    );
+                    let mut img = resized;
+                    let dim = if row.is_dead || is_exhausted { 0.4 } else { 0.86 };
+                    for px in img.pixels_mut() {
+                        px.0[3] = (px.0[3] as f32 * dim) as u8;
+                    }
+                    draw_icon(pm, &img, icon_x + icon_size * 0.5, strip_y + icon_size * 0.5, 1.0);
+                } else {
+                    draw_filled_rect(pm, icon_x, strip_y, icon_size, icon_size, [60, 60, 60], 0.7);
+                }
+
+                // Charge/timer overlay. Unlimited consumables stay blank; the
+                // absence of a number signals "no cap."
+                let label = match (cons.active_remaining_secs, &charges_remaining, &cons.total_charges) {
+                    (Some(sec), _, _) if !row.is_dead => format!("{:.0}s", sec.max(0.0)),
+                    (_, RosterCharge::Unlimited, _) | (_, _, RosterCharge::Unlimited) => String::new(),
+                    (_, RosterCharge::Finite(n), RosterCharge::Finite(t)) => format!("{n}/{t}"),
+                };
+                if label.is_empty() {
+                    continue;
+                }
+                let label_color = cons.availability.charge_count_rgb();
+                let charges_scale = fonts.scale(9.0);
+                let (lw_u, lh_u) = text_size(charges_scale, &fonts.primary, &label);
+                let lx = icon_x + icon_size - lw_u as f32 - 1.0;
+                let ly = strip_y + icon_size - lh_u as f32;
+                draw_text(pm, [0, 0, 0], (lx + 1.0) as i32, (ly + 1.0) as i32, charges_scale, &fonts.primary, &label);
+                draw_text(pm, label_color, lx as i32, ly as i32, charges_scale, &fonts.primary, &label);
+            }
+        }
+    }
+}
+
+use crate::CANVAS_HEIGHT;
+use crate::HUD_HEIGHT;
+use crate::MINIMAP_SIZE;
+use crate::TEAM_ROSTER_WIDTH;
+
+use crate::config::RenderOptions;
+use crate::viewport::MapViewport;
+use wows_replays::types::EntityId;
+
+/// Which side panel the CLI canvas should reserve space for. Mirrors the
+/// runtime decision the desktop renderer makes from
+/// `RenderOptions.{show_stats_panel,show_team_rosters}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidePanelLayout {
+    /// Just the minimap.
+    None,
+    /// Self-perspective stats panel on the right.
+    StatsPanel,
+    /// Team rosters in gutters on both sides of the minimap.
+    TeamRosters,
+}
+
+impl SidePanelLayout {
+    pub fn from_options(opts: &RenderOptions) -> Self {
+        if opts.show_team_rosters {
+            Self::TeamRosters
+        } else if opts.show_stats_panel {
+            Self::StatsPanel
+        } else {
+            Self::None
+        }
+    }
+}
+
+/// Pre-rasterized ship icon (RGBA, white/alpha mask to be tinted at draw time).
+pub type ShipIcon = RgbaImage;
+
+/// Software renderer that draws to a tiny-skia `Pixmap` for anti-aliased output.
+///
+/// Owns the map image, font, ship icons, plane icons, and consumable icons.
+/// Implements `RenderTarget` by dispatching `DrawCommand`s to tiny-skia primitives.
+pub struct ImageTarget {
+    canvas: Pixmap,
+    /// The map art, kept so the drawn map can be rebuilt when the viewport
+    /// moves.
+    map_art: RgbImage,
+    /// Which part of the map frames show.
+    viewport: MapViewport,
+    /// The drawn map with its grid, at the current viewport. Cloned at the
+    /// start of each frame.
+    map_base: Pixmap,
+    /// What map-space commands draw on this frame.
+    ///
+    /// A layer of its own rather than the canvas, because it is exactly the
+    /// map's rectangle: a zoomed-in ship near an edge is clipped by the layer
+    /// instead of being painted over the score bar.
+    map_layer: Pixmap,
+    /// Whether the layer holds anything not yet composited onto the canvas.
+    map_dirty: bool,
+    /// Width of the minimap area (excludes side panels). Always `MINIMAP_SIZE`.
+    map_width: u32,
+    /// Horizontal offset (in canvas pixels) from the canvas's left edge to the
+    /// minimap's left edge. Non-zero when team rosters reserve a left gutter.
+    /// Map-coordinate draw commands add this offset; HUD elements that span
+    /// the full canvas keep using `canvas.width()` directly.
+    map_x_offset: u32,
+    /// Width of the HUD strip. With team rosters, this spans the rosters plus
+    /// the minimap so the score bar can stretch across both gutters; with the
+    /// stats panel (or no side panel) it's just the minimap width.
+    hud_width: u32,
+    /// Which gutters this canvas was laid out with, which is what says
+    /// whether there is room either side to widen into.
+    layout: SidePanelLayout,
+    fonts: GameFonts,
+    ship_icons: HashMap<String, ShipIcon>,
+    /// Pre-computed gold outline halos for ship icons. Same keys as `ship_icons`;
+    /// each image is `ship_icons[key]` padded by [`SHIP_ICON_OUTLINE_THICKNESS`]
+    /// pixels with a dilated silhouette painted gold.
+    ship_icon_outlines: HashMap<String, RgbaImage>,
+    plane_icons: HashMap<String, RgbaImage>,
+    building_icons: HashMap<String, RgbaImage>,
+    consumable_icons: HashMap<String, RgbaImage>,
+    ribbon_icons: HashMap<String, RgbaImage>,
+    subribbon_icons: HashMap<String, RgbaImage>,
+    death_cause_icons: HashMap<String, RgbaImage>,
+    powerup_icons: HashMap<String, RgbaImage>,
+    /// Bounding rects [x, y, w, h] of previously placed config-circle labels in the current frame.
+    placed_labels: Vec<[i32; 4]>,
+    /// What this frame drew that a pointer can rest on. Cleared each frame.
+    regions: Vec<DrawnRegion>,
+    /// Resolves translatable game text (battle results, advantage labels, etc.)
+    text_resolver: Arc<dyn TextResolver>,
+}
+
+impl ImageTarget {
+    pub fn new(
+        map_image: Option<RgbImage>,
+        fonts: GameFonts,
+        ship_icons: HashMap<String, ShipIcon>,
+        plane_icons: HashMap<String, RgbaImage>,
+        building_icons: HashMap<String, RgbaImage>,
+        consumable_icons: HashMap<String, RgbaImage>,
+        ribbon_icons: HashMap<String, RgbaImage>,
+        subribbon_icons: HashMap<String, RgbaImage>,
+        death_cause_icons: HashMap<String, RgbaImage>,
+        powerup_icons: HashMap<String, RgbaImage>,
+    ) -> Self {
+        Self::with_stats_panel(
+            map_image,
+            fonts,
+            ship_icons,
+            plane_icons,
+            building_icons,
+            consumable_icons,
+            ribbon_icons,
+            subribbon_icons,
+            death_cause_icons,
+            powerup_icons,
+            false,
+        )
+    }
+
+    pub fn with_stats_panel(
+        map_image: Option<RgbImage>,
+        fonts: GameFonts,
+        ship_icons: HashMap<String, ShipIcon>,
+        plane_icons: HashMap<String, RgbaImage>,
+        building_icons: HashMap<String, RgbaImage>,
+        consumable_icons: HashMap<String, RgbaImage>,
+        ribbon_icons: HashMap<String, RgbaImage>,
+        subribbon_icons: HashMap<String, RgbaImage>,
+        death_cause_icons: HashMap<String, RgbaImage>,
+        powerup_icons: HashMap<String, RgbaImage>,
+        stats_panel: bool,
+    ) -> Self {
+        let layout = if stats_panel { SidePanelLayout::StatsPanel } else { SidePanelLayout::None };
+        Self::with_side_panel(
+            map_image,
+            fonts,
+            ship_icons,
+            plane_icons,
+            building_icons,
+            consumable_icons,
+            ribbon_icons,
+            subribbon_icons,
+            death_cause_icons,
+            powerup_icons,
+            layout,
+        )
+    }
+
+    pub fn with_side_panel(
+        map_image: Option<RgbImage>,
+        fonts: GameFonts,
+        ship_icons: HashMap<String, ShipIcon>,
+        plane_icons: HashMap<String, RgbaImage>,
+        building_icons: HashMap<String, RgbaImage>,
+        consumable_icons: HashMap<String, RgbaImage>,
+        ribbon_icons: HashMap<String, RgbaImage>,
+        subribbon_icons: HashMap<String, RgbaImage>,
+        death_cause_icons: HashMap<String, RgbaImage>,
+        powerup_icons: HashMap<String, RgbaImage>,
+        layout: SidePanelLayout,
+    ) -> Self {
+        let map = map_image.unwrap_or_else(|| RgbImage::from_pixel(MINIMAP_SIZE, MINIMAP_SIZE, Rgb([30, 40, 60])));
+
+        let (canvas_width, map_x_offset, hud_width) = match layout {
+            SidePanelLayout::None => (MINIMAP_SIZE, 0, MINIMAP_SIZE),
+            SidePanelLayout::StatsPanel => (MINIMAP_SIZE + STATS_PANEL_WIDTH, 0, MINIMAP_SIZE),
+            SidePanelLayout::TeamRosters => {
+                let cw = MINIMAP_SIZE + TEAM_ROSTER_WIDTH * 2;
+                (cw, TEAM_ROSTER_WIDTH, cw)
+            }
+        };
+
+        let viewport = MapViewport::default();
+        let map_base = build_map_base(&map, viewport, &fonts);
+
+        let ship_icon_outlines = ship_icons
+            .iter()
+            .map(|(k, icon)| (k.clone(), make_ship_icon_outline(icon, SHIP_ICON_OUTLINE_THICKNESS, [255, 215, 0], 230)))
+            .collect();
+
+        Self {
+            canvas: Pixmap::new(canvas_width, CANVAS_HEIGHT).unwrap(),
+            map_layer: map_base.clone(),
+            map_base,
+            map_art: map,
+            viewport,
+            map_dirty: true,
+            map_width: MINIMAP_SIZE,
+            map_x_offset,
+            hud_width,
+            layout,
+            fonts,
+            ship_icons,
+            ship_icon_outlines,
+            plane_icons,
+            building_icons,
+            consumable_icons,
+            ribbon_icons,
+            subribbon_icons,
+            death_cause_icons,
+            powerup_icons,
+            placed_labels: Vec::new(),
+            regions: Vec::new(),
+            text_resolver: Arc::new(DefaultTextResolver),
+        }
+    }
+
+    /// Set a custom text resolver for translating game text.
+    pub fn set_text_resolver(&mut self, resolver: Arc<dyn TextResolver>) {
+        self.text_resolver = resolver;
+    }
+
+    /// What the last frame drew that a pointer can rest on.
+    pub fn drawn_regions(&self) -> &[DrawnRegion] {
+        &self.regions
+    }
+
+    /// Where the map's top-left corner sits in a frame.
+    ///
+    /// The strip above it carries the score bar and the timer; the gutter
+    /// beside it carries the team rosters, when there are any.
+    pub fn map_origin(&self) -> (u32, u32) {
+        (self.map_x_offset, HUD_HEIGHT)
+    }
+
+    /// Which part of the map frames show.
+    pub fn map_viewport(&self) -> MapViewport {
+        self.viewport
+    }
+
+    /// Shows `viewport`'s part of the map from the next frame on.
+    ///
+    /// Redrawing the map art at the new zoom costs a resample, so a viewport
+    /// that has not moved is left alone; a drag asks for the same one many
+    /// times.
+    pub fn set_map_viewport(&mut self, viewport: MapViewport) {
+        if viewport == self.viewport {
+            return;
+        }
+        self.viewport = viewport;
+        self.map_base = build_map_base(&self.map_art, viewport, &self.fonts);
+        // A wider window needs a wider canvas to put it on. Only where there
+        // is room for one: the gutters a side panel takes are already spoken
+        // for, so a viewport showing them keeps its shape.
+        let wanted = match self.layout {
+            SidePanelLayout::None => self.map_base.width(),
+            _ => self.canvas.width(),
+        };
+        if wanted != self.canvas.width()
+            && let Some(canvas) = Pixmap::new(wanted, CANVAS_HEIGHT)
+        {
+            self.canvas = canvas;
+            self.hud_width = wanted;
+        }
+    }
+
+    /// Puts what the map layer holds onto the canvas.
+    ///
+    /// Called before anything that is not a map element, so the HUD lands on
+    /// top of the map whatever order the commands arrive in. The layer is
+    /// left empty rather than reloaded, so a map element that arrives after a
+    /// HUD element composites over it rather than under it.
+    fn flush_map(&mut self) {
+        if !self.map_dirty {
+            return;
+        }
+        let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
+        self.canvas.draw_pixmap(
+            self.map_x_offset as i32,
+            HUD_HEIGHT as i32,
+            self.map_layer.as_ref(),
+            &paint,
+            Transform::identity(),
+            None,
+        );
+        self.map_layer.data_mut().fill(0);
+        self.map_dirty = false;
+    }
+
+    /// Access the current frame as an RGB image (converted from Pixmap).
+    pub fn frame(&self) -> RgbImage {
+        pixmap_to_rgb(&self.canvas)
+    }
+
+    /// Canvas dimensions.
+    pub fn canvas_size(&self) -> (u32, u32) {
+        (self.canvas.width(), self.canvas.height())
+    }
+}
+
+/// What a frame starts as, everywhere the map and the HUD do not reach.
+const CANVAS_BACKGROUND: [u8; 3] = [20, 25, 35];
+
+/// Something drawn into a frame that a reader can rest a pointer on.
+///
+/// A target draws the rosters itself, so nothing outside it knows where a
+/// consumable icon ended up. Recording them as they are drawn is what lets a
+/// front end put a hover over one without repeating the layout and drifting
+/// from it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawnRegion {
+    /// Left, top, width and height in canvas pixels.
+    pub rect: [f32; 4],
+    pub kind: RegionKind,
+}
+
+impl DrawnRegion {
+    /// Whether `at` is inside this region, in canvas pixels.
+    pub fn contains(&self, at: (f32, f32)) -> bool {
+        let [left, top, width, height] = self.rect;
+        at.0 >= left && at.0 < left + width && at.1 >= top && at.1 < top + height
+    }
+}
+
+/// What a drawn region belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionKind {
+    /// One of a roster row's consumable icons. The index is into that row's
+    /// own `consumables`, so the caller reads the rest off the command it
+    /// already has.
+    RosterConsumable { entity_id: EntityId, index: usize },
+}
+
+/// Whether `cmd` draws on the map rather than over it.
+///
+/// The map's own elements move and grow with the viewport and are clipped to
+/// the map's rectangle; the score bar, timer, kill feed, chat, results and
+/// side panels do none of those things.
+fn is_map_command(cmd: &DrawCommand) -> bool {
+    matches!(
+        cmd,
+        DrawCommand::ShotTracer { .. }
+            | DrawCommand::ShotTracerTip { .. }
+            | DrawCommand::SecondaryShotTracer { .. }
+            | DrawCommand::SecondaryShotTracerTip { .. }
+            | DrawCommand::Torpedo { .. }
+            | DrawCommand::Smoke { .. }
+            | DrawCommand::BuffZone { .. }
+            | DrawCommand::CapturePoint { .. }
+            | DrawCommand::CameraDirection { .. }
+            | DrawCommand::Building { .. }
+            | DrawCommand::WeatherZone { .. }
+            | DrawCommand::Ship { .. }
+            | DrawCommand::HealthBar { .. }
+            | DrawCommand::DeadShip { .. }
+            | DrawCommand::Plane { .. }
+            | DrawCommand::ConsumableRadius { .. }
+            | DrawCommand::PatrolRadius { .. }
+            | DrawCommand::ConsumableIcons { .. }
+            | DrawCommand::PositionTrail { .. }
+            | DrawCommand::ShipConfigCircle { .. }
+            | DrawCommand::Annotation { .. }
+    )
+}
+
+impl RenderTarget for ImageTarget {
+    fn begin_frame(&mut self) {
+        // Everything outside the map is this one colour; the map is a layer
+        // of its own, so that it can be drawn at a zoom without the rest of
+        // the canvas moving.
+        self.canvas.fill(tiny_skia::Color::from_rgba8(
+            CANVAS_BACKGROUND[0],
+            CANVAS_BACKGROUND[1],
+            CANVAS_BACKGROUND[2],
+            255,
+        ));
+        self.map_layer = self.map_base.clone();
+        // The map art itself still has to reach the canvas, even for a frame
+        // with nothing drawn on it.
+        self.map_dirty = true;
+        self.placed_labels.clear();
+        self.regions.clear();
+    }
+
+    fn draw(&mut self, cmd: &DrawCommand) {
+        // Map elements go on the layer, which is the map's own rectangle;
+        // everything else goes on the canvas, over whatever the layer holds.
+        if is_map_command(cmd) {
+            self.map_dirty = true;
+        } else {
+            self.flush_map();
+        }
+        let view = self.viewport;
+        // What a map-space length is drawn at. Radii, icons, bars and the
+        // labels beside them grow with the map; stroke widths do not, which
+        // is what keeps a line readable at every zoom.
+        let grow = view.zoom();
+        match cmd {
+            DrawCommand::ShotTracer { from, to, color } => {
+                draw_line(
+                    &mut self.map_layer,
+                    view.x(from.x),
+                    view.y(from.y),
+                    view.x(to.x),
+                    view.y(to.y),
+                    *color,
+                    1.0,
+                    1.5,
+                );
+            }
+            DrawCommand::ShotTracerTip { at, color } => {
+                // A bit wider than the 1.5px tracer line so the ammo color is noticeable.
+                draw_filled_circle(
+                    &mut self.map_layer,
+                    view.x(at.x),
+                    view.y(at.y),
+                    1.9 * grow,
+                    *color,
+                    crate::draw_command::SHOT_TIP_ALPHA,
+                );
+            }
+            DrawCommand::SecondaryShotTracer { from, to, color } => {
+                draw_line(
+                    &mut self.map_layer,
+                    view.x(from.x),
+                    view.y(from.y),
+                    view.x(to.x),
+                    view.y(to.y),
+                    *color,
+                    crate::draw_command::SECONDARY_SHOT_ALPHA,
+                    1.5,
+                );
+            }
+            DrawCommand::SecondaryShotTracerTip { at, color } => {
+                draw_filled_circle(
+                    &mut self.map_layer,
+                    view.x(at.x),
+                    view.y(at.y),
+                    1.9 * grow,
+                    *color,
+                    crate::draw_command::SECONDARY_SHOT_ALPHA,
+                );
+            }
+            DrawCommand::Torpedo { pos, color } => {
+                draw_filled_circle(&mut self.map_layer, view.x(pos.x), view.y(pos.y), 2.5 * grow, *color, 1.0);
+            }
+            DrawCommand::Smoke { pos, radius, color, alpha } => {
+                draw_filled_circle(
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    view.length(*radius as f32),
+                    *color,
+                    *alpha,
+                );
+            }
+            DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {
+                let cx = view.x(pos.x);
+                let cy = view.y(pos.y);
+                let r = view.length(*radius as f32);
+                // Filled circle
+                draw_filled_circle(&mut self.map_layer, cx, cy, r, *color, *alpha);
+                // Border ring
+                draw_circle_outline(&mut self.map_layer, cx, cy, r, *color, 0.6, 1.5);
+                // Draw powerup icon centered on zone
+                if let Some(name) = marker_name
+                    && let Some(icon) = self.powerup_icons.get(name.as_str())
+                {
+                    draw_icon(&mut self.map_layer, icon, cx, cy, grow);
+                }
+            }
+            DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color, flag_icon } => {
+                draw_capture_point(
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    view.length(*radius as f32),
+                    *color,
+                    *alpha,
+                    label,
+                    *progress,
+                    *invader_color,
+                    flag_icon.as_ref(),
+                    &self.fonts,
+                    grow,
+                );
+            }
+            DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
+                let wedge = CameraDirectionWedge::new(*pos, *yaw, *length as f32);
+                let corners = wedge.corners().map(|at| (view.x(at.x), view.y(at.y)));
+                let alpha = (CAMERA_DIRECTION_ALPHA * 255.0) as u8;
+                draw_run(&mut self.map_layer, &corners, true, true, [color[0], color[1], color[2], alpha], 0.0);
+            }
+            DrawCommand::Building { pos, color, icon_type, relation, .. } => {
+                // Try to render an icon; fall back to a dot if no icon is available
+                let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
+                let icon = icon_key.as_ref().and_then(|k| self.building_icons.get(k));
+                if let Some(icon) = icon {
+                    draw_icon(&mut self.map_layer, icon, view.x(pos.x), view.y(pos.y), grow);
+                } else {
+                    draw_filled_circle(&mut self.map_layer, view.x(pos.x), view.y(pos.y), 2.5 * grow, *color, 1.0);
+                }
+            }
+            DrawCommand::WeatherZone { pos, radius } => {
+                // Semi-transparent light gray circle for weather zones (squalls/storms)
+                draw_filled_circle(
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    view.length(*radius as f32),
+                    [255, 255, 255],
+                    0.25,
+                );
+            }
+            DrawCommand::Ship {
+                pos,
+                yaw,
+                species,
+                color,
+                visibility,
+                opacity,
+                is_self,
+                player_name,
+                ship_name,
+                is_detected_teammate,
+                is_disconnected,
+                name_color,
+                ..
+            } => {
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+
+                let fallback_key = match (*visibility, *is_self) {
+                    (ShipVisibility::Visible, true) => "Auxiliary_self",
+                    (ShipVisibility::Visible, false) => "Auxiliary",
+                    (ShipVisibility::MinimapOnly | ShipVisibility::Undetected, _) => "Auxiliary_invisible",
+                };
+                let lookup_keys: Vec<String> = if let Some(sp) = species.as_ref() {
+                    let variant_key = match (*visibility, *is_self) {
+                        (ShipVisibility::Visible, true) => format!("{}_self", sp),
+                        (ShipVisibility::Visible, false) => sp.clone(),
+                        (ShipVisibility::MinimapOnly, _) => format!("{}_invisible", sp),
+                        (ShipVisibility::Undetected, _) => format!("{}_invisible", sp),
+                    };
+                    vec![variant_key, sp.clone(), fallback_key.to_string()]
+                } else {
+                    vec![fallback_key.to_string()]
+                };
+
+                let Some((icon_key, icon)) =
+                    lookup_keys.iter().find_map(|k| self.ship_icons.get(k).map(|i| (k.as_str(), i)))
+                else {
+                    return;
+                };
+
+                if *is_detected_teammate && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
+                    draw_ship_icon(&mut self.map_layer, outline, x, y, *yaw, None, 1.0, grow);
+                }
+                if *is_disconnected && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
+                    draw_ship_icon(&mut self.map_layer, outline, x, y, *yaw, Some([255, 60, 60]), 1.0, grow);
+                }
+
+                draw_ship_icon(&mut self.map_layer, icon, x, y, *yaw, color.map(|c| c), *opacity, grow);
+                draw_ship_labels(
+                    &mut self.map_layer,
+                    x,
+                    y,
+                    player_name.as_deref(),
+                    ship_name.as_deref(),
+                    *name_color,
+                    &self.fonts,
+                    grow,
+                );
+            }
+            DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha, .. } => {
+                draw_health_bar(
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    *fraction,
+                    *fill_color,
+                    *background_color,
+                    *background_alpha,
+                    grow,
+                );
+            }
+            DrawCommand::DeadShip { pos, yaw, species, color, is_self, .. } => {
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+
+                let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
+                let icon = if let Some(sp) = species.as_ref() {
+                    let variant_key = if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) };
+                    self.ship_icons
+                        .get(&variant_key)
+                        .or_else(|| self.ship_icons.get(sp))
+                        .or_else(|| self.ship_icons.get(fallback_key))
+                } else {
+                    self.ship_icons.get(fallback_key)
+                };
+
+                let Some(icon) = icon else {
+                    return;
+                };
+
+                draw_ship_icon(&mut self.map_layer, icon, x, y, *yaw, color.map(|c| c), 1.0, grow);
+            }
+            DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                let Some(icon) = self.plane_icons.get(icon_key) else {
+                    tracing::warn!(icon_key, "Missing plane icon, skipping");
+                    return;
+                };
+                draw_icon(&mut self.map_layer, icon, x, y, grow);
+                draw_ship_labels(
+                    &mut self.map_layer,
+                    x,
+                    y,
+                    player_name.as_deref(),
+                    ship_name.as_deref(),
+                    None,
+                    &self.fonts,
+                    grow,
+                );
+            }
+            DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                let radius = view.length(*radius_px as f32);
+                // Semi-transparent filled circle
+                draw_filled_circle(&mut self.map_layer, x, y, radius, *color, *alpha);
+                // Outline for visibility
+                draw_circle_outline(&mut self.map_layer, x, y, radius, *color, 0.5, 2.0);
+            }
+            DrawCommand::PatrolRadius { pos, radius_px, color, alpha, .. } => {
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                // Filled circle only, no outline
+                draw_filled_circle(&mut self.map_layer, x, y, view.length(*radius_px as f32), *color, *alpha);
+            }
+            DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
+                let x = view.x(pos.x).round() as i32;
+                let y = view.y(pos.y).round() as i32;
+                let below = if *has_hp_bar { 28.0 } else { 26.0 };
+                let base_y = y + (below * grow).round() as i32;
+                let icon_size = (28.0 * grow).round().max(1.0) as i32;
+                let gap = (1.0 * grow).round().max(1.0) as i32;
+                let count = icon_keys.len() as i32;
+                let total_w = count * icon_size + (count - 1) * gap;
+                let start_x = x - total_w / 2 + icon_size / 2;
+                for (i, icon_key) in icon_keys.iter().enumerate() {
+                    if let Some(icon) = self.consumable_icons.get(icon_key) {
+                        let ix = start_x + i as i32 * (icon_size + gap);
+                        draw_icon(&mut self.map_layer, icon, ix as f32, base_y as f32, grow);
+                    }
+                }
+            }
+            DrawCommand::ScoreBar {
+                team0,
+                team1,
+                team0_color,
+                team1_color,
+                max_score,
+                team0_timer,
+                team1_timer,
+                advantage,
+            } => {
+                let advantage_label = advantage
+                    .map(|(level, _)| self.text_resolver.resolve(&TranslatableText::Advantage(level)))
+                    .unwrap_or_default();
+                let advantage_team = advantage.map(|(_, team)| team as i32).unwrap_or(-1);
+                draw_score_bar(
+                    &mut self.canvas,
+                    *team0,
+                    *team1,
+                    *team0_color,
+                    *team1_color,
+                    *max_score,
+                    team0_timer.as_deref(),
+                    team1_timer.as_deref(),
+                    &advantage_label,
+                    advantage_team,
+                    &self.fonts,
+                    self.hud_width,
+                );
+            }
+            DrawCommand::TeamAdvantage { .. } => {
+                // Advantage is now rendered inline in the score bar;
+                // this command is retained for consumers that want the breakdown data.
+            }
+            DrawCommand::Timer { time_remaining, elapsed } => {
+                draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts, self.hud_width);
+            }
+            DrawCommand::PreBattleCountdown { seconds } => {
+                draw_pre_battle_countdown(
+                    &mut self.canvas,
+                    *seconds,
+                    &self.fonts,
+                    &*self.text_resolver,
+                    self.hud_width,
+                );
+            }
+            DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
+                let icon_size = 16i32;
+                let gap = 2i32;
+                let buff_y = HUD_HEIGHT as i32;
+                let count_scale = self.fonts.scale(10.0);
+
+                // Friendly buffs: left side of the minimap (shifted right by
+                // the roster gutter when team rosters are on).
+                let mut x = self.map_x_offset as i32 + 4i32;
+                for (marker, count) in friendly_buffs {
+                    if let Some(icon) = self.powerup_icons.get(marker.as_str()) {
+                        let resized = image::imageops::resize(
+                            icon,
+                            icon_size as u32,
+                            icon_size as u32,
+                            image::imageops::FilterType::Nearest,
+                        );
+                        draw_icon(
+                            &mut self.canvas,
+                            &resized,
+                            (x + icon_size / 2) as f32,
+                            (buff_y + icon_size / 2) as f32,
+                            1.0,
+                        );
+                        if *count > 1 {
+                            let label = format!("{}", count);
+                            draw_text_shadow(
+                                &mut self.canvas,
+                                [255, 255, 255],
+                                x + icon_size,
+                                buff_y + 4,
+                                count_scale,
+                                &self.fonts.primary,
+                                &label,
+                            );
+                            let (tw, _) = text_size(count_scale, &self.fonts.primary, &label);
+                            x += icon_size + tw as i32 + gap;
+                        } else {
+                            x += icon_size + gap;
+                        }
+                    }
+                }
+
+                // Enemy buffs: right side, starting from the minimap's right
+                // edge (map_x_offset + map_width) rather than the canvas edge.
+                let width = (self.map_x_offset + self.map_width) as i32;
+                let mut x = width - 4;
+                for (marker, count) in enemy_buffs {
+                    if let Some(icon) = self.powerup_icons.get(marker.as_str()) {
+                        let resized = image::imageops::resize(
+                            icon,
+                            icon_size as u32,
+                            icon_size as u32,
+                            image::imageops::FilterType::Nearest,
+                        );
+                        if *count > 1 {
+                            let label = format!("{}", count);
+                            let (tw, _) = text_size(count_scale, &self.fonts.primary, &label);
+                            x -= tw as i32;
+                            draw_text_shadow(
+                                &mut self.canvas,
+                                [255, 255, 255],
+                                x,
+                                buff_y + 4,
+                                count_scale,
+                                &self.fonts.primary,
+                                &label,
+                            );
+                            x -= icon_size;
+                        } else {
+                            x -= icon_size;
+                        }
+                        draw_icon(
+                            &mut self.canvas,
+                            &resized,
+                            (x + icon_size / 2) as f32,
+                            (buff_y + icon_size / 2) as f32,
+                            1.0,
+                        );
+                        x -= gap;
+                    }
+                }
+            }
+            DrawCommand::Annotation { shape, color, width } => {
+                let rgb = [color[0], color[1], color[2]];
+                let alpha = color[3] as f32 / 255.0;
+                // A drawn line thickens with the map it was drawn on, so its
+                // width is a map length rather than a stroke width.
+                let drawn_width = width * grow;
+                match shape {
+                    AnnotationShape::Polyline { points } => {
+                        let points: Vec<(f32, f32)> = points.iter().map(|at| (view.x(at.x), view.y(at.y))).collect();
+                        draw_run(&mut self.map_layer, &points, false, false, *color, drawn_width);
+                    }
+                    AnnotationShape::Polygon { points, filled } => {
+                        let points: Vec<(f32, f32)> = points.iter().map(|at| (view.x(at.x), view.y(at.y))).collect();
+                        draw_run(&mut self.map_layer, &points, true, *filled, *color, drawn_width);
+                    }
+                    AnnotationShape::Circle { center, radius, filled } => {
+                        let (x, y) = (view.x(center.x), view.y(center.y));
+                        let radius = view.length(*radius);
+                        if *filled {
+                            draw_filled_circle(&mut self.map_layer, x, y, radius, rgb, alpha);
+                        } else {
+                            draw_circle_outline(&mut self.map_layer, x, y, radius, rgb, alpha, drawn_width);
+                        }
+                    }
+                }
+            }
+            DrawCommand::PositionTrail { points, .. } => {
+                for (pos, color) in points {
+                    draw_filled_circle(&mut self.map_layer, view.x(pos.x), view.y(pos.y), grow, *color, 1.0);
+                }
+            }
+            DrawCommand::ShipConfigCircle { pos, radius_px, color, alpha, dashed, label, .. } => {
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                let r = view.length(*radius_px);
+                if *dashed {
+                    draw_dashed_circle(&mut self.map_layer, x, y, r, *color, *alpha, 1.0);
+                } else {
+                    draw_circle_outline(&mut self.map_layer, x, y, r, *color, *alpha, 1.0);
+                }
+                if let Some(text) = label {
+                    let font = self.fonts.font_for_text(text);
+                    let scale = self.fonts.scale(11.0 * grow);
+                    let (tw, th) = text_size(scale, font, text);
+                    let tw = tw as i32;
+                    let th = th as i32;
+                    let cx = x as i32;
+                    let cy = y as i32;
+                    let ri = r as i32;
+                    let gap = (3.0 * grow).round().max(1.0) as i32;
+
+                    // 8 candidate angles: top, top-right, right, bottom-right, bottom, bottom-left, left, top-left
+                    let candidates: [(f32, f32); 8] = [
+                        (0.0, -1.0),      // top
+                        (0.707, -0.707),  // top-right
+                        (1.0, 0.0),       // right
+                        (0.707, 0.707),   // bottom-right
+                        (0.0, 1.0),       // bottom
+                        (-0.707, 0.707),  // bottom-left
+                        (-1.0, 0.0),      // left
+                        (-0.707, -0.707), // top-left
+                    ];
+
+                    let compute_rect = |cos: f32, sin: f32| -> [i32; 4] {
+                        let ax = cx + ((ri + gap) as f32 * cos) as i32;
+                        let ay = cy + ((ri + gap) as f32 * sin) as i32;
+                        let lx = if cos < -0.3 {
+                            ax - tw
+                        } else if cos > 0.3 {
+                            ax
+                        } else {
+                            ax - tw / 2
+                        };
+                        let ly = if sin < -0.3 {
+                            ay - th
+                        } else if sin > 0.3 {
+                            ay
+                        } else {
+                            ay - th / 2
+                        };
+                        [lx, ly, tw, th]
+                    };
+
+                    let rects_overlap = |a: &[i32; 4], b: &[i32; 4]| -> bool {
+                        a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1]
+                    };
+
+                    let mut best = compute_rect(candidates[0].0, candidates[0].1);
+                    for &(cos, sin) in &candidates {
+                        let rect = compute_rect(cos, sin);
+                        let overlaps = self.placed_labels.iter().any(|prev| rects_overlap(prev, &rect));
+                        if !overlaps {
+                            best = rect;
+                            break;
+                        }
+                    }
+
+                    self.placed_labels.push(best);
+                    draw_text_shadow(&mut self.map_layer, *color, best[0], best[1], scale, font, text);
+                }
+            }
+            DrawCommand::KillFeed { entries } => {
+                draw_kill_feed(
+                    &mut self.canvas,
+                    entries,
+                    &self.fonts,
+                    &self.ship_icons,
+                    &self.death_cause_icons,
+                    self.map_x_offset + self.map_width,
+                );
+            }
+            DrawCommand::ChatOverlay { entries } => {
+                draw_chat_overlay(
+                    &mut self.canvas,
+                    entries,
+                    &self.fonts,
+                    &self.ship_icons,
+                    HUD_HEIGHT,
+                    self.map_x_offset,
+                );
+            }
+            DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
+                let text = self.text_resolver.resolve(&TranslatableText::BattleResult(*result));
+                let subtitle = finish_type
+                    .as_ref()
+                    .map(|ft| self.text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase());
+                draw_battle_result_overlay(
+                    &mut self.canvas,
+                    &text,
+                    subtitle.as_deref(),
+                    *color,
+                    *subtitle_above,
+                    &self.fonts,
+                    self.hud_width,
+                );
+            }
+            DrawCommand::StatsPanel { x, width } => {
+                // Dark background for the stats panel area
+                draw_filled_rect(
+                    &mut self.canvas,
+                    *x as f32,
+                    0.0,
+                    *width as f32,
+                    CANVAS_HEIGHT as f32,
+                    [30, 34, 42],
+                    0.96,
+                );
+                // Subtle left border
+                draw_line(&mut self.canvas, *x as f32, 0.0, *x as f32, CANVAS_HEIGHT as f32, [55, 60, 72], 0.8, 1.0);
+            }
+            DrawCommand::StatsSilhouette {
+                x,
+                y,
+                width,
+                height,
+                ship_param_id: _,
+                hp,
+                heal_availability,
+                player_name,
+                clan_tag,
+                clan_color,
+                ship_name,
+                silhouette,
+            } => {
+                let padding = 8;
+                let inner_x = *x + padding;
+                let inner_w = *width - padding * 2;
+
+                // Draw clan tag + player name, and ship name above the silhouette
+                let _name_scale = self.fonts.scale(12.0);
+                let _small_scale = self.fonts.scale(10.0);
+                let mut label_y = *y + 2;
+
+                if player_name.is_some() || clan_tag.as_ref().is_some_and(|t| !t.is_empty()) {
+                    let clan_prefix = clan_tag.as_ref().filter(|t| !t.is_empty()).map(|t| format!("[{t}] "));
+                    let name_part = player_name.as_deref().unwrap_or("");
+
+                    let (name_font, name_font_scale) = self.fonts.font_and_scale(name_part, 12.0);
+
+                    // Measure total width for centering
+                    let clan_w =
+                        clan_prefix.as_ref().map(|cp| text_size(name_font_scale, name_font, cp).0).unwrap_or(0);
+                    let name_w =
+                        if !name_part.is_empty() { text_size(name_font_scale, name_font, name_part).0 } else { 0 };
+                    let total_w = clan_w + name_w;
+                    let mut cx = inner_x + (inner_w - total_w as i32) / 2;
+
+                    if let Some(ref cp) = clan_prefix {
+                        let cc = clan_color.unwrap_or([255, 255, 255]);
+                        draw_text_shadow(&mut self.canvas, cc, cx, label_y, name_font_scale, name_font, cp);
+                        cx += clan_w as i32;
+                    }
+                    if !name_part.is_empty() {
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [255, 255, 255],
+                            cx,
+                            label_y,
+                            name_font_scale,
+                            name_font,
+                            name_part,
+                        );
+                    }
+                    label_y += 13;
+                }
+                if let Some(name) = ship_name {
+                    let (ship_font, ship_font_scale) = self.fonts.font_and_scale(name, 10.0);
+                    let (tw, _) = text_size(ship_font_scale, ship_font, name);
+                    let tx = inner_x + (inner_w - tw as i32) / 2;
+                    draw_text_shadow(&mut self.canvas, [180, 180, 180], tx, label_y, ship_font_scale, ship_font, name);
+                    label_y += 13;
+                }
+
+                // Draw silhouette: gray base + colored HP + white healable overlay
+                let sil_y = label_y + 1;
+                let sil_h = (*y + *height - 18 - sil_y).max(20);
+                if let Some(sil_img) = silhouette {
+                    // Scale silhouette to fit the available area
+                    let aspect = sil_img.width() as f32 / sil_img.height() as f32;
+                    let fit_w = inner_w as u32;
+                    let fit_h = sil_h as u32;
+                    let (draw_w, draw_h) = if aspect > (fit_w as f32 / fit_h as f32) {
+                        (fit_w, (fit_w as f32 / aspect) as u32)
+                    } else {
+                        ((fit_h as f32 * aspect) as u32, fit_h)
+                    };
+                    let draw_w = draw_w.max(1);
+                    let draw_h = draw_h.max(1);
+
+                    // Charcoal silhouette base (remainder = unhealable lost HP shows through)
+                    let base_sil = tint_silhouette(sil_img, crate::draw_command::SILHOUETTE_BASE_RGB);
+                    let resized_base =
+                        image::imageops::resize(&base_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                    let sil_x = inner_x + (inner_w - draw_w as i32) / 2;
+                    let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
+                    draw_icon_at(&mut self.canvas, &resized_base, sil_x, sil_cy);
+
+                    if let Some(hp) = hp {
+                        let regions = crate::panel_math::silhouette_regions(
+                            hp.current,
+                            hp.healable,
+                            hp.healable_per_charge,
+                            hp.max,
+                        );
+
+                        // Colored region: current HP portion
+                        let hp_color = hp_bar_color_lerp(hp.fraction());
+                        let hp_sil = tint_silhouette(sil_img, hp_color);
+                        let resized_hp =
+                            image::imageops::resize(&hp_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                        let colored_px = (draw_w as f32 * regions.colored) as u32;
+                        if colored_px > 0 {
+                            let cropped = image::imageops::crop_imm(&resized_hp, 0, 0, colored_px, draw_h).to_image();
+                            draw_icon_at(&mut self.canvas, &cropped, sil_x, sil_cy);
+                        }
+
+                        // Healable region: bright = HP the next heal charge restores,
+                        // dim = the regenerable pool beyond that charge. Gray when a
+                        // heal is ready, white while healing, hidden when unavailable.
+                        if let Some(color) = heal_availability.healable_rgb() {
+                            let mut draw_region = |fraction_start: f32, fraction_w: f32, tint: [u8; 3]| {
+                                let region_x = (draw_w as f32 * fraction_start) as u32;
+                                let region_w = (draw_w as f32 * fraction_w) as u32;
+                                if region_w > 0 {
+                                    let region_sil = tint_silhouette(sil_img, tint);
+                                    let resized_region = image::imageops::resize(
+                                        &region_sil,
+                                        draw_w,
+                                        draw_h,
+                                        image::imageops::FilterType::Triangle,
+                                    );
+                                    let cropped =
+                                        image::imageops::crop_imm(&resized_region, region_x, 0, region_w, draw_h)
+                                            .to_image();
+                                    draw_icon_at(&mut self.canvas, &cropped, sil_x + region_x as i32, sil_cy);
+                                }
+                            };
+                            draw_region(regions.colored, regions.healable_bright, color);
+                            draw_region(
+                                regions.colored + regions.healable_bright,
+                                regions.healable_dim,
+                                crate::panel_math::darken(color, 0.5),
+                            );
+                        }
+                    }
+                }
+
+                // HP text: "12,345 / 42,750"
+                if let Some(hp) = hp {
+                    let hp_text = format!("{} / {}", format_number(hp.current as i64), format_number(hp.max as i64));
+                    let hp_scale = self.fonts.scale(14.0);
+                    let (tw, _) = text_size(hp_scale, &self.fonts.primary, &hp_text);
+                    let hp_text_x = inner_x + (inner_w - tw as i32) / 2;
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [220, 220, 220],
+                        hp_text_x,
+                        *y + *height - 14,
+                        hp_scale,
+                        &self.fonts.primary,
+                        &hp_text,
+                    );
+                }
+            }
+            DrawCommand::StatsDamage {
+                x,
+                y,
+                width,
+                breakdowns,
+                damage_spotting,
+                spotting_breakdowns,
+                damage_potential,
+                potential_breakdowns,
+            } => {
+                let padding = 8;
+                let inner_x = *x + padding;
+                let indent_x = inner_x + 12;
+                let header_scale = self.fonts.scale(16.0);
+                let breakdown_scale = self.fonts.scale(13.0);
+                let header_row_h = 22;
+                let breakdown_row_h = 18;
+                let right_x = *x + *width - padding;
+
+                let mut cur_y = *y + 4;
+
+                // Total enemy damage header
+                let total_damage: f64 = breakdowns.iter().map(|e| e.damage).sum();
+                draw_text_shadow(
+                    &mut self.canvas,
+                    [200, 200, 200],
+                    inner_x,
+                    cur_y,
+                    header_scale,
+                    &self.fonts.primary,
+                    "DMG",
+                );
+                let total_str = format_number(total_damage as i64);
+                let (tw, _) = text_size(header_scale, &self.fonts.primary, &total_str);
+                draw_text_shadow(
+                    &mut self.canvas,
+                    [255, 220, 100],
+                    right_x - tw as i32,
+                    cur_y,
+                    header_scale,
+                    &self.fonts.primary,
+                    &total_str,
+                );
+                cur_y += header_row_h;
+
+                // Indented breakdown rows
+                for entry in breakdowns.iter() {
+                    let color = damage_label_color_rgb(&entry.label);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [140, 140, 140],
+                        indent_x,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        &entry.label,
+                    );
+                    let val_str = format_number(entry.damage as i64);
+                    let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &val_str);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        color,
+                        right_x - tw as i32,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        &val_str,
+                    );
+                    cur_y += breakdown_row_h;
+                }
+
+                // Spotting + Potential with sub-breakdowns
+                let summary_sections: [(&str, f64, &[_], [u8; 3]); 2] = [
+                    ("SPOT", *damage_spotting, spotting_breakdowns, [120u8, 200, 255]),
+                    ("POT", *damage_potential, potential_breakdowns, [180, 180, 180]),
+                ];
+                for (label, total, sub_breakdowns, color) in &summary_sections {
+                    // Header row
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [140, 140, 140],
+                        inner_x,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        label,
+                    );
+                    let val_str = format_number(*total as i64);
+                    let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &val_str);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        *color,
+                        right_x - tw as i32,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        &val_str,
+                    );
+                    cur_y += breakdown_row_h;
+
+                    // Sub-breakdown rows
+                    for entry in sub_breakdowns.iter() {
+                        let sub_color = damage_label_color_rgb(&entry.label);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [140, 140, 140],
+                            indent_x,
+                            cur_y,
+                            breakdown_scale,
+                            &self.fonts.primary,
+                            &entry.label,
+                        );
+                        let sub_val_str = format_number(entry.damage as i64);
+                        let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &sub_val_str);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            sub_color,
+                            right_x - tw as i32,
+                            cur_y,
+                            breakdown_scale,
+                            &self.fonts.primary,
+                            &sub_val_str,
+                        );
+                        cur_y += breakdown_row_h;
+                    }
+                }
+            }
+            DrawCommand::StatsRibbons { x, y, width, ribbons } => {
+                use crate::draw_command::STATS_RIBBON_CELL_W;
+                use crate::draw_command::STATS_RIBBON_ICON;
+                use crate::draw_command::STATS_RIBBON_ROW_H;
+                let padding = 8;
+                let inner_x = *x + padding;
+                let inner_w = *width - padding * 2;
+                let scale = self.fonts.scale(14.0);
+                let icon_h = STATS_RIBBON_ICON;
+                let cell_w = STATS_RIBBON_CELL_W;
+                let gap = 2;
+
+                let mut cur_x = inner_x;
+                let mut cur_y = *y;
+                for rc in ribbons.iter() {
+                    // Fixed-width cell, wrapping by whole cells, matching the
+                    // emitter's `inner_w / cell_w` row math so the activity feed
+                    // below never overlaps a wrapped row.
+                    if cur_x > inner_x && cur_x + cell_w > inner_x + inner_w {
+                        cur_x = inner_x;
+                        cur_y += STATS_RIBBON_ROW_H;
+                    }
+                    let sub_key = format!("sub{}", rc.icon_key);
+                    let icon = if rc.is_subribbon {
+                        self.subribbon_icons.get(&sub_key).or_else(|| self.ribbon_icons.get(&rc.icon_key))
+                    } else {
+                        self.ribbon_icons.get(&rc.icon_key).or_else(|| self.subribbon_icons.get(&sub_key))
+                    };
+                    let count_str = format!("x{}", rc.count);
+                    let (_, th) = text_size(scale, &self.fonts.primary, &count_str);
+
+                    // Icon at fixed height, aspect-preserved width (ribbon icons
+                    // are wide); fall back to a truncated name when missing.
+                    let lead_w = if let Some(img) = icon {
+                        let w = if img.height() > 0 {
+                            ((icon_h as f32 * img.width() as f32 / img.height() as f32).round() as i32).max(1)
+                        } else {
+                            icon_h
+                        };
+                        let resized = image::imageops::resize(
+                            img,
+                            w as u32,
+                            icon_h as u32,
+                            image::imageops::FilterType::Lanczos3,
+                        );
+                        draw_icon_at(&mut self.canvas, &resized, cur_x, cur_y);
+                        w
+                    } else {
+                        let label: String = rc.display_name.chars().take(8).collect();
+                        let (lw, _) = text_size(scale, &self.fonts.primary, &label);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [180, 180, 180],
+                            cur_x,
+                            cur_y,
+                            scale,
+                            &self.fonts.primary,
+                            &label,
+                        );
+                        lw as i32
+                    };
+                    let count_y = cur_y + (icon_h - th as i32) / 2;
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [255, 255, 255],
+                        cur_x + lead_w + gap,
+                        count_y,
+                        scale,
+                        &self.fonts.primary,
+                        &count_str,
+                    );
+                    cur_x += cell_w;
+                }
+            }
+            DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {
+                let assets = FeedAssets {
+                    fonts: &self.fonts,
+                    ship_icons: &self.ship_icons,
+                    death_cause_icons: &self.death_cause_icons,
+                };
+                draw_activity_feed(&mut self.canvas, *x, *y, *width, *height, entries, &assets);
+            }
+            DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
+                draw_team_roster(
+                    &mut self.canvas,
+                    *side,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    rows,
+                    &self.fonts,
+                    &self.ship_icons,
+                    &self.consumable_icons,
+                    &self.death_cause_icons,
+                    &mut self.regions,
+                );
+            }
+        }
+    }
+
+    fn end_frame(&mut self) {
+        self.flush_map();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::map_data::MinimapPos;
+    use crate::viewport::MapViewport;
+
+    /// A target with no game files behind it: no map art, no icons, and
+    /// whatever font the machine has. `None` where it has none.
+    fn target() -> Option<ImageTarget> {
+        target_with_ship_icons(HashMap::new())
+    }
+
+    fn target_with_ship_icons(ship_icons: HashMap<String, ShipIcon>) -> Option<ImageTarget> {
+        let fonts = crate::assets::test_fonts()?;
+        Some(ImageTarget::new(
+            None,
+            fonts,
+            ship_icons,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ))
+    }
+
+    /// The pixel at `x`, `y` of a finished frame.
+    fn pixel(frame: &RgbImage, x: u32, y: u32) -> [u8; 3] {
+        frame.get_pixel(x, y).0
+    }
+
+    /// A torpedo sits where the viewport says it does, and is drawn at all.
+    ///
+    /// The positive half of the clipping test below: without it, a test that
+    /// found nothing on the HUD would pass even if nothing were drawn.
+    #[test]
+    fn a_map_element_lands_where_the_viewport_puts_it() {
+        let Some(mut target) = target() else { return };
+        target.set_map_viewport(MapViewport::new(4.0, (0.0, 0.0)));
+        target.begin_frame();
+        target.draw(&DrawCommand::Torpedo { pos: MinimapPos { x: 50.0, y: 50.0 }, color: [255, 0, 0] });
+        target.end_frame();
+
+        let frame = target.frame();
+        // Four times its map position, and the map starts below the HUD.
+        let (x, y) = (200, 200 + HUD_HEIGHT);
+        assert_eq!(pixel(&frame, x, y), [255, 0, 0], "the torpedo is where the zoom puts it");
+    }
+
+    /// A map element the viewport pushes off the map does not reach the strip
+    /// the score bar and the timer live on.
+    ///
+    /// The map draws on a layer of its own for exactly this: the layer is the
+    /// map's rectangle, so anything outside it is clipped rather than painted
+    /// over the HUD.
+    #[test]
+    fn a_map_element_pushed_off_the_map_does_not_reach_the_hud() {
+        let Some(mut target) = target() else { return };
+        // Panned far enough down that a torpedo near the top of the map would
+        // land two hundred pixels above the map's own top edge.
+        target.set_map_viewport(MapViewport::new(4.0, (0.0, 400.0)));
+        target.begin_frame();
+        target.draw(&DrawCommand::Torpedo { pos: MinimapPos { x: 50.0, y: 50.0 }, color: [255, 0, 0] });
+        target.end_frame();
+
+        let frame = target.frame();
+        for y in 0..HUD_HEIGHT {
+            for x in 0..frame.width() {
+                assert_eq!(pixel(&frame, x, y), [20, 25, 35], "nothing was drawn on the HUD strip at {x},{y}");
+            }
+        }
+    }
+
+    /// Going back to the whole map leaves no trace of the zoom.
+    ///
+    /// One renderer is shared by every preview of a map, so a frame drawn
+    /// zoomed must not change what the next plain frame looks like.
+    #[test]
+    fn a_viewport_is_not_remembered_between_frames() {
+        let (Some(mut zoomed), Some(mut plain)) = (target(), target()) else { return };
+
+        zoomed.set_map_viewport(MapViewport::new(6.0, (300.0, 120.0)));
+        zoomed.begin_frame();
+        zoomed.draw(&DrawCommand::Torpedo { pos: MinimapPos { x: 60.0, y: 60.0 }, color: [255, 0, 0] });
+        zoomed.end_frame();
+
+        zoomed.set_map_viewport(MapViewport::default());
+        zoomed.begin_frame();
+        zoomed.end_frame();
+
+        plain.begin_frame();
+        plain.end_frame();
+
+        assert_eq!(zoomed.frame(), plain.frame(), "the frame is the one a renderer that never zoomed draws");
+    }
+
+    /// The map itself reaches the canvas, on a frame with nothing drawn on it.
+    ///
+    /// The layer is composited rather than drawn straight onto the canvas, so
+    /// a frame that carried no commands at all could have been left blank.
+    #[test]
+    fn a_frame_with_no_commands_still_carries_the_map() {
+        let Some(mut target) = target() else { return };
+        target.begin_frame();
+        target.end_frame();
+
+        let frame = target.frame();
+        // The stand-in map art the target falls back to, which is not the
+        // background the canvas starts as.
+        assert_eq!(pixel(&frame, 400, 400 + HUD_HEIGHT), [30, 40, 60]);
+        assert_eq!(pixel(&frame, 400, 4), [20, 25, 35], "and the HUD strip is still the background");
+    }
+
+    fn camera_direction(pos: MinimapPos) -> DrawCommand {
+        DrawCommand::CameraDirection {
+            entity_id: wows_replays::types::EntityId::from(7u32),
+            pos,
+            yaw: 0.0,
+            color: [255, 0, 0],
+            length: crate::ICON_SIZE as i32,
+        }
+    }
+
+    /// A wedge looking east from the icon center reaches one icon length at
+    /// the zoom the icon is drawn at, and nothing behind the center.
+    #[test]
+    fn a_camera_direction_reaches_one_icon_length_from_the_center() {
+        let Some(mut target) = target() else { return };
+        target.set_map_viewport(MapViewport::new(2.0, (0.0, 0.0)));
+        target.begin_frame();
+        target.draw(&camera_direction(MinimapPos { x: 100.25, y: 100.25 }));
+        target.end_frame();
+
+        let frame = target.frame();
+        let (x, y) = (200, 200 + HUD_HEIGHT);
+        let icon = 2 * crate::ICON_SIZE;
+        let map = [30, 40, 60];
+        assert_ne!(pixel(&frame, x + 2, y), map, "the wide end is filled at the center");
+        assert_ne!(pixel(&frame, x + icon * 3 / 4, y), map, "the wedge runs along the look direction");
+        assert_eq!(pixel(&frame, x + icon + 2, y), map, "and stops one icon length out");
+        assert_eq!(pixel(&frame, x - 3, y), map, "nothing is drawn behind the center");
+    }
+
+    /// A ship icon drawn after its wedge covers it, and the wedge shows past
+    /// the icon's bow.
+    #[test]
+    fn a_ship_icon_covers_its_camera_direction() {
+        let icon = image::RgbaImage::from_pixel(crate::ICON_SIZE, crate::ICON_SIZE, image::Rgba([255, 255, 255, 255]));
+        let Some(mut target) = target_with_ship_icons(HashMap::from([("Cruiser".to_string(), icon)])) else {
+            return;
+        };
+        let pos = MinimapPos { x: 100.5, y: 100.5 };
+        target.begin_frame();
+        target.draw(&camera_direction(pos));
+        target.draw(&DrawCommand::Ship {
+            entity_id: wows_replays::types::EntityId::from(7u32),
+            pos,
+            yaw: 0.0,
+            species: Some("Cruiser".to_string()),
+            color: None,
+            visibility: ShipVisibility::Visible,
+            opacity: 1.0,
+            is_self: false,
+            player_name: None,
+            ship_name: None,
+            is_detected_teammate: false,
+            is_disconnected: false,
+            name_color: None,
+        });
+        target.end_frame();
+
+        let frame = target.frame();
+        let (x, y) = (100, 100 + HUD_HEIGHT);
+        let half_icon = crate::ICON_SIZE / 2;
+        assert_eq!(pixel(&frame, x + half_icon - 2, y), [255, 255, 255], "the icon is on top inside its outline");
+        let past_bow = pixel(&frame, x + half_icon + 2, y);
+        assert!(past_bow[0] > past_bow[2], "the red wedge shows past the bow: {past_bow:?}");
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use super::*;
+    use crate::draw_command::ChargeCount;
+    use crate::draw_command::ConsumableAvailability;
+    use crate::draw_command::RosterConsumable;
+    use crate::draw_command::RosterRow;
+    use crate::draw_command::RosterSide;
+
+    fn consumable(key: &str) -> RosterConsumable {
+        RosterConsumable {
+            icon_key: key.to_string(),
+            display_name: key.to_string(),
+            description: String::new(),
+            total_charges: ChargeCount::Finite(3),
+            charges_used: 0,
+            work_time_secs: 10.0,
+            reload_time_secs: 60.0,
+            active_remaining_secs: None,
+            availability: ConsumableAvailability::Ready,
+        }
+    }
+
+    fn row(entity: u32, consumables: Vec<RosterConsumable>) -> RosterRow {
+        RosterRow {
+            entity_id: EntityId::from(entity),
+            team_id: 0,
+            player_name: format!("player{entity}"),
+            clan_tag: None,
+            clan_color: None,
+            ship_name: "Smaland".to_string(),
+            ship_param_id: None,
+            class_icon_key: None,
+            species: None,
+            hp: Some(crate::draw_command::HitPoints {
+                current: 15400.0,
+                max: 15400.0,
+                healable: 0.0,
+                healable_per_charge: 0.0,
+            }),
+            heal_availability: ConsumableAvailability::Ready,
+            is_dead: false,
+            is_self: false,
+            is_spotted: false,
+            is_disconnected: false,
+            kills: 0,
+            damage_dealt: 0.0,
+            seconds_since_damage: None,
+            consumables,
+        }
+    }
+
+    /// Drawing a roster records where each consumable icon landed, in the
+    /// row's own order, so a hover can be put over one without repeating the
+    /// layout.
+    #[test]
+    fn a_roster_records_where_its_consumable_icons_landed() {
+        let Some(fonts) = crate::assets::test_fonts() else { return };
+        let mut canvas = Pixmap::new(400, 400).expect("a canvas");
+        let mut regions = Vec::new();
+
+        draw_team_roster(
+            &mut canvas,
+            RosterSide::Friendly,
+            0,
+            0,
+            280,
+            400,
+            &[row(7, vec![consumable("heal"), consumable("smoke")])],
+            &fonts,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut regions,
+        );
+
+        assert_eq!(regions.len(), 2, "one per consumable the row carries");
+        for (index, region) in regions.iter().enumerate() {
+            assert_eq!(
+                region.kind,
+                RegionKind::RosterConsumable { entity_id: EntityId::from(7u32), index },
+                "each keys back to its own row and place in it"
+            );
+            let [_, _, width, height] = region.rect;
+            assert!(width > 0.0 && height > 0.0, "a region a pointer can land in");
+        }
+        assert!(regions[1].rect[0] > regions[0].rect[0], "the second sits to the right of the first");
+        assert!(!regions[0].contains((regions[1].rect[0], regions[1].rect[1])), "and they do not overlap");
+    }
+
+    /// A row with no consumables records nothing, so an empty strip is not a
+    /// hover that says nothing.
+    #[test]
+    fn a_row_with_no_consumables_records_nothing() {
+        let Some(fonts) = crate::assets::test_fonts() else { return };
+        let mut canvas = Pixmap::new(400, 400).expect("a canvas");
+        let mut regions = Vec::new();
+
+        draw_team_roster(
+            &mut canvas,
+            RosterSide::Friendly,
+            0,
+            0,
+            280,
+            400,
+            &[row(7, Vec::new())],
+            &fonts,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut regions,
+        );
+
+        assert!(regions.is_empty());
+    }
+}

@@ -1,0 +1,27 @@
+[package]
+name = "wt-collab-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Wire protocol types for WoWs Toolkit collaborative sessions"
+
+[dependencies]
+rkyv = { workspace = true }
+flate2 = { workspace = true }
+data-encoding = { workspace = true }
+iroh = { workspace = true, default-features = false }
+wowsunpack = { workspace = true, features = ["rkyv"] }
+wows_minimap_renderer = { workspace = true, features = ["rkyv"] }
+# Instant that also works in the wasm client.
+web-time = { workspace = true }
+
+# Optional: egui conversion helpers
+egui = { version = "0.37", optional = true }
+
+[dev-dependencies]
+rand = "0.10"
+
+[features]
+default = []
+egui = ["dep:egui"]

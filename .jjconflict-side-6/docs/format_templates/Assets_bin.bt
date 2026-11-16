@@ -1,0 +1,130 @@
+//------------------------------------------------
+//--- 010 Editor v11.0.1 Binary Template
+//
+//      File: WoWs Index
+//   Authors: 
+//   Version: 
+//   Purpose: 
+//  Category: 
+// File Mask: assets.bin
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+LittleEndian();
+
+typedef struct {
+    uint32 magic;
+    uint32 version;
+    uint32 checksum;
+    uint16 architecture_bit;
+    uint16 endianness;
+} Header;
+
+typedef struct {
+    uint64 count;
+// gets adjusted to this base struct + this value
+    uint64 ptr;
+
+} DatabaseInfo;
+
+Header header;
+
+local int64 resource_off = FTell();
+
+
+typedef struct {
+uint32 a;
+uint32 b;
+} idk;
+
+DatabaseInfo db;
+
+uint64 values_ptr;
+uint64 string_table_size;
+uint64 strings_ptr;
+
+local int64 unk_offset = FTell();
+
+// used in conjunction with unk_ptr and unk2
+uint64 some_count;
+uint64 some_ptr;
+
+// used as unk_offset + unk_ptr
+uint64 unk_ptr;
+
+local int64 model_table_offset = FTell();
+uint64 model_count;
+uint64 models_offset;
+
+uint64 databases_count;
+uint64 databases_ptr;
+
+FSeek(model_table_offset + models_offset);
+
+typedef struct model_metadata {
+    uint64 self_id;
+    uint64 parent_id;
+// data starts at this offset + offset?
+local int64 name_offset = FTell();
+    uint64 size;
+    uint64 offset;
+    local int64 after_offset_offset = FTell();
+
+    FSeek(name_offset + offset);
+    string name;
+    FSeek(after_offset_offset);
+};
+
+model_metadata model_metadatas[model_count];
+
+FSeek(unk_offset + some_ptr);
+typedef struct idk2 {
+    uint64 id;
+    uint32 unk[2];
+};
+
+idk2 some_things[some_count];
+
+FSeek(resource_off + db.ptr);
+idk who_knows[db.count];
+
+FSeek(unk_offset + unk_ptr);
+// maybe values?
+uint32 unk_data[some_count];
+
+FSeek(resource_off + values_ptr);
+typedef struct {
+local int64 start = FTell();
+    uint32 string_table_offset;
+local int64 reset = FTell();
+FSeek(resource_off + strings_ptr + string_table_offset);
+    string name;
+FSeek(reset);
+} dependency;
+dependency dependencies[db.count] <optimize=false>;
+
+typedef struct {
+    uint32 count;
+    uint32 unk;
+    uint32 items_ptr;
+} skeleton_prototype;
+
+FSeek(resource_off + databases_ptr);
+typedef struct {
+local int64 database_offset = FTell();
+    uint32 prototype_magic;
+    uint32 prototype_checksum;
+    uint64 size;
+    uint64 offset;
+local int64 reset = FTell();
+FSeek(database_offset + offset);
+    skeleton_prototype skeleton;
+    byte data[size - sizeof(skeleton_prototype)];
+FSeek(reset);
+} database;
+database database_info[databases_count]<optimize=false>;
+
+
+
+//FSeek(resource_off + strings_ptr);
+//uint64 data;

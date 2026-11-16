@@ -1,0 +1,80 @@
+//! Queries over World of Warships game data for chat bots and MCP clients.
+//!
+//! Load a [`GameData`] once from a wows-replay-data dump, then call its query
+//! methods. Argument types derive `JsonSchema` for tool calling; outputs
+//! serialize to compact JSON. Programs that serve `gameparams_query` call
+//! [`jq_worker::init`] first in `main`; programs that read replays call
+//! [`replay_worker::init`] there too.
+
+pub mod aircraft;
+pub mod anti_air;
+pub mod armament;
+pub mod armor;
+pub mod armor_assessment;
+mod armor_models;
+pub mod armor_trace;
+pub mod battle_impact;
+pub mod buffs;
+pub mod builds;
+pub mod citadel;
+pub mod commanders;
+pub mod comparison;
+pub mod concealment;
+pub mod consumables;
+pub mod data;
+pub mod dispersion;
+#[cfg(feature = "download")]
+pub mod download;
+pub mod error;
+pub mod fire_target;
+pub mod fires;
+pub mod firing_arcs;
+pub mod firing_range;
+pub mod game_modes;
+pub mod gameparams;
+pub mod gun_module_matchups;
+pub mod healing;
+pub mod hit_locations;
+pub mod jq_worker;
+pub mod loadout;
+pub mod module_comparison;
+pub mod modules;
+pub mod names;
+pub mod penetration;
+pub mod quantities;
+pub mod rates;
+pub mod raw_params;
+pub mod replay;
+pub mod replay_worker;
+pub mod shell_traits;
+pub mod shells;
+pub mod ship_variants;
+pub mod ships;
+pub mod skills;
+pub mod special_abilities;
+pub mod speed;
+pub mod stat_search;
+pub mod stat_value;
+pub mod stats;
+pub mod tech_tree;
+pub mod tools;
+pub mod torpedo_rankings;
+pub mod turtleback;
+pub mod upgrades;
+
+mod fuzzy;
+mod jq;
+mod sandbox;
+mod text;
+mod torpedoes;
+
+pub use data::GameData;
+pub use error::LoadError;
+pub use error::QueryError;
+pub use names::Alias;
+pub use names::AliasError;
+pub use names::AliasTarget;
+pub use names::Interpretation;
+pub use names::Mention;
+pub use names::NameKind;
+pub use names::ResolutionMethod;

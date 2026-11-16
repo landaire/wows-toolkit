@@ -1,0 +1,18 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 0
+payload:
+  BasePlayerCreate:
+    component_data:
+      - 1
+      - 0
+      - 0
+      - 0
+      - 2
+    entity_id: 1214224
+    entity_type: Avatar
+    props:
+      attrs: 17935783428105

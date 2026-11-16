@@ -1,0 +1,71 @@
+[package]
+name = "wows-toolkit-services"
+description = "Network, runtime, logging and update services shared by the desktop front ends"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "wows_toolkit_services"
+path = "src/lib.rs"
+
+[features]
+# For headless front-end tests: file dialogs are recorded and answered as
+# dismissed instead of opened, and a collab link can stand without a session.
+test-support = []
+
+[dependencies]
+# The stats-service request body.
+ciborium = { workspace = true }
+# The update download reports its progress over a channel.
+futures = "0.3"
+jiff = { workspace = true }
+# The collab session state the peer task and the front end both hold.
+parking_lot = "0.12.5"
+# Matches the egui app's feature set so both resolve one copy.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+rootcause = { workspace = true }
+# The constants mapping a sweep writes.
+serde_json = { workspace = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+# The update is staged beside the running executable.
+tempfile = "3"
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util"] }
+tracing = { workspace = true }
+# The rotated log file a bug report is copied from.
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "time"] }
+# The chat poll behind the roster's possible-stream-sniper chip. Same version
+# and features as the egui app, so the two resolve one Twitch client.
+twitch_api = { version = "0.7.2", features = ["helix", "client", "reqwest"] }
+wows-data-mgr = { workspace = true, features = ["constants", "download"] }
+wows-toolkit-config = { workspace = true }
+wows-toolkit-hardening = { workspace = true }
+wows-toolkit-viewmodel = { workspace = true }
+# The live roster the stats lookup is asked about.
+# The map dimensions a tactics board carries.
+wows_minimap_renderer = { workspace = true }
+wows_replays = { workspace = true }
+# A ping's clock, which a test ages.
+web-time = { workspace = true }
+# The collaborative session mesh, shared with the egui app.
+wt-collab-client = { workspace = true }
+# The release archive the update is read out of.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+# File dialogs. Linux asks the desktop portal directly, which reports why a
+# dialog could not open; rfd only answers with a path or nothing.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"] }
+url = "2"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "0.17"
+
+[lints.cargo]
+# Dependents enable test-support from their dev-dependencies, which compiles out
+# the dialog backend that uses ashpd and rfd.
+unused_dependencies = "allow"

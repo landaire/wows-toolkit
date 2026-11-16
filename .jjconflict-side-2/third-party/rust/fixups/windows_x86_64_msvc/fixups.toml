@@ -1,0 +1,4 @@
+# The bundled import libraries are unused: windows-targets is built with
+# windows_raw_dylib, so nothing links them. The build script only publishes a
+# search path for them, so there is nothing left for it to do.
+buildscript.run = false

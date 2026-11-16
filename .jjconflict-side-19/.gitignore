@@ -1,0 +1,55 @@
+target/
+toolchains/windows/offline/installed/*
+!toolchains/windows/offline/installed/.gitkeep
+buck-out/
+# DotSlash and the Buck2 it fetches, installed by bootstrap.sh and bootstrap.ps1.
+/.tools/
+# Machine-local Nix toolchain root written by scripts/refresh-buck-toolchain.nu.
+.buckconfig.local
+# Anchored: a bare `dist/` also matches prelude/dist, and a partially checked-out
+# vendored prelude fails to load with an error that never names the ignore rule.
+/dist/
+crates/wt-web/dist/
+# The replay demo build, copied in for local previews. CI builds it.
+/site/replay-demo/
+.cargo/config.toml
+wows_toolkit.log.*
+.claude/
+*.glb
+dump_out/
+game_data/
+.steam-user
+/armor_backfill.json
+.wix
+wix/banner.bmp
+wix/license.rtf
+scratch/
+.scratch/
+.tooling/
+__pycache__/
+*.tmp
+strings.csv
+# Steam depot manifest dumps
+/55299*.txt
+# Superpowers planning docs and scratch (local only, not source-controlled)
+docs/superpowers/
+.superpowers/
+.direnv/
+
+dhat-heap.json
+dhat-markers.log
+
+# Profiler captures (samply writes profile.json.gz into the cwd)
+profile.json.gz
+*.json.gz
+# Windows kernel traces. These reach several GB each and jj snapshots the
+# working copy on every command, so one left in the tree lands in history
+# dozens of times.
+*.etl
+
+# Files the finalize-update cli tests create in the crate's cwd; a Drop guard
+# removes them normally, this is the backstop if a test run is interrupted.
+*.exe.old
+**/tests/snapshots/**/*.diff.png
+**/tests/snapshots/**/*.new.png
+**/tests/snapshots/**/*.old.png

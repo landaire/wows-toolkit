@@ -1,0 +1,8 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 16
+payload:
+  InitFlag: 0

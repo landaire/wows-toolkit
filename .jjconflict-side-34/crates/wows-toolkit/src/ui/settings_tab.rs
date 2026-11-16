@@ -1,0 +1,690 @@
+use std::path::Path;
+use std::path::PathBuf;
+
+use egui::OpenUrl;
+use egui::RichText;
+use egui::Slider;
+use egui::Stroke;
+use rust_i18n::t;
+
+use crate::app::ToolkitTabViewer;
+use crate::data::settings::AppPreferences;
+use crate::data::settings::DataSharingMode;
+use crate::data::settings::ThemeChoice;
+use crate::icons;
+use crate::tab_state::TabState;
+use crate::task::DataExportSettings;
+use crate::task::ReplayBackgroundParserThreadMessage;
+use crate::task::ReplayExportFormat;
+use crate::twitch::Token;
+use crate::ui::theme::semantic::SemanticExt;
+use crate::update_background_task;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
+
+/// Folder pickers opened from the settings tab.
+#[derive(Default)]
+pub struct SettingsDialogs {
+    wows_dir: FileDialogSlot,
+    cache_dir: FileDialogSlot,
+    auto_export_dir: FileDialogSlot,
+}
+
+/// What the stored twitch token is currently worth. `Absent` is not an error:
+/// nothing has been configured yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenState {
+    Absent,
+    Valid,
+    /// Stored but not yet checked: the startup validation round-trip hasn't
+    /// completed, or the machine is offline. Neither is a rejection.
+    Unvalidated,
+    Rejected,
+}
+
+/// `has_token`, `is_valid`, and `validation_failed` come from two separate
+/// locks, so a stale validity flag must never outrank the absence of a
+/// token. Likewise, only an actual failed validation attempt justifies the
+/// rejected treatment: a token that is merely loaded-but-expired reports
+/// `is_valid == false` with `validation_failed == false`, and reads as
+/// `Unvalidated` until a validation attempt actually fails. That bias is
+/// deliberate -- never accuse a token we have not proven bad.
+fn token_state(has_token: bool, is_valid: bool, validation_failed: bool) -> TokenState {
+    match (has_token, is_valid, validation_failed) {
+        (false, _, _) => TokenState::Absent,
+        (true, _, true) => TokenState::Rejected,
+        (true, true, false) => TokenState::Valid,
+        (true, false, false) => TokenState::Unvalidated,
+    }
+}
+
+/// Render a styled section header with an icon, title, and dimmed description.
+fn section_header(ui: &mut egui::Ui, icon: &str, title: &str, description: &str) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(icon).size(16.0).strong());
+        ui.label(RichText::new(title).size(14.0).strong());
+    });
+    ui.label(RichText::new(description).size(11.0).weak());
+    ui.add_space(2.0);
+}
+
+impl ToolkitTabViewer<'_> {
+    /// Applies the result of any settings dialog that closed since the last frame.
+    pub(crate) fn poll_settings_dialogs(&mut self) {
+        if let Some(folder) = self.tab_state.settings_dialogs.wows_dir.poll_path() {
+            self.tab_state.prevent_changing_wows_dir();
+            update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(folder)));
+        }
+
+        if let Some(folder) = self.tab_state.settings_dialogs.cache_dir.poll_path() {
+            self.tab_state.set_game_data_cache_dir(folder.to_string_lossy().into_owned());
+        }
+
+        if let Some(folder) = self.tab_state.settings_dialogs.auto_export_dir.poll_path() {
+            self.tab_state.persisted.write().settings.replay.auto_export_path = folder.to_string_lossy().to_string();
+            self.notify_data_export_change();
+        }
+    }
+
+    fn notify_data_export_change(&self) {
+        let p = self.tab_state.persisted.read();
+        let rs = &p.settings.replay;
+        let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
+            tx.send(ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(DataExportSettings {
+                should_auto_export: rs.auto_export_data,
+                export_path: PathBuf::from(rs.auto_export_path.clone()),
+                export_format: rs.auto_export_format,
+            }))
+        });
+    }
+
+    pub fn build_settings_tab(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
+            // ── Application Settings ──────────────────────────────────
+            section_header(ui, icons::GEAR_FINE, &t!("ui.settings.app.heading"), &t!("ui.settings.app.description"));
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                let mut check_for_updates = self.tab_state.persisted.read().settings.app.check_for_updates;
+                if ui.checkbox(&mut check_for_updates, t!("ui.settings.app.check_for_updates")).changed() {
+                    self.tab_state.persisted.write().settings.app.check_for_updates = check_for_updates;
+                }
+                let mut enable_logging = self.tab_state.persisted.read().settings.app.enable_logging;
+                if ui
+                    .checkbox(&mut enable_logging, t!("ui.settings.app.enable_logging"))
+                    .on_hover_text(t!("ui.settings.app.enable_logging_tooltip"))
+                    .changed()
+                {
+                    self.tab_state.persisted.write().settings.app.enable_logging = enable_logging;
+                }
+                let mut mode = self.tab_state.persisted.read().settings.integrations.data_sharing_mode;
+                ui.label(t!("ui.settings.app.data_sharing_mode"));
+                let mut mode_changed = false;
+                mode_changed |=
+                    ui.radio_value(&mut mode, DataSharingMode::Off, t!("ui.settings.app.data_sharing_off")).changed();
+                mode_changed |= ui
+                    .radio_value(&mut mode, DataSharingMode::BuildData, t!("ui.settings.app.data_sharing_build_data"))
+                    .changed();
+                mode_changed |= ui
+                    .radio_value(&mut mode, DataSharingMode::Replays, t!("ui.settings.app.data_sharing_replays"))
+                    .changed();
+                if mode_changed {
+                    self.tab_state.persisted.write().settings.integrations.data_sharing_mode = mode;
+                }
+                ui.horizontal(|ui| {
+                    let mut zoom = ui.ctx().zoom_factor();
+                    if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text(t!("ui.settings.app.zoom_factor"))).changed() {
+                        ui.ctx().set_zoom_factor(zoom);
+                        self.tab_state.persisted.write().settings.app.zoom_factor = zoom;
+                    }
+                    if ui.button(t!("ui.buttons.reset")).clicked() {
+                        let default_zoom = AppPreferences::default().zoom_factor;
+                        ui.ctx().set_zoom_factor(default_zoom);
+                        self.tab_state.persisted.write().settings.app.zoom_factor = default_zoom;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut theme = self.tab_state.persisted.read().settings.app.theme;
+                    ui.label(t!("ui.settings.app.theme"));
+                    let mut changed = false;
+                    changed |=
+                        ui.radio_value(&mut theme, ThemeChoice::System, t!("ui.settings.app.theme_system")).changed();
+                    changed |=
+                        ui.radio_value(&mut theme, ThemeChoice::Dark, t!("ui.settings.app.theme_dark")).changed();
+                    changed |=
+                        ui.radio_value(&mut theme, ThemeChoice::Light, t!("ui.settings.app.theme_light")).changed();
+                    if changed {
+                        self.tab_state.persisted.write().settings.app.theme = theme;
+                        crate::ui::theme::apply(ui.ctx(), theme);
+                    }
+                });
+                // Windows-only: the policy this chooses does not exist on other
+                // platforms, so offering the choice there would be a control
+                // that does nothing.
+                #[cfg(windows)]
+                {
+                    use crate::hardening::CodeIntegrityPreference;
+
+                    ui.horizontal(|ui| {
+                        let mut preference = self.tab_state.persisted.read().settings.app.code_integrity;
+                        ui.label(t!("ui.settings.app.code_integrity"))
+                            .on_hover_text(t!("ui.settings.app.code_integrity_tooltip"));
+                        let mut changed = false;
+                        for choice in CodeIntegrityPreference::ALL {
+                            changed |= ui.radio_value(&mut preference, choice, t!(choice.key())).changed();
+                        }
+                        if changed {
+                            self.tab_state.persisted.write().settings.app.code_integrity = preference;
+                        }
+                    });
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label(t!("ui.settings.app.language"));
+                    let current_locale =
+                        self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".into());
+                    let current_name = wt_translations::language_name(&current_locale).unwrap_or("English");
+                    egui::ComboBox::from_id_salt("language_selector").selected_text(current_name).show_ui(ui, |ui| {
+                        for lang in wt_translations::SUPPORTED_LANGUAGES {
+                            if ui.selectable_label(current_locale == lang.code, lang.native_name).clicked() {
+                                self.tab_state.persisted.write().settings.app.locale = Some(lang.code.to_string());
+                                rust_i18n::set_locale(lang.code);
+
+                                // Swap the gettext catalog so WoWs translations (ship names,
+                                // achievements, etc.) resolve in the new locale without a
+                                // full game data reload.
+                                if let Some(data_map) = &self.tab_state.build_cache {
+                                    data_map.reload_translations(lang.code);
+                                }
+
+                                // Refresh translated strings on all loaded replays.
+                                for replay in self.tab_state.all_open_replays() {
+                                    if let Some(report) = &mut replay.write().ui_report {
+                                        report.refresh_translations();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+                if ui
+                    .button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.settings.app.open_data_dir")))
+                    .on_hover_text(t!("ui.settings.app.open_data_dir_tooltip"))
+                    .clicked()
+                    && let Some(dir) = crate::storage_dir()
+                {
+                    let _ = std::fs::create_dir_all(&dir);
+                    crate::util::open_directory(&dir);
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label(t!("ui.settings.app.proxy_url"));
+                    // `None` is "no manual override set", which the text field
+                    // shows as empty rather than as a placeholder value.
+                    let mut proxy_url =
+                        self.tab_state.persisted.read().settings.app.proxy_url.clone().unwrap_or_default();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut proxy_url)
+                            .hint_text(t!("ui.settings.app.proxy_url_hint"))
+                            .desired_width(ui.available_width()),
+                    );
+                    if response.changed() {
+                        let trimmed = proxy_url.trim();
+                        self.tab_state.persisted.write().settings.app.proxy_url =
+                            (!trimmed.is_empty()).then(|| trimmed.to_string());
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            // ── World of Warships Settings ────────────────────────────
+            section_header(
+                ui,
+                icons::FOLDER_OPEN,
+                &t!("ui.settings.wows.heading"),
+                &t!("ui.settings.wows.description"),
+            );
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let wows_dir_dialog = &mut self.tab_state.settings_dialogs.wows_dir;
+                        if ui
+                            .add_enabled(
+                                self.tab_state.can_change_wows_dir && !wows_dir_dialog.is_pending(),
+                                egui::Button::new(t!("ui.buttons.choose")),
+                            )
+                            .clicked()
+                        {
+                            wows_dir_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+                        }
+
+                        let show_text_error = self.tab_state.wows_dir_invalid;
+
+                        let mut wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+                        let response = ui.add_sized(
+                            ui.available_size(),
+                            egui::TextEdit::singleline(&mut wows_dir)
+                                .id(TabState::wows_dir_field_id())
+                                .interactive(self.tab_state.can_change_wows_dir)
+                                .hint_text(t!("ui.settings.wows.directory_hint"))
+                                .text_color_opt(show_text_error.then_some(ui.sem().error)),
+                        );
+
+                        // If someone pastes or types a path, revalidate and reload if valid.
+                        if response.changed() {
+                            self.tab_state.persisted.write().settings.game.wows_dir = wows_dir.clone();
+                            self.tab_state.revalidate_wows_dir();
+                            if !self.tab_state.wows_dir_invalid && !wows_dir.is_empty() {
+                                let path = Path::new(&wows_dir).to_owned();
+                                self.tab_state.prevent_changing_wows_dir();
+                                update_background_task!(
+                                    self.tab_state.background_tasks,
+                                    Some(self.tab_state.load_game_data(path))
+                                );
+                            }
+                        }
+                    });
+                });
+            });
+
+            // Game data cache settings
+            {
+                let mut auto_dump = self.tab_state.persisted.read().settings.game.auto_dump_game_data;
+                ui.checkbox(&mut auto_dump, t!("ui.settings.wows.cache.auto_dump"));
+                if auto_dump != self.tab_state.persisted.read().settings.game.auto_dump_game_data {
+                    self.tab_state.persisted.write().settings.game.auto_dump_game_data = auto_dump;
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label(t!("ui.settings.wows.cache.directory_label"));
+                    let mut cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+                    let default_label = crate::task::replays::game_data_dump_base()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut cache_dir)
+                            .hint_text(&default_label)
+                            .desired_width(ui.available_width() - 70.0),
+                    );
+                    if response.changed() {
+                        self.tab_state.set_game_data_cache_dir(cache_dir);
+                    }
+                    let cache_dir_dialog = &mut self.tab_state.settings_dialogs.cache_dir;
+                    if ui
+                        .add_enabled(
+                            !cache_dir_dialog.is_pending(),
+                            egui::Button::new(t!("ui.settings.wows.cache.browse")),
+                        )
+                        .clicked()
+                    {
+                        cache_dir_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+                    }
+                });
+
+                let cache_dir_setting = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+                if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir_setting)
+                    && dump_base.exists()
+                {
+                    let stats = match self.tab_state.game_data_cache_stats {
+                        Some(stats) => stats,
+                        None => {
+                            let stats = wows_data_mgr::dump::cache_stats(&dump_base);
+                            self.tab_state.game_data_cache_stats = Some(stats);
+                            stats
+                        }
+                    };
+                    if stats.version_count > 0 {
+                        ui.horizontal(|ui| {
+                            ui.label(t!(
+                                "ui.settings.wows.cache.stats",
+                                size = humansize::format_size(stats.total_bytes, humansize::BINARY),
+                                count = stats.version_count,
+                            ));
+                            if ui.button(t!("ui.settings.wows.cache.open_folder")).clicked() {
+                                crate::util::open_directory(&dump_base);
+                            }
+                            if stats.version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
+                                wows_data_mgr::dump::delete_old_versions(&dump_base);
+                                self.tab_state.game_data_cache_stats = None;
+                            }
+                        });
+
+                        ui.horizontal(|ui| {
+                            let checking = self.tab_state.checking_game_data_updates;
+                            if ui
+                                .add_enabled(!checking, egui::Button::new(t!("ui.settings.wows.cache.check_updates")))
+                                .clicked()
+                            {
+                                self.tab_state.check_game_data_updates();
+                            }
+                            if checking {
+                                ui.spinner();
+                            }
+
+                            let validating = self.tab_state.validating_game_data_cache;
+                            if ui
+                                .add_enabled(!validating, egui::Button::new(t!("ui.settings.wows.cache.validate")))
+                                .on_hover_text(t!("ui.settings.wows.cache.validate_tooltip"))
+                                .clicked()
+                            {
+                                self.tab_state.validate_game_data_cache();
+                            }
+                            if validating {
+                                ui.spinner();
+                            }
+                        });
+
+                        let update_count = self.tab_state.game_data_updates.len();
+                        if update_count > 0 {
+                            ui.horizontal(|ui| {
+                                ui.label(t!("ui.settings.wows.cache.updates_available", count = update_count));
+                                if ui.button(t!("ui.settings.wows.cache.update_all")).clicked() {
+                                    self.tab_state.update_all_game_data();
+                                }
+                            });
+                        }
+
+                        let repair_count = self.tab_state.game_data_repair.len();
+                        if repair_count > 0 {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(t!("ui.settings.wows.cache.repair_needed", count = repair_count))
+                                        .color(ui.sem().error),
+                                );
+                                if ui.button(t!("ui.settings.wows.cache.repair")).clicked() {
+                                    self.tab_state.repair_game_data_cache();
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
+            ui.add_space(12.0);
+
+            // ── Replay Settings ───────────────────────────────────────
+            section_header(ui, icons::TABLE, &t!("ui.settings.replay.heading"), &t!("ui.settings.replay.description"));
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+
+                // 2-column grid for the column visibility checkboxes
+                egui::Grid::new("replay_columns_grid").num_columns(2).spacing([40.0, 4.0]).show(ui, |ui| {
+                    let mut p = self.tab_state.persisted.write();
+                    let rs = &mut p.settings.replay;
+
+                    ui.checkbox(&mut rs.show_raw_xp, t!("ui.settings.replay.show_raw_xp"));
+                    ui.checkbox(&mut rs.show_entity_id, t!("ui.settings.replay.show_entity_id"));
+                    ui.end_row();
+
+                    ui.checkbox(&mut rs.show_observed_damage, t!("ui.settings.replay.show_observed_damage"));
+                    ui.end_row();
+                });
+
+                {
+                    let mut p = self.tab_state.persisted.write();
+                    let rs = &mut p.settings.replay;
+                    ui.checkbox(&mut rs.enable_replay_previews, t!("ui.settings.replay.enable_previews"))
+                        .on_hover_text(t!("ui.settings.replay.enable_previews_tooltip"));
+                }
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    let mut alert_data_export_change = false;
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let auto_export_dialog = &mut self.tab_state.settings_dialogs.auto_export_dir;
+                        if ui
+                            .add_enabled(!auto_export_dialog.is_pending(), egui::Button::new(t!("ui.buttons.choose")))
+                            .clicked()
+                        {
+                            auto_export_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
+                        }
+
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            let mut p = self.tab_state.persisted.write();
+                            let rs = &mut p.settings.replay;
+
+                            if ui
+                                .checkbox(&mut rs.auto_export_data, t!("ui.settings.replay.auto_export_data"))
+                                .changed()
+                            {
+                                alert_data_export_change = true;
+                            }
+
+                            let previously_selected_format = rs.auto_export_format;
+                            egui::ComboBox::from_id_salt("auto_export_format_combobox")
+                                .selected_text(rs.auto_export_format.as_str())
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut rs.auto_export_format,
+                                        ReplayExportFormat::Json,
+                                        t!("ui.settings.replay.format_json"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut rs.auto_export_format,
+                                        ReplayExportFormat::Csv,
+                                        t!("ui.settings.replay.format_csv"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut rs.auto_export_format,
+                                        ReplayExportFormat::Cbor,
+                                        t!("ui.settings.replay.format_cbor"),
+                                    );
+                                });
+                            if previously_selected_format != rs.auto_export_format {
+                                alert_data_export_change = true;
+                            }
+                            let path = Path::new(&rs.auto_export_path);
+                            let path_is_valid = path.exists() && path.is_dir();
+                            let response = ui.add_sized(
+                                ui.available_size(),
+                                egui::TextEdit::singleline(&mut rs.auto_export_path)
+                                    .hint_text(t!("ui.settings.replay.export_path_hint"))
+                                    .text_color_opt((!path_is_valid).then_some(ui.sem().error)),
+                            );
+
+                            if response.lost_focus() {
+                                let path = Path::new(&rs.auto_export_path);
+                                if path.exists() && path.is_dir() {
+                                    alert_data_export_change = true;
+                                }
+                            }
+                        });
+                    });
+
+                    if alert_data_export_change {
+                        self.notify_data_export_change();
+                    }
+                });
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Reads all replays into the durable index so the player tracker,
+                // and any future search UI, can query them without re-parsing.
+                let reindex_deps = crate::task::ReconcileIndexDeps::from_tab_state(self.tab_state);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            reindex_deps.is_some(),
+                            egui::Button::new(t!("ui.settings.replay.index_all_replays")),
+                        )
+                        .clicked()
+                        && let Some(deps) = reindex_deps.clone()
+                    {
+                        crate::update_background_task!(
+                            self.tab_state.background_tasks,
+                            Some(crate::task::start_reconcile_index(
+                                deps,
+                                crate::task::ReindexMode::FillGaps,
+                                self.tab_state.egui_ctx.clone()
+                            ))
+                        );
+                    }
+
+                    if ui
+                        .add_enabled(
+                            reindex_deps.is_some(),
+                            egui::Button::new(t!("ui.settings.replay.reindex_all_replays")),
+                        )
+                        .on_hover_text(t!("ui.settings.replay.reindex_all_replays_hover"))
+                        .clicked()
+                    {
+                        self.tab_state.refresh_persisted_data_requested = true;
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            // ── Session Settings ──────────────────────────────────────
+            section_header(
+                ui,
+                icons::USERS,
+                &t!("ui.settings.session.heading"),
+                &t!("ui.settings.session.description"),
+            );
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.label(t!("ui.settings.session.display_name"));
+                {
+                    let mut p = self.tab_state.persisted.write();
+                    ui.text_edit_singleline(&mut p.settings.collab.display_name);
+                    ui.checkbox(
+                        &mut p.settings.collab.suppress_p2p_ip_warning,
+                        t!("ui.settings.session.suppress_ip_warning"),
+                    )
+                    .on_hover_text(t!("ui.settings.session.ip_warning_tooltip"));
+                    ui.checkbox(
+                        &mut p.settings.collab.disable_auto_open_session_windows,
+                        t!("ui.settings.session.disable_auto_open"),
+                    )
+                    .on_hover_text(t!("ui.settings.session.auto_open_tooltip"));
+                }
+            });
+
+            ui.add_space(12.0);
+
+            section_header(
+                ui,
+                icons::BROADCAST,
+                &t!("ui.settings.twitch.heading"),
+                &t!("ui.settings.twitch.description"),
+            );
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                if ui
+                    .button(wt_translations::icon_t(icons::BROWSER, &t!("ui.settings.twitch.get_token")))
+                    .on_hover_text(t!("ui.settings.twitch.get_token_tooltip"))
+                    .clicked()
+                {
+                    ui.ctx().open_url(OpenUrl::new_tab("https://chatterino.com/client_login"));
+                }
+
+                let state = {
+                    let has_token = self.tab_state.persisted.read().settings.integrations.twitch_token.is_some();
+                    let is_valid = self.tab_state.twitch_state.read().token_is_valid();
+                    let validation_failed = self.tab_state.twitch_state.read().token_validation_failed;
+                    token_state(has_token, is_valid, validation_failed)
+                };
+
+                let (label, glyph, tint) = match state {
+                    TokenState::Absent => {
+                        (t!("ui.settings.twitch.paste_token_no_token"), Some(icons::WARNING), ui.sem().warn)
+                    }
+                    TokenState::Valid => {
+                        (t!("ui.settings.twitch.paste_token_valid"), Some(icons::CHECK_CIRCLE), ui.sem().ok)
+                    }
+                    TokenState::Unvalidated => {
+                        (t!("ui.settings.twitch.paste_token_unvalidated"), None, ui.visuals().text_color())
+                    }
+                    TokenState::Rejected => {
+                        (t!("ui.settings.twitch.paste_token_invalid"), Some(icons::X_CIRCLE), ui.sem().error)
+                    }
+                };
+
+                let text = match glyph {
+                    Some(glyph) => format!("{} {} {}", icons::CLIPBOARD_TEXT, label, glyph),
+                    None => format!("{} {}", icons::CLIPBOARD_TEXT, label),
+                };
+                let mut button = egui::Button::new(RichText::new(text).color(tint));
+                if state == TokenState::Rejected {
+                    button = button.stroke(Stroke::new(1.0, ui.sem().error));
+                }
+
+                if ui.add(button).clicked()
+                    && let Ok(mut clipboard) = arboard::Clipboard::new()
+                    && let Ok(contents) = clipboard.get_text()
+                {
+                    let token: Result<Token, _> = contents.parse();
+                    if let Ok(token) = token
+                        && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()
+                    {
+                        self.tab_state.persisted.write().settings.integrations.twitch_token = Some(token.clone());
+                        let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
+                    }
+                }
+                ui.label(t!("ui.settings.twitch.monitored_channel"));
+                let mut monitored_channel =
+                    self.tab_state.persisted.read().settings.integrations.twitch_monitored_channel.clone();
+                let response = ui.text_edit_singleline(&mut monitored_channel);
+                if response.changed() {
+                    self.tab_state.persisted.write().settings.integrations.twitch_monitored_channel =
+                        monitored_channel.clone();
+                }
+                if response.lost_focus()
+                    && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()
+                {
+                    let _ = tx.blocking_send(crate::twitch::TwitchUpdate::User(monitored_channel));
+                }
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod token_state_tests {
+    use super::TokenState;
+    use super::token_state;
+
+    #[test]
+    fn no_stored_token_is_absent_regardless_of_the_validity_flag() {
+        // The validity flag and the validation-failed flag are separate reads
+        // from a separate lock and can still say `true` from a token that has
+        // since been cleared. Absent has to win, or the button reports a
+        // working (or rejected) token with none stored.
+        assert_eq!(token_state(false, false, false), TokenState::Absent);
+        assert_eq!(token_state(false, true, false), TokenState::Absent);
+        assert_eq!(token_state(false, false, true), TokenState::Absent);
+        assert_eq!(token_state(false, true, true), TokenState::Absent);
+    }
+
+    #[test]
+    fn a_validation_failure_is_rejected_even_if_is_valid_says_otherwise() {
+        // A failed validation attempt is the only thing that should ever
+        // paint the button red; it outranks a stale or contradictory
+        // `is_valid` read.
+        assert_eq!(token_state(true, false, true), TokenState::Rejected);
+        assert_eq!(token_state(true, true, true), TokenState::Rejected);
+    }
+
+    #[test]
+    fn a_stored_token_that_has_not_failed_validation_follows_the_validity_flag() {
+        assert_eq!(token_state(true, true, false), TokenState::Valid);
+    }
+
+    #[test]
+    fn unchecked_token_is_unvalidated_not_rejected() {
+        // The startup window (before the background validation round-trip
+        // completes) and the offline case both leave `is_valid == false`
+        // with no validation attempt having failed yet. That must read as
+        // neutral, not as a rejection we have not actually proven.
+        assert_eq!(token_state(true, false, false), TokenState::Unvalidated);
+    }
+}

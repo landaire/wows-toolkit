@@ -1,0 +1,49 @@
+[package]
+name = "landaire-ui"
+description = "Themed surfaces and test tooling for zgui applications"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "landaire_ui"
+path = "src/lib.rs"
+
+[features]
+# Opening a view headlessly to drive it, and to write what it shows to a PNG.
+test-support = [
+    "dep:accesskit_consumer",
+    "dep:image",
+    "dep:zgui-platform-headless",
+    "dep:zgui-render-vector-vello",
+    "dep:zgui-render-wgpu",
+    "dep:zgui-testkit-scene",
+]
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+zgui.workspace = true
+zgui-ui.workspace = true
+zgui-ui-icons.workspace = true
+zgui-ui-primitives.workspace = true
+zgui-ui-tokens.workspace = true
+
+accesskit_consumer = { workspace = true, optional = true }
+image = { workspace = true, features = ["png"], optional = true }
+zgui-platform-headless = { workspace = true, optional = true }
+zgui-render-vector-vello = { workspace = true, optional = true }
+zgui-render-wgpu = { workspace = true, optional = true }
+zgui-testkit-scene = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta.workspace = true
+serde_json.workspace = true
+
+[[example]]
+name = "gallery"
+required-features = ["test-support"]
+# Its tests open every section.
+test = true

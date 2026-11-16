@@ -1,0 +1,1110 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: yamato
+---
+ship: "T10 Yamato (battleship, Japan)"
+hull: Yamato
+shooter_tiers:
+  min: 8
+  max: 11
+shooters:
+  - group: destroyer AP 127 mm
+    role: destroyer_ap
+    ammo: AP
+    caliber_mm: 127
+    ships_with_caliber: 31
+    ships_in_role: 98
+    ship: "T8 Benson (destroyer, USA)"
+    projectile: 127 mm AP/SC Mk38
+    param: PAPA004_Shell_127mm_AP_SC_Mk_38
+    max_range_km: 10.54
+    fuse_threshold_mm: 21
+  - group: light cruiser AP 152 mm
+    role: light_cruiser_ap
+    ammo: AP
+    caliber_mm: 152
+    ships_with_caliber: 33
+    ships_in_role: 54
+    ship: "T8 Edinburgh (cruiser, United_Kingdom)"
+    projectile: 152 mm AP 6crh Mk IV
+    param: PBPA016_152MM_AP_6CRH_MK4
+    max_range_km: 14.02
+    fuse_threshold_mm: 12
+  - group: heavy cruiser AP 203 mm
+    role: heavy_cruiser_ap
+    ammo: AP
+    caliber_mm: 203
+    ships_with_caliber: 44
+    ships_in_role: 99
+    ship: "T10 Hindenburg (cruiser, Germany)"
+    projectile: 203 mm P.Spr.Gr. L/4.4
+    param: PGPA023_203MM_AP_PZ_SPR_GGR_L4_4
+    max_range_km: 17.83
+    fuse_threshold_mm: 34
+  - group: battleship AP 406 mm
+    role: battleship_ap
+    ammo: AP
+    caliber_mm: 406
+    ships_with_caliber: 38
+    ships_in_role: 122
+    ship: "T9 Minnesota (battleship, USA)"
+    projectile: 406 mm AP Mk8 mod. 1
+    param: PAPA128_Shell_406mm_AP_AP_Mk_8_Mod1
+    max_range_km: 21.18
+    fuse_threshold_mm: 68
+  - group: battleship AP 457 mm
+    role: battleship_ap
+    ammo: AP
+    caliber_mm: 457
+    ships_with_caliber: 14
+    ships_in_role: 122
+    ship: "T9 Georgia (battleship, USA, premium)"
+    projectile: 457 mm AP Type B
+    param: PAPA105_457MM_AP_GEORGIA_SH
+    max_range_km: 20.04
+    fuse_threshold_mm: 76
+  - group: cruiser HE 203 mm
+    role: cruiser_he
+    ammo: HE
+    caliber_mm: 203
+    ships_with_caliber: 39
+    ships_in_role: 135
+    ship: "T9 Ibuki (cruiser, Japan)"
+    projectile: 203 mm HE Type0
+    param: PJPA009_Shell_203mm_HE_C_Type_0
+    max_range_km: 15.04
+    penetration_mm: 34
+  - group: SAP 203 mm
+    role: sap
+    ammo: SAP
+    caliber_mm: 203
+    ships_with_caliber: 5
+    ships_in_role: 36
+    ship: "T8 Amalfi (cruiser, Italy)"
+    projectile: 203 mm proiettili CS 1924 mod.2
+    param: PIPA031_203MM_55_1924_CS
+    max_range_km: 14.68
+    penetration_mm: 54
+bands:
+  - band: close
+    label: "close, 5 to 10 km"
+    groups:
+      - group: destroyer AP 127 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 12707
+            citadel_pct: 0
+            penetration_pct: 46.5
+            overpenetration_pct: 5.5
+            ricochet_pct: 33.5
+            shatter_pct: 14.6
+            fuse_armed_pct: 16.2
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 10
+                lower_pct: 90
+              fuse_armed:
+                higher_pct: 1
+                lower_pct: 99
+          - aspect: angled_30
+            rays: 11581
+            citadel_pct: 0
+            penetration_pct: 43.3
+            overpenetration_pct: 4.3
+            ricochet_pct: 37.3
+            shatter_pct: 15.1
+            fuse_armed_pct: 12.1
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 25
+                lower_pct: 74
+              fuse_armed:
+                higher_pct: 1
+                lower_pct: 98
+          - aspect: angled_45
+            rays: 10224
+            citadel_pct: 0
+            penetration_pct: 43.8
+            overpenetration_pct: 2.6
+            ricochet_pct: 38.5
+            shatter_pct: 15.1
+            fuse_armed_pct: 6.9
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 37
+                lower_pct: 62
+              fuse_armed:
+                higher_pct: 51
+                lower_pct: 48
+      - group: light cruiser AP 152 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 11561
+            citadel_pct: 0
+            penetration_pct: 65.9
+            overpenetration_pct: 1.5
+            ricochet_pct: 17.2
+            shatter_pct: 15.3
+            fuse_armed_pct: 33.7
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 41
+                lower_pct: 59
+              fuse_armed:
+                higher_pct: 7
+                lower_pct: 90
+          - aspect: angled_30
+            rays: 10379
+            citadel_pct: 0
+            penetration_pct: 64.2
+            overpenetration_pct: 1.5
+            ricochet_pct: 17.9
+            shatter_pct: 16.4
+            fuse_armed_pct: 29.5
+            ranks:
+              citadel:
+                higher_pct: 1
+                lower_pct: 0
+              damaging:
+                higher_pct: 41
+                lower_pct: 59
+              fuse_armed:
+                higher_pct: 9
+                lower_pct: 91
+          - aspect: angled_45
+            rays: 8974
+            citadel_pct: 0
+            penetration_pct: 62.9
+            overpenetration_pct: 1.3
+            ricochet_pct: 18.5
+            shatter_pct: 17.3
+            fuse_armed_pct: 25
+            ranks:
+              citadel:
+                higher_pct: 1
+                lower_pct: 0
+              damaging:
+                higher_pct: 38
+                lower_pct: 62
+              fuse_armed:
+                higher_pct: 10
+                lower_pct: 89
+      - group: heavy cruiser AP 203 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 10894
+            citadel_pct: 0
+            penetration_pct: 7.9
+            overpenetration_pct: 43.9
+            ricochet_pct: 30.5
+            shatter_pct: 17.7
+            fuse_armed_pct: 1
+            ranks:
+              citadel:
+                higher_pct: 12
+                lower_pct: 0
+              damaging:
+                higher_pct: 78
+                lower_pct: 22
+              fuse_armed:
+                higher_pct: 63
+                lower_pct: 31
+          - aspect: angled_30
+            rays: 9775
+            citadel_pct: 0
+            penetration_pct: 30.4
+            overpenetration_pct: 25.6
+            ricochet_pct: 28.3
+            shatter_pct: 15.6
+            fuse_armed_pct: 11
+            ranks:
+              citadel:
+                higher_pct: 4
+                lower_pct: 0
+              damaging:
+                higher_pct: 42
+                lower_pct: 57
+              fuse_armed:
+                higher_pct: 4
+                lower_pct: 96
+          - aspect: angled_45
+            rays: 8358
+            citadel_pct: 0
+            penetration_pct: 39.5
+            overpenetration_pct: 17.3
+            ricochet_pct: 27.6
+            shatter_pct: 15.5
+            fuse_armed_pct: 13.4
+            ranks:
+              citadel:
+                higher_pct: 9
+                lower_pct: 0
+              damaging:
+                higher_pct: 14
+                lower_pct: 83
+              fuse_armed:
+                higher_pct: 2
+                lower_pct: 96
+      - group: battleship AP 406 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 11001
+            citadel_pct: 10.8
+            penetration_pct: 6.2
+            overpenetration_pct: 50.9
+            ricochet_pct: 29.8
+            shatter_pct: 2.4
+            fuse_armed_pct: 0.2
+            ranks:
+              citadel:
+                higher_pct: 6
+                lower_pct: 94
+              damaging:
+                higher_pct: 91
+                lower_pct: 9
+              fuse_armed:
+                higher_pct: 80
+                lower_pct: 12
+          - aspect: angled_30
+            rays: 9913
+            citadel_pct: 10.3
+            penetration_pct: 7.5
+            overpenetration_pct: 44.5
+            ricochet_pct: 35.6
+            shatter_pct: 2.1
+            fuse_armed_pct: 0.4
+            ranks:
+              citadel:
+                higher_pct: 10
+                lower_pct: 90
+              damaging:
+                higher_pct: 93
+                lower_pct: 7
+              fuse_armed:
+                higher_pct: 62
+                lower_pct: 36
+          - aspect: angled_45
+            rays: 8498
+            citadel_pct: 10.2
+            penetration_pct: 9.2
+            overpenetration_pct: 37.6
+            ricochet_pct: 39.2
+            shatter_pct: 3.9
+            fuse_armed_pct: 0.4
+            ranks:
+              citadel:
+                higher_pct: 7
+                lower_pct: 91
+              damaging:
+                higher_pct: 93
+                lower_pct: 6
+              fuse_armed:
+                higher_pct: 53
+                lower_pct: 40
+      - group: battleship AP 457 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 11013
+            citadel_pct: 10.8
+            penetration_pct: 6.8
+            overpenetration_pct: 51.1
+            ricochet_pct: 30
+            shatter_pct: 1.3
+            fuse_armed_pct: 0.2
+            ranks:
+              citadel:
+                higher_pct: 6
+                lower_pct: 93
+              damaging:
+                higher_pct: 90
+                lower_pct: 9
+              fuse_armed:
+                higher_pct: 93
+                lower_pct: 2
+          - aspect: angled_30
+            rays: 9912
+            citadel_pct: 10.2
+            penetration_pct: 7.8
+            overpenetration_pct: 45
+            ricochet_pct: 35.7
+            shatter_pct: 1.3
+            fuse_armed_pct: 0.3
+            ranks:
+              citadel:
+                higher_pct: 10
+                lower_pct: 89
+              damaging:
+                higher_pct: 94
+                lower_pct: 6
+              fuse_armed:
+                higher_pct: 73
+                lower_pct: 19
+          - aspect: angled_45
+            rays: 8508
+            citadel_pct: 11.4
+            penetration_pct: 8.5
+            overpenetration_pct: 37.8
+            ricochet_pct: 40.4
+            shatter_pct: 1.9
+            fuse_armed_pct: 0.2
+            ranks:
+              citadel:
+                higher_pct: 9
+                lower_pct: 90
+              damaging:
+                higher_pct: 95
+                lower_pct: 5
+              fuse_armed:
+                higher_pct: 77
+                lower_pct: 15
+      - group: cruiser HE 203 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 11177
+            citadel_pct: 0
+            penetration_pct: 70.9
+            ricochet_pct: 0
+            shatter_pct: 29.1
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 27
+                lower_pct: 72
+          - aspect: angled_30
+            rays: 10063
+            citadel_pct: 0
+            penetration_pct: 68
+            ricochet_pct: 0
+            shatter_pct: 32
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 35
+                lower_pct: 64
+          - aspect: angled_45
+            rays: 8649
+            citadel_pct: 0
+            penetration_pct: 67
+            ricochet_pct: 0
+            shatter_pct: 33
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 37
+                lower_pct: 63
+      - group: SAP 203 mm
+        ranges_km:
+          - 5
+          - 7.5
+          - 10
+        aspects:
+          - aspect: broadside
+            rays: 10803
+            citadel_pct: 0
+            penetration_pct: 72.7
+            ricochet_pct: 9.5
+            shatter_pct: 17.8
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 37
+                lower_pct: 63
+          - aspect: angled_30
+            rays: 9644
+            citadel_pct: 0
+            penetration_pct: 70
+            ricochet_pct: 10.4
+            shatter_pct: 19.6
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 40
+                lower_pct: 59
+          - aspect: angled_45
+            rays: 8266
+            citadel_pct: 0
+            penetration_pct: 69
+            ricochet_pct: 11
+            shatter_pct: 20
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 38
+                lower_pct: 62
+  - band: moderate
+    label: "moderate, 12 to 15 km"
+    groups:
+      - group: light cruiser AP 152 mm
+        ranges_km:
+          - 12
+          - 14
+        aspects:
+          - aspect: broadside
+            rays: 9592
+            citadel_pct: 0
+            penetration_pct: 62
+            overpenetration_pct: 0.8
+            ricochet_pct: 1.1
+            shatter_pct: 36.2
+            fuse_armed_pct: 19.3
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 75
+                lower_pct: 25
+              fuse_armed:
+                higher_pct: 11
+                lower_pct: 86
+          - aspect: angled_30
+            rays: 8846
+            citadel_pct: 0
+            penetration_pct: 57.9
+            overpenetration_pct: 0.6
+            ricochet_pct: 3.2
+            shatter_pct: 38.3
+            fuse_armed_pct: 15.1
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 80
+                lower_pct: 20
+              fuse_armed:
+                higher_pct: 21
+                lower_pct: 78
+          - aspect: angled_45
+            rays: 8018
+            citadel_pct: 0
+            penetration_pct: 55.8
+            overpenetration_pct: 0.5
+            ricochet_pct: 4.4
+            shatter_pct: 39.3
+            fuse_armed_pct: 9.8
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 78
+                lower_pct: 21
+              fuse_armed:
+                higher_pct: 40
+                lower_pct: 60
+      - group: heavy cruiser AP 203 mm
+        ranges_km:
+          - 12
+          - 14
+        aspects:
+          - aspect: broadside
+            rays: 8240
+            citadel_pct: 0
+            penetration_pct: 8.8
+            overpenetration_pct: 26.3
+            ricochet_pct: 49
+            shatter_pct: 15.8
+            fuse_armed_pct: 2.4
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 79
+                lower_pct: 19
+              fuse_armed:
+                higher_pct: 25
+                lower_pct: 73
+          - aspect: angled_30
+            rays: 7463
+            citadel_pct: 0
+            penetration_pct: 29.3
+            overpenetration_pct: 14.9
+            ricochet_pct: 41
+            shatter_pct: 14.8
+            fuse_armed_pct: 8.2
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 28
+                lower_pct: 70
+              fuse_armed:
+                higher_pct: 1
+                lower_pct: 98
+          - aspect: angled_45
+            rays: 6509
+            citadel_pct: 0
+            penetration_pct: 33
+            overpenetration_pct: 10.1
+            ricochet_pct: 42.4
+            shatter_pct: 14.5
+            fuse_armed_pct: 8.9
+            ranks:
+              citadel:
+                higher_pct: 6
+                lower_pct: 0
+              damaging:
+                higher_pct: 15
+                lower_pct: 84
+              fuse_armed:
+                higher_pct: 1
+                lower_pct: 98
+      - group: battleship AP 406 mm
+        ranges_km:
+          - 12
+          - 14
+        aspects:
+          - aspect: broadside
+            rays: 8182
+            citadel_pct: 9.6
+            penetration_pct: 5.3
+            overpenetration_pct: 35.7
+            ricochet_pct: 45.9
+            shatter_pct: 3.5
+            fuse_armed_pct: 0.1
+            ranks:
+              citadel:
+                higher_pct: 9
+                lower_pct: 90
+              damaging:
+                higher_pct: 93
+                lower_pct: 6
+              fuse_armed:
+                higher_pct: 72
+                lower_pct: 23
+          - aspect: angled_30
+            rays: 7422
+            citadel_pct: 8.6
+            penetration_pct: 6.6
+            overpenetration_pct: 30.5
+            ricochet_pct: 50.6
+            shatter_pct: 3.7
+            fuse_armed_pct: 0.2
+            ranks:
+              citadel:
+                higher_pct: 9
+                lower_pct: 90
+              damaging:
+                higher_pct: 91
+                lower_pct: 9
+              fuse_armed:
+                higher_pct: 63
+                lower_pct: 32
+          - aspect: angled_45
+            rays: 6469
+            citadel_pct: 2.6
+            penetration_pct: 6.5
+            overpenetration_pct: 25.5
+            ricochet_pct: 53.3
+            shatter_pct: 12
+            fuse_armed_pct: 0
+            ranks:
+              citadel:
+                higher_pct: 23
+                lower_pct: 74
+              damaging:
+                higher_pct: 95
+                lower_pct: 5
+              fuse_armed:
+                higher_pct: 69
+                lower_pct: 0
+      - group: battleship AP 457 mm
+        ranges_km:
+          - 12
+          - 14
+        aspects:
+          - aspect: broadside
+            rays: 8171
+            citadel_pct: 9.6
+            penetration_pct: 6.9
+            overpenetration_pct: 36.1
+            ricochet_pct: 45.9
+            shatter_pct: 1.4
+            fuse_armed_pct: 0
+            ranks:
+              citadel:
+                higher_pct: 10
+                lower_pct: 89
+              damaging:
+                higher_pct: 91
+                lower_pct: 9
+              fuse_armed:
+                higher_pct: 79
+                lower_pct: 0
+          - aspect: angled_30
+            rays: 7402
+            citadel_pct: 9.3
+            penetration_pct: 7.9
+            overpenetration_pct: 31.3
+            ricochet_pct: 50.3
+            shatter_pct: 1.2
+            fuse_armed_pct: 0.1
+            ranks:
+              citadel:
+                higher_pct: 10
+                lower_pct: 89
+              damaging:
+                higher_pct: 88
+                lower_pct: 11
+              fuse_armed:
+                higher_pct: 74
+                lower_pct: 15
+          - aspect: angled_45
+            rays: 6445
+            citadel_pct: 8.4
+            penetration_pct: 7.6
+            overpenetration_pct: 26
+            ricochet_pct: 53.4
+            shatter_pct: 4.6
+            fuse_armed_pct: 0.1
+            ranks:
+              citadel:
+                higher_pct: 9
+                lower_pct: 90
+              damaging:
+                higher_pct: 93
+                lower_pct: 7
+              fuse_armed:
+                higher_pct: 70
+                lower_pct: 11
+      - group: cruiser HE 203 mm
+        ranges_km:
+          - 12
+          - 14
+        aspects:
+          - aspect: broadside
+            rays: 8748
+            citadel_pct: 0
+            penetration_pct: 63.8
+            ricochet_pct: 0
+            shatter_pct: 36.2
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 42
+                lower_pct: 58
+          - aspect: angled_30
+            rays: 7969
+            citadel_pct: 0
+            penetration_pct: 61.7
+            ricochet_pct: 0
+            shatter_pct: 38.3
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 46
+                lower_pct: 54
+          - aspect: angled_45
+            rays: 7051
+            citadel_pct: 0
+            penetration_pct: 59.9
+            ricochet_pct: 0
+            shatter_pct: 40.1
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 51
+                lower_pct: 49
+      - group: SAP 203 mm
+        ranges_km:
+          - 12
+          - 14
+        aspects:
+          - aspect: broadside
+            rays: 8002
+            citadel_pct: 0
+            penetration_pct: 63.6
+            ricochet_pct: 20.3
+            shatter_pct: 16
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 38
+                lower_pct: 62
+          - aspect: angled_30
+            rays: 7208
+            citadel_pct: 0
+            penetration_pct: 62.1
+            ricochet_pct: 19
+            shatter_pct: 19
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 38
+                lower_pct: 59
+          - aspect: angled_45
+            rays: 6260
+            citadel_pct: 0
+            penetration_pct: 60.2
+            ricochet_pct: 20.1
+            shatter_pct: 19.8
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 40
+                lower_pct: 60
+    excluded:
+      - group: destroyer AP 127 mm
+        max_range_km: 10.54
+  - band: long
+    label: "long, 15 km and beyond (20 km for battleships only)"
+    groups:
+      - group: heavy cruiser AP 203 mm
+        ranges_km:
+          - 16
+        aspects:
+          - aspect: broadside
+            rays: 4494
+            citadel_pct: 0
+            penetration_pct: 10.7
+            overpenetration_pct: 18.6
+            ricochet_pct: 57.6
+            shatter_pct: 13.1
+            fuse_armed_pct: 3.9
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 79
+                lower_pct: 21
+              fuse_armed:
+                higher_pct: 2
+                lower_pct: 96
+          - aspect: angled_30
+            rays: 4110
+            citadel_pct: 0
+            penetration_pct: 29.8
+            overpenetration_pct: 9.8
+            ricochet_pct: 46.9
+            shatter_pct: 13.5
+            fuse_armed_pct: 8.2
+            ranks:
+              citadel:
+                higher_pct: 0
+                lower_pct: 0
+              damaging:
+                higher_pct: 15
+                lower_pct: 84
+              fuse_armed:
+                higher_pct: 1
+                lower_pct: 98
+          - aspect: angled_45
+            rays: 3659
+            citadel_pct: 0
+            penetration_pct: 28.5
+            overpenetration_pct: 6.5
+            ricochet_pct: 52.3
+            shatter_pct: 12.7
+            fuse_armed_pct: 6.9
+            ranks:
+              citadel:
+                higher_pct: 5
+                lower_pct: 0
+              damaging:
+                higher_pct: 12
+                lower_pct: 86
+              fuse_armed:
+                higher_pct: 0
+                lower_pct: 99
+      - group: battleship AP 406 mm
+        ranges_km:
+          - 16
+          - 18
+          - 20
+        aspects:
+          - aspect: broadside
+            rays: 13796
+            citadel_pct: 3.6
+            penetration_pct: 5.7
+            overpenetration_pct: 25.9
+            ricochet_pct: 56.6
+            shatter_pct: 8.2
+            fuse_armed_pct: 0.2
+            ranks:
+              citadel:
+                higher_pct: 27
+                lower_pct: 72
+              damaging:
+                higher_pct: 93
+                lower_pct: 7
+              fuse_armed:
+                higher_pct: 62
+                lower_pct: 33
+          - aspect: angled_30
+            rays: 12647
+            citadel_pct: 1.2
+            penetration_pct: 6.1
+            overpenetration_pct: 22
+            ricochet_pct: 60.5
+            shatter_pct: 10.1
+            fuse_armed_pct: 0
+            ranks:
+              citadel:
+                higher_pct: 36
+                lower_pct: 62
+              damaging:
+                higher_pct: 94
+                lower_pct: 5
+              fuse_armed:
+                higher_pct: 65
+                lower_pct: 0
+          - aspect: angled_45
+            rays: 11327
+            citadel_pct: 1.8
+            penetration_pct: 5.9
+            overpenetration_pct: 16.7
+            ricochet_pct: 66.2
+            shatter_pct: 9.4
+            fuse_armed_pct: 0
+            ranks:
+              citadel:
+                higher_pct: 12
+                lower_pct: 86
+              damaging:
+                higher_pct: 84
+                lower_pct: 16
+              fuse_armed:
+                higher_pct: 64
+                lower_pct: 0
+      - group: battleship AP 457 mm
+        ranges_km:
+          - 16
+          - 18
+          - 20
+        aspects:
+          - aspect: broadside
+            rays: 13507
+            citadel_pct: 7.9
+            penetration_pct: 5.7
+            overpenetration_pct: 27.2
+            ricochet_pct: 56.7
+            shatter_pct: 2.5
+            fuse_armed_pct: 0.2
+            ranks:
+              citadel:
+                higher_pct: 17
+                lower_pct: 81
+              damaging:
+                higher_pct: 93
+                lower_pct: 7
+              fuse_armed:
+                higher_pct: 67
+                lower_pct: 23
+          - aspect: angled_30
+            rays: 12426
+            citadel_pct: 6.5
+            penetration_pct: 6
+            overpenetration_pct: 23.1
+            ricochet_pct: 59.6
+            shatter_pct: 4.7
+            fuse_armed_pct: 0.3
+            ranks:
+              citadel:
+                higher_pct: 19
+                lower_pct: 80
+              damaging:
+                higher_pct: 91
+                lower_pct: 9
+              fuse_armed:
+                higher_pct: 54
+                lower_pct: 37
+          - aspect: angled_45
+            rays: 11089
+            citadel_pct: 2.4
+            penetration_pct: 6.1
+            overpenetration_pct: 17.5
+            ricochet_pct: 65
+            shatter_pct: 9
+            fuse_armed_pct: 0.3
+            ranks:
+              citadel:
+                higher_pct: 26
+                lower_pct: 72
+              damaging:
+                higher_pct: 95
+                lower_pct: 5
+              fuse_armed:
+                higher_pct: 40
+                lower_pct: 37
+    excluded:
+      - group: destroyer AP 127 mm
+        max_range_km: 10.54
+      - group: light cruiser AP 152 mm
+        max_range_km: 14.02
+      - group: cruiser HE 203 mm
+        max_range_km: 15.04
+      - group: SAP 203 mm
+        max_range_km: 14.68
+properties:
+  citadel:
+    roof_above_waterline_m: 4.1
+    floor_m: -10.4
+    side_above_waterline_pct: 30.9
+    roof_rank:
+      higher_pct: 2
+      lower_pct: 95
+    side_above_waterline_rank:
+      higher_pct: 0
+      lower_pct: 98
+  above_waterline_face:
+    kind: inclined_belt
+    share_pct: 72.2
+    median_slope_deg: 20
+  fuse_arming:
+    - group: destroyer AP 127 mm
+      fuse_threshold_mm: 21
+      rays: 3772
+      share_pct: 10.9
+      plates:
+        - plate: "bow: Fore End Plating"
+          thickness_mm: 32
+          rays: 1691
+        - plate: "stern: Aft End Plating"
+          thickness_mm: 32
+          rays: 1256
+        - plate: "superstructure: Plating (side)"
+          thickness_mm: 19
+          rays: 507
+    - group: light cruiser AP 152 mm
+      fuse_threshold_mm: 12
+      rays: 12997
+      share_pct: 22.7
+      plates:
+        - plate: "bow: Fore End Plating"
+          thickness_mm: 32
+          rays: 5338
+        - plate: "stern: Aft End Plating"
+          thickness_mm: 32
+          rays: 3392
+        - plate: "superstructure: Plating (side)"
+          thickness_mm: 19
+          rays: 2885
+    - group: heavy cruiser AP 203 mm
+      fuse_threshold_mm: 34
+      rays: 4437
+      share_pct: 7
+      plates:
+        - plate: "stern: Aft End Plating"
+          thickness_mm: 32
+          rays: 2366
+        - plate: "bow: Fore End Plating"
+          thickness_mm: 32
+          rays: 1645
+        - plate: "casemate: Armor Belt"
+          thickness_mm: 32
+          rays: 390
+    - group: battleship AP 406 mm
+      fuse_threshold_mm: 68
+      rays: 140
+      share_pct: 0.2
+      plates:
+        - plate: "hull: Plating"
+          thickness_mm: 75
+          rays: 51
+        - plate: "turret: Side Plate"
+          thickness_mm: 250
+          rays: 49
+        - plate: "steering gear: Steering Gear Armor"
+          thickness_mm: 350
+          rays: 28
+    - group: battleship AP 457 mm
+      fuse_threshold_mm: 76
+      rays: 172
+      share_pct: 0.2
+      plates:
+        - plate: "steering gear: Steering Gear Armor"
+          thickness_mm: 350
+          rays: 60
+        - plate: "hull: Plating"
+          thickness_mm: 75
+          rays: 38
+        - plate: "turret: Side Plate"
+          thickness_mm: 250
+          rays: 24
+comparison:
+  class: battleship
+  tiers:
+    min: 9
+    max: 11
+  peers: 81
+  examples:
+    - Bungo
+    - C. Colombo
+    - Conqueror
+    - Kremlin
+  copies: 2
+  with_citadel: 81
+  with_turtleback: 26
+armor_verdict: "Armor verdict against battleship AP 406 mm and battleship AP 457 mm, compared with tier 9-11 battleships: its citadel is easy to hit, but it takes penetration damage less often than most of them."
+verdict: "Against battleship AP 406 mm (Minnesota) at 12-14 km: weakness: 9.6% of broadside hits detonate in its citadel, heavy damage taken (higher than 90% of 81 tier 9-11 battleships); weakness: 8.6% of angled 30 deg hits detonate in its citadel (higher than 90% of 81 tier 9-11 battleships); strength: 14.9% of broadside hits detonate inside it, in the citadel or as a regular penetration, each regular or heavy damage taken (lower than 93% of 81 tier 9-11 battleships). Against battleship AP 457 mm (Georgia) at 12-14 km: weakness: 9.6% of broadside hits detonate in its citadel, heavy damage taken (higher than 89% of 81 tier 9-11 battleships); weakness: 9.3% of angled 30 deg hits detonate in its citadel (higher than 89% of 81 tier 9-11 battleships); strength: 16.5% of broadside hits detonate inside it, in the citadel or as a regular penetration, each regular or heavy damage taken (lower than 91% of 81 tier 9-11 battleships). Fuse arming by destroyer AP 127 mm (Benson; a plate of 21 mm or more after normalization arms it) at 5-10 km: on 16.2% of broadside hits a plate arms the fuse of a shell that would otherwise overpenetrate, and it detonates inside (higher than 99% of 81 tier 9-11 battleships). Over all bands and aspects the arming plates are mostly bow: Fore End Plating 32 mm and stern: Aft End Plating 32 mm. Citadel roof 4.1 m above the waterline (higher than 95% of 81 tier 9-11 battleships); 30.9% of its side face is above the waterline."
+assumptions:
+  - "Shooter groups are the most common caliber of destroyer AP, light cruiser AP (155 mm and less), heavy cruiser AP, battleship AP (two calibers), cruiser HE and SAP among released ships of the shooter tiers, each counted by its largest main battery shell of that ammo; the ship whose shell is the median of that caliber by penetration fires for the group, a tech tree ship before its copies."
+  - "Aspects are broadside and 30 and 45 deg angled, bow toward the shooter. Range bands are close (5, 7.5 and 10 km), moderate (12 and 14 km) and long (16 and 18 km, and 20 km for battleship shooters). A shooter fires only at ranges within its stock main battery range; a band's rates are the mean over the ranges it reaches, each weighted equally."
+  - "Rays are 1 m apart and each stands for an equal area of the target seen along the line of fire; rates are shares of rays that strike armor above the waterline, not weighted by dispersion or aim."
+  - "Each ray is traced as armor_trace traces it: AP through every plate with the armor viewer's simulation, HE and SAP against the first plate, ricochets between the ricochet start and always-ricochet angles treated as no ricochet."
+  - "A fuse is armed by a plate whose thickness after normalization is at least the shell's bulletDetonatorThreshold. Fuse-armed rays are AP that detonates inside the ship and, traced again with no plate arming the fuse, leaves the ship without detonating."
+  - "Peers are released ships of the same class within one tier, traced on their stock hulls against the same shooters and ranges; ships sharing one armor model count once. A rank gives the shares of peers with a higher and with a lower value, to 0.1."

@@ -1,0 +1,173 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output
+---
+ship:
+  name: Montana
+  index: PASB017
+  tier: 10
+  class: battleship
+  nation: USA
+  group: upgradeable
+  category: tech_tree
+  status: released
+  replicas:
+    - BA Montana
+battery: main_battery
+range_km: 12
+conclusion: "At 12 km, a 39.2% longer main battery range (23.65 km to 32.92 km with Spotting Aircraft + Artillery Plotting Room Modification 1) shrinks vertical dispersion from 90.3 m to 75.4 m; horizontal is unchanged at 180 m. With sigma 1.9, half of the shells land within 33.9% of the ellipse (61 m by 30.6 m) and 68.7% within its inner half; a higher sigma packs more shells toward the aim point. Artillery Plotting Room Modification 2 narrows both: horizontal 180 m to 160.2 m, vertical 90.3 m to 80.3 m."
+guns:
+  - mount: main battery
+    min_radius: 2
+    ideal_radius: 12
+    ideal_distance: 1000
+    radius_on_zero: 0.2
+    radius_on_delim: 0.5
+    radius_on_max: 0.6
+    delim: 0.5
+builds:
+  - build: base
+    kind: base
+    max_range_km: 23.65
+    shells:
+      sigma_count: 1.9
+      half_of_shells_radius_fraction: 0.339
+      ninety_pct_of_shells_radius_fraction: 0.769
+      inner_half_share_pct: 68.7
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 180
+            vertical_m: 90.3
+            vertical_ratio: 0.501
+            half_of_shells_within:
+              horizontal_m: 61
+              vertical_m: 30.6
+            ninety_pct_of_shells_within:
+              horizontal_m: 138.4
+              vertical_m: 69.4
+  - build: Spotting Aircraft
+    kind: range
+    max_range_km: 28.38
+    max_range_change_pct: 20
+    shells:
+      sigma_count: 1.9
+      half_of_shells_radius_fraction: 0.339
+      ninety_pct_of_shells_radius_fraction: 0.769
+      inner_half_share_pct: 68.7
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 180
+            vertical_m: 81.7
+            vertical_ratio: 0.454
+            horizontal_change_pct: 0
+            vertical_change_pct: -9.5
+            half_of_shells_within:
+              horizontal_m: 61
+              vertical_m: 27.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 138.4
+              vertical_m: 62.8
+  - build: Artillery Plotting Room Modification 1
+    kind: range
+    max_range_km: 27.43
+    max_range_change_pct: 16
+    shells:
+      sigma_count: 1.9
+      half_of_shells_radius_fraction: 0.339
+      ninety_pct_of_shells_radius_fraction: 0.769
+      inner_half_share_pct: 68.7
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 180
+            vertical_m: 83.2
+            vertical_ratio: 0.462
+            horizontal_change_pct: 0
+            vertical_change_pct: -7.8
+            half_of_shells_within:
+              horizontal_m: 61
+              vertical_m: 28.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 138.4
+              vertical_m: 64
+  - build: Artillery Plotting Room Modification 2
+    kind: accuracy
+    max_range_km: 23.65
+    max_range_change_pct: 0
+    shells:
+      sigma_count: 1.9
+      half_of_shells_radius_fraction: 0.339
+      ninety_pct_of_shells_radius_fraction: 0.769
+      inner_half_share_pct: 68.7
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 160.2
+            vertical_m: 80.3
+            vertical_ratio: 0.501
+            horizontal_change_pct: -11
+            vertical_change_pct: -11
+            half_of_shells_within:
+              horizontal_m: 54.3
+              vertical_m: 27.2
+            ninety_pct_of_shells_within:
+              horizontal_m: 123.1
+              vertical_m: 61.8
+  - build: Spotting Aircraft + Artillery Plotting Room Modification 1
+    kind: range
+    max_range_km: 32.92
+    max_range_change_pct: 39.2
+    shells:
+      sigma_count: 1.9
+      half_of_shells_radius_fraction: 0.339
+      ninety_pct_of_shells_radius_fraction: 0.769
+      inner_half_share_pct: 68.7
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 180
+            vertical_m: 75.4
+            vertical_ratio: 0.419
+            horizontal_change_pct: 0
+            vertical_change_pct: -16.5
+            half_of_shells_within:
+              horizontal_m: 61
+              vertical_m: 25.6
+            ninety_pct_of_shells_within:
+              horizontal_m: 138.4
+              vertical_m: 57.9
+  - build: Spotting Aircraft + Artillery Plotting Room Modification 1 + Artillery Plotting Room Modification 2
+    kind: range_and_accuracy
+    max_range_km: 32.92
+    max_range_change_pct: 39.2
+    shells:
+      sigma_count: 1.9
+      half_of_shells_radius_fraction: 0.339
+      ninety_pct_of_shells_radius_fraction: 0.769
+      inner_half_share_pct: 68.7
+    mounts:
+      - mount: main battery
+        at_range:
+          ellipse:
+            horizontal_m: 160.2
+            vertical_m: 67.1
+            vertical_ratio: 0.419
+            horizontal_change_pct: -11
+            vertical_change_pct: -25.7
+            half_of_shells_within:
+              horizontal_m: 54.3
+              vertical_m: 22.7
+            ninety_pct_of_shells_within:
+              horizontal_m: 123.1
+              vertical_m: 51.6
+notes:
+  - "horizontal_m = 30 x (minRadius + X_m / 30 x (idealRadius - minRadius) / idealDistance), X_m the firing distance in meters and both radii times the accuracy coefficient (Aiming Systems Modification 1 and the like); it depends only on the firing distance. vertical_m = horizontal_m x vertical_ratio, where vertical_ratio runs linearly from radiusOnZero at 0 km to radiusOnDelim at delim x max range, then to radiusOnMax at max range. A longer max range lowers X / max range, so at the same X the ratio, and with it vertical dispersion, falls whenever radiusOnZero < radiusOnDelim < radiusOnMax. At max range horizontal_m is the port's maximum dispersion."
+  - "Shell spread inside the ellipse (getRandomLastPoints and gaussClamped in the game scripts): each shell takes a point on the ellipse edge at a random angle, scaled by r, a sample of N(0, 1 / sigmaCount) redrawn from Uniform[-1, 1] when it falls outside [-1, 1]. So the share of shells inside the ellipse scaled by t is P(|r| <= t) = erf(t x sigmaCount / sqrt 2) + (1 - erf(sigmaCount / sqrt 2)) x t. Above the waterline the game also compresses the vertical offset (community analysis gives 10 x log(0.1 Y + 1)); the inner ellipses here leave that out, so their upper half overstates the spread."
+  - "max range is the modified main battery range: fire control module, upgrades, captain skills and Spotting Aircraft all lengthen it. The game client passes the modified range to the gun, and replay measurements (Colbert at 6 km, 13.8 km against 19.2 km range with range skill and upgrade) showed the predicted 16% smaller vertical spread. Spotting Aircraft lengthens the same range value, so it is assumed to act the same way; that case was not measured."

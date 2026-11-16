@@ -1,0 +1,1160 @@
+use std::sync::Arc;
+
+#[cfg(feature = "rendering")]
+use image::RgbaImage;
+use wows_replays::analyzer::decoder::DeathCause;
+use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::types::ElapsedClock;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
+use wows_replays::types::PlaneId;
+use wowsunpack::game_types::AdvantageLevel;
+use wowsunpack::game_types::BattleResult;
+use wowsunpack::game_types::FinishType;
+pub use wowsunpack::game_types::Ribbon;
+
+use crate::map_data::MinimapPos;
+
+/// Cell metrics for the stats-panel ribbon grid. Cells are fixed width so the
+/// command emitter (which positions the activity feed below the grid) and the
+/// render backends agree exactly on rows-per-line. `CELL_W` fits the widest
+/// ribbon icon (~2.6:1 at `ICON` height) plus a 2-digit count.
+pub const STATS_RIBBON_ICON: i32 = 18;
+pub const STATS_RIBBON_CELL_W: i32 = 76;
+pub const STATS_RIBBON_ROW_H: i32 = 24;
+
+/// Opacity for the ammo-colored shell tip dot. Dimmed so the tips read as
+/// accents on the tracer rather than dominating the map. Shared by every render
+/// backend.
+pub const SHOT_TIP_ALPHA: f32 = 0.4;
+
+/// Opacity for secondary (ATBA) shell tracers and tips. Secondary batteries fire
+/// far more shots than the main battery, so dimming them keeps the map readable
+/// while still showing the fire. Shared by every render backend.
+pub const SECONDARY_SHOT_ALPHA: f32 = 0.25;
+
+/// Opacity of the camera direction wedge. Shared by every render backend.
+pub const CAMERA_DIRECTION_ALPHA: f32 = 0.6;
+
+/// The triangle a [`DrawCommand::CameraDirection`] is filled as, in minimap
+/// pixels: wide across the ship icon's center, narrowing to a point in the
+/// look direction.
+#[derive(Debug, Clone, Copy)]
+pub struct CameraDirectionWedge {
+    /// The corners of the wide end, either side of the icon's center as seen
+    /// looking along the wedge.
+    pub left: MinimapPos,
+    pub right: MinimapPos,
+    pub tip: MinimapPos,
+}
+
+impl CameraDirectionWedge {
+    /// `yaw` is in radians, counter-clockwise from east, and `length` in
+    /// minimap pixels, as the command carries them.
+    pub fn new(center: MinimapPos, yaw: f32, length: f32) -> Self {
+        // At the bow of an icon looking straight ahead the wedge is half this wide.
+        const BASE_WIDTH: f32 = 4.0;
+
+        let half_width = BASE_WIDTH / 2.0;
+
+        // Minimap y grows downward, so `right` is clockwise of `along` on screen.
+        let (sin, cos) = yaw.sin_cos();
+        let along = (cos, -sin);
+        let right = (sin, cos);
+
+        Self {
+            left: MinimapPos { x: center.x - right.0 * half_width, y: center.y - right.1 * half_width },
+            right: MinimapPos { x: center.x + right.0 * half_width, y: center.y + right.1 * half_width },
+            tip: MinimapPos { x: center.x + along.0 * length, y: center.y + along.1 * length },
+        }
+    }
+
+    /// The corners in clockwise order on screen.
+    pub fn corners(&self) -> [MinimapPos; 3] {
+        [self.left, self.tip, self.right]
+    }
+}
+
+/// The type of building icon to display on the minimap.
+///
+/// Derived from the building's Species in GameParams.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum BuildingIconType {
+    Airbase,
+    AirDefence,
+    Artillery,
+    Generator,
+    Radar,
+    Station,
+    Supply,
+    Tower,
+}
+
+impl BuildingIconType {
+    /// Icon file base name (e.g. `"airbase"`, `"air_defence"`).
+    pub fn icon_name(&self) -> &'static str {
+        match self {
+            Self::Airbase => "airbase",
+            Self::AirDefence => "air_defence",
+            Self::Artillery => "artillery",
+            Self::Generator => "generator",
+            Self::Radar => "radar",
+            Self::Station => "station",
+            Self::Supply => "supply",
+            Self::Tower => "tower",
+        }
+    }
+}
+
+/// The relation/state of a building for icon selection.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum BuildingRelation {
+    Ally,
+    Enemy,
+    Neutral,
+    Dead,
+    SuppressedAlly,
+    SuppressedEnemy,
+    SuppressedNeutral,
+}
+
+impl BuildingRelation {
+    /// Icon file suffix (e.g. `"ally"`, `"suppressed_enemy"`).
+    pub fn icon_suffix(&self) -> &'static str {
+        match self {
+            Self::Ally => "ally",
+            Self::Enemy => "enemy",
+            Self::Neutral => "neutral",
+            Self::Dead => "dead",
+            Self::SuppressedAlly => "suppressed_ally",
+            Self::SuppressedEnemy => "suppressed_enemy",
+            Self::SuppressedNeutral => "suppressed_neutral",
+        }
+    }
+}
+
+/// How a ship should be rendered based on its visibility state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ShipVisibility {
+    /// Ship is directly visible (Position packets). Solid fill.
+    Visible,
+    /// Ship is detected on minimap but not directly rendered. Outline only.
+    MinimapOnly,
+    /// Ship has gone undetected. Gray, semi-transparent at last known position.
+    Undetected,
+}
+
+/// Kind of ship configuration circle for filtering and grouping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ShipConfigCircleKind {
+    Detection,
+    MainBattery,
+    SecondaryBattery,
+    TorpedoRange,
+    Radar,
+    Hydro,
+}
+
+impl ShipConfigCircleKind {
+    /// The colour, opacity and dashing this kind of circle is drawn with.
+    ///
+    /// Here rather than at each place one is built, so a circle drawn for a
+    /// ship in the battle and one drawn for a ship a reader placed cannot
+    /// come out different colours.
+    pub const fn style(self) -> ([u8; 3], f32, bool) {
+        match self {
+            // Dashed, because it is the only one that says where the ship
+            // can be seen from rather than what it can reach.
+            Self::Detection => ([135, 206, 235], 0.6, true),
+            Self::MainBattery => ([180, 180, 180], 0.5, false),
+            Self::SecondaryBattery => ([255, 165, 0], 0.5, false),
+            Self::TorpedoRange => ([0, 200, 200], 0.5, false),
+            Self::Radar => ([255, 255, 100], 0.5, false),
+            Self::Hydro => ([100, 255, 100], 0.5, false),
+        }
+    }
+}
+
+/// Per-range-type visibility filter for ship configuration circles.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ShipConfigFilter {
+    pub detection: bool,
+    pub main_battery: bool,
+    pub secondary_battery: bool,
+    pub torpedo: bool,
+    pub radar: bool,
+    pub hydro: bool,
+}
+
+impl ShipConfigFilter {
+    /// Returns true if the given circle kind is enabled in this filter.
+    pub fn is_enabled(&self, kind: &ShipConfigCircleKind) -> bool {
+        match kind {
+            ShipConfigCircleKind::Detection => self.detection,
+            ShipConfigCircleKind::MainBattery => self.main_battery,
+            ShipConfigCircleKind::SecondaryBattery => self.secondary_battery,
+            ShipConfigCircleKind::TorpedoRange => self.torpedo,
+            ShipConfigCircleKind::Radar => self.radar,
+            ShipConfigCircleKind::Hydro => self.hydro,
+        }
+    }
+
+    /// Returns a filter with all range types enabled.
+    pub fn all_enabled() -> Self {
+        Self { detection: true, main_battery: true, secondary_battery: true, torpedo: true, radar: true, hydro: true }
+    }
+
+    /// Returns true if any range type is enabled.
+    pub fn any_enabled(&self) -> bool {
+        self.detection || self.main_battery || self.secondary_battery || self.torpedo || self.radar || self.hydro
+    }
+}
+
+/// Controls which ships have their config circles rendered.
+///
+/// The callback in `Filtered` receives an entity ID and returns:
+/// - `Some(filter)` to show circles matching the filter for that entity
+/// - `None` to hide all circles for that entity
+#[derive(Default)]
+pub enum ShipConfigVisibility {
+    /// Only show the replay owner's config circles (all range types). Default.
+    #[default]
+    SelfOnly,
+    /// Use a callback to determine per-ship visibility and per-range filtering.
+    /// The callback receives the entity ID and returns an optional filter.
+    Filtered(Arc<dyn Fn(EntityId) -> Option<ShipConfigFilter> + Send + Sync>),
+}
+
+impl PartialEq for ShipConfigVisibility {
+    fn eq(&self, other: &Self) -> bool {
+        matches!((self, other), (Self::SelfOnly, Self::SelfOnly) | (Self::Filtered(_), Self::Filtered(_)))
+    }
+}
+
+impl ShipConfigVisibility {
+    /// Returns the filter for a ship, or None if circles should be hidden.
+    pub fn filter_for(&self, is_self: bool, entity_id: EntityId) -> Option<ShipConfigFilter> {
+        match self {
+            ShipConfigVisibility::SelfOnly => {
+                if is_self {
+                    Some(ShipConfigFilter::all_enabled())
+                } else {
+                    None
+                }
+            }
+            ShipConfigVisibility::Filtered(cb) => cb(entity_id),
+        }
+    }
+}
+
+impl Clone for ShipConfigVisibility {
+    fn clone(&self) -> Self {
+        match self {
+            Self::SelfOnly => Self::SelfOnly,
+            Self::Filtered(cb) => Self::Filtered(Arc::clone(cb)),
+        }
+    }
+}
+
+impl std::fmt::Debug for ShipConfigVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SelfOnly => write!(f, "SelfOnly"),
+            Self::Filtered(_) => write!(f, "Filtered(<callback>)"),
+        }
+    }
+}
+
+/// Hint for which font to use when rendering text.
+///
+/// Allows render backends (egui, ImageTarget) to select the correct font
+/// without needing access to `GameFonts` directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum FontHint {
+    /// Use the primary UI font (Warhelios Bold).
+    #[default]
+    Primary,
+    /// Use the fallback font at the given index in `GameFonts::fallbacks`.
+    Fallback(usize),
+}
+
+/// A single chat message entry for the chat overlay.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ChatEntry {
+    /// Clan tag (e.g. "CLAN"), empty if none
+    pub clan_tag: String,
+    /// Clan color as RGB, or None to use team color
+    pub clan_color: Option<[u8; 3]>,
+    /// Player name
+    pub player_name: String,
+    /// Team color for the player name
+    pub team_color: [u8; 3],
+    /// Ship species for icon lookup (e.g. "Destroyer")
+    pub ship_species: Option<String>,
+    /// Localized ship name (e.g. "Shimakaze")
+    pub ship_name: Option<String>,
+    /// Chat message text
+    pub message: String,
+    /// Color for the message text (reflects the chat channel)
+    pub message_color: [u8; 3],
+    /// Opacity (0.0 = fully faded, 1.0 = fully visible)
+    pub opacity: f32,
+    /// Which font to use for the message text (primary or CJK fallback).
+    pub font_hint: FontHint,
+}
+
+/// A single entry in the kill feed.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct KillFeedEntry {
+    /// Killer's player name. `None` when no ship is responsible, such as a
+    /// sea mine.
+    pub killer_name: Option<String>,
+    /// Killer's ship species (e.g. "Destroyer") for icon lookup
+    pub killer_species: Option<String>,
+    /// Killer's localized ship name (e.g. "Shimakaze")
+    pub killer_ship_name: Option<String>,
+    /// Killer's team color
+    pub killer_color: [u8; 3],
+    /// True if killer is self or ally
+    pub killer_is_friendly: bool,
+    /// Victim's player name
+    pub victim_name: String,
+    /// Victim's ship species for icon lookup
+    pub victim_species: Option<String>,
+    /// Victim's localized ship name
+    pub victim_ship_name: Option<String>,
+    /// Victim's team color
+    pub victim_color: [u8; 3],
+    /// True if victim is self or ally
+    pub victim_is_friendly: bool,
+    /// How the victim died. `None` when the game names no cause.
+    pub cause: Option<Recognized<DeathCause>>,
+}
+
+/// A single ribbon type with its accumulated count.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct RibbonCount {
+    pub ribbon: Ribbon,
+    pub count: usize,
+    /// Localized display name (resolved via translate_ribbon, falls back to English).
+    pub display_name: String,
+    /// Lowercased ribbon icon key (RIBBON_*.to_lowercase()); for subribbons the
+    /// renderers prepend "sub" to look up the subribbon map.
+    pub icon_key: String,
+    /// When true, renderers prefer the subribbon icon (the "sub"+icon_key atlas).
+    pub is_subribbon: bool,
+}
+
+/// An entry in the merged activity feed (kills + chat), sorted by game clock.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ActivityFeedEntry {
+    pub clock: GameClock,
+    pub kind: ActivityFeedKind,
+    /// How far the row has eased into place, from 0 (just arrived) to 1
+    /// (settled). See [`crate::activity_feed::reveal`].
+    pub reveal: f32,
+    pub shade: RowShade,
+}
+
+/// The payload of an activity feed entry.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ActivityFeedKind {
+    Kill(KillFeedEntry),
+    Chat(ChatEntry),
+}
+
+/// Background band of an activity feed row. Taken from the entry's place in
+/// the whole feed so a row keeps its band as newer rows push it along.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum RowShade {
+    Plain,
+    Banded,
+}
+
+impl RowShade {
+    pub fn from_feed_index(index: usize) -> Self {
+        if index.is_multiple_of(2) { Self::Plain } else { Self::Banded }
+    }
+}
+
+/// A single weapon-group damage entry for the stats panel breakdown.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DamageBreakdownEntry {
+    /// Short display label (e.g. "MAIN", "TORP", "FIRE")
+    pub label: String,
+    /// Accumulated enemy damage for this weapon group
+    pub damage: f64,
+}
+
+/// A high-level draw command emitted by the renderer.
+///
+/// The renderer reads game state and produces a sequence of these commands.
+/// A `RenderTarget` implementation consumes them to produce visual output,
+/// whether that's a software-rendered image or GPU draw calls.
+///
+/// All visual properties (colors, opacity, etc.) are fully resolved by the renderer,
+/// so backends don't need to duplicate game logic.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum DrawCommand {
+    /// Artillery tracer line segment
+    ShotTracer { from: MinimapPos, to: MinimapPos, color: [u8; 3] },
+    /// Ammo-colored dot at a shell tracer's leading point (the shell tip)
+    ShotTracerTip { at: MinimapPos, color: [u8; 3] },
+    /// Secondary (ATBA) tracer line segment. Same shape as `ShotTracer` but
+    /// rendered at `SECONDARY_SHOT_ALPHA` so dense secondary fire de-emphasizes
+    /// itself relative to main-battery tracers. The line (vs a lone dot) keeps it
+    /// distinguishable from torpedoes.
+    SecondaryShotTracer { from: MinimapPos, to: MinimapPos, color: [u8; 3] },
+    /// Secondary (ATBA) shell dot. Same shape as `ShotTracerTip` but rendered at
+    /// `SECONDARY_SHOT_ALPHA` to match its tracer line.
+    SecondaryShotTracerTip { at: MinimapPos, color: [u8; 3] },
+    /// Torpedo dot
+    Torpedo { pos: MinimapPos, color: [u8; 3] },
+    /// Smoke puff circle (alpha blended)
+    Smoke { pos: MinimapPos, radius: i32, color: [u8; 3], alpha: f32 },
+    /// Ship with icon, rotation, color, visibility
+    Ship {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        yaw: f32,
+        /// Species name for icon lookup (e.g. "Destroyer")
+        species: Option<String>,
+        /// Tint color. None = use the icon's native colors (for last_visible/invisible variants)
+        color: Option<[u8; 3]>,
+        visibility: ShipVisibility,
+        opacity: f32,
+        /// Whether this is the player's own ship (uses `_self` icon variant)
+        is_self: bool,
+        /// Player name to render above the icon
+        player_name: Option<String>,
+        /// Localized ship name to render above the icon (below player name)
+        ship_name: Option<String>,
+        /// Whether this ship is a detected teammate (ally visible but not self)
+        is_detected_teammate: bool,
+        /// Whether this player is currently disconnected (latest connection
+        /// event before the current clock is `Disconnected`). Draws a red
+        /// outline around the icon, mirroring `is_detected_teammate`.
+        is_disconnected: bool,
+        /// Override color for player name based on selected armament
+        /// (e.g. orange=HE, light blue=AP, green=torp). None = default white.
+        name_color: Option<[u8; 3]>,
+    },
+    /// Health bar above a ship
+    HealthBar {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        fraction: f32,
+        fill_color: [u8; 3],
+        background_color: [u8; 3],
+        background_alpha: f32,
+    },
+    /// Dead ship marker
+    DeadShip {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        yaw: f32,
+        species: Option<String>,
+        /// Tint color. None = use the icon's native colors
+        color: Option<[u8; 3]>,
+        is_self: bool,
+        /// Player name to render above the icon
+        player_name: Option<String>,
+        /// Localized ship name to render above the icon (below player name)
+        ship_name: Option<String>,
+    },
+    /// Arms race buff zone circle
+    BuffZone {
+        pos: MinimapPos,
+        /// Zone radius in pixels
+        radius: i32,
+        /// Team color (green/red/white)
+        color: [u8; 3],
+        /// Fill transparency
+        alpha: f32,
+        /// Marker name for icon lookup (e.g. "damage_active")
+        marker_name: Option<String>,
+    },
+    /// Capture zone circle with team coloring and letter label
+    CapturePoint {
+        pos: MinimapPos,
+        /// Zone radius in pixels
+        radius: i32,
+        /// Team color (green/red/white) for the owning team
+        color: [u8; 3],
+        /// Fill transparency
+        alpha: f32,
+        /// Zone label (e.g. "A", "B", "C")
+        label: String,
+        /// Capture progress 0.0..1.0 (0 = no capture in progress)
+        progress: f32,
+        /// Color of the invading team (shown as progress arc)
+        invader_color: Option<[u8; 3]>,
+        /// Pre-selected flag icon for base-type capture points (drawn instead of text label)
+        #[cfg(feature = "rendering")]
+        #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
+        flag_icon: Option<RgbaImage>,
+    },
+    /// Camera/look direction wedge, filled as a [`CameraDirectionWedge`]
+    /// beneath every ship icon.
+    CameraDirection {
+        entity_id: EntityId,
+        /// Center of the ship icon.
+        pos: MinimapPos,
+        /// Camera yaw in radians (world-space, already includes ship heading)
+        yaw: f32,
+        color: [u8; 3],
+        /// Wedge length in minimap pixels: one ship icon length.
+        length: i32,
+    },
+    /// Building marker on the minimap (fort, AA battery, airbase, etc.)
+    Building {
+        pos: MinimapPos,
+        color: [u8; 3],
+        is_alive: bool,
+        icon_type: Option<BuildingIconType>,
+        relation: BuildingRelation,
+    },
+    /// Local weather zone (squall/storm) — semi-transparent gray circle
+    WeatherZone {
+        pos: MinimapPos,
+        /// Zone radius in pixels
+        radius: i32,
+    },
+    /// Plane icon
+    Plane {
+        plane_id: PlaneId,
+        owner_entity_id: EntityId,
+        pos: MinimapPos,
+        /// Icon key for lookup (e.g. "controllable/fighter_he_enemy")
+        icon_key: String,
+        /// Owner player name to render above the icon
+        player_name: Option<String>,
+        /// Owner's localized ship name to render above the icon
+        ship_name: Option<String>,
+    },
+    /// Consumable detection radius circle (radar, hydro, etc.)
+    ConsumableRadius {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        /// Radius in pixels
+        radius_px: i32,
+        /// Circle color (team-colored: green for friendly, red for enemy)
+        color: [u8; 3],
+        /// Fill transparency
+        alpha: f32,
+    },
+    /// Fighter patrol radius circle (filled only, no outline)
+    PatrolRadius {
+        plane_id: PlaneId,
+        pos: MinimapPos,
+        /// Radius in pixels
+        radius_px: i32,
+        /// Circle color (team-colored)
+        color: [u8; 3],
+        /// Fill transparency
+        alpha: f32,
+    },
+    /// Active consumable icons laid out horizontally below a ship
+    ConsumableIcons {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        /// Icon keys for lookup (e.g. "PCY019_RLSSearch")
+        icon_keys: Vec<String>,
+        /// True for self/allies, false for enemies (affects tint color)
+        is_friendly: bool,
+        /// Whether a health bar is rendered below this ship (affects vertical offset)
+        has_hp_bar: bool,
+    },
+    /// Ship configuration range circle (detection, main battery, secondary, radar, hydro)
+    ShipConfigCircle {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        /// Radius in minimap pixels
+        radius_px: f32,
+        color: [u8; 3],
+        alpha: f32,
+        /// Whether circle should be dashed (detection) or solid
+        dashed: bool,
+        /// Label text (e.g. "12.0 km")
+        label: Option<String>,
+        kind: ShipConfigCircleKind,
+        /// Player name for filtering per-ship
+        player_name: String,
+        /// Whether this is the replay player's own ship
+        is_self: bool,
+    },
+    /// Position trail showing historical movement as colored dots
+    PositionTrail {
+        entity_id: EntityId,
+        /// Player name for filtering trails per-ship
+        player_name: Option<String>,
+        /// Points with interpolated colors (oldest=blue, newest=red)
+        points: Vec<(MinimapPos, [u8; 3])>,
+    },
+    /// Team buff indicators below the score bar (arms race)
+    TeamBuffs {
+        /// Friendly team buffs: (marker_name, count), sorted by sorting field
+        friendly_buffs: Vec<(String, u32)>,
+        /// Enemy team buffs: (marker_name, count), sorted by sorting field
+        enemy_buffs: Vec<(String, u32)>,
+    },
+    /// Score bar
+    ScoreBar {
+        team0: i32,
+        team1: i32,
+        team0_color: [u8; 3],
+        team1_color: [u8; 3],
+        /// Win score threshold (from BattleLogic, typically 1000)
+        max_score: i32,
+        /// Time-to-win for team 0 (e.g. "5:32"), or None if no caps
+        team0_timer: Option<String>,
+        /// Time-to-win for team 1 (e.g. "3:15"), or None if no caps
+        team1_timer: Option<String>,
+        /// Which team has the advantage and at what level. None = even or disabled.
+        /// Tuple is (level, team_index) where team_index is 0 or 1.
+        advantage: Option<(AdvantageLevel, u8)>,
+    },
+    /// Team advantage indicator (shown in score bar area)
+    TeamAdvantage {
+        /// Advantage level, or None if even
+        level: Option<AdvantageLevel>,
+        /// Color for the label (advantaged team's color)
+        color: [u8; 3],
+        /// Detailed breakdown for tooltip display
+        breakdown: crate::advantage::AdvantageBreakdown,
+    },
+    /// Game timer (during battle)
+    Timer {
+        /// Seconds remaining in the match (from BattleLogic timeLeft), if available
+        time_remaining: Option<i64>,
+        /// Seconds elapsed since battle started (excludes pre-battle countdown)
+        elapsed: ElapsedClock,
+    },
+    /// Pre-battle countdown overlay (large centered number before battle starts)
+    PreBattleCountdown { seconds: i64 },
+    /// Kill feed entries with rich data
+    KillFeed { entries: Vec<KillFeedEntry> },
+    /// Chat overlay on the left side of the minimap
+    ChatOverlay { entries: Vec<ChatEntry> },
+    /// Battle result overlay (shown at end of match)
+    BattleResultOverlay {
+        /// The battle outcome (Victory, Defeat, Draw)
+        result: BattleResult,
+        /// How the battle ended
+        finish_type: Option<Recognized<FinishType>>,
+        /// Glow/shadow color behind the text
+        color: [u8; 3],
+        /// If true, subtitle is drawn above the main text; otherwise below.
+        subtitle_above: bool,
+    },
+    /// Stats panel background
+    StatsPanel { x: i32, width: i32 },
+    /// Ship silhouette with HP overlay in the stats panel
+    StatsSilhouette {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        /// Ship GameParamId — renderers resolve to localized name
+        ship_param_id: Option<GameParamId>,
+        /// `None` until the ship's max health is known.
+        hp: Option<HitPoints>,
+        /// Repair Party (heal) availability for this ship (drives healable region).
+        heal_availability: ConsumableAvailability,
+        /// Player name to display above the silhouette.
+        player_name: Option<String>,
+        /// Clan tag (e.g. "CLAN"), empty string or None if none.
+        clan_tag: Option<String>,
+        /// Clan color as RGB, or None to use default white.
+        clan_color: Option<[u8; 3]>,
+        /// Ship name to display below the player name.
+        ship_name: Option<String>,
+        #[cfg(feature = "rendering")]
+        #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
+        silhouette: Option<RgbaImage>,
+    },
+    /// Damage breakdown numbers in the stats panel
+    StatsDamage {
+        x: i32,
+        y: i32,
+        width: i32,
+        /// Per-weapon-group enemy damage breakdown (sorted by damage desc)
+        breakdowns: Vec<DamageBreakdownEntry>,
+        damage_spotting: f64,
+        spotting_breakdowns: Vec<DamageBreakdownEntry>,
+        damage_potential: f64,
+        potential_breakdowns: Vec<DamageBreakdownEntry>,
+    },
+    /// Compact ribbon summary in the stats panel
+    StatsRibbons { x: i32, y: i32, width: i32, ribbons: Vec<RibbonCount> },
+    /// Merged kill feed + chat activity log in the stats panel
+    StatsActivityFeed { x: i32, y: i32, width: i32, height: i32, entries: Vec<ActivityFeedEntry> },
+    /// Per-team roster panel: list of ships with HP, name, and consumable slots.
+    /// Positioned in a gutter beside the map (left or right depending on `side`).
+    TeamRoster { side: RosterSide, x: i32, y: i32, width: i32, height: i32, rows: Vec<RosterRow> },
+    /// Something a reader drew on the map, rather than something the battle
+    /// did. One command per shape; a drawn arrow is its shaft and its head.
+    Annotation { shape: AnnotationShape, color: [u8; 4], width: f32 },
+}
+
+/// What a drawn annotation is, in minimap space.
+///
+/// Three shapes rather than one per drawing tool: a rectangle and a triangle
+/// are both closed runs of points, and an arrow is a run with a filled head,
+/// so the tools turn into these rather than the target learning each of them.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum AnnotationShape {
+    /// An open run of points.
+    Polyline {
+        points: Vec<MinimapPos>,
+    },
+    /// A closed run of points, outlined or filled.
+    Polygon {
+        points: Vec<MinimapPos>,
+        filled: bool,
+    },
+    Circle {
+        center: MinimapPos,
+        radius: f32,
+        filled: bool,
+    },
+}
+
+/// Which gutter a [`DrawCommand::TeamRoster`] sits in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum RosterSide {
+    /// Player's own team (rendered left of the map in the default layout).
+    Friendly,
+    /// Opposing team (rendered right of the map).
+    Enemy,
+}
+
+/// Availability of a consumable: unavailable (reloading or out of charges),
+/// ready (a charge remains and not running), or active (currently running).
+/// Drives visibility and color of the healable-HP region and the charge-count
+/// label color in the roster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ConsumableAvailability {
+    /// No charge ready (reloading or out of charges) and none running. Hide the region.
+    Unavailable,
+    /// At least one charge remains and nothing running. Gray region.
+    Ready,
+    /// Currently running. White region.
+    Active,
+}
+
+impl ConsumableAvailability {
+    /// RGB for the healable-HP region, or `None` when the region should be
+    /// hidden. Shared by every render backend so the gray (ready) / white
+    /// (actively healing) treatment stays in sync.
+    pub const fn healable_rgb(self) -> Option<[u8; 3]> {
+        match self {
+            ConsumableAvailability::Unavailable => None,
+            ConsumableAvailability::Ready => Some([140, 140, 140]),
+            ConsumableAvailability::Active => Some([255, 255, 255]),
+        }
+    }
+
+    /// RGB for a roster consumable's charge-count label. Yellow while the
+    /// consumable is running, normal gray when ready, muted gray when it is
+    /// unavailable (reloading or out of charges) so the unavailable state
+    /// recedes rather than draws attention.
+    pub const fn charge_count_rgb(self) -> [u8; 3] {
+        match self {
+            ConsumableAvailability::Active => [255, 220, 80],
+            ConsumableAvailability::Ready => [220, 220, 220],
+            ConsumableAvailability::Unavailable => [90, 90, 90],
+        }
+    }
+}
+
+/// Charcoal tint for the stats-panel ship silhouette base/outline. Shared so
+/// both render backends match.
+pub const SILHOUETTE_BASE_RGB: [u8; 3] = [55, 55, 60];
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct RosterRow {
+    /// Per-session entity ID for this player's ship. Acts as a stable lookup
+    /// key for the desktop renderer's per-player build snapshot, so the build
+    /// popover can resolve hovered rows back to a `ResolvedBuild`.
+    pub entity_id: EntityId,
+    /// Raw arena-side team id for this player. The desktop renderer uses this
+    /// to decide whether the build popover may show enemy loadouts (only when
+    /// at least one merged replay's recording player is on the same team).
+    pub team_id: i64,
+    pub player_name: String,
+    pub clan_tag: Option<String>,
+    pub clan_color: Option<[u8; 3]>,
+    pub ship_name: String,
+    pub ship_param_id: Option<GameParamId>,
+    /// Lookup key for the ship class icon (DD/CA/BB/CV/SS). Matches a key in
+    /// the renderer's `ship_icons` texture map (the species name).
+    pub class_icon_key: Option<String>,
+    /// Parsed ship species, used as the primary roster sort key so the order
+    /// follows the in-game class hierarchy (CV/BB/CA/DD/SS) rather than the
+    /// alphabetical fall-back of `class_icon_key`.
+    pub species: Option<wowsunpack::game_params::types::Species>,
+    /// `None` until the ship's max health is known.
+    pub hp: Option<HitPoints>,
+    /// Repair Party (heal) availability for this ship (drives healable HP-bar segment).
+    pub heal_availability: ConsumableAvailability,
+    pub is_dead: bool,
+    /// Highlight this row (player's own ship, or own division-mate).
+    pub is_self: bool,
+    /// True while the ship is currently visible to the opposing team. Drives
+    /// the yellow name highlight.
+    pub is_spotted: bool,
+    /// True if the most recent connection event for this player at the current
+    /// clock is `Disconnected`. Drives the red outline on the icon.
+    pub is_disconnected: bool,
+    /// Number of kills the player has scored at the current clock.
+    pub kills: u32,
+    /// Total damage dealt by the player at the current clock.
+    pub damage_dealt: f32,
+    /// Seconds elapsed since this player's last observed damage event, or
+    /// `None` if they have never dealt damage. UI fades the recent-damage
+    /// indicator over this duration.
+    pub seconds_since_damage: Option<f32>,
+    pub consumables: Vec<RosterConsumable>,
+}
+
+/// A ship's hit points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct HitPoints {
+    pub current: f32,
+    /// Always positive.
+    pub max: f32,
+    /// Portion of missing HP that the ship can still restore via Repair Party
+    /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
+    /// between current HP and permanent damage.
+    pub healable: f32,
+    /// HP the active/next heal charge will restore (the brighter part of
+    /// the healable region). The remainder of `healable` is drawn dimmer.
+    pub healable_per_charge: f32,
+}
+
+impl HitPoints {
+    /// Current HP as a fraction of max, clamped to `0..=1`.
+    pub fn fraction(&self) -> f32 {
+        (self.current / self.max).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct RosterConsumable {
+    /// Lookup key in the consumable icon map (Ability param index, e.g.
+    /// `"PCY009_CrashCrewPremium"`).
+    pub icon_key: String,
+    /// User-facing display name. Localized when game translations are
+    /// available, otherwise the raw consumable type.
+    pub display_name: String,
+    /// Localized description (the in-game tooltip text). Empty when no
+    /// translation is available.
+    pub description: String,
+    pub total_charges: ChargeCount,
+    pub charges_used: u32,
+    pub work_time_secs: f32,
+    pub reload_time_secs: f32,
+    /// Seconds of activation remaining, or `None` when not active.
+    pub active_remaining_secs: Option<f32>,
+    /// Availability of this consumable (drives the charge-count label color).
+    pub availability: ConsumableAvailability,
+}
+
+/// What a hover over one of a roster's consumable icons reads.
+///
+/// Built here rather than in either front end: both show the same lines, and
+/// a difference between them would be a difference in what the replay says.
+pub struct ConsumableLines {
+    pub name: String,
+    pub charges: String,
+    /// How long it runs and how long until the next charge. Absent for a
+    /// consumable that states neither.
+    pub timing: Option<String>,
+    /// How much of an activation is left, while one is running.
+    pub active: Option<String>,
+    /// The in-game tooltip text, empty when the build ships no translation.
+    pub description: String,
+}
+
+/// What `consumable` reads as under a pointer.
+pub fn consumable_lines(consumable: &RosterConsumable) -> ConsumableLines {
+    let name =
+        if consumable.display_name.is_empty() { consumable.icon_key.clone() } else { consumable.display_name.clone() };
+    let charges = match consumable.total_charges {
+        ChargeCount::Unlimited => "Charges: inf".to_string(),
+        ChargeCount::Finite(total) => {
+            format!("Charges: {} / {}", total.saturating_sub(consumable.charges_used), total)
+        }
+    };
+    let timing = (consumable.work_time_secs > 0.0 || consumable.reload_time_secs > 0.0).then(|| {
+        format!("Duration: {:.0}s   Cooldown: {:.0}s", consumable.work_time_secs, consumable.reload_time_secs)
+    });
+    let active = consumable.active_remaining_secs.map(|left| format!("Active: {left:.0}s remaining"));
+    ConsumableLines { name, charges, timing, active, description: consumable.description.clone() }
+}
+
+/// Mirror of `wowsunpack::game_types::ChargeCount` for the draw command
+/// layer. Kept local so this crate avoids a full wowsunpack dep when
+/// built with `rendering` off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ChargeCount {
+    Unlimited,
+    Finite(u32),
+}
+
+impl ChargeCount {
+    pub fn remaining(self, used: u32) -> Self {
+        match self {
+            Self::Unlimited => Self::Unlimited,
+            Self::Finite(n) => Self::Finite(n.saturating_sub(used)),
+        }
+    }
+}
+
+#[cfg(feature = "rendering")]
+impl From<wowsunpack::game_types::ChargeCount> for ChargeCount {
+    fn from(value: wowsunpack::game_types::ChargeCount) -> Self {
+        match value {
+            wowsunpack::game_types::ChargeCount::Unlimited => Self::Unlimited,
+            wowsunpack::game_types::ChargeCount::Finite(n) => Self::Finite(n),
+        }
+    }
+}
+
+impl DrawCommand {
+    /// Returns true if this is a HUD overlay element (score bar, timer, kill feed, etc.)
+    /// that should be drawn unclipped, outside the map viewport area.
+    pub fn is_hud(&self) -> bool {
+        matches!(
+            self,
+            Self::ScoreBar { .. }
+                | Self::Timer { .. }
+                | Self::PreBattleCountdown { .. }
+                | Self::KillFeed { .. }
+                | Self::BattleResultOverlay { .. }
+                | Self::TeamBuffs { .. }
+                | Self::TeamAdvantage { .. }
+                | Self::ChatOverlay { .. }
+                | Self::StatsPanel { .. }
+                | Self::StatsSilhouette { .. }
+                | Self::StatsDamage { .. }
+                | Self::StatsRibbons { .. }
+                | Self::StatsActivityFeed { .. }
+                | Self::TeamRoster { .. }
+        )
+    }
+
+    /// Returns true if this is a stats-panel element that should be rendered
+    /// in the side panel rather than on the main canvas.
+    pub fn is_stats(&self) -> bool {
+        matches!(
+            self,
+            Self::StatsPanel { .. }
+                | Self::StatsSilhouette { .. }
+                | Self::StatsDamage { .. }
+                | Self::StatsRibbons { .. }
+                | Self::StatsActivityFeed { .. }
+                | Self::TeamRoster { .. }
+        )
+    }
+}
+
+/// Trait for rendering backends that consume `DrawCommand`s.
+///
+/// Implementations produce visual output from high-level draw commands.
+/// The software image renderer and a future GPU renderer both implement this.
+pub trait RenderTarget {
+    /// Prepare a fresh frame (clear canvas, draw background map + grid).
+    fn begin_frame(&mut self);
+
+    /// Execute a single draw command.
+    fn draw(&mut self, cmd: &DrawCommand);
+
+    /// Finalize the current frame. After this call, the frame is ready to read/encode.
+    fn end_frame(&mut self);
+}
+
+#[cfg(test)]
+mod consumable_reading_tests {
+    use super::ChargeCount;
+    use super::ConsumableAvailability;
+    use super::RosterConsumable;
+    use super::consumable_lines;
+
+    fn consumable() -> RosterConsumable {
+        RosterConsumable {
+            icon_key: "PCY009_CrashCrewPremium".to_string(),
+            display_name: "Repair Party".to_string(),
+            description: "Restores hit points.".to_string(),
+            total_charges: ChargeCount::Finite(4),
+            charges_used: 1,
+            work_time_secs: 28.0,
+            reload_time_secs: 80.0,
+            active_remaining_secs: None,
+            availability: ConsumableAvailability::Ready,
+        }
+    }
+
+    /// Charges read as what is left of what there was, which is what a
+    /// reader is counting.
+    #[test]
+    fn charges_read_as_what_is_left() {
+        assert_eq!(consumable_lines(&consumable()).charges, "Charges: 3 / 4");
+    }
+
+    /// A consumable with no limit says so rather than showing a number it
+    /// does not have.
+    #[test]
+    fn an_unlimited_consumable_says_so() {
+        let unlimited = RosterConsumable { total_charges: ChargeCount::Unlimited, ..consumable() };
+        assert_eq!(consumable_lines(&unlimited).charges, "Charges: inf");
+    }
+
+    /// Spending more charges than there were cannot read as a negative
+    /// count: the roster is built from a battle that may have been rejoined.
+    #[test]
+    fn spending_past_the_last_charge_reads_as_none_left() {
+        let spent = RosterConsumable { charges_used: 9, ..consumable() };
+        assert_eq!(consumable_lines(&spent).charges, "Charges: 0 / 4");
+    }
+
+    /// Timing is shown only by a consumable that states one.
+    #[test]
+    fn a_consumable_that_states_no_timing_shows_none() {
+        let lines = consumable_lines(&consumable());
+        assert_eq!(lines.timing.as_deref(), Some("Duration: 28s   Cooldown: 80s"));
+
+        let untimed = RosterConsumable { work_time_secs: 0.0, reload_time_secs: 0.0, ..consumable() };
+        assert!(consumable_lines(&untimed).timing.is_none());
+    }
+
+    /// What is left of an activation is shown only while one is running.
+    #[test]
+    fn the_active_line_is_there_only_while_it_runs() {
+        assert!(consumable_lines(&consumable()).active.is_none());
+
+        let running = RosterConsumable { active_remaining_secs: Some(12.4), ..consumable() };
+        assert_eq!(consumable_lines(&running).active.as_deref(), Some("Active: 12s remaining"));
+    }
+
+    /// A build with no translation for a consumable falls back to the key it
+    /// is looked up by, rather than reading as a nameless icon.
+    #[test]
+    fn an_untranslated_consumable_reads_as_its_key() {
+        let untranslated = RosterConsumable { display_name: String::new(), ..consumable() };
+        assert_eq!(consumable_lines(&untranslated).name, "PCY009_CrashCrewPremium");
+    }
+}
+
+#[cfg(test)]
+mod camera_direction_wedge_tests {
+    use std::f32::consts::FRAC_PI_2;
+    use std::f32::consts::PI;
+    use std::fmt::Write;
+
+    use super::CameraDirectionWedge;
+    use crate::ICON_SIZE;
+    use crate::map_data::MinimapPos;
+
+    const CENTER: MinimapPos = MinimapPos { x: 100.0, y: 200.0 };
+    const ICON: f32 = ICON_SIZE as f32;
+
+    fn distance(a: MinimapPos, b: MinimapPos) -> f32 {
+        (a.x - b.x).hypot(a.y - b.y)
+    }
+
+    /// The bow of an icon centered on `CENTER`, placed as the icon is drawn:
+    /// the art points up and is turned clockwise by PI/2 - heading.
+    fn bow(heading: f32) -> MinimapPos {
+        let turn = FRAC_PI_2 - heading;
+        let half = ICON / 2.0;
+
+        MinimapPos { x: CENTER.x + turn.sin() * half, y: CENTER.y - turn.cos() * half }
+    }
+
+    fn stern(heading: f32) -> MinimapPos {
+        bow(heading + PI)
+    }
+
+    fn look_angles() -> impl Iterator<Item = f32> {
+        (0..360).step_by(15).map(|degrees| (degrees as f32).to_radians())
+    }
+
+    #[test]
+    fn corners_by_look_direction() {
+        let mut out = String::new();
+        for degrees in [0.0f32, 45.0, 90.0, 180.0, 270.0] {
+            let [left, tip, right] = CameraDirectionWedge::new(CENTER, degrees.to_radians(), ICON).corners();
+            writeln!(
+                out,
+                "{degrees:>3}: base ({:.2}, {:.2}) ({:.2}, {:.2}) tip ({:.2}, {:.2})",
+                left.x, left.y, right.x, right.y, tip.x, tip.y
+            )
+            .expect("writes to a string");
+        }
+
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn starts_at_the_icon_center() {
+        for yaw in look_angles() {
+            let CameraDirectionWedge { left, right, .. } = CameraDirectionWedge::new(CENTER, yaw, ICON);
+            let middle = MinimapPos { x: (left.x + right.x) / 2.0, y: (left.y + right.y) / 2.0 };
+
+            assert!(distance(middle, CENTER) < 1e-3, "yaw {yaw}: base centered on {middle:?}");
+        }
+    }
+
+    #[test]
+    fn reaches_one_icon_length() {
+        for yaw in look_angles() {
+            let tip = CameraDirectionWedge::new(CENTER, yaw, ICON).tip;
+
+            assert!((distance(tip, CENTER) - ICON).abs() < 1e-3, "yaw {yaw}: tip at {tip:?}");
+        }
+    }
+
+    #[test]
+    fn looking_ahead_ends_half_an_icon_past_the_bow() {
+        for heading in look_angles() {
+            let tip = CameraDirectionWedge::new(CENTER, heading, ICON).tip;
+
+            assert!((distance(tip, bow(heading)) - ICON / 2.0).abs() < 1e-3, "heading {heading}: tip at {tip:?}");
+            assert!((distance(tip, stern(heading)) - 1.5 * ICON).abs() < 1e-3, "heading {heading}: past the bow");
+        }
+    }
+
+    #[test]
+    fn looking_astern_ends_half_an_icon_behind_the_stern() {
+        for heading in look_angles() {
+            let tip = CameraDirectionWedge::new(CENTER, heading + PI, ICON).tip;
+
+            assert!((distance(tip, stern(heading)) - ICON / 2.0).abs() < 1e-3, "heading {heading}: tip at {tip:?}");
+            assert!((distance(tip, bow(heading)) - 1.5 * ICON).abs() < 1e-3, "heading {heading}: behind the stern");
+        }
+    }
+}

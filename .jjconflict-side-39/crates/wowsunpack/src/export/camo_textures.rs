@@ -1,0 +1,353 @@
+//! Lazy camo texture support: scheme identity, metadata, and on-demand decode.
+
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use crate::export::camouflage;
+use crate::export::camouflage::UvTransform;
+use crate::export::gltf_export::CamoOrigin;
+use crate::export::material_alpha::AlphaMode;
+use crate::export::ship;
+use crate::export::ship::MfmInfo;
+use crate::export::surface_maps::GltfSurfacePngs;
+use crate::export::texture;
+
+/// Stable identity of a camo scheme within a single loaded ship. It indexes the
+/// ordered `CamoSchemeInfo` list the ship produces and is never persisted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CamoSchemeId(pub usize);
+
+#[derive(Debug, thiserror::Error)]
+pub enum CamoDecodeError {
+    #[error("no camo scheme with id {0:?}")]
+    UnknownId(CamoSchemeId),
+    #[error("no camo scheme named {name}")]
+    UnknownName { name: String },
+}
+
+/// Decoded textures for one scheme: mfm stem to PNG bytes. Empty is a valid,
+/// explicit result (a scheme that covers no loaded part), distinct from
+/// not-yet-decoded (absence from any cache).
+pub type SchemeTextures = HashMap<String, Vec<u8>>;
+
+/// Cheap per-scheme metadata for the picker; carries no decoded textures.
+#[derive(Debug, Clone)]
+pub struct CamoSchemeInfo {
+    pub id: CamoSchemeId,
+    pub display_name: String,
+    /// The camouflages.xml/legacy scheme name, untranslated. Used to spot the
+    /// "default" scheme under any locale, since `display_name` may be translated.
+    pub raw_name: String,
+    pub origin: CamoOrigin,
+    pub use_color_scheme: bool,
+    /// mfm stem to UV scale/offset for tiled schemes; absent stem means identity.
+    pub uv_transforms: HashMap<String, UvTransform>,
+}
+
+/// Decode one filename-scanned (LegacyScan) scheme: the textures WoWs already
+/// stores pre-colored per part. No baking; a missing part texture is skipped.
+pub(crate) fn decode_legacy_scheme(
+    vfs: &crate::vfs::VfsPath,
+    unique_infos: &[&MfmInfo],
+    scheme: &str,
+    lod: texture::TextureLod,
+) -> SchemeTextures {
+    let mut out = SchemeTextures::new();
+    for info in unique_infos {
+        let Some((_base_name, dds_bytes)) = texture::load_texture_bytes(vfs, &info.stem, scheme, lod) else {
+            continue;
+        };
+        match texture::dds_to_png(&dds_bytes, lod) {
+            Ok(png) => {
+                out.insert(info.stem.clone(), png);
+            }
+            Err(e) => eprintln!("  Warning: failed to decode camo texture {}_{scheme}: {e}", info.stem),
+        }
+    }
+    out
+}
+
+/// Borrow view of the fields a mat-based scheme needs to decode, so ship.rs's
+/// owned `MatCamoScheme` and the lazy source can both drive one decoder.
+pub struct MatCamoSchemeView<'a> {
+    pub textures: &'a HashMap<String, String>,
+    pub tiled: bool,
+    pub color_scheme_colors: Option<&'a [[f32; 4]; 4]>,
+    pub uv_transforms: &'a HashMap<String, UvTransform>,
+}
+
+/// Decode one material-based scheme (ship-specific, universal, or expendable):
+/// resolve each part's texture, bake a zone mask that carries a color scheme,
+/// force-opaque a raw painted albedo. Returns stem to PNG.
+pub(crate) fn decode_mat_scheme(
+    vfs: &crate::vfs::VfsPath,
+    scheme: &MatCamoSchemeView<'_>,
+    stems: &[String],
+    lod: texture::TextureLod,
+) -> SchemeTextures {
+    let mut decoded: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut out = SchemeTextures::new();
+    for stem in stems {
+        let cat = camouflage::classify_part_category(stem);
+        let Some(path) = crate::export::ship::resolve_part_texture(scheme.textures, cat, scheme.tiled) else {
+            continue;
+        };
+        if !decoded.contains_key(path) {
+            let Some(dds) = texture::load_dds_from_vfs(vfs, path, lod) else {
+                continue;
+            };
+            // Bake (colorize) only a zone mask that has a color scheme; a real painted
+            // albedo (even one that carries a color scheme) must render raw.
+            let bake = scheme.color_scheme_colors.is_some() && texture::zone_mask_fraction(&dds).unwrap_or(0.0) >= 0.90;
+            let png = if bake {
+                // A per-ship painted mask (tiled=false) uses black as passthrough to the
+                // base; a repeating tile uses black as an opaque pattern color (full cover).
+                let black_passthrough = !scheme.tiled;
+                match texture::bake_tiled_camo_png(&dds, scheme.color_scheme_colors.unwrap(), black_passthrough, lod) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("  Warning: failed to bake camo {path}: {e}");
+                        continue;
+                    }
+                }
+            } else {
+                // A raw painted camo is a full opaque replacement; its DDS alpha holds
+                // material data (gloss/height), not camo coverage. Force it opaque so
+                // the only textures carrying sub-255 alpha are baked passthrough masks,
+                // which lets the compositor identify passthrough reliably.
+                match texture::dds_to_png(&dds, lod) {
+                    Ok(mut p) => {
+                        texture::apply_png_alpha(&mut p, AlphaMode::Opaque);
+                        p
+                    }
+                    Err(e) => {
+                        eprintln!("  Warning: failed to decode camo texture {path}: {e}");
+                        continue;
+                    }
+                }
+            };
+            decoded.insert(path.clone(), png);
+        }
+        if let Some(png) = decoded.get(path) {
+            out.insert(stem.clone(), png.clone());
+        }
+    }
+    out
+}
+
+/// Owned copy of a mat-based scheme's decode inputs, so the source survives the
+/// `ShipModelContext` that built it.
+#[derive(Debug, Clone)]
+pub struct OwnedMatScheme {
+    pub display_name: String,
+    pub textures: HashMap<String, String>,
+    pub tiled: bool,
+    pub use_color_scheme: bool,
+    pub color_scheme_colors: Option<[[f32; 4]; 4]>,
+    pub uv_transforms: HashMap<String, UvTransform>,
+    pub origin: CamoOrigin,
+    /// The camouflages.xml/legacy scheme name, untranslated.
+    pub camo_name: String,
+}
+
+impl OwnedMatScheme {
+    fn view(&self) -> MatCamoSchemeView<'_> {
+        MatCamoSchemeView {
+            textures: &self.textures,
+            tiled: self.tiled,
+            color_scheme_colors: self.color_scheme_colors.as_ref(),
+            uv_transforms: &self.uv_transforms,
+        }
+    }
+}
+
+enum CamoSchemeKind {
+    Legacy(usize), // index into legacy_schemes
+    Mat(usize),    // index into mat_schemes
+}
+
+/// Everything needed to enumerate scheme metadata and decode any one scheme,
+/// without retaining the ship context or re-parsing assets.bin.
+pub struct CamoTextureSource {
+    vfs: crate::vfs::VfsPath,
+    unique_infos: Vec<MfmInfo>,
+    unique_stems: Vec<String>,
+    legacy_schemes: Vec<String>,
+    mat_schemes: Vec<OwnedMatScheme>,
+    kinds: Vec<CamoSchemeKind>,
+    lod: texture::TextureLod,
+}
+
+impl CamoTextureSource {
+    pub(crate) fn new(
+        vfs: crate::vfs::VfsPath,
+        unique_infos: Vec<MfmInfo>,
+        legacy_schemes: Vec<String>,
+        mat_schemes: Vec<OwnedMatScheme>,
+        lod: texture::TextureLod,
+    ) -> Self {
+        let unique_stems = unique_infos.iter().map(|i| i.stem.clone()).collect();
+        let mut kinds = Vec::with_capacity(legacy_schemes.len() + mat_schemes.len());
+        for i in 0..legacy_schemes.len() {
+            kinds.push(CamoSchemeKind::Legacy(i));
+        }
+        for i in 0..mat_schemes.len() {
+            kinds.push(CamoSchemeKind::Mat(i));
+        }
+        Self { vfs, unique_infos, unique_stems, legacy_schemes, mat_schemes, kinds, lod }
+    }
+
+    pub fn scheme_infos(&self) -> Vec<CamoSchemeInfo> {
+        self.kinds
+            .iter()
+            .enumerate()
+            .map(|(idx, kind)| {
+                let id = CamoSchemeId(idx);
+                match kind {
+                    CamoSchemeKind::Legacy(i) => CamoSchemeInfo {
+                        id,
+                        display_name: self.legacy_schemes[*i].clone(),
+                        raw_name: self.legacy_schemes[*i].clone(),
+                        origin: CamoOrigin::LegacyScan,
+                        use_color_scheme: false,
+                        uv_transforms: HashMap::new(),
+                    },
+                    CamoSchemeKind::Mat(i) => {
+                        let s = &self.mat_schemes[*i];
+                        CamoSchemeInfo {
+                            id,
+                            display_name: s.display_name.clone(),
+                            raw_name: s.camo_name.clone(),
+                            origin: s.origin,
+                            use_color_scheme: s.use_color_scheme,
+                            uv_transforms: self.mat_uv_by_stem(s),
+                        }
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Per-stem UV transforms, mirroring the eager path's `tiled_uv_transforms`
+    /// (resolve the part category, fall back to the "tile" transform when tiled).
+    fn mat_uv_by_stem(&self, s: &OwnedMatScheme) -> HashMap<String, UvTransform> {
+        let mut out = HashMap::new();
+        for stem in &self.unique_stems {
+            let cat = camouflage::classify_part_category(stem);
+            let xform = s.uv_transforms.get(cat).or_else(|| if s.tiled { s.uv_transforms.get("tile") } else { None });
+            if let Some(x) = xform
+                && (x.scale != [1.0, 1.0] || x.offset != [0.0, 0.0])
+            {
+                out.insert(stem.clone(), x.clone());
+            }
+        }
+        out
+    }
+
+    pub fn decode(&self, id: CamoSchemeId) -> Result<SchemeTextures, CamoDecodeError> {
+        let kind = self.kinds.get(id.0).ok_or(CamoDecodeError::UnknownId(id))?;
+        let unique_refs: Vec<&MfmInfo> = self.unique_infos.iter().collect();
+        Ok(match kind {
+            CamoSchemeKind::Legacy(i) => {
+                decode_legacy_scheme(&self.vfs, &unique_refs, &self.legacy_schemes[*i], self.lod)
+            }
+            CamoSchemeKind::Mat(i) => {
+                decode_mat_scheme(&self.vfs, &self.mat_schemes[*i].view(), &self.unique_stems, self.lod)
+            }
+        })
+    }
+
+    /// Base albedo PNGs by MFM stem: the stock appearance every export carries,
+    /// under any camo variants.
+    pub fn base_albedos(&self) -> HashMap<String, Vec<u8>> {
+        let mut out = HashMap::new();
+        for info in &self.unique_infos {
+            let Some(dds) = texture::load_base_albedo_bytes(&self.vfs, &info.full_path, self.lod) else {
+                continue;
+            };
+            match texture::dds_to_png(&dds, self.lod) {
+                Ok(png) => {
+                    out.insert(info.stem.clone(), png);
+                }
+                Err(e) => eprintln!("  Warning: failed to decode base texture for {}: {e}", info.stem),
+            }
+        }
+        out
+    }
+
+    /// The alpha mode of each base material that tests or blends alpha, by
+    /// MFM stem, as [`TextureSet::base_alpha`](super::gltf_export::TextureSet)
+    /// holds it.
+    pub fn base_alpha(&self) -> HashMap<String, AlphaMode> {
+        self.unique_infos
+            .iter()
+            .filter(|info| info.alpha != AlphaMode::Opaque)
+            .map(|info| (info.stem.clone(), info.alpha))
+            .collect()
+    }
+
+    /// The glTF-encoded surface maps of each base material that names one,
+    /// by MFM stem, as [`TextureSet::base_surface`](super::gltf_export::TextureSet)
+    /// holds them.
+    pub fn base_surface_pngs(&self) -> HashMap<String, GltfSurfacePngs> {
+        ship::base_surface_pngs(&self.unique_infos, &self.vfs, self.lod)
+    }
+
+    /// The base albedo DDS path per stem, without reading it.
+    pub fn base_albedo_paths(&self) -> HashMap<String, String> {
+        self.unique_infos
+            .iter()
+            .filter_map(|i| texture::base_albedo_path(&self.vfs, &i.full_path).map(|p| (i.stem.clone(), p)))
+            .collect()
+    }
+
+    /// The distinct DDS paths one scheme reads, restricted to `reachable`
+    /// MFM stems. Pricing an export must not pay for a decode, so this
+    /// resolves paths only. `reachable` excludes stems whose only render sets
+    /// are excluded for the ship's damage state (e.g. `_crack_` in an intact
+    /// export): those stems never reach a surviving primitive, so a camo
+    /// applied to them never gets embedded either, and pricing them would
+    /// charge for a texture the export does not carry.
+    pub fn scheme_texture_paths(
+        &self,
+        id: CamoSchemeId,
+        reachable: &HashSet<String>,
+    ) -> Result<Vec<String>, CamoDecodeError> {
+        let kind = self.kinds.get(id.0).ok_or(CamoDecodeError::UnknownId(id))?;
+        let mut paths: Vec<String> = match kind {
+            CamoSchemeKind::Legacy(i) => {
+                let scheme = &self.legacy_schemes[*i];
+                self.unique_infos
+                    .iter()
+                    .filter(|info| reachable.contains(&info.stem))
+                    .filter_map(|info| texture::scheme_texture_path(&self.vfs, &info.stem, scheme))
+                    .collect()
+            }
+            CamoSchemeKind::Mat(i) => {
+                let s = &self.mat_schemes[*i];
+                self.unique_stems
+                    .iter()
+                    .filter(|stem| reachable.contains(*stem))
+                    .filter_map(|stem| {
+                        let cat = camouflage::classify_part_category(stem);
+                        crate::export::ship::resolve_part_texture(&s.textures, cat, s.tiled).cloned()
+                    })
+                    .collect()
+            }
+        };
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
+    /// Metadata for one id.
+    pub fn scheme_info(&self, id: CamoSchemeId) -> Option<CamoSchemeInfo> {
+        self.scheme_infos().into_iter().find(|i| i.id == id)
+    }
+
+    /// The id whose display name matches, for callers that name a scheme rather
+    /// than index it (the CLI). Case-insensitive; first match wins.
+    pub fn resolve_display_name(&self, name: &str) -> Option<CamoSchemeId> {
+        self.scheme_infos().into_iter().find(|i| i.display_name.eq_ignore_ascii_case(name)).map(|i| i.id)
+    }
+}

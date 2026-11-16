@@ -1,0 +1,91 @@
+---
+source: crates/wows-query/tests/module_comparison.rs
+expression: output
+---
+interpretations:
+  - input: GK
+    resolved: G. Kurfürst
+    kind: ship
+    method: exact-alias
+    alternatives:
+      - "[G. Kurfürst] (clan battle rental): T10 battleship, PGSB910"
+ship: "T10 G. Kurfürst (battleship, Germany, premium)"
+range_km: 12
+kinds:
+  - kind: guns
+    options:
+      - module: 406 mm/52 Drh C/34 on a Drh LC/34 mount
+        stock: true
+        values:
+          - "caliber: 406 mm"
+          - "mounts x barrels: 4 x 3"
+          - "barrels: 12"
+          - "reload: 29.0 s"
+          - "180 deg turret turn time: 40.0 s"
+          - "maximum range: 20.6 km"
+          - "HE alpha damage: 4800"
+          - "HE salvo damage: 57600"
+          - "HE damage per minute: 119172 hp/min"
+          - "HE fire chance: 38%"
+          - "HE fires per minute against one target: 9.43 fires/min"
+          - "HE penetration: 102 mm"
+          - "HE muzzle velocity: 810 m/s"
+          - "HE flight time to 12 km: 6.23 s"
+          - "HE impact velocity at 12 km: 619 m/s"
+          - "AP alpha damage: 12700"
+          - "AP salvo damage: 152400"
+          - "AP damage per minute: 315310 hp/min"
+          - "AP muzzle velocity: 810 m/s"
+          - "AP raw penetration at 12 km: 566.5 mm"
+          - "AP flight time to 12 km: 6.23 s"
+          - "AP impact velocity at 12 km: 619 m/s"
+          - "AP overmatches plates up to: 28 mm"
+          - "AP fuse threshold: 68 mm"
+          - "AP fuse time: 0.033 s"
+          - "horizontal dispersion at 12 km: 180 m"
+          - "vertical dispersion at 12 km: 93 m"
+          - "sigma: 1.80"
+          - "Minimum Shell Type Switching Time: 29.0 s"
+          - "fires per minute, every gun mount firing at once, all armament: 38.51 fires/min"
+          - "fires per minute against one target, all armament: 28.45 fires/min"
+      - module: 420 mm/48 SK C/40 on a Drh LC/34 mount
+        stock: false
+        values:
+          - "caliber: 420 mm"
+          - "mounts x barrels: 4 x 3"
+          - "barrels: 12"
+          - "reload: 32.0 s"
+          - "180 deg turret turn time: 40.0 s"
+          - "maximum range: 20.6 km"
+          - "HE alpha damage: 5000"
+          - "HE salvo damage: 60000"
+          - "HE damage per minute: 112500 hp/min"
+          - "HE fire chance: 41%"
+          - "HE fires per minute against one target: 9.23 fires/min"
+          - "HE penetration: 105 mm"
+          - "HE muzzle velocity: 800 m/s"
+          - "HE flight time to 12 km: 6.22 s"
+          - "HE impact velocity at 12 km: 628 m/s"
+          - "AP alpha damage: 13500"
+          - "AP salvo damage: 162000"
+          - "AP damage per minute: 303750 hp/min"
+          - "AP muzzle velocity: 800 m/s"
+          - "AP raw penetration at 12 km: 597.8 mm"
+          - "AP flight time to 12 km: 6.22 s"
+          - "AP impact velocity at 12 km: 628 m/s"
+          - "AP overmatches plates up to: 29 mm"
+          - "AP fuse threshold: 70 mm"
+          - "AP fuse time: 0.033 s"
+          - "horizontal dispersion at 12 km: 180 m"
+          - "vertical dispersion at 12 km: 93 m"
+          - "sigma: 1.80"
+          - "Minimum Shell Type Switching Time: 32.0 s"
+          - "fires per minute, every gun mount firing at once, all armament: 38.31 fires/min"
+          - "fires per minute against one target, all armament: 28.24 fires/min"
+    differences:
+      - "420 mm/48 SK C/40 on a Drh LC/34 mount: caliber 420 mm instead of 406 mm; reload 32.0 s instead of 29.0 s; HE alpha damage 5000 instead of 4800; HE salvo damage 60000 instead of 57600; HE damage per minute 112500 hp/min instead of 119172 hp/min; HE fire chance 41% instead of 38%; HE fires per minute against one target 9.23 fires/min instead of 9.43 fires/min; HE penetration 105 mm instead of 102 mm; HE muzzle velocity 800 m/s instead of 810 m/s; HE flight time to 12 km 6.22 s instead of 6.23 s; HE impact velocity at 12 km 628 m/s instead of 619 m/s; AP alpha damage 13500 instead of 12700; AP salvo damage 162000 instead of 152400; AP damage per minute 303750 hp/min instead of 315310 hp/min; AP muzzle velocity 800 m/s instead of 810 m/s; AP raw penetration at 12 km 597.8 mm instead of 566.5 mm; AP flight time to 12 km 6.22 s instead of 6.23 s; AP impact velocity at 12 km 628 m/s instead of 619 m/s; AP overmatches plates up to 29 mm instead of 28 mm; AP fuse threshold 70 mm instead of 68 mm; Minimum Shell Type Switching Time 32.0 s instead of 29.0 s; fires per minute, every gun mount firing at once, all armament 38.31 fires/min instead of 38.51 fires/min; fires per minute against one target, all armament 28.24 fires/min instead of 28.45 fires/min."
+notes:
+  - "Every option is on the stock build: the ship's other modules stock unless the option needs others (listed in with), no captain skills, upgrades or consumables."
+  - "Damage, fires and torpedoes per minute assume every shell or torpedo hits, on the reload with no consumable, against one target at the bearing where the most guns or launchers bear; values for every mount or launcher firing at once are a ceiling no single target sees. AA damage per second is before hit chance."
+  - "AP raw penetration, flight time and impact velocity at range_km come from each shell's ballistic solution: penetration against a plate struck head-on. Dispersion at range_km is computed even beyond the option's maximum range."
+  - "Torpedo reaction time is detectability / speed, with speed in knots x 2.69 m/s per knot: the time a target has from spotting the torpedo until it arrives."

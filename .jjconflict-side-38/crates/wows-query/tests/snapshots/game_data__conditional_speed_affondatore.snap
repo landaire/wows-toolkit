@@ -1,0 +1,40 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3399
+expression: speed
+---
+surface:
+  stat: top speed on the surface
+  unit: kn
+  builds:
+    base: 30
+    best:
+      value: 30
+      assumed: []
+    alternatives:
+      - label: with Brisk active
+        value: 33
+        assumed:
+          - Brisk
+        note: "Increases your ship's speed while she remains undetected."
+      - label: with Sierra Mike signal
+        value: 31.5
+        assumed:
+          - Sierra Mike signal
+      - label: with Brisk active and Sierra Mike signal
+        value: 34.65
+        assumed:
+          - Brisk
+          - Sierra Mike signal
+        note: "Increases your ship's speed while she remains undetected."
+      - label: "with Combat Instructions: Consumable Operational Readiness active"
+        value: 33
+        assumed:
+          - "Combat Instructions: Consumable Operational Readiness"
+        note: "Only while Combat Instructions: Consumable Operational Readiness is active."
+      - label: "with Brisk active and Combat Instructions: Consumable Operational Readiness active"
+        value: 36.3
+        assumed:
+          - Brisk
+          - "Combat Instructions: Consumable Operational Readiness"
+        note: "Increases your ship's speed while she remains undetected."

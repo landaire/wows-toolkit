@@ -1,0 +1,14 @@
+load("//build-support/buck:wasm_rules.bzl", "platform_transition")
+
+# Builds whatever carries it for wasm32, whatever platform it was asked for.
+platform_transition(
+    name = "transition",
+    platform = "toolchains//platforms:wasm32",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "bundle_site.py",
+    src = "bundle_site.py",
+    visibility = ["PUBLIC"],
+)

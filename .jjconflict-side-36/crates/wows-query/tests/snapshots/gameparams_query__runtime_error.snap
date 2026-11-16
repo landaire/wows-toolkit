@@ -1,0 +1,13 @@
+---
+source: crates/wows-query/tests/gameparams_query.rs
+expression: runtime
+---
+matched: 1
+queried: 1
+total_bytes: 0
+truncated: false
+failed: 1
+errors:
+  - param: PASC020_Des_Moines_1948
+    error: "cannot calculate {\"Ammo_1\":{\"antiRamCoeff\":1.0,\"armorCoeff\":0.0,\"autoRepairTime\":40,\"autoRepairTimeMin\":5,\"brokenRepairHealthCoefficient\":0.5,\"brokenRepairTime\":90.0,\"buoyancyShipPercent\":0.0,\"burnNode\":\"\",\"canBeDestroyed\":true,\"coeffReloadDamaged\":1.0,\"critProb\":[0.0,0.0],\"critProbHP\":[1.0,0.0],\"da"
+results: []

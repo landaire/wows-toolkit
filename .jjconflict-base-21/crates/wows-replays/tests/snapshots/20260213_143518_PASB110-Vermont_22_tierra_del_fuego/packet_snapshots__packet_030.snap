@@ -1,0 +1,106 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 8
+payload:
+  MinimapUpdate:
+    arg1: []
+    updates:
+      - disappearing: false
+        entity_id: 968071
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.931640625
+          y: 0.099609375
+        unknown: false
+      - disappearing: false
+        entity_id: 968075
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.01953125
+          y: 0.259765625
+        unknown: false
+      - disappearing: false
+        entity_id: 968077
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.05078125
+          y: 0.138671875
+        unknown: false
+      - disappearing: false
+        entity_id: 968079
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.435546875
+          y: 0.099609375
+        unknown: false
+      - disappearing: false
+        entity_id: 968081
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.01953125
+          y: 0.1796875
+        unknown: false
+      - disappearing: false
+        entity_id: 968085
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.146484375
+          y: 0.099609375
+        unknown: false
+      - disappearing: false
+        entity_id: 968087
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.5
+          y: 0.1796875
+        unknown: false
+      - disappearing: false
+        entity_id: 968047
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.931640625
+          y: 0.1796875
+        unknown: false
+      - disappearing: false
+        entity_id: 968049
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.5
+          y: 0.099609375
+        unknown: false
+      - disappearing: false
+        entity_id: 968057
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.466796875
+          y: 0.138671875
+        unknown: false
+      - disappearing: false
+        entity_id: 968059
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.083984375
+          y: 0.099609375
+        unknown: false
+      - disappearing: false
+        entity_id: 968061
+        heading: 0
+        is_sentinel: false
+        position:
+          x: 0.8984375
+          y: 0.138671875
+        unknown: false

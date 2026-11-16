@@ -9,6 +9,7 @@ def _wix_msi_impl(ctx):
     # derived from whichever payload entry happened to be first.
     contents = dict(ctx.attrs.binaries)
     contents.update(ctx.attrs.pdbs)
+    contents.update(ctx.attrs.files)
     payload = ctx.actions.copied_dir("payload", contents, has_content_based_path = False)
 
     output = ctx.actions.declare_output(ctx.attrs.out, has_content_based_path = False)
@@ -44,6 +45,7 @@ wix_msi = rule(
     attrs = {
         "assets": attrs.list(attrs.source(), default = []),
         "binaries": attrs.dict(key = attrs.string(), value = attrs.source()),
+        "files": attrs.dict(key = attrs.string(), value = attrs.source(), default = {}),
         "out": attrs.string(),
         "pdbs": attrs.dict(key = attrs.string(), value = attrs.source(), default = {}),
         "version": attrs.string(),

@@ -1,0 +1,67 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "json!({\n    \"tiers_1_to_6\":\n    {\n        \"by_tier\": low_tiers[\"lacking\"][\"by_tier\"], \"by_class\":\n        low_tiers[\"lacking\"][\"by_class\"], \"note\": low_tiers[\"note\"],\n    }, \"armed_tiers_1_to_4\":\n    { \"ranked\": armed_low_tiers[\"ranked\"], \"ships\": armed }, \"tiers_5_to_11\":\n    {\n        \"by_tier\": high_tiers[\"lacking\"][\"by_tier\"], \"by_class\":\n        high_tiers[\"lacking\"][\"by_class\"], \"ships\":\n        high_tiers[\"lacking\"][\"ships\"],\n    },\n})"
+---
+tiers_1_to_6:
+  by_tier:
+    "1": 13
+    "2": 26
+    "3": 38
+    "4": 41
+    "6": 7
+  by_class:
+    destroyer: 31
+    cruiser: 58
+    battleship: 25
+    aircraft_carrier: 5
+    submarine: 6
+  note: "Released submarines are of tiers 6, 8, 10. Of the searched ships, those with anti-submarine weapons start at tier 3. Most battleships and cruisers of tiers V to X received anti-submarine weapons when submarines entered Random Battles in update 0.10.9 (https://blog.worldofwarships.com/blog/225); few ships below tier V have them."
+armed_tiers_1_to_4:
+  ranked: 2
+  ships:
+    - "T4 Clemson (destroyer, USA) [replicas: DD 214]"
+    - "T3 Wickes (destroyer, USA)"
+tiers_5_to_11:
+  by_tier:
+    "6": 7
+    "7": 1
+    "8": 9
+    "9": 1
+    "10": 15
+  by_class:
+    battleship: 6
+    submarine: 27
+  ships:
+    - "T10 Archerfish (submarine, USA, premium)"
+    - "T10 Balao (submarine, USA)"
+    - "T10 Gato (submarine, USA, premium)"
+    - "T10 I-56 '44 (submarine, Japan, premium) [replicas: BA Arona's Whale]"
+    - "T10 K-1 (submarine, Russia)"
+    - "T10 Orzeł (submarine, Europe, premium)"
+    - "T10 Pietro Calvi (submarine, Italy)"
+    - "T10 Seal (submarine, United_Kingdom, premium)"
+    - "T10 Thrasher (submarine, United_Kingdom)"
+    - "T10 Tonijn (submarine, Netherlands, premium)"
+    - "T10 U-2501 (submarine, Germany)"
+    - "T10 U-4501 (submarine, Germany, premium)"
+    - "T10 Willem de Eerste (battleship, Netherlands, premium)"
+    - "T8 Alliance (submarine, United_Kingdom, premium)"
+    - "T8 I-56 (submarine, Japan, premium)"
+    - "T8 L-20 (submarine, Russia)"
+    - "T8 Pietro Micca (submarine, Italy)"
+    - "T8 S-189 (submarine, Russia, premium)"
+    - "T8 Salmon (submarine, USA)"
+    - "T8 Sturdy (submarine, United_Kingdom)"
+    - "T8 U-190 (submarine, Germany)"
+    - "T6 Cachalot (submarine, USA)"
+    - "T6 Foca (submarine, Italy)"
+    - "T6 S-1 (submarine, Russia)"
+    - "T6 U-69 (submarine, Germany)"
+    - "T6 Undine (submarine, United_Kingdom)"
+    - "T6 Xin Zhong Guo 14 (submarine, Pan_Asia, premium)"
+    - "T10 Balao 2 (submarine, USA, test)"
+    - "T10 Neptunus (battleship, Netherlands, test)"
+    - "T9 Eenhoorn (battleship, Netherlands, test)"
+    - "T8 Prins Maurits (battleship, Netherlands, test)"
+    - "T7 Graaf van Egmont (battleship, Netherlands, test)"
+    - "T6 Grote Geus (battleship, Netherlands, test)"

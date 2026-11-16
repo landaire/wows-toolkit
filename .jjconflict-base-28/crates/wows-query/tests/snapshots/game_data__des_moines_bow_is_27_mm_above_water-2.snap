@@ -1,0 +1,78 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: search
+---
+thickness_mm: 27
+target: "T10 Des Moines (cruiser, USA) bow"
+plates:
+  - "bow: Fore End Plating"
+  - "bow: Fore End Deck"
+tiers:
+  min: 8
+  max: 11
+tier_source: target_matchmaking
+ifhe: false
+rule: "AP defeats a plate by overmatch when caliber > 14.3 x thickness. HE and SAP need penetration >= thickness. SAP also overmatches when caliber > 14.3 x thickness, and then cannot ricochet off the plate at any angle; without overmatch it ricochets at steep angles. HE never overmatches."
+groups:
+  - method: ap_overmatch
+    considered:
+      total: 412
+      by_class:
+        destroyer: 102
+        cruiser: 165
+        battleship: 144
+        submarine: 1
+      test: 38
+    qualifying:
+      total: 96
+      by_class:
+        battleship: 96
+      test: 14
+    share_pct: 23.3
+    share_pct_by_class:
+      destroyer: 0
+      cruiser: 0
+      battleship: 66.7
+      submarine: 0
+    ships:
+      - "T11 Affondatore (battleship, Italy): main battery 406 mm AP"
+      - "T11 Devastation (battleship, United_Kingdom): main battery 419 mm AP"
+      - "T11 Hannover (battleship, Germany): main battery 483 mm AP"
+      - "T11 Maine (battleship, USA): main battery 406 mm AP"
+      - "T11 Patrie (battleship, France): main battery 431 mm AP"
+      - "T11 Satsuma (battleship, Japan): main battery 510 mm AP"
+      - "T11 Ushakov (battleship, Russia): main battery 457 mm AP"
+      - "T10 Aki (battleship, Japan, premium) [replicas: Aki G]: main battery 460 mm AP"
+      - "T10 Bungo (battleship, Japan): main battery 457 mm AP"
+      - "T10 Conqueror (battleship, United_Kingdom) [replicas: Conqueror CLR]: main battery 419 mm AP"
+      - "T10 G. Kurfürst (battleship, Germany, premium): main battery 420 mm AP"
+      - "T10 Incomparable (battleship, United_Kingdom, premium): main battery 508 mm AP"
+      - "T10 Kremlin (battleship, Russia): main battery 457 mm AP"
+      - "T10 Libertad (battleship, Pan_America): main battery 419 mm AP"
+      - "T10 Louisiana (battleship, USA): main battery 406 mm AP"
+      - "T10 Montana (battleship, USA) [replicas: BA Montana]: main battery 406 mm AP"
+      - "T10 Ohio (battleship, USA, premium): main battery 457 mm AP"
+      - "T10 Preussen (battleship, Germany): main battery 457 mm AP"
+      - "T10 R. Lauria (battleship, Italy, premium) [replicas: Tempesta Nera]: main battery 457 mm AP"
+      - "T10 République (battleship, France): main battery 431 mm AP"
+      - "T10 Schlieffen (battleship, Germany) [replicas: Von Zuckerhoff]: main battery 420 mm AP"
+      - "T10 Sete de Setembro (battleship, Pan_America, premium): main battery 406 mm AP"
+      - "T10 Shikishima (battleship, Japan, premium): main battery 510 mm AP"
+      - "T10 Sibir (battleship, Russia, premium): main battery 457 mm AP"
+      - "T10 Slava (battleship, Russia, premium): main battery 406 mm AP"
+      - "T10 St. Vincent (battleship, United_Kingdom): main battery 457 mm AP"
+      - "T10 Thor (battleship, Europe): main battery 406 mm AP"
+      - "T10 Thunderer (battleship, United_Kingdom, premium): main battery 457 mm AP"
+      - "T10 Vermont (battleship, USA): main battery 457 mm AP"
+      - "T10 Willem de Eerste (battleship, Netherlands, premium): main battery 419 mm AP"
+      - "T10 Wisconsin (battleship, USA, premium) [replicas: Wisconsin G]: main battery 406 mm AP"
+      - "T10 Yamato (battleship, Japan) [replicas: ARP Yamato, Yamato Kai]: main battery 460 mm AP"
+      - "T9 AL Sov. Rossiya (battleship, Russia, premium): main battery 406 mm AP"
+      - "T9 Adatara (battleship, Japan): main battery 457 mm AP"
+      - "T9 Bajie (battleship, Pan_Asia, premium): main battery 410 mm AP"
+      - "T9 Daisen (battleship, Japan, premium): main battery 410 mm AP"
+      - "T9 Delaware (battleship, USA) [replicas: Bird Cry]: main battery 406 mm AP"
+      - "T9 Duncan (battleship, United_Kingdom): main battery 419 mm AP"
+      - "T9 F. der Grosse (battleship, Germany): main battery 420 mm AP"
+      - "T9 Friedrich Carl (battleship, Germany, premium): main battery 406 mm AP"
+    omitted: 56

@@ -1,0 +1,14 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 8
+payload:
+  EntityMethod:
+    args:
+      - 0
+      - 0
+      - 0
+    entity_id: 968070
+    method: onShutdownTime

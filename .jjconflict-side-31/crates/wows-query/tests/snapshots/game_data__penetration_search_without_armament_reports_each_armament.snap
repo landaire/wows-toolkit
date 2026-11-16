@@ -1,0 +1,19 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: groups
+---
+- armament: secondary_battery
+  method: he_penetration
+  considered: 13
+  qualifying: 1
+  share_pct: 7.7
+- armament: aircraft
+  method: he_penetration
+  considered: 12
+  qualifying: 12
+  share_pct: 100
+- armament: aircraft
+  method: ap_overmatch
+  considered: 6
+  qualifying: 3
+  share_pct: 50

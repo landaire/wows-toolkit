@@ -1,0 +1,14 @@
+---
+source: crates/wows-query/src/jq.rs
+expression: outcomes
+---
+- Ok:
+    - "[1,2]"
+    - "2"
+- Ok:
+    - "[0,1,2]"
+    - "[1,1]"
+- Ok:
+    - "42"
+- Ok:
+    - "42"

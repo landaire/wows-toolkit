@@ -1,0 +1,28 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: resolved
+---
+- - Grosser Kurfurst
+  - G. Kurfürst
+- - Großer Kurfürst
+  - G. Kurfürst
+- - Friedrich der Grosse
+  - F. der Grosse
+- - Dmitri Donskoi
+  - Dm. Donskoi
+- - Dmitry Donskoy
+  - Dm. Donskoi
+- - Dmitri Pozharsky
+  - D. Pozharsky
+- - Dmitry Pozharsky
+  - D. Pozharsky
+- - Attilio Regolo
+  - A. Regolo
+- - Francesco Ferruccio
+  - F. Ferruccio
+- - Forrest Sherman
+  - F. Sherman
+- - Prinz Eitel Friedrich
+  - P. E. Friedrich
+- - Friedrich der Grose
+  - F. der Grosse

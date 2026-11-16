@@ -1,0 +1,44 @@
+---
+source: crates/wows-query/tests/jq_sandbox.rs
+expression: probes
+---
+- filter: keys
+  outcome:
+    Ok:
+      - "[\"a\"]"
+- filter: env
+  outcome:
+    Err: env is not available
+- filter: env.WOWS_QUERY_CANARY
+  outcome:
+    Err: env is not available
+- filter: $ENV
+  outcome:
+    Err: jq filter uses undefined variable $ENV
+- filter: $ENV.WOWS_QUERY_CANARY
+  outcome:
+    Err: jq filter uses undefined variable $ENV
+- filter: input
+  outcome:
+    Err: jq filter uses undefined filter input/0
+- filter: "[inputs]"
+  outcome:
+    Err: jq filter uses undefined filter inputs/0
+- filter: input_filename
+  outcome:
+    Err: jq filter uses undefined filter input_filename/0
+- filter: $__prog_args
+  outcome:
+    Err: jq filter uses undefined variable $__prog_args
+- filter: "include \"x\"; ."
+  outcome:
+    Err: "jq modules (import, include) are not available"
+- filter: "import \"x\" as y; ."
+  outcome:
+    Err: "jq modules (import, include) are not available"
+- filter: "import \"x\" as $y; $y"
+  outcome:
+    Err: "jq modules (import, include) are not available"
+- filter: "include \"canary\"; canary"
+  outcome:
+    Err: "jq modules (import, include) are not available"

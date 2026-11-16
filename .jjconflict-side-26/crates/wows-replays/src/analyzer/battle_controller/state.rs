@@ -1,0 +1,439 @@
+use serde::Serialize;
+use wowsunpack::game_params::types::BigWorldDistance;
+pub use wowsunpack::game_types::ControlPointType;
+pub use wowsunpack::game_types::InteractiveZoneType;
+
+use crate::analyzer::decoder::ArtillerySalvo;
+use crate::analyzer::decoder::Consumable;
+use crate::analyzer::decoder::DeathCause;
+use crate::analyzer::decoder::Recognized;
+use crate::analyzer::decoder::ShotHit;
+use crate::analyzer::decoder::TorpedoData;
+use crate::types::AvatarId;
+use crate::types::EntityId;
+use crate::types::GameClock;
+use crate::types::GameParamId;
+use crate::types::NormalizedPos;
+use crate::types::PlaneId;
+use crate::types::VisibilityFlags;
+use crate::types::WorldPos;
+use crate::types::WorldPos2D;
+use wowsunpack::game_types::ConsumableUsageParams;
+
+/// Last known world-space position of a ship entity.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShipPosition {
+    pub entity_id: EntityId,
+    pub position: WorldPos,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub roll: f32,
+    pub last_updated: GameClock,
+}
+
+/// Last known minimap position of an entity (normalized coordinates).
+#[derive(Debug, Clone, Serialize)]
+pub struct MinimapPosition {
+    pub entity_id: EntityId,
+    /// Normalized minimap position
+    pub position: NormalizedPos,
+    /// Heading in degrees
+    pub heading: f32,
+    pub visible: bool,
+    /// Why the ship is detected, from the Vehicle entity's `visibilityFlags`
+    /// property. `None` on builds predating that property.
+    pub visibility_flags: Option<VisibilityFlags>,
+    /// True when the ship is invisible (e.g. submarine submerged). Sourced from
+    /// the Vehicle entity's `isInvisible` property.
+    pub is_invisible: bool,
+    pub last_updated: GameClock,
+}
+
+/// Current state of a capture point.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct CapturePointState {
+    pub index: usize,
+    /// World position of the zone center (from InteractiveZone entity)
+    pub position: Option<WorldPos>,
+    /// Zone radius in world units (from InteractiveZone entity). `None` until
+    /// a `radius` names it.
+    pub radius: Option<f32>,
+    /// Control point sub-type (domination, base, epicenter, etc.)
+    pub control_point_type: Option<Recognized<ControlPointType>>,
+    pub team_id: i64,
+    pub invader_team: i64,
+    /// (fraction captured 0..1, time remaining)
+    pub progress: (f64, f64),
+    pub has_invaders: bool,
+    pub both_inside: bool,
+    /// Whether this capture point is enabled (arms race: starts disabled, enabled mid-game)
+    pub is_enabled: bool,
+}
+
+/// Packed visual state used by `InteractiveZone.visualState`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[repr(u8)]
+pub enum InteractiveZoneVisualState {
+    #[default]
+    NoState = 0x00,
+    Neutral = 0x01,
+    Unfriendly = 0x02,
+    Friendly = 0x03,
+    Cyan = 0x04,
+    Yellow = 0x05,
+    Purple = 0x06,
+    Blue = 0x07,
+    Orange = 0x08,
+    InversedNoState = 0x10,
+    InversedNeutral = 0x11,
+    InversedUnfriendly = 0x12,
+    InversedFriendly = 0x13,
+    InversedCyan = 0x14,
+    InversedYellow = 0x15,
+    InversedPurple = 0x16,
+    InversedBlue = 0x17,
+    InversedOrange = 0x18,
+}
+
+impl InteractiveZoneVisualState {
+    pub const fn raw(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_raw(raw: u8) -> Recognized<Self, u8> {
+        let state = match raw {
+            0x00 => Self::NoState,
+            0x01 => Self::Neutral,
+            0x02 => Self::Unfriendly,
+            0x03 => Self::Friendly,
+            0x04 => Self::Cyan,
+            0x05 => Self::Yellow,
+            0x06 => Self::Purple,
+            0x07 => Self::Blue,
+            0x08 => Self::Orange,
+            0x10 => Self::InversedNoState,
+            0x11 => Self::InversedNeutral,
+            0x12 => Self::InversedUnfriendly,
+            0x13 => Self::InversedFriendly,
+            0x14 => Self::InversedCyan,
+            0x15 => Self::InversedYellow,
+            0x16 => Self::InversedPurple,
+            0x17 => Self::InversedBlue,
+            0x18 => Self::InversedOrange,
+            _ => return Recognized::Unknown(raw),
+        };
+        Recognized::Known(state)
+    }
+}
+
+fn serialize_interactive_zone_visual_state<S>(
+    value: &Recognized<InteractiveZoneVisualState, u8>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let raw = match value {
+        Recognized::Known(state) => state.raw(),
+        Recognized::Unknown(raw) => *raw,
+    };
+    serializer.serialize_u8(raw)
+}
+
+/// State of a buff zone (arms race powerup drop).
+///
+/// InteractiveZone entities with `controlPoint: null` in `componentsState`.
+/// These appear in waves during arms race, can be captured by either team,
+/// and disappear (EntityLeave) once consumed.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BuffZoneState {
+    pub entity_id: EntityId,
+    /// World position of the zone center
+    pub position: WorldPos,
+    /// Zone radius in world units. `None` when the zone names none.
+    pub radius: Option<f32>,
+    pub team_id: i64,
+    /// Whether this zone is currently active and visible
+    pub is_active: bool,
+    /// Packed color and inversion state from `InteractiveZone.visualState.forOwner`.
+    #[serde(serialize_with = "serialize_interactive_zone_visual_state")]
+    pub visual_state: Recognized<InteractiveZoneVisualState, u8>,
+    /// GameParam ID of the associated Drop (powerup type)
+    pub drop_params_id: Option<GameParamId>,
+}
+
+/// A buff that has been captured by a team.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CapturedBuff {
+    /// GameParam ID of the Drop
+    pub params_id: GameParamId,
+    /// Team that captured it (entity_id of owner → team_id)
+    pub team_id: i64,
+    /// Game clock when captured
+    pub clock: GameClock,
+}
+
+/// Current score for a team.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct TeamScore {
+    pub team_index: usize,
+    pub score: i64,
+}
+
+/// Scoring rules extracted from BattleLogic state.missions.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ScoringRules {
+    /// Score required to win (typically 1000)
+    pub team_win_score: i64,
+    /// Points awarded per owned cap per tick
+    pub hold_reward: i64,
+    /// Seconds between cap tick scoring
+    pub hold_period: f32,
+    /// Which capture point indices participate in hold scoring
+    pub hold_cp_indices: Vec<usize>,
+}
+
+/// An active consumable on a ship.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActiveConsumable {
+    pub consumable: Recognized<Consumable>,
+    pub activated_at: GameClock,
+    pub duration: f32,
+    /// How the consumable was activated (15.2+). `None` for pre-15.2 replays.
+    pub usage_params: Option<ConsumableUsageParams>,
+}
+
+/// Tracked state for one consumable slot on a ship.
+///
+/// Seeded externally (e.g. via `wows_replay_insights::build::seed_consumable_inventories`)
+/// after the controller is set up. The controller updates `charges_used` on
+/// each observed activation and stamps `active_until` for active timing.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConsumableInventory {
+    pub slot_index: u8,
+    /// Raw GameParams `consumableType` string. Used to match activation events
+    /// to the right slot.
+    pub consumable_type_raw: String,
+    pub consumable: Recognized<Consumable>,
+    /// Param index of the chosen Ability variant (e.g. `"PCY009_CrashCrewPremium"`).
+    /// Doubles as the icon-map key.
+    pub icon_key: String,
+    /// Maximum number of charges this slot can hold.
+    pub total_charges: wowsunpack::game_types::ChargeCount,
+    /// Activations the controller has observed since seeding.
+    pub charges_used: u32,
+    /// One activation's work duration, in seconds.
+    pub work_time: f32,
+    /// Cooldown between activations, in seconds.
+    pub reload_time: f32,
+    /// Repair Party heal rate, fraction of max HP per second, build modifiers
+    /// applied. `None` for non-heal consumables. The renderer derives per-charge
+    /// heal capacity as `work_time * (regen_hp_speed_units + regen_hp_speed * maxHealth)`.
+    pub regen_hp_speed: Option<f32>,
+    /// Repair Party flat heal rate, HP per second, build modifiers applied.
+    /// `None` for non-heal consumables.
+    pub regen_hp_speed_units: Option<f32>,
+    /// `Some(clock)` while a consumable is active. Cleared by renderers when
+    /// the current clock passes the activation expiry.
+    pub active_until: Option<GameClock>,
+    // No stored reload-remaining: the server broadcasts discrete activation
+    // events, not a live cooldown countdown. Renderers that want a readiness
+    // indicator estimate the reload window from `reload_time` and the last
+    // activation. That estimate runs long for ships that refund consumables
+    // early (Valparaiso, San Martin); the next activation packet corrects it.
+}
+
+impl ConsumableInventory {
+    pub fn charges_remaining(&self) -> wowsunpack::game_types::ChargeCount {
+        self.total_charges.saturating_sub(self.charges_used)
+    }
+}
+
+/// A building/structure entity in the game.
+#[derive(Debug, Clone, Serialize)]
+pub struct BuildingEntity {
+    pub id: EntityId,
+    pub position: WorldPos,
+    pub is_alive: bool,
+    pub is_hidden: bool,
+    pub is_suppressed: bool,
+    pub team_id: i8,
+    pub params_id: Option<GameParamId>,
+}
+
+/// A smoke screen entity in the game.
+#[derive(Debug, Clone, Serialize)]
+pub struct SmokeScreenEntity {
+    pub id: EntityId,
+    pub radius: BigWorldDistance,
+    /// World position where the smoke was created
+    pub position: WorldPos,
+    /// Current active smoke puff positions (mutated via SetRange/RemoveRange)
+    pub points: Vec<WorldPos>,
+}
+
+/// An active artillery salvo in flight.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActiveShot {
+    pub avatar_id: AvatarId,
+    pub salvo: ArtillerySalvo,
+    pub fired_at: GameClock,
+}
+
+/// An active torpedo in the water.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActiveTorpedo {
+    pub avatar_id: AvatarId,
+    pub torpedo: TorpedoData,
+    pub launched_at: GameClock,
+    /// Last time origin/direction were updated (for homing torpedo direction changes).
+    /// Position is extrapolated from `torpedo.origin` using time elapsed since this clock.
+    pub updated_at: GameClock,
+}
+
+/// An active plane squadron on the minimap.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActivePlane {
+    pub plane_id: PlaneId,
+    pub owner_id: EntityId,
+    pub team_id: u32,
+    pub params_id: GameParamId,
+    /// Current position (2D world coordinates), updated by minimap updates.
+    pub position: WorldPos2D,
+    pub last_updated: GameClock,
+}
+
+/// A fighter patrol ward — a stationary circle where fighters patrol.
+/// Created by `receive_wardAdded`, removed by `receive_wardRemoved`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActiveWard {
+    pub plane_id: PlaneId,
+    /// Patrol center position (world coordinates)
+    pub position: WorldPos,
+    /// Patrol radius in BigWorld units
+    pub radius: BigWorldDistance,
+    /// Owner ship entity ID
+    pub owner_id: EntityId,
+}
+
+/// A ship kill event.
+#[derive(Debug, Clone, Serialize)]
+pub struct KillRecord {
+    pub clock: GameClock,
+    /// `None` when no ship is responsible, such as a sea mine.
+    pub killer: Option<EntityId>,
+    pub victim: EntityId,
+    /// `None` when the game names no cause.
+    pub cause: Option<Recognized<DeathCause>>,
+}
+
+/// A dead ship's last known position.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeadShip {
+    pub clock: GameClock,
+    /// World-space position (from ship_positions). `None` if the ship was only
+    /// tracked via minimap updates (e.g. PVE bots outside the player's AOI).
+    pub position: Option<WorldPos>,
+    /// Normalized minimap position (from minimap_positions). Available as
+    /// fallback when world position is not known.
+    pub minimap_position: Option<NormalizedPos>,
+}
+
+/// A local weather zone (squall/storm) on the map.
+///
+/// Weather zones are InteractiveZone entities with `type == 5`. Their initial
+/// data comes from BattleLogic `state.weather.localWeather` PropertyUpdates,
+/// but position changes arrive via 0x2a packets on the InteractiveZone entity.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LocalWeatherZone {
+    /// Human-readable weather type name (e.g. "Filth"). `None` when the zone
+    /// names none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// 2D world position (x, z) — y is always 0. Updated by 0x2a packets.
+    pub position: WorldPos,
+    /// Zone radius in world units. `None` until a `radius` names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f32>,
+    /// GameParam ID for weather parameters. `None` until a `paramsId` names it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_id: Option<GameParamId>,
+    /// InteractiveZone entity ID, used to match 0x2a position updates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity_id: Option<EntityId>,
+}
+
+/// A projectile hit resolved against its originating salvo.
+///
+/// Created when a ShotKills packet arrives and matched to an ActiveShot.
+/// Contains both the server-authoritative impact data and the salvo metadata
+/// needed for armor visualization. The matched ActiveShot is removed from
+/// active_shots when this is created.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResolvedShotHit {
+    /// Game clock when the hit was recorded.
+    pub clock: GameClock,
+    /// The raw hit data from the receiveShotKills packet.
+    pub hit: ShotHit,
+    /// Entity that received the receiveShotKills call (the victim ship).
+    pub victim_entity_id: EntityId,
+    /// The full originating salvo data, if the hit was matched.
+    pub salvo: Option<ArtillerySalvo>,
+    /// The originating salvo fire time. None if unmatched.
+    pub fired_at: Option<GameClock>,
+    /// Victim ship pose at the time of impact, or `None` when the victim's
+    /// world transform was not held at that moment (it left the client's AOI,
+    /// or was never resolved to a live entity). Consumers that place the
+    /// impact on the hull must refuse the hit rather than substitute an
+    /// origin: an offset measured from a guessed position lands on a real
+    /// hull section and is indistinguishable from a measured one.
+    pub victim_pose: Option<VictimPose>,
+}
+
+/// A victim ship's world placement at the moment a shell landed on it.
+///
+/// Position and orientation travel together because they are only meaningful
+/// together: the consumer takes `impact - position` and rotates it into the
+/// hull's frame, so a real yaw beside a guessed position is worse than no
+/// pose at all.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct VictimPose {
+    /// World position of the ship's origin.
+    pub position: WorldPos,
+    /// Yaw in radians.
+    pub yaw: f32,
+    /// Pitch in radians.
+    pub pitch: f32,
+    /// Roll in radians.
+    pub roll: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interactive_zone_visual_state_preserves_known_and_unknown_values() {
+        assert_eq!(InteractiveZoneVisualState::from_raw(0x03), Recognized::Known(InteractiveZoneVisualState::Friendly));
+        assert_eq!(
+            InteractiveZoneVisualState::from_raw(0x15),
+            Recognized::Known(InteractiveZoneVisualState::InversedYellow)
+        );
+        assert_eq!(InteractiveZoneVisualState::from_raw(0xff), Recognized::Unknown(0xff));
+    }
+
+    #[test]
+    fn interactive_zone_visual_state_serializes_as_its_wire_value() {
+        #[derive(Serialize)]
+        struct State {
+            #[serde(serialize_with = "serialize_interactive_zone_visual_state")]
+            visual_state: Recognized<InteractiveZoneVisualState, u8>,
+        }
+
+        let state = State { visual_state: Recognized::Known(InteractiveZoneVisualState::Friendly) };
+        assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"visual_state":3}"#);
+
+        let state = State { visual_state: Recognized::Unknown(0xff) };
+        assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"visual_state":255}"#);
+    }
+}

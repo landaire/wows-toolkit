@@ -1,0 +1,36 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "he_penetration(\"DM\")"
+---
+- battery: main
+  caliber_mm: 203
+  penetration:
+    stat: HE penetration (main battery 203 mm HE/HC Mk25)
+    unit: mm
+    builds:
+      base: 34
+      best:
+        value: 34
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 42
+          assumed:
+            - Inertia Fuse for HE Shells
+          note: "Main battery HE: 34 mm base; 42 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because 34 mm already penetrates the 32 mm bow and deck plating of the cruisers and battleships a tier 10 ship meets."
+- battery: secondary
+  caliber_mm: 127
+  penetration:
+    stat: HE penetration (secondary battery 127 mm HE Mk32)
+    unit: mm
+    builds:
+      base: 21
+      best:
+        value: 21
+        assumed: []
+      alternatives:
+        - label: with Inertia Fuse for HE Shells
+          value: 26
+          assumed:
+            - Inertia Fuse for HE Shells
+          note: "Secondary battery HE: 21 mm base; 26 mm with Inertia Fuse for HE Shells. Best-fit builds leave the skill out because even 26 mm does not penetrate the 27 mm upper hull plating of cruisers and belts of destroyers at tiers 8 to 10."

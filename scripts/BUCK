@@ -7,6 +7,7 @@
     for script in [
         "check-buck2-pins.py",
         "check-publish-dependencies.py",
+        "check-third-party-notices.py",
         "lint.nu",
     ]
 ]

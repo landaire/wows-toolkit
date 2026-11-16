@@ -1,0 +1,57 @@
+# git-cliff config for RELEASE_NOTES.md -- curated, opt-in highlights only.
+#
+# A commit is included ONLY if it carries a `Release-Note:` trailer in its body, e.g.
+#
+#     feat(armor): add hull lighting with presets
+#
+#     Release-Note: Realistic hull lighting in the armor viewer, with presets and a
+#     detachable settings window.
+#
+# The trailer text (not the commit subject) is what appears in the release notes, so it
+# can be written for players rather than developers. Commits without the trailer are
+# dropped entirely -- this is the explicit allow-list.
+#
+# At release time, generate the new version's section and paste it under the header in
+# RELEASE_NOTES.md (the header is hand-maintained, so this avoids clobbering it):
+#
+#     git cliff --config cliff-release.toml --unreleased --tag vX.Y.Z
+#
+# Past versions in RELEASE_NOTES.md are curated by hand and left untouched.
+
+[changelog]
+header = """
+# Release Notes
+
+Player-facing highlights for each release. Generated from `Release-Note:` commit
+trailers via `cliff-release.toml`; see that file for the convention.
+"""
+body = """
+{% if commits %}\
+## {% if version %}{{ version | trim_start_matches(pat="v") }}{% else %}Unreleased{% endif %}\
+{% if timestamp %} - {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
+{% for commit in commits %}\
+{% for footer in commit.footers %}\
+{% if footer.token == "Release-Note" %}
+- {{ footer.value | trim }}\
+{% endif %}\
+{% endfor %}\
+{% endfor %}
+{% endif %}\
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# Keep non-conventional commits eligible too, as long as they carry the trailer.
+filter_unconventional = false
+split_commits = false
+# Only commits whose body has a `Release-Note:` trailer are kept; everything else is
+# filtered out by `filter_commits`.
+commit_parsers = [
+  { footer = "^Release-Note", group = "Highlights" },
+]
+protect_breaking_commits = false
+filter_commits = true
+topo_order = false
+sort_commits = "newest"

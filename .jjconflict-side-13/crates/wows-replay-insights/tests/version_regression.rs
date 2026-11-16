@@ -1,0 +1,392 @@
+#![cfg(feature = "battle-report")]
+//! Version-matrix regression for `resolve_battle_results` +
+//! `NormalizedBattleReport::from_battle_report`.
+//!
+//! Each entry pairs a real `replay_cache` replay with its game build. Game data
+//! is loaded from a dumped build archive via `wows_data_mgr::dump_for_build`,
+//! which serves content-addressed dumps out of the shared `common/` store and
+//! older ones from their `vfs/` tree. Entries whose build has no local game data
+//! skip with a message, so the suite stays green on machines without the
+//! archives.
+//!
+//! For each runnable entry the test builds the report, checks version-invariant
+//! structural properties, then compares the serialized report to a committed
+//! golden as `serde_json::Value` (order-insensitive, so the `damage_interactions`
+//! `HashMap` serialization order does not matter).
+//!
+//! Goldens are captured snapshots. To (re)generate them after a deliberate
+//! builder change, run with the game data present:
+//!   REGEN_GOLDENS=1 cargo test -p wows-replay-insights --features battle-report \
+//!     --test version_regression
+//! which overwrites `tests/fixtures/normalized/<version_label>.json` for every
+//! runnable entry without comparing. Commit the updated goldens. Goldens are
+//! keyed by `version_label`, not `build`, since more than one entry can share a
+//! build (a PvP entry and a co-op entry testing the same constants fixture).
+
+use std::path::PathBuf;
+
+use wows_battle_world::BattleWorld;
+use wows_battle_world::ids::ShotTracking;
+use wows_battle_world::report::BattleReport;
+use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replays::ReplayFile;
+use wows_replays::analyzer::Analyzer;
+use wows_replays::game_constants::GameConstants;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Species;
+
+struct Entry {
+    version_label: &'static str,
+    replay_filename: &'static str,
+    build: u32,
+    /// Co-op/operations entries battle BOTS. `db_id` is not guaranteed unique
+    /// across bots (the toolkit had a bug joining players by `db_id` instead
+    /// of positionally, which collapsed bots sharing `AccountId(0)`); this
+    /// gates the bot-specific structural assertions that guard the builder
+    /// against collapsing them.
+    expect_bots: bool,
+}
+
+const MATRIX: &[Entry] = &[
+    Entry {
+        version_label: "13.11.0",
+        replay_filename: "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay",
+        build: 9251401,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "14.5.0",
+        replay_filename: "1005_1751197418_20250629_132500_PHSC010-Utrecht_54_Faroe.wowsreplay",
+        build: 10087791,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "14.11.0",
+        replay_filename: "10000_1767829698_20260107_182737_PJSB018-Yamato-1944_50_Gold_harbor.wowsreplay",
+        build: 11189791,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "15.1.0",
+        replay_filename: "10000_1773241614_20260214_215653_PVSB719-Valparaiso_42_Neighbors.wowsreplay",
+        build: 11965230,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "15.4.0",
+        replay_filename: "1003_1780609677_20260604_172336_PASD008-Benson-1945_52_Britain.wowsreplay",
+        build: 12506899,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "15.5.0",
+        replay_filename: "1148_1782049673_20260619_175139_PRSB909-East-Navarin_44_Path_warrior.wowsreplay",
+        build: 12668706,
+        expect_bots: false,
+    },
+    Entry {
+        version_label: "13.11.0-coop",
+        replay_filename: "1852_1736026132_20250104_225447_PRSD103-Derzky_04_Archipelago.wowsreplay",
+        build: 9251401,
+        expect_bots: true,
+    },
+];
+
+fn fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures")
+}
+
+struct Loaded {
+    replay: ReplayFile,
+    provider: &'static GameMetadataProvider,
+    game_constants: &'static GameConstants,
+    version: Version,
+    constants: serde_json::Value,
+}
+
+/// Load the replay, its dumped game data, and its constants fixture. Returns
+/// `None` (skip) when the build's game data or constants fixture is unavailable.
+fn try_load(entry: &Entry) -> Option<Loaded> {
+    let path = fixtures_dir().join("replays").join(entry.replay_filename);
+    let replay = ReplayFile::from_file(&path).ok()?;
+    let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+
+    let dump = wows_data_mgr::dump_for_build(entry.build)?;
+    if !dump.has_game_files() {
+        return None;
+    }
+    let vfs = dump.vfs();
+
+    let cached = dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
+    let provider = match cached {
+        Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs).ok()?,
+        None => GameMetadataProvider::from_vfs(&vfs).ok()?,
+    };
+    let game_constants = GameConstants::from_vfs(&vfs);
+
+    let constants_path = fixtures_dir().join("constants").join(format!("{}.json", entry.build));
+    let constants: serde_json::Value =
+        std::fs::read(&constants_path).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
+
+    let provider: &'static GameMetadataProvider = Box::leak(Box::new(provider));
+    let game_constants: &'static GameConstants = Box::leak(Box::new(game_constants));
+
+    Some(Loaded { replay, provider, game_constants, version, constants })
+}
+
+/// Build a `BattleReport` from the replay, mirroring `run_players_query`.
+fn build_report(loaded: &Loaded) -> BattleReport {
+    let mut world = BattleWorld::new(&loaded.replay.meta, loaded.provider, Some(loaded.game_constants));
+    world.set_shot_tracking(ShotTracking::Untracked);
+
+    let mut parser = wows_replays::packet2::Parser::with_version(loaded.provider.entity_specs(), loaded.version);
+    let mut remaining = loaded.replay.packet_data();
+    while !remaining.is_empty() {
+        match parser.parse_packet(&mut remaining) {
+            Ok(packet) => world.process(&packet),
+            Err(_) => break,
+        }
+    }
+    world.finish();
+    world.into_report()
+}
+
+/// Version-invariant properties that must hold regardless of the exact numbers,
+/// so a regenerated golden is still meaningful.
+fn assert_structural_invariants(entry: &Entry, report: &BattleReport, normalized: &NormalizedBattleReport) {
+    let ctx = entry.version_label;
+
+    let self_player = normalized.players.iter().find(|p| p.is_self);
+    assert!(self_player.is_some(), "{ctx}: a self player must exist");
+    let self_player = self_player.unwrap();
+
+    if report.battle_results().is_some() {
+        let has_server_damage =
+            normalized.players.iter().any(|p| p.server_results.as_ref().map(|s| s.damage.is_some()).unwrap_or(false));
+        assert!(has_server_damage, "{ctx}: with battle results, some player must have server_results with damage");
+    }
+
+    // Self controller fallbacks are always populated for the recording player.
+    assert!(self_player.controller_spotting_damage.is_some(), "{ctx}: self controller_spotting_damage must be Some");
+    assert!(self_player.controller_potential_damage.is_some(), "{ctx}: self controller_potential_damage must be Some");
+
+    // Any AirCarrier with server results carries the aircraft `hits` scalar.
+    for cv in normalized.players.iter().filter(|p| p.ship_class == Species::AirCarrier) {
+        if let Some(sr) = cv.server_results.as_ref() {
+            assert!(sr.hits.is_some(), "{ctx}: AirCarrier with server_results must carry hits");
+        }
+    }
+
+    // If any player recorded interactions, at least one carries a per-type map.
+    let any_interactions = normalized
+        .players
+        .iter()
+        .any(|p| p.server_results.as_ref().map(|s| !s.damage_interactions.is_empty()).unwrap_or(false));
+    if any_interactions {
+        let has_typed = normalized.players.iter().any(|p| {
+            p.server_results
+                .as_ref()
+                .map(|s| {
+                    s.damage_interactions.values().any(|i| {
+                        i.damage_dealt_by_type.ap.is_some()
+                            || i.damage_dealt_by_type.he.is_some()
+                            || i.damage_dealt_by_type.sap.is_some()
+                    })
+                })
+                .unwrap_or(false)
+        });
+        assert!(has_typed, "{ctx}: interactions present but no per-type damage breakdown");
+    }
+
+    if entry.expect_bots {
+        let bot_entities = report.players().iter().filter(|p| p.initial_state().is_bot()).count();
+        assert!(bot_entities > 0, "{ctx}: expected bot entities in the underlying report");
+
+        // Every entity produces exactly one NormalizedPlayer (see
+        // `NormalizedBattleReport::from_battle_report`, a plain positional
+        // `.map()` over `report.players()`). Assert it holds for bots
+        // specifically, since bots commonly share `db_id == AccountId(0)` and a
+        // db_id-keyed join (rather than positional) would silently collapse them.
+        let bot_normalized = normalized.players.iter().filter(|p| p.is_bot).count();
+        assert_eq!(
+            bot_normalized, bot_entities,
+            "{ctx}: normalized bot player count must match bot entity count (builder must not collapse them)"
+        );
+        assert_eq!(
+            normalized.players.len(),
+            report.players().len(),
+            "{ctx}: normalized player count must match total entity count"
+        );
+    }
+}
+
+fn run_entry(entry: &Entry) {
+    let Some(loaded) = try_load(entry) else {
+        eprintln!("skipping {}: game data not installed", entry.version_label);
+        return;
+    };
+
+    let report = build_report(&loaded);
+    let normalized =
+        NormalizedBattleReport::from_battle_report(&report, &loaded.replay.meta, loaded.provider, &loaded.constants);
+
+    assert_structural_invariants(entry, &report, &normalized);
+    assert_translations_are_rebuilt(&report, &normalized, loaded.provider, &loaded.version);
+
+    let mut produced = serde_json::to_value(&normalized).expect("normalized report serializes");
+    sort_players(&mut produced);
+    // Keyed by version_label, not build: a build can host more than one matrix
+    // entry (e.g. a PvP entry and a co-op entry sharing the same constants
+    // fixture), and version_label is unique across the matrix.
+    let golden_path = fixtures_dir().join("normalized").join(format!("{}.json", entry.version_label));
+
+    if std::env::var_os("REGEN_GOLDENS").is_some() {
+        std::fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
+        std::fs::write(&golden_path, serde_json::to_string_pretty(&produced).unwrap()).unwrap();
+        eprintln!("captured golden for {} (build {})", entry.version_label, entry.build);
+        return;
+    }
+
+    let golden_bytes = std::fs::read(&golden_path).unwrap_or_else(|_| {
+        panic!(
+            "missing golden for {} (build {}); run REGEN_GOLDENS=1 cargo test -p wows-replay-insights \
+             --features battle-report --test version_regression",
+            entry.version_label, entry.build
+        )
+    });
+    let mut golden: serde_json::Value = serde_json::from_slice(&golden_bytes).expect("golden parses as JSON");
+    sort_players(&mut golden);
+
+    if let Err(path) = approx_eq(&produced, &golden) {
+        panic!("{} (build {}): normalized report does not match golden at {}", entry.version_label, entry.build, path);
+    }
+}
+
+/// A locale change re-derives every name the provider supplies, so the export
+/// and the index do not keep the language the replay was parsed under.
+///
+/// Proved by scribbling over each of those fields and refreshing: a field the
+/// refresh forgot stays scribbled.
+fn assert_translations_are_rebuilt(
+    report: &BattleReport,
+    normalized: &NormalizedBattleReport,
+    provider: &GameMetadataProvider,
+    version: &Version,
+) {
+    const SCRIBBLE: &str = "not a name";
+
+    for (player, original) in report.players().iter().zip(normalized.players.iter()) {
+        let mut scribbled = original.clone();
+        scribbled.ship_name = SCRIBBLE.to_string();
+        scribbled.display_name = SCRIBBLE.to_string();
+        scribbled.build = None;
+        for achievement in &mut scribbled.achievements {
+            achievement.display_name = SCRIBBLE.to_string();
+            achievement.description = SCRIBBLE.to_string();
+        }
+        for ribbon in &mut scribbled.ribbons {
+            ribbon.display_name = SCRIBBLE.to_string();
+            ribbon.description = SCRIBBLE.to_string();
+        }
+
+        scribbled.refresh_translations(player, provider, version);
+
+        assert_eq!(scribbled.ship_name, original.ship_name, "the ship is named again");
+        assert_eq!(scribbled.display_name, original.display_name, "the player is named again");
+        assert!(scribbled.build.is_some() == original.build.is_some(), "the build is rebuilt whenever there was one");
+        let names: Vec<&str> = scribbled.achievements.iter().map(|a| a.display_name.as_str()).collect();
+        let expected: Vec<&str> = original.achievements.iter().map(|a| a.display_name.as_str()).collect();
+        assert_eq!(names, expected, "every achievement is named again");
+        let ribbons: Vec<&str> = scribbled.ribbons.iter().map(|r| r.display_name.as_str()).collect();
+        let expected: Vec<&str> = original.ribbons.iter().map(|r| r.display_name.as_str()).collect();
+        assert_eq!(ribbons, expected, "every ribbon is named again");
+    }
+}
+
+/// Sort the `players` array by each player's identity, so both sides of the
+/// compare are in the same order.
+///
+/// Not by serialized text: object key order depends on serde_json's
+/// `preserve_order`, which Cargo unifies on for the whole workspace because
+/// `wows-toolkit` enables it. `cargo test -p wows-replay-insights` therefore
+/// serialized keys alphabetically while `cargo test --workspace` serialized
+/// them in declaration order, giving the two runs different sort keys for the
+/// same players and misaligning the arrays. Identity is also immune to the
+/// float drift `approx_eq` tolerates, which a content sort is not.
+///
+/// `db_id` alone is not enough: bots commonly share `AccountId(0)`.
+fn sort_players(value: &mut serde_json::Value) {
+    if let Some(players) = value.get_mut("players").and_then(|p| p.as_array_mut()) {
+        players.sort_by_cached_key(player_identity);
+    }
+}
+
+fn player_identity(player: &serde_json::Value) -> (i64, String, String, u64) {
+    let text = |field: &str| player.get(field).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    (
+        player.get("db_id").and_then(|v| v.as_i64()).unwrap_or_default(),
+        text("name"),
+        text("ship_index"),
+        player.get("team_id").and_then(|v| v.as_u64()).unwrap_or_default(),
+    )
+}
+
+/// Deep structural compare of two JSON values, order-insensitive for objects and
+/// tolerant of tiny float drift. Percentage fields are ratios summed over a hash
+/// map, so their last f64 bits vary run-to-run; a 1e-9 tolerance absorbs that
+/// while staying far below any real regression. Returns `Err(path)` at the first
+/// divergence.
+fn approx_eq(a: &serde_json::Value, b: &serde_json::Value) -> Result<(), String> {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            if x == y {
+                return Ok(());
+            }
+            match (x.as_f64(), y.as_f64()) {
+                (Some(fx), Some(fy)) => {
+                    let diff = (fx - fy).abs();
+                    let tol = 1e-9 * fx.abs().max(fy.abs()).max(1.0);
+                    if diff <= tol { Ok(()) } else { Err(format!("<number {fx} vs {fy}>")) }
+                }
+                _ => Err(format!("<number {x} vs {y}>")),
+            }
+        }
+        (Value::Array(xs), Value::Array(ys)) => {
+            if xs.len() != ys.len() {
+                return Err(format!("<array len {} vs {}>", xs.len(), ys.len()));
+            }
+            for (i, (xi, yi)) in xs.iter().zip(ys).enumerate() {
+                approx_eq(xi, yi).map_err(|p| format!("[{i}]{p}"))?;
+            }
+            Ok(())
+        }
+        (Value::Object(xs), Value::Object(ys)) => {
+            if xs.len() != ys.len() {
+                return Err(format!(
+                    "<object keys {:?} vs {:?}>",
+                    xs.keys().collect::<Vec<_>>(),
+                    ys.keys().collect::<Vec<_>>()
+                ));
+            }
+            for (k, xv) in xs {
+                match ys.get(k) {
+                    Some(yv) => approx_eq(xv, yv).map_err(|p| format!(".{k}{p}"))?,
+                    None => return Err(format!(".{k}<missing in golden>")),
+                }
+            }
+            Ok(())
+        }
+        _ if a == b => Ok(()),
+        _ => Err(format!("<{a} vs {b}>")),
+    }
+}
+
+#[test]
+fn version_matrix_regression() {
+    for entry in MATRIX {
+        run_entry(entry);
+    }
+}

@@ -1,0 +1,41 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: overview.armament
+---
+modules:
+  - kind: hull
+    name: Ragnar
+  - kind: guns
+    name: 152 mm/53 Model 1942 in a turret
+main_battery:
+  - layout: 2 x 2 152 mm
+    mounts: 2
+    barrels_per_mount: 2
+    caliber_mm: 152
+secondary_battery: none
+torpedoes: none
+anti_submarine:
+  summary: "1 ship-mounted depth charge launcher (2 charges, 4 depth charges per attack, 2000 damage each, 40 s reload); no depth charge air strike; no submarine detection consumable"
+  depth_charge_launchers:
+    launchers: 1
+    charges: 2
+    reload_s: 40
+    depth_charges_per_attack: 4
+    damage_per_depth_charge: 2000
+    splash_radius_m: 26.67
+  depth_charge_air_strike: none
+  submarine_detection: none
+aircraft: none
+consumables:
+  - slot: 1
+    options:
+      - Damage Control Party
+  - slot: 2
+    options:
+      - Repair Party
+  - slot: 3
+    options:
+      - Surveillance Radar
+  - slot: 4
+    options:
+      - Engine Boost

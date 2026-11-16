@@ -1,0 +1,6166 @@
+mod damage_types;
+mod listing_cache;
+#[cfg(test)]
+mod listing_perf;
+mod listing_row;
+mod models;
+pub(crate) mod preview_popup;
+mod sorting;
+mod workspace;
+
+pub use listing_row::ListedReplay;
+use workspace::ReplayRequestSlot;
+pub(crate) use workspace::ReplayWorkspace;
+use workspace::alt_perspective_slot_id;
+use workspace::request_slot_id;
+pub(crate) use workspace::shorten_root;
+use workspace::workspace_leaf_salt;
+use workspace::workspace_salt;
+
+use std::path::PathBuf;
+
+pub use models::Achievement;
+pub use models::ClanColor;
+pub use models::DamageInteraction;
+pub use models::PlayerReport;
+pub use models::PlayerTint;
+pub use models::PlayerTintColor;
+pub use models::SkillInfo;
+pub use models::ship_class_icon_from_species;
+use rust_i18n::t;
+pub use sorting::ReplayColumn;
+pub use sorting::SortColumn;
+use sorting::SortKey;
+pub use sorting::SortOrder;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::io::BufWriter;
+use std::io::Write;
+
+use std::sync::Arc;
+use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
+
+use rootcause::Report;
+
+use crate::collab::Permissions;
+use crate::collab::SessionCommand;
+use crate::collab::SessionStatus;
+use crate::data::settings::ReplayGrouping;
+use crate::data::settings::ReplaySettings;
+use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::SharedBuildData;
+use crate::db::index::rows::WorkspaceId;
+use crate::icons;
+use crate::replay::timeline::TimelineExtractionError;
+use crate::replay::timeline::TimelineState;
+use crate::replay::timeline::extract_timeline_events;
+use crate::replay::timeline::format_timeline_event;
+use crate::replay::timeline::merge_timelines;
+use crate::replay::timeline::ui::TimelineFilter;
+use crate::replay::timeline::ui::timeline_filter_bar;
+use crate::replay::timeline::ui::timeline_list;
+use crate::task::BackgroundTask;
+use crate::task::BackgroundTaskKind;
+use crate::task::ReplayExportFormat;
+use crate::task::ReplaySource;
+use crate::task::ToastMessage;
+use crate::task::replays::IngestStage;
+use crate::ui::theme::semantic::SemanticExt;
+use crate::update_background_task;
+use wows_replay_insights::battle_report::DamageBreakdown;
+use wows_replay_insights::battle_report::NormalizedBattleReport;
+
+use crate::util::file_dialog;
+use crate::util::file_dialog::DialogKind;
+use crate::util::file_dialog::FileDialogSlot;
+use crate::util::replay_export::ExportedMatch;
+use crate::util::replay_export::FlattenedVehicle;
+use crate::util::replay_export::export_match;
+
+use damage_types::*;
+use egui::Color32;
+use egui::ComboBox;
+use egui::Context;
+use egui::FontId;
+use egui::Id;
+use egui::Image;
+use egui::ImageSource;
+use egui::Label;
+use egui::Margin;
+use egui::OpenUrl;
+use egui::PopupCloseBehavior;
+use egui::RichText;
+use egui::Sense;
+use egui::Separator;
+use egui::Style;
+use egui::TextFormat;
+use egui::Tooltip;
+use egui::UiKind;
+use egui::Vec2;
+use egui::text::LayoutJob;
+
+use escaper::decode_html;
+use jiff::Timestamp;
+use parking_lot::Mutex;
+use parking_lot::RwLock;
+use tracing::warn;
+
+use crate::task::replay_upload::ResultsScan;
+use crate::task::replay_upload::ResultsScanner;
+use tracing::error;
+use wows_battle_world::BattleWorld;
+use wows_battle_world::merged::MergedReplays;
+use wows_battle_world::report::BattleReport;
+use wows_replays::ReplayFile;
+use wows_replays::VehicleInfoMeta;
+use wows_replays::analyzer::Analyzer;
+use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::ChatChannel;
+use wows_replays::analyzer::battle_controller::GameMessage;
+use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::types::AccountId;
+
+use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
+use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
+use wows_toolkit_viewmodel::breakdown;
+use wows_toolkit_viewmodel::fire_chance::TallyRow;
+use wows_toolkit_viewmodel::fire_chance::fire_chance_battle_tally_rows;
+use wows_toolkit_viewmodel::fire_chance::fire_chance_formula_lines;
+use wows_toolkit_viewmodel::fire_chance::fire_chance_ribbon_rows;
+
+use itertools::Itertools;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::TranslationKey;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::CrewSkillName;
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::skill_translation_keys_for;
+
+use crate::app::ToolkitTabViewer;
+use crate::ui::plaintext_viewer;
+use crate::ui::plaintext_viewer::FileType;
+use crate::util;
+use crate::util::build_ship_config_url;
+use crate::util::build_shiptool_url;
+use crate::util::build_short_ship_config_url;
+use crate::util::build_wows_numbers_url;
+use crate::util::error::ToolkitError;
+use crate::util::player_color_for_team_relation;
+use crate::util::separate_number;
+
+const CHAT_VIEW_WIDTH: f32 = 500.0;
+
+/// Minimum width the replay listing is allowed to occupy, and the clip-rect
+/// width below which the tree is skipped for a frame. Below this the tree
+/// cannot lay out a row, and egui_ltreeview panics on the degenerate
+/// (possibly inverted) clip rect that `show_collapsible` produces mid-animation.
+const REPLAY_LISTING_MIN_WIDTH: f32 = 100.0;
+
+/// Above this many replays the grouped listing opens with every group closed,
+/// so the first frame does not lay out every row in the directory.
+const LARGE_LISTING_THRESHOLD: usize = 500;
+
+/// A single replay viewer tab inside the Replay Inspector dock area.
+#[derive(Clone)]
+pub struct ReplayTab {
+    pub replay: Arc<RwLock<Replay>>,
+    /// Unique identifier for this tab instance.
+    pub id: u64,
+    /// The file this tab's replay was read from, so the listing can match a row
+    /// to its hydrated replay without taking a read lock on every tab. `None`
+    /// for a replay that came from something other than a file on disk.
+    pub path: Option<std::path::PathBuf>,
+}
+
+/// A replay file path paired with the listing data drawn for it.
+/// The groupings that draw a tree of groups. [`ReplayGrouping::None`] has its
+/// own flat listing, so it is not representable here and the tree listing needs
+/// no arm for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GroupedListing {
+    Date,
+    Ship,
+}
+
+impl GroupedListing {
+    /// The setting value this grouping came from, which the row-layout helpers
+    /// take to decide which fields a row's two lines already carry in its group
+    /// header.
+    const fn grouping(self) -> ReplayGrouping {
+        match self {
+            GroupedListing::Date => ReplayGrouping::Date,
+            GroupedListing::Ship => ReplayGrouping::Ship,
+        }
+    }
+}
+
+use std::cmp::Reverse;
+
+/// Paints `text` rotated a quarter turn counter-clockwise, reading bottom-to-top,
+/// horizontally centred in `rect` and starting `top_offset` below its top edge.
+fn paint_vertical_caption(ui: &egui::Ui, rect: egui::Rect, top_offset: f32, text: &str) {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::TextStyle::Body.resolve(ui.style()),
+        ui.visuals().weak_text_color(),
+    );
+    // With a -90deg angle the galley grows downward from its anchor, so the
+    // anchor is the top of the run and the text width becomes its height.
+    let pos = egui::pos2(rect.center().x + galley.size().y / 2.0, rect.top() + top_offset);
+    ui.painter().add(
+        egui::epaint::TextShape::new(pos, galley, ui.visuals().weak_text_color())
+            .with_angle(-std::f32::consts::FRAC_PI_2),
+    );
+}
+
+/// The parsed stats a listing row draws, when the workspace has that file open
+/// in a dock tab. A listed but unopened replay has no parse in memory, so its
+/// row draws from the index alone.
+fn parsed_stats_for(
+    hydrated: &HashMap<PathBuf, Arc<RwLock<Replay>>>,
+    path: &std::path::Path,
+) -> Option<listing_row::ParsedStats> {
+    listing_row::replay_parsed_stats(&hydrated.get(path)?.read())
+}
+
+/// Show context menu items for a single replay leaf node.
+fn show_leaf_context_menu(ui: &mut egui::Ui, path: &std::path::PathBuf, wows_dir: &str, ws_id: WorkspaceId) {
+    if ui.button(wt_translations::icon_t(icons::BROWSER, &t!("ui.replay.context.open_in_new_tab"))).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::OpenReplayNewTab), path.clone());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
+    if ui.button(wt_translations::icon_t(icons::CLIPBOARD, &t!("ui.replay.context.copy_path"))).clicked() {
+        ui.ctx().copy_text(path.to_string_lossy().into_owned());
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(wt_translations::icon_t(icons::CLIPBOARD, &t!("ui.replay.context.copy_replay"))).clicked() {
+        copy_files_to_clipboard(std::slice::from_ref(path));
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.replay.context.show_in_explorer"))).clicked() {
+        util::open_file_explorer(path);
+        ui.close_kind(UiKind::Menu);
+    }
+    if !wows_dir.is_empty() {
+        let alt_held = ui.input(|i| i.modifiers.alt);
+        let label = if alt_held {
+            wt_translations::icon_t(icons::KEYBOARD, &t!("ui.replay.context.show_replay_controls"))
+        } else {
+            wt_translations::icon_t(icons::GAME_CONTROLLER, &t!("ui.replay.context.open_in_game"))
+        };
+        if ui.button(label).clicked() {
+            if alt_held {
+                ui.ctx().data_mut(|data| {
+                    // App-wide: opens the single reference window regardless of workspace.
+                    data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
+                });
+            } else {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::unique("pending_confirmation_request"),
+                        Some(crate::tab_state::ConfirmableAction::OpenInGame { replay_path: path.clone() }),
+                    );
+                });
+            }
+            ui.close_kind(UiKind::Menu);
+        }
+    }
+    if ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.context.render_replay"))).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::ContextMenuRenderReplay), path.clone());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(t!("ui.replay.context.render_to_video")).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays), vec![path.clone()]);
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(t!("ui.replay.context.render_to_clipboard")).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard), vec![path.clone()]);
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
+    if ui.button(t!("ui.replay.context.set_session_stats_one")).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::unique("pending_confirmation_request"),
+                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: vec![path.clone()] }),
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(t!("ui.replay.context.add_session_stats_one")).clicked() {
+        ui.ctx().data_mut(|data| {
+            // App-wide: feeds the one global session-stats total, not a per-workspace one.
+            data.insert_temp(egui::Id::unique("add_to_session_stats_request"), vec![path.clone()]);
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+}
+
+/// Show context menu items for a group node (date or ship).
+fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], ws_id: WorkspaceId) {
+    let count = paths.len();
+
+    // Batch render
+    let render_label: String = if count == 1 {
+        t!("ui.replay.context.render_to_video").into()
+    } else {
+        t!("ui.replay.context.render_to_video_many", count = count).into()
+    };
+    if ui.button(render_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays), paths.to_vec());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    let clipboard_label: String = if count == 1 {
+        t!("ui.replay.context.render_to_clipboard").into()
+    } else {
+        t!("ui.replay.context.render_to_clipboard_many", count = count).into()
+    };
+    if ui.button(clipboard_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard), paths.to_vec());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
+    let copy_label: String = if count == 1 {
+        t!("ui.replay.context.copy_replay").into()
+    } else {
+        t!("ui.replay.context.copy_replays", count = count).into()
+    };
+    if ui.button(copy_label).clicked() {
+        copy_files_to_clipboard(paths);
+        ui.close_kind(UiKind::Menu);
+    }
+    let session_label: String = if count == 1 {
+        t!("ui.replay.context.set_session_stats_one").into()
+    } else {
+        t!("ui.replay.context.set_session_stats_many", count = count).into()
+    };
+    if ui.button(session_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::unique("pending_confirmation_request"),
+                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: paths.to_vec() }),
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    let add_label: String = if count == 1 {
+        t!("ui.replay.context.add_session_stats_one").into()
+    } else {
+        t!("ui.replay.context.add_session_stats_many", count = count).into()
+    };
+    if ui.button(add_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            // App-wide: feeds the one global session-stats total, not a per-workspace one.
+            data.insert_temp(egui::Id::unique("add_to_session_stats_request"), paths.to_vec());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+}
+
+/// Show the fallback (multi-selection) context menu for tree views.
+fn show_multi_selection_context_menu(
+    tree: &listing_cache::TreeIdMaps,
+    ui: &mut egui::Ui,
+    selected_ids: &[egui::Id],
+    ws_id: WorkspaceId,
+) {
+    let selected_paths = tree.collect_selected(selected_ids);
+    if selected_paths.is_empty() {
+        return;
+    }
+    let count = selected_paths.len();
+
+    let copy_label =
+        if count == 1 { "Copy Replay".to_string() } else { format!("Copy {} Replays", selected_paths.len()) };
+    if ui.button(copy_label).clicked() {
+        copy_files_to_clipboard(&selected_paths);
+        ui.close_kind(UiKind::Menu);
+    }
+
+    // Batch render
+    let render_label: String = if count == 1 {
+        t!("ui.replay.context.render_to_video").into()
+    } else {
+        t!("ui.replay.context.render_to_video_many", count = count).into()
+    };
+    if ui.button(render_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays), selected_paths.clone());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    let clipboard_label: String = if count == 1 {
+        t!("ui.replay.context.render_to_clipboard").into()
+    } else {
+        t!("ui.replay.context.render_to_clipboard_many", count = count).into()
+    };
+    if ui.button(clipboard_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard), selected_paths.clone());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
+
+    let set_label = if count == 1 {
+        "Set as Session Stats (1 replay)".to_string()
+    } else {
+        format!("Set as Session Stats ({} replays)", count)
+    };
+    if ui.button(set_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::unique("pending_confirmation_request"),
+                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: selected_paths.clone() }),
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    let add_label = if count == 1 {
+        "Add to Session Stats (1 replay)".to_string()
+    } else {
+        format!("Add to Session Stats ({} replays)", count)
+    };
+    if ui.button(add_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            // App-wide: feeds the one global session-stats total, not a per-workspace one.
+            data.insert_temp(egui::Id::unique("add_to_session_stats_request"), selected_paths);
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+}
+
+/// Resolve raw battle results arrays into named JSON objects.
+///
+/// Delegates to [`wows_replay_insights::battle_report::resolve_battle_results`].
+fn resolve_battle_results(results: serde_json::Value, constants: &serde_json::Value) -> serde_json::Value {
+    wows_replay_insights::battle_report::resolve_battle_results(results, constants)
+}
+
+#[allow(non_camel_case_types)]
+pub struct UiReport {
+    match_timestamp: Timestamp,
+    /// The replay's game version, used to select version-specific parsing (e.g.
+    /// the captain-skill translation key style).
+    version: wowsunpack::data::Version,
+    self_player: Option<Arc<Player>>,
+    /// Salts the row-expansion animation ids so expanding a row in one
+    /// report's table does not animate the same row number in another.
+    /// Assigned from a process-wide counter rather than the replay's arena id
+    /// because arena id falls back to a shared sentinel when the arena-state
+    /// packet was never observed (spectator recordings, truncated captures).
+    report_salt: u64,
+    player_reports: Vec<PlayerReport>,
+    /// The report every per-player number above was read from. Kept because
+    /// the export writes from it rather than from the presentation rebuilt
+    /// over it, so the two cannot drift.
+    normalized: NormalizedBattleReport,
+    sorted: bool,
+    is_row_expanded: BTreeMap<u64, bool>,
+    wows_data: SharedBuildData,
+    twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
+    replay_sort: Arc<Mutex<SortOrder>>,
+    columns: Vec<ReplayColumn>,
+    row_heights: BTreeMap<u64, f32>,
+    background_task_sender: Option<egui_inbox::UiInboxSender<BackgroundTask>>,
+    selected_row: Option<(u64, bool)>,
+    debug_mode: bool,
+    /// `true` when this UiReport was built from a Replay with merged alt
+    /// perspectives. Unmasks columns like enemy builds that are otherwise
+    /// hidden out-of-NDA.
+    merge_active: bool,
+    battle_result: Option<BattleResult>,
+    resolved_results: Option<serde_json::Value>,
+    /// Ribbon icons from the newest loaded build, used to fill gaps when this
+    /// replay's own build ships none (Flash-era and older). See
+    /// [`crate::data::wows_data::BuildDataCache::newest_ribbon_icons`].
+    fallback_ribbon_icons: HashMap<String, Arc<GameAsset>>,
+    fallback_subribbon_icons: HashMap<String, Arc<GameAsset>>,
+    /// Decoded icon textures, cached per build so they stay version-correct
+    /// (icons can change between game versions). Mutex for interior mutability
+    /// from `&self` while staying Send+Sync.
+    icon_textures: Mutex<HashMap<String, egui::TextureHandle>>,
+}
+
+/// Source for `UiReport::report_salt`. Every constructed report gets a
+/// distinct value, so it stays unique even across reports that share an
+/// arena id (or lack one).
+static NEXT_REPORT_SALT: AtomicU64 = AtomicU64::new(0);
+
+impl UiReport {
+    pub fn new(
+        replay_file: &ReplayFile,
+        report: &BattleReport,
+        wows_data: &SharedBuildData,
+        deps: &crate::data::wows_data::ReplayDependencies,
+        merge_active: bool,
+    ) -> Self {
+        // Captured before locking the replay's build below (sequential, avoids a
+        // re-entrant read on the same data). Used to borrow class icons when the
+        // replay's own (pre-12.0) build shipped none.
+        let fallback_ship_icons = crate::timed_stage!("newest_ship_icons", deps.build_cache.newest_ship_icons());
+
+        let wows_data_inner = wows_data.read();
+        let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
+        let constants_inner = wows_data_inner.replay_constants.read();
+
+        let match_timestamp = util::replay_timestamp(&replay_file.meta);
+
+        let players = report.players().to_vec();
+
+        let self_player = players.iter().find(|player| player.relation().is_self()).cloned();
+
+        // Computed once for the recording player and attached only to that
+        // player's report below: `analyze` already refuses any other attacker,
+        // so per-player computation would be wasted work.
+        let self_fire_chance = crate::timed_stage!("compute_fire_chance", {
+            let cache_dir =
+                crate::task::replays::game_data_dump_base_with_override(deps.build_cache.game_data_cache_dir())
+                    .map(|base| base.join("fire_sections").join(wows_data_inner.build_number.to_string()));
+            wows_replay_insights::fire_chance::sections::compute_fire_chance(
+                report,
+                metadata_provider,
+                &wows_data_inner.vfs,
+                wows_data_inner.build_number,
+                cache_dir.as_deref(),
+            )
+        });
+
+        let resolved_results: Option<serde_json::Value> = crate::timed_stage!(
+            "resolve_battle_results",
+            report
+                .battle_results()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .map(|raw| resolve_battle_results(raw, &constants_inner))
+        );
+
+        let battle_result = resolved_results.as_ref().and_then(|results| {
+            let self_team_id = self_player.as_ref().map(|player| player.initial_state().team_id())?;
+            let winning_team_id = results.pointer("/commonList/winner_team_id")?.as_i64()?;
+
+            if winning_team_id == self_team_id {
+                Some(BattleResult::Win(self_team_id as i8))
+            } else if winning_team_id >= 0 {
+                Some(BattleResult::Loss(winning_team_id as i8))
+            } else {
+                Some(BattleResult::Draw)
+            }
+        });
+
+        let locale = "en-US";
+
+        // Single source of truth for per-player numbers: the egui-free normalized
+        // report. PlayerReport below is presentation rebuilt over these values.
+        let normalized = crate::timed_stage!(
+            "normalized_report",
+            wows_replay_insights::battle_report::NormalizedBattleReport::from_battle_report(
+                report,
+                &replay_file.meta,
+                metadata_provider,
+                &constants_inner,
+            )
+        );
+
+        let self_normalized = normalized.players.iter().find(|np| np.is_self);
+        let self_division_id = self_normalized.and_then(|np| np.division_id);
+        let self_db_id = self_normalized.map(|np| np.db_id);
+
+        // normalized.players is built positionally from report.players() (plain
+        // .map(), no filter/reorder), so zip it against `players` instead of
+        // joining on db_id, which is not unique (bots are all AccountId(0)).
+        let player_reports: Vec<PlayerReport> = crate::timed_stage!(
+            "player_reports",
+            players
+                .iter()
+                .zip(normalized.players.iter())
+                .map(|(player, np)| {
+                    debug_assert_eq!(
+                        player.initial_state().db_id(),
+                        np.db_id,
+                        "normalized/entity player order drifted"
+                    );
+                    let vehicle = player.vehicle_entity();
+                    let vehicle_param = player.vehicle();
+                    let server = np.server_results.as_ref();
+
+                    let mut tint = PlayerTint::from_relation(np.relation);
+                    if let (Some(self_div), Some(self_id)) = (self_division_id, self_db_id)
+                        && self_id != np.db_id
+                        && np.division_id == Some(self_div)
+                    {
+                        tint = PlayerTint::DivisionMate;
+                    }
+
+                    let known_species = vehicle_param.species().and_then(|r| r.known().cloned());
+                    let ship_species_text: String = known_species
+                        .as_ref()
+                        .and_then(|species| {
+                            metadata_provider
+                                .localized_name_from_id(&TranslationKey::new(species.translation_id()))
+                                .or_else(|| Some(species.name().to_string()))
+                        })
+                        .unwrap_or_default();
+                    let icon = known_species.as_ref().and_then(|species| {
+                        ship_class_icon_from_species(*species, &wows_data_inner)
+                            .or_else(|| fallback_ship_icons.get(species).cloned())
+                    });
+
+                    let (clan_tag, clan_color) = if !np.clan.is_empty() {
+                        (Some(np.clan.clone()), clan_color_for_player(player))
+                    } else {
+                        (None, None)
+                    };
+                    let name_text = np.display_name.clone();
+
+                    let (base_xp, base_xp_text) = match server.and_then(|sr| sr.xp) {
+                        Some(base_xp) => (Some(base_xp), Some(separate_number(base_xp, Some(locale)))),
+                        None => (None, None),
+                    };
+
+                    let (raw_xp, raw_xp_text) = match server.and_then(|sr| sr.raw_xp) {
+                        Some(raw_xp) => (Some(raw_xp), Some(separate_number(raw_xp, Some(locale)))),
+                        None => (None, None),
+                    };
+
+                    let observed_damage = np.observed_results.damage;
+                    let observed_damage_text = separate_number(observed_damage, Some(locale));
+
+                    let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_hover_text) =
+                        match server {
+                            Some(sr) if sr.damage.is_some() => {
+                                let damage_number = sr.damage.expect("damage present");
+                                let text = separate_number(damage_number, Some(locale));
+                                let hover =
+                                    RichText::new(breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
+                                        sr.damage_by_type.get(key).copied().unwrap_or(0)
+                                    }))
+                                    .font(FontId::monospace(12.0));
+                                (Some(damage_number), Some(sr.damage_details.clone()), Some(text), Some(hover))
+                            }
+                            _ => (None, None, None, None),
+                        };
+
+                    let (hits, hits_report, hits_text, hits_hover_text) = match server {
+                        Some(sr) => {
+                            let hits_number = sr.hits.unwrap_or(0);
+                            let text = separate_number(hits_number, Some(locale));
+                            let hover = RichText::new(breakdown_hover_string(&HITS_DESCRIPTIONS, locale, |key| {
+                                sr.hits_by_type.get(key).copied().unwrap_or(0)
+                            }))
+                            .font(FontId::monospace(12.0));
+                            (sr.hits, Some(sr.hits_details.clone()), Some(text), Some(hover))
+                        }
+                        None => (None, None, None, None),
+                    };
+
+                    let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) =
+                        match server {
+                            Some(sr) => {
+                                let total = sr.received_damage;
+                                let text = separate_number(total, Some(locale));
+                                let hover = RichText::new(breakdown_hover_string(
+                                    &RECEIVED_DAMAGE_DESCRIPTIONS,
+                                    locale,
+                                    |key| sr.received_damage_by_type.get(key).copied().unwrap_or(0),
+                                ))
+                                .font(FontId::monospace(12.0));
+                                (Some(total), Some(text), Some(hover), Some(sr.received_damage_details.clone()))
+                            }
+                            None => (None, None, None, None),
+                        };
+
+                    let spotting_damage = np.spotting_damage();
+                    let spotting_damage_text = spotting_damage.map(|damage| separate_number(damage, Some(locale)));
+                    let spotting_damage_hover_text =
+                        np.spotting_damage_breakdown().map(|split| damage_hover_text(&split, locale));
+
+                    let potential_damage = np.potential_damage();
+                    let potential_damage_text = potential_damage.map(|total| separate_number(total, Some(locale)));
+                    let potential_damage_hover_text =
+                        np.potential_damage_breakdown().map(|split| damage_hover_text(&split, locale));
+                    let potential_damage_report = server.map(|sr| sr.potential_damage_details.clone());
+
+                    let time_lived_secs = np.time_lived_secs;
+                    let time_lived_text = time_lived_secs.map(|secs| format!("{}:{:02}", secs / 60, secs % 60));
+
+                    // Skill counts come from the normalized report; the label and hover
+                    // still need the entity's commander-skill list.
+                    let species =
+                        vehicle_param.species().and_then(|r| r.known()).cloned().expect("ship has no species?");
+                    let (tier, label_text, hover_text) = util::colorize_captain_points(
+                        np.skill_info.skill_points,
+                        np.skill_info.num_skills,
+                        np.skill_info.highest_tier,
+                        np.skill_info.num_tier_1_skills,
+                        vehicle.and_then(|v| v.commander_skills(species)),
+                    );
+                    let skill_info = SkillInfo {
+                        skill_points: np.skill_info.skill_points,
+                        num_skills: np.skill_info.num_skills,
+                        highest_tier: np.skill_info.highest_tier,
+                        num_tier_1_skills: np.skill_info.num_tier_1_skills,
+                        hover_text,
+                        label_text,
+                        tier,
+                    };
+
+                    // `fires_dealt` is `Some` exactly when the resolved object carried an
+                    // interactions map, matching the old `interactions`-key gate.
+                    let (damage_interactions, fires, floods, citadels, crits) = match server {
+                        Some(sr) if sr.fires_dealt.is_some() => {
+                            let interactions: HashMap<AccountId, DamageInteraction> = sr
+                                .damage_interactions
+                                .iter()
+                                .map(|(id, interaction)| (*id, damage_interaction_from_normalized(interaction, locale)))
+                                .collect();
+                            (Some(interactions), sr.fires_dealt, sr.floods_dealt, sr.citadels_dealt, sr.crits_dealt)
+                        }
+                        _ => (None, None, None, None, None),
+                    };
+
+                    let distance_traveled = server.and_then(|sr| sr.distance_traveled);
+                    let kills = server.and_then(|sr| sr.kills);
+
+                    let achievements: Vec<Achievement> = np
+                        .achievements
+                        .iter()
+                        .filter_map(|achievement| {
+                            let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_name(
+                                metadata_provider,
+                                &achievement.name,
+                            )?;
+                            Some(Achievement {
+                                game_param,
+                                display_name: achievement.display_name.clone(),
+                                description: achievement.description.clone(),
+                                icon_key: achievement.icon_key.clone(),
+                                count: achievement.count,
+                            })
+                        })
+                        .collect();
+
+                    let ribbons: HashMap<String, models::Ribbon> = np
+                        .ribbons
+                        .iter()
+                        .map(|ribbon| {
+                            (
+                                ribbon.name.clone(),
+                                models::Ribbon {
+                                    name: ribbon.name.clone(),
+                                    display_name: ribbon.display_name.clone(),
+                                    description: ribbon.description.clone(),
+                                    icon_key: ribbon.icon_key.clone(),
+                                    is_subribbon: ribbon.is_subribbon,
+                                    count: ribbon.count,
+                                },
+                            )
+                        })
+                        .collect();
+
+                    let consumables: Vec<models::PlayerConsumable> = np
+                        .consumables
+                        .iter()
+                        .map(|consumable| models::PlayerConsumable {
+                            display_name: consumable.display_name.clone(),
+                            description: consumable.description.clone(),
+                            icon_key: consumable.icon_key.clone(),
+                            charges_used: consumable.charges_used,
+                            total_charges: consumable.total_charges,
+                        })
+                        .collect();
+
+                    PlayerReport {
+                        player: Arc::clone(player),
+                        tint,
+                        is_abuser: np.is_abuser,
+                        name_text,
+                        clan_tag,
+                        clan_color,
+                        icon,
+                        division_label: np.division_label.clone(),
+                        base_xp,
+                        base_xp_text,
+                        raw_xp,
+                        raw_xp_text,
+                        observed_damage,
+                        observed_damage_text,
+                        actual_damage,
+                        actual_damage_report,
+                        actual_damage_text,
+                        actual_damage_hover_text,
+                        ship_name: np.ship_display_name(),
+                        spotting_damage,
+                        spotting_damage_text,
+                        spotting_damage_hover_text,
+                        potential_damage,
+                        potential_damage_hover_text,
+                        potential_damage_report,
+                        time_lived_secs,
+                        time_lived_text,
+                        skill_info,
+                        potential_damage_text,
+                        ship_species_text,
+                        received_damage,
+                        received_damage_text,
+                        received_damage_hover_text,
+                        fires,
+                        floods,
+                        citadels,
+                        crits,
+                        distance_traveled,
+                        is_test_ship: np.is_test_ship,
+                        relation: np.relation,
+                        manual_stat_hide_toggle: false,
+                        received_damage_report,
+                        kills,
+                        observed_kills: np.observed_results.kills,
+                        translated_build: np.build.clone(),
+                        hits,
+                        hits_report,
+                        hits_text,
+                        hits_hover_text,
+                        damage_interactions,
+                        achievements,
+                        ribbons,
+                        consumables,
+                        heal_count: np.heal_count,
+                        personal_rating: None,
+                        has_vehicle_entity: vehicle.is_some(),
+                        fire_chance: np.is_self.then(|| self_fire_chance.clone()).flatten(),
+                    }
+                })
+                .collect()
+        );
+
+        drop(constants_inner);
+        drop(wows_data_inner);
+
+        Self {
+            match_timestamp,
+            version: report.version(),
+            report_salt: NEXT_REPORT_SALT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            player_reports,
+            normalized,
+            self_player,
+            replay_sort: Arc::clone(&deps.replay_sort),
+            wows_data: Arc::clone(wows_data),
+            twitch_state: Arc::clone(&deps.twitch_state),
+            battle_result,
+            is_row_expanded: Default::default(),
+            sorted: false,
+            columns: vec![
+                ReplayColumn::Actions,
+                ReplayColumn::Name,
+                ReplayColumn::ShipName,
+                ReplayColumn::PersonalRating,
+                ReplayColumn::BaseXp,
+                ReplayColumn::RawXp,
+                ReplayColumn::Kills,
+                ReplayColumn::ObservedDamage,
+                ReplayColumn::ActualDamage,
+                ReplayColumn::Hits,
+                ReplayColumn::Heals,
+                ReplayColumn::ReceivedDamage,
+                ReplayColumn::PotentialDamage,
+                ReplayColumn::SpottingDamage,
+                ReplayColumn::TimeLived,
+                ReplayColumn::DistanceTraveled,
+                ReplayColumn::Skills,
+            ],
+            row_heights: Default::default(),
+            background_task_sender: Some(deps.background_task_sender.clone()),
+            selected_row: None,
+            debug_mode: deps.is_debug_mode,
+            merge_active,
+            resolved_results,
+            fallback_ribbon_icons: crate::timed_stage!("newest_ribbon_icons", deps.build_cache.newest_ribbon_icons()),
+            fallback_subribbon_icons: crate::timed_stage!(
+                "newest_subribbon_icons",
+                deps.build_cache.newest_subribbon_icons()
+            ),
+            icon_textures: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn sort_players(&mut self, sort_order: SortOrder) {
+        let self_player_team_id = self.self_player.as_ref().expect("no self player?").initial_state().team_id();
+
+        let sort_key = |report: &PlayerReport, column: &SortColumn| {
+            let player = report.player();
+            let player_state = player.initial_state();
+            let team_id = player_state.team_id() != self_player_team_id;
+            let db_id = player_state.db_id().raw();
+
+            let key = match column {
+                SortColumn::Name => SortKey::String(player_state.username().to_string()),
+                SortColumn::BaseXp => SortKey::I64(report.base_xp),
+                SortColumn::RawXp => SortKey::I64(report.raw_xp),
+                SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
+                SortColumn::ShipClass => SortKey::Species(
+                    player.vehicle().species().and_then(|r| r.known()).cloned().expect("no species for vehicle?"),
+                ),
+                SortColumn::ObservedDamage => SortKey::U64(Some(if report.should_hide_stats() && !self.debug_mode {
+                    0
+                } else {
+                    report.observed_damage
+                })),
+                SortColumn::ActualDamage => SortKey::U64(if report.should_hide_stats() && !self.debug_mode {
+                    None
+                } else {
+                    report.actual_damage
+                }),
+                SortColumn::SpottingDamage => SortKey::U64(report.spotting_damage),
+                SortColumn::PotentialDamage => SortKey::U64(if report.should_hide_stats() && !self.debug_mode {
+                    None
+                } else {
+                    report.potential_damage
+                }),
+                SortColumn::TimeLived => SortKey::U64(report.time_lived_secs),
+                SortColumn::Fires => {
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.fires })
+                }
+                SortColumn::Floods => {
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.floods })
+                }
+                SortColumn::Citadels => {
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.citadels })
+                }
+                SortColumn::Crits => {
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.crits })
+                }
+                SortColumn::ReceivedDamage => SortKey::U64(if report.should_hide_stats() && !self.debug_mode {
+                    None
+                } else {
+                    report.received_damage
+                }),
+                SortColumn::DistanceTraveled => SortKey::F64(report.distance_traveled),
+                SortColumn::Kills => SortKey::I64(report.kills.or(Some(report.observed_kills))),
+                SortColumn::Hits => {
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits })
+                }
+                SortColumn::Heals => SortKey::U64(report.heal_count.map(|c| c as u64)),
+                SortColumn::PersonalRating => SortKey::F64(report.personal_rating.as_ref().map(|pr| pr.pr)),
+            };
+
+            (team_id, key, db_id)
+        };
+
+        // The rows and the normalized report are positional counterparts, so
+        // one permutation moves both: the export then writes the order that
+        // is on screen rather than the order the replay was parsed in.
+        let mut order: Vec<usize> = (0..self.player_reports.len()).collect();
+        match sort_order {
+            SortOrder::Desc(column) => order.sort_unstable_by_key(|&index| {
+                let key = sort_key(&self.player_reports[index], &column);
+                (key.0, Reverse(key.1), key.2)
+            }),
+            SortOrder::Asc(column) => {
+                order.sort_unstable_by_key(|&index| sort_key(&self.player_reports[index], &column));
+            }
+        }
+
+        permute(&mut self.player_reports, &order);
+        permute(&mut self.normalized.players, &order);
+
+        self.sorted = true;
+    }
+
+    fn update_visible_columns(&mut self, settings: &ReplaySettings) {
+        let optional_columns = [
+            (ReplayColumn::RawXp, settings.show_raw_xp),
+            (ReplayColumn::ObservedDamage, settings.show_observed_damage),
+            (ReplayColumn::Heals, settings.show_heals),
+            (ReplayColumn::ReceivedDamage, settings.show_received_damage),
+            (ReplayColumn::DistanceTraveled, settings.show_distance_traveled),
+        ];
+
+        let mut optional_columns: HashMap<ReplayColumn, bool> = optional_columns.iter().copied().collect();
+
+        let mut remove_columns = Vec::with_capacity(optional_columns.len());
+        // For each column in our existing set, check to see if it's been disabled.
+        // If so,
+        for (i, column) in self.columns.iter().enumerate() {
+            if optional_columns.contains_key(column)
+                && let Some(false) = optional_columns.remove(column)
+            {
+                remove_columns.push(i);
+            }
+        }
+
+        // Remove columns in reverse order so that we don't invalidate indices
+        for i in remove_columns.into_iter().rev() {
+            self.columns.remove(i);
+        }
+
+        // The optional_columns set above is the remaining columns which are enabled,
+        // but not in the existing set, or disabled and not in the existing set. Add the former.
+        for (column, enabled) in optional_columns {
+            if enabled {
+                self.columns.push(column);
+            }
+        }
+
+        // Finally, sort the remaining columns by their order in the enum.
+        self.columns.sort_unstable_by_key(|column| *column as u8);
+    }
+
+    fn received_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
+        let alt_held = ui.input(|i| i.modifiers.alt);
+
+        ui.vertical(|ui| {
+            if let Some(received_hover_text) = report.received_damage_hover_text() {
+                ui.label(received_hover_text.clone());
+
+                if report.damage_interactions.is_some() {
+                    ui.separator();
+                }
+            }
+
+            if let Some(interactions) = report.damage_interactions.as_ref() {
+                // TODO: this sucks, it allocates for each sort
+                for interaction in
+                    interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_received, &a.1.damage_received))
+                {
+                    if interaction.1.damage_received == 0 {
+                        continue;
+                    }
+
+                    let Some(interaction_player) = self
+                        .player_reports()
+                        .iter()
+                        .find(|report| report.player().initial_state().db_id() == *interaction.0)
+                    else {
+                        // TODO: Handle bots?
+                        continue;
+                    };
+
+                    let hover_layout = player_hover_layout(interaction_player, ui);
+
+                    // ALT: show % of attacker's total dealt damage; default: % of this player's received damage
+                    let pct_text = if alt_held {
+                        &interaction.1.damage_received_inverse_percentage_text
+                    } else {
+                        &interaction.1.damage_received_percentage_text
+                    };
+
+                    let resp = ui.label(format!(
+                        "{}: {} ({})",
+                        interaction_player.ship_name(),
+                        interaction.1.damage_received_text,
+                        pct_text
+                    ));
+                    if interaction.1.damage_received_hover_text.is_empty() {
+                        resp.on_hover_text(hover_layout);
+                    } else {
+                        resp.on_hover_ui(|ui| {
+                            ui.label(hover_layout);
+                            ui.separator();
+                            ui.label(
+                                RichText::new(&interaction.1.damage_received_hover_text).font(FontId::monospace(12.0)),
+                            );
+                        });
+                    }
+                }
+            };
+        });
+    }
+
+    fn render_skill_grid(&self, ui: &mut egui::Ui, rows: &[wowsunpack::game_params::skill_grid_data::SkillGridRow]) {
+        const ICON_SIZE: f32 = 28.0;
+        let all_skills: Vec<&wowsunpack::game_params::skill_grid_data::SkillGridSkill> =
+            rows.iter().flat_map(|r| r.skills.iter()).collect();
+        let icons: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            all_skills.iter().map(|s| wows_data.cached_crew_skill_icon(&s.internal_name)).collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            all_skills
+                .iter()
+                .zip(icons)
+                .map(|(s, cached)| cached.or_else(|| wows_data.load_crew_skill_icon(&s.internal_name)))
+                .collect()
+        } else {
+            icons
+        };
+        let mut icon_idx = 0;
+        for row in rows {
+            ui.horizontal(|ui| {
+                let row_label = row.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
+                ui.add_sized([14.0, ICON_SIZE], egui::Label::new(RichText::new(row_label).weak().small()));
+                for skill in &row.skills {
+                    let icon = &icons[icon_idx];
+                    icon_idx += 1;
+                    let display_name = skill.name.clone().unwrap_or_else(|| skill.internal_name.to_string());
+                    let cost = skill.point_cost.map(|c| format!(" ({} pt)", c.get())).unwrap_or_default();
+                    let tooltip = match skill.description.as_deref() {
+                        Some(desc) if !desc.is_empty() => format!("{}{}\n\n{}", display_name, cost, desc),
+                        _ => format!("{}{}", display_name, cost),
+                    };
+                    match icon {
+                        Some(icon) => {
+                            let tint = if skill.learned { ui.sem().text_strong } else { ui.sem().text_dim };
+                            if let Some(tex) = self.icon_texture(ui.ctx(), icon) {
+                                let image =
+                                    egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE))).tint(tint);
+                                ui.add(image).on_hover_text(tooltip);
+                            } else {
+                                // Fallback for builds whose skill icons are absent.
+                                let label = match skill.point_cost {
+                                    Some(c) => format!("({}) {}", c.get(), display_name),
+                                    None => display_name,
+                                };
+                                let mut text = RichText::new(label);
+                                if !skill.learned {
+                                    text = text.weak();
+                                }
+                                ui.label(text).on_hover_text(tooltip);
+                            }
+                        }
+                        None => {
+                            // Fallback for builds whose skill icons are absent.
+                            let label = match skill.point_cost {
+                                Some(c) => format!("({}) {}", c.get(), display_name),
+                                None => display_name,
+                            };
+                            let mut text = RichText::new(label);
+                            if !skill.learned {
+                                text = text.weak();
+                            }
+                            ui.label(text).on_hover_text(tooltip);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    /// Decode + cache an icon's texture once per build. The cache key and the
+    /// egui texture name include the build so icons from different game versions
+    /// stay distinct. Returns None if the bytes fail to decode.
+    fn icon_texture(&self, ctx: &egui::Context, asset: &GameAsset) -> Option<egui::TextureHandle> {
+        let key = format!("{:?}:{}", self.version.build, asset.path);
+        if let Some(tex) = self.icon_textures.lock().get(&key) {
+            return Some(tex.clone());
+        }
+        let img = image::load_from_memory(&asset.data).ok()?.to_rgba8();
+        let size = [img.width() as usize, img.height() as usize];
+        let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+        let tex = ctx.load_texture(key.clone(), color, egui::TextureOptions::LINEAR);
+        self.icon_textures.lock().insert(key, tex.clone());
+        Some(tex)
+    }
+
+    fn render_modernization_slots(&self, ui: &mut egui::Ui, slots: &[Option<models::TranslatedModule>]) {
+        const ICON_SIZE: f32 = 28.0;
+        let cached: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            slots
+                .iter()
+                .map(|s| s.as_ref().and_then(|m| wows_data.cached_modernization_icon(&m.game_params_name)))
+                .collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if slots.iter().zip(&cached).any(|(s, c)| s.is_some() && c.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            slots
+                .iter()
+                .zip(cached)
+                .map(|(s, c)| match s {
+                    Some(m) => c.or_else(|| wows_data.load_modernization_icon(&m.game_params_name)),
+                    None => None,
+                })
+                .collect()
+        } else {
+            cached
+        };
+        ui.horizontal_wrapped(|ui| {
+            for (slot, icon) in slots.iter().zip(icons) {
+                match slot {
+                    Some(module) => {
+                        let display_name = module.name.clone().unwrap_or_else(|| module.game_params_name.clone());
+                        let tooltip = match module.description.as_deref() {
+                            Some(d) if !d.is_empty() => format!("{}\n\n{}", display_name, d),
+                            _ => display_name.clone(),
+                        };
+                        match icon.as_ref().and_then(|a| self.icon_texture(ui.ctx(), a)) {
+                            Some(tex) => {
+                                ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(ICON_SIZE))))
+                                    .on_hover_text(tooltip);
+                            }
+                            None => {
+                                ui.label(RichText::new(&display_name).small()).on_hover_text(tooltip);
+                            }
+                        }
+                    }
+                    None => {
+                        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(ICON_SIZE), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, ui.visuals().faint_bg_color);
+                    }
+                }
+            }
+        });
+    }
+
+    fn render_signals(&self, ui: &mut egui::Ui, signals: &[models::TranslatedModule]) {
+        const ICON_SIZE: f32 = 28.0;
+        let cached: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            signals.iter().map(|m| wows_data.cached_signal_flag_icon(&m.game_params_name)).collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if cached.iter().any(|c| c.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            signals
+                .iter()
+                .zip(cached)
+                .map(|(m, c)| c.or_else(|| wows_data.load_signal_flag_icon(&m.game_params_name)))
+                .collect()
+        } else {
+            cached
+        };
+        ui.horizontal_wrapped(|ui| {
+            for (signal, icon) in signals.iter().zip(icons) {
+                let display_name = signal.name.clone().unwrap_or_else(|| signal.game_params_name.clone());
+                let tooltip = match signal.description.as_deref() {
+                    Some(d) if !d.is_empty() => format!("{}\n\n{}", display_name, d),
+                    _ => display_name.clone(),
+                };
+                match icon.as_ref().and_then(|a| self.icon_texture(ui.ctx(), a)) {
+                    Some(tex) => {
+                        ui.add(egui::Image::new((tex.id(), egui::Vec2::splat(ICON_SIZE)))).on_hover_text(tooltip);
+                    }
+                    None => {
+                        ui.label(RichText::new(&display_name).small()).on_hover_text(tooltip);
+                    }
+                }
+            }
+        });
+    }
+
+    fn render_consumable_inventory(&self, ui: &mut egui::Ui, consumables: &[models::PlayerConsumable]) {
+        const NAME_COL_WIDTH: f32 = 170.0;
+        const COUNT_COL_WIDTH: f32 = 64.0;
+        const ICON_SIZE: f32 = 20.0;
+        const ROW_HEIGHT: f32 = 22.0;
+
+        let icons: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            consumables.iter().map(|c| wows_data.cached_consumable_icon(&c.icon_key)).collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            consumables
+                .iter()
+                .zip(icons)
+                .map(|(c, cached)| cached.or_else(|| wows_data.load_consumable_icon(&c.icon_key)))
+                .collect()
+        } else {
+            icons
+        };
+
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [NAME_COL_WIDTH, ROW_HEIGHT],
+                egui::Label::new(RichText::new(t!("ui.replay.consumable_header_consumable")).strong()),
+            );
+            ui.add_sized(
+                [COUNT_COL_WIDTH, ROW_HEIGHT],
+                egui::Label::new(RichText::new(t!("ui.replay.consumable_header_remaining")).strong()),
+            );
+            ui.add_sized(
+                [COUNT_COL_WIDTH, ROW_HEIGHT],
+                egui::Label::new(RichText::new(t!("ui.replay.consumable_header_total")).strong()),
+            );
+        });
+
+        for (consumable, icon) in consumables.iter().zip(icons) {
+            let (remaining_text, total_text, hover_text) = match consumable.total_charges {
+                wowsunpack::game_types::ChargeCount::Unlimited => (
+                    consumable.charges_used.to_string(),
+                    t!("ui.replay.consumable_charges_infinite").to_string(),
+                    t!("ui.replay.consumable_charges_unlimited", used = consumable.charges_used).to_string(),
+                ),
+                wowsunpack::game_types::ChargeCount::Finite(total) => {
+                    let remaining = total.saturating_sub(consumable.charges_used);
+                    (
+                        remaining.to_string(),
+                        total.to_string(),
+                        t!("ui.replay.consumable_charges_remaining", remaining = remaining, total = total).to_string(),
+                    )
+                }
+            };
+
+            ui.horizontal(|ui| {
+                let (name_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(NAME_COL_WIDTH, ROW_HEIGHT), egui::Sense::hover());
+                let mut name_ui = ui.new_child(
+                    egui::UiBuilder::new().max_rect(name_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                if let Some(icon) = icon.as_ref()
+                    && let Some(tex) = self.icon_texture(name_ui.ctx(), icon)
+                {
+                    let image = egui::Image::new((tex.id(), egui::Vec2::new(ICON_SIZE, ICON_SIZE)));
+                    let response = name_ui.add(image);
+                    if !consumable.description.is_empty() {
+                        response.on_hover_text(&consumable.description);
+                    }
+                }
+                let name_label = name_ui.label(&consumable.display_name);
+                if !consumable.description.is_empty() {
+                    name_label.on_hover_text(&consumable.description);
+                }
+
+                ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&remaining_text))
+                    .on_hover_text(&hover_text);
+                ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&total_text)).on_hover_text(&hover_text);
+            });
+        }
+    }
+
+    fn dealt_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
+        let alt_held = ui.input(|i| i.modifiers.alt);
+
+        ui.vertical(|ui| {
+            if let Some(received_hover_text) = report.actual_damage_hover_text() {
+                ui.label(received_hover_text.clone());
+
+                if report.damage_interactions.is_some() {
+                    ui.separator();
+                }
+            }
+
+            if let Some(interactions) = report.damage_interactions.as_ref() {
+                // TODO: this sucks, it allocates for each sort
+                for interaction in interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_dealt, &a.1.damage_dealt))
+                {
+                    if interaction.1.damage_dealt == 0 {
+                        continue;
+                    }
+
+                    let Some(interaction_player) = self
+                        .player_reports()
+                        .iter()
+                        .find(|report| report.player().initial_state().db_id() == *interaction.0)
+                    else {
+                        // In co-op, you may not have an interaction
+                        continue;
+                    };
+
+                    let hover_layout = player_hover_layout(interaction_player, ui);
+
+                    // ALT: show % of victim's total received damage; default: % of this player's dealt damage
+                    let pct_text = if alt_held {
+                        &interaction.1.damage_dealt_inverse_percentage_text
+                    } else {
+                        &interaction.1.damage_dealt_percentage_text
+                    };
+
+                    let resp = ui.label(format!(
+                        "{}: {} ({})",
+                        interaction_player.ship_name(),
+                        interaction.1.damage_dealt_text,
+                        pct_text
+                    ));
+                    if interaction.1.damage_dealt_hover_text.is_empty() {
+                        resp.on_hover_text(hover_layout);
+                    } else {
+                        resp.on_hover_ui(|ui| {
+                            ui.label(hover_layout);
+                            ui.separator();
+                            ui.label(
+                                RichText::new(&interaction.1.damage_dealt_hover_text).font(FontId::monospace(12.0)),
+                            );
+                        });
+                    }
+                }
+            };
+        });
+    }
+
+    /// The recording player's per-type spotting split, then one line per
+    /// victim this row spotted for allies. The results split spotting only by
+    /// victim, so other rows show just those lines.
+    fn spotting_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            let has_targets = report.has_spotting_targets();
+            if let Some(hover_text) = report.spotting_damage_hover_text() {
+                ui.label(hover_text.clone());
+
+                if has_targets {
+                    ui.separator();
+                }
+            }
+
+            let Some(interactions) = report.damage_interactions.as_ref() else {
+                return;
+            };
+            for (victim_id, interaction) in
+                interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.spotting_damage, &a.1.spotting_damage))
+            {
+                if interaction.spotting_damage == 0 {
+                    continue;
+                }
+
+                let Some(victim) =
+                    self.player_reports().iter().find(|report| report.player().initial_state().db_id() == *victim_id)
+                else {
+                    continue;
+                };
+
+                // No share without a spotting total to divide by.
+                let text = if interaction.spotting_damage_percentage_text.is_empty() {
+                    format!("{}: {}", victim.ship_name(), interaction.spotting_damage_text)
+                } else {
+                    format!(
+                        "{}: {} ({})",
+                        victim.ship_name(),
+                        interaction.spotting_damage_text,
+                        interaction.spotting_damage_percentage_text
+                    )
+                };
+                ui.label(text).on_hover_text(player_hover_layout(victim, ui));
+            }
+        });
+    }
+
+    /// Render the effective fire chance block for the recording player's row:
+    /// a clickable headline, a breakdown expander, and a per-target-ship
+    /// expander. `report.fire_chance` is `None` for every other row, so callers
+    /// only reach this once per replay.
+    ///
+    /// Both expanders start collapsed. This block is one row of a table of
+    /// players, so it has to stay a couple of lines tall until the reader asks
+    /// for more; the hover carries only the copy hint, since the breakdown it
+    /// used to hold is longer than a tooltip can usefully be.
+    ///
+    /// `hide_stats` replaces the whole block with the NDA placeholder, as the
+    /// sibling sections do: the breakdown carries the ship's raw `burnProb`,
+    /// every modifier its build applies and its per-target rates, which is the
+    /// data the test-ship hide exists to cover.
+    fn render_fire_chance(&self, ui: &mut egui::Ui, fire_chance: &EffectiveFireChance, hide_stats: bool) {
+        ui.strong(t!("ui.replay.sections.fire_chance"));
+        if hide_stats {
+            ui.label(t!("ui.replay.nda"));
+            return;
+        }
+
+        // Laid out rather than space-padded: the figures carry their own
+        // emphasis and every listing under them gets real columns, so none of
+        // it depends on a fixed-width font to line up. The formula keeps
+        // monospace because it genuinely is a fixed-width listing.
+        // Vertical: the counts on one line and the context beneath, so the
+        // block stays narrow. The name column clips rather than wraps, so a
+        // single wide line loses its tail.
+        let headline = ui
+            .vertical(|ui| {
+                // Labels are selectable by default, which makes each one consume
+                // the pointer and leaves the row's own response reachable only
+                // through the gaps between them. The hover and click belong to
+                // the row as a whole, so the parts must not sense input.
+                let plain = |ui: &mut egui::Ui, text: RichText| {
+                    ui.add(Label::new(text).selectable(false));
+                };
+                if fire_chance.eligible_hits == 0 {
+                    plain(ui, RichText::new(t!("ui.replay.sections.fire_chance_no_eligible_hits")).weak());
+                } else {
+                    // The flame is what says the leading figure is fires; the
+                    // clipboard form spells it out in words instead, since an
+                    // icon-font codepoint pasted elsewhere is a blank box.
+                    // Observed and expected sit together: comparing them is the
+                    // point of the statistic, so they must not be split apart.
+                    ui.horizontal(|ui| {
+                        plain(
+                            ui,
+                            RichText::new(wt_translations::icon_t(
+                                icons::FIRE,
+                                &wows_toolkit_viewmodel::fire_chance::counts_text(
+                                    fire_chance.fires,
+                                    fire_chance.eligible_hits,
+                                ),
+                            ))
+                            .strong(),
+                        );
+                        if let Some(expected) = fire_chance.expected_fires {
+                            plain(
+                                ui,
+                                RichText::new(t!(
+                                    "ui.replay.sections.fire_chance_expected_fires",
+                                    fires = format!("{expected:.1}")
+                                ))
+                                .weak(),
+                            );
+                        }
+                    });
+                    plain(ui, RichText::new(wows_toolkit_viewmodel::fire_chance::ships_text(fire_chance)).weak());
+                }
+            })
+            .response
+            .interact(Sense::click())
+            .on_hover_text(t!("ui.replay.sections.fire_chance_click_to_copy"));
+
+        if headline.clicked() {
+            ui.ctx().copy_text(self.fire_chance_copy_text(fire_chance));
+            let _ = self.background_task_sender.as_ref().map(|sender| {
+                sender.send(BackgroundTask {
+                    receiver: None,
+                    kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(t!(
+                        "ui.replay.sections.fire_chance_copied"
+                    ))),
+                })
+            });
+        }
+
+        egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_breakdown")).show(ui, |ui| {
+            let formula = fire_chance_formula_lines(fire_chance, &|source| self.localize_modifier_source(source));
+            if !formula.is_empty() {
+                ui.label(RichText::new(formula.join("\n")).monospace());
+                ui.add_space(4.0);
+            }
+            fire_chance_rows_ui(ui, "fire_chance_tally", &fire_chance_battle_tally_rows(fire_chance));
+            let ribbons = fire_chance_ribbon_rows(fire_chance);
+            if !ribbons.is_empty() {
+                ui.add_space(4.0);
+                fire_chance_rows_ui(ui, "fire_chance_ribbons", &ribbons);
+            }
+        });
+
+        if !fire_chance.per_ship.is_empty() {
+            egui::CollapsingHeader::new(t!("ui.replay.sections.fire_chance_per_ship")).show(ui, |ui| {
+                // Two rows per ship: the name and its rate on one, the counts
+                // indented beneath. One line carrying all four would set the
+                // width of the name column, which clips rather than wraps.
+                egui::Grid::new(ui.scope_id().with("fire_chance_per_ship"))
+                    .num_columns(3)
+                    .spacing([12.0, 2.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for ship in wows_toolkit_viewmodel::fire_chance::sorted_per_ship(fire_chance) {
+                            ui.label(self.localize_ship_name(ship));
+                            match ship.rate() {
+                                Some(rate) => ui.label(format!("{:.1}%", rate * 100.0)),
+                                None => ui.weak(t!("ui.replay.sections.fire_chance_no_eligible_hits")),
+                            };
+                            match ship.expected_rate() {
+                                Some(expected) => ui.weak(format!(
+                                    "{} {:.1}%",
+                                    t!("ui.replay.sections.fire_chance_expected"),
+                                    expected * 100.0
+                                )),
+                                None => ui.label(""),
+                            };
+                            ui.end_row();
+
+                            if ship.rate().is_some() {
+                                ui.label("");
+                                ui.weak(wt_translations::icon_t(
+                                    icons::FIRE,
+                                    &wows_toolkit_viewmodel::fire_chance::counts_text(ship.fires, ship.eligible_hits),
+                                ));
+                                ui.label("");
+                                ui.end_row();
+                            }
+                        }
+                        // The rows do not otherwise add up to the totals above
+                        // them, because a hit keyed to our own ship or to a
+                        // player whose hull never resolved has no row to sit in.
+                        if let Some(line) = wows_toolkit_viewmodel::fire_chance::no_target_ship_line(fire_chance) {
+                            ui.weak(line);
+                            ui.label("");
+                            ui.label("");
+                            ui.end_row();
+                        }
+                    });
+            });
+        }
+    }
+
+    /// A victim ship's display name, resolved from its GameParams index.
+    ///
+    /// The insights crate carries no translations, so it reports the raw index
+    /// alongside the raw internal name (`PJSB018_Yamato_1944`). Resolved by
+    /// index, the way the armor viewer's ship lookup does it; falls back to the
+    /// internal name when the index does not resolve against this build.
+    fn localize_ship_name(&self, ship: &PerShipFireChance) -> String {
+        let metadata_provider = self.metadata_provider();
+        <GameMetadataProvider as GameParamProvider>::game_param_by_index(&metadata_provider, &ship.victim_ship_index)
+            .and_then(|param| metadata_provider.localized_name_from_param(&param))
+            .unwrap_or_else(|| ship.victim_ship_name.clone())
+    }
+
+    /// Best-effort localized name for a formula step's source identifier.
+    /// Tries an equipped upgrade or signal's GameParams entry first, then a
+    /// crew skill's translation keys (a skill carries no `Param` of its own,
+    /// so it cannot be found the first way); falls back to the raw identifier
+    /// when neither resolves.
+    fn localize_modifier_source(&self, source: &str) -> String {
+        let metadata_provider = self.metadata_provider();
+
+        let upgrade_or_signal_name =
+            <GameMetadataProvider as GameParamProvider>::game_param_by_name(&metadata_provider, source).and_then(
+                |param| {
+                    let ctx = wowsunpack::game_params::describe::DescribeContext {
+                        resource_loader: metadata_provider.as_ref(),
+                        version: &self.version,
+                        species: None,
+                        param_name: None,
+                    };
+                    param.display_name(&ctx)
+                },
+            );
+        if let Some(name) = upgrade_or_signal_name {
+            return name;
+        }
+
+        let skill_name = CrewSkillName::from(source);
+        let (primary, fallback) = skill_translation_keys_for(&skill_name, "IDS_SKILL", &self.version);
+        let skill_display_name = metadata_provider
+            .localized_name_from_id(&TranslationKey::new(primary))
+            .or_else(|| metadata_provider.localized_name_from_id(&TranslationKey::new(fallback)));
+        if let Some(name) = skill_display_name {
+            return name;
+        }
+
+        source.to_owned()
+    }
+
+    /// The full plain-text form for click-to-copy, with this build's own
+    /// names in it.
+    fn fire_chance_copy_text(&self, fire_chance: &EffectiveFireChance) -> String {
+        wows_toolkit_viewmodel::fire_chance::copy_text(
+            fire_chance,
+            &|source| self.localize_modifier_source(source),
+            &|ship| self.localize_ship_name(ship),
+        )
+    }
+
+    fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
+        let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
+        let expandedness = ui.ctx().animate_bool(Id::unique(("replay_row", self.report_salt, row_nr)), is_expanded);
+
+        let Some(report) = self.player_reports.get(row_nr as usize) else {
+            return;
+        };
+
+        let column = *self.columns.get(col_nr).expect("somehow ended up with zero columns?");
+        let mut change_expand = false;
+
+        let inner_response = ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                // The first column always has the expand/collapse button
+                if col_nr == 1 {
+                    let (_, response) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::click());
+                    egui::collapsing_header::paint_default_icon(ui, expandedness, &response);
+                    if response.clicked() {
+                        change_expand = true;
+                    }
+                }
+
+                match column {
+                    ReplayColumn::Name => {
+                        // Add ship icon
+                        if let Some(icon) = report.icon.as_ref() {
+                            let image = Image::new(ImageSource::Bytes {
+                                uri: icon.path.clone().into(),
+                                // the icon size is <1k, this clone is fairly cheap
+                                bytes: icon.data.clone().into(),
+                            })
+                            .tint(report.tint.color(ui.visuals()))
+                            .fit_to_exact_size((20.0, 20.0).into())
+                            .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
+
+                            let response = ui.add(image);
+                            if !report.ship_species_text.is_empty() {
+                                response.on_hover_text(&report.ship_species_text);
+                            }
+                        } else {
+                            ui.label(&report.ship_species_text);
+                        }
+
+                        // Add division ID
+                        if let Some(div) = report.division_label.as_ref() {
+                            ui.label(div);
+                        }
+
+                        // Add player clan
+                        if let Some(clan_text) = report.clan_text(ui.visuals()) {
+                            ui.label(clan_text);
+                        }
+
+                        // Add player name
+                        ui.label(report.name_text(ui.visuals()));
+
+                        // Add icons for player properties
+                        {
+                            let player = report.player();
+                            // Hidden profile icon
+                            if player.initial_state().is_hidden() {
+                                ui.label(icons::EYE_SLASH).on_hover_text(t!("ui.replay.player.hidden_profile"));
+                            }
+
+                            // Stream sniper icon
+                            let candidates = self.twitch_state.read().player_is_potential_stream_sniper(
+                                player.initial_state().username(),
+                                self.match_timestamp,
+                            );
+                            if let Some(login) = crate::ui::widgets::twitch_chip(ui, &candidates) {
+                                ui.ctx().copy_text(login);
+                            }
+
+                            let disconnect_hover_text = if player.connection_change_info().is_empty() {
+                                // An empty connection history means either a genuine no-show
+                                // (in the roster but never loaded) or that this client just
+                                // doesn't broadcast usable connection state (older replays,
+                                // e.g. 0.9.10, report everyone as not-connected at the arena
+                                // snapshot and never update it). A player who spawned a ship
+                                // was obviously connected, so only flag the ones who never did.
+                                if player.vehicle_entity().is_some() {
+                                    None
+                                } else {
+                                    Some(t!("ui.replay.player.never_connected").into())
+                                }
+                            } else if player.connection_change_info().iter().any(|connection_info| {
+                                ConnectionChangeKind::Disconnected == connection_info.event_kind()
+                                    && !connection_info.had_death_event()
+                            }) {
+                                let mut event_descriptions = Vec::new();
+                                // Skip the first connect event
+                                for connection_change in player.connection_change_info().iter().skip(1) {
+                                    let secs = connection_change.at_game_duration().as_secs();
+                                    let timestamp = format!("{}:{:02}", secs / 60, secs % 60);
+                                    match connection_change.event_kind() {
+                                        ConnectionChangeKind::Connected => {
+                                            event_descriptions.push(format!("connected @ {timestamp}"))
+                                        }
+                                        ConnectionChangeKind::Disconnected => {
+                                            event_descriptions.push(format!("disconnected @ {timestamp}"))
+                                        }
+                                    }
+                                }
+                                Some(format!("Player {}", event_descriptions.join(", ")))
+                            } else {
+                                None
+                            };
+                            if let Some(disconnect_text) = disconnect_hover_text {
+                                ui.label(icons::PLUGS).on_hover_text(disconnect_text);
+                            }
+                        }
+                    }
+                    ReplayColumn::BaseXp => {
+                        if let Some(base_xp_text) = report.base_xp_text.as_ref() {
+                            ui.label(RichText::new(base_xp_text).color(report.tint.color(ui.visuals())));
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::RawXp => {
+                        if let Some(raw_xp_text) = report.raw_xp_text.clone() {
+                            ui.label(raw_xp_text);
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::ShipName => {
+                        ui.label(&report.ship_name);
+                    }
+                    ReplayColumn::Kills => {
+                        if let Some(kills) = report.kills {
+                            ui.label(kills.to_string());
+                        } else {
+                            ui.label(report.observed_kills.to_string());
+                        }
+                    }
+                    ReplayColumn::ObservedDamage => {
+                        if report.should_hide_stats() && !self.debug_mode {
+                            ui.label(t!("ui.replay.nda"));
+                        } else {
+                            ui.label(&report.observed_damage_text);
+                        }
+                    }
+                    ReplayColumn::ActualDamage => {
+                        if let Some(damage_text) = report.actual_damage_text.as_ref() {
+                            if report.should_hide_stats() && !self.debug_mode {
+                                ui.label(t!("ui.replay.nda"));
+                            } else {
+                                let response =
+                                    ui.label(RichText::new(damage_text).color(report.tint.color(ui.visuals())));
+                                if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
+                                    let tooltip = Tooltip::for_enabled(&response);
+                                    tooltip.show(|ui| {
+                                        self.dealt_damage_details(report, ui);
+                                    });
+                                }
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::ReceivedDamage => {
+                        if let Some(received_damage_text) = report.received_damage_text.as_ref() {
+                            if report.should_hide_stats() && !self.debug_mode {
+                                ui.label(t!("ui.replay.nda"));
+                            } else {
+                                let response = ui
+                                    .label(RichText::new(received_damage_text).color(report.tint.color(ui.visuals())));
+                                if report.received_damage_hover_text().is_some() || report.damage_interactions.is_some()
+                                {
+                                    let tooltip = Tooltip::for_enabled(&response);
+                                    tooltip.show(|ui| {
+                                        self.received_damage_details(report, ui);
+                                    });
+                                }
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::PotentialDamage => {
+                        if let Some(damage_text) = report.potential_damage_text.clone() {
+                            if report.should_hide_stats() && !self.debug_mode {
+                                ui.label(t!("ui.replay.nda"));
+                            } else {
+                                let response = ui.label(damage_text);
+                                if let Some(hover_text) = report.potential_damage_hover_text.as_ref() {
+                                    response.on_hover_text(hover_text.clone());
+                                }
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::SpottingDamage => {
+                        if let Some(spotting_damage_text) = report.spotting_damage_text.clone() {
+                            let response = ui.label(spotting_damage_text);
+                            if report.spotting_damage_hover_text().is_some() || report.has_spotting_targets() {
+                                let tooltip = Tooltip::for_enabled(&response);
+                                tooltip.show(|ui| {
+                                    self.spotting_damage_details(report, ui);
+                                });
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::TimeLived => {
+                        if let Some(time_lived_text) = report.time_lived_text.clone() {
+                            ui.label(time_lived_text);
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::DistanceTraveled => {
+                        if let Some(distance) = report.distance_traveled {
+                            ui.label(format!("{distance:.2}km"));
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Skills => {
+                        if report.relation().is_enemy() && !self.debug_mode {
+                            ui.label("-");
+                        } else if !report.has_vehicle_entity {
+                            ui.label(
+                                RichText::new(wt_translations::icon_t(icons::EXCLAMATION_MARK, "-"))
+                                    .color(ui.sem().loss),
+                            )
+                            .on_hover_text(t!("ui.replay.build.not_spotted"));
+                        } else {
+                            let label = RichText::new(&report.skill_info.label_text)
+                                .color(report.skill_info.tier.color(ui.visuals()));
+                            let response = ui.label(label);
+                            if let Some(hover_text) = &report.skill_info.hover_text {
+                                response.on_hover_text(hover_text);
+                            }
+                        }
+                    }
+                    ReplayColumn::PersonalRating => {
+                        if let Some(pr) = report.personal_rating.as_ref() {
+                            crate::ui::widgets::pr_chip(ui, pr.category, &format!("{:.0}", pr.pr), false)
+                                .on_hover_text(pr.category.name());
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Actions => {
+                        ui.menu_button(icons::DOTS_THREE, |ui| {
+                            if (!report.relation().is_enemy() || self.debug_mode) && report.has_vehicle_entity {
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::SHARE,
+                                        &t!("ui.replay.build.open_shiptool"),
+                                    ))
+                                    .clicked()
+                                {
+                                    let metadata_provider = self.metadata_provider();
+                                    if let Some(url) = build_shiptool_url(report.player(), &metadata_provider) {
+                                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    }
+                                    ui.close_kind(UiKind::Menu);
+                                }
+
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::SHARE,
+                                        &t!("ui.replay.build.open_in_browser"),
+                                    ))
+                                    .clicked()
+                                {
+                                    let metadata_provider = self.metadata_provider();
+
+                                    if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
+                                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    }
+                                    ui.close_kind(UiKind::Menu);
+                                }
+
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::COPY,
+                                        &t!("ui.replay.build.copy_link"),
+                                    ))
+                                    .clicked()
+                                {
+                                    let metadata_provider = self.metadata_provider();
+
+                                    if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
+                                        ui.ctx().copy_text(url);
+
+                                        let _ = self.background_task_sender.as_ref().map(|sender| {
+                                            sender.send(BackgroundTask {
+                                                receiver: None,
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(
+                                                    t!("ui.replay.build.link_copied"),
+                                                )),
+                                            })
+                                        });
+                                    }
+
+                                    ui.close_kind(UiKind::Menu);
+                                }
+
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::COPY,
+                                        &t!("ui.replay.build.copy_short_link"),
+                                    ))
+                                    .clicked()
+                                {
+                                    let metadata_provider = self.metadata_provider();
+
+                                    if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider)
+                                    {
+                                        ui.ctx().copy_text(url);
+                                        let _ = self.background_task_sender.as_ref().map(|sender| {
+                                            sender.send(BackgroundTask {
+                                                receiver: None,
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(
+                                                    t!("ui.replay.build.link_copied"),
+                                                )),
+                                            })
+                                        });
+                                    }
+
+                                    ui.close_kind(UiKind::Menu);
+                                }
+
+                                ui.separator();
+                            }
+
+                            if ui
+                                .small_button(wt_translations::icon_t(
+                                    icons::SHARE,
+                                    &t!("ui.replay.build.open_wows_numbers"),
+                                ))
+                                .clicked()
+                            {
+                                if let Some(url) = build_wows_numbers_url(report.player()) {
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                }
+
+                                ui.close_kind(UiKind::Menu);
+                            }
+
+                            if self.debug_mode {
+                                ui.separator();
+
+                                if let Some(player) = Some(report.player())
+                                    && ui
+                                        .small_button(wt_translations::icon_t(
+                                            icons::BUG,
+                                            &t!("ui.replay.debug.view_raw_metadata"),
+                                        ))
+                                        .clicked()
+                                {
+                                    let pretty_meta =
+                                        serde_json::to_string_pretty(player).expect("failed to serialize player");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("metadata.json".to_owned()),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty_meta,
+                                        })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+
+                                    if let Some(sender) = self.background_task_sender.as_ref() {
+                                        // The app owns the task inbox for its
+                                        // whole life, so this cannot fail.
+                                        let _ = sender.send(BackgroundTask {
+                                            receiver: None,
+                                            kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                        });
+                                    }
+
+                                    ui.close_kind(UiKind::Menu);
+                                }
+                            }
+                        });
+                    }
+                    ReplayColumn::Hits => {
+                        if let Some(hits_text) = report.hits_text.as_ref() {
+                            if report.should_hide_stats() && !self.debug_mode {
+                                ui.label(t!("ui.replay.nda"));
+                            } else {
+                                let response =
+                                    ui.label(RichText::new(hits_text).color(report.tint.color(ui.visuals())));
+                                if let Some(hover_text) = report.hits_hover_text.clone() {
+                                    response.on_hover_text(hover_text);
+                                }
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Heals => {
+                        if let Some(heal_count) = report.heal_count {
+                            ui.label(format!("{heal_count}")).on_hover_text(t!("ui.replay.column.heals_tooltip"));
+                        } else {
+                            ui.label("-").on_hover_text(t!("ui.replay.column.heals_no_repair_tooltip"));
+                        }
+                    }
+                }
+            });
+
+            // // Entity ID (debugging)
+            // if self.tab_state.settings.replay_settings.show_entity_id {
+            //     ui.col(|ui| {
+            //         ui.label(format!("{}", player_report.vehicle.id()));
+            //     });
+            // }
+
+            // Expanded content goes here
+            if 0.0 < expandedness {
+                match column {
+                    ReplayColumn::Name => {
+                        ui.vertical(|ui| {
+                            if !report.achievements.is_empty() {
+                                ui.strong(t!("ui.replay.sections.achievements"));
+
+                                // Resolve icons: read lock for cache hits, write lock only on misses
+                                let icons: Vec<Option<Arc<GameAsset>>> = {
+                                    let wows_data = self.wows_data.read();
+                                    report
+                                        .achievements
+                                        .iter()
+                                        .map(|a| wows_data.cached_achievement_icon(&a.icon_key))
+                                        .collect()
+                                };
+                                let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+                                    let mut wows_data = self.wows_data.write();
+                                    report
+                                        .achievements
+                                        .iter()
+                                        .zip(icons)
+                                        .map(|(a, cached)| {
+                                            cached.or_else(|| wows_data.load_achievement_icon(&a.icon_key))
+                                        })
+                                        .collect()
+                                } else {
+                                    icons
+                                };
+
+                                for (achievement, icon) in report.achievements.iter().zip(icons) {
+                                    ui.horizontal(|ui| {
+                                        if let Some(icon) = icon {
+                                            let image = Image::new(ImageSource::Bytes {
+                                                uri: icon.path.clone().into(),
+                                                bytes: icon.data.clone().into(),
+                                            })
+                                            .fit_to_exact_size((32.0, 32.0).into());
+                                            ui.add(image).on_hover_text(&achievement.description);
+                                        }
+
+                                        let response = if achievement.count > 1 {
+                                            ui.label(format!("{} ({}x)", achievement.display_name, achievement.count))
+                                        } else {
+                                            ui.label(&achievement.display_name)
+                                        };
+                                        response.on_hover_text(&achievement.description);
+                                    });
+                                }
+                            }
+
+                            // Display ribbons
+                            if !report.ribbons.is_empty() {
+                                if !report.achievements.is_empty() {
+                                    ui.separator();
+                                }
+                                ui.strong(t!("ui.replay.sections.ribbons"));
+
+                                // Sort ribbons by count descending for display
+                                let mut ribbons: Vec<_> = report.ribbons.values().collect();
+                                ribbons.sort_by(|a, b| a.name.cmp(&b.name));
+
+                                // One-off fix: insert RIBBON_BULGE (torp protection) immediately after RIBBON_MAIN_CALIBER
+                                if let Some(main_caliber_idx) =
+                                    ribbons.iter().position(|r| r.name == "RIBBON_MAIN_CALIBER")
+                                    && let Some(bulge_idx) = ribbons.iter().position(|r| r.name == "RIBBON_BULGE")
+                                {
+                                    let bulge = ribbons.remove(bulge_idx);
+                                    // Adjust index if bulge was before main_caliber
+                                    let insert_idx = if bulge_idx < main_caliber_idx {
+                                        main_caliber_idx
+                                    } else {
+                                        main_caliber_idx + 1
+                                    };
+                                    ribbons.insert(insert_idx, bulge);
+                                }
+
+                                let wows_data = self.wows_data.read();
+                                for ribbon in ribbons {
+                                    ui.horizontal(|ui| {
+                                        // Prefer the replay build's own icon; fall back to the
+                                        // newest loaded build when this build ships none (Flash-era
+                                        // ~0.9.5-0.10.4 and older embed ribbons in achievements.swf),
+                                        // and finally to text only if even the latest build lacks it.
+                                        let icon = if ribbon.is_subribbon {
+                                            let key = format!("sub{}", ribbon.icon_key);
+                                            wows_data
+                                                .assets
+                                                .subribbon_icons
+                                                .get(&key)
+                                                .or_else(|| self.fallback_subribbon_icons.get(&key))
+                                        } else {
+                                            wows_data
+                                                .assets
+                                                .ribbon_icons
+                                                .get(&ribbon.icon_key)
+                                                .or_else(|| self.fallback_ribbon_icons.get(&ribbon.icon_key))
+                                        };
+
+                                        let size = if ribbon.is_subribbon { (32.0, 32.0) } else { (64.0, 64.0) };
+
+                                        if let Some(icon) = icon {
+                                            let image = Image::new(ImageSource::Bytes {
+                                                uri: icon.path.clone().into(),
+                                                bytes: icon.data.clone().into(),
+                                            })
+                                            .fit_to_exact_size(size.into());
+                                            let response = ui.add(image);
+                                            if let Some(description) = &ribbon.description {
+                                                response.on_hover_text(description);
+                                            }
+                                        }
+
+                                        let response = ui.label(format!("{} ({}x)", ribbon.display_name, ribbon.count));
+                                        if let Some(description) = &ribbon.description {
+                                            response.on_hover_text(description);
+                                        }
+                                    });
+                                }
+                            }
+
+                            let has_damage_events = report.fires.is_some()
+                                || report.floods.is_some()
+                                || report.citadels.is_some()
+                                || report.crits.is_some();
+                            if has_damage_events {
+                                if !report.achievements.is_empty() || !report.ribbons.is_empty() {
+                                    ui.separator();
+                                }
+                                ui.strong(t!("ui.replay.sections.damage_events"));
+                                if report.should_hide_stats() && !self.debug_mode {
+                                    ui.label(t!("ui.replay.nda"));
+                                } else {
+                                    if let Some(fires) = report.fires {
+                                        ui.label(format!("{}: {fires}", t!("ui.replay.column.fires")));
+                                    }
+                                    if let Some(floods) = report.floods {
+                                        ui.label(format!("{}: {floods}", t!("ui.replay.column.floods")));
+                                    }
+                                    if let Some(citadels) = report.citadels {
+                                        ui.label(format!("{}: {citadels}", t!("ui.replay.column.citadels")));
+                                    }
+                                    if let Some(crits) = report.crits {
+                                        ui.label(format!("{}: {crits}", t!("ui.replay.column.crits")));
+                                    }
+                                }
+                            }
+
+                            if let Some(fire_chance) = report.fire_chance.as_ref() {
+                                if !report.achievements.is_empty() || !report.ribbons.is_empty() || has_damage_events {
+                                    ui.separator();
+                                }
+                                self.render_fire_chance(
+                                    ui,
+                                    fire_chance,
+                                    report.should_hide_stats() && !self.debug_mode,
+                                );
+                            }
+                        });
+                    }
+                    ReplayColumn::ActualDamage => {
+                        if report.should_hide_stats() && !self.debug_mode {
+                            ui.label(t!("ui.replay.nda"));
+                        } else if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
+                            self.dealt_damage_details(report, ui);
+                        }
+                    }
+                    ReplayColumn::PotentialDamage => {
+                        if report.should_hide_stats() && !self.debug_mode {
+                            ui.label(t!("ui.replay.nda"));
+                        } else if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
+                            ui.label(damage_extended_info);
+                        }
+                    }
+                    ReplayColumn::SpottingDamage => {
+                        if report.spotting_damage_hover_text().is_some() || report.has_spotting_targets() {
+                            self.spotting_damage_details(report, ui);
+                        }
+                    }
+                    ReplayColumn::ReceivedDamage => {
+                        if report.should_hide_stats() && !self.debug_mode {
+                            ui.label(t!("ui.replay.nda"));
+                        } else if report.received_damage_hover_text.is_some() || report.damage_interactions.is_some() {
+                            self.received_damage_details(report, ui);
+                        }
+                    }
+                    ReplayColumn::Skills => {
+                        if !report.relation().is_enemy() || self.debug_mode || self.merge_active {
+                            ui.vertical(|ui| {
+                                if let Some(hover_text) = &report.skill_info.hover_text {
+                                    ui.label(hover_text);
+                                }
+                                if let Some(build_info) = &report.translated_build {
+                                    ui.separator();
+
+                                    // A ship with slots but no upgrades mounted renders a row of
+                                    // empty placeholders (shows how many slots exist); only a
+                                    // ship whose slot count is unknown (0) shows the none label.
+                                    if build_info.modernization_slots.is_empty() {
+                                        ui.label(t!("ui.replay.sections.modules_none"));
+                                    } else {
+                                        ui.label(t!("ui.replay.sections.modules"));
+                                        self.render_modernization_slots(ui, &build_info.modernization_slots);
+                                    }
+
+                                    if !build_info.signals.is_empty() {
+                                        ui.separator();
+                                        ui.label(t!("ui.replay.sections.signals"));
+                                        self.render_signals(ui, &build_info.signals);
+                                    }
+
+                                    ui.separator();
+
+                                    if build_info.loadout.is_empty() {
+                                        ui.label(t!("ui.replay.sections.loadout_none"));
+                                    } else {
+                                        ui.label(t!("ui.replay.sections.loadout"));
+                                        for module in &build_info.loadout {
+                                            if let Some(name) = &module.name {
+                                                let label = ui.label(name);
+                                                if let Some(hover_text) = module.description.as_ref() {
+                                                    label.on_hover_text(hover_text);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    ui.separator();
+
+                                    if let Some(captain_skills) = build_info.captain_skills.as_ref() {
+                                        ui.label(t!("ui.replay.sections.captain_skills"));
+                                        if captain_skills.is_empty() {
+                                            ui.label(t!("ui.replay.sections.captain_skills_none"));
+                                        } else {
+                                            self.render_skill_grid(ui, captain_skills);
+                                        }
+                                    } else {
+                                        ui.label(t!("ui.replay.sections.captain_skills_none"));
+                                    }
+                                }
+
+                                if !report.consumables.is_empty() {
+                                    ui.separator();
+                                    ui.label(t!("ui.replay.sections.consumables"));
+                                    self.render_consumable_inventory(ui, &report.consumables);
+                                } else if let Some(build_info) = &report.translated_build
+                                    && !build_info.abilities.is_empty()
+                                {
+                                    // No activations were replayed; list the configured
+                                    // consumables by name instead of the used/total table.
+                                    ui.separator();
+                                    ui.label(t!("ui.replay.sections.consumables"));
+                                    for ability in &build_info.abilities {
+                                        if let Some(name) = &ability.name {
+                                            ui.label(name);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    ReplayColumn::Hits => {
+                        if report.should_hide_stats() && !self.debug_mode {
+                            ui.label(t!("ui.replay.nda"));
+                        } else if let Some(hits_extended_info) = report.hits_hover_text.clone() {
+                            ui.label(hits_extended_info);
+                        }
+                    }
+                    _ => {
+                        // Do nothing
+                    }
+                }
+            }
+        });
+
+        match ui.input(|i| {
+            let double_clicked = i.pointer.button_double_clicked(egui::PointerButton::Primary)
+                && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
+            let single_clicked = i.pointer.button_clicked(egui::PointerButton::Primary)
+                && i.modifiers.ctrl
+                && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
+
+            (double_clicked, single_clicked)
+        }) {
+            (true, _) => {
+                // A double-click shouldn't enable row selection
+                if let Some((_row, false)) = self.selected_row {
+                    self.selected_row = None;
+                }
+
+                change_expand = true;
+            }
+            (false, true) if self.selected_row.take().filter(|prev| prev.0 == row_nr).is_none() => {
+                self.selected_row = Some((row_nr, true));
+                ui.ctx().request_repaint();
+            }
+            _ => {
+                // both false
+            }
+        }
+
+        if change_expand {
+            // Toggle.
+            // Note: we use a map instead of a set so that we can animate opening and closing of each column.
+            self.is_row_expanded.insert(row_nr, !is_expanded);
+            self.row_heights.remove(&row_nr);
+        }
+
+        let cell_height = inner_response.response.rect.height();
+        let previous_height = self.row_heights.entry(row_nr).or_insert(cell_height);
+
+        if *previous_height < cell_height {
+            *previous_height = cell_height;
+        }
+    }
+
+    fn metadata_provider(&self) -> Arc<GameMetadataProvider> {
+        self.wows_data.read().game_metadata.as_ref().expect("no metadata provider?").clone()
+    }
+
+    pub fn match_timestamp(&self) -> Timestamp {
+        self.match_timestamp
+    }
+
+    pub fn player_reports(&self) -> &[PlayerReport] {
+        &self.player_reports
+    }
+
+    /// The report this was built from, which the export writes.
+    pub fn normalized(&self) -> &NormalizedBattleReport {
+        &self.normalized
+    }
+
+    pub fn battle_result(&self) -> Option<BattleResult> {
+        self.battle_result
+    }
+
+    /// Re-derive all translation-dependent display strings (ship names, species,
+    /// bot names, achievements, ribbons) from the current locale. Call this after
+    /// the user changes language so the report reflects the new translations
+    /// without rebuilding from scratch.
+    pub fn refresh_translations(&mut self) {
+        let wows_data = self.wows_data.read();
+        let Some(metadata_provider) = wows_data.game_metadata.as_ref() else {
+            return;
+        };
+
+        // The normalized report is what the export and the replay index read,
+        // so it changes language with the rows rather than staying in the
+        // locale the replay was parsed under.
+        for (player, np) in self.player_reports.iter().zip(self.normalized.players.iter_mut()) {
+            np.refresh_translations(&player.player, metadata_provider, &self.version);
+        }
+
+        for report in &mut self.player_reports {
+            let vehicle_param = report.player.vehicle();
+            let player_state = report.player.initial_state();
+
+            // Ship name
+            report.ship_name = metadata_provider
+                .localized_name_from_param(vehicle_param)
+                .unwrap_or_else(|| format!("{}", vehicle_param.id()));
+
+            // Ship species text
+            if let Some(species) = vehicle_param.species().and_then(|r| r.known().cloned()) {
+                report.ship_species_text = metadata_provider
+                    .localized_name_from_id(&TranslationKey::new(species.translation_id()))
+                    .unwrap_or_else(|| species.name().to_string());
+            }
+
+            // Bot display name
+            if player_state.is_bot() && player_state.username().starts_with("IDS_") {
+                report.name_text = metadata_provider
+                    .localized_name_from_id(&TranslationKey::new(player_state.username()))
+                    .unwrap_or_else(|| player_state.username().to_string());
+            }
+
+            // Translated build
+            report.translated_build = models::TranslatedBuild::new(&report.player, metadata_provider, &self.version);
+
+            // Achievements (icon_key holds the ui_name used for translation lookup)
+            for achievement in &mut report.achievements {
+                if let Some(name) = wowsunpack::game_params::translations::translate_achievement_name(
+                    &achievement.icon_key,
+                    metadata_provider.as_ref(),
+                ) {
+                    achievement.display_name = name;
+                }
+                if let Some(desc) = wowsunpack::game_params::translations::translate_achievement_description(
+                    &achievement.icon_key,
+                    metadata_provider.as_ref(),
+                ) {
+                    achievement.description = desc;
+                }
+            }
+
+            // Ribbons (name holds the RIBBON_* key used for translation lookup)
+            for ribbon in report.ribbons.values_mut() {
+                if let Some(translation) =
+                    wowsunpack::game_params::translations::translate_ribbon(&ribbon.name, metadata_provider.as_ref())
+                {
+                    ribbon.display_name = translation.display_name;
+                    ribbon.description = translation.description;
+                }
+            }
+        }
+    }
+
+    /// Rates every player, and carries the ratings onto the rows the table
+    /// draws.
+    ///
+    /// The report is rated rather than the rows, so the export writes the
+    /// same numbers the table shows; the rows then read them back.
+    pub fn populate_personal_ratings(&mut self, pr_data: &crate::util::personal_rating::PersonalRatingData) {
+        self.normalized.populate_personal_ratings(pr_data);
+
+        for (report, np) in self.player_reports.iter_mut().zip(self.normalized.players.iter()) {
+            if report.personal_rating.is_none() {
+                report.personal_rating = np.personal_rating.clone();
+            }
+        }
+    }
+}
+
+/// Reorders `items` so that position `i` holds what `order[i]` named.
+///
+/// `order` must be a permutation of `0..items.len()`, which is what a sort of
+/// the index range produces.
+fn permute<T>(items: &mut Vec<T>, order: &[usize]) {
+    let mut taken: Vec<Option<T>> = items.drain(..).map(Some).collect();
+    items.extend(order.iter().map(|&index| taken[index].take().expect("an index appears once in a permutation")));
+}
+
+impl egui_table::TableDelegate for UiReport {
+    fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell_inf: &egui_table::HeaderCellInfo) {
+        let egui_table::HeaderCellInfo { group_index, .. } = cell_inf;
+
+        let margin = 4;
+
+        egui::Frame::new().inner_margin(Margin::symmetric(margin, 0)).show(ui, |ui| {
+            let column = *self.columns.get(*group_index).expect("somehow ended up with zero columns?");
+            match column {
+                ReplayColumn::Actions => {
+                    ui.label(t!("ui.replay.column.actions"));
+                }
+                ReplayColumn::Name => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.player_name"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Name,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Name);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::BaseXp => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.base_xp"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::BaseXp,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::BaseXp);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::RawXp => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.raw_xp"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::RawXp,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::RawXp);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ShipName => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.ship_name"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ShipName,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ShipName);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Hits => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.hits"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Hits,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Hits);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Heals => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.heals"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Heals,
+                        ))
+                        .on_hover_text(t!("ui.replay.column.heals_tooltip"))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Heals);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Kills => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.kills"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Kills,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Kills);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ObservedDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.observed_damage"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ObservedDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ObservedDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ActualDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.actual_damage"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ActualDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ActualDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::SpottingDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.spotting_damage"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::SpottingDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::SpottingDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::PotentialDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.potential_damage"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::PotentialDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::PotentialDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::TimeLived => {
+                    ui.strong(t!("ui.replay.column.time_lived"));
+                }
+                ReplayColumn::ReceivedDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.received_damage"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ReceivedDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ReceivedDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::DistanceTraveled => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.distance_traveled"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::DistanceTraveled,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::DistanceTraveled);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Skills => {
+                    ui.strong(t!("ui.replay.column.skills"));
+                }
+                ReplayColumn::PersonalRating => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.personal_rating"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::PersonalRating,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::PersonalRating);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+            }
+        });
+    }
+
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell_info: &egui_table::CellInfo) {
+        let egui_table::CellInfo { row_nr, col_nr, .. } = *cell_info;
+
+        if self.selected_row.filter(|row| row.0 == row_nr && row.1).is_some() {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().selection.bg_fill);
+        } else if row_nr % 2 == 1 {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
+        }
+
+        egui::Frame::new().inner_margin(Margin::symmetric(4, 4)).show(ui, |ui| {
+            self.cell_content_ui(row_nr, col_nr, ui);
+        });
+    }
+
+    fn row_top_offset(&self, ctx: &Context, _table_id: Id, row_nr: u64) -> f32 {
+        self.is_row_expanded
+            .range(0..row_nr)
+            .map(|(expanded_row_nr, expanded)| {
+                let how_expanded =
+                    ctx.animate_bool(Id::unique(("replay_row", self.report_salt, *expanded_row_nr)), *expanded);
+                how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap()
+            })
+            .sum::<f32>()
+            + row_nr as f32 * ROW_HEIGHT
+    }
+}
+
+const ROW_HEIGHT: f32 = 28.0;
+
+/// A validated alt-perspective pick, waiting for a frame in which no replay
+/// write guard is held so it can be pushed onto its replay and re-parsed.
+#[derive(Clone)]
+struct PendingAltRequest {
+    /// The workspace whose replay tab raised this. Carried for diagnostics: the
+    /// re-parse itself works through the replay handle below, which any
+    /// workspace showing that replay shares.
+    workspace: WorkspaceId,
+    replay: Weak<RwLock<Replay>>,
+    alt: std::sync::Arc<ReplayFile>,
+}
+
+/// Transient handoff between the in-tab "Load Other Team Perspective"
+/// button and `handle_pending_alt_reparse`, which triggers the re-parse.
+/// Wrapped because egui's `Memory::remove_temp` requires the stored type to
+/// be `Default`, and [`PendingAltRequest`] is not.
+#[derive(Default, Clone)]
+struct PendingAltReparse(Option<PendingAltRequest>);
+
+/// Parks a validated alt-perspective pick for the next frame's consumer.
+fn stash_alt_reparse(ctx: &egui::Context, request: PendingAltRequest) {
+    ctx.data_mut(|data| data.insert_temp(alt_perspective_slot_id(), PendingAltReparse(Some(request))));
+}
+
+/// Takes whatever alt-perspective pick is parked, if any. Every caller consumes
+/// unconditionally: the request names its own replay, so no caller has to match
+/// a workspace against it to know it is theirs to run.
+fn take_alt_reparse(ctx: &egui::Context) -> Option<PendingAltRequest> {
+    ctx.data_mut(|data| data.remove_temp::<PendingAltReparse>(alt_perspective_slot_id())).and_then(|pending| pending.0)
+}
+
+/// Native dialogs opened from replay tabs and their floating windows.
+#[derive(Default)]
+pub struct ReplayDialogs {
+    /// Chat and timeline exports, formatted when the button is pressed.
+    save_text: FileDialogSlot<String>,
+    export_results: FileDialogSlot<ExportResultsRequest>,
+    open_replay: FileDialogSlot,
+    alt_perspective: FileDialogSlot<AltPerspectiveRequest>,
+    batch_render_output: FileDialogSlot<Vec<PathBuf>>,
+}
+
+struct ExportResultsRequest {
+    format: ReplayExportFormat,
+    results: ExportedMatch,
+}
+
+/// Replay a picked alt-perspective file is validated against and merged into.
+struct AltPerspectiveRequest {
+    workspace: WorkspaceId,
+    replay: Weak<RwLock<Replay>>,
+}
+
+/// Formats chat messages as one line each, prefixing the sender's clan when known.
+fn format_game_chat(messages: &[GameMessage]) -> String {
+    let mut text = String::new();
+    for message in messages {
+        let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+        let line = match player {
+            Some(player) if !player.initial_state().clan().is_empty() => {
+                format!("[{}] {} ({:?}): {}\n", player.initial_state().clan(), sender_name, channel, message)
+            }
+            _ => format!("{sender_name} ({channel:?}): {message}\n"),
+        };
+        text.push_str(&line);
+    }
+
+    text
+}
+
+fn write_exported_results(request: ExportResultsRequest, path: &std::path::Path) {
+    let mut file = match std::fs::File::create(path) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Failed to create {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    let result =
+        match request.format {
+            ReplayExportFormat::Json => serde_json::to_writer(&mut file, &request.results)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            ReplayExportFormat::Cbor => ciborium::into_writer(&request.results, &mut file)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            ReplayExportFormat::Csv => {
+                let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+                let mut result = Ok(());
+                for vehicle in request.results.vehicles {
+                    result = writer.serialize(FlattenedVehicle::from(vehicle));
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                let _ = writer.flush();
+                result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+            }
+        };
+    if let Err(e) = result {
+        error!("Failed to write results to file: {}", e);
+    }
+}
+
+/// What one parse of a replay produced: the battle report, plus the
+/// independently-collected evidence of whether the stream carried an
+/// end-of-battle marker.
+pub struct ParsedReplay {
+    pub report: BattleReport,
+    pub results: ResultsScan,
+}
+
+pub struct Replay {
+    pub replay_file: ReplayFile,
+
+    /// Optional additional replays from other players in the same match. When
+    /// non-empty, the parser feeds all of them into a single merged
+    /// [`wows_battle_world::merged::MergedReplays`]
+    /// so that enemy positions / HP / consumables / etc. that the primary's
+    /// client never saw become visible in the resulting BattleReport.
+    pub alt_replays: Vec<ReplayFile>,
+
+    pub resource_loader: Arc<GameMetadataProvider>,
+
+    pub battle_report: Option<BattleReport>,
+    pub ui_report: Option<UiReport>,
+
+    /// End-of-battle evidence from the last parse of this replay's packet
+    /// stream. `None` until parsed. This, not the decoded report, is the single
+    /// source of truth for whether results are present: a parse that stops
+    /// early yields a report with no results but is not evidence of absence.
+    pub results_scan: Option<ResultsScan>,
+
+    pub game_constants: Option<Arc<wows_replays::game_constants::GameConstants>>,
+
+    /// Original file path this replay was loaded from, if available.
+    pub source_path: Option<PathBuf>,
+
+    /// Lazy background-extraction state for the Match Timeline window.
+    pub(crate) timeline: TimelineState,
+}
+
+/// The colour a player's clan tag should render with. `None` if the player
+/// has no clan. Resolved to a `Color32` at draw time via `ClanColor::color`.
+fn clan_color_for_player(player: &Player) -> Option<ClanColor> {
+    let state = player.initial_state();
+    if state.clan().is_empty() {
+        return None;
+    }
+    // Older replays omit clanColor; fall back to the player's team color so the
+    // clan tag still renders instead of panicking.
+    let clan_color = match state.raw_with_names().get("clanColor").and_then(|c| c.as_i64()) {
+        Some(clan_color) => ClanColor::Fixed(Color32::from_rgb(
+            ((clan_color & 0xFF0000) >> 16) as u8,
+            ((clan_color & 0xFF00) >> 8) as u8,
+            (clan_color & 0xFF) as u8,
+        )),
+        None => {
+            tracing::warn!("player '{}' has no clanColor; using team color", state.username());
+            ClanColor::Relation(PlayerTint::from_relation(player.relation()))
+        }
+    };
+    Some(clan_color)
+}
+
+impl Replay {
+    pub fn new(replay_file: ReplayFile, resource_loader: Arc<GameMetadataProvider>) -> Self {
+        Replay {
+            replay_file,
+            alt_replays: Vec::new(),
+            resource_loader,
+            battle_report: None,
+            ui_report: None,
+            results_scan: None,
+            game_constants: None,
+            source_path: None,
+            timeline: TimelineState::NotRequested,
+        }
+    }
+
+    /// Attach a parse result. Both halves land together so no caller can store
+    /// a report while leaving the results evidence stale from an earlier parse.
+    pub fn store_parse(&mut self, parsed: ParsedReplay) {
+        self.battle_report = Some(parsed.report);
+        self.results_scan = Some(parsed.results);
+    }
+
+    pub fn player_vehicle(&self) -> Option<&VehicleInfoMeta> {
+        let meta = &self.replay_file.meta;
+        meta.vehicles.iter().find(|vehicle| vehicle.relation == 0)
+    }
+
+    pub fn vehicle_name(&self, metadata_provider: &GameMetadataProvider) -> String {
+        self.player_vehicle()
+            .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId.raw().into()))
+            .and_then(|id| metadata_provider.localized_name_from_id(&TranslationKey::new(id)))
+            .unwrap_or_else(|| t!("ui.replay.spectator").into())
+    }
+
+    #[allow(dead_code)]
+    pub fn player_name(&self) -> Option<&str> {
+        self.player_vehicle().map(|vehicle| vehicle.name.as_str())
+    }
+
+    pub fn map_name(&self, metadata_provider: &GameMetadataProvider) -> String {
+        wowsunpack::game_params::translations::translate_map_name(&self.replay_file.meta.mapName, metadata_provider)
+    }
+
+    pub fn game_mode(&self, metadata_provider: &GameMetadataProvider) -> String {
+        wowsunpack::game_params::translations::translate_game_mode(
+            self.replay_file.meta.gameType.as_deref().unwrap_or(""),
+            metadata_provider,
+        )
+    }
+
+    pub fn scenario(&self, metadata_provider: &GameMetadataProvider) -> String {
+        wowsunpack::game_params::translations::translate_scenario(&self.replay_file.meta.scenario, metadata_provider)
+    }
+
+    pub fn game_time(&self) -> &str {
+        &self.replay_file.meta.dateTime
+    }
+
+    /// Get the battle result, preferring battle_report if available, otherwise cached result.
+    pub fn battle_report(&self) -> Option<&BattleReport> {
+        self.battle_report.as_ref()
+    }
+
+    /// Shared with the GPUI port, which names the same battle the same file
+    /// (`wows_toolkit_viewmodel::replay_export::exported_file_stem`).
+    pub fn better_file_name(&self, metadata_provider: &GameMetadataProvider) -> String {
+        wows_toolkit_viewmodel::replay_export::exported_file_stem(&self.replay_file.meta, metadata_provider)
+    }
+
+    pub fn parse(&self, expected_build: &str) -> Result<ParsedReplay, Report> {
+        let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
+        assert!(version_parts.len() == 4);
+        if version_parts[3] != expected_build {
+            return Err(ToolkitError::ReplayVersionMismatch {
+                game_version: expected_build.to_string(),
+                replay_version: version_parts[3].to_string(),
+            }
+            .into());
+        }
+
+        let replay_version = wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
+
+        tracing::info!(
+            primary = %self.replay_file.meta.playerName,
+            alt_count = self.alt_replays.len(),
+            "Replay::parse"
+        );
+        if self.alt_replays.is_empty() {
+            // Single-replay fast path — no merger involved.
+            let mut world =
+                BattleWorld::new(&self.replay_file.meta, self.resource_loader.as_ref(), self.game_constants.as_deref());
+            // Fire-chance analysis divides by the whole-match hit history, which is
+            // otherwise not recorded to save memory for renderers that only need
+            // the current frame's hits. Its shells-fired count reads the salvo
+            // log, which is off by the same default.
+            world.set_record_hit_history(true);
+            world.set_record_salvo_history(true);
+            let mut p =
+                wows_replays::packet2::Parser::with_version(self.resource_loader.entity_specs(), replay_version);
+            let mut remaining = self.replay_file.packet_data();
+            let mut scanner = ResultsScanner::new();
+            while !remaining.is_empty() {
+                match p.parse_packet(&mut remaining) {
+                    Ok(packet) => {
+                        scanner.observe(&packet);
+                        world.process(&packet);
+                    }
+                    Err(e) => {
+                        // A malformed packet leaves the parser's entity state
+                        // untrustworthy, so the walk stops here. Recording the
+                        // stop keeps a truncated parse distinguishable from a
+                        // replay that genuinely carried no results.
+                        warn!("packet parse stopped early, results presence is unknown: {:?}", e);
+                        scanner.truncate();
+                        break;
+                    }
+                }
+            }
+            world.finish();
+            return Ok(ParsedReplay { report: world.into_report(), results: scanner.finish() });
+        }
+
+        // Merge path — fold alt perspectives into a single world via
+        // MergedReplays so the report sees through fog of war.
+        let game_constants = self
+            .game_constants
+            .as_deref()
+            .ok_or_else(|| rootcause::report!("game constants required to merge alt-perspective replays"))?;
+        let mut session = MergedReplays::new(
+            self.resource_loader.entity_specs(),
+            self.resource_loader.as_ref(),
+            game_constants,
+            replay_version,
+            &self.replay_file,
+            &self.alt_replays,
+        )
+        .map_err(|e| rootcause::report!("{e}"))?;
+        // See the single-replay path above: fire-chance analysis needs the
+        // whole-match hit history and the salvo log, both off by default.
+        session.world_mut().set_record_hit_history(true);
+        session.world_mut().set_record_salvo_history(true);
+        while session.step().map_err(|e| rootcause::report!("{e}"))?.is_some() {}
+        session.finish();
+        let world = session.into_world();
+        // The merge loop propagates a parse error rather than stopping at it, so
+        // arriving here means every stream was consumed whole. That makes the
+        // world's own end-of-battle state a sound marker on this path, unlike
+        // the single-replay path above, which can stop mid-stream.
+        let results = if world.battle_results().is_some() || world.battle_end_clock().is_some() {
+            ResultsScan::Present
+        } else {
+            ResultsScan::Absent
+        };
+        Ok(ParsedReplay { report: world.into_report(), results })
+    }
+
+    pub fn build_ui_report(&mut self, deps: &crate::data::wows_data::ReplayDependencies) {
+        if let Some(battle_report) = &self.battle_report {
+            let replay_version =
+                wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
+
+            // Resolve version-matched data so the UI report uses the correct constants
+            let Some(wows_data) = deps.resolve_versioned_deps(&replay_version) else {
+                tracing::warn!(
+                    "Could not resolve versioned data for build {}",
+                    replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                );
+                return;
+            };
+
+            let merge_active = !self.alt_replays.is_empty();
+            let mut ui_report = UiReport::new(&self.replay_file, battle_report, &wows_data, deps, merge_active);
+
+            {
+                let pr_data = deps.personal_rating_data.read();
+                if pr_data.is_loaded() {
+                    ui_report.populate_personal_ratings(&pr_data);
+                }
+            }
+
+            self.ui_report = Some(ui_report);
+        }
+    }
+
+    /// Returns a boolean indicating if the replay has incomplete battle results.
+    /// Reads the packet-stream scan rather than the decoded report, so a parse
+    /// that stopped mid-stream reports "pending" instead of silently claiming
+    /// the replay had no results. An unparsed replay is pending by the same
+    /// rule: absence of evidence is not evidence of results.
+    pub fn battle_results_are_pending(&self) -> bool {
+        !self.results_scan.is_some_and(|scan| scan.is_present())
+    }
+
+    pub fn battle_result(&self) -> Option<BattleResult> {
+        self.battle_report()
+            .and_then(|report| report.battle_result().cloned())
+            .or_else(|| self.ui_report.as_ref().and_then(|report| report.battle_result()))
+    }
+
+    /// Convert this replay's player stats to ShipBattleStats for PR calculation
+    pub fn to_battle_stats(&self) -> Option<crate::util::personal_rating::ShipBattleStats> {
+        let vehicle = self.player_vehicle()?;
+        let battle_result = self.battle_result()?;
+        let ui_report = self.ui_report.as_ref()?;
+        let self_report = ui_report.player_reports().iter().find(|report| report.relation().is_self())?;
+
+        let is_win = matches!(battle_result, BattleResult::Win(_));
+
+        Some(crate::util::personal_rating::ShipBattleStats {
+            ship_id: vehicle.shipId,
+            battles: 1,
+            damage: self_report.actual_damage().unwrap_or_default(),
+            wins: if is_win { 1 } else { 0 },
+            frags: self_report.kills().unwrap_or_default(),
+        })
+    }
+}
+
+fn column_name_with_sort_order(text: &str, has_info: bool, sort_order: SortOrder, column: SortColumn) -> String {
+    if sort_order.column() == column {
+        if has_info {
+            format!("{} {} {}", text, icons::INFO, sort_order.icon())
+        } else {
+            format!("{} {}", text, sort_order.icon())
+        }
+    } else if has_info {
+        format!("{} {}", text, icons::INFO)
+    } else {
+        text.to_string()
+    }
+}
+
+fn copy_files_to_clipboard(paths: &[std::path::PathBuf]) {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        let _ = clipboard.set().file_list(paths);
+    }
+}
+
+/// Label for the alt-perspective action, with a merge count when replays are
+/// already merged in.
+fn alt_perspective_label(replay_file: &Replay) -> String {
+    let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
+    if !replay_file.alt_replays.is_empty() {
+        label.push_str(&format!(" ({})", replay_file.alt_replays.len()));
+    }
+    label
+}
+
+/// Which source a workspace's summary load should read: its own resolved
+/// source once it has one, or the live source while it does not. A workspace
+/// stuck on `None` forever (the live workspace) keeps reading the live
+/// source for its whole life; an imported workspace moves to `Explicit` once
+/// its source is ensured.
+fn summary_source_selector(source: Option<crate::db::index::rows::SourceId>) -> crate::task::SourceSelector {
+    match source {
+        Some(source) => crate::task::SourceSelector::Explicit(source),
+        None => crate::task::SourceSelector::Live,
+    }
+}
+
+impl ToolkitTabViewer<'_> {
+    fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
+        self.tab_state.world_of_warships_data.as_ref().and_then(|wows_data| wows_data.read().game_metadata.clone())
+    }
+
+    fn build_replay_player_list(&self, ui_report: &mut UiReport, ui: &mut egui::Ui) {
+        // Populate PR data if available (must happen before sorting so PR sort works)
+        {
+            let pr_data = self.tab_state.personal_rating_data.read();
+            if pr_data.is_loaded() {
+                ui_report.populate_personal_ratings(&pr_data);
+            }
+        }
+
+        if !ui_report.sorted {
+            let replay_sort = self.tab_state.replay_sort.lock();
+            ui_report.sort_players(*replay_sort);
+        }
+
+        ui_report.update_visible_columns(&self.tab_state.persisted.read().settings.replay);
+
+        let mut columns =
+            vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
+        let action_label_layout = ui.painter().layout_no_wrap(
+            t!("ui.replay.column.actions").into(),
+            egui::FontId::default(),
+            ui.style().visuals.text_color(),
+        );
+        let action_label_width = action_label_layout.rect.width() + 4.0;
+        columns[ReplayColumn::Actions as usize] = egui_table::Column::new(action_label_width).resizable(false);
+
+        // The name column carries every expanded section: achievements, ribbons,
+        // damage events and the fire-chance breakdown. Those are wider than a
+        // name, and a cell clips rather than wraps, so the shared 500 px ceiling
+        // truncates them once expanded.
+        columns[ReplayColumn::Name as usize] = egui_table::Column::new(260.0).range(10.0..=1400.0).resizable(true);
+
+        let table = egui_table::Table::new()
+            .id_salt("replay_player_list")
+            .num_rows(ui_report.player_reports.len() as u64)
+            .columns(columns)
+            .num_sticky_cols(3)
+            .headers([egui_table::HeaderRow { height: 14.0f32, groups: Default::default() }])
+            .auto_size_mode(egui_table::AutoSizeMode::Never);
+        table.show(ui, ui_report);
+    }
+
+    fn build_replay_view(
+        &self,
+        replay_file: &mut Replay,
+        replay_weak: &Weak<RwLock<Replay>>,
+        ui: &mut egui::Ui,
+        metadata_provider: &GameMetadataProvider,
+        ws_id: WorkspaceId,
+    ) {
+        // little hack because of borrowing issues
+        let mut hide_my_stats = false;
+        let mut hide_my_stats_changed = false;
+        if let Some(report) = replay_file.battle_report.as_ref() {
+            let self_player = report.self_player();
+            let self_state = self_player.initial_state();
+            // --- Row 1: Key outcome info + action buttons ---
+            let mut self_report = None;
+            ui.horizontal(|ui| {
+                if replay_file.battle_results_are_pending() {
+                    let text = RichText::new(wt_translations::icon_t(icons::INFO, &t!("ui.replay.incomplete_results")))
+                        .color(ui.sem().warn);
+                    ui.strong(text).on_hover_text(t!("ui.replay.incomplete_results_tooltip"));
+                }
+
+                if let Some(battle_result) = replay_file.battle_result() {
+                    let sem = ui.sem();
+                    let text = match battle_result {
+                        BattleResult::Win(_) => {
+                            RichText::new(wt_translations::icon_t(icons::TROPHY, &t!("ui.replay.results.victory")))
+                                .color(sem.win)
+                        }
+                        BattleResult::Loss(_) => {
+                            RichText::new(wt_translations::icon_t(icons::SMILEY_SAD, &t!("ui.replay.results.defeat")))
+                                .color(sem.loss)
+                        }
+                        BattleResult::Draw => {
+                            RichText::new(wt_translations::icon_t(icons::NOTCHES, &t!("ui.replay.results.draw")))
+                                .color(sem.draw)
+                        }
+                    };
+                    ui.label(text);
+                }
+
+                if let Some(battle_stats) = replay_file.to_battle_stats() {
+                    let pr_data = self.tab_state.personal_rating_data.read();
+                    if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
+                        crate::ui::widgets::pr_chip(
+                            ui,
+                            pr_result.category,
+                            &format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name()),
+                            false,
+                        );
+                    }
+                }
+
+                if let Some(ui_report) = replay_file.ui_report.as_ref() {
+                    for vehicle_report in &ui_report.player_reports {
+                        if vehicle_report.relation().is_self() {
+                            self_report = Some(vehicle_report);
+                            hide_my_stats = vehicle_report.manual_stat_hide_toggle;
+                            break;
+                        }
+                    }
+                }
+
+                ui.menu_button(t!("ui.replay.actions"), |ui| {
+                    ui.label(RichText::new(t!("ui.replay.section_match").as_ref()).strong());
+
+                    if ui.button(wt_translations::icon_t(icons::LIST_BULLETS, &t!("ui.replay.timeline"))).clicked() {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(egui::Id::unique("show_timeline"), true);
+                        });
+                        ui.close_kind(UiKind::Menu);
+                    }
+
+                    if !self.tab_state.persisted.read().settings.game.wows_dir.is_empty()
+                        && replay_file.source_path.is_some()
+                    {
+                        if ui
+                            .button(wt_translations::icon_t(
+                                icons::GAME_CONTROLLER,
+                                &t!("ui.replay.context.open_in_game"),
+                            ))
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(
+                                    egui::Id::unique("pending_confirmation_request"),
+                                    Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                        replay_path: replay_file.source_path.clone().unwrap(),
+                                    }),
+                                );
+                            });
+                            ui.close_kind(UiKind::Menu);
+                        }
+                        if ui
+                            .button(wt_translations::icon_t(
+                                icons::KEYBOARD,
+                                &t!("ui.replay.context.show_replay_controls"),
+                            ))
+                            .clicked()
+                        {
+                            ui.ctx().data_mut(|data| {
+                                // App-wide: opens the single reference window regardless of workspace.
+                                data.insert_temp(egui::Id::unique("open_replay_controls_window"), true);
+                            });
+                            ui.close_kind(UiKind::Menu);
+                        }
+                    }
+
+                    if ui
+                        .button(alt_perspective_label(replay_file))
+                        .on_hover_text(t!("ui.replay.load_alt_perspective_tooltip"))
+                        .clicked()
+                    {
+                        self.load_alt_perspective_action(ui, replay_weak, ws_id);
+                        ui.close_kind(UiKind::Menu);
+                    }
+
+                    if let Some(self_report) = self_report
+                        && self_report.is_test_ship()
+                        && ui.checkbox(&mut hide_my_stats, t!("ui.replay.hide_my_stats")).changed()
+                    {
+                        hide_my_stats_changed = true;
+                    }
+
+                    ui.separator();
+                    ui.label(RichText::new(t!("ui.replay.section_export").as_ref()).strong());
+
+                    if ui
+                        .button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.export_chat_save")))
+                        .clicked()
+                    {
+                        let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                            "{} {} {} - Game Chat.txt",
+                            report.game_type(),
+                            report.game_mode(),
+                            report.map_name()
+                        ));
+                        let text = format_game_chat(report.game_chat());
+                        self.tab_state.replay_dialogs.lock().save_text.open(
+                            ui.ctx(),
+                            DialogKind::SaveFile,
+                            dialog,
+                            text,
+                        );
+                        ui.close_kind(UiKind::Menu);
+                    }
+                    if ui.button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.export_chat_copy"))).clicked() {
+                        let mut buf = BufWriter::new(Vec::new());
+                        for message in report.game_chat() {
+                            let GameMessage {
+                                sender_relation: _,
+                                sender_name,
+                                channel,
+                                message,
+                                entity_id: _,
+                                player,
+                                clock: _,
+                            } = message;
+                            match player {
+                                Some(player) if !player.initial_state().clan().is_empty() => {
+                                    let _ = writeln!(
+                                        buf,
+                                        "[{}] {} ({:?}): {}",
+                                        player.initial_state().clan(),
+                                        sender_name,
+                                        channel,
+                                        message
+                                    );
+                                }
+                                _ => {
+                                    let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
+                                }
+                            }
+                        }
+                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner"))
+                            .expect("failed to convert game chat buffer to string");
+                        ui.ctx().copy_text(game_chat);
+                        ui.close_kind(UiKind::Menu);
+                    }
+
+                    let format = if ui.button(t!("ui.replay.export_results_json")).clicked() {
+                        Some(ReplayExportFormat::Json)
+                    } else if ui.button(t!("ui.replay.export_results_cbor")).clicked() {
+                        Some(ReplayExportFormat::Cbor)
+                    } else if ui.button(t!("ui.replay.export_results_csv")).clicked() {
+                        Some(ReplayExportFormat::Csv)
+                    } else {
+                        None
+                    };
+                    if let Some(format) = format {
+                        let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                            "{}.{}",
+                            replay_file.better_file_name(metadata_provider),
+                            format.extension()
+                        ));
+                        let results =
+                            export_match(replay_file, self.tab_state.persisted.read().settings.app.debug_mode);
+                        let request = ExportResultsRequest { format, results };
+                        self.tab_state.replay_dialogs.lock().export_results.open(
+                            ui.ctx(),
+                            DialogKind::SaveFile,
+                            dialog,
+                            request,
+                        );
+                    }
+
+                    if self.tab_state.persisted.read().settings.app.debug_mode {
+                        ui.separator();
+                        ui.label(RichText::new(t!("ui.replay.section_debug").as_ref()).strong());
+
+                        if ui.button(t!("ui.replay.debug.raw_metadata")).clicked() {
+                            let parsed_meta: serde_json::Value =
+                                serde_json::from_str(&replay_file.replay_file.raw_meta)
+                                    .expect("failed to parse replay metadata");
+                            let pretty_meta = serde_json::to_string_pretty(&parsed_meta)
+                                .expect("failed to serialize replay metadata");
+                            let viewer = plaintext_viewer::PlaintextFileViewer {
+                                title: Arc::new("metadata.json".to_owned()),
+                                file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                    ext: ".json".to_owned(),
+                                    contents: pretty_meta,
+                                })),
+                                open: Arc::new(AtomicBool::new(true)),
+                            };
+                            self.tab_state.file_viewer.lock().push(viewer);
+                            ui.close_kind(UiKind::Menu);
+                        }
+
+                        let has_results = report.battle_results().is_some();
+                        ui.add_enabled_ui(has_results, |ui| {
+                            if ui
+                                .button(t!("ui.replay.debug.results_raw_json"))
+                                .on_hover_text(t!("ui.replay.debug.raw_json_tooltip"))
+                                .clicked()
+                            {
+                                if let Some(results_json) = report.battle_results() {
+                                    let parsed_results: serde_json::Value =
+                                        serde_json::from_str(results_json).expect("failed to parse battle results");
+                                    let pretty = serde_json::to_string_pretty(&parsed_results)
+                                        .expect("failed to serialize battle results");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("results_raw.json".to_owned()),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty,
+                                        })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+                                    self.tab_state.file_viewer.lock().push(viewer);
+                                }
+                                ui.close_kind(UiKind::Menu);
+                            }
+                            if ui
+                                .button(t!("ui.replay.debug.results_mapped_json"))
+                                .on_hover_text(t!("ui.replay.debug.mapped_json_tooltip"))
+                                .clicked()
+                            {
+                                if let Some(resolved) =
+                                    replay_file.ui_report.as_ref().and_then(|r| r.resolved_results.as_ref())
+                                {
+                                    let pretty = serde_json::to_string_pretty(resolved)
+                                        .expect("failed to serialize resolved results");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("results_mapped.json".to_owned()),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty,
+                                        })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+                                    self.tab_state.file_viewer.lock().push(viewer);
+                                }
+                                ui.close_kind(UiKind::Menu);
+                            }
+                        });
+                    }
+                });
+
+                {
+                    let has_chat = !report.game_chat().is_empty();
+                    let show_chat: bool =
+                        ui.ctx().data(|d| d.get_temp(egui::Id::unique("show_game_chat"))).unwrap_or(false);
+                    let response = ui.add_enabled(
+                        has_chat,
+                        egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat")))
+                            .selected(show_chat),
+                    );
+                    if !has_chat {
+                        response.on_disabled_hover_text(t!("ui.replay.no_chat"));
+                    } else if response.clicked() {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::unique("show_game_chat"), !show_chat);
+                        });
+                    }
+                }
+
+                if self.tab_state.build_cache.is_some()
+                    && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
+                {
+                    let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
+                    let pkt_data = replay_file.replay_file.packet_data().to_vec();
+                    let map_name = replay_file.replay_file.meta.mapName.clone();
+                    let translated_map = replay_file.map_name(metadata_provider);
+                    let base = format!("{} - {}", replay_file.replay_file.meta.playerName, translated_map);
+                    let source_stem = replay_file
+                        .source_path
+                        .as_ref()
+                        .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()));
+                    let replay_name = if let Some(stem) = &source_stem { format!("{} - {}", base, stem) } else { base };
+                    let video_file_stem = crate::replay::renderer::video_file_stem(
+                        &replay_file.replay_file.meta,
+                        &translated_map,
+                        source_stem.as_deref(),
+                    );
+                    let game_duration = replay_file.replay_file.meta.duration as f32;
+                    let replay_version =
+                        wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
+                    let Some(wows_data) =
+                        self.tab_state.build_cache.as_ref().and_then(|map| map.resolve(&replay_version))
+                    else {
+                        tracing::warn!(
+                            "No data for build {}",
+                            replay_version.build_number().map_or_else(|| "unknown".to_string(), |b| b.to_string())
+                        );
+                        return;
+                    };
+                    let asset_cache = self.tab_state.renderer_asset_cache.clone();
+                    let alt_replays: Vec<crate::replay::renderer::AltReplayBytes> = replay_file
+                        .alt_replays
+                        .iter()
+                        .map(|r| crate::replay::renderer::AltReplayBytes {
+                            raw_meta: r.raw_meta.clone().into_bytes(),
+                            packet_data: r.packet_data().to_vec(),
+                        })
+                        .collect();
+                    let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
+                    let viewer = crate::replay::renderer::launch_replay_renderer(
+                        raw_meta,
+                        pkt_data,
+                        alt_replays,
+                        map_name,
+                        replay_name,
+                        video_file_stem,
+                        game_duration,
+                        wows_data,
+                        asset_cache,
+                        &self.tab_state.persisted.read().settings.renderer,
+                        Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
+                        self.tab_state.window_settings.clone(),
+                        self.tab_state.save_notify.clone(),
+                        is_debug_mode,
+                    );
+                    self.tab_state.replay_renderers.lock().push(viewer);
+                }
+            });
+
+            // --- Row 2: Match context (subdued) ---
+            ui.horizontal(|ui| {
+                let weak = ui.visuals().weak_text_color();
+                if !self_state.clan().is_empty() {
+                    ui.label(RichText::new(format!("[{}]", self_state.clan())).color(weak));
+                }
+                ui.label(RichText::new(self_state.username()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(
+                    RichText::new(wowsunpack::game_params::translations::translate_game_mode(
+                        &report.game_type().to_string(),
+                        metadata_provider,
+                    ))
+                    .color(weak),
+                );
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.version().to_path()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.game_mode()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.map_name()).color(weak));
+
+                if let Some(ui_report) = replay_file.ui_report.as_ref() {
+                    let mut team_damage = 0u64;
+                    let mut red_team_damage = 0u64;
+                    for vehicle_report in &ui_report.player_reports {
+                        if vehicle_report.relation().is_enemy() {
+                            red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
+                        } else {
+                            team_damage += vehicle_report.actual_damage.unwrap_or(0);
+                        }
+                    }
+
+                    ui.label(RichText::new("\u{00B7}").color(weak));
+                    let locale_val = self.tab_state.persisted.read().settings.app.locale.clone();
+                    let locale = locale_val.as_ref().map(|s| s.as_ref());
+                    let mut job = LayoutJob::default();
+                    let weak_fmt = TextFormat { color: weak, ..Default::default() };
+                    job.append(&t!("ui.replay.team_damage"), 0.0, weak_fmt.clone());
+                    job.append(
+                        &separate_number(team_damage, locale),
+                        0.0,
+                        TextFormat { color: ui.sem().win, ..Default::default() },
+                    );
+                    job.append(" : ", 0.0, weak_fmt.clone());
+                    job.append(
+                        &separate_number(red_team_damage, locale),
+                        0.0,
+                        TextFormat { color: ui.sem().loss, ..Default::default() },
+                    );
+                    job.append(
+                        &format!(" ({})", separate_number(team_damage + red_team_damage, locale)),
+                        0.0,
+                        weak_fmt,
+                    );
+                    ui.label(job);
+                }
+            });
+
+            // Synchronize the hide_my_stats value
+            if hide_my_stats_changed
+                && let Some(ui_report) = replay_file.ui_report.as_mut()
+                && let Some(self_report) =
+                    ui_report.player_reports.iter_mut().find(|report| report.relation().is_self())
+            {
+                self_report.manual_stat_hide_toggle = hide_my_stats;
+            }
+
+            egui::CentralPanel::default().show(ui, |ui| {
+                if let Some(ui_report) = replay_file.ui_report.as_mut() {
+                    ui_report.debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
+                    self.build_replay_player_list(ui_report, ui);
+                }
+            });
+        }
+    }
+
+    fn build_file_listing(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let grouping = self.tab_state.persisted.read().settings.replay.grouping;
+
+        if ws_id != WorkspaceId::LIVE {
+            self.directory_stats_button(ui, ws_id);
+        }
+        self.show_ingest_progress(ui, ws_id);
+
+        match grouping {
+            ReplayGrouping::None => self.build_file_listing_ungrouped(ui, ws_id),
+            ReplayGrouping::Date => self.build_file_listing_grouped(ui, ws_id, GroupedListing::Date),
+            ReplayGrouping::Ship => self.build_file_listing_grouped(ui, ws_id, GroupedListing::Ship),
+        }
+    }
+
+    /// Asks for a stats tab over every replay under this listing's directory.
+    /// The app opens it after the dock has drawn.
+    fn directory_stats_button(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let can_parse = self.tab_state.build_cache.is_some();
+        let button = egui::Button::new(wt_translations::icon_t(icons::CHART_BAR, &t!("ui.stats.open_directory_stats")));
+        let response = ui.add_enabled(can_parse, button);
+        let response = if can_parse {
+            response.on_hover_text(t!("ui.stats.open_directory_stats_tooltip"))
+        } else {
+            response.on_disabled_hover_text(t!("ui.stats.directory_stats_unavailable"))
+        };
+        if response.clicked() {
+            self.tab_state.pending_directory_stats = Some(ws_id);
+        }
+    }
+
+    /// Report what the run filling this listing is doing, above the rows it is
+    /// filling. A partly-filled listing is otherwise indistinguishable from a
+    /// finished one.
+    fn show_ingest_progress(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let Some(workspace) = self.tab_state.workspace(ws_id) else {
+            return;
+        };
+        if !workspace.ingest_in_flight {
+            return;
+        }
+        let Some(stage) = workspace.ingest_stage.clone() else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(t!("ui.messages.reading_replay_directory"));
+            });
+            return;
+        };
+
+        let label = match &stage {
+            IngestStage::Scanning(progress) | IngestStage::Reading(progress) => {
+                t!(stage.key(), done = progress.done, total = progress.total)
+            }
+            IngestStage::Downloading(progress) => {
+                t!(stage.key(), done = progress.downloaded, total = progress.total)
+            }
+            IngestStage::LoadingData { build, position } => {
+                t!(stage.key(), version = build.friendly_version(), index = position.index + 1, count = position.count)
+            }
+        };
+
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(label);
+        });
+        if let Some(fraction) = stage.fraction() {
+            ui.add(egui::ProgressBar::new(fraction).desired_height(4.0));
+        }
+    }
+
+    /// Build the preview dependencies for this listing, or `None` when previews
+    /// are off, game data is not loaded, or the pointer is not over the
+    /// listing at all.
+    ///
+    /// `pointer_over_listing` is computed by the caller rather than by asking
+    /// this `ui` directly: `Ui::ui_contains_pointer` tests `min_rect`, which
+    /// for both listings' actual row-drawing `ui` is either a pre-expanded
+    /// rect that covers far more than the rows (the ungrouped panel content
+    /// ui) or a zero-size seed that a pointer test can never satisfy (the
+    /// grouped listing's `ScrollArea` content ui, which only ever receives
+    /// `set_clip_rect`, never `set_min_size`). See the call sites for the
+    /// rect each one actually tests against.
+    ///
+    /// The pointer check matters: this does the icon-set load plus a GPU
+    /// upload, and without it every listing draw would pay that cost on its
+    /// first frame whether or not anyone ever hovers a row. Map backgrounds
+    /// are not resolved here at all -- `preview_tooltip` fetches the hovered
+    /// row's map lazily, so opening a large listing never uploads every map
+    /// it contains.
+    pub(crate) fn preview_deps(
+        &self,
+        ui: &egui::Ui,
+        pointer_over_listing: bool,
+    ) -> Option<Arc<preview_popup::PreviewDeps>> {
+        if !pointer_over_listing {
+            return None;
+        }
+        if !self.tab_state.persisted.read().settings.replay.enable_replay_previews {
+            return None;
+        }
+        let wows_data = self.tab_state.world_of_warships_data.as_ref()?;
+        let data_map = self.tab_state.build_cache.clone()?;
+        let (vfs, version, dump_dir) = {
+            let data = wows_data.read();
+            (data.vfs.clone(), data.version().copied(), data.dump_dir.clone())
+        };
+        let asset_cache = Arc::clone(&self.tab_state.renderer_asset_cache);
+        let assets = preview_popup::build_preview_assets(&asset_cache, &vfs, version.as_ref(), dump_dir.as_deref());
+
+        let texture_cache = Arc::clone(&self.tab_state.renderer_texture_cache);
+        let icons = texture_cache.lock().get_or_upload_icons(ui.ctx(), version, &assets);
+
+        Some(Arc::new(preview_popup::PreviewDeps {
+            cache: Arc::clone(&self.tab_state.preview_cache),
+            asset_cache,
+            texture_cache,
+            data_map,
+            icons,
+            vfs,
+            version,
+        }))
+    }
+
+    fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let mut replay_to_open: Option<PathBuf> = None;
+        let mut replay_to_open_new: Option<PathBuf> = None;
+
+        // The cached sorted listing needs the workspace mutably (a stale cache
+        // rebuilds in place); everything else this listing reads comes from
+        // one immutable borrow afterwards, so a workspace that has gone away
+        // draws nothing rather than needing each read to argue that it is
+        // still there.
+        let rows = self.tab_state.workspace_mut(ws_id).and_then(|workspace| workspace.listing_rows());
+        if let Some(files) = rows
+            && let Some(workspace) = self.tab_state.workspace(ws_id)
+        {
+            let metadata_provider = self.metadata_provider().unwrap();
+            let focused = workspace.focused_replay_path();
+            let hydrated = workspace.hydrated_replays();
+            let locale = self.tab_state.persisted.read().settings.app.locale.clone();
+            let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+            let row_summaries = workspace.row_summaries();
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+
+            // `available_rect_before_wrap` is built from `max_rect`, which this
+            // panel content ui already has set to the full listing column
+            // regardless of how much of `min_rect` widgets have claimed so
+            // far, so it is a positive rect covering the rows about to be
+            // drawn below (whatever `show_ingest_progress` already consumed
+            // above them is excluded, which is correct: nothing draws there).
+            let pointer_over_listing = ui.rect_contains_pointer(ui.available_rect_before_wrap());
+            let preview_deps = self.preview_deps(ui, pointer_over_listing);
+
+            // `show_rows` takes the height without spacing and adds `item_spacing.y` itself,
+            // so this is just the two-line galley.
+            let row_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0;
+
+            // Sized to the rows this viewport can actually show; scrolling
+            // reuses cached rows instead of re-laying them out.
+            let (files_rev, summaries_rev) = workspace.listing_revisions();
+            let artifacts = workspace.row_artifacts();
+            let visible_rows =
+                (ui.available_height() / (row_height + ui.spacing().item_spacing.y)).ceil().max(0.0) as usize;
+            artifacts.begin_frame(
+                listing_cache::ArtifactEpoch {
+                    files_rev,
+                    summaries_rev,
+                    provider: Arc::downgrade(&metadata_provider),
+                    translation_epoch: metadata_provider.translation_epoch(),
+                    locale: locale.clone(),
+                    dark_mode: ui.visuals().dark_mode,
+                },
+                listing_cache::artifact_capacity(visible_rows),
+            );
+
+            egui::ScrollArea::both().id_salt(workspace_salt(ws_id, "replay_listing_scroll_area")).show_rows(
+                ui,
+                row_height,
+                files.len(),
+                |ui, range| {
+                    for (path, listed) in &files[range] {
+                        let parsed = parsed_stats_for(&hydrated, path);
+                        let has_parse = parsed.is_some();
+                        let summary = row_summaries.get(path);
+                        let is_selected = focused.as_deref() == Some(path.as_path());
+
+                        let build_row = || {
+                            let identity = listing_row::listed_row_identity(listed, &metadata_provider);
+                            let stats = listing_row::resolve_row_stats(parsed, summary);
+                            let identity_text = listing_row::identity_line(&identity, ReplayGrouping::None);
+                            let stats_text =
+                                listing_row::stats_line(&identity, &stats, ReplayGrouping::None, locale.as_deref());
+                            listing_cache::RowArtifacts {
+                                label: listing_row::row_layout_job(
+                                    &identity_text,
+                                    &stats_text,
+                                    &stats,
+                                    is_selected,
+                                    ui.visuals(),
+                                    font_id.clone(),
+                                ),
+                                hover: listing_row::hover_text(&identity, &stats, locale.as_deref()),
+                            }
+                        };
+                        // A hydrated row's stats come from the in-memory parse,
+                        // which the cache epoch does not see; build it fresh.
+                        let row = if has_parse {
+                            Arc::new(build_row())
+                        } else {
+                            artifacts.get_or_insert_with(path, is_selected, build_row)
+                        };
+
+                        let path_clone = path.clone();
+                        let wows_dir_clone = wows_dir.clone();
+                        let label_response = ui.add(
+                            Label::new(row.label.clone())
+                                .selectable(false)
+                                .sense(Sense::click())
+                                // The scroll area hands rows its full visible width, so a
+                                // panel dragged narrower than the auto-sized width would
+                                // otherwise wrap to a third line that `show_rows` has not
+                                // reserved height for, overlapping the row below.
+                                .wrap_mode(egui::TextWrapMode::Truncate),
+                        );
+                        // The key is built only once previews are known to be
+                        // wanted: it allocates a `PathBuf` and is asked for on
+                        // every row every frame.
+                        let preview = preview_deps
+                            .as_ref()
+                            .and_then(|deps| Some((deps, preview_popup::preview_key(path, summary)?)));
+                        let label_response = match preview {
+                            Some((deps, key)) => label_response.on_hover_ui(|ui| {
+                                preview_popup::preview_tooltip(ui, deps, key, &listed.map_name, &row.hover);
+                            }),
+                            None => label_response.on_hover_text(row.hover.clone()),
+                        };
+                        label_response.context_menu(|ui| {
+                            show_leaf_context_menu(ui, &path_clone, &wows_dir_clone, ws_id);
+                        });
+
+                        if label_response.double_clicked() {
+                            replay_to_open = Some(path.clone());
+                        }
+                    }
+                },
+            );
+        }
+
+        self.handle_context_menu_render(ui, ws_id);
+        self.handle_batch_render_request(ui, ws_id);
+        self.handle_replay_open_actions(ui, ws_id, &mut replay_to_open, &mut replay_to_open_new);
+    }
+
+    fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId, listing: GroupedListing) {
+        let grouping = listing.grouping();
+        let tree_id_salt = match listing {
+            GroupedListing::Ship => "replay_ship_tree",
+            GroupedListing::Date => "replay_date_tree",
+        };
+        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
+
+        let Some(rows) = self.tab_state.workspace_mut(ws_id).and_then(|workspace| workspace.listing_rows()) else {
+            return;
+        };
+        let metadata_provider = self.metadata_provider().unwrap();
+        let Some(groups) = self
+            .tab_state
+            .workspace_mut(ws_id)
+            .and_then(|workspace| workspace.listing_groups(ws_id, listing, &metadata_provider, locale.as_deref()))
+        else {
+            return;
+        };
+        let stats = match self.tab_state.workspace_mut(ws_id) {
+            Some(workspace) => workspace.listing_group_stats(listing, &groups, &rows),
+            None => return,
+        };
+        let files_len = rows.len();
+
+        // Computed on this outer ui -- the same panel content ui
+        // `build_file_listing_ungrouped` tests -- and not on the `ScrollArea`
+        // content ui the closure below receives: that inner ui is handed a
+        // `set_clip_rect` but never a `set_min_size`, so its `min_rect` stays
+        // the zero-size seed rect, and even a `max_rect`-based rect on it
+        // would be testing a ui that has not yet learned the tree's real
+        // bounds. Testing here, before `ScrollArea::show` hands out that
+        // fresh ui, covers the actual rows.
+        let pointer_over_listing = ui.rect_contains_pointer(ui.available_rect_before_wrap());
+
+        egui::ScrollArea::both().id_salt(workspace_salt(ws_id, "replay_listing_scroll_area")).show(ui, |ui| {
+            let visuals = ui.visuals().clone();
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+            let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+
+            let preview_deps = self.preview_deps(ui, pointer_over_listing);
+
+            // Unlike `ScrollArea::show_rows`, `egui_ltreeview`'s `ui.set_height` call
+            // (node.rs) clamps the node's layout rect directly to the height we pass,
+            // with no spacing added on top. The two-line label needs that spacing
+            // budgeted in here, or it collides with the row below it.
+            let leaf_node_height = ui.text_style_height(&egui::TextStyle::Body) * 2.0 + ui.spacing().item_spacing.y;
+
+            let needs_collapse_default =
+                self.tab_state.workspace(ws_id).is_some_and(|workspace| !workspace.replay_listing_collapse_defaulted);
+            if needs_collapse_default && files_len > LARGE_LISTING_THRESHOLD {
+                let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
+                ui.ctx().data_mut(|data| {
+                    let state = data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                    for group in &groups.groups {
+                        // Only groups the user has never opened or closed.
+                        if state.is_open(&group.id).is_none() {
+                            state.set_openness(group.id, false);
+                        }
+                    }
+                });
+                if let Some(workspace) = self.tab_state.workspace_mut(ws_id) {
+                    workspace.replay_listing_collapse_defaulted = true;
+                }
+            }
+
+            // Bound after the collapse-default write, which needs the workspace
+            // mutably, and in one borrow that covers both reads.
+            let Some(workspace) = self.tab_state.workspace(ws_id) else {
+                return;
+            };
+            let hydrated = workspace.hydrated_replays();
+            let row_summaries = workspace.row_summaries();
+
+            // Parsed outcomes (open tabs) override the index in group win
+            // rates. Only a handful of replays are ever hydrated, so their
+            // groups' counts are patched here instead of invalidating the
+            // cached stats layer.
+            let mut patched_counts: HashMap<u32, listing_cache::OutcomeCounts> = HashMap::new();
+            for path in hydrated.keys() {
+                let Some(parsed) = parsed_stats_for(&hydrated, path) else { continue };
+                let summary_outcome = row_summaries.get(path).map(|summary| summary.outcome);
+                if summary_outcome == Some(parsed.outcome) {
+                    continue;
+                }
+                let Some(listed) = workspace.replay_files().and_then(|files| files.get(path)) else { continue };
+                let key = listing_cache::group_key(listing, listed, &metadata_provider);
+                let Some(&group_idx) = groups.by_name.get(&key) else { continue };
+                let counts = patched_counts.entry(group_idx).or_insert(stats.counts[group_idx as usize]);
+                if let Some(previous) = summary_outcome {
+                    counts.remove(previous);
+                }
+                counts.add(parsed.outcome);
+            }
+
+            let fallback_tree = Arc::clone(&groups.tree);
+            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt)))
+                .allow_multi_selection(true)
+                .fallback_context_menu(move |ui, selected_ids| {
+                    show_multi_selection_context_menu(&fallback_tree, ui, selected_ids, ws_id);
+                });
+
+            let (response, actions) = tree.show(ui, |builder| {
+                for (group_idx, group) in groups.groups.iter().enumerate() {
+                    let label = match patched_counts.get(&(group_idx as u32)) {
+                        Some(counts) => format!("{} ({}){}", group.name, group.rows.len(), counts.suffix()),
+                        None => stats.labels[group_idx].clone(),
+                    };
+                    let menu_tree = Arc::clone(&groups.tree);
+                    let group_id = group.id;
+                    let dir_node = egui_ltreeview::NodeBuilder::dir(group.id).label(label).context_menu(move |ui| {
+                        // Resolved only when the menu opens; per frame this
+                        // closure costs the Arc clone above.
+                        let group_paths = menu_tree.group_paths(&group_id).unwrap_or_default();
+                        show_group_context_menu(ui, &group_paths, ws_id);
+                    });
+                    let is_open = builder.node(dir_node);
+                    if is_open {
+                        for &row in &group.rows {
+                            let (path, listed) = row.get(&rows);
+                            let id = workspace_leaf_salt(ws_id, path);
+                            let path_clone = path.clone();
+                            let wows_dir = wows_dir.clone();
+
+                            let identity = listing_row::listed_row_identity(listed, &metadata_provider);
+                            let parsed = parsed_stats_for(&hydrated, path);
+
+                            let summary = row_summaries.get(path);
+                            let stats = listing_row::resolve_row_stats(parsed, summary);
+                            let identity_text = listing_row::identity_line(&identity, grouping);
+                            let stats_text = listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
+                            let label_text = listing_row::row_layout_job(
+                                &identity_text,
+                                &stats_text,
+                                &stats,
+                                false,
+                                &visuals,
+                                font_id.clone(),
+                            );
+                            let hover = listing_row::hover_text(&identity, &stats, locale.as_deref());
+                            // Every leaf of every open group is drawn each
+                            // frame, so the key's `PathBuf` and the map name's
+                            // `String` are only allocated once previews are
+                            // known to be wanted.
+                            let preview = preview_deps.as_ref().and_then(|deps| {
+                                let key = preview_popup::preview_key(path, summary)?;
+                                Some((Arc::clone(deps), key, listed.map_name.clone()))
+                            });
+                            let node = egui_ltreeview::NodeBuilder::leaf(id)
+                                .height(leaf_node_height)
+                                .label_ui(move |ui| {
+                                    let resp = ui.add(Label::new(label_text.clone()).selectable(false));
+                                    match preview {
+                                        Some((ref deps, ref key, ref map_name)) => {
+                                            resp.on_hover_ui(|ui| {
+                                                preview_popup::preview_tooltip(ui, deps, key.clone(), map_name, &hover);
+                                            });
+                                        }
+                                        None => {
+                                            resp.on_hover_text(hover.clone());
+                                        }
+                                    }
+                                })
+                                .context_menu(move |ui| {
+                                    show_leaf_context_menu(ui, &path_clone, &wows_dir, ws_id);
+                                });
+                            builder.node(node);
+                        }
+                    }
+                    builder.close_dir();
+                }
+            });
+
+            self.handle_context_menu_render(ui, ws_id);
+            self.handle_batch_render_request(ui, ws_id);
+
+            // Handle tree actions
+            let mut replay_to_open: Option<PathBuf> = None;
+            let mut replay_to_open_new: Option<PathBuf> = None;
+            for action in actions {
+                match action {
+                    egui_ltreeview::Action::SetSelected(selected_ids) => {
+                        let mut expanded_selection: Vec<egui::Id> = Vec::new();
+                        let mut needs_expansion = false;
+                        for id in &selected_ids {
+                            expanded_selection.push(*id);
+                            if let Some(child_ids) = groups.tree.group_child_ids.get(id) {
+                                for child_id in child_ids {
+                                    if !selected_ids.contains(child_id) {
+                                        needs_expansion = true;
+                                        expanded_selection.push(*child_id);
+                                    }
+                                }
+                            }
+                        }
+                        if needs_expansion {
+                            let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
+                            ui.ctx().data_mut(|data| {
+                                let state =
+                                    data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                                state.set_selected(expanded_selection);
+                            });
+                        }
+                    }
+                    egui_ltreeview::Action::Activate(activate) => {
+                        for id in activate.selected {
+                            if let Some(path) = groups.tree.leaf_paths.get(&id) {
+                                replay_to_open = Some(path.clone());
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Workaround: egui_ltreeview 0.7 doesn't fire Action::Activate on double-click.
+            // Fall back to checking the response directly and opening the selected replay.
+            if replay_to_open.is_none() && response.double_clicked() {
+                let tree_id = ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt));
+                let selected = ui.ctx().data(|data| {
+                    data.get_temp::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id)
+                        .map(|state| state.selected().clone())
+                });
+                if let Some(selected_ids) = selected {
+                    for id in &selected_ids {
+                        if let Some(path) = groups.tree.leaf_paths.get(id) {
+                            replay_to_open = Some(path.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            self.handle_replay_open_actions(ui, ws_id, &mut replay_to_open, &mut replay_to_open_new);
+        });
+    }
+
+    /// Opens a file picker for another `.wowsreplay` recording of the same
+    /// match. The pick is validated by [`Self::stage_alt_perspective`].
+    fn load_alt_perspective_action(&self, ui: &mut egui::Ui, replay_weak: &Weak<RwLock<Replay>>, ws_id: WorkspaceId) {
+        let dialog = file_dialog::REPLAYS.apply(rfd::AsyncFileDialog::new());
+        let request = AltPerspectiveRequest { workspace: ws_id, replay: replay_weak.clone() };
+        self.tab_state.replay_dialogs.lock().alt_perspective.open(ui.ctx(), DialogKind::PickFile, dialog, request);
+    }
+
+    /// Loads and validates a picked alt-perspective file. If valid, the
+    /// freshly-loaded `ReplayFile` plus a Weak pointer to the current Replay
+    /// are stashed in egui's transient store for
+    /// [`Self::handle_pending_alt_reparse`] to pick up - that handler takes the
+    /// write lock, appends to `alt_replays`, and dispatches the re-parse.
+    fn stage_alt_perspective(&self, ctx: &egui::Context, request: AltPerspectiveRequest, file: PathBuf) {
+        let Some(replay_arc) = request.replay.upgrade() else {
+            tracing::warn!(workspace = request.workspace.0, "alt-perspective pick: replay was dropped");
+            return;
+        };
+        let replay_file = replay_arc.read();
+
+        let alt = match ReplayFile::from_file(&file) {
+            Ok(r) => r,
+            Err(e) => {
+                self.tab_state
+                    .toasts
+                    .lock()
+                    .error(t!("ui.replay.load_alt_perspective_failed", error = format!("{e:?}")));
+                return;
+            }
+        };
+
+        // Validate version + arena id up front so a bad pick never lands in
+        // alt_replays. Otherwise it would stick around and every subsequent
+        // attempt would re-fail on the same stale entry.
+        let validation = if alt.meta.clientVersionFromExe != replay_file.replay_file.meta.clientVersionFromExe {
+            Err(format!(
+                "version mismatch (primary={}, merge={})",
+                replay_file.replay_file.meta.clientVersionFromExe, alt.meta.clientVersionFromExe
+            ))
+        } else {
+            let primary_arena = replay_file.battle_report.as_ref().map(|r| r.arena_id());
+            let alt_arena = wows_replays::analyzer::arena_scan::scan_arena_id(
+                replay_file.resource_loader.entity_specs(),
+                wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe),
+                &alt,
+            );
+            match (primary_arena, alt_arena) {
+                (Some(p), Some(a)) if p != a => Err(format!("arena id mismatch (primary={p}, merge={a})")),
+                (_, None) => Err("could not extract arena id from selected replay".to_string()),
+                _ => Ok(()),
+            }
+        };
+
+        if let Err(msg) = validation {
+            self.tab_state.toasts.lock().error(t!("ui.replay.load_alt_perspective_failed", error = msg));
+            return;
+        }
+
+        // The read guard above is released before `handle_pending_alt_reparse`
+        // takes its write lock.
+        tracing::info!(player = %alt.meta.playerName, "alt-perspective validated; staging for re-parse");
+        stash_alt_reparse(
+            ctx,
+            PendingAltRequest { workspace: request.workspace, replay: request.replay, alt: std::sync::Arc::new(alt) },
+        );
+    }
+
+    /// Check for "Open in New Tab" from context menu, then open replays in the appropriate tab.
+    fn handle_replay_open_actions(
+        &mut self,
+        ui: &mut egui::Ui,
+        ws_id: WorkspaceId,
+        replay_to_open: &mut Option<PathBuf>,
+        replay_to_open_new: &mut Option<PathBuf>,
+    ) {
+        if let Some(path) = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<PathBuf>(request_slot_id(ws_id, ReplayRequestSlot::OpenReplayNewTab)))
+        {
+            *replay_to_open_new = Some(path);
+        }
+
+        let (path, in_new_tab) = match (replay_to_open_new.take(), replay_to_open.take()) {
+            (Some(path), _) => (path, true),
+            (None, Some(path)) => (path, false),
+            (None, None) => return,
+        };
+
+        // Opening is what hydrates a replay: the listing holds only the
+        // metadata its rows draw, so the file is read here. Re-opening one
+        // that is already in a tab reuses that hydrated replay rather than
+        // building a second copy of it.
+        let hydrated = self.tab_state.workspace(ws_id).and_then(|workspace| workspace.hydrated_replay(&path));
+        let replay = match hydrated {
+            Some(replay) => replay,
+            None => match self.tab_state.hydrate_replay(&path) {
+                Ok(replay) => replay,
+                Err(error) => {
+                    tracing::warn!("could not open replay {}: {error}", path.display());
+                    self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
+                    return;
+                }
+            },
+        };
+
+        // A double-click or context menu in this listing opens into this
+        // listing's own dock, which is why the workspace comes from `ws_id`
+        // rather than from whichever workspace is active.
+        let Some(workspace) = self.tab_state.workspace_mut(ws_id) else {
+            return;
+        };
+        if in_new_tab {
+            workspace.open_replay_in_new_tab(Arc::clone(&replay));
+        } else {
+            workspace.open_replay_in_focused_tab(Arc::clone(&replay));
+        }
+        if let Some(deps) = self.tab_state.replay_dependencies() {
+            update_background_task!(
+                self.tab_state.background_tasks,
+                deps.load_replay(replay, ReplaySource::FileListing)
+            );
+        }
+    }
+
+    /// Picks up an alt-perspective request raised in a previous frame and runs
+    /// it: pushes the alt onto its replay and dispatches the merged re-parse.
+    ///
+    /// Runs from every replay tab, before any of that tab's own content, and
+    /// deliberately not from the listing: the button that raises the request
+    /// lives in the replay dock, which draws whether or not the listing beside
+    /// it does, so a listing-side consumer would miss any request raised while
+    /// the listing is collapsed or empty, leaving a whole `ReplayFile` parked
+    /// in egui's store for the session.
+    fn handle_pending_alt_reparse(&mut self, ctx: &egui::Context) {
+        // The write guard `build_replay_view` holds over the button is long
+        // gone by the time we get here, so taking a fresh one is safe.
+        let Some(request) = take_alt_reparse(ctx) else {
+            return;
+        };
+        let Some(arc) = request.replay.upgrade() else {
+            tracing::warn!(workspace = request.workspace.0, "alt-perspective re-parse: replay was dropped");
+            return;
+        };
+        // Try to unwrap the Arc; if some other handler still holds a
+        // reference, clone the inner instead. Either way, the alt
+        // lands in `alt_replays` as an owned ReplayFile.
+        let alt = std::sync::Arc::try_unwrap(request.alt).unwrap_or_else(|a| (*a).clone());
+        let player = alt.meta.playerName.clone();
+        let mut guard = arc.write();
+        guard.alt_replays.push(alt);
+        let count = guard.alt_replays.len();
+        // The cached timeline is primary-only; force a re-extract/merge on next open.
+        guard.timeline = TimelineState::NotRequested;
+        drop(guard);
+        tracing::info!(
+            player = %player,
+            alt_count = count,
+            workspace = request.workspace.0,
+            "pushed alt-perspective; triggering re-parse"
+        );
+        if let Some(deps) = self.tab_state.replay_dependencies() {
+            update_background_task!(self.tab_state.background_tasks, deps.load_replay(arc, ReplaySource::ManualOpen));
+        } else {
+            tracing::warn!("alt-perspective re-parse: no replay dependencies available");
+        }
+    }
+
+    fn build_replay_header(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let open_pending = self.tab_state.replay_dialogs.lock().open_replay.is_pending();
+            if ui
+                .add_enabled(
+                    !open_pending,
+                    egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.open_manually"))),
+                )
+                .clicked()
+            {
+                let dialog = file_dialog::REPLAYS.apply(rfd::AsyncFileDialog::new());
+                self.tab_state.replay_dialogs.lock().open_replay.open(ui.ctx(), DialogKind::PickFile, dialog, ());
+            }
+
+            {
+                let mut val = self.tab_state.persisted.read().auto_load_latest_replay;
+                if ui.checkbox(&mut val, t!("ui.replay.autoload_latest")).changed() {
+                    self.tab_state.persisted.write().auto_load_latest_replay = val;
+                }
+            }
+
+            {
+                let mut grouping = self.tab_state.persisted.read().settings.replay.grouping;
+                ComboBox::from_id_salt("replay_grouping")
+                    .selected_text(t!("ui.replay.group.prefix", label = grouping.label()))
+                    .show_ui(ui, |ui| {
+                        let changed = ui
+                            .selectable_value(&mut grouping, ReplayGrouping::Date, t!("ui.replay.group.date"))
+                            .changed()
+                            | ui.selectable_value(&mut grouping, ReplayGrouping::Ship, t!("ui.replay.group.ship"))
+                                .changed()
+                            | ui.selectable_value(&mut grouping, ReplayGrouping::None, t!("ui.replay.group.none"))
+                                .changed();
+                        if changed {
+                            self.tab_state.persisted.write().settings.replay.grouping = grouping;
+                        }
+                    });
+            }
+
+            ComboBox::from_id_salt("column_filters")
+                .selected_text(t!("ui.replay.column_filters"))
+                .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| {
+                    let mut rs = self.tab_state.persisted.read().settings.replay.clone();
+                    let mut changed = false;
+                    changed |= ui.checkbox(&mut rs.show_raw_xp, t!("ui.replay.filter.raw_xp")).changed();
+                    changed |= ui.checkbox(&mut rs.show_entity_id, t!("ui.replay.filter.entity_id")).changed();
+                    changed |=
+                        ui.checkbox(&mut rs.show_observed_damage, t!("ui.replay.filter.observed_damage")).changed();
+                    changed |= ui.checkbox(&mut rs.show_heals, t!("ui.replay.filter.heals")).changed();
+                    if changed {
+                        self.tab_state.persisted.write().settings.replay = rs;
+                    }
+                });
+
+            ui.separator();
+
+            // ── Collab session popover ──
+            self.show_session_popover(ui);
+
+            // ── Tactics Board ──
+            {
+                let has_data = self.tab_state.world_of_warships_data.is_some();
+                let board_count = self.tab_state.tactics_boards.lock().len();
+                let at_limit = board_count >= crate::collab::protocol::MAX_TACTICS_BOARDS;
+                let btn = ui.add_enabled(
+                    has_data && !at_limit,
+                    egui::Button::new(wt_translations::icon_t(icons::MAP_TRIFOLD, &t!("ui.collab.tactics_board"))),
+                );
+                let btn = if !has_data {
+                    btn.on_hover_text(t!("ui.collab.waiting_for_data"))
+                } else if at_limit {
+                    btn.on_hover_text(t!("ui.collab.max_boards", count = crate::collab::protocol::MAX_TACTICS_BOARDS))
+                } else {
+                    btn
+                };
+                if btn.clicked() {
+                    let session_handle =
+                        self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+                    let owner_user_id =
+                        session_handle.map(|_| self.tab_state.session_state.lock().my_user_id).unwrap_or(0);
+                    let mut board = crate::replay::minimap_view::tactics::TacticsBoardViewer::new(
+                        rand::random(),
+                        owner_user_id,
+                        std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                        std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                        std::sync::Arc::clone(self.tab_state.world_of_warships_data.as_ref().unwrap()),
+                        self.tab_state.db_pool.clone(),
+                        self.tab_state.tokio_runtime.clone(),
+                        self.tab_state.window_settings.clone(),
+                        self.tab_state.save_notify.clone(),
+                    );
+                    if let Some(handle) = session_handle {
+                        let is_authority = {
+                            let s = self.tab_state.session_state.lock();
+                            s.role.is_host() || s.role.is_co_host()
+                        };
+                        board.is_session_board = is_authority;
+                        board.collab_local_tx = Some(handle.local_tx.clone());
+                        board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                        board.collab_command_tx = Some(handle.command_tx.clone());
+                    }
+                    self.tab_state.tactics_boards.lock().push(board);
+                }
+            }
+        });
+    }
+
+    /// Session popover: host, join, and active session controls.
+    fn show_session_popover(&mut self, ui: &mut egui::Ui) {
+        // Determine active states from tab_state directly.
+        let host_status = if self.tab_state.host_session.is_some() {
+            Some(self.tab_state.session_state.lock().status.clone())
+        } else {
+            None
+        };
+        let host_active = matches!(host_status, Some(SessionStatus::Active) | Some(SessionStatus::Starting));
+        let client_active = self.tab_state.client_session.is_some();
+        let any_active = host_active || client_active;
+
+        // Session button (turns red when active).
+        let label = if any_active {
+            RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
+                .color(crate::ui::theme::contrast::label_on(ui.sem().error))
+        } else {
+            RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
+        };
+        let mut button = egui::Button::new(label);
+        if any_active {
+            button = button.fill(ui.sem().error);
+        }
+        let btn = ui.add(button);
+
+        egui::Popup::from_toggle_button_response(&btn).close_behavior(PopupCloseBehavior::CloseOnClickOutside).show(
+            |ui| {
+                ui.set_min_width(260.0);
+
+                if host_active && matches!(host_status, Some(SessionStatus::Starting)) {
+                    // ── Host session is starting ──
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(t!("ui.collab.starting"));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button(t!("ui.buttons.cancel")).clicked() {
+                                if let Some(ref handle) = self.tab_state.host_session {
+                                    let _ = handle.command_tx.send(SessionCommand::Stop);
+                                }
+                                for r in self.tab_state.replay_renderers.lock().iter() {
+                                    let mut s = r.shared_state().lock();
+                                    s.session_frame_tx = None;
+                                    s.collab_replay_id = None;
+                                    s.session_announced = false;
+                                    s.collab_session_state = None;
+                                }
+                                self.tab_state.host_session = None;
+                                {
+                                    let mut s = self.tab_state.session_state.lock();
+                                    s.status = SessionStatus::Idle;
+                                    s.connected_users.clear();
+                                    s.cursors.clear();
+                                    s.token = None;
+                                    s.open_replays.clear();
+                                }
+                            }
+                        });
+                    });
+                } else if host_active {
+                    // ── Active host session controls ──
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t!("ui.collab.session_active").as_ref()).strong().color(ui.sem().error));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button(t!("ui.buttons.stop")).clicked() {
+                                if let Some(ref handle) = self.tab_state.host_session {
+                                    let _ = handle.command_tx.send(SessionCommand::Stop);
+                                }
+                                for r in self.tab_state.replay_renderers.lock().iter() {
+                                    let mut s = r.shared_state().lock();
+                                    s.session_frame_tx = None;
+                                    s.collab_replay_id = None;
+                                    s.session_announced = false;
+                                    s.collab_session_state = None;
+                                }
+                                self.tab_state.host_session = None;
+                                {
+                                    let mut s = self.tab_state.session_state.lock();
+                                    s.status = SessionStatus::Idle;
+                                    s.connected_users.clear();
+                                    s.cursors.clear();
+                                    s.token = None;
+                                    s.open_replays.clear();
+                                }
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    // Token display
+                    let token = self.tab_state.session_state.lock().token.clone().unwrap_or_default();
+                    if !token.is_empty() {
+                        ui.label(t!("ui.collab.session_token"));
+                        let visible = self.tab_state.session_token_visible;
+                        ui.horizontal(|ui| {
+                            let mut display_token = token.clone();
+                            let te = egui::TextEdit::singleline(&mut display_token)
+                                .password(!visible)
+                                .interactive(false)
+                                .desired_width(160.0);
+                            ui.add(te);
+
+                            let eye_icon = if visible { icons::EYE } else { icons::EYE_SLASH };
+                            if ui.button(eye_icon).on_hover_text(t!("ui.collab.toggle_visibility")).clicked() {
+                                self.tab_state.session_token_visible = !visible;
+                            }
+
+                            if ui.button(icons::COPY).on_hover_text(t!("ui.collab.copy_token")).clicked() {
+                                ui.ctx().copy_text(token.clone());
+                                self.tab_state.toasts.lock().info(t!("ui.collab.token_copied"));
+                            }
+                        });
+
+                        // Copy web link buttons
+                        if ui
+                            .button(wt_translations::icon_t(icons::BROWSER, &t!("ui.collab.copy_web_link")))
+                            .on_hover_text(t!("ui.collab.copy_web_link_tooltip"))
+                            .clicked()
+                        {
+                            let url = format!("{}#{}", crate::collab::WEB_CLIENT_URL, token);
+                            ui.ctx().copy_text(url);
+                            self.tab_state.toasts.lock().info(t!("ui.collab.web_link_copied"));
+                        }
+                        #[cfg(debug_assertions)]
+                        if ui
+                            .button(wt_translations::icon_t(icons::BROWSER, &t!("ui.collab.copy_localhost_link")))
+                            .on_hover_text(t!("ui.collab.copy_localhost_tooltip"))
+                            .clicked()
+                        {
+                            let url = format!("http://localhost:8080/#{}", token);
+                            ui.ctx().copy_text(url);
+                            self.tab_state.toasts.lock().info(t!("ui.collab.localhost_copied"));
+                        }
+
+                        ui.add_space(4.0);
+                    }
+
+                    // Connected users list
+                    let connected_users = self.tab_state.session_state.lock().connected_users.clone();
+                    // Exclude self from "connected" count — the host is always connected
+                    let my_id = self.tab_state.session_state.lock().my_user_id;
+                    let peer_count = connected_users.iter().filter(|u| u.id != my_id).count();
+                    ui.horizontal(|ui| {
+                        ui.label(icons::USERS);
+                        ui.label(t!("ui.collab.connected_count", count = peer_count));
+                    });
+                    // Show each connected user with color dot, name, and role
+                    for user in &connected_users {
+                        if user.id == my_id {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            let color = crate::ui::widgets::identity_dot_color(
+                                ui.visuals(),
+                                user.color[0],
+                                user.color[1],
+                                user.color[2],
+                            );
+                            crate::ui::widgets::identity_dot(ui, color);
+                            ui.label(&user.name);
+                            if user.role == crate::collab::PeerRole::CoHost {
+                                ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_cohost));
+                            }
+                            if user.role != crate::collab::PeerRole::Host
+                                && user.role != crate::collab::PeerRole::CoHost
+                                && ui.small_button(icons::CROWN).on_hover_text(t!("ui.collab.promote_cohost")).clicked()
+                                && let Some(ref handle) = self.tab_state.host_session
+                            {
+                                let _ = handle.command_tx.send(SessionCommand::PromoteToCoHost { user_id: user.id });
+                                self.tab_state.toasts.lock().info(t!("ui.collab.promoted_cohost", name = &user.name));
+                            }
+                        });
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    // Permission controls
+                    ui.label(RichText::new(t!("ui.collab.permissions").as_ref()).small().strong());
+                    let (mut lock_ann, mut lock_settings) = {
+                        let s = self.tab_state.session_state.lock();
+                        (s.permissions.annotations_locked, s.permissions.settings_locked)
+                    };
+
+                    let mut perms_changed = false;
+                    perms_changed |= ui.checkbox(&mut lock_ann, t!("ui.collab.lock_annotations")).changed();
+                    perms_changed |= ui.checkbox(&mut lock_settings, t!("ui.collab.lock_settings")).changed();
+
+                    if perms_changed {
+                        let perms = Permissions { annotations_locked: lock_ann, settings_locked: lock_settings };
+                        self.tab_state.session_state.lock().permissions = perms.clone();
+                        if let Some(ref handle) = self.tab_state.host_session {
+                            let _ = handle.command_tx.send(SessionCommand::SetPermissions(perms));
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    if ui
+                        .button(t!("ui.collab.reset_overrides"))
+                        .on_hover_text(t!("ui.collab.reset_overrides_tooltip"))
+                        .clicked()
+                        && let Some(ref handle) = self.tab_state.host_session
+                    {
+                        let _ = handle.command_tx.send(SessionCommand::ResetClientOverrides);
+                    }
+                } else if client_active {
+                    // ── Active client session ──
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t!("ui.collab.connected_to_session").as_ref()).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button(t!("ui.collab.leave")).clicked() {
+                                if let Some(ref handle) = self.tab_state.client_session {
+                                    let _ = handle.command_tx.send(SessionCommand::Stop);
+                                }
+                                self.tab_state.client_session = None;
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    // Show connected users
+                    let connected_users = self.tab_state.session_state.lock().connected_users.clone();
+                    let my_id = self.tab_state.session_state.lock().my_user_id;
+                    for user in &connected_users {
+                        ui.horizontal(|ui| {
+                            let color = crate::ui::widgets::identity_dot_color(
+                                ui.visuals(),
+                                user.color[0],
+                                user.color[1],
+                                user.color[2],
+                            );
+                            crate::ui::widgets::identity_dot(ui, color);
+                            if user.id == my_id {
+                                ui.label(RichText::new(&user.name).italics());
+                                ui.label(RichText::new(t!("ui.collab.you").as_ref()).small().weak());
+                            } else {
+                                ui.label(&user.name);
+                            }
+                            match user.role {
+                                crate::collab::PeerRole::Host => {
+                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_host))
+                                        .on_hover_text(t!("ui.collab.role_host"));
+                                }
+                                crate::collab::PeerRole::CoHost => {
+                                    ui.label(RichText::new(icons::CROWN).small().color(ui.sem().crown_cohost))
+                                        .on_hover_text(t!("ui.collab.role_cohost"));
+                                }
+                                _ => {}
+                            }
+                        });
+                    }
+
+                    self.show_shared_windows(ui);
+                } else {
+                    // ── No active session ──
+
+                    // Display name (shared for host + join)
+                    if self.tab_state.show_display_name_error {
+                        ui.label(
+                            RichText::new(t!("ui.collab.display_name_error").as_ref()).color(ui.sem().error).small(),
+                        );
+                    }
+                    ui.label(t!("ui.collab.display_name"));
+                    let mut display_name = self.tab_state.persisted.read().settings.collab.display_name.clone();
+                    let name_response = ui.add(
+                        egui::TextEdit::singleline(&mut display_name)
+                            .hint_text(t!("ui.collab.display_name_hint"))
+                            .desired_width(160.0)
+                            .text_color(if self.tab_state.show_display_name_error {
+                                ui.sem().error
+                            } else {
+                                ui.visuals().text_color()
+                            }),
+                    );
+                    if name_response.changed() {
+                        self.tab_state.persisted.write().settings.collab.display_name = display_name;
+                    }
+                    if self.tab_state.show_display_name_error {
+                        ui.painter().rect_stroke(
+                            name_response.rect,
+                            name_response.rect.height() * 0.15,
+                            egui::Stroke::new(1.5, ui.sem().error),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    // Clear error when user edits the field
+                    if name_response.changed() {
+                        self.tab_state.show_display_name_error = false;
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    ui.label(RichText::new(t!("ui.collab.host_session").as_ref()).strong());
+                    if ui.button(t!("ui.collab.start_session")).clicked() {
+                        if self.tab_state.persisted.read().settings.collab.display_name.trim().is_empty() {
+                            self.tab_state.show_display_name_error = true;
+                            self.tab_state.toasts.lock().error(t!("ui.collab.enter_display_name"));
+                        } else {
+                            self.tab_state.pending_host = true;
+                            if !self.tab_state.persisted.read().settings.collab.suppress_p2p_ip_warning {
+                                self.tab_state.show_ip_warning = true;
+                            }
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // ── Join a session ──
+                    ui.label(RichText::new(t!("ui.collab.join_session").as_ref()).strong());
+                    ui.add_space(2.0);
+
+                    // Paste token -> validate -> auto-join
+                    if ui.button(wt_translations::icon_t(icons::CLIPBOARD, &t!("ui.collab.paste_and_join"))).clicked()
+                        && let Ok(mut clipboard) = arboard::Clipboard::new()
+                        && let Ok(text) = clipboard.get_text()
+                    {
+                        let trimmed = text.trim().to_string();
+                        if trimmed.is_empty() {
+                            self.tab_state.toasts.lock().error(t!("ui.collab.clipboard_empty"));
+                        } else if self.tab_state.persisted.read().settings.collab.display_name.trim().is_empty() {
+                            self.tab_state.show_display_name_error = true;
+                            self.tab_state.toasts.lock().error(t!("ui.collab.enter_display_name"));
+                        } else if let Err(e) = crate::collab::protocol::decode_token(&trimmed) {
+                            self.tab_state.toasts.lock().error(t!("ui.collab.invalid_token", error = e));
+                        } else {
+                            self.tab_state.join_session_token = trimmed;
+                            self.tab_state.pending_join = true;
+                            if !self.tab_state.persisted.read().settings.collab.suppress_p2p_ip_warning {
+                                self.tab_state.show_ip_warning = true;
+                            }
+                        }
+                    }
+                }
+            },
+        );
+    }
+
+    /// Show the "Shared Windows" section inside the session popover.
+    /// Lists open replays and tactics boards with Open / Open-for-everyone buttons.
+    fn show_shared_windows(&mut self, ui: &mut egui::Ui) {
+        let ss = self.tab_state.session_state.lock();
+        let open_replays = ss.open_replays.clone();
+        let session_boards: Vec<(u64, u64, String)> = ss
+            .tactics_boards
+            .iter()
+            .map(|(&bid, bs)| {
+                let title = if !bs.window_title.is_empty() {
+                    bs.window_title.clone()
+                } else if !bs.tactics_map.display_name.is_empty() {
+                    format!("Tactics Board \u{2014} {}", bs.tactics_map.display_name)
+                } else if !bs.tactics_map.map_name.is_empty() {
+                    format!("Tactics Board \u{2014} {}", bs.tactics_map.map_name)
+                } else {
+                    "Tactics Board".to_string()
+                };
+                (bid, bs.owner_user_id, title)
+            })
+            .collect();
+        let is_host_role = ss.role.is_host();
+        let connected_users = ss.connected_users.clone();
+        drop(ss);
+
+        if open_replays.is_empty() && session_boards.is_empty() {
+            return;
+        }
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(RichText::new(t!("ui.collab.shared_windows").as_ref()).small().strong());
+
+        // ── Replays ──
+        let renderers = self.tab_state.replay_renderers.lock();
+        // Only count visible (open) renderers as "active" — hidden ones show an Open button.
+        let visible_replay_ids: Vec<u64> = renderers
+            .iter()
+            .filter(|r| r.open.load(std::sync::atomic::Ordering::Relaxed))
+            .filter_map(|r| r.shared_state().lock().collab_replay_id)
+            .collect();
+        drop(renderers);
+
+        for replay in &open_replays {
+            let is_visible = visible_replay_ids.contains(&replay.replay_id);
+            ui.horizontal(|ui| {
+                let name = if replay.replay_name.len() > 40 {
+                    format!("{}…", &replay.replay_name[..39])
+                } else {
+                    replay.replay_name.clone()
+                };
+                let label = format!("{} {}", icons::MONITOR, name);
+                if is_visible {
+                    ui.label(&label);
+                } else {
+                    ui.label(RichText::new(&label).weak());
+                    if ui.small_button(t!("ui.collab.open")).clicked() {
+                        let renderers = self.tab_state.replay_renderers.lock();
+                        // Check for an existing hidden viewer we can reuse.
+                        let existing = renderers
+                            .iter()
+                            .find(|r| r.shared_state().lock().collab_replay_id == Some(replay.replay_id));
+                        if let Some(viewer) = existing {
+                            // Reuse: show the hidden viewer and re-wire its frame channel.
+                            viewer.open.store(true, std::sync::atomic::Ordering::Relaxed);
+                            if self.tab_state.client_session.is_some() {
+                                let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
+                                let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
+                                viewer.shared_state().lock().collab_frame_rx = Some(frame_rx);
+                                self.tab_state.session_state.lock().register_viewport_sink(
+                                    replay.replay_id,
+                                    crate::collab::ViewportSink {
+                                        frame_tx: Some(frame_tx),
+                                        wake: Some(crate::collab::viewport_wake(ui.ctx(), viewport_id)),
+                                    },
+                                );
+                            }
+                        } else {
+                            // No hidden viewer — create a fresh one.
+                            drop(renderers);
+                            let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
+                            let suppress = std::sync::Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                            let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
+                            let viewer = crate::replay::renderer::launch_client_renderer(
+                                replay.replay_name.clone(),
+                                replay.map_image_png.clone(),
+                                replay.game_version.clone(),
+                                &saved_options,
+                                suppress,
+                                self.tab_state.world_of_warships_data.as_ref(),
+                                &self.tab_state.renderer_asset_cache,
+                                self.tab_state.window_settings.clone(),
+                                self.tab_state.save_notify.clone(),
+                                is_debug_mode,
+                            );
+                            if let Some(ref client_handle) = self.tab_state.client_session {
+                                let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
+                                let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
+                                let mut state = viewer.shared_state().lock();
+                                state.collab_replay_id = Some(replay.replay_id);
+                                state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                                state.collab_local_tx = Some(client_handle.local_tx.clone());
+                                state.collab_frame_rx = Some(frame_rx);
+                                self.tab_state.session_state.lock().register_viewport_sink(
+                                    replay.replay_id,
+                                    crate::collab::ViewportSink {
+                                        frame_tx: Some(frame_tx),
+                                        wake: Some(crate::collab::viewport_wake(ui.ctx(), viewport_id)),
+                                    },
+                                );
+                            }
+                            self.tab_state.replay_renderers.lock().push(viewer);
+                        }
+                    }
+                }
+            });
+        }
+
+        // ── Tactics Boards ──
+        let local_boards = self.tab_state.tactics_boards.lock();
+        let local_board_ids: Vec<u64> = local_boards.iter().map(|b| b.board_id).collect();
+        drop(local_boards);
+
+        let session_handle = self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+
+        for (bid, owner_uid, title) in &session_boards {
+            let is_open_locally = local_board_ids.contains(bid);
+            let owner_name =
+                connected_users.iter().find(|u| u.id == *owner_uid).map(|u| u.name.as_str()).unwrap_or("unknown");
+            ui.horizontal(|ui| {
+                let display_title = if title.len() > 40 { format!("{}…", &title[..39]) } else { title.clone() };
+                let label = format!("{} {} ({})", icons::MAP_TRIFOLD, display_title, owner_name);
+                if is_open_locally {
+                    ui.label(&label);
+                } else {
+                    ui.label(RichText::new(&label).weak());
+                    if ui.small_button(t!("ui.collab.open")).clicked()
+                        && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+                    {
+                        let board_count = self.tab_state.tactics_boards.lock().len();
+                        if board_count < crate::collab::protocol::MAX_TACTICS_BOARDS {
+                            let mut board = crate::replay::minimap_view::tactics::TacticsBoardViewer::new(
+                                *bid,
+                                *owner_uid,
+                                std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                                std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                                std::sync::Arc::clone(wows_data),
+                                self.tab_state.db_pool.clone(),
+                                self.tab_state.tokio_runtime.clone(),
+                                self.tab_state.window_settings.clone(),
+                                self.tab_state.save_notify.clone(),
+                            );
+                            board.is_session_board = true;
+                            if let Some(handle) = session_handle {
+                                board.collab_local_tx = Some(handle.local_tx.clone());
+                                board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                                board.collab_command_tx = Some(handle.command_tx.clone());
+                            }
+                            self.tab_state.tactics_boards.lock().push(board);
+                        }
+                    }
+                }
+                // Host can request all peers to open this window.
+                if is_host_role
+                    && let Some(handle) = session_handle
+                    && ui.small_button(t!("ui.collab.open_for_everyone")).clicked()
+                {
+                    let _ = handle
+                        .command_tx
+                        .send(crate::collab::SessionCommand::OpenWindowForEveryone { window_id: *bid });
+                }
+            });
+        }
+    }
+
+    /// Builds a `Tab::Replays(ws_id)` tab's body, drawing strictly the workspace
+    /// `ws_id` names. Also makes `ws_id` the app-wide active workspace so the
+    /// floating chat, timeline, and replay-controls windows (which have no tab
+    /// payload of their own) follow whichever replay tab was drawn last.
+    pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        self.tab_state.set_active_workspace(ws_id);
+
+        // Ahead of the workspace check below so a request raised in a workspace
+        // that has since closed still runs: it carries its own replay handle
+        // and needs nothing from the workspace it came from.
+        self.handle_pending_alt_reparse(ui.ctx());
+
+        // A tab can outlive its workspace (e.g. a stale split after the
+        // workspace's owning tab was closed). Showing a placeholder here
+        // instead of falling back to another workspace is the whole point of
+        // this method taking `ws_id` explicitly. Both arms fall through to the
+        // same four floating-window calls at the end of this function instead
+        // of returning early, so a closed workspace never skips them.
+        if self.tab_state.workspace_for_tab(ws_id).is_some() {
+            self.refresh_row_summaries(ws_id);
+            // Nothing can close ws_id's workspace during this function's own
+            // execution: there is no reentrant call back into
+            // `build_replay_parser_tab` (or anything it calls) between the
+            // existence check above and this read. `unwrap_or(false)` is still
+            // the right shape here rather than `.expect(...)`: if that ever
+            // stopped holding, "nothing to scan" is the safe reading, not a panic.
+            let needs_reindex_scan = self
+                .tab_state
+                .workspace_mut(ws_id)
+                .map(|workspace| std::mem::take(&mut workspace.replay_rows_need_reindex_scan))
+                .unwrap_or(false);
+            if needs_reindex_scan {
+                self.queue_stale_rows_for_reindex(ws_id);
+            }
+            ui.vertical(|ui| {
+                self.build_replay_header(ui);
+
+                {
+                    let panel_salt = workspace_salt(ws_id, "replay_listing_panel");
+                    let collapsed_before = self.tab_state.persisted.read().settings.replay.listing_collapsed;
+                    // `show_collapsible` tracks the expanded state, and flips it itself when the
+                    // user drags or double-clicks the resize edge.
+                    let mut expanded = !collapsed_before;
+
+                    // Auto-size the panel to the widest label when files are first populated.
+                    // Uses a flag on TabState (not egui temp data) to survive GC. Deferred while
+                    // collapsed, so re-expanding does not clobber a width the user chose, and
+                    // deferred until a summary load has completed, since measuring before the
+                    // stats line exists would latch a width fitted to "not indexed".
+                    // One borrow of the workspace covers every read the measurement makes.
+                    let workspace = self.tab_state.workspace(ws_id);
+                    let has_files =
+                        workspace.and_then(|workspace| workspace.replay_files()).is_some_and(|files| !files.is_empty());
+
+                    let mut default_width = 250.0f32;
+
+                    if has_files
+                        && expanded
+                        && let Some(workspace) = workspace
+                        && !workspace.replay_listing_auto_sized
+                        && workspace.replay_row_summaries_loaded
+                        && let Some(metadata_provider) = self.metadata_provider()
+                    {
+                        let grouping = self.tab_state.persisted.read().settings.replay.grouping;
+                        let locale = self.tab_state.persisted.read().settings.app.locale.clone();
+                        let font_id = egui::TextStyle::Body.resolve(ui.style());
+                        let hydrated = workspace.hydrated_replays();
+                        let max_width = workspace
+                            .replay_files()
+                            .iter()
+                            .flat_map(|files| files.iter())
+                            .map(|(path, listed)| {
+                                let identity = listing_row::listed_row_identity(listed, &metadata_provider);
+                                let parsed = parsed_stats_for(&hydrated, path);
+                                let summary = workspace.row_summaries().get(path);
+                                let stats = listing_row::resolve_row_stats(parsed, summary);
+                                let identity_text = listing_row::identity_line(&identity, grouping);
+                                let stats_text =
+                                    listing_row::stats_line(&identity, &stats, grouping, locale.as_deref());
+                                [identity_text, stats_text]
+                                    .iter()
+                                    .map(|line| {
+                                        ui.painter()
+                                            .layout_no_wrap(line.to_string(), font_id.clone(), ui.sem().text_strong)
+                                            .size()
+                                            .x
+                                    })
+                                    .fold(0.0f32, f32::max)
+                            })
+                            .fold(0.0f32, f32::max);
+
+                        // Allowance for tree indentation, the right margin, and the scrollbar.
+                        // Line 1 carries at most one trailing glyph (the division icon), and
+                        // the stats line's icons are already part of the measured text above,
+                        // so this no longer needs to budget for a second glyph.
+                        default_width = (max_width + 44.0).max(200.0);
+
+                        if let Some(workspace) = self.tab_state.workspace_mut(ws_id) {
+                            workspace.replay_listing_auto_sized = true;
+                        }
+
+                        // Clear stored panel state so default_width takes effect. The panel
+                        // keys its state under the parent's scope, as `make_persistent_id` does.
+                        let panel_id = ui.make_persistent_id(panel_salt);
+                        ui.ctx().data_mut(|d| {
+                            d.remove::<egui::containers::panel::PanelState>(panel_id);
+                        });
+                    }
+
+                    egui::Panel::left(panel_salt)
+                        .default_size(default_width)
+                        .size_range(REPLAY_LISTING_MIN_WIDTH..=f32::INFINITY)
+                        // Left margin is zero so labels sit flush; the right margin keeps them
+                        // clear of the resize divider.
+                        .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
+                            left: 0,
+                            right: 8,
+                            top: 2,
+                            bottom: 2,
+                        }))
+                        .show_collapsible(ui, &mut expanded, |ui| {
+                            // egui_ltreeview 0.8.0 draw_indent_hint clamps against an
+                            // un-normalized clip rect. `show_collapsible` slides the panel
+                            // off-screen rather than shrinking it, so the clip rect - not
+                            // the panel width - is what collapses and inverts mid-animation;
+                            // an inverted rect makes the clamp panic. Skip drawing the tree
+                            // until we're past it.
+                            let clip_width = ui.clip_rect().width();
+                            if clip_width < REPLAY_LISTING_MIN_WIDTH {
+                                return;
+                            }
+                            self.build_file_listing(ui, ws_id);
+                        });
+
+                    egui::Panel::left(workspace_salt(ws_id, "replay_listing_rail"))
+                        .exact_size(20.0)
+                        .resizable(false)
+                        .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(0)))
+                        .show(ui, |ui| {
+                            let icon = if expanded { icons::CARET_LEFT } else { icons::CARET_RIGHT };
+                            let tooltip = if expanded {
+                                t!("ui.replay.collapse_listing")
+                            } else {
+                                t!("ui.replay.expand_listing")
+                            };
+
+                            // The listing panel's resize divider is registered on its own
+                            // right edge, i.e. exactly where this rail begins (the listing
+                            // is declared first). Cede that strip to the divider so a
+                            // full-rail click can't swallow the resize / drag-to-collapse
+                            // gesture.
+                            let mut rect = ui.max_rect();
+                            rect.min.x += ui.style().interaction.resize_grab_radius_side;
+
+                            let response =
+                                ui.interact(rect, ui.scope_id().with("listing_rail_toggle"), egui::Sense::click());
+                            if response.hovered() {
+                                ui.painter().rect_filled(
+                                    rect,
+                                    ui.visuals().widgets.hovered.corner_radius,
+                                    ui.visuals().widgets.hovered.weak_bg_fill,
+                                );
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+
+                            let fg_color = if response.hovered() {
+                                ui.visuals().widgets.hovered.fg_stroke.color
+                            } else {
+                                ui.visuals().widgets.inactive.fg_stroke.color
+                            };
+                            ui.painter().text(
+                                egui::pos2(rect.center().x, rect.top() + 14.0),
+                                egui::Align2::CENTER_CENTER,
+                                icon,
+                                egui::TextStyle::Button.resolve(ui.style()),
+                                fg_color,
+                            );
+
+                            if !expanded {
+                                paint_vertical_caption(ui, rect, 28.0, &t!("ui.replay.listing_caption"));
+                            }
+
+                            if response.on_hover_text(tooltip).clicked() {
+                                expanded = !expanded;
+                            }
+                        });
+
+                    // `show_collapsible` may have flipped `expanded` itself via a resize drag or a
+                    // double-click on the edge, so persist on any change, not just a caret click.
+                    let collapsed_now = !expanded;
+                    if collapsed_now != collapsed_before {
+                        self.tab_state.persisted.write().settings.replay.listing_collapsed = collapsed_now;
+                    }
+                }
+
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let has_tabs = self
+                        .tab_state
+                        .workspace(ws_id)
+                        .is_some_and(|workspace| workspace.replay_dock_state.iter_all_tabs().next().is_some());
+                    if has_tabs {
+                        // Taking the dock state out for the duration of the draw is
+                        // load-bearing, not a borrow-checker convenience: the listing
+                        // draws rows through `parsed_stats_for`, which takes each open
+                        // replay's read lock, while `ReplayTabViewer::ui` holds the
+                        // write lock on the tab it is drawing. Leaving the dock in
+                        // place would let those two meet on the same replay.
+                        let Some(workspace) = self.tab_state.workspace_mut(ws_id) else {
+                            return;
+                        };
+                        let mut dock_state =
+                            std::mem::replace(&mut workspace.replay_dock_state, egui_dock::DockState::new(vec![]));
+                        let mut viewer = ReplayTabViewer { tab_state: self.tab_state, workspace: ws_id };
+                        egui_dock::DockArea::new(&mut dock_state)
+                            .id(workspace_salt(ws_id, "replay_parser_dock"))
+                            .style(egui_dock::Style::from_egui(ui.style().as_ref()))
+                            .show_close_buttons(true)
+                            .show_leaf_collapse_buttons(false)
+                            .show_leaf_close_all_buttons(false)
+                            .allowed_splits(egui_dock::AllowedSplits::All)
+                            .show_inside(ui, &mut viewer);
+                        if let Some(workspace) = self.tab_state.workspace_mut(ws_id) {
+                            workspace.replay_dock_state = dock_state;
+                        }
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.heading(t!("ui.replay.no_selection"));
+                        });
+                    }
+                });
+            });
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.heading(t!("ui.replay.workspace_closed"));
+            });
+        }
+
+        // These four resolve through the active workspace (set at the top of
+        // this function) or are workspace-independent outright, never through
+        // ws_id's own workspace, so both branches above reach them. They must
+        // stay after the normal path's dock write-back
+        // (`replay_dock_state = dock_state` above): `focused_replay()` reads
+        // `replay_dock_state.focused_leaf()`, so running them any earlier
+        // renders the previously focused sub-tab's chat and timeline for a
+        // frame after every sub-tab switch.
+        self.show_game_chat_window(ui.ctx());
+        self.show_timeline_window(ui.ctx());
+        self.pick_up_replay_controls_request(ui.ctx());
+        self.show_replay_controls_window(ui.ctx());
+    }
+
+    /// Reload the listing's index-sourced row data when the index has been
+    /// written since the last load attempt. `index_generation` is bumped after
+    /// every index write, so this is a cheap per-frame comparison rather than a
+    /// query.
+    fn refresh_row_summaries(&mut self, ws_id: WorkspaceId) {
+        // `ws_id` existence is checked by the caller (`build_replay_parser_tab`)
+        // before this runs, so every `workspace(ws_id)` / `workspace_mut(ws_id)`
+        // below is justified in assuming `Some`.
+        let generation = crate::data::replay_index::index_generation();
+        let workspace = self.tab_state.workspace(ws_id).expect("ws_id checked present by build_replay_parser_tab");
+        if !listing_row::should_reload_summaries(
+            workspace.replay_row_summaries_loading,
+            workspace.replay_row_summaries_generation,
+            generation,
+        ) {
+            return;
+        }
+        // A configured replays dir is what makes a live index source possible at all,
+        // so it gates the load even though the query itself does not need the path.
+        let deps = match (
+            self.tab_state.db_pool.as_ref(),
+            self.tab_state.tokio_runtime.as_ref(),
+            self.tab_state.workspace(ws_id).expect("checked above").root.as_ref(),
+        ) {
+            (Some(pool), Some(rt), Some(_)) => Some((pool.clone(), Arc::clone(rt))),
+            _ => None,
+        };
+        let Some((pool, rt)) = deps else {
+            return;
+        };
+        let selector = summary_source_selector(self.tab_state.workspace(ws_id).expect("checked above").source);
+        // Stamped here rather than on completion so a query that keeps failing does not
+        // re-dispatch on every frame. The next attempt waits for the index to move again.
+        let workspace = self.tab_state.workspace_mut(ws_id).expect("checked above");
+        workspace.replay_row_summaries_loading = true;
+        workspace.replay_row_summaries_generation = Some(generation);
+        crate::update_background_task!(
+            self.tab_state.background_tasks,
+            Some(crate::task::start_load_row_summaries(pool, rt, selector, ws_id, generation))
+        );
+    }
+
+    /// Hand every listed replay whose index row is out of date to the background
+    /// parser. `ModifiedReplay` re-parses and re-indexes without re-uploading,
+    /// which is exactly the semantics wanted here.
+    ///
+    /// Only `Stale` is queued. Detecting mtime drift is what this scan uniquely
+    /// knows how to do; a replay with no index row at all belongs to the parser
+    /// thread's startup walk, which already carries `record_paths_in_source` as
+    /// its ledger. Queueing `Missing` here would re-parse everything that walk
+    /// just handled, re-run auto-export over the whole library, and re-parse on
+    /// every launch forever for old-version replays that can never index because
+    /// their build data is not downloaded.
+    fn queue_stale_rows_for_reindex(&mut self, ws_id: WorkspaceId) {
+        // `ws_id` existence is checked by the caller (`build_replay_parser_tab`)
+        // before this runs, so every `workspace(ws_id)` / `workspace_mut(ws_id)`
+        // below is justified in assuming `Some`.
+        let Some(sender) = self.tab_state.background_parser_tx.as_ref() else {
+            return;
+        };
+        let Some(files) =
+            self.tab_state.workspace(ws_id).expect("ws_id checked present by build_replay_parser_tab").replay_files()
+        else {
+            return;
+        };
+        let mut queued: Vec<std::path::PathBuf> = Vec::new();
+        for path in files.keys() {
+            if self.tab_state.workspace(ws_id).expect("checked above").replay_rows_reindex_requested.contains(path) {
+                continue;
+            }
+            let summary = self.tab_state.workspace(ws_id).expect("checked above").row_summaries().get(path);
+            let freshness = listing_row::row_freshness(summary, listing_row::file_mtime_secs(path));
+            if !matches!(freshness, listing_row::RowFreshness::Stale) {
+                continue;
+            }
+            if sender.send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path.clone())).is_ok() {
+                queued.push(path.clone());
+            }
+        }
+        for path in queued {
+            self.tab_state.workspace_mut(ws_id).expect("checked above").replay_rows_reindex_requested.insert(path);
+        }
+    }
+
+    fn show_game_chat_window(&self, ctx: &egui::Context) {
+        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::unique("show_game_chat"))).unwrap_or(false);
+        if !open {
+            return;
+        }
+
+        let Some(replay_arc) = self.tab_state.focused_replay() else {
+            return;
+        };
+        let replay_file = replay_arc.read();
+        let Some(report) = replay_file.battle_report.as_ref() else {
+            return;
+        };
+
+        let chat_messages = report.game_chat();
+        if chat_messages.is_empty() {
+            return;
+        }
+
+        let toasts = self.tab_state.toasts.clone();
+        let metadata_provider = self.metadata_provider();
+
+        egui::Window::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.game_chat")))
+            .open(&mut open)
+            .default_width(CHAT_VIEW_WIDTH)
+            .default_height(400.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.copy_all"))).clicked() {
+                        let mut buf = std::io::BufWriter::new(Vec::new());
+                        for message in chat_messages {
+                            let GameMessage {
+                                sender_relation: _,
+                                sender_name,
+                                channel,
+                                message,
+                                entity_id: _,
+                                player,
+                                clock: _,
+                            } = message;
+                            match player {
+                                Some(player) if !player.initial_state().clan().is_empty() => {
+                                    let _ = writeln!(
+                                        buf,
+                                        "[{}] {} ({:?}): {}",
+                                        player.initial_state().clan(),
+                                        sender_name,
+                                        channel,
+                                        message
+                                    );
+                                }
+                                _ => {
+                                    let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
+                                }
+                            }
+                        }
+                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner"))
+                            .expect("failed to convert game chat buffer to string");
+                        ui.ctx().copy_text(game_chat);
+                        toasts.lock().success(t!("ui.replay.chat_copied"));
+                    }
+                    if ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file"))).clicked() {
+                        let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                            "{} {} {} - Game Chat.txt",
+                            report.game_type(),
+                            report.game_mode(),
+                            report.map_name()
+                        ));
+                        let text = format_game_chat(chat_messages);
+                        self.tab_state.replay_dialogs.lock().save_text.open(
+                            ui.ctx(),
+                            DialogKind::SaveFile,
+                            dialog,
+                            text,
+                        );
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().id_salt("game_chat_window_scroll").show(ui, |ui| {
+                    build_replay_chat_content(metadata_provider.as_deref(), chat_messages, ui);
+                });
+            });
+
+        // Write back the open state (user may have closed the window via X)
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::unique("show_game_chat"), open);
+        });
+    }
+
+    /// Starts a background timeline scan if none is running or cached yet.
+    /// Everything the scan needs is cloned out of the write guard before the
+    /// guard is dropped - the scan takes seconds and must never hold the lock
+    /// the UI reads every frame.
+    fn start_timeline_extraction_if_needed(&self, replay_arc: &Arc<RwLock<Replay>>) {
+        let mut guard = replay_arc.write();
+        if !guard.timeline.should_start() {
+            return;
+        }
+        let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
+        let packet_data = guard.replay_file.packet_data().to_vec();
+        let alt_bytes: Vec<(Vec<u8>, Vec<u8>)> =
+            guard.alt_replays.iter().map(|r| (r.raw_meta.clone().into_bytes(), r.packet_data().to_vec())).collect();
+        let resource_loader = guard.resource_loader.clone();
+        let game_constants = guard.game_constants.clone();
+        guard.timeline = TimelineState::Extracting;
+        drop(guard);
+
+        let weak = Arc::downgrade(replay_arc);
+        crate::util::thread::spawn_logged("timeline-extraction", move || {
+            let primary = match ReplayFile::from_decrypted_parts(raw_meta, packet_data) {
+                Ok(replay) => replay,
+                Err(source) => {
+                    if let Some(arc) = weak.upgrade() {
+                        arc.write().timeline =
+                            TimelineState::Failed(TimelineExtractionError::Reconstruction { source });
+                    }
+                    return;
+                }
+            };
+
+            let primary_result = extract_timeline_events(&primary, &resource_loader, game_constants.as_deref());
+
+            // An alt that fails to reconstruct is skipped: the primary's events are
+            // still worth showing, and only a primary failure is fatal to the window.
+            let alt_results: Vec<_> = alt_bytes
+                .into_iter()
+                .filter_map(|(alt_raw_meta, alt_packet_data)| {
+                    match ReplayFile::from_decrypted_parts(alt_raw_meta, alt_packet_data) {
+                        Ok(alt) => Some(extract_timeline_events(&alt, &resource_loader, game_constants.as_deref())),
+                        Err(e) => {
+                            tracing::warn!("timeline extraction: skipping alt replay that failed to reconstruct: {e}");
+                            None
+                        }
+                    }
+                })
+                .collect();
+
+            let merged = merge_timelines(primary_result, alt_results);
+
+            if let Some(arc) = weak.upgrade() {
+                arc.write().timeline = TimelineState::Ready(Arc::new(merged));
+            }
+        });
+    }
+
+    fn show_timeline_window(&self, ctx: &egui::Context) {
+        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::unique("show_timeline"))).unwrap_or(false);
+        if !open {
+            return;
+        }
+
+        let Some(replay_arc) = self.tab_state.focused_replay() else {
+            return;
+        };
+
+        self.start_timeline_extraction_if_needed(&replay_arc);
+
+        let filter_id = egui::Id::unique("timeline_window_filter");
+        let mut filter = ctx.data_mut(|d| d.get_temp_mut_or_default::<TimelineFilter>(filter_id).clone());
+        let mut retry_requested = false;
+
+        {
+            let replay = replay_arc.read();
+            egui::Window::new(wt_translations::icon_t(icons::LIST_BULLETS, &t!("ui.replay.timeline")))
+                .open(&mut open)
+                .default_width(CHAT_VIEW_WIDTH)
+                .default_height(400.0)
+                .resizable(true)
+                .show(ctx, |ui| match &replay.timeline {
+                    TimelineState::NotRequested | TimelineState::Extracting => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(t!("ui.replay.timeline_parsing"));
+                        });
+                    }
+                    TimelineState::Failed(err) => {
+                        ui.label(
+                            RichText::new(t!("ui.replay.timeline_failed", error = err.to_string()).as_ref())
+                                .color(ui.sem().error),
+                        );
+                        if ui.button(t!("ui.replay.timeline_retry")).clicked() {
+                            retry_requested = true;
+                        }
+                    }
+                    TimelineState::Ready(result) => {
+                        let visible_count = result.events.iter().filter(|e| filter.matches(e)).count();
+
+                        ui.horizontal(|ui| {
+                            timeline_filter_bar(ui, &mut filter);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .add_enabled(visible_count > 0, egui::Button::new(t!("ui.replay.save_to_file")))
+                                    .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                    .clicked()
+                                {
+                                    let dialog = rfd::AsyncFileDialog::new().set_file_name(format!(
+                                        "{} - Match Timeline.txt",
+                                        replay.map_name(&replay.resource_loader)
+                                    ));
+                                    let text: String = result
+                                        .events
+                                        .iter()
+                                        .filter(|e| filter.matches(e))
+                                        .map(|event| format!("{}\n", format_timeline_event(event)))
+                                        .collect();
+                                    self.tab_state.replay_dialogs.lock().save_text.open(
+                                        ui.ctx(),
+                                        DialogKind::SaveFile,
+                                        dialog,
+                                        text,
+                                    );
+                                }
+                                if ui
+                                    .add_enabled(visible_count > 0, egui::Button::new(t!("ui.buttons.copy")))
+                                    .on_hover_text(t!("ui.replay.timeline_export_tooltip"))
+                                    .clicked()
+                                {
+                                    let text = result
+                                        .events
+                                        .iter()
+                                        .filter(|e| filter.matches(e))
+                                        .map(format_timeline_event)
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    ui.ctx().copy_text(text);
+                                    self.tab_state.toasts.lock().success(t!("ui.replay.timeline_copied"));
+                                }
+                            });
+                        });
+                        ui.separator();
+
+                        if !result.events.is_empty() && visible_count == 0 {
+                            ui.label(t!("ui.replay.timeline_no_matches"));
+                        } else {
+                            egui::ScrollArea::vertical()
+                                .id_salt("timeline_window_scroll")
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    let egui_ctx = ui.ctx().clone();
+                                    timeline_list(ui, &result.events, &filter, result.viewer_team, |event| {
+                                        egui_ctx.copy_text(format_timeline_event(event));
+                                        self.tab_state.toasts.lock().success(t!("ui.replay.timeline_event_copied"));
+                                    });
+                                });
+                        }
+                    }
+                });
+        }
+
+        if retry_requested {
+            replay_arc.write().timeline = TimelineState::NotRequested;
+        }
+
+        ctx.data_mut(|d| {
+            d.insert_temp(filter_id, filter);
+            d.insert_temp(egui::Id::unique("show_timeline"), open);
+        });
+    }
+
+    fn handle_context_menu_render(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        let requested: Option<PathBuf> = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp(request_slot_id(ws_id, ReplayRequestSlot::ContextMenuRenderReplay)));
+        let Some(path) = requested else {
+            return;
+        };
+        self.launch_replay_render(&path, Some(ws_id));
+    }
+
+    /// Opens the replay renderer for `path`.
+    ///
+    /// `ws_id` names the workspace the request came from, and is used only to
+    /// find a hydrated replay for `path`: the renderer itself is a viewport of
+    /// its own rather than a dock tab, so it belongs to no workspace.
+    /// Returns whether a renderer was launched.
+    pub(crate) fn launch_replay_render(&mut self, path: &std::path::Path, ws_id: Option<WorkspaceId>) -> bool {
+        let Some(build_cache) = self.tab_state.build_cache.as_ref() else {
+            return false;
+        };
+        let Some(info) = crate::replay::renderer::replay_render_input(path, build_cache) else {
+            return false;
+        };
+
+        // Only a replay open in a tab can have had an alternate perspective
+        // merged into it, and the merged view is what the user is looking at,
+        // so a render started from its row renders the same thing.
+        let alt_replays: Vec<crate::replay::renderer::AltReplayBytes> = ws_id
+            .and_then(|ws_id| self.tab_state.workspace(ws_id))
+            .and_then(|workspace| workspace.hydrated_replay(path))
+            .map(|replay| {
+                replay
+                    .read()
+                    .alt_replays
+                    .iter()
+                    .map(|alt| crate::replay::renderer::AltReplayBytes {
+                        raw_meta: alt.raw_meta.clone().into_bytes(),
+                        packet_data: alt.packet_data().to_vec(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let asset_cache = self.tab_state.renderer_asset_cache.clone();
+        let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
+        let viewer = crate::replay::renderer::launch_replay_renderer(
+            info.raw_meta,
+            info.packet_data,
+            alt_replays,
+            info.map_name,
+            info.replay_name,
+            info.video_file_stem,
+            info.game_duration,
+            info.wows_data,
+            asset_cache,
+            &self.tab_state.persisted.read().settings.renderer,
+            Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
+            self.tab_state.window_settings.clone(),
+            self.tab_state.save_notify.clone(),
+            is_debug_mode,
+        );
+        self.tab_state.replay_renderers.lock().push(viewer);
+        true
+    }
+
+    /// The selected paths and the data map a batch render needs, or `None` when
+    /// there is nothing renderable. The replays themselves are read on the
+    /// render thread: reading is decrypt plus inflate of a whole packet stream,
+    /// and a group context menu can select hundreds of them.
+    fn batch_render_inputs(
+        &self,
+        paths: Vec<PathBuf>,
+    ) -> Option<(Vec<PathBuf>, crate::data::wows_data::BuildDataCache)> {
+        if paths.is_empty() {
+            return None;
+        }
+        Some((paths, self.tab_state.build_cache.clone()?))
+    }
+
+    /// Assemble the shared render/encode context for a batch render from the
+    /// saved renderer settings and the current encoder availability.
+    fn batch_render_context(
+        &self,
+        build_cache: crate::data::wows_data::BuildDataCache,
+    ) -> crate::replay::renderer::BatchRenderContext {
+        let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
+        let options = crate::replay::renderer::render_options_from_saved(&renderer_settings);
+        let status = wows_minimap_renderer::check_encoder();
+        let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
+            renderer_settings.prefer_cpu_encoder,
+            renderer_settings.video_codec,
+            &status,
+        );
+        crate::replay::renderer::BatchRenderContext {
+            build_cache,
+            options,
+            asset_cache: self.tab_state.renderer_asset_cache.clone(),
+            toasts: self.tab_state.toasts.clone(),
+            encode: crate::replay::renderer::BatchEncodeOptions {
+                prefer_cpu,
+                codec: renderer_settings.video_codec,
+                include_pre_battle: renderer_settings.include_pre_battle,
+            },
+            egui_ctx: self.tab_state.egui_ctx.clone(),
+        }
+    }
+
+    fn handle_batch_render_request(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
+        // Batch render to folder
+        if let Some(paths) = ui.ctx().data_mut(|data| {
+            data.remove_temp::<Vec<PathBuf>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderReplays))
+        }) {
+            let dialog = rfd::AsyncFileDialog::new().set_title("Select output folder for rendered videos");
+            self.tab_state.replay_dialogs.lock().batch_render_output.open(
+                ui.ctx(),
+                DialogKind::PickFolder,
+                dialog,
+                paths,
+            );
+            return;
+        }
+
+        // Batch render to clipboard
+        if let Some(paths) = ui.ctx().data_mut(|data| {
+            data.remove_temp::<Vec<PathBuf>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard))
+        }) {
+            let Some((paths, build_cache)) = self.batch_render_inputs(paths) else {
+                self.tab_state.toasts.lock().warning("No renderable replays in selection");
+                return;
+            };
+
+            let ctx = self.batch_render_context(build_cache);
+            let task = crate::replay::renderer::batch_render_to_clipboard(paths, ctx);
+            self.tab_state.background_tasks.push(task);
+        }
+    }
+
+    /// Applies the result of any replay dialog that closed since the last frame.
+    pub(crate) fn poll_replay_dialogs(&mut self, ctx: &egui::Context) {
+        let save_text = self.tab_state.replay_dialogs.lock().save_text.poll();
+        let export_results = self.tab_state.replay_dialogs.lock().export_results.poll();
+        let open_replay = self.tab_state.replay_dialogs.lock().open_replay.poll_path();
+        let alt_perspective = self.tab_state.replay_dialogs.lock().alt_perspective.poll();
+        let batch_render_output = self.tab_state.replay_dialogs.lock().batch_render_output.poll();
+
+        if let Some((text, path)) = save_text
+            && let Err(e) = std::fs::write(&path, text)
+        {
+            error!("Failed to write {}: {}", path.display(), e);
+        }
+
+        if let Some((request, path)) = export_results {
+            write_exported_results(request, &path);
+        }
+
+        if let Some(file) = open_replay {
+            self.tab_state.persisted.write().settings.game.current_replay_path = file.clone();
+
+            if let Some(deps) = self.tab_state.replay_dependencies() {
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    deps.parse_replay_from_path(file, ReplaySource::ManualOpen)
+                );
+            }
+        }
+
+        if let Some((request, file)) = alt_perspective {
+            self.stage_alt_perspective(ctx, request, file);
+            // No replay write guard is held here, and no replay tab has to be visible.
+            self.handle_pending_alt_reparse(ctx);
+        }
+
+        if let Some((paths, output_dir)) = batch_render_output {
+            let Some((paths, build_cache)) = self.batch_render_inputs(paths) else {
+                self.tab_state.toasts.lock().warning("No renderable replays in selection");
+                return;
+            };
+
+            let ctx = self.batch_render_context(build_cache);
+            let task = crate::replay::renderer::batch_render_to_folder(output_dir, paths, ctx);
+            self.tab_state.background_tasks.push(task);
+        }
+    }
+
+    /// Called from the main button (non-closure) path.
+    fn open_replay_controls_window(&mut self) {
+        // Parse from VFS on first use, then cache
+        if self.tab_state.replay_controls_cache.is_none()
+            && let Some(map) = &self.tab_state.build_cache
+        {
+            let result = map.loaded_builds().into_iter().find_map(|data| {
+                let data = data.read();
+                let path = "system/data/commands.scheme.xml";
+                let mut buf = Vec::new();
+                let mut file = data.vfs.join(path).and_then(|p| p.open_file()).ok()?;
+                use std::io::Read;
+                if file.read_to_end(&mut buf).is_err() || buf.is_empty() {
+                    return None;
+                }
+                let groups = wows_toolkit_viewmodel::controls::parse_commands_scheme(&buf);
+                (!groups.is_empty()).then_some(groups)
+            });
+            self.tab_state.replay_controls_cache = result;
+        }
+        self.tab_state.show_replay_controls = true;
+    }
+
+    /// Pick up the temp data flag set from context menu closures.
+    fn pick_up_replay_controls_request(&mut self, ctx: &egui::Context) {
+        // App-wide: opens the single reference window regardless of workspace.
+        let request: Option<bool> =
+            ctx.data_mut(|data| data.remove_temp(egui::Id::unique("open_replay_controls_window")));
+        if request == Some(true) {
+            self.open_replay_controls_window();
+        }
+    }
+
+    /// Draw the standalone replay controls reference window.
+    fn show_replay_controls_window(&mut self, ctx: &egui::Context) {
+        if !self.tab_state.show_replay_controls {
+            return;
+        }
+
+        egui::Window::new(t!("ui.replay.controls.window_title"))
+            .open(&mut self.tab_state.show_replay_controls)
+            .collapsible(true)
+            .resizable(true)
+            .default_width(360.0)
+            .show(ctx, |ui| {
+                if let Some(groups) = &self.tab_state.replay_controls_cache {
+                    egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.7).show(ui, |ui| {
+                        for group in groups {
+                            ui.add_space(2.0);
+                            ui.label(egui::RichText::new(group.title).strong());
+                            egui::Grid::new(group.title).num_columns(2).spacing([16.0, 2.0]).striped(true).show(
+                                ui,
+                                |ui| {
+                                    for cmd in &group.commands {
+                                        ui.label(&cmd.label);
+                                        let binding = if let Some(ref k2) = cmd.key2 {
+                                            format!("{}  /  {}", cmd.key1, k2)
+                                        } else {
+                                            cmd.key1.clone()
+                                        };
+                                        ui.label(egui::RichText::new(binding).monospace().color(ui.sem().text_dim));
+                                        ui.end_row();
+                                    }
+                                },
+                            );
+                            ui.separator();
+                        }
+                    });
+                } else {
+                    ui.label(t!("ui.replay.controls.unavailable"));
+                }
+            });
+    }
+}
+
+struct ReplayTabViewer<'a> {
+    tab_state: &'a mut crate::tab_state::TabState,
+    workspace: WorkspaceId,
+}
+
+impl egui_dock::TabViewer for ReplayTabViewer<'_> {
+    type Tab = ReplayTab;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        workspace_salt(self.workspace, "replay_tab").with(tab.id)
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        let replay = tab.replay.read();
+        let viewer = ToolkitTabViewer { tab_state: self.tab_state };
+        if let Some(mp) = viewer.metadata_provider() {
+            let ship = replay.vehicle_name(&mp);
+            let map = replay.map_name(&mp);
+            format!("{ship} - {map}").into()
+        } else {
+            t!("ui.replay.loading").into_owned().into()
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        let viewer = ToolkitTabViewer { tab_state: self.tab_state };
+        let metadata_provider = viewer.metadata_provider().expect("no metadata provider?");
+        let replay_weak = Arc::downgrade(&tab.replay);
+        let mut replay = tab.replay.write();
+        viewer.build_replay_view(&mut replay, &replay_weak, ui, metadata_provider.as_ref(), self.workspace);
+    }
+
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        true
+    }
+
+    fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
+        false
+    }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        // The replay view manages its own panels and the player-list table
+        // brings its own scroll area. The outer wrapper would duplicate bars.
+        [false, false]
+    }
+}
+
+/// A per-type breakdown as one padded block, for a tooltip that has no columns
+/// to line up in.
+fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], locale: &str, get: F) -> String {
+    breakdown::padded_text(&breakdown::rows(descriptions, Some(locale), get))
+}
+
+/// A per-type damage split as hover text.
+fn damage_hover_text(split: &DamageBreakdown<'_>, locale: &str) -> RichText {
+    RichText::new(breakdown::padded_text(&breakdown::damage_rows(split, Some(locale)))).font(FontId::monospace(12.0))
+}
+
+/// Clan tag and name of the other player in a per-victim line, for its hover.
+fn player_hover_layout(player: &PlayerReport, ui: &egui::Ui) -> LayoutJob {
+    let style = Style::default();
+    let mut layout = LayoutJob::default();
+    if let Some(clan_text) = player.clan_text(ui.visuals()) {
+        clan_text.append_to(&mut layout, &style, egui::FontSelection::Default, egui::Align::Center);
+        layout.append(" ", 0.0, Default::default());
+    }
+    player.name_text(ui.visuals()).append_to(&mut layout, &style, egui::FontSelection::Default, egui::Align::Center);
+    layout
+}
+
+/// A count-and-label listing on screen: counts right-aligned in their own
+/// column, labels indented by depth. A grid rather than padded text, so the
+/// columns line up in the proportional font the rest of the row uses.
+fn fire_chance_rows_ui(ui: &mut egui::Ui, id: &str, rows: &[TallyRow]) {
+    egui::Grid::new(ui.scope_id().with(id)).num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
+        for row in rows {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(row.count.to_string());
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(row.depth as f32 * 12.0);
+                if row.depth == 0 {
+                    ui.label(row.label.as_ref());
+                } else {
+                    ui.weak(row.label.as_ref());
+                }
+            });
+            ui.end_row();
+        }
+    });
+}
+
+/// Presentation view of a normalized per-victim interaction: the numeric fields
+/// are copied verbatim and the text/hover fields are formatted from them, gated
+/// on `> 0` exactly as the original inline extraction did.
+fn damage_interaction_from_normalized(
+    interaction: &wows_replay_insights::battle_report::DamageInteraction,
+    locale: &str,
+) -> DamageInteraction {
+    let mut out = DamageInteraction { damage_dealt: interaction.damage_dealt, ..Default::default() };
+    if interaction.damage_dealt > 0 {
+        out.damage_dealt_text = separate_number(interaction.damage_dealt, Some(locale));
+        out.damage_dealt_hover_text = breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
+            interaction.damage_dealt_by_type_full.get(key).copied().unwrap_or(0)
+        });
+    }
+    out.damage_dealt_percentage = interaction.damage_dealt_percentage;
+    if interaction.damage_dealt_percentage > 0.0 {
+        out.damage_dealt_percentage_text = format!("{:.0}%", interaction.damage_dealt_percentage);
+    }
+    out.damage_dealt_inverse_percentage = interaction.damage_dealt_inverse_percentage;
+    if interaction.damage_dealt_inverse_percentage > 0.0 {
+        out.damage_dealt_inverse_percentage_text = format!("{:.0}%", interaction.damage_dealt_inverse_percentage);
+    }
+    out.damage_received = interaction.damage_received;
+    if interaction.damage_received > 0 {
+        out.damage_received_text = separate_number(interaction.damage_received, Some(locale));
+        out.damage_received_hover_text = breakdown_hover_string(&DAMAGE_DESCRIPTIONS, locale, |key| {
+            interaction.damage_received_by_type_full.get(key).copied().unwrap_or(0)
+        });
+    }
+    out.damage_received_percentage = interaction.damage_received_percentage;
+    if interaction.damage_received_percentage > 0.0 {
+        out.damage_received_percentage_text = format!("{:.0}%", interaction.damage_received_percentage);
+    }
+    out.damage_received_inverse_percentage = interaction.damage_received_inverse_percentage;
+    if interaction.damage_received_inverse_percentage > 0.0 {
+        out.damage_received_inverse_percentage_text = format!("{:.0}%", interaction.damage_received_inverse_percentage);
+    }
+    out.spotting_damage = interaction.spotting_damage;
+    if interaction.spotting_damage > 0 {
+        out.spotting_damage_text = separate_number(interaction.spotting_damage, Some(locale));
+        if let Some(pct) = interaction.spotting_damage_percentage {
+            out.spotting_damage_percentage_text = format!("{pct:.0}%");
+        }
+    }
+    out
+}
+
+/// Renders chat messages into a `Ui`. Used by both the inline chat view and the chat window.
+///
+/// Click-to-copy is signaled via a temp data slot `"chat_message_copied"` containing the
+/// plaintext string. The caller is responsible for reading this and performing the copy/toast.
+fn build_replay_chat_content(
+    metadata_provider: Option<&GameMetadataProvider>,
+    messages: &[GameMessage],
+    ui: &mut egui::Ui,
+) {
+    for message in messages {
+        let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+
+        let (translated_name, translated_text) =
+            if sender_relation.is_none() || player.as_ref().map(|player| player.is_bot()).unwrap_or_default() {
+                let translated_user = metadata_provider.and_then(|provider| {
+                    provider.localized_name_from_id(&TranslationKey::new(sender_name.as_str())).map(Cow::Owned)
+                });
+                let translated_text = metadata_provider.and_then(|provider| {
+                    provider.localized_name_from_id(&TranslationKey::new(message.as_str())).map(Cow::Owned)
+                });
+                (translated_user, translated_text)
+            } else {
+                (None, None)
+            };
+
+        let message =
+            if let Ok(decoded) = decode_html(message.as_str()) { Cow::Owned(decoded) } else { Cow::Borrowed(message) };
+
+        let sender_name: Cow<'_, str> = translated_name.unwrap_or(Cow::Borrowed(sender_name.as_str()));
+        let message: Cow<'_, str> = match translated_text {
+            Some(t) => t,
+            None => match message {
+                Cow::Owned(s) => Cow::Owned(s),
+                Cow::Borrowed(s) => Cow::Borrowed(s.as_str()),
+            },
+        };
+
+        let text = match player {
+            Some(player) if !player.initial_state().clan().is_empty() => {
+                format!("[{}] {sender_name} ({channel:?}): {message}", player.initial_state().clan())
+            }
+            _ => {
+                format!("{sender_name} ({channel:?}): {message}")
+            }
+        };
+
+        let name_color = if let Some(relation) = sender_relation {
+            player_color_for_team_relation(*relation, ui.visuals())
+        } else {
+            ui.sem().text_dim
+        };
+
+        let mut job = LayoutJob::default();
+        if let Some(player) = player
+            && !player.initial_state().clan().is_empty()
+        {
+            job.append(
+                &format!("[{}] ", player.initial_state().clan()),
+                0.0,
+                TextFormat { color: clan_color_for_player(player).unwrap().color(ui.visuals()), ..Default::default() },
+            );
+        }
+        job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
+
+        let text_color = match channel {
+            ChatChannel::Division => ui.sem().chat.division,
+            ChatChannel::Global => ui.sem().chat.global,
+            ChatChannel::Team => ui.sem().chat.team,
+            _ => ui.sem().chat.other,
+        };
+
+        job.append(&message, 0.0, TextFormat { color: text_color, ..Default::default() });
+
+        let label_response = ui.add(Label::new(job));
+        // Full-width hover row so the copy button appears when hovering anywhere on the row
+        let row_rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), label_response.rect.y_range());
+        let row_hovered = ui.rect_contains_pointer(row_rect);
+        if row_hovered {
+            // Place button using a child ui so it doesn't affect parent layout
+            let padded_row = row_rect.shrink2(egui::vec2(8.0, 0.0));
+            let btn_rect = egui::Align2::RIGHT_CENTER
+                .align_size_within_rect(egui::vec2(20.0, label_response.rect.height()), padded_row);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(btn_rect));
+            if child.small_button(crate::icons::COPY).on_hover_text(t!("ui.replay.copy_message")).clicked() {
+                ui.ctx().copy_text(text);
+            }
+        }
+        ui.add(Separator::default());
+        ui.end_row();
+    }
+}
+
+#[cfg(test)]
+mod summary_source_selector_tests {
+    use super::summary_source_selector;
+    use crate::db::index::rows::SourceId;
+    use crate::task::SourceSelector;
+
+    /// A workspace with a resolved source reads that source explicitly,
+    /// rather than falling back to the live source it may not even be.
+    #[test]
+    fn a_resolved_source_yields_explicit() {
+        let selector = summary_source_selector(Some(SourceId(42)));
+        assert_eq!(selector, SourceSelector::Explicit(SourceId(42)));
+    }
+
+    /// A workspace with no resolved source yet -- the live workspace for its
+    /// whole life, or an imported workspace before its source is ensured --
+    /// reads the live source. Getting this branch wrong strands the
+    /// workspace's loading flag true forever, since the completion would
+    /// never route back to it.
+    #[test]
+    fn no_resolved_source_yields_live() {
+        let selector = summary_source_selector(None);
+        assert_eq!(selector, SourceSelector::Live);
+    }
+}
+
+#[cfg(test)]
+mod alt_perspective_handoff_tests {
+    use super::*;
+
+    /// A minimal `ReplayFile`: a hand-built `ReplayMeta` round-tripped through
+    /// `from_decrypted_parts`, the same entry point the app uses for a loaded
+    /// replay's raw JSON.
+    fn test_replay_file() -> ReplayFile {
+        let meta = wows_replays::ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0,0,0,0".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: wows_replays::types::AccountId(0),
+            vehicles: Vec::new(),
+            playersPerTeam: 0,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: String::new(),
+            scenarioConfigId: 0,
+            teamsCount: 0,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        };
+        let meta_json = serde_json::to_vec(&meta).expect("ReplayMeta serializes");
+        ReplayFile::from_decrypted_parts(meta_json, Vec::new()).expect("a ReplayMeta we just serialized parses back")
+    }
+
+    fn test_replay() -> Arc<RwLock<Replay>> {
+        let resource_loader = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+                .expect("an empty param list is always valid"),
+        );
+        Arc::new(RwLock::new(Replay::new(test_replay_file(), resource_loader)))
+    }
+
+    /// The stash and the take must name one id, and the take must clear it. A
+    /// mismatch costs an unreachable `ReplayFile` held for the session and a
+    /// button that silently does nothing.
+    #[test]
+    fn a_stashed_request_is_delivered_once_and_leaves_nothing_behind() {
+        let ctx = egui::Context::default();
+        let replay = test_replay();
+        let alt = Arc::new(test_replay_file());
+        assert_eq!(Arc::strong_count(&alt), 1);
+
+        stash_alt_reparse(
+            &ctx,
+            PendingAltRequest { workspace: WorkspaceId(4), replay: Arc::downgrade(&replay), alt: Arc::clone(&alt) },
+        );
+        assert_eq!(Arc::strong_count(&alt), 2, "the parked request holds the alt");
+
+        let taken = take_alt_reparse(&ctx).expect("the request we just stashed comes back");
+        assert_eq!(taken.workspace, WorkspaceId(4));
+        assert!(Arc::ptr_eq(&taken.alt, &alt), "the delivered alt is the one that was picked");
+        assert!(
+            taken.replay.upgrade().is_some_and(|delivered| Arc::ptr_eq(&delivered, &replay)),
+            "the delivered request names the replay it was stashed against"
+        );
+
+        drop(taken);
+        assert_eq!(Arc::strong_count(&alt), 1, "the take leaves no copy of the alt in egui's store");
+        assert!(take_alt_reparse(&ctx).is_none(), "a consumed request is not delivered a second time");
+    }
+}
+
+#[cfg(test)]
+mod permutation_tests {
+    use super::permute;
+
+    #[test]
+    fn a_permutation_moves_both_lists_the_same_way() {
+        let order = vec![2, 0, 1];
+
+        let mut rows = vec!["a", "b", "c"];
+        let mut normalized = vec![1, 2, 3];
+        permute(&mut rows, &order);
+        permute(&mut normalized, &order);
+
+        assert_eq!(rows, vec!["c", "a", "b"]);
+        assert_eq!(normalized, vec![3, 1, 2], "the counterpart list lands in the same order");
+    }
+
+    #[test]
+    fn an_identity_permutation_changes_nothing() {
+        let mut rows = vec!["a", "b", "c"];
+        permute(&mut rows, &[0, 1, 2]);
+        assert_eq!(rows, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn an_empty_list_permutes_to_an_empty_list() {
+        let mut rows: Vec<&str> = Vec::new();
+        permute(&mut rows, &[]);
+        assert!(rows.is_empty());
+    }
+}

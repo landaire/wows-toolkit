@@ -1,0 +1,77 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 3399
+expression: speed
+---
+surface:
+  stat: top speed on the surface
+  unit: kn
+  builds:
+    base: 39
+    best:
+      value: 39
+      assumed: []
+    alternatives:
+      - label: with Swift in Silence active
+        value: 42.12
+        assumed:
+          - Swift in Silence
+        note: "Increases your ship's speed while she remains undetected."
+      - label: with Dazzle active
+        value: 42.12
+        assumed:
+          - Dazzle
+        note: Stays active for 15 s after your ship has been spotted.
+      - label: with Sierra Mike signal
+        value: 40.95
+        assumed:
+          - Sierra Mike signal
+      - label: with Swift in Silence active and Sierra Mike signal
+        value: 44.23
+        assumed:
+          - Swift in Silence
+          - Sierra Mike signal
+        note: "Increases your ship's speed while she remains undetected."
+      - label: with Dazzle active and Sierra Mike signal
+        value: 44.23
+        assumed:
+          - Dazzle
+          - Sierra Mike signal
+        note: Stays active for 15 s after your ship has been spotted.
+      - label: with Engine Boost active
+        value: 42.12
+        assumed:
+          - Engine Boost
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Swift in Silence active and Engine Boost active
+        value: 45.24
+        assumed:
+          - Swift in Silence
+          - Engine Boost
+        note: "Increases your ship's speed while she remains undetected."
+      - label: with Dazzle active and Engine Boost active
+        value: 45.24
+        assumed:
+          - Dazzle
+          - Engine Boost
+        note: Stays active for 15 s after your ship has been spotted.
+      - label: with Engine Boost active and Sierra Mike signal
+        value: 44.07
+        assumed:
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Only while Engine Boost is active. It adds 8% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+      - label: with Swift in Silence active and Engine Boost active and Sierra Mike signal
+        value: 47.35
+        assumed:
+          - Swift in Silence
+          - Engine Boost
+          - Sierra Mike signal
+        note: "Increases your ship's speed while she remains undetected."
+      - label: with Dazzle active and Engine Boost active and Sierra Mike signal
+        value: 47.35
+        assumed:
+          - Dazzle
+          - Engine Boost
+          - Sierra Mike signal
+        note: Stays active for 15 s after your ship has been spotted.

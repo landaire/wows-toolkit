@@ -1,0 +1,6 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 769
+expression: colombo.unique_upgrades
+---
+- "Improved Rangefinders (slot 6) is a unique upgrade: it fits only C. Colombo and mounts in place of a regular upgrade of that slot (Main Battery Modification 3, Auxiliary Armaments Modification 2). Best-fit builds take it where it improves a stat and list it as \"Improved Rangefinders (unique upgrade)\"."

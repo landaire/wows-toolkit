@@ -20,6 +20,7 @@ use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::config::hide_command_parts;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::config::hide_command_parts;
 use wows_minimap_renderer::toggles::TOGGLES;
 use wows_minimap_renderer::toggles::Toggle;
 use wows_minimap_renderer::track_file::TrackFile;

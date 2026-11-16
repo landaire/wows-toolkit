@@ -1,0 +1,12 @@
+-- The Player Tracker's tables aggregate every account the index holds
+-- (`query::distinct_players`, `query::clan_history_corrections`): one pass
+-- over `indexed_vehicle` for the encounter counts, and a correlated lookup per
+-- account for the name and clan it was last seen under.
+--
+-- This index carries exactly what both reads want, so neither touches the
+-- table: measured on a 2.1M-row index (638k accounts), all-time went from
+-- 23.5s to 6.0s, for about 80MB.
+--
+-- The match side needs nothing: `indexed_match.arena_id` is the rowid, so the
+-- timestamp each candidate row is ranked by is already a direct lookup.
+CREATE INDEX idx_vehicle_account_seen ON indexed_vehicle(account_id, arena_id, player_name, clan);

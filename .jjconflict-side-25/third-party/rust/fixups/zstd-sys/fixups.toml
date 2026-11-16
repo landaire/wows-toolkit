@@ -1,0 +1,93 @@
+# The build script compiles the bundled zstd sources with `cc`, so they are
+# declared directly instead. The defines match build.rs for the features the
+# graph enables (legacy, zdict_builder). xxhash.c is omitted because
+# XXH_PRIVATE_API inlines it through the headers. build.rs uses the assembly
+# decoder only on non-Windows x86_64.
+buildscript.run = false
+
+[['cfg(all(target_os = "linux", target_arch = "x86_64"))'.cxx_library]]
+name = "zstd-linux-x86_64"
+srcs = [
+    "zstd/lib/common/debug.c",
+    "zstd/lib/common/entropy_common.c",
+    "zstd/lib/common/error_private.c",
+    "zstd/lib/common/fse_decompress.c",
+    "zstd/lib/common/pool.c",
+    "zstd/lib/common/threading.c",
+    "zstd/lib/common/zstd_common.c",
+    "zstd/lib/compress/*.c",
+    "zstd/lib/decompress/*.c",
+    "zstd/lib/decompress/huf_decompress_amd64.S",
+    "zstd/lib/dictBuilder/*.c",
+    "zstd/lib/legacy/*.c",
+]
+headers = ["zstd/lib/**/*.h"]
+include_paths = ["zstd/lib", "zstd/lib/common", "zstd/lib/legacy"]
+preprocessor_flags = [
+    "-DXXH_PRIVATE_API",
+    "-DZSTD_LIB_DEPRECATED=0",
+    "-DZSTD_LEGACY_SUPPORT=1",
+    "-DZSTDLIB_VISIBILITY=",
+    "-DZDICTLIB_VISIBILITY=",
+    "-DZSTDERRORLIB_VISIBILITY=",
+]
+compiler_flags = ["-fvisibility=hidden", "-w"]
+preferred_linkage = "static"
+
+[['cfg(target_os = "macos")'.cxx_library]]
+name = "zstd-macos"
+srcs = [
+    "zstd/lib/common/debug.c",
+    "zstd/lib/common/entropy_common.c",
+    "zstd/lib/common/error_private.c",
+    "zstd/lib/common/fse_decompress.c",
+    "zstd/lib/common/pool.c",
+    "zstd/lib/common/threading.c",
+    "zstd/lib/common/zstd_common.c",
+    "zstd/lib/compress/*.c",
+    "zstd/lib/decompress/*.c",
+    "zstd/lib/dictBuilder/*.c",
+    "zstd/lib/legacy/*.c",
+]
+headers = ["zstd/lib/**/*.h"]
+include_paths = ["zstd/lib", "zstd/lib/common", "zstd/lib/legacy"]
+preprocessor_flags = [
+    "-DXXH_PRIVATE_API",
+    "-DZSTD_LIB_DEPRECATED=0",
+    "-DZSTD_LEGACY_SUPPORT=1",
+    "-DZSTDLIB_VISIBILITY=",
+    "-DZDICTLIB_VISIBILITY=",
+    "-DZSTDERRORLIB_VISIBILITY=",
+    "-DZSTD_DISABLE_ASM",
+]
+compiler_flags = ["-fvisibility=hidden", "-w"]
+preferred_linkage = "static"
+
+[['cfg(target_env = "msvc")'.cxx_library]]
+name = "zstd-windows"
+srcs = [
+    "zstd/lib/common/debug.c",
+    "zstd/lib/common/entropy_common.c",
+    "zstd/lib/common/error_private.c",
+    "zstd/lib/common/fse_decompress.c",
+    "zstd/lib/common/pool.c",
+    "zstd/lib/common/threading.c",
+    "zstd/lib/common/zstd_common.c",
+    "zstd/lib/compress/*.c",
+    "zstd/lib/decompress/*.c",
+    "zstd/lib/dictBuilder/*.c",
+    "zstd/lib/legacy/*.c",
+]
+headers = ["zstd/lib/**/*.h"]
+include_paths = ["zstd/lib", "zstd/lib/common", "zstd/lib/legacy"]
+preprocessor_flags = [
+    "/DXXH_PRIVATE_API",
+    "/DZSTD_LIB_DEPRECATED=0",
+    "/DZSTD_LEGACY_SUPPORT=1",
+    "/DZSTDLIB_VISIBILITY=",
+    "/DZDICTLIB_VISIBILITY=",
+    "/DZSTDERRORLIB_VISIBILITY=",
+    "/DZSTD_DISABLE_ASM",
+]
+compiler_flags = ["/w"]
+preferred_linkage = "static"

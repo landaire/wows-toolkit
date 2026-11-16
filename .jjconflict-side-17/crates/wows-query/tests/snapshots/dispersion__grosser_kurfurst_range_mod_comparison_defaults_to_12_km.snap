@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output.conclusion
+---
+"At 12 km, G. Kurfürst's main battery dispersion without Gun Fire Control System Modification 2 is 180 m horizontal and 93 m vertical; with Gun Fire Control System Modification 2 it is 180 m horizontal and 90.1 m vertical (0% horizontal, -3.1% vertical)."

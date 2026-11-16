@@ -1,0 +1,79 @@
+//! Writing settings back to the shared config database.
+//!
+//! The startup read closes over its own pool; persisting an edit needs one
+//! that outlives it, so the writer is held here for the life of the process
+//! and writes are submitted to the tokio runtime like any other sqlx work. The
+//! write order is `wows_toolkit_services::settings_writer`.
+
+use gpui_kit::App;
+use gpui_kit::AsyncApp;
+use gpui_kit::Global;
+use serde::Serialize;
+use sqlx::sqlite::SqlitePool;
+use wows_toolkit_services::settings_writer::SettingsWriter;
+
+use crate::runtime;
+
+struct SettingsPool(SettingsWriter);
+
+impl Global for SettingsPool {}
+
+/// Installs the pool. Called once, after the startup read has opened it.
+pub fn init(pool: SqlitePool, cx: &mut App) {
+    cx.set_global(SettingsPool(SettingsWriter::new(pool)));
+}
+
+/// The open config pool, for the tabs that query it directly.
+///
+/// `None` before the startup read has installed it, which is a real state:
+/// the tabs render an appropriate status rather than assuming a database.
+pub fn pool(cx: &App) -> Option<SqlitePool> {
+    cx.try_global::<SettingsPool>().map(|held| held.0.pool().clone())
+}
+
+/// Persists one setting.
+///
+/// Fire and forget: the control has already moved, and a failed write is
+/// logged rather than surfaced, matching the egui app, whose save task also
+/// reports failures to the log rather than to the settings tab. The value is
+/// serialized on the caller's thread so the future owns no borrow.
+pub fn save<T: Serialize>(key: &'static str, value: &T, cx: &mut App) {
+    let json = match serde_json::to_string(value) {
+        Ok(json) => json,
+        Err(err) => {
+            tracing::error!("settings: {key} could not be serialized: {err}");
+            return;
+        }
+    };
+    #[cfg(test)]
+    SAVED.with(|saved| saved.borrow_mut().push((key, json.clone())));
+
+    let Some(held) = cx.try_global::<SettingsPool>() else {
+        tracing::warn!("settings: {key} was not saved because the config database is not open");
+        return;
+    };
+    let pending = held.0.begin(key, json);
+
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        let Some(write) = pending.turn().await else { return };
+        match runtime::spawn(cx, write.commit()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => tracing::error!("settings: {key} could not be written: {err}"),
+            Err(err) => tracing::error!("settings: the write of {key} did not complete: {err}"),
+        }
+    })
+    .detach();
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every save asked for on this thread, as its key and its JSON: a test
+    /// window has no database to read them back from.
+    static SAVED: std::cell::RefCell<Vec<(&'static str, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Every save asked for on this thread so far, oldest first.
+#[cfg(test)]
+pub(crate) fn saved_for_test() -> Vec<(&'static str, String)> {
+    SAVED.with(|saved| saved.borrow().clone())
+}

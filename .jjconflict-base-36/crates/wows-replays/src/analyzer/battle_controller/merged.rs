@@ -1,0 +1,279 @@
+//! Per-vehicle fact gathering shared by replay renderers.
+//!
+//! These utilities walk a replay's raw packet stream to extract per-vehicle
+//! initial-state facts (max HP, ship config, crew) and the match arena id,
+//! without constructing any battle controller. Renderers use them to display
+//! ship facts for every player from the first frame of a session.
+
+use std::collections::HashMap;
+
+use wowsunpack::data::Version;
+use wowsunpack::data::ship_config::ShipConfig;
+use wowsunpack::data::ship_config::parse_ship_config;
+use wowsunpack::game_types::GameParamId;
+use wowsunpack::rpc::entitydefs::EntitySpec;
+
+use crate::ReplayFile;
+use crate::analyzer::decoder::DecodedPacketPayload;
+use crate::analyzer::decoder::PacketDecoder;
+use crate::game_constants::GameConstants;
+use crate::packet2::Packet;
+use crate::packet2::PacketType;
+use crate::packet2::Parser;
+use crate::types::EntityId;
+
+use super::controller::CrewModifiersCompactParams;
+use super::controller::EntityType;
+use super::controller::VehicleProps;
+
+/// Per-vehicle facts collected from initial EntityCreate packets, regardless
+/// of which perspective spotted the entity first. Lets renderers display max
+/// HP and consumable inventories for every player from the first frame of a
+/// merged session, even before the primary perspective has spotted them.
+#[derive(Debug, Clone, Default)]
+pub struct VehicleFacts {
+    /// `None` until a shipConfig blob or roster entry names the ship.
+    pub vehicle_id: Option<GameParamId>,
+    /// `None` until a create packet, property update, or roster entry names a
+    /// positive max health.
+    pub max_health: Option<f32>,
+    pub ship_config: ShipConfig,
+    pub crew: CrewModifiersCompactParams,
+}
+
+/// Accumulates per-vehicle facts from a single replay's packet stream.
+///
+/// Feed each decoded packet via [`observe`](Self::observe), then call
+/// [`into_facts`](Self::into_facts) to consume the accumulator and obtain the
+/// collected map. Multiple accumulators can be unioned by merging their output
+/// maps (first-wins per entity, matching the semantics of
+/// [`gather_replay_facts`]).
+pub struct VehicleFactsAccumulator<'c> {
+    facts: HashMap<EntityId, VehicleFacts>,
+    version: Version,
+    constants: &'c GameConstants,
+}
+
+impl<'c> VehicleFactsAccumulator<'c> {
+    /// Create a new accumulator for packets from a replay of `version`,
+    /// parsed against `constants`.
+    pub fn new(version: Version, constants: &'c GameConstants) -> Self {
+        Self { facts: HashMap::new(), version, constants }
+    }
+
+    /// Observe one decoded packet, updating internal state.
+    pub fn observe(&mut self, packet: &Packet<'_, '_>, decoded: &DecodedPacketPayload<'_, '_, '_>) {
+        match &packet.payload {
+            PacketType::EntityCreate(ec) => {
+                if !matches!(ec.entity_type.parse::<EntityType>(), Ok(EntityType::Vehicle)) {
+                    return;
+                }
+                fold_props_into(&mut self.facts, ec.entity_id, &ec.props, self.version, self.constants);
+            }
+            PacketType::CellPlayerCreate(cell) => {
+                if !matches!(cell.entity_type.parse::<EntityType>(), Ok(EntityType::Vehicle)) {
+                    return;
+                }
+                fold_props_into(&mut self.facts, cell.entity_id, &cell.props, self.version, self.constants);
+            }
+            PacketType::BasePlayerCreate(base) => {
+                if !matches!(base.entity_type.parse::<EntityType>(), Ok(EntityType::Vehicle)) {
+                    return;
+                }
+                fold_props_into(&mut self.facts, base.entity_id, &base.props, self.version, self.constants);
+            }
+            PacketType::EntityProperty(ep) => {
+                // Fold any single-property update that carries one of the
+                // fields we care about. shipConfig (and sometimes maxHealth)
+                // arrives this way after the initial create, especially for
+                // own-team ships once the player customizes their loadout.
+                let mut single = HashMap::new();
+                single.insert(ep.property, ep.value.clone());
+                let parsed = VehicleProps::from_create_props(&single, self.version, self.constants);
+
+                let entry = self.facts.entry(ep.entity_id).or_default();
+                if entry.max_health.is_none() {
+                    entry.max_health = parsed.max_health();
+                }
+                if entry.ship_config.abilities().is_empty() && !parsed.ship_config().abilities().is_empty() {
+                    entry.ship_config = parsed.ship_config().clone();
+                    if entry.vehicle_id.is_none() {
+                        entry.vehicle_id = parsed.ship_config().ship_params_id();
+                    }
+                }
+                let parsed_crew = parsed.crew_modifiers_compact_params();
+                if parsed_crew.params_id().is_some() || parsed_crew.has_learned_skills() {
+                    entry.crew.merge_from(parsed_crew);
+                }
+            }
+            _ => {}
+        }
+        if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } = decoded {
+            for player in player_states.iter().chain(bot_states.iter()) {
+                let entity_id = player.entity_id();
+                let entry = self.facts.entry(entity_id).or_default();
+                if entry.max_health.is_none()
+                    && let Some(max_health) = player.max_health().filter(|health| *health > 0)
+                {
+                    entry.max_health = Some(max_health as f32);
+                }
+                if let Some(spid) = player.ship_params_id() {
+                    entry.vehicle_id = Some(spid);
+                    entry.ship_config.set_ship_params_id(spid);
+                    if let Some(blob) = player.ship_config_dump()
+                        && let Ok(mut ship_config) = parse_ship_config(&blob, &self.version)
+                    {
+                        ship_config.set_ship_params_id(spid);
+                        if entry.ship_config.abilities().is_empty() {
+                            entry.ship_config = ship_config;
+                        }
+                    }
+                }
+                if let Some(crew_id) = player.crew_params_id() {
+                    entry.crew.set_params_id(crew_id);
+                }
+            }
+        }
+    }
+
+    /// Consume the accumulator and return the collected facts.
+    pub fn into_facts(self) -> HashMap<EntityId, VehicleFacts> {
+        self.facts
+    }
+}
+
+/// Gather per-vehicle facts directly from every replay's packet stream.
+///
+/// Walks each replay's packets raw and extracts initial-state facts from
+/// every vehicle-create packet (EntityCreate, CellPlayerCreate,
+/// BasePlayerCreate). Each packet's `props` map is parsed via
+/// `VehicleProps::from_create_props`, so any of `shipConfig`, `maxHealth`,
+/// and `crewModifiersCompactParams` lands regardless of which packet type
+/// carried it for a given perspective.
+///
+/// Also folds in `maxHealth` from any later `EntityProperty(maxHealth)`
+/// update, since some ships only broadcast it on first damage.
+///
+/// Also seeds `max_health`, ship configuration, and captain id from
+/// `onArenaStateReceived` for ships the active perspective never detects.
+pub fn gather_replay_facts(
+    constants: &GameConstants,
+    version: Version,
+    specs: &[EntitySpec],
+    replays: &[&ReplayFile],
+) -> HashMap<EntityId, VehicleFacts> {
+    let mut combined: HashMap<EntityId, VehicleFacts> = HashMap::new();
+
+    let decoder = PacketDecoder::builder()
+        .version(version)
+        .battle_constants(constants.battle())
+        .common_constants(constants.common())
+        .ships_constants(constants.ships())
+        .build();
+
+    for (replay_idx, replay) in replays.iter().enumerate() {
+        let before = combined.len();
+        let mut acc = VehicleFactsAccumulator::new(version, constants);
+        let mut parser = Parser::with_version(specs, version);
+        let mut remaining = replay.packet_data();
+        while !remaining.is_empty() {
+            let Ok(packet) = parser.parse_packet(&mut remaining) else { break };
+            let decoded = decoder.decode(&packet);
+            acc.observe(&packet, &decoded.payload);
+        }
+        let replay_facts = acc.into_facts();
+        for (entity_id, src) in replay_facts {
+            let dst = combined.entry(entity_id).or_default();
+            if let Some(vehicle_id) = src.vehicle_id {
+                dst.vehicle_id = Some(vehicle_id);
+                dst.ship_config.set_ship_params_id(vehicle_id);
+            }
+            if dst.max_health.is_none() {
+                dst.max_health = src.max_health;
+            }
+            if dst.ship_config.abilities().is_empty() && !src.ship_config.abilities().is_empty() {
+                dst.ship_config = src.ship_config;
+            }
+            if src.crew.params_id().is_some() || src.crew.has_learned_skills() {
+                dst.crew.merge_from(&src.crew);
+            }
+        }
+        let with_ship_config = combined.values().filter(|f| !f.ship_config.abilities().is_empty()).count();
+        let with_max_health = combined.values().filter(|f| f.max_health.is_some()).count();
+        tracing::info!(
+            replay_idx,
+            player = %replay.meta.playerName,
+            total_facts = combined.len(),
+            new_facts = combined.len() - before,
+            with_ship_config,
+            with_max_health,
+            "gather_replay_facts processed replay"
+        );
+    }
+
+    combined
+}
+
+pub fn fold_props_into(
+    out: &mut HashMap<EntityId, VehicleFacts>,
+    entity_id: EntityId,
+    props: &std::collections::HashMap<&str, wowsunpack::rpc::typedefs::ArgValue<'_>>,
+    version: Version,
+    constants: &GameConstants,
+) {
+    // No create packet carries the ship class param ID. The `vehicle_id` field
+    // on EntityCreate / CellPlayerCreate is BigWorld's vehicle/passenger link,
+    // unused by WoWs. The only authoritative source is the parsed shipConfig blob.
+    let parsed = VehicleProps::from_create_props(props, version, constants);
+    let parsed_vehicle_id = parsed.ship_config().ship_params_id();
+    let parsed_max_health = parsed.max_health();
+    let parsed_ship_config = parsed.ship_config().clone();
+    let parsed_crew = parsed.crew_modifiers_compact_params().clone();
+
+    let entry = out.entry(entity_id).or_default();
+
+    if entry.vehicle_id.is_none() {
+        entry.vehicle_id = parsed_vehicle_id;
+    }
+    if entry.max_health.is_none() {
+        entry.max_health = parsed_max_health;
+    }
+    if entry.ship_config.abilities().is_empty() && !parsed_ship_config.abilities().is_empty() {
+        entry.ship_config = parsed_ship_config;
+    }
+    if parsed_crew.params_id().is_some() || parsed_crew.has_learned_skills() {
+        entry.crew.merge_from(&parsed_crew);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wowsunpack::rpc::typedefs::ArgValue;
+
+    #[test]
+    fn fold_props_merges_skills_into_roster_crew() {
+        let version = Version::from_client_exe("15,9,0,13357625");
+        let constants = GameConstants::defaults();
+        let skills = ArgValue::Array(vec![
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![ArgValue::Uint8(2), ArgValue::Uint8(9)]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+            ArgValue::Array(vec![]),
+        ]);
+        let crew_fields = HashMap::from([("paramsId", ArgValue::Uint32(123)), ("learnedSkills", skills)]);
+        let props: HashMap<&str, ArgValue<'_>> =
+            HashMap::from([("crewModifiersCompactParams", ArgValue::FixedDict(crew_fields))]);
+        let entity_id = EntityId::from(438_335u32);
+        let mut facts = HashMap::new();
+        facts.entry(entity_id).or_insert_with(VehicleFacts::default).crew.set_params_id(GameParamId::from(456u32));
+
+        fold_props_into(&mut facts, entity_id, &props, version, &constants);
+
+        let crew = &facts[&entity_id].crew;
+        assert_eq!(crew.params_id(), Some(GameParamId::from(456u32)));
+        assert_eq!(crew.learned_skills().battleship(), &[2, 9]);
+    }
+}

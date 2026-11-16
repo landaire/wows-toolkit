@@ -1,0 +1,75 @@
+load("//build-support/buck:workspace_rules.bzl", "wasm_select", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+
+buildscript = workspace_buildscript(
+    name = "wows-replays-buildscript",
+    crate = "wows_replays",
+    package = "wows_replays",
+    version = "0.48.0",
+    deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
+)
+
+REPLAYS_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:bon",
+    "//third-party/rust:flate2",
+    "//third-party/rust:kinded",
+    "//third-party/rust:modular-bitfield",
+    "//third-party/rust:pickled",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:roxmltree",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+    "//third-party/rust:winnow",
+]
+
+REPLAYS_FEATURES = ["arc", "parsing", "vfs"]
+
+REPLAYS_TEST_DEPS = [
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//third-party/rust:insta",
+    "//third-party/rust:rust-crypto",
+    "//third-party/rust:sha2",
+]
+
+# What Cargo resolves for wt-web, which enables no feature.
+REPLAYS_WASM_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:flate2",
+    "//third-party/rust:kinded",
+    "//third-party/rust:serde",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tracing",
+]
+
+workspace_library(
+    name = "wows_replays",
+    crate = "wows_replays",
+    package = "wows_replays",
+    version = "0.48.0",
+    features = wasm_select(wasm = [], native = REPLAYS_FEATURES),
+    buildscript = buildscript,
+    deps = wasm_select(wasm = REPLAYS_WASM_DEPS, native = REPLAYS_DEPS),
+)
+
+workspace_test(
+    name = "wows_replays_test",
+    crate = "wows_replays",
+    crate_root = "src/lib.rs",
+    package = "wows_replays",
+    version = "0.48.0",
+    features = REPLAYS_FEATURES,
+    buildscript = buildscript,
+    deps = REPLAYS_DEPS,
+    test_deps = REPLAYS_TEST_DEPS,
+)
+
+workspace_integration_tests(
+    package = "wows_replays",
+    version = "0.48.0",
+    library = ":wows_replays",
+    deps = REPLAYS_DEPS,
+    features = REPLAYS_FEATURES,
+    test_deps = REPLAYS_TEST_DEPS,
+)

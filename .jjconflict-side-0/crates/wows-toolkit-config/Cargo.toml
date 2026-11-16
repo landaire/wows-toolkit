@@ -1,0 +1,32 @@
+[package]
+name = "wows-toolkit-config"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "macros"] }
+home = "0.5"
+wows-core = { path = "../wows-core", features = ["serde"] }
+thiserror = { workspace = true }
+jiff = { workspace = true, features = ["serde"] }
+winnow = { workspace = true }
+
+[features]
+# Compiles the timezone override in, so another crate's tests can pin the zone a
+# bare date and the printer's midnight check resolve against. Off in every
+# production build, which is what keeps "the zone" meaning the system's own.
+test-support = []
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["rt", "macros"] }
+tempfile = "3.27.0"
+# Setting a file's modification time, to show the unindexable ledger forgets a
+# replaced file.
+filetime = "0.2"

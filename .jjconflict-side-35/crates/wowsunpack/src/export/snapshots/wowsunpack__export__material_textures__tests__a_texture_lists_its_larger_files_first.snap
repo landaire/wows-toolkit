@@ -1,0 +1,40 @@
+---
+source: crates/wowsunpack/src/export/material_textures.rs
+expression: "texture_files(&root, \"content/ship/hull_a.dds\")"
+---
+Ok(
+    TextureFiles {
+        format: Some(
+            TextureFormat(
+                BC1RgbaUnormSrgb,
+            ),
+        ),
+        mip_count: 10,
+        files: [
+            TextureFile {
+                path: "content/ship/hull_a.dd0",
+                size: TextureSize {
+                    width: 2048,
+                    height: 1024,
+                },
+                bytes: 40,
+            },
+            TextureFile {
+                path: "content/ship/hull_a.dd1",
+                size: TextureSize {
+                    width: 1024,
+                    height: 512,
+                },
+                bytes: 20,
+            },
+            TextureFile {
+                path: "content/ship/hull_a.dds",
+                size: TextureSize {
+                    width: 512,
+                    height: 256,
+                },
+                bytes: 87548,
+            },
+        ],
+    },
+)

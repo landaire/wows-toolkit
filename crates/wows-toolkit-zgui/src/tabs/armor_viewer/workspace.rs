@@ -59,9 +59,9 @@ use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 
+use crate::long_job::long_job;
 use crate::services::Job;
 use crate::services::Services;
 use crate::tabs::armor_viewer::library::ArmorBundle;
@@ -876,7 +876,7 @@ impl ArmorWorkspace {
             });
             let asked = request.clone();
             let assets = Arc::clone(&bundle.assets);
-            let landed = blocking(move || {
+            let landed = long_job(move || {
                 load_model_scene(&models, assets.metadata(), &asked, &cancel).map(|first| (first, models))
             })
             .await;
@@ -924,7 +924,7 @@ impl ArmorWorkspace {
             });
             let assets = Arc::clone(&bundle.assets);
             let (asked, named) = (param_index.clone(), display_name.clone());
-            let landed = blocking(move || load_ship_armor_by_param(&assets, &asked, &named, &cancel)).await;
+            let landed = long_job(move || load_ship_armor_by_param(&assets, &asked, &named, &cancel)).await;
             if !target.is_current_load(started.generation) {
                 // A newer selection in the same pane superseded this load.
                 return;

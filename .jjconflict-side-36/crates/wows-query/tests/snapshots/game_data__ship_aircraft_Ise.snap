@@ -1,0 +1,64 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: aircraft
+---
+ship:
+  name: Ise
+  index: PJSB526
+  tier: 6
+  class: battleship
+  nation: Japan
+  group: special
+  category: premium
+  status: released
+squadron_count: 2
+squadrons:
+  - role: torpedo_bombers
+    aircraft: Aichi M6A2 Seiran
+    aircraft_param: PJAB606_ISE_STOCK
+    squadron_size: 4
+    attack_flight_size: 4
+    payload_per_plane: 2
+    speed_with_ordnance_knots: 122
+    ordnance:
+      kind: torpedo
+      name: Type 5
+      param: PJPT606_ISE_STOCK
+      damage: 2767
+      fire_chance_pct: 0
+      fall_time_coef: 1
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+  - role: air_strike
+    aircraft: Kawanishi H8K
+    aircraft_param: PJAD904_ASW_T5
+    squadron_size: 8
+    attack_flight_size: 1
+    payload_per_plane: 1
+    speed_with_ordnance_knots: 176
+    ordnance:
+      kind: depth_charge
+      name: Type 99 No. 6 Mk 2 mod. 1
+      param: PJPD103_depth_T5
+      damage: 2900
+      fire_chance_pct: 16
+      fall_time_coef: 1.5
+    air_strike:
+      planes_per_strike: 1
+      charges: 1
+      reload_s: 20
+      range_km: 8
+    fire_chance:
+      stat: Kawanishi H8K fire chance per projectile
+      unit: "%"
+      builds:
+        base: 16
+        best:
+          value: 16
+          assumed: []
+    vs_plate:
+      result: not_applicable
+      reason: strikes below the waterline and does not test plates
+thickness_mm: 32
+rule: "HE and SAP ordnance defeats the plate when its penetration is at least the thickness. Inertia Fuse for HE Shells does not apply to aircraft ordnance. AP bombs and rockets overmatch the plate when caliber > 14.3 x thickness; otherwise they defeat it when their penetration at bulletSpeed (ordnance.ap.penetration_mm) is at least the thickness, struck head-on: strike angle, normalization and ricochet are not applied. Torpedoes, depth charges and mines do not test plates."

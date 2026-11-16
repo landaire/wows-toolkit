@@ -1,0 +1,44 @@
+[package]
+name = "wows-battle-world"
+description = "ECS implementation for World of Warships, used in replay processing"
+repository = "https://github.com/landaire/wows-toolkit"
+version = "0.15.0"
+# Golden snapshots and the bench both need a replay corpus plus a real game
+# install, neither of which is available to consumers of the published crate.
+exclude = ["BUCK", "tests/", "benches/"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+wows-core = { workspace = true }
+wows_replays = { workspace = true, features = ["arc", "parsing"] }
+wowsunpack = { workspace = true, features = ["arc"] }
+pickled = { workspace = true }
+rootcause = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# 0.18.1: pinned deliberately; newer bevy_ecs releases are unevaluated here.
+bevy_ecs = "0.18.1"
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[features]
+default = []
+# Mirrors wows-replays: loads a real WoWS install for differential tests.
+vfs = ["wows_replays/vfs"]
+
+[dev-dependencies]
+criterion = { workspace = true }
+insta = { workspace = true }
+serde = { workspace = true }
+wowsunpack = { workspace = true, features = ["arc", "vfs"] }
+wows-data-mgr = { workspace = true }
+
+[[bench]]
+name = "replay_pipeline"
+harness = false
+required-features = ["vfs"]

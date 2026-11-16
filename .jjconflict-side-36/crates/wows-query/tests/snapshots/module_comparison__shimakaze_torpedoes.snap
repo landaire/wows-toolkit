@@ -1,0 +1,65 @@
+---
+source: crates/wows-query/tests/module_comparison.rs
+expression: output
+---
+ship: "T10 Shimakaze (destroyer, Japan)"
+range_km: 12
+kinds:
+  - kind: torpedoes
+    options:
+      - module: Type 93
+        stock: true
+        values:
+          - "launchers x tubes: 3 x 5"
+          - "tubes: 15"
+          - "reload: 150.0 s"
+          - "torpedo: Type 93"
+          - "damage: 20967"
+          - "range: 20.0 km"
+          - "speed: 62.0 kn"
+          - "detectability: 2.5 km"
+          - "reaction time: 15.02 s"
+          - "damage per minute against one target: 125800 hp/min"
+          - "damage per minute, every launcher firing at once: 125800 hp/min"
+          - "torpedoes per minute against one target: 6.00 torpedoes/min"
+          - "torpedoes per minute, every launcher firing at once: 6.00 torpedoes/min"
+      - module: Type 93 mod. 3
+        stock: false
+        values:
+          - "launchers x tubes: 3 x 5"
+          - "tubes: 15"
+          - "reload: 153.0 s"
+          - "torpedo: Type 93 mod. 3"
+          - "damage: 23767"
+          - "range: 12.0 km"
+          - "speed: 67.0 kn"
+          - "detectability: 1.7 km"
+          - "reaction time: 9.45 s"
+          - "damage per minute against one target: 139804 hp/min"
+          - "damage per minute, every launcher firing at once: 139804 hp/min"
+          - "torpedoes per minute against one target: 5.88 torpedoes/min"
+          - "torpedoes per minute, every launcher firing at once: 5.88 torpedoes/min"
+      - module: Type F3
+        stock: false
+        values:
+          - "launchers x tubes: 3 x 5"
+          - "tubes: 15"
+          - "reload: 131.0 s"
+          - "torpedo: Type F3"
+          - "damage: 21367"
+          - "range: 8.0 km"
+          - "speed: 76.0 kn"
+          - "detectability: 1.8 km"
+          - "reaction time: 8.82 s"
+          - "damage per minute against one target: 146794 hp/min"
+          - "damage per minute, every launcher firing at once: 146794 hp/min"
+          - "torpedoes per minute against one target: 6.87 torpedoes/min"
+          - "torpedoes per minute, every launcher firing at once: 6.87 torpedoes/min"
+    differences:
+      - "Type 93 mod. 3: reload 153.0 s instead of 150.0 s; torpedo Type 93 mod. 3 instead of Type 93; damage 23767 instead of 20967; range 12.0 km instead of 20.0 km; speed 67.0 kn instead of 62.0 kn; detectability 1.7 km instead of 2.5 km; reaction time 9.45 s instead of 15.02 s; damage per minute against one target 139804 hp/min instead of 125800 hp/min; damage per minute, every launcher firing at once 139804 hp/min instead of 125800 hp/min; torpedoes per minute against one target 5.88 torpedoes/min instead of 6.00 torpedoes/min; torpedoes per minute, every launcher firing at once 5.88 torpedoes/min instead of 6.00 torpedoes/min."
+      - "Type F3: reload 131.0 s instead of 150.0 s; torpedo Type F3 instead of Type 93; damage 21367 instead of 20967; range 8.0 km instead of 20.0 km; speed 76.0 kn instead of 62.0 kn; detectability 1.8 km instead of 2.5 km; reaction time 8.82 s instead of 15.02 s; damage per minute against one target 146794 hp/min instead of 125800 hp/min; damage per minute, every launcher firing at once 146794 hp/min instead of 125800 hp/min; torpedoes per minute against one target 6.87 torpedoes/min instead of 6.00 torpedoes/min; torpedoes per minute, every launcher firing at once 6.87 torpedoes/min instead of 6.00 torpedoes/min."
+notes:
+  - "Every option is on the stock build: the ship's other modules stock unless the option needs others (listed in with), no captain skills, upgrades or consumables."
+  - "Damage, fires and torpedoes per minute assume every shell or torpedo hits, on the reload with no consumable, against one target at the bearing where the most guns or launchers bear; values for every mount or launcher firing at once are a ceiling no single target sees. AA damage per second is before hit chance."
+  - "AP raw penetration, flight time and impact velocity at range_km come from each shell's ballistic solution: penetration against a plate struck head-on. Dispersion at range_km is computed even beyond the option's maximum range."
+  - "Torpedo reaction time is detectability / speed, with speed in knots x 2.69 m/s per knot: the time a target has from spotting the torpedo until it arrives."

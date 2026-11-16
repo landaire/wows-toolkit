@@ -1,0 +1,26 @@
+#!/bin/sh
+# Runs the Buck2 release that toolchains/buck2 pins, through the DotSlash that
+# bootstrap.sh installs into .tools. Add this directory to PATH to run it as
+# buck2.
+set -eu
+
+# Resolve links to this file so a link on PATH finds the repository.
+self=$0
+while [ -L "$self" ]; do
+    target=$(readlink "$self")
+    case $target in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+    esac
+done
+
+root=$(CDPATH='' cd -- "$(dirname -- "$self")/.." && pwd)
+dotslash=$root/.tools/bin/dotslash
+
+if [ ! -x "$dotslash" ]; then
+    "$root/bootstrap.sh" --buck2-only
+fi
+
+DOTSLASH_CACHE=$root/.tools/dotslash
+export DOTSLASH_CACHE
+exec "$dotslash" "$root/toolchains/buck2" "$@"

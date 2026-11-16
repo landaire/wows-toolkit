@@ -1,0 +1,5 @@
+#unstable_features = true
+#imports_granularity = "Item"
+#imports_layout = "Vertical"
+use_small_heuristics = "Max"
+max_width = 120

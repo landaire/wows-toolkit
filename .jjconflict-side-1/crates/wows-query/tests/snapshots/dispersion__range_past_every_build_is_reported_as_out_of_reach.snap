@@ -1,0 +1,5 @@
+---
+source: crates/wows-query/tests/dispersion.rs
+expression: output.conclusion
+---
+"Des Moines's main battery reaches 15.83 km, short of 25 km. No build reaches it: the longest, Spotting Aircraft + Gun Fire Control System Modification 2, reaches 22.04 km."

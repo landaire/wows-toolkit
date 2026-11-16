@@ -1,0 +1,31 @@
+---
+source: crates/wows-query/tests/game_data.rs
+assertion_line: 2169
+expression: search
+---
+conditions:
+  - armor.citadel.max >= 400 mm
+  - mobility.speed >= 33 kn
+rule: "A ship qualifies with stock modules, or with the fewest modules, upgrades (one per slot) and captain skills (21 points, each skill needing one on every cheaper tier) that make every condition hold. Conditional skills count with their triggers unmet, as on the always-on build; health-scaled effects use full health."
+considered:
+  total: 28
+  by_class:
+    destroyer: 6
+    cruiser: 6
+    battleship: 9
+    aircraft_carrier: 3
+    submarine: 4
+  test: 4
+qualifying:
+  total: 0
+  by_class: {}
+  stock: 0
+  with_requirements: 0
+share_pct: 0
+share_pct_by_class:
+  destroyer: 0
+  cruiser: 0
+  battleship: 0
+  aircraft_carrier: 0
+  submarine: 0
+ships: []

@@ -1,0 +1,18 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: "explain(json!({ \"ship\": \"Des Moines\", \"value\": 585744 }))"
+---
+ship: "T10 Des Moines (cruiser, USA)"
+value: "585744"
+rule: "A match is a stat of this ship whose value rounds to the number at its decimals, on the stock modules or another module combination, alone or with up to three captain skills (21 points, a skill on every cheaper tier) and upgrades (one per slot); conditional skills count with their trigger met only where marked active, and the ship's special ability only where named. Fewer assumptions rank first. Signals, camouflage and commander talents are not searched."
+matches:
+  - stat: artillery.shells.damage_per_minute
+    label: Main battery damage per minute (AP)
+    value: 585743.81 hp/min
+    base: 490909.09 hp/min
+    build:
+      - Heavy AP Shells
+      - Main Battery Modification 3
+    because:
+      - Main Battery Modification 3 x0.88 (-0.66)
+      - Heavy AP Shells x1.05 (+250)

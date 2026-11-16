@@ -1,0 +1,235 @@
+//! Packet ingestion: translates decoded packet payloads into ECS state changes.
+
+pub mod aviation;
+pub mod chat;
+pub mod combat;
+pub mod consumables;
+pub mod entities;
+pub mod hydrophone;
+pub mod match_state;
+pub mod positions;
+pub mod projectiles;
+pub mod vehicles;
+pub mod zones;
+
+use bevy_ecs::world::World;
+use wows_replays::analyzer::decoder::DecodedPacketPayload;
+use wows_replays::game_constants::GameConstants;
+use wows_replays::types::GameClock;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
+use wowsunpack::game_types::WorldPos;
+
+use crate::ids::IngestOptions;
+use crate::resources::PresenceLog;
+
+/// Record that entity state for `entity` arrived at `clock`, which is what
+/// bounds a still-open presence window. See `PresenceLog::note_seen` for why
+/// minimap updates are not among the arms that call this.
+fn note_seen(world: &mut World, entity: wows_replays::types::EntityId, clock: GameClock) {
+    world.resource_mut::<PresenceLog>().note_seen(entity, clock);
+}
+
+/// Dispatch one decoded packet into the ECS world.
+///
+/// Every variant has an explicit arm so a future-added variant is a compile
+/// error rather than silently dropped.
+pub fn dispatch<G: ResourceLoader>(
+    payload: DecodedPacketPayload<'_, '_, '_>,
+    world: &mut World,
+    resources: &G,
+    constants: &GameConstants,
+    version: Version,
+    options: &IngestOptions,
+    clock: GameClock,
+) {
+    match payload {
+        DecodedPacketPayload::Chat { entity_id, sender_id, audience, message, extra_data } => {
+            // The wire type is AccountId, but in the PLAYER_ID era (see
+            // chat_sender_is_account_id) the value it carries is actually the
+            // sender's player id, not their account id.
+            let sender_id = wows_replays::types::PlayerId::from(sender_id.raw());
+            chat::handle_chat_message(
+                chat::ChatMessage { entity_id, sender_id, audience, message, extra_data },
+                clock,
+                world,
+                resources,
+                version,
+            );
+        }
+        DecodedPacketPayload::VoiceLine { .. } => {}
+        DecodedPacketPayload::Ribbon(ribbon) => {
+            combat::handle_ribbon(ribbon, world, clock);
+        }
+        DecodedPacketPayload::Position(pos) => {
+            note_seen(world, pos.pid, clock);
+            positions::handle_position(&pos, world, clock);
+        }
+        DecodedPacketPayload::PlayerOrientation(orient) => {
+            note_seen(world, orient.pid, clock);
+            positions::handle_player_orientation(&orient, world, clock);
+        }
+        DecodedPacketPayload::DamageStat(ref entries) => {
+            combat::handle_damage_stat(entries, world);
+        }
+        DecodedPacketPayload::ShipDestroyed { killer, victim, cause } => {
+            combat::handle_ship_destroyed(killer, victim, cause, clock, world);
+        }
+        DecodedPacketPayload::EntityMethod(_) => {}
+        DecodedPacketPayload::EntityProperty(prop) => {
+            note_seen(world, prop.entity_id, clock);
+            vehicles::handle_vehicle_property(
+                prop.entity_id,
+                prop.property,
+                &prop.value,
+                world,
+                version,
+                constants,
+                clock,
+            );
+            zones::handle_entity_property_zone(prop.entity_id, prop.property, &prop.value, world);
+            match_state::handle_entity_property_match(prop.property, &prop.value, clock, world, constants, version);
+        }
+        DecodedPacketPayload::BasePlayerCreate(base) => {
+            note_seen(world, base.entity_id, clock);
+            vehicles::apply_player_create_props(base.entity_id, &base.props, world, version, constants, clock);
+        }
+        DecodedPacketPayload::CellPlayerCreate(cell) => {
+            note_seen(world, cell.entity_id, clock);
+            vehicles::apply_player_create_props(cell.entity_id, &cell.props, world, version, constants, clock);
+        }
+        DecodedPacketPayload::EntityEnter(enter) => {
+            // AOI re-entry proves the entity is being received again, but
+            // carries no properties, so it refreshes presence without opening
+            // a window. When it follows a blackout it is the update that
+            // closes the stale window; see `PresenceLog::note_seen`.
+            note_seen(world, enter.entity_id, clock);
+        }
+        DecodedPacketPayload::EntityLeave(leave) => {
+            entities::handle_entity_leave(leave.entity_id, clock, world);
+        }
+        DecodedPacketPayload::EntityCreate(entity_create) => {
+            entities::handle_entity_create(clock, entity_create, world, resources, constants, version);
+        }
+        DecodedPacketPayload::OnArenaStateReceived {
+            arena_id,
+            team_build_type_id: _,
+            pre_battles_info: _,
+            player_states: players,
+            bot_states: bots,
+        } => {
+            match_state::handle_arena_id(arena_id, world);
+            entities::seed_vehicles_from_arena_state(
+                players.iter().chain(bots.iter()),
+                clock,
+                world,
+                resources,
+                constants,
+                version,
+            );
+        }
+        DecodedPacketPayload::OnGameRoomStateChanged { player_states } => {
+            match_state::handle_game_room_state_changed(&player_states, clock, world);
+        }
+        DecodedPacketPayload::NewPlayerSpawnedInBattle { player_states: players, bot_states: bots } => {
+            entities::seed_spawned_players(players.iter().chain(bots.iter()), world, resources, constants, version);
+        }
+        DecodedPacketPayload::CheckPing(_) => {}
+        DecodedPacketPayload::DamageReceived { victim, ref aggressors } => {
+            combat::handle_damage_received(victim, aggressors, clock, world);
+        }
+        DecodedPacketPayload::MinimapUpdate { updates, .. } => {
+            positions::handle_minimap_updates(&updates, world, clock, options.source_team);
+        }
+        DecodedPacketPayload::PropertyUpdate(update) => {
+            zones::handle_property_update(update, clock, world);
+            combat::handle_ribbon_property_update(update, world, clock);
+        }
+        DecodedPacketPayload::BattleEnd { winning_team, finish_type } => {
+            match_state::handle_battle_end(winning_team, finish_type, clock, world);
+        }
+        DecodedPacketPayload::Consumable { entity, consumable, duration, usage_params } => {
+            consumables::handle_consumable(entity, consumable.clone(), duration, usage_params, clock, world);
+        }
+        DecodedPacketPayload::DetectedByHydrophone { detected } => {
+            hydrophone::handle_detection(detected, world, clock);
+        }
+        DecodedPacketPayload::HydrophoneContacts { ref contacts, broadcast } => {
+            hydrophone::handle_zone_contacts(contacts, broadcast, world, clock);
+        }
+        DecodedPacketPayload::HydrophoneContactLost { entity } => {
+            hydrophone::handle_contact_lost(entity, world);
+        }
+        DecodedPacketPayload::HydrophoneCleared => {
+            hydrophone::handle_cleared(world);
+        }
+        DecodedPacketPayload::SubmarineHydrophoneContacts { holder, ref contacts, zone_life_time } => {
+            hydrophone::handle_submarine_contacts(holder, contacts, zone_life_time, world, clock);
+        }
+        DecodedPacketPayload::CruiseState { .. } => {}
+        DecodedPacketPayload::Map(_) => {}
+        DecodedPacketPayload::Version(_) => {}
+        DecodedPacketPayload::Camera(_) => {}
+        DecodedPacketPayload::CameraMode(_) => {}
+        DecodedPacketPayload::CameraFreeLook(_) => {}
+        DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
+            projectiles::handle_artillery_shots(avatar_id, salvos, clock, world, options);
+        }
+        // Secondary fire is rendered from the shared receiveArtilleryShots path
+        // (classified by the owner ship's ATBA ammo), so the per-gun fire bitmask
+        // is unused.
+        DecodedPacketPayload::WeaponFired { .. } => {}
+        DecodedPacketPayload::TorpedoesReceived { avatar_id, torpedoes } => {
+            projectiles::handle_torpedoes_received(avatar_id, torpedoes, clock, world);
+        }
+        DecodedPacketPayload::TorpedoDirection { owner_id, shot_id, position, target_yaw, speed_coef } => {
+            projectiles::handle_torpedo_direction(owner_id, shot_id, position, target_yaw, speed_coef, clock, world);
+        }
+        DecodedPacketPayload::ShotKills { avatar_id, hits } => {
+            projectiles::handle_shot_kills(avatar_id, hits, clock, world, options);
+        }
+        DecodedPacketPayload::GunSync { entity_id, weapon_type, gun_id, yaw, .. } => {
+            vehicles::handle_gun_sync(entity_id, weapon_type, gun_id, yaw, world);
+        }
+        DecodedPacketPayload::PlaneAdded { entity_id, plane_id, team_id, params_id, position } => {
+            aviation::handle_plane_added(entity_id, plane_id, team_id, params_id, position, clock, world);
+        }
+        DecodedPacketPayload::PlanePosition { entity_id: _, plane_id, position } => {
+            aviation::handle_plane_position(plane_id, position, clock, world);
+        }
+        DecodedPacketPayload::PlaneRemoved { entity_id: _, plane_id } => {
+            aviation::handle_plane_removed(plane_id, options.source_team, world);
+        }
+        DecodedPacketPayload::WardAdded { entity_id: _, plane_id, position, radius, owner_id } => {
+            aviation::handle_ward_added(plane_id, position, radius, owner_id, world);
+        }
+        DecodedPacketPayload::WardRemoved { entity_id: _, plane_id } => {
+            aviation::handle_ward_removed(plane_id, world);
+        }
+        DecodedPacketPayload::SetAmmoForWeapon { entity_id, weapon_type, ammo_param_id, .. } => {
+            vehicles::handle_set_ammo_for_weapon(entity_id, weapon_type, ammo_param_id, world);
+        }
+        DecodedPacketPayload::EntityControl(_) => {}
+        DecodedPacketPayload::NonVolatilePosition(sd) => {
+            let pos = WorldPos::new(sd.position.x, sd.position.y, sd.position.z);
+            positions::handle_non_volatile_position(sd.entity_id, pos, world);
+        }
+        DecodedPacketPayload::PlayerNetStats(_) => {}
+        DecodedPacketPayload::ServerTimestamp(_) => {}
+        DecodedPacketPayload::OwnShip(_) => {}
+        DecodedPacketPayload::SetWeaponLock(_) => {}
+        DecodedPacketPayload::ServerTick(_) => {}
+        DecodedPacketPayload::SubController(_) => {}
+        DecodedPacketPayload::ShotTracking(_) => {}
+        DecodedPacketPayload::GunMarker(_) => {}
+        DecodedPacketPayload::SyncShipCracks { .. } => {}
+        DecodedPacketPayload::InitFlag(_) => {}
+        DecodedPacketPayload::InitMarker => {}
+        DecodedPacketPayload::Unknown(_) => {}
+        DecodedPacketPayload::Invalid(_) => {}
+        DecodedPacketPayload::Audit(_) => {}
+        DecodedPacketPayload::BattleResults(json) => {
+            match_state::handle_battle_results(json, world);
+        }
+    }
+}

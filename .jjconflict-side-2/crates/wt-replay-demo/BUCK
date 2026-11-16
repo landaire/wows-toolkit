@@ -1,0 +1,56 @@
+load("//build-support/buck:wasm_rules.bzl", "wasm_site", "wasm_target_compatible_with")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+# Built for wasm32 only, from whatever platform it is asked for.
+workspace_library(
+    name = "wt_replay_demo",
+    crate = "wt_replay_demo",
+    package = "wt-replay-demo",
+    version = "1.1.0-beta4",
+    incoming_transition = "//build-support/buck/wasm:transition",
+    target_compatible_with = wasm_target_compatible_with(),
+    rustc_flags = select({
+        "toolchains//:release": ["-Clto=thin", "-Cstrip=symbols"],
+        "DEFAULT": [],
+    }),
+    deps = [
+        "//crates/minimap-renderer:wows_minimap_renderer",
+        "//crates/wows-replays:wows_replays",
+        "//crates/wt-collab-egui:wt_collab_egui",
+        "//crates/wt-translations:wt_translations",
+        "//third-party/rust:eframe",
+        "//third-party/rust:egui",
+        "//third-party/rust:getrandom",
+        "//third-party/rust:js-sys",
+        "//third-party/rust:png",
+        "//third-party/rust:ring",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:wasm-bindgen",
+        "//third-party/rust:wasm-bindgen-futures",
+        "//third-party/rust:web-sys",
+        "//third-party/rust:wgpu",
+    ],
+)
+
+# The replay demo the site embeds. The page loads it from its own directory,
+# so the module and glue are fetched relative to it.
+wasm_site(
+    name = "site",
+    index = "index.html",
+    module = ":wt_replay_demo[cdylib]",
+    out_name = "wt-replay-demo",
+    public_url = "./",
+    target_compatible_with = wasm_target_compatible_with(),
+    visibility = ["PUBLIC"],
+    # The proposals rustc enables by default for wasm32-unknown-unknown; see
+    # //crates/wt-web:site.
+    wasm_opt_flags = [
+        "-O2",
+        "--enable-bulk-memory",
+        "--enable-multivalue",
+        "--enable-mutable-globals",
+        "--enable-nontrapping-float-to-int",
+        "--enable-reference-types",
+        "--enable-sign-ext",
+    ],
+)

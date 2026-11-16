@@ -1,0 +1,1804 @@
+---
+source: crates/wows-query/tests/special_abilities.rs
+expression: stats
+---
+ship:
+  name: Condé
+  index: PFSC111
+  tier: 11
+  class: cruiser
+  nation: France
+  group: superShip
+  category: tech_tree
+  status: released
+special_ability:
+  - Burst Fire and Modified Shells
+build_stats:
+  main_battery_reload:
+    stat: main battery reload
+    unit: s
+    builds:
+      base: 50
+      best:
+        value: 44
+        assumed:
+          - Main Battery Modification 3
+      alternatives:
+        - label: without Main Battery Modification 3
+          value: 50
+          assumed: []
+        - label: with Top Grade Gunner active
+          value: 40.48
+          assumed:
+            - Main Battery Modification 3
+            - Top Grade Gunner
+          note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+  main_battery_range:
+    stat: main battery range
+    unit: km
+    builds:
+      base: 19.5
+      best:
+        value: 22.62
+        assumed:
+          - Gun Fire Control System Modification 2
+      alternatives:
+        - label: without Gun Fire Control System Modification 2
+          value: 19.5
+          assumed: []
+  main_battery_dispersion:
+    stat: main battery horizontal dispersion at 19.5 km
+    unit: m
+    builds:
+      base: 134
+      best:
+        value: 125
+        assumed:
+          - Aiming Systems Modification 1
+      alternatives:
+        - label: without Aiming Systems Modification 1
+          value: 134
+          assumed: []
+        - label: with Outnumbered active
+          value: 112
+          assumed:
+            - Aiming Systems Modification 1
+            - Outnumbered
+          note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+  secondary_range:
+    stat: secondary battery range
+    unit: km
+    builds:
+      base: 8.3
+      best:
+        value: 11.95
+        assumed:
+          - Pack a Punch
+          - Secondary Battery Modification 1
+      alternatives:
+        - label: without Pack a Punch
+          value: 9.96
+          assumed:
+            - Secondary Battery Modification 1
+        - label: without Secondary Battery Modification 1
+          value: 9.96
+          assumed:
+            - Pack a Punch
+  torpedo_reload:
+    stat: torpedo reload
+    unit: s
+    builds:
+      base: 110
+      best:
+        value: 84.15
+        assumed:
+          - Fill the Tubes
+          - Torpedo Tubes Modification 2
+      alternatives:
+        - label: without Fill the Tubes
+          value: 93.5
+          assumed:
+            - Torpedo Tubes Modification 2
+        - label: without Torpedo Tubes Modification 2
+          value: 99
+          assumed:
+            - Fill the Tubes
+  burst_fire:
+    shots_per_burst: 2
+    shot_interval:
+      stat: burst shot interval
+      unit: s
+      builds:
+        base: 1.5
+        best:
+          value: 1.32
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value: 1.5
+            assumed: []
+          - label: with Top Grade Gunner active
+            value: 1.21
+            assumed:
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    reload_after_burst:
+      stat: reload after a burst
+      unit: s
+      builds:
+        base: 50
+        best:
+          value: 44
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value: 50
+            assumed: []
+          - label: with Top Grade Gunner active
+            value: 40.48
+            assumed:
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    cycle:
+      stat: burst cycle
+      unit: s
+      builds:
+        base: 51.5
+        best:
+          value: 45.32
+          assumed:
+            - Main Battery Modification 3
+        alternatives:
+          - label: without Main Battery Modification 3
+            value: 51.5
+            assumed: []
+          - label: with Top Grade Gunner active
+            value: 41.69
+            assumed:
+              - Main Battery Modification 3
+              - Top Grade Gunner
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+  torpedoes_per_minute:
+    launchers: 2
+    tubes: 8
+    tubes_per_reload: 8
+    rate:
+      stat: torpedoes per minute
+      unit: torpedoes/min
+      builds:
+        base:
+          torpedoes_per_minute: 2.18
+          bearing: 90
+          all_launchers_ceiling: 4.36
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 2.18
+              port: 2.18
+            - bearing: 45
+              starboard: 2.18
+              port: 2.18
+            - bearing: 60
+              starboard: 2.18
+              port: 2.18
+            - bearing: 90
+              starboard: 2.18
+              port: 2.18
+            - bearing: 120
+              starboard: 2.18
+              port: 2.18
+            - bearing: 135
+              starboard: 2.18
+              port: 2.18
+            - bearing: 150
+              starboard: 2.18
+              port: 2.18
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            torpedoes_per_minute: 2.85
+            bearing: 90
+            all_launchers_ceiling: 5.7
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 2.85
+                port: 2.85
+              - bearing: 45
+                starboard: 2.85
+                port: 2.85
+              - bearing: 60
+                starboard: 2.85
+                port: 2.85
+              - bearing: 90
+                starboard: 2.85
+                port: 2.85
+              - bearing: 120
+                starboard: 2.85
+                port: 2.85
+              - bearing: 135
+                starboard: 2.85
+                port: 2.85
+              - bearing: 150
+                starboard: 2.85
+                port: 2.85
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Fill the Tubes
+            - Torpedo Tubes Modification 2
+        alternatives:
+          - label: without Fill the Tubes
+            value:
+              torpedoes_per_minute: 2.57
+              bearing: 90
+              all_launchers_ceiling: 5.13
+            assumed:
+              - Torpedo Tubes Modification 2
+          - label: without Torpedo Tubes Modification 2
+            value:
+              torpedoes_per_minute: 2.42
+              bearing: 90
+              all_launchers_ceiling: 4.85
+            assumed:
+              - Fill the Tubes
+  main_battery_damage:
+    - ammo: AP
+      damage: 6200
+      barrels: 12
+      rates:
+        stat: main battery AP damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 173359
+            damage_per_second: 2889.3
+            bearing: 90
+            all_barrels_ceiling: 173359
+            by_bearing:
+              - bearing: 0
+                starboard: 115573
+                port: 115573
+              - bearing: 30
+                starboard: 115573
+                port: 115573
+              - bearing: 45
+                starboard: 173359
+                port: 173359
+              - bearing: 60
+                starboard: 173359
+                port: 173359
+              - bearing: 90
+                starboard: 173359
+                port: 173359
+              - bearing: 120
+                starboard: 173359
+                port: 173359
+              - bearing: 135
+                starboard: 173359
+                port: 173359
+              - bearing: 150
+                starboard: 57786
+                port: 57786
+              - bearing: 180
+                starboard: 57786
+                port: 57786
+          best:
+            value:
+              damage_per_minute: 206849
+              damage_per_second: 3447.5
+              bearing: 90
+              all_barrels_ceiling: 206849
+              by_bearing:
+                - bearing: 0
+                  starboard: 137899
+                  port: 137899
+                - bearing: 30
+                  starboard: 137899
+                  port: 137899
+                - bearing: 45
+                  starboard: 206849
+                  port: 206849
+                - bearing: 60
+                  starboard: 206849
+                  port: 206849
+                - bearing: 90
+                  starboard: 206849
+                  port: 206849
+                - bearing: 120
+                  starboard: 206849
+                  port: 206849
+                - bearing: 135
+                  starboard: 206849
+                  port: 206849
+                - bearing: 150
+                  starboard: 68950
+                  port: 68950
+                - bearing: 180
+                  starboard: 68950
+                  port: 68950
+            assumed:
+              - Heavy AP Shells
+              - Main Battery Modification 3
+          alternatives:
+            - label: without Heavy AP Shells
+              value:
+                damage_per_minute: 196999
+                damage_per_second: 3283.3
+                bearing: 90
+                all_barrels_ceiling: 196999
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 182027
+                damage_per_second: 3033.8
+                bearing: 90
+                all_barrels_ceiling: 182027
+              assumed:
+                - Heavy AP Shells
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 224836
+                damage_per_second: 3747.3
+                bearing: 90
+                all_barrels_ceiling: 224836
+              assumed:
+                - Heavy AP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+            - label: with Main Battery Reload Booster active
+              value:
+                damage_per_minute: 413698
+                damage_per_second: 6895
+                bearing: 90
+                all_barrels_ceiling: 413698
+              assumed:
+                - Heavy AP Shells
+                - Main Battery Modification 3
+              note: "Only while Main Battery Reload Booster is active: 4 charges of 15 s, 80 s cooldown, stock build. It multiplies the main battery reload time by 0.5."
+      burst_damage: 148800
+      during_burst:
+        stat: main battery AP damage rate during a burst
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 2976000
+            damage_per_second: 49600
+            bearing: 90
+            all_barrels_ceiling: 2976000
+            by_bearing:
+              - bearing: 0
+                starboard: 1984000
+                port: 1984000
+              - bearing: 30
+                starboard: 1984000
+                port: 1984000
+              - bearing: 45
+                starboard: 2976000
+                port: 2976000
+              - bearing: 60
+                starboard: 2976000
+                port: 2976000
+              - bearing: 90
+                starboard: 2976000
+                port: 2976000
+              - bearing: 120
+                starboard: 2976000
+                port: 2976000
+              - bearing: 135
+                starboard: 2976000
+                port: 2976000
+              - bearing: 150
+                starboard: 992000
+                port: 992000
+              - bearing: 180
+                starboard: 992000
+                port: 992000
+          best:
+            value:
+              damage_per_minute: 3550909
+              damage_per_second: 59181.8
+              bearing: 90
+              all_barrels_ceiling: 3550909
+              by_bearing:
+                - bearing: 0
+                  starboard: 2367273
+                  port: 2367273
+                - bearing: 30
+                  starboard: 2367273
+                  port: 2367273
+                - bearing: 45
+                  starboard: 3550909
+                  port: 3550909
+                - bearing: 60
+                  starboard: 3550909
+                  port: 3550909
+                - bearing: 90
+                  starboard: 3550909
+                  port: 3550909
+                - bearing: 120
+                  starboard: 3550909
+                  port: 3550909
+                - bearing: 135
+                  starboard: 3550909
+                  port: 3550909
+                - bearing: 150
+                  starboard: 1183636
+                  port: 1183636
+                - bearing: 180
+                  starboard: 1183636
+                  port: 1183636
+            assumed:
+              - Heavy AP Shells
+              - Main Battery Modification 3
+          alternatives:
+            - label: without Heavy AP Shells
+              value:
+                damage_per_minute: 3381818
+                damage_per_second: 56363.6
+                bearing: 90
+                all_barrels_ceiling: 3381818
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 3124800
+                damage_per_second: 52080
+                bearing: 90
+                all_barrels_ceiling: 3124800
+              assumed:
+                - Heavy AP Shells
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 3859684
+                damage_per_second: 64328.1
+                bearing: 90
+                all_barrels_ceiling: 3859684
+              assumed:
+                - Heavy AP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    - ammo: HE
+      damage: 3400
+      barrels: 12
+      rates:
+        stat: main battery HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 95068
+            damage_per_second: 1584.5
+            bearing: 90
+            all_barrels_ceiling: 95068
+            by_bearing:
+              - bearing: 0
+                starboard: 63379
+                port: 63379
+              - bearing: 30
+                starboard: 63379
+                port: 63379
+              - bearing: 45
+                starboard: 95068
+                port: 95068
+              - bearing: 60
+                starboard: 95068
+                port: 95068
+              - bearing: 90
+                starboard: 95068
+                port: 95068
+              - bearing: 120
+                starboard: 95068
+                port: 95068
+              - bearing: 135
+                starboard: 95068
+                port: 95068
+              - bearing: 150
+                starboard: 31689
+                port: 31689
+              - bearing: 180
+                starboard: 31689
+                port: 31689
+          best:
+            value:
+              damage_per_minute: 118835
+              damage_per_second: 1980.6
+              bearing: 90
+              all_barrels_ceiling: 118835
+              by_bearing:
+                - bearing: 0
+                  starboard: 79223
+                  port: 79223
+                - bearing: 30
+                  starboard: 79223
+                  port: 79223
+                - bearing: 45
+                  starboard: 118835
+                  port: 118835
+                - bearing: 60
+                  starboard: 118835
+                  port: 118835
+                - bearing: 90
+                  starboard: 118835
+                  port: 118835
+                - bearing: 120
+                  starboard: 118835
+                  port: 118835
+                - bearing: 135
+                  starboard: 118835
+                  port: 118835
+                - bearing: 150
+                  starboard: 39612
+                  port: 39612
+                - bearing: 180
+                  starboard: 39612
+                  port: 39612
+            assumed:
+              - Heavy HE and SAP Shells
+              - Main Battery Modification 3
+          alternatives:
+            - label: without Heavy HE and SAP Shells
+              value:
+                damage_per_minute: 108032
+                damage_per_second: 1800.5
+                bearing: 90
+                all_barrels_ceiling: 108032
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 104575
+                damage_per_second: 1742.9
+                bearing: 90
+                all_barrels_ceiling: 104575
+              assumed:
+                - Heavy HE and SAP Shells
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 129168
+                damage_per_second: 2152.8
+                bearing: 90
+                all_barrels_ceiling: 129168
+              assumed:
+                - Heavy HE and SAP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+            - label: with Main Battery Reload Booster active
+              value:
+                damage_per_minute: 237670
+                damage_per_second: 3961.2
+                bearing: 90
+                all_barrels_ceiling: 237670
+              assumed:
+                - Heavy HE and SAP Shells
+                - Main Battery Modification 3
+              note: "Only while Main Battery Reload Booster is active: 4 charges of 15 s, 80 s cooldown, stock build. It multiplies the main battery reload time by 0.5."
+      burst_damage: 81600
+      during_burst:
+        stat: main battery HE damage rate during a burst
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 1632000
+            damage_per_second: 27200
+            bearing: 90
+            all_barrels_ceiling: 1632000
+            by_bearing:
+              - bearing: 0
+                starboard: 1088000
+                port: 1088000
+              - bearing: 30
+                starboard: 1088000
+                port: 1088000
+              - bearing: 45
+                starboard: 1632000
+                port: 1632000
+              - bearing: 60
+                starboard: 1632000
+                port: 1632000
+              - bearing: 90
+                starboard: 1632000
+                port: 1632000
+              - bearing: 120
+                starboard: 1632000
+                port: 1632000
+              - bearing: 135
+                starboard: 1632000
+                port: 1632000
+              - bearing: 150
+                starboard: 544000
+                port: 544000
+              - bearing: 180
+                starboard: 544000
+                port: 544000
+          best:
+            value:
+              damage_per_minute: 2040000
+              damage_per_second: 34000
+              bearing: 90
+              all_barrels_ceiling: 2040000
+              by_bearing:
+                - bearing: 0
+                  starboard: 1360000
+                  port: 1360000
+                - bearing: 30
+                  starboard: 1360000
+                  port: 1360000
+                - bearing: 45
+                  starboard: 2040000
+                  port: 2040000
+                - bearing: 60
+                  starboard: 2040000
+                  port: 2040000
+                - bearing: 90
+                  starboard: 2040000
+                  port: 2040000
+                - bearing: 120
+                  starboard: 2040000
+                  port: 2040000
+                - bearing: 135
+                  starboard: 2040000
+                  port: 2040000
+                - bearing: 150
+                  starboard: 680000
+                  port: 680000
+                - bearing: 180
+                  starboard: 680000
+                  port: 680000
+            assumed:
+              - Heavy HE and SAP Shells
+              - Main Battery Modification 3
+          alternatives:
+            - label: without Heavy HE and SAP Shells
+              value:
+                damage_per_minute: 1854546
+                damage_per_second: 30909.1
+                bearing: 90
+                all_barrels_ceiling: 1854546
+              assumed:
+                - Main Battery Modification 3
+            - label: without Main Battery Modification 3
+              value:
+                damage_per_minute: 1795200
+                damage_per_second: 29920
+                bearing: 90
+                all_barrels_ceiling: 1795200
+              assumed:
+                - Heavy HE and SAP Shells
+            - label: with Top Grade Gunner active
+              value:
+                damage_per_minute: 2217391
+                damage_per_second: 36956.5
+                bearing: 90
+                all_barrels_ceiling: 2217391
+              assumed:
+                - Heavy HE and SAP Shells
+                - Main Battery Modification 3
+                - Top Grade Gunner
+              note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+  secondary_damage:
+    - ammo: 127 mm HE
+      damage: 1800
+      barrels: 16
+      rates:
+        stat: secondary 127 mm HE damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 216000
+            damage_per_second: 3600
+            bearing: 90
+            all_barrels_ceiling: 432000
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 216000
+                port: 216000
+              - bearing: 45
+                starboard: 216000
+                port: 216000
+              - bearing: 60
+                starboard: 216000
+                port: 216000
+              - bearing: 90
+                starboard: 216000
+                port: 216000
+              - bearing: 120
+                starboard: 216000
+                port: 216000
+              - bearing: 135
+                starboard: 216000
+                port: 216000
+              - bearing: 150
+                starboard: 162000
+                port: 162000
+              - bearing: 180
+                starboard: 0
+                port: 0
+          best:
+            value:
+              damage_per_minute: 300000
+              damage_per_second: 5000
+              bearing: 90
+              all_barrels_ceiling: 600000
+              by_bearing:
+                - bearing: 0
+                  starboard: 0
+                  port: 0
+                - bearing: 30
+                  starboard: 300000
+                  port: 300000
+                - bearing: 45
+                  starboard: 300000
+                  port: 300000
+                - bearing: 60
+                  starboard: 300000
+                  port: 300000
+                - bearing: 90
+                  starboard: 300000
+                  port: 300000
+                - bearing: 120
+                  starboard: 300000
+                  port: 300000
+                - bearing: 135
+                  starboard: 300000
+                  port: 300000
+                - bearing: 150
+                  starboard: 225000
+                  port: 225000
+                - bearing: 180
+                  starboard: 0
+                  port: 0
+            assumed:
+              - Top Grade Gunner
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without Top Grade Gunner
+              value:
+                damage_per_minute: 270000
+                damage_per_second: 4500
+                bearing: 90
+                all_barrels_ceiling: 540000
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value:
+                damage_per_minute: 240000
+                damage_per_second: 4000
+                bearing: 90
+                all_barrels_ceiling: 480000
+              assumed:
+                - Top Grade Gunner
+  torpedo_damage:
+    - ammo: 550 mm 23DT
+      damage: 14833
+      barrels: 8
+      rates:
+        stat: 550 mm 23DT damage rate
+        unit: HP/min
+        builds:
+          base:
+            damage_per_minute: 32364
+            damage_per_second: 539.4
+            bearing: 90
+            all_barrels_ceiling: 64727
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 32364
+                port: 32364
+              - bearing: 45
+                starboard: 32364
+                port: 32364
+              - bearing: 60
+                starboard: 32364
+                port: 32364
+              - bearing: 90
+                starboard: 32364
+                port: 32364
+              - bearing: 120
+                starboard: 32364
+                port: 32364
+              - bearing: 135
+                starboard: 32364
+                port: 32364
+              - bearing: 150
+                starboard: 32364
+                port: 32364
+              - bearing: 180
+                starboard: 0
+                port: 0
+          best:
+            value:
+              damage_per_minute: 48651
+              damage_per_second: 810.9
+              bearing: 90
+              all_barrels_ceiling: 97302
+              by_bearing:
+                - bearing: 0
+                  starboard: 0
+                  port: 0
+                - bearing: 30
+                  starboard: 48651
+                  port: 48651
+                - bearing: 45
+                  starboard: 48651
+                  port: 48651
+                - bearing: 60
+                  starboard: 48651
+                  port: 48651
+                - bearing: 90
+                  starboard: 48651
+                  port: 48651
+                - bearing: 120
+                  starboard: 48651
+                  port: 48651
+                - bearing: 135
+                  starboard: 48651
+                  port: 48651
+                - bearing: 150
+                  starboard: 48651
+                  port: 48651
+                - bearing: 180
+                  starboard: 0
+                  port: 0
+            assumed:
+              - Pack a Punch
+              - Fill the Tubes
+              - Torpedo Tubes Modification 2
+          alternatives:
+            - label: without Pack a Punch
+              value:
+                damage_per_minute: 42305
+                damage_per_second: 705.1
+                bearing: 90
+                all_barrels_ceiling: 84611
+              assumed:
+                - Fill the Tubes
+                - Torpedo Tubes Modification 2
+            - label: without Fill the Tubes
+              value:
+                damage_per_minute: 43786
+                damage_per_second: 729.8
+                bearing: 90
+                all_barrels_ceiling: 87572
+              assumed:
+                - Pack a Punch
+                - Torpedo Tubes Modification 2
+            - label: without Torpedo Tubes Modification 2
+              value:
+                damage_per_minute: 41354
+                damage_per_second: 689.2
+                bearing: 90
+                all_barrels_ceiling: 82707
+              assumed:
+                - Pack a Punch
+                - Fill the Tubes
+  torpedo_reload_buffs:
+    - consumable: Auxiliary and Torpedo Weaponry Coordination
+      choice: "choose one of: Auxiliary and Torpedo Weaponry Coordination, Hydroacoustic Search"
+      reload_factor_while_active: 0.8
+      charges:
+        stat: Auxiliary and Torpedo Weaponry Coordination charges
+        unit: charges
+        builds:
+          base: 3
+          best:
+            value: 4
+            assumed:
+              - Superintendent
+          alternatives:
+            - label: without Superintendent
+              value: 3
+              assumed: []
+      action_time:
+        stat: Auxiliary and Torpedo Weaponry Coordination action time
+        unit: s
+        builds:
+          base: 30
+          best:
+            value: 33
+            assumed:
+              - Ship Consumable Modification 1
+          alternatives:
+            - label: without Ship Consumable Modification 1
+              value: 30
+              assumed: []
+      cooldown:
+        stat: Auxiliary and Torpedo Weaponry Coordination cooldown
+        unit: s
+        builds:
+          base: 120
+          best:
+            value: 120
+            assumed: []
+      torpedoes_per_minute:
+        stat: torpedoes per minute with Auxiliary and Torpedo Weaponry Coordination
+        unit: torpedoes/min
+        builds:
+          base:
+            torpedoes_per_minute: 2.29
+            bearing: 90
+            all_launchers_ceiling: 4.58
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 2.29
+                port: 2.29
+              - bearing: 45
+                starboard: 2.29
+                port: 2.29
+              - bearing: 60
+                starboard: 2.29
+                port: 2.29
+              - bearing: 90
+                starboard: 2.29
+                port: 2.29
+              - bearing: 120
+                starboard: 2.29
+                port: 2.29
+              - bearing: 135
+                starboard: 2.29
+                port: 2.29
+              - bearing: 150
+                starboard: 2.29
+                port: 2.29
+              - bearing: 180
+                starboard: 0
+                port: 0
+          best:
+            value:
+              torpedoes_per_minute: 3.01
+              bearing: 90
+              all_launchers_ceiling: 6.01
+              by_bearing:
+                - bearing: 0
+                  starboard: 0
+                  port: 0
+                - bearing: 30
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 45
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 60
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 90
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 120
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 135
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 150
+                  starboard: 3.01
+                  port: 3.01
+                - bearing: 180
+                  starboard: 0
+                  port: 0
+            assumed:
+              - Fill the Tubes
+              - Ship Consumable Modification 1
+              - Torpedo Tubes Modification 2
+          alternatives:
+            - label: without Fill the Tubes
+              value:
+                torpedoes_per_minute: 2.71
+                bearing: 90
+                all_launchers_ceiling: 5.41
+              assumed:
+                - Ship Consumable Modification 1
+                - Torpedo Tubes Modification 2
+            - label: without Ship Consumable Modification 1
+              value:
+                torpedoes_per_minute: 2.99
+                bearing: 90
+                all_launchers_ceiling: 5.99
+              assumed:
+                - Fill the Tubes
+                - Torpedo Tubes Modification 2
+            - label: without Torpedo Tubes Modification 2
+              value:
+                torpedoes_per_minute: 2.55
+                bearing: 90
+                all_launchers_ceiling: 5.11
+              assumed:
+                - Fill the Tubes
+                - Ship Consumable Modification 1
+            - label: with AA Defense and ASW Expert active
+              value:
+                torpedoes_per_minute: 3.11
+                bearing: 90
+                all_launchers_ceiling: 6.21
+              assumed:
+                - Fill the Tubes
+                - Ship Consumable Modification 1
+                - Torpedo Tubes Modification 2
+                - AA Defense and ASW Expert
+              note: "Improves your ship's characteristics when her AA guns are active."
+      torpedo_damage:
+        - ammo: 550 mm 23DT
+          damage: 14833
+          barrels: 8
+          rates:
+            stat: 550 mm 23DT damage rate with Auxiliary and Torpedo Weaponry Coordination
+            unit: HP/min
+            builds:
+              base:
+                damage_per_minute: 33982
+                damage_per_second: 566.4
+                bearing: 90
+                all_barrels_ceiling: 67964
+                by_bearing:
+                  - bearing: 0
+                    starboard: 0
+                    port: 0
+                  - bearing: 30
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 45
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 60
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 90
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 120
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 135
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 150
+                    starboard: 33982
+                    port: 33982
+                  - bearing: 180
+                    starboard: 0
+                    port: 0
+              best:
+                value:
+                  damage_per_minute: 51275
+                  damage_per_second: 854.6
+                  bearing: 90
+                  all_barrels_ceiling: 102549
+                  by_bearing:
+                    - bearing: 0
+                      starboard: 0
+                      port: 0
+                    - bearing: 30
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 45
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 60
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 90
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 120
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 135
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 150
+                      starboard: 51275
+                      port: 51275
+                    - bearing: 180
+                      starboard: 0
+                      port: 0
+                assumed:
+                  - Pack a Punch
+                  - Fill the Tubes
+                  - Ship Consumable Modification 1
+                  - Torpedo Tubes Modification 2
+              alternatives:
+                - label: without Pack a Punch
+                  value:
+                    damage_per_minute: 44587
+                    damage_per_second: 743.1
+                    bearing: 90
+                    all_barrels_ceiling: 89173
+                  assumed:
+                    - Fill the Tubes
+                    - Ship Consumable Modification 1
+                    - Torpedo Tubes Modification 2
+                - label: without Fill the Tubes
+                  value:
+                    damage_per_minute: 46147
+                    damage_per_second: 769.1
+                    bearing: 90
+                    all_barrels_ceiling: 92294
+                  assumed:
+                    - Pack a Punch
+                    - Ship Consumable Modification 1
+                    - Torpedo Tubes Modification 2
+                - label: without Ship Consumable Modification 1
+                  value:
+                    damage_per_minute: 51084
+                    damage_per_second: 851.4
+                    bearing: 90
+                    all_barrels_ceiling: 102168
+                  assumed:
+                    - Pack a Punch
+                    - Fill the Tubes
+                    - Torpedo Tubes Modification 2
+                - label: without Torpedo Tubes Modification 2
+                  value:
+                    damage_per_minute: 43583
+                    damage_per_second: 726.4
+                    bearing: 90
+                    all_barrels_ceiling: 87167
+                  assumed:
+                    - Pack a Punch
+                    - Fill the Tubes
+                    - Ship Consumable Modification 1
+                - label: with AA Defense and ASW Expert active
+                  value:
+                    damage_per_minute: 52967
+                    damage_per_second: 882.8
+                    bearing: 90
+                    all_barrels_ceiling: 105934
+                  assumed:
+                    - Pack a Punch
+                    - Fill the Tubes
+                    - Ship Consumable Modification 1
+                    - Torpedo Tubes Modification 2
+                    - AA Defense and ASW Expert
+                  note: "Improves your ship's characteristics when her AA guns are active."
+  rate_notes:
+    - "torpedoes_per_minute = 60 x tubes_per_reload / reload, with no consumable, against one distant target at the bearing (degrees off the bow, clockwise) where the most tubes bear, counting only the launchers that turn to it outside their dead zones. all_launchers_ceiling is every launcher firing at once, which a ship with launchers on both sides brings to bear on no single target without turning. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. A loader group reloads at most `loaders` of its launchers at a time and the others wait, so it reloads tubes x min(loaders, launchers) / launchers tubes per reload time; against one target it reloads only its launchers bearing on it. Launchers outside every loader group reload all at once. Submarine tubes have no bearing figures; their rates count every launcher. launchers, tubes, loader_groups and limit describe the stock modules; a build that assumes another hull or torpedo module uses that module's launchers."
+    - "torpedo_reload_buffs are consumables, such as Auxiliary and Torpedo Weaponry Coordination, whose buff multiplies the launcher reload time by reload_factor_while_active for action_time; a reload in progress speeds up while it lasts. Their torpedoes_per_minute and torpedo_damage average one cycle of action_time + cooldown with the consumable used whenever it is ready: the launcher reload rate times (cooldown + action_time / reload_factor_while_active) / (action_time + cooldown), against one target and with every launcher as for the launcher reload. They hold only while charges last, charges x (action_time + cooldown); then the plain rates apply. With a choice, the ship carries the consumable only in place of the slot's other options."
+    - "Damage rates are theoretical maxima: every shell or torpedo fired at its reload hits for its full damage. Not applied: fires, flooding, citadel and overpenetration multipliers, armor, dispersion, shell flight time, turret traverse and ammo switching. Guns: damage_per_minute is against one distant target at the bearing (degrees off the bow, clockwise) where the most damage bears, counting only the barrels whose mounts turn to it outside their dead zones; all_barrels_ceiling is every barrel firing at once, which no single target sees. Each barrel adds damage x 60 / reload. by_bearing gives the rate at standard bearings, starboard and its port mirror, on the base and best builds. Torpedoes: damage_per_minute = torpedoes_per_minute x damage, against one target at the bearing where the most tubes bear as for torpedoes_per_minute; all_barrels_ceiling counts every tube. damage_per_second = damage_per_minute / 60. An ammo with modules is carried only with those modules; its base uses them."
+    - "Main battery in Burst Fire: each turret fires shots salvos interval apart, then reloads for reload. damage_per_minute averages one burst and that reload: barrels x damage x shots x 60 / ((shots - 1) x interval + reload). during_burst is the rate while a burst fires: barrels x damage x 60 / interval."
+    - "The main battery alternative \"with Main Battery Reload Booster active\" is the rate while the booster runs: the main battery reload time times main_battery_reload_factor. It holds only while the booster is active; with special_ability_active it is the rate with both the special ability and the booster active."
+  speed:
+    surface:
+      stat: top speed on the surface
+      unit: kn
+      builds:
+        base: 34.5
+        best:
+          value: 34.5
+          assumed: []
+        alternatives:
+          - label: with Outnumbered active
+            value: 37.26
+            assumed:
+              - Outnumbered
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+          - label: with Sierra Mike signal
+            value: 36.22
+            assumed:
+              - Sierra Mike signal
+          - label: with Outnumbered active and Sierra Mike signal
+            value: 39.12
+            assumed:
+              - Outnumbered
+              - Sierra Mike signal
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+          - label: with Engine Boost active
+            value: 41.4
+            assumed:
+              - Engine Boost
+            note: "Only while Engine Boost is active. It adds 20% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+          - label: with Outnumbered active and Engine Boost active
+            value: 44.16
+            assumed:
+              - Outnumbered
+              - Engine Boost
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+          - label: with Engine Boost active and Sierra Mike signal
+            value: 43.13
+            assumed:
+              - Engine Boost
+              - Sierra Mike signal
+            note: "Only while Engine Boost is active. It adds 20% of the hull's top speed; other speed bonuses add to it instead of multiplying it."
+          - label: with Outnumbered active and Engine Boost active and Sierra Mike signal
+            value: 46.02
+            assumed:
+              - Outnumbered
+              - Engine Boost
+              - Sierra Mike signal
+            note: "Improves your ship's characteristics while the number of allies within your ship's main battery firing range doesn't exceed the number of visible enemy ships.\n\nYour ship is not counted as an allied ship."
+  fires_per_minute:
+    total:
+      stat: "fire starts per minute, all armament"
+      unit: fires/min
+      builds:
+        base:
+          fires_per_minute: 20.69
+          bearing: 90
+          all_mounts_ceiling: 31.49
+          by_bearing:
+            - bearing: 0
+              starboard: 8.83
+              port: 8.83
+            - bearing: 30
+              starboard: 19.63
+              port: 19.63
+            - bearing: 45
+              starboard: 20.69
+              port: 20.69
+            - bearing: 60
+              starboard: 20.69
+              port: 20.69
+            - bearing: 90
+              starboard: 20.69
+              port: 20.69
+            - bearing: 120
+              starboard: 20.69
+              port: 20.69
+            - bearing: 135
+              starboard: 20.69
+              port: 20.69
+            - bearing: 150
+              starboard: 15.88
+              port: 15.88
+            - bearing: 180
+              starboard: 7.78
+              port: 7.78
+        best:
+          value:
+            fires_per_minute: 26.7
+            bearing: 90
+            all_mounts_ceiling: 43.37
+            by_bearing:
+              - bearing: 0
+                starboard: 8.93
+                port: 8.93
+              - bearing: 30
+                starboard: 25.59
+                port: 25.59
+              - bearing: 45
+                starboard: 26.7
+                port: 26.7
+              - bearing: 60
+                starboard: 26.7
+                port: 26.7
+              - bearing: 90
+                starboard: 26.7
+                port: 26.7
+              - bearing: 120
+                starboard: 26.7
+                port: 26.7
+              - bearing: 135
+                starboard: 26.7
+                port: 26.7
+              - bearing: 150
+                starboard: 20.32
+                port: 20.32
+              - bearing: 180
+                starboard: 7.82
+                port: 7.82
+          assumed:
+            - Demolition Expert
+            - Top Grade Gunner
+            - Auxiliary Armaments Modification 2
+        alternatives:
+          - label: without Demolition Expert
+            value:
+              fires_per_minute: 24.89
+              bearing: 90
+              all_mounts_ceiling: 39.89
+            assumed:
+              - Top Grade Gunner
+              - Auxiliary Armaments Modification 2
+          - label: without Top Grade Gunner
+            value:
+              fires_per_minute: 25.03
+              bearing: 90
+              all_mounts_ceiling: 40.03
+            assumed:
+              - Demolition Expert
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value:
+              fires_per_minute: 23.37
+              bearing: 90
+              all_mounts_ceiling: 36.7
+            assumed:
+              - Demolition Expert
+              - Top Grade Gunner
+          - label: with Inertia Fuse for HE Shells
+            value:
+              fires_per_minute: 17.61
+              bearing: 90
+              all_mounts_ceiling: 26.78
+            assumed:
+              - Demolition Expert
+              - Top Grade Gunner
+              - Auxiliary Armaments Modification 2
+              - Inertia Fuse for HE Shells
+            note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+          - label: with Top Grade Gunner active
+            value:
+              fires_per_minute: 26.99
+              bearing: 90
+              all_mounts_ceiling: 43.65
+            assumed:
+              - Demolition Expert
+              - Auxiliary Armaments Modification 2
+              - Top Grade Gunner
+            note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+    secondaries:
+      stat: "secondary fire starts per minute, every group"
+      unit: fires/min
+      builds:
+        base:
+          fires_per_minute: 10.8
+          bearing: 90
+          all_mounts_ceiling: 21.6
+          by_bearing:
+            - bearing: 0
+              starboard: 0
+              port: 0
+            - bearing: 30
+              starboard: 10.8
+              port: 10.8
+            - bearing: 45
+              starboard: 10.8
+              port: 10.8
+            - bearing: 60
+              starboard: 10.8
+              port: 10.8
+            - bearing: 90
+              starboard: 10.8
+              port: 10.8
+            - bearing: 120
+              starboard: 10.8
+              port: 10.8
+            - bearing: 135
+              starboard: 10.8
+              port: 10.8
+            - bearing: 150
+              starboard: 8.1
+              port: 8.1
+            - bearing: 180
+              starboard: 0
+              port: 0
+        best:
+          value:
+            fires_per_minute: 16.67
+            bearing: 90
+            all_mounts_ceiling: 33.33
+            by_bearing:
+              - bearing: 0
+                starboard: 0
+                port: 0
+              - bearing: 30
+                starboard: 16.67
+                port: 16.67
+              - bearing: 45
+                starboard: 16.67
+                port: 16.67
+              - bearing: 60
+                starboard: 16.67
+                port: 16.67
+              - bearing: 90
+                starboard: 16.67
+                port: 16.67
+              - bearing: 120
+                starboard: 16.67
+                port: 16.67
+              - bearing: 135
+                starboard: 16.67
+                port: 16.67
+              - bearing: 150
+                starboard: 12.5
+                port: 12.5
+              - bearing: 180
+                starboard: 0
+                port: 0
+          assumed:
+            - Demolition Expert
+            - Top Grade Gunner
+            - Auxiliary Armaments Modification 2
+        alternatives:
+          - label: without Demolition Expert
+            value:
+              fires_per_minute: 15
+              bearing: 90
+              all_mounts_ceiling: 30
+            assumed:
+              - Top Grade Gunner
+              - Auxiliary Armaments Modification 2
+          - label: without Top Grade Gunner
+            value:
+              fires_per_minute: 15
+              bearing: 90
+              all_mounts_ceiling: 30
+            assumed:
+              - Demolition Expert
+              - Auxiliary Armaments Modification 2
+          - label: without Auxiliary Armaments Modification 2
+            value:
+              fires_per_minute: 13.33
+              bearing: 90
+              all_mounts_ceiling: 26.67
+            assumed:
+              - Demolition Expert
+              - Top Grade Gunner
+          - label: with Inertia Fuse for HE Shells
+            value:
+              fires_per_minute: 9.17
+              bearing: 90
+              all_mounts_ceiling: 18.33
+            assumed:
+              - Demolition Expert
+              - Top Grade Gunner
+              - Auxiliary Armaments Modification 2
+              - Inertia Fuse for HE Shells
+            note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+    sources:
+      - armament: main_battery
+        source: main battery HE
+        rate:
+          stat: main battery HE fire starts per minute
+          unit: fires/min
+          builds:
+            base:
+              fires_per_minute: 3.17
+              bearing: 90
+              fire_chance_pct: 22
+              projectiles_per_minute: 14.4
+              salvo_fire_chance_pct: 94.9
+              all_mounts_ceiling: 3.17
+            best:
+              value:
+                fires_per_minute: 3.76
+                bearing: 90
+                fire_chance_pct: 23
+                projectiles_per_minute: 16.4
+                salvo_fire_chance_pct: 95.7
+                all_mounts_ceiling: 3.76
+              assumed:
+                - Demolition Expert
+                - Main Battery Modification 3
+            alternatives:
+              - label: without Demolition Expert
+                value:
+                  fires_per_minute: 3.6
+                  bearing: 90
+                  fire_chance_pct: 22
+                  projectiles_per_minute: 16.4
+                  salvo_fire_chance_pct: 94.9
+                  all_mounts_ceiling: 3.6
+                assumed:
+                  - Main Battery Modification 3
+              - label: without Main Battery Modification 3
+                value:
+                  fires_per_minute: 3.31
+                  bearing: 90
+                  fire_chance_pct: 23
+                  projectiles_per_minute: 14.4
+                  salvo_fire_chance_pct: 95.7
+                  all_mounts_ceiling: 3.31
+                assumed:
+                  - Demolition Expert
+              - label: with Inertia Fuse for HE Shells
+                value:
+                  fires_per_minute: 1.96
+                  bearing: 90
+                  fire_chance_pct: 12
+                  projectiles_per_minute: 16.4
+                  salvo_fire_chance_pct: 78.4
+                  all_mounts_ceiling: 1.96
+                assumed:
+                  - Demolition Expert
+                  - Main Battery Modification 3
+                  - Inertia Fuse for HE Shells
+                note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+              - label: with Top Grade Gunner active
+                value:
+                  fires_per_minute: 4.09
+                  bearing: 90
+                  fire_chance_pct: 23
+                  projectiles_per_minute: 17.8
+                  salvo_fire_chance_pct: 95.7
+                  all_mounts_ceiling: 4.09
+                assumed:
+                  - Demolition Expert
+                  - Main Battery Modification 3
+                  - Top Grade Gunner
+                note: "Increases main battery reload speed while an enemy ship is within your ship's standard detectability range. Changes to ship detectability caused by firing main guns, fires on board, and other combat events are not taken into account."
+      - armament: secondary
+        source: secondary battery 127 mm
+        rate:
+          stat: secondary battery 127 mm fire starts per minute
+          unit: fires/min
+          builds:
+            base:
+              fires_per_minute: 10.8
+              bearing: 90
+              fire_chance_pct: 9
+              projectiles_per_minute: 120
+              salvo_fire_chance_pct: 53
+              all_mounts_ceiling: 21.6
+            best:
+              value:
+                fires_per_minute: 16.67
+                bearing: 90
+                fire_chance_pct: 10
+                projectiles_per_minute: 166.7
+                salvo_fire_chance_pct: 57
+                all_mounts_ceiling: 33.33
+              assumed:
+                - Demolition Expert
+                - Top Grade Gunner
+                - Auxiliary Armaments Modification 2
+            alternatives:
+              - label: without Demolition Expert
+                value:
+                  fires_per_minute: 15
+                  bearing: 90
+                  fire_chance_pct: 9
+                  projectiles_per_minute: 166.7
+                  salvo_fire_chance_pct: 53
+                  all_mounts_ceiling: 30
+                assumed:
+                  - Top Grade Gunner
+                  - Auxiliary Armaments Modification 2
+              - label: without Top Grade Gunner
+                value:
+                  fires_per_minute: 15
+                  bearing: 90
+                  fire_chance_pct: 10
+                  projectiles_per_minute: 150
+                  salvo_fire_chance_pct: 57
+                  all_mounts_ceiling: 30
+                assumed:
+                  - Demolition Expert
+                  - Auxiliary Armaments Modification 2
+              - label: without Auxiliary Armaments Modification 2
+                value:
+                  fires_per_minute: 13.33
+                  bearing: 90
+                  fire_chance_pct: 10
+                  projectiles_per_minute: 133.3
+                  salvo_fire_chance_pct: 57
+                  all_mounts_ceiling: 26.67
+                assumed:
+                  - Demolition Expert
+                  - Top Grade Gunner
+              - label: with Inertia Fuse for HE Shells
+                value:
+                  fires_per_minute: 9.17
+                  bearing: 90
+                  fire_chance_pct: 5.5
+                  projectiles_per_minute: 166.7
+                  salvo_fire_chance_pct: 36.4
+                  all_mounts_ceiling: 18.33
+                assumed:
+                  - Demolition Expert
+                  - Top Grade Gunner
+                  - Auxiliary Armaments Modification 2
+                  - Inertia Fuse for HE Shells
+                note: "Lowers fire chance: Inertia Fuse for HE Shells halves the fire chance of HE shells, main battery and secondaries alike."
+      - armament: air_strike
+        source: air strike LeO H-470
+        aircraft_param: PFAD903_ASW_T10
+        rate:
+          stat: air strike LeO H-470 fire starts per minute
+          unit: fires/min
+          builds:
+            base:
+              fires_per_minute: 6.72
+              fire_chance_pct: 28
+              projectiles_per_minute: 24
+            best:
+              value:
+                fires_per_minute: 6.72
+                fire_chance_pct: 28
+                projectiles_per_minute: 24
+              assumed: []
+    note: "Fire starts are theoretical: fires_per_minute = projectiles_per_minute x fire_chance, every projectile hitting a target that can burn. The headline is against one distant target at the bearing (degrees off the bow, clockwise) where the most fires start: the server gives each secondary mount its own target, and a gun fires at a target only when its mount turns to it outside its dead zones, so one target draws the mounts whose firing sectors cover its bearing, usually one side and the centerline. all_mounts_ceiling is every gun mount firing at once, which no single target sees. by_bearing gives the figure at standard bearings, starboard and its port mirror, on the base and best builds. salvo_fire_chance_pct = 1 - (1 - p)^n over the n bearing shells of one salvo. Not applied: the target's fire resistance and hull fire-node probability, the limit of fires burning at once, fire duration, dispersion and signal flags. Guns fire at their reload. A carrier squadron, which makes several attacks per sortie, attacks with attackerSize planes every attackCooldown, the shortest time between two of its attacks, while it has attacks left; flight to the target, returns and lost planes are left out, so this is its rate over the target. A squadron that attacks once per sortie, as hybrid ships launch them, attacks again when the hangar has restored its planes. An air strike releases every plane's ordnance once per consumable reload; its charges are not counted. Ordnance per attack is attackerSize x attackCount x projectilesPerAttack, the client's bombs per plane (PreprocessedPlanes). total adds the main battery's best ammo type, every secondary group, the best squadron of the stock plane modules (a carrier flies one at a time) and the best air strike aircraft (one air strike's aircraft share its charges)."
+  anti_aircraft:
+    auras:
+      - band: medium-range
+        range: 3.8
+        hit_chance: 90
+        mounts:
+          - 8 x 57 mm twin
+        damage_per_second:
+          stat: medium-range AA damage per second
+          unit: hp/s
+          builds:
+            base: 343
+            best:
+              value: 493
+              assumed:
+                - AA Defense and ASW Expert
+                - Auxiliary Armaments Modification 2
+            alternatives:
+              - label: without AA Defense and ASW Expert
+                value: 394
+                assumed:
+                  - Auxiliary Armaments Modification 2
+              - label: without Auxiliary Armaments Modification 2
+                value: 429
+                assumed:
+                  - AA Defense and ASW Expert
+      - band: long-range
+        range: 6
+        hit_chance: 90
+        mounts:
+          - 8 x 127 mm twin
+        damage_per_second:
+          stat: long-range AA damage per second
+          unit: hp/s
+          builds:
+            base: 147
+            best:
+              value: 211
+              assumed:
+                - AA Defense and ASW Expert
+                - Auxiliary Armaments Modification 2
+            alternatives:
+              - label: without AA Defense and ASW Expert
+                value: 169
+                assumed:
+                  - Auxiliary Armaments Modification 2
+              - label: without Auxiliary Armaments Modification 2
+                value: 184
+                assumed:
+                  - AA Defense and ASW Expert
+    flak:
+      zone: 3.5 to 6 km
+      hit_chance: 90
+      bursts:
+        stat: flak bursts per salvo
+        unit: bursts
+        builds:
+          base: 6
+          best:
+            value: 8
+            assumed:
+              - Focus Fire Training
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without Focus Fire Training
+              value: 7
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value: 7
+              assumed:
+                - Focus Fire Training
+      damage_per_burst:
+        stat: flak burst damage
+        unit: hp
+        builds:
+          base: 1680
+          best:
+            value: 2415
+            assumed:
+              - AA Defense and ASW Expert
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without AA Defense and ASW Expert
+              value: 1932
+              assumed:
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value: 2100
+              assumed:
+                - AA Defense and ASW Expert
+    priority_sector:
+      instant_damage: 3.5
+      damage_multiplier: 1.5
+      duration: 10
+      cooldown: 10
+    rating:
+      method: "Damage the AA deals to one plane flying straight in at 150 knots (2.69 m/s per knot on the game map) from the edge of the farthest aura to the ship: for each aura, seconds inside it times damage per second times hit chance, plus the flak bursts the client spawns on the way (bursts x hit chance every 2.02 s) times burst damage times 0.1, the share counted as hitting. A judgment to compare ships of one class and tier: players dodge flak and do not fly straight in. The priority sector is left out, and so is Defensive AA Fire except in the alternatives that name it."
+      rating:
+        stat: "AA rating, damage to one plane flying straight in"
+        unit: hp
+        builds:
+          base: 7563
+          best:
+            value: 12208
+            assumed:
+              - AA Defense and ASW Expert
+              - Focus Fire Training
+              - Auxiliary Armaments Modification 2
+          alternatives:
+            - label: without AA Defense and ASW Expert
+              value: 9766
+              assumed:
+                - Focus Fire Training
+                - Auxiliary Armaments Modification 2
+            - label: without Focus Fire Training
+              value: 11540
+              assumed:
+                - AA Defense and ASW Expert
+                - Auxiliary Armaments Modification 2
+            - label: without Auxiliary Armaments Modification 2
+              value: 10034
+              assumed:
+                - AA Defense and ASW Expert
+                - Focus Fire Training
+      breakdown:
+        - "medium-range: up to 9.19 s inside, 443.76 hp/s after hit chance, 4076 hp"
+        - "long-range: up to 14.65 s inside, 190.18 hp/s after hit chance, 2786 hp"
+        - "flak: 8 bursts of 2415 hp, 0.9 hit chance, 5346 hp"
+        - "total: 12208 hp"
+changes:
+  - stat: Main Battery Reload Time
+    from: 14.0 s
+    to: 50.0 s
+  - stat: Maximum Dispersion
+    from: 168 m
+    to: 134 m
+    because:
+      - Burst Fire and Modified Shells x0.8 (-33.51)
+  - stat: Artillery Dispersion Vertical
+    from: 101 m
+    to: 80 m
+    because:
+      - Burst Fire and Modified Shells x0.8 (-20.106)
+  - stat: Minimum Shell Type Switching Time
+    from: 14.0 s
+    to: 50.0 s
+  - stat: Armor Penetration Capacity (HE)
+    from: 40 mm
+    to: 50 mm
+    because:
+      - Burst Fire and Modified Shells x1.25 (+10)
+  - stat: Secondary Shells Penetration (127 mm)
+    from: 21 mm
+    to: 26 mm
+    because:
+      - Burst Fire and Modified Shells x1.25 (+5.25)
+  - stat: Main battery damage per minute (HE)
+    from: 174857 hp/min
+    to: 95068 hp/min
+  - stat: Main battery damage per minute (AP)
+    from: 318857 hp/min
+    to: 173359 hp/min
+  - stat: Main battery horizontal dispersion at stock firing range
+    from: 168 m
+    to: 134 m
+    because:
+      - Burst Fire and Modified Shells x0.8 (-33.51)
+  - stat: Main battery vertical dispersion at stock firing range
+    from: 101 m
+    to: 80 m
+    because:
+      - Burst Fire and Modified Shells x0.8 (-20.106)
+  - stat: "Fire starts per minute with every gun mount firing at once, all armament: a ceiling no single target sees"
+    from: 39.63 fires/min
+    to: 31.49 fires/min
+  - stat: "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
+    from: 28.83 fires/min
+    to: 20.69 fires/min
+  - stat: "Main battery fire starts per minute against one target at its best bearing, every shell hitting (HE)"
+    from: 11.31 fires/min
+    to: 3.17 fires/min

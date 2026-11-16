@@ -1,0 +1,23 @@
+---
+source: crates/wowsunpack/tests/material_textures_real.rs
+expression: listing
+---
+content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_skinned.mfm
+  ambientOcclusionMap: content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_ao.dds
+    BC1RgbaUnorm, 9 mips
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_ao.dds 256x256
+  detailMap: content/gameplay/common/textures/ship_atlas_detail.dds
+    Bgr8Unorm, 12 mips
+    content/gameplay/common/textures/ship_atlas_detail.dds 2048x2048
+  diffuseMap: content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_a.dds
+    BC1RgbaUnorm, 10 mips
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_a.dd0 1024x1024
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_a.dds 512x512
+  metallicGlossMap: content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_mg.dds
+    BC1RgbaUnorm, 10 mips
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_mg.dd0 1024x1024
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_mg.dds 512x512
+  normalMap: content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_n.dds
+    BC7RgbaUnorm, 10 mips
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_n.dd0 1024x1024
+    content/gameplay/usa/gun/main/textures/AGM034_16in50_Mk7_n.dds 512x512

@@ -1,0 +1,13 @@
+---
+source: crates/wows-query/src/armor_models.rs
+expression: main_turrets
+---
+- - HP_JGM_1
+  - 0
+  - content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model
+- - HP_JGM_2
+  - 0
+  - content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model
+- - HP_JGM_3
+  - 180
+  - content/gameplay/japan/gun/main/JGM178_460mm_45_Type94/JGM178_460mm_45_Type94.model
