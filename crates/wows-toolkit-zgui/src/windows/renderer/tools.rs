@@ -24,6 +24,7 @@ use wows_toolkit_replay_data::replay_render::annotate::is_fillable;
 use wows_toolkit_replay_data::replay_render::annotate::places_ship;
 use wows_toolkit_replay_data::replay_render::annotate::same_tool;
 use wows_toolkit_replay_data::replay_render::annotate::ship_tool;
+use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use zgui::component;
 use zgui::css;
@@ -66,7 +67,8 @@ const CSS: &str = css!(
     .wt-renderer-tools__dim { flex: 1; font-size: 12px; color: var(--lui-color-text-dim); }
     .wt-renderer-tools__nib { width: 16px; font-size: 12px; }
     .wt-renderer-tools__ink { width: 18px; height: 18px; border-radius: 3px; cursor: pointer; }
-    .wt-renderer-tools__ink[data-chosen] { border: 2px solid #ffffff; }"
+    .wt-renderer-tools__ink[data-chosen] { border: 2px solid #ffffff; }
+    .wt-renderer-tools__clear.wt-renderer-tools__clear { color: var(--lui-color-danger); }"
 );
 
 /// The drawing tools, on the transport beside the gear. Offered alone as in a session: a reader
@@ -113,6 +115,12 @@ fn ToolsPanel(
     escape: EscapeClears,
 ) -> impl IntoView {
     let undo_refused = Signal::derive_local(move || !session.annotator.with(Annotator::can_undo));
+    // A peer can draw or erase, so the count is read again as the session redraws.
+    let nothing_drawn = Signal::derive_local(move || {
+        let _ = session.collab_frame.get();
+        session.annotator.with(|_| ());
+        session.collab.with(CollabLink::annotation_count) == 0
+    });
     // A peer's change can rename or remove the picked ship, so it is read again as the session
     // redraws; the memo keeps the chooser, and what is typed in it, until the answer changes.
     let picked_ship = Memo::new(move |_| {
@@ -142,7 +150,7 @@ fn ToolsPanel(
             SpeciesRow(session = session, friendly = true)
             SpeciesRow(session = session, friendly = false)
             Separator()
-            row {
+            row(class = "wt-renderer-tools__row") {
                 Button(
                     variant = ButtonVariant::Ghost,
                     size = ButtonSize::Sm,
@@ -154,6 +162,19 @@ fn ToolsPanel(
                 ) {
                     AppIcon(glyph = Glyph::RotateCcw)
                     text {{t!("ui.renderer.annotations.undo").into_owned()}}
+                }
+                Button(
+                    variant = ButtonVariant::Ghost,
+                    size = ButtonSize::Sm,
+                    class = "wt-renderer-tools__clear",
+                    disabled = nothing_drawn,
+                    attr:data-testid = "replay-renderer-annotations-clear",
+                    on:click = move |_| {
+                        session.annotate(|annotator, link| annotator.clear_all(link));
+                    }
+                ) {
+                    AppIcon(glyph = Glyph::Trash)
+                    text {{t!("ui.renderer.annotations.clear_all").into_owned()}}
                 }
             }
             Separator()

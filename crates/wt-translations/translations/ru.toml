@@ -1679,6 +1679,7 @@ action_stroke_width = "Толщина линии"
 action_delete = "Удалить"
 action_cancel = "Отмена / снять выбор"
 toggle_fill = "Нажмите ещё раз, чтобы переключить заливку"
+clear_all = "Очистить всё"
 
 [ui.armor.cast]
 prompt = "%{key}+щелчок по корпусу добавляет точку попадания"

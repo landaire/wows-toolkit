@@ -1679,6 +1679,7 @@ action_stroke_width = "Çizgi kalınlığı"
 action_delete = "Sil"
 action_cancel = "İptal / Seçimi kaldır"
 toggle_fill = "Dolguyu açıp kapatmak için yeniden tıklayın"
+clear_all = "Tümünü Temizle"
 
 [ui.armor.cast]
 prompt = "Darbe noktası eklemek için gövdeye %{key}+tıklayın"

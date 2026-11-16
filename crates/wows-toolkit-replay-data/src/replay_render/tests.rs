@@ -1980,6 +1980,41 @@ fn a_second_press_of_a_shape_button_toggles_its_fill() {
     assert_eq!(in_hand(&annotator), Tool::Line, "a tool with nothing to fill stays as it is");
 }
 
+/// Clear All takes every shape off, in a session under the ids it knows them by, and one undo
+/// puts them all back.
+#[test]
+fn clearing_everything_is_one_undo() {
+    let line = |y: f32| Annotation::Line { start: [100.0, y], end: [200.0, y], color: [255; 4], width: 2.0 };
+
+    let link = CollabLink::default();
+    let mut annotator = Annotator::new();
+    assert!(!annotator.clear_all(&link), "nothing to clear");
+    link.add_annotation(line(100.0));
+    link.add_annotation(line(200.0));
+    assert!(annotator.clear_all(&link));
+    assert_eq!(link.annotation_count(), 0, "alone, everything goes");
+    assert!(annotator.undo(&link));
+    assert_eq!(link.annotations(), [line(100.0), line(200.0)], "and comes back in order");
+
+    let (state, link, sent) = session();
+    state.lock().current_annotation_sync =
+        Some(AnnotationSyncState { annotations: vec![line(100.0), line(200.0)], ids: vec![5, 6], owners: vec![1, 2] });
+    let mut annotator = Annotator::new();
+    assert!(annotator.clear_all(&link));
+    let removed: Vec<u64> = sent
+        .try_iter()
+        .filter_map(|event| match event {
+            LocalEvent::Annotation(LocalAnnotationEvent::Remove { id, .. }) => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(removed.len(), 2, "the session is told each shape went: {removed:?}");
+    assert!(removed.contains(&5) && removed.contains(&6));
+
+    assert!(annotator.undo(&link));
+    assert_eq!(link.annotations(), [line(100.0), line(200.0)], "one undo puts them back");
+}
+
 /// Undoing takes the shape off again under the id it was added with.
 #[test]
 fn undoing_takes_back_what_was_just_drawn() {

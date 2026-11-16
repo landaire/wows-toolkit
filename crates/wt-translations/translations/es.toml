@@ -1679,6 +1679,7 @@ action_stroke_width = "Grosor del trazo"
 action_delete = "Eliminar"
 action_cancel = "Cancelar / Deseleccionar"
 toggle_fill = "Haz clic de nuevo para alternar el relleno"
+clear_all = "Borrar todo"
 
 [ui.armor.cast]
 prompt = "%{key}+clic en el casco para añadir un punto de impacto"

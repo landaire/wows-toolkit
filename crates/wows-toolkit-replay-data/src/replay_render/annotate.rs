@@ -380,6 +380,19 @@ impl Annotator {
         true
     }
 
+    /// Erases everything drawn, as the egui toolbar's Clear All does, so one undo puts it all
+    /// back. Returns whether there was anything.
+    pub fn clear_all(&mut self, link: &CollabLink) -> bool {
+        if link.annotation_count() == 0 {
+            return false;
+        }
+        self.remember(link);
+        link.replace_annotations(Vec::new());
+        self.picked.clear();
+
+        true
+    }
+
     /// Hands a pointer event to the tool and does what it drew.
     ///
     /// The frame carries the part-drawn shape, so a front end redraws after

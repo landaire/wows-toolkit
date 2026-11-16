@@ -1725,6 +1725,7 @@ action_stroke_width = "線條粗細"
 action_delete = "刪除"
 action_cancel = "取消 / 取消選擇"
 toggle_fill = "再次點擊以切換填滿"
+clear_all = "全部清除"
 
 [ui.armor.cast]
 prompt = "%{key}+點擊艦體以新增命中點"

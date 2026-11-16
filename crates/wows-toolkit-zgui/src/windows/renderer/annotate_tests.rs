@@ -199,6 +199,31 @@ fn a_second_press_of_a_shape_button_fills_it() {
     assert_eq!(tool(session), Tool::Circle { filled: false }, "the third empties it");
 }
 
+/// Clear All is refused with nothing drawn, takes everything off once there is, and one undo puts
+/// it all back.
+#[test]
+fn clear_all_takes_everything_and_undo_puts_it_back() {
+    let (mut window, session) = open();
+    let drawn = || session.collab.with_untracked(CollabLink::annotation_count);
+    click(&mut window, "replay-renderer-tools-toggle");
+    let clear = window.by_test_id("replay-renderer-annotations-clear").expect("Clear All is drawn");
+    assert_eq!(window.a11y(clear).map(|state| state.disabled), Some(true), "nothing to clear yet");
+
+    session.annotate(|annotator, link| {
+        annotator.take_up(Tool::Line);
+        for y in [100.0, 200.0] {
+            annotator.stroke(link, Stroke::Began { at: [100.0, y] });
+            annotator.stroke(link, Stroke::Ended { at: [200.0, y] });
+        }
+    });
+    settle(&mut window);
+    click(&mut window, "replay-renderer-annotations-clear");
+    assert_eq!(drawn(), 0, "everything went");
+
+    click(&mut window, "replay-renderer-annotations-undo");
+    assert_eq!(drawn(), 2, "and one undo put it all back");
+}
+
 /// The nib steps one at a time and stops at the thickest the board offers, where the step that
 /// would go past it is refused.
 #[test]

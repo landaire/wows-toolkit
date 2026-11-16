@@ -1476,6 +1476,7 @@ action_stroke_width = "Stroke width"
 action_delete = "Delete"
 action_cancel = "Cancel / Deselect"
 toggle_fill = "Click again to toggle fill"
+clear_all = "Clear All"
 
 [ui.renderer.settings]
 title = "Display Settings"

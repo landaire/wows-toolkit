@@ -1725,6 +1725,7 @@ action_stroke_width = "Spessore tratto"
 action_delete = "Elimina"
 action_cancel = "Annulla / Deseleziona"
 toggle_fill = "Fai di nuovo clic per attivare o disattivare il riempimento"
+clear_all = "Cancella tutto"
 
 [ui.armor.cast]
 prompt = "%{key}+clic sullo scafo per aggiungere un punto di impatto"
