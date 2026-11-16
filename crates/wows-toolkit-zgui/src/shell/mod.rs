@@ -131,16 +131,12 @@ use crate::window_shell::DecoratedWindowProps;
 use crate::window_shell::RememberGeometryProps;
 use crate::window_shell::main_window_title;
 use crate::windows::tactics::TacticsHost;
-use crate::zoom::ZoomStep;
 
 pub use crate::shell::dialogs::DialogHandle;
 pub use crate::shell::dialogs::Dialogs;
 pub use crate::shell::dialogs::HostedDialogProps;
 
 const SHEET: &str = "wt-shell";
-
-/// The message a zoom step says, which the next step's replaces.
-const ZOOM_TOAST: &str = "zoom";
 
 const CSS: &str = css!(
     ".wt-shell {
@@ -580,12 +576,7 @@ impl Shell {
 
     /// Applies `zoom` to the window and saves it.
     pub fn set_zoom(self, zoom: ZoomFactor) {
-        let services = self.services;
-        self.appearance.zoom.set(zoom);
-        services.settings.edit(wows_toolkit_viewmodel::settings::keys::ZOOM_FACTOR, |settings| {
-            settings.zoom = zoom;
-            zoom.get()
-        });
+        crate::zoom::apply(self.services, self.appearance, zoom);
     }
 
     /// Shows `choice` and saves it.
@@ -721,6 +712,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     let root = NodeRef::new();
     hear_unfocused_keys(root);
     follow_held_modifiers(shell, root);
+    crate::zoom::hear_zoom_keys(root, services, appearance, toasts);
 
     // A window that loses focus never sees the release of a key held as it went.
     let window_focused = try_use_window().map(|window| window.focused());
@@ -931,32 +923,8 @@ fn follow_held_modifiers(shell: Shell, root: NodeRef) {
     });
 }
 
-/// Runs the zoom step `key` with `modifiers` is, and says whether it was one. A step repeats while
-/// its key is held. Also called from dialogs over the shell, whose keys do not reach its root.
-pub(crate) fn zoom_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifiers) -> bool {
-    let Some(step) = ZoomStep::of(key, modifiers) else {
-        return false;
-    };
-
-    // The zoom waits for the settings, which hold the zoom it steps from.
-    if shell.services.settings.read_untracked(|_| ()).is_some() {
-        let zoom = step.applied_to(shell.appearance.zoom.get_untracked());
-        shell.set_zoom(zoom);
-        // Said, since the tab with the zoom slider may not be the one open.
-        let said = rust_i18n::t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get()));
-        shell.toasts().show(landaire_ui::Notice::info(said).keyed(landaire_ui::ToastKey::new(ZOOM_TOAST)));
-    }
-
-    true
-}
-
-/// Runs the window-wide shortcut `key` with `modifiers` is, and says whether it was one. Only a
-/// zoom step repeats while its key is held.
+/// Runs the window-wide shortcut `key` with `modifiers` is, and says whether it was one.
 fn shell_shortcut(shell: Shell, key: &zgui::vocab::KeyEvent, modifiers: Modifiers) -> bool {
-    if zoom_shortcut(shell, key, modifiers) {
-        return true;
-    }
-
     if key.repeat || !modifiers.primary() || modifiers.alt() {
         return false;
     }

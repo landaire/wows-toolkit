@@ -353,7 +353,40 @@ fn a_hovering_file_is_named_on_the_scrim() {
     assert!(window.by_test_id(SCRIM).is_none(), "and the scrim goes with the drag");
 }
 
-/// The zoom shortcuts are the shell's, and still reach it with the palette open over it.
+/// A zoom step draws the shell larger by the step, and the shell still fills the window.
+#[test]
+fn a_zoom_step_draws_the_shell_larger_and_it_still_fills_the_window() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+    settle_in_real_time(&mut window);
+    let before = shell().appearance.zoom.get_untracked();
+    let drawn = |window: &HeadlessWindow, id: &str| {
+        let element = window.by_test_id(id).expect("the element is in the shell");
+        window.bounds(element).expect("the element has a box").size
+    };
+    let tabs_before = drawn(&window, "app-tabs").height.0;
+
+    window.press_character('=', Modifiers::PRIMARY);
+    settle(&mut window);
+    let after = shell().appearance.zoom.get_untracked();
+    assert!(after > before, "the step zoomed in from {before:?}, got {after:?}");
+
+    let tabs_after = drawn(&window, "app-tabs").height.0;
+    let grown = tabs_after / tabs_before;
+    let stepped = after.get() / before.get();
+    assert!((grown - stepped).abs() < 0.05, "the tab strip grew {grown}x for a {stepped}x step");
+    let root = drawn(&window, "app-root");
+    assert_eq!(
+        (root.width.0, root.height.0),
+        (REVIEW_SIZE.width, REVIEW_SIZE.height),
+        "the shell fills the window at {after:?}"
+    );
+
+    // The zoom is saved to settings every test in the process reads.
+    shell().set_zoom(before);
+    settle_in_real_time(&mut window);
+}
+
+/// The zoom shortcuts still reach the window with the palette open over it.
 #[test]
 fn the_zoom_shortcuts_work_from_inside_the_palette() {
     let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
@@ -366,6 +399,30 @@ fn the_zoom_shortcuts_work_from_inside_the_palette() {
     window.press_character('=', Modifiers::PRIMARY);
     settle(&mut window);
     assert_eq!(shell().appearance.zoom.get_untracked(), before.zoomed_in());
+
+    // The zoom is saved to settings every test in the process reads.
+    shell().set_zoom(before);
+    settle_in_real_time(&mut window);
+}
+
+/// The zoom shortcuts work with the keyboard in a text field, and type nothing into it.
+#[test]
+fn the_zoom_shortcuts_work_from_a_focused_field() {
+    let mut window = open_shell(HeadlessOptions::new(REVIEW_SIZE));
+    settle_in_real_time(&mut window);
+    let before = shell().appearance.zoom.get_untracked();
+
+    window.press_character(',', Modifiers::PRIMARY);
+    settle(&mut window);
+    let search = window.by_test_id("settings-search").expect("the shortcut opens the settings");
+    window.type_text("z");
+    settle(&mut window);
+
+    window.press_character('=', Modifiers::PRIMARY);
+    settle(&mut window);
+    assert_eq!(shell().appearance.zoom.get_untracked(), before.zoomed_in());
+    let typed = window.a11y(search).and_then(|state| state.value);
+    assert_eq!(typed.as_deref(), Some("z"), "the search holds only what was typed");
 
     // The zoom is saved to settings every test in the process reads.
     shell().set_zoom(before);

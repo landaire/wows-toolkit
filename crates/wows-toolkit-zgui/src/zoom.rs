@@ -1,12 +1,31 @@
-//! The interface zoom: how large the main window draws its text and controls, and the shortcuts
+//! The interface zoom: how large the windows draw their text and controls, and the shortcuts
 //! that step it.
 
+use landaire_ui::Notice;
+use landaire_ui::ToastKey;
+use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
+use wows_toolkit_viewmodel::settings::keys;
 use zgui::prelude::Zoom;
+use zgui::reactive::RenderEffect;
+use zgui::reactive::StoredValue;
+use zgui::reactive::on_cleanup_local;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::WithValue;
+use zgui::view::EventCx;
+use zgui::view::ListenerGuard;
+use zgui::view::ListenerOptions;
+use zgui::view::NodeRef;
+use zgui::view::events;
 use zgui::vocab::Key;
 use zgui::vocab::KeyEvent;
 use zgui::vocab::Modifiers;
+
+use crate::services::Services;
+use crate::shell::Appearance;
 
 /// What a zoom shortcut asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +70,66 @@ impl ZoomStep {
 pub fn to_window(zoom: ZoomFactor) -> Zoom {
     // `ZoomFactor` is held to 0.5 through 2.0, which the window's range covers.
     Zoom::new(zoom.get()).unwrap_or(Zoom::ONE)
+}
+
+/// Applies `zoom` to every window and saves it.
+pub fn apply(services: Services, appearance: Appearance, zoom: ZoomFactor) {
+    appearance.zoom.set(zoom);
+    services.settings.edit(keys::ZOOM_FACTOR, |settings| {
+        settings.zoom = zoom;
+        zoom.get()
+    });
+}
+
+/// Hears the zoom shortcuts anywhere in the window `root` is in: before anything has focus, in a
+/// focused field and in a dialog. The listener is on the window root's capture leg, so nothing
+/// below it takes the key first.
+pub fn hear_zoom_keys(root: NodeRef, services: Services, appearance: Appearance, toasts: Toasts) {
+    let guard = StoredValue::new_local(None::<ListenerGuard>);
+    let attaching = RenderEffect::new(move |_| {
+        if root.get().is_none() || guard.with_value(Option::is_some) {
+            return;
+        }
+        let Some(window) = root.window_root() else {
+            return;
+        };
+
+        guard.set_value(window.listen(
+            events::KEY_DOWN,
+            ListenerOptions::CAPTURE,
+            move |ev: &mut EventCx<'_, events::KeyDown>| {
+                let modifiers = ev.modifiers;
+                let Some(step) = ZoomStep::of(ev, modifiers) else {
+                    return;
+                };
+                take_step(services, appearance, toasts, step);
+                ev.prevent_default();
+                ev.stop_propagation();
+            },
+        ));
+    });
+    on_cleanup_local(move || {
+        drop(attaching);
+        guard.set_value(None);
+    });
+}
+
+/// Steps the zoom and says the new one. A step repeats while its key is held.
+fn take_step(services: Services, appearance: Appearance, toasts: Toasts, step: ZoomStep) {
+    // The message a zoom step says, which the next step's replaces.
+    const ZOOM_TOAST: &str = "zoom";
+
+    // The zoom waits for the settings, which hold the zoom it steps from.
+    if services.settings.read_untracked(|_| ()).is_none() {
+        return;
+    }
+
+    let zoom = step.applied_to(appearance.zoom.get_untracked());
+    apply(services, appearance, zoom);
+
+    // Said, since the tab with the zoom slider may not be the one open.
+    let said = t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get()));
+    toasts.show(Notice::info(said).keyed(ToastKey::new(ZOOM_TOAST)));
 }
 
 /// The zoom shortcuts, with the platform's own modifier name.

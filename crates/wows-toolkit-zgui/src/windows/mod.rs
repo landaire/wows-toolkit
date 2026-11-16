@@ -9,6 +9,7 @@ pub mod tactics;
 
 use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
+use landaire_ui::Toasts;
 use zgui::component;
 use zgui::css;
 use zgui::prelude::WindowHandle;
@@ -22,6 +23,7 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::Children;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 
 use crate::services::Services;
@@ -96,13 +98,22 @@ fn WindowRoot(services: Services, appearance: Appearance, title: String, content
     }
 }
 
-/// What fills a secondary window: its content, on the surface the main window's shell draws.
+/// What fills a secondary window: its content, on the surface the main window's shell draws. The
+/// zoom shortcuts step every window's zoom from here as from the main window.
 #[component]
 pub(crate) fn WindowSurface(children: Children) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
+    let surface = NodeRef::new();
+    // A surface placed outside a window that `open` made, as a test fixture is, has no zoom to step.
+    if let Some(services) = use_local_context::<Services>()
+        && let Some(appearance) = use_local_context::<Appearance>()
+        && let Some(toasts) = Toasts::current()
+    {
+        crate::zoom::hear_zoom_keys(surface, services, appearance, toasts);
+    }
 
     view! {
-        column(class = "wt-window") {
+        column(class = "wt-window", node_ref = surface) {
             {children.into_view_once()}
         }
     }
@@ -117,6 +128,8 @@ mod tests {
     use landaire_ui::test_support::HeadlessOptions;
     use landaire_ui::test_support::HeadlessWindow;
     use landaire_ui::test_support::WindowSize;
+    use zgui::reactive::prelude::GetUntracked;
+    use zgui::vocab::Modifiers;
 
     use super::*;
 
@@ -131,27 +144,53 @@ mod tests {
         view! { box {} }
     }
 
+    thread_local! {
+        static OPENED: Cell<Option<(Services, Appearance)>> = const { Cell::new(None) };
+    }
+
     #[component]
     fn SecondaryUnderTest() -> impl IntoView {
         let services = Services::provide(None);
+        let appearance = Appearance::new();
+        OPENED.set(Some((services, appearance)));
         let content = AnyView::new(view! { Panel() });
 
-        view! { WindowRoot(services = services, appearance = Appearance::new(), title = "Panel".to_owned(), content = content) }
+        view! { WindowRoot(services = services, appearance = appearance, title = "Panel".to_owned(), content = content) }
     }
 
-    /// A secondary window has a message host of its own, so a toast raised in it reaches its screen.
-    #[test]
-    fn a_toast_reaches_a_secondary_windows_screen() {
+    fn open_secondary() -> HeadlessWindow {
         let mut window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 400.0, height: 200.0 }), || {
             view! { SecondaryUnderTest() }
         })
         .expect("the window opens headlessly");
         window.advance(Duration::from_millis(50));
 
+        window
+    }
+
+    /// A secondary window has a message host of its own, so a toast raised in it reaches its screen.
+    #[test]
+    fn a_toast_reaches_a_secondary_windows_screen() {
+        let mut window = open_secondary();
+
         TOASTS.get().expect("the content sits inside a message host").ok("exported");
         window.advance(Duration::from_millis(400));
 
         let shown = window.texts_by_class("zui-toast").concat();
         assert!(shown.contains("exported"), "the toast is on screen, got {shown:?}");
+    }
+
+    /// The zoom shortcuts work in a secondary window too, and step the zoom every window follows.
+    #[test]
+    fn the_zoom_shortcuts_reach_a_secondary_window() {
+        let mut window = open_secondary();
+        let (services, appearance) = OPENED.get().expect("the window was built");
+        services.settings.adopt_unsaved(crate::shell::settings::tests::test_settings());
+        let before = appearance.zoom.get_untracked();
+
+        window.press_character('=', Modifiers::PRIMARY);
+        window.advance(Duration::from_millis(100));
+
+        assert_eq!(appearance.zoom.get_untracked(), before.zoomed_in());
     }
 }
