@@ -21,6 +21,7 @@ use wt_collab_client::PlaybackFrame;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::DisplayOptionField;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 
 use crate::services::Services;
@@ -73,7 +74,7 @@ fn torpedo() -> DrawCommand {
     DrawCommand::Torpedo { pos: MinimapPos { x: 50.0, y: 60.0 }, color: [0, 255, 0] }
 }
 
-/// Long enough for the window to look for frames again.
+/// Long enough for the window to follow what the session nudged it about.
 fn take_in(window: &mut HeadlessWindow) {
     window.advance(Duration::from_millis(120));
 }
@@ -142,6 +143,8 @@ fn the_hosts_layers_are_drawn_over_the_watched_windows_own() {
         let mut held = state.lock();
         held.current_render_options = Some(hosts);
         held.render_options_version = 1;
+        // What the peer task does as the host's settings land.
+        held.repaint_viewport(REPLAY);
     }
     take_in(&mut window);
 
@@ -169,4 +172,20 @@ fn a_locked_peers_toggle_is_refused() {
 
     assert!(shows_torpedo(watch), "the torpedoes are still drawn");
     assert!(!sent.try_iter().any(|event| matches!(event, LocalEvent::DisplayToggle(..))), "and nothing is sent");
+}
+
+/// Frames that arrive faster than the window looks leave it drawing the newest of them, rather
+/// than one the host has already moved past.
+#[test]
+fn the_newest_of_a_burst_of_frames_is_drawn() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+
+    for frame_index in 1..=6 {
+        state.lock().push_frame(REPLAY, PlaybackFrame { frame_index, ..frame(vec![timer()]) });
+    }
+    take_in(&mut window);
+
+    assert_eq!(watch.clock.get_untracked().map(|clock| clock.frame), Some(6));
 }

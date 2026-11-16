@@ -392,6 +392,17 @@ pub struct SharedWindow {
     pub art_png: Option<Vec<u8>>,
 }
 
+/// The newest frame the session has sent one watched window. Each arrival replaces the one before.
+#[derive(Clone, Default)]
+pub struct LatestFrame(Arc<Mutex<Option<wt_collab_client::PlaybackFrame>>>);
+
+impl LatestFrame {
+    /// The newest frame, if one has arrived since the last was taken.
+    pub fn take(&self) -> Option<wt_collab_client::PlaybackFrame> {
+        self.0.lock().take()
+    }
+}
+
 /// One participant, as the roster shows them.
 pub struct ConnectedPeer {
     pub user_id: u64,
@@ -1189,22 +1200,32 @@ impl CollabLink {
         let _ = commands.send(wt_collab_client::SessionCommand::ReplayClosed { replay_id: replay_id.raw() });
     }
 
-    /// Asks the session to send this end the frames of one of its windows.
+    /// Asks the session to send this end the frames of one of its windows, calling `wake` on the
+    /// peer task whenever one arrives or the session changes what is drawn over it.
     ///
-    /// No waker is registered with the sink: the shared one is a plain callback,
-    /// and reaching a view from the peer task would need a channel into
-    /// the UI thread that the viewport is already draining. It looks for frames
-    /// on its own timer instead.
-    pub fn watch_window(
-        &self,
-        replay_id: ReplayId,
-        frames: std::sync::mpsc::SyncSender<wt_collab_client::PlaybackFrame>,
-    ) {
-        let Some(state) = &self.state else { return };
+    /// The session hands frames over through a bounded queue that drops the newest when full, so
+    /// the queue is emptied into the returned slot as each frame lands: a viewport that looks late
+    /// draws where the host is rather than where it was.
+    pub fn watch_window(&self, replay_id: ReplayId, wake: impl Fn() + Send + Sync + 'static) -> LatestFrame {
+        let latest = LatestFrame::default();
+        let Some(state) = &self.state else { return latest };
+
+        let (frames, arrived) = std::sync::mpsc::sync_channel(1);
+        let arrived = Mutex::new(arrived);
+        let held = latest.clone();
+        let wake: wt_collab_client::WindowWake = Arc::new(move || {
+            // Called right after each frame is queued, so the queue never holds more than one.
+            if let Some(frame) = arrived.lock().try_iter().last() {
+                *held.0.lock() = Some(frame);
+            }
+            wake();
+        });
         state.lock().register_viewport_sink(
             replay_id.raw(),
-            wt_collab_client::ViewportSink { frame_tx: Some(frames), wake: None },
+            wt_collab_client::ViewportSink { frame_tx: Some(frames), wake: Some(wake) },
         );
+
+        latest
     }
 
     /// Says this end has stopped drawing one of the session's windows.

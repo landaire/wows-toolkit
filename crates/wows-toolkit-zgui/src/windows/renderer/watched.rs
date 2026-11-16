@@ -9,10 +9,8 @@
 //! that end has reached rather than offering a transport of its own.
 
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::sync_channel;
-use std::time::Duration;
 
+use futures::channel::mpsc::UnboundedReceiver;
 use landaire_ui::LoadingPace;
 use landaire_ui::LoadingProps;
 use landaire_ui::TooltipContentProps;
@@ -42,9 +40,9 @@ use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_replay_data::replay_render::ships::ship_names;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::DisplayVersions;
+use wows_toolkit_services::collab::LatestFrame;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedWindow;
-use wt_collab_client::PlaybackFrame;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -65,7 +63,6 @@ use zgui::view;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
-use zgui::view::set_interval;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::PopoverContentProps;
@@ -108,12 +105,6 @@ const CSS: &str = css!(
     .wt-watched__body { position: relative; flex: 1; min-height: 0; }
     .wt-watched__frame { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }"
 );
-
-/// How often the frames the session has sent are looked for.
-///
-/// The shared sink's waker is a plain callback with no way onto the UI thread, so this drains on a
-/// timer instead. Watching someone else's playback is worth a tenth of a second of lateness.
-const DRAIN: Duration = Duration::from_millis(100);
 
 /// What the end that owns the replay says about where it has reached.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,8 +152,10 @@ struct WatchRun {
     /// The art the owning end sent, for a map this build ships none of.
     art: Option<Arc<image::RgbImage>>,
     game_data: Option<GameDataCache>,
-    /// Bounded, and the far end drops rather than blocks: a frame nobody has drawn yet is stale.
-    frames: Receiver<PlaybackFrame>,
+    /// The newest frame the host has sent, taken as it is drawn.
+    frames: LatestFrame,
+    /// The session's nudges, each a frame or a change to what is drawn. Taken by the view.
+    wakes: Option<UnboundedReceiver<()>>,
     /// The commands the last frame carried.
     latest: Option<Vec<DrawCommand>>,
     /// Whose ranges and trails are drawn: nobody's ranges until asked for, as in the renderer.
@@ -184,10 +177,12 @@ struct WatchRun {
 impl WatchSession {
     /// Asks the session for the frames of `shared`. Called from a component's body.
     pub fn open(shared: SharedWindow, link: CollabLink, game_data: Option<GameDataCache>) -> Self {
-        // A depth of a few frames is a cushion against a slow raster, not a queue to be played out.
-        let (tx, frames) = sync_channel(4);
+        let (nudge, wakes) = futures::channel::mpsc::unbounded();
         let replay_id = ReplayId::from_raw(shared.replay_id);
-        link.watch_window(replay_id, tx);
+        let frames = link.watch_window(replay_id, move || {
+            // The view is gone once nothing reads the nudges, and then there is nobody to wake.
+            let _ = nudge.unbounded_send(());
+        });
 
         let art = shared.art_png.as_ref().and_then(|png| match image::load_from_memory(png) {
             Ok(art) => Some(Arc::new(art.to_rgb8())),
@@ -210,6 +205,7 @@ impl WatchSession {
                 art,
                 game_data,
                 frames,
+                wakes: Some(wakes),
                 latest: None,
                 choices: ShipChoices::new(),
                 range_overrides: Vec::new(),
@@ -227,10 +223,21 @@ impl WatchSession {
         self.run.with_value(|run| run.sink.clone())
     }
 
-    /// Takes whatever has arrived, keeping only the newest: the others are moments the host has
+    /// The session's nudges, for the view to follow. `None` once taken.
+    pub fn take_wakes(self) -> Option<UnboundedReceiver<()>> {
+        self.run.try_update_value(|run| run.wakes.take()).flatten()
+    }
+
+    /// Takes up what the session has changed: the host's newest frame and its display settings.
+    pub fn follow_session(self) {
+        self.follow_session_display();
+        self.take_frames();
+    }
+
+    /// Takes the newest frame the host has sent. The ones before it are moments the host has
     /// already left, and drawing them would put this viewport behind it.
-    pub fn take_frames(self) {
-        let newest = self.run.try_with_value(|run| run.frames.try_iter().last()).flatten();
+    fn take_frames(self) {
+        let newest = self.run.try_with_value(|run| run.frames.take()).flatten();
         let Some(frame) = newest else { return };
 
         self.run.update_value(|run| run.latest = Some(frame.commands));
@@ -288,7 +295,7 @@ impl WatchSession {
 
     /// Takes up the display settings the session holds where they have changed since last
     /// looked at, over whatever was chosen here, as an egui peer does.
-    pub fn follow_session_display(self) {
+    fn follow_session_display(self) {
         let Some((link, seen)) = self.run.try_with_value(|run| (run.link.clone(), run.display_seen)) else { return };
         let versions = link.display_versions();
         if versions == seen {
@@ -409,20 +416,23 @@ pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView 
     view! { WatchedView(watch = watch) }
 }
 
-/// What `watch` shows, taking in the host's frames while it is up and stopping the watch as it
-/// goes.
+/// What `watch` shows, following the session while it is up and stopping the watch as it goes.
 #[component]
 pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    watch.follow_session_display();
-    let drain = set_interval(DRAIN, move || {
-        watch.follow_session_display();
-        watch.take_frames();
-    });
-    on_cleanup_local(move || {
-        drop(drain);
-        watch.stop();
-    });
+    watch.follow_session();
+    if let Some(mut wakes) = watch.take_wakes() {
+        spawn_local(async move {
+            use futures::StreamExt as _;
+
+            while wakes.next().await.is_some() {
+                // A burst of nudges is one look at the session.
+                while wakes.try_recv().is_ok() {}
+                watch.follow_session();
+            }
+        });
+    }
+    on_cleanup_local(move || watch.stop());
     let sink = watch.sink();
 
     view! {
