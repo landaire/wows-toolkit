@@ -895,6 +895,8 @@ impl SearchStat {
             Self::Card(TtxStat::ConsumableMaxCapacity) => "Capacity of a time-based consumable, one switched on and off that draws on a pool of seconds of use per battle instead of charges (e.g. 20 de Julio's Main Battery Reload Booster); unlimited ranks above every number. Only ships with a time-based consumable have a row, so a condition >= 0 lists them all".to_owned(),
             Self::Card(TtxStat::SubmergedSpeed) => "Submerged speed: a submarine's top speed fully underwater, at maximum depth. This is how fast a submarine moves underwater; mobility.speed is its speed on the surface".to_owned(),
             Self::Card(TtxStat::PeriscopeSpeed) => "A submarine's top speed at periscope depth, just below the surface; equal to its surface speed (mobility.speed) on almost every submarine, so not its underwater speed (underwater_mobility.speed)".to_owned(),
+            Self::Card(TtxStat::BatteryCapacity) => "Dive capacity: seconds a submarine's full dive capacity lasts below the surface (periscope depth or deeper), draining 1 per second at any depth and speed; when it runs out the submarine must surface. This is how long a submarine can stay underwater. The Reserve Battery Unit consumable stops the drain while active".to_owned(),
+            Self::Card(TtxStat::BatteryRegeneration) => "Dive capacity recharge rate: seconds of dive capacity regained per second on the surface; battery.recharge_time is the time to refill from empty".to_owned(),
             Self::Card(stat) => clean(&stat_display_label(stat, game.provider())),
             Self::Armor { zone, bound: Bound::Min } => {
                 format!("Thinnest {} plate above the waterline ({NOMINAL})", zone.key.replace('_', " "))
@@ -2981,6 +2983,7 @@ mod tests {
             StatValue::DegreesPerSecond(_) => Unit::DegreesPerSecond,
             StatValue::Count(_) | StatValue::Ammo(_) => Unit::Count,
             StatValue::Float(_) => Unit::Ratio,
+            StatValue::DiveCapacityRate(_) => Unit::DiveCapacityPerSecond,
             StatValue::Bool(_) => Unit::Flag,
         }
     }

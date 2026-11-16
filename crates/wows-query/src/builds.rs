@@ -39,6 +39,7 @@ use wows_core::units::Seconds;
 use wows_core::units::TorpedoesPerMinute;
 use wows_ship_stats::Triggers;
 use wowsunpack::game_params::ttx::ShipUpgradeSelection;
+use wowsunpack::game_params::ttx::model::DiveCapacityRate;
 use wowsunpack::game_params::ttx::model::Knots;
 use wowsunpack::game_params::ttx::model::ShipStats;
 use wowsunpack::game_params::ttx::modifiers::ModifierBundle;
@@ -131,6 +132,16 @@ impl StatAmount for FiresPerMinute {
 
 impl StatUnit for FiresPerMinute {
     const UNIT: &'static str = "fires/min";
+}
+
+impl StatAmount for DiveCapacityRate {
+    fn amount(self) -> f32 {
+        self.value()
+    }
+}
+
+impl StatUnit for DiveCapacityRate {
+    const UNIT: &'static str = "s of dive capacity per s";
 }
 
 impl StatAmount for Percent {

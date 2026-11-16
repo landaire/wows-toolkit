@@ -141,8 +141,7 @@ impl std::fmt::Display for AmmoCount {
 
 /// A kind-tagged stat value: the displayed quantity plus the unit it carries.
 /// `Count` is a dimensionless integer (gun/barrel counts); `Float` is a
-/// dimensionless real (submarine dive pool/rate, no real-world unit); `Bool` is
-/// a yes/no flag.
+/// dimensionless real; `Bool` is a yes/no flag.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StatValue {
     Hp(Hp),
@@ -158,6 +157,7 @@ pub enum StatValue {
     DegreesPerSecond(DegreesPerSecond),
     Count(u32),
     Float(f32),
+    DiveCapacityRate(DiveCapacityRate),
     Ammo(AmmoCount),
     Bool(bool),
 }
@@ -179,6 +179,7 @@ impl std::fmt::Display for StatValue {
             StatValue::DegreesPerSecond(v) => write!(f, "{v}"),
             StatValue::Count(n) => write!(f, "{n}"),
             StatValue::Float(v) => write!(f, "{v:.1}"),
+            StatValue::DiveCapacityRate(v) => write!(f, "{v}"),
             StatValue::Ammo(v) => write!(f, "{v}"),
             StatValue::Bool(b) => write!(f, "{}", if *b { "yes" } else { "no" }),
         }
@@ -202,6 +203,7 @@ impl StatValue {
             StatValue::DegreesPerSecond(v) => Some(v.value()),
             StatValue::Count(n) => Some(*n as f32),
             StatValue::Float(v) => Some(*v),
+            StatValue::DiveCapacityRate(v) => Some(v.value()),
             StatValue::Ammo(AmmoCount::Finite(n)) => Some(*n as f32),
             StatValue::Ammo(AmmoCount::Infinite) => None,
             StatValue::Bool(_) => None,
@@ -304,8 +306,8 @@ impl ShipStats {
     /// field order). Absent fields are skipped.
     ///
     /// Every [`TtxStat`] variant is reachable: shell muzzle speed maps to
-    /// [`StatValue::MetersPerSecond`], the submarine dive pool/rate to the
-    /// dimensionless [`StatValue::Float`].
+    /// [`StatValue::MetersPerSecond`], the submarine dive capacity to
+    /// [`StatValue::Seconds`] and its recharge to [`StatValue::DiveCapacityRate`].
     pub fn rows(&self) -> Vec<StatRow> {
         let mut rows = Vec::new();
 
@@ -340,8 +342,8 @@ impl ShipStats {
             scalar(&mut rows, TtxStat::ArmorMax, a.max.map(StatValue::Millimeters));
         }
         if let Some(b) = &self.battery {
-            scalar(&mut rows, TtxStat::BatteryCapacity, b.capacity.map(StatValue::Float));
-            scalar(&mut rows, TtxStat::BatteryRegeneration, b.regeneration.map(StatValue::Float));
+            scalar(&mut rows, TtxStat::BatteryCapacity, b.capacity.map(StatValue::Seconds));
+            scalar(&mut rows, TtxStat::BatteryRegeneration, b.regeneration.map(StatValue::DiveCapacityRate));
         }
 
         push_artillery_rows(&mut rows, self.artillery.as_ref(), ArtilleryKind::Main, &scalar, &item);
@@ -641,12 +643,39 @@ pub struct Armor {
     pub max: Option<Millimeters>,
 }
 
-/// Submarine battery stats (`FactoryBattery`).
+/// Submarine battery stats (`FactoryBattery`). The battery drains 1 unit per
+/// second at periscope depth and below, at any speed (`BASE_BATTERY_SPEND_RATE`,
+/// m63fc2621.py:99; `BATTERY_SPENDING_STATES`, BuoyancyCommon.py:37), so the
+/// capacity is the seconds a full battery lasts underwater.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Battery {
-    pub capacity: Option<f32>,
-    pub regeneration: Option<f32>,
+    pub capacity: Option<Seconds>,
+    pub regeneration: Option<DiveCapacityRate>,
+}
+
+/// Dive capacity regained per second on the surface, in seconds of
+/// underwater time (ModifiersApply.py:898-899).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DiveCapacityRate(f32);
+
+impl DiveCapacityRate {
+    pub fn value(&self) -> f32 {
+        self.0
+    }
+}
+
+impl From<f32> for DiveCapacityRate {
+    fn from(v: f32) -> Self {
+        Self(v)
+    }
+}
+
+impl std::fmt::Display for DiveCapacityRate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.1}/s", self.0)
+    }
 }
 
 /// Main-battery gun mount stats (`MainGunTTX`, FactoryArtillery.py:70-76 +
@@ -1071,7 +1100,10 @@ mod tests {
                 buoyancy_speed: Some(MetersPerSecond::from(1.0)),
             }),
             armor: Some(Armor { min: Some(Millimeters::from(1.0)), max: Some(Millimeters::from(1.0)) }),
-            battery: Some(Battery { capacity: Some(1.0), regeneration: Some(1.0) }),
+            battery: Some(Battery {
+                capacity: Some(Seconds::from(1.0)),
+                regeneration: Some(DiveCapacityRate::from(1.0)),
+            }),
             artillery: Some(artillery()),
             secondaries: Some(SecondaryBattery {
                 range: Km::from(1.0),
@@ -1129,7 +1161,10 @@ mod tests {
     #[test]
     fn rows_emit_speed_and_battery() {
         let stats = ShipStats {
-            battery: Some(Battery { capacity: Some(240.0), regeneration: Some(1.2) }),
+            battery: Some(Battery {
+                capacity: Some(Seconds::from(240.0)),
+                regeneration: Some(DiveCapacityRate::from(1.2)),
+            }),
             artillery: Some(Artillery {
                 shells: vec![ShellStats { speed: Some(MetersPerSecond::from(820.0)), ..bare_shell("S", "HE") }],
                 ..Default::default()
@@ -1146,12 +1181,12 @@ mod tests {
 
         let capacity = rows.iter().find(|r| r.stat == TtxStat::BatteryCapacity).unwrap();
         assert_eq!(capacity.qualifier, None);
-        assert_eq!(capacity.value, StatValue::Float(240.0));
-        assert_eq!(capacity.value.to_string(), "240.0");
+        assert_eq!(capacity.value, StatValue::Seconds(Seconds::from(240.0)));
+        assert_eq!(capacity.value.to_string(), "240.0 s");
 
         let regen = rows.iter().find(|r| r.stat == TtxStat::BatteryRegeneration).unwrap();
         assert_eq!(regen.qualifier, None);
-        assert_eq!(regen.value.to_string(), "1.2");
+        assert_eq!(regen.value.to_string(), "1.2/s");
     }
 
     #[test]

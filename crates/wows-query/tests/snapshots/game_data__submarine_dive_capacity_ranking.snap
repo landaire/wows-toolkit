@@ -1,0 +1,103 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: ranking
+---
+stat: "battery.capacity (s), highest first, on the build that raises it most, the usual build"
+rule: "Each ship is ranked by its value on the build that raises the stat most, as ship_concealment and ship_stats report best builds: the module combination, captain skills (21 points, each skill needing one on every cheaper tier) and upgrades (one per slot) that raise the stat most. Conditional skills count with their triggers unmet; every extra consumable charge counts. With conditions, the build is chosen for the rank stat alone. Ships are ordered by exact value; ships whose values print the same share a rank. That is the usual build, the one players run for the stat, whichever order the ships are listed in."
+ranked: 13
+ships:
+  - rank: 1
+    ship: "T10 Thrasher (submarine, United_Kingdom)"
+    value: 430.1 s
+    base: 340 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 2
+    ship: "T10 Archerfish (submarine, USA, premium)"
+    value: 404.8 s
+    base: 320 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 3
+    ship: "T10 Tonijn (submarine, Netherlands, premium)"
+    value: 392.15 s
+    base: 310 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 4
+    ship: "T10 Seal (submarine, United_Kingdom, premium)"
+    value: 379.5 s
+    base: 300 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 5
+    ship: "T10 Orzeł (submarine, Europe, premium)"
+    value: 366.85 s
+    base: 290 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 6
+    ship: "T10 U-2501 (submarine, Germany)"
+    value: 354.2 s
+    base: 280 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 7
+    ship: "T10 Surcouf (submarine, France, premium)"
+    value: 328.9 s
+    base: 260 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 8
+    ship: "T10 Balao (submarine, USA)"
+    value: 303.6 s
+    base: 240 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+    tied: true
+  - rank: 8
+    ship: "T10 Gato (submarine, USA, premium)"
+    value: 303.6 s
+    base: 240 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+    tied: true
+  - rank: 10
+    ship: "T10 K-1 (submarine, Russia)"
+    value: 265.65 s
+    base: 210 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+    tied: true
+  - rank: 10
+    ship: "T10 U-4501 (submarine, Germany, premium)"
+    value: 265.65 s
+    base: 210 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+    tied: true
+  - rank: 12
+    ship: "T10 Pietro Calvi (submarine, Italy)"
+    value: 202.4 s
+    base: 160 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2
+  - rank: 13
+    ship: "T10 I-56 '44 (submarine, Japan, premium) [replicas: BA Arona's Whale]"
+    value: 113.85 s
+    base: 90 s
+    build:
+      - Improved Battery Capacity
+      - Dive Capacity Modification 2

@@ -25,8 +25,11 @@ pub enum Unit {
     Degrees,
     Count,
 
-    /// A dimensionless real, such as the submarine dive capacity pool.
+    /// A dimensionless real.
     Ratio,
+
+    /// Seconds of submarine dive capacity regained per second on the surface.
+    DiveCapacityPerSecond,
 
     /// Yes or no.
     Flag,
@@ -50,6 +53,7 @@ impl Unit {
             Self::Percent => "%",
             Self::DegreesPerSecond => " deg/s",
             Self::Degrees => " deg",
+            Self::DiveCapacityPerSecond => "/s",
             Self::Count | Self::Ratio | Self::Flag => "",
         }
     }
@@ -73,6 +77,7 @@ impl Unit {
             Self::Degrees => "deg",
             Self::Count => "count",
             Self::Ratio => "ratio",
+            Self::DiveCapacityPerSecond => "s of dive capacity per s",
             Self::Flag => "yes/no",
         }
     }
@@ -106,7 +111,8 @@ pub fn unit(stat: TtxStat) -> Unit {
         | TtxStat::ConsumableMaxCapacity
         | TtxStat::ConsumableSmokeLifetime
         | TtxStat::ConsumableCallFightersTimeDelay
-        | TtxStat::ConsumableCallFightersTimeFromHeaven => Unit::Seconds,
+        | TtxStat::ConsumableCallFightersTimeFromHeaven
+        | TtxStat::BatteryCapacity => Unit::Seconds,
         TtxStat::TurningRadius
         | TtxStat::ArtilleryDispersion
         | TtxStat::ArtilleryDispersionVertical
@@ -154,9 +160,8 @@ pub fn unit(stat: TtxStat) -> Unit {
         | TtxStat::ShellMaxAmmo
         | TtxStat::SecondaryShellMaxAmmo
         | TtxStat::ConsumableCharges => Unit::Count,
-        TtxStat::BatteryCapacity
-        | TtxStat::BatteryRegeneration
-        | TtxStat::ConsumableRegenerationHpSpeed
+        TtxStat::BatteryRegeneration => Unit::DiveCapacityPerSecond,
+        TtxStat::ConsumableRegenerationHpSpeed
         | TtxStat::ConsumableFightersCount
         | TtxStat::ConsumablePlaneRegenerationRate => Unit::Ratio,
         TtxStat::ShellDisabledUnderwater | TtxStat::TorpedoIsDamageIncreasing | TtxStat::TorpedoDisabledUnderwater => {

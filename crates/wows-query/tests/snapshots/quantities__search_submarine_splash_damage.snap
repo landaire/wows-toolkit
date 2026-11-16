@@ -90,5 +90,5 @@ quantities:
         description: "base: stock modules, no captain skills or upgrades. best: the build players take for the stat (lower detection and reload, higher damage and range); the base value for a stat no build improves. lowest or highest: the build that moves the stat furthest that way."
     sources:
       - "computation: stat_search, from the ship's stat card as the port's TTX factories compute it, on the builds stat_search ranks by"
-omitted: 49
+omitted: 51
 note: "Call quantity_values with a name and its params: it computes the values from game data. Speeds are game knots: ships and torpedoes move 2.6854 m/s per game knot on the map, not 0.5144 m/s per nautical knot; values already apply this."

@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(wows-query)* Explain submarine dive capacity as the seconds a full battery lasts underwater and its recharge rate as seconds regained per second on the surface, rank `battery.recharge_time` (time to refill from empty) in `stat_search`, and give the dive capacity, recharge rate and recharge time with builds in `ship_stats`
 - *(zgui)* List a ship's splash boxes by group in the armor viewer's Layers tab, with a checkbox for each box and group, and outline the boxes of a hovered row on the hull
 - *(zgui)* Show how to Shift+click the hull to cast a shell in the armor viewport and the Trajectory section while no arc is cast, show a crosshair while Shift is held over the hull, and say why a Shift+click cast nothing
 - *(zgui)* Group the armor viewer options into Ship, Layers, Analysis and Display tabs on the panel's edge. The search covers every tab, counts the matches on each and shows the first tab holding one, and the chosen tab and open sections are remembered. Ctrl+Tab moves between the tabs

@@ -1,0 +1,61 @@
+---
+source: crates/wows-query/tests/game_data.rs
+expression: battery
+---
+capacity:
+  stat: "dive capacity: seconds a full battery lasts at periscope depth or deeper, draining 1 per second at any depth and speed"
+  unit: s
+  builds:
+    base: 240
+    best:
+      value: 303.6
+      assumed:
+        - Improved Battery Capacity
+        - Dive Capacity Modification 2
+    alternatives:
+      - label: without Improved Battery Capacity
+        value: 276
+        assumed:
+          - Dive Capacity Modification 2
+      - label: without Dive Capacity Modification 2
+        value: 264
+        assumed:
+          - Improved Battery Capacity
+regeneration:
+  stat: "dive capacity recharge rate: seconds of dive capacity regained per second on the surface"
+  unit: s of dive capacity per s
+  builds:
+    base: 1.2
+    best:
+      value: 1.32
+      assumed:
+        - Dive Capacity Modification 1
+    alternatives:
+      - label: without Dive Capacity Modification 1
+        value: 1.2
+        assumed: []
+      - label: with Improved Battery Efficiency active
+        value: 1.65
+        assumed:
+          - Dive Capacity Modification 1
+          - Improved Battery Efficiency
+        note: "Increases dive capacity recharge rate on the surface while less than 50% of your sub's maximum dive capacity remains."
+recharge_time:
+  stat: "dive capacity recharge time: seconds on the surface to refill an empty battery, capacity / regeneration"
+  unit: s
+  builds:
+    base: 200
+    best:
+      value: 181.82
+      assumed:
+        - Dive Capacity Modification 1
+    alternatives:
+      - label: without Dive Capacity Modification 1
+        value: 200
+        assumed: []
+      - label: with Improved Battery Efficiency active
+        value: 145.45
+        assumed:
+          - Dive Capacity Modification 1
+          - Improved Battery Efficiency
+        note: "Increases dive capacity recharge rate on the surface while less than 50% of your sub's maximum dive capacity remains."

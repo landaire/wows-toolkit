@@ -32,6 +32,7 @@ use crate::game_params::ttx::model::Armor;
 use crate::game_params::ttx::model::Artillery;
 use crate::game_params::ttx::model::Battery;
 use crate::game_params::ttx::model::DegreesPerSecond;
+use crate::game_params::ttx::model::DiveCapacityRate;
 use crate::game_params::ttx::model::Durability;
 use crate::game_params::ttx::model::Hp;
 use crate::game_params::ttx::model::Knots;
@@ -259,7 +260,7 @@ pub fn battery<R: Recorder>(
             b.coef(sources, "batteryRegenCoeff")
         });
     }
-    Some(Battery { capacity: Some(cap_value), regeneration: Some(regen_value) })
+    Some(Battery { capacity: Some(Seconds::from(cap_value)), regeneration: Some(DiveCapacityRate::from(regen_value)) })
 }
 
 /// Underwater maneuvering section (`FactoryUnderwaterMobility.py:6`). `None` for
@@ -1943,8 +1944,8 @@ mod tests {
             &mut Off,
         )
         .expect("battery computed");
-        assert_eq!(battery.capacity, Some(BALAO_BATTERY_CAPACITY));
-        assert_eq!(battery.regeneration, Some(BALAO_BATTERY_REGEN));
+        assert_eq!(battery.capacity, Some(Seconds::from(BALAO_BATTERY_CAPACITY)));
+        assert_eq!(battery.regeneration, Some(DiveCapacityRate::from(BALAO_BATTERY_REGEN)));
     }
 
     #[test]
@@ -1955,8 +1956,8 @@ mod tests {
             ModifierBundle::from_modifiers(&mods, Species::Submarine, VERSION).expect("test modifiers are all known");
         let battery =
             battery(&balao_hull(), "H", &bundle, &ModifierSources::default(), &mut Off).expect("battery computed");
-        let capacity = battery.capacity.expect("capacity");
-        let regen = battery.regeneration.expect("regen");
+        let capacity = battery.capacity.expect("capacity").value();
+        let regen = battery.regeneration.expect("regen").value();
         assert!((capacity - 264.0).abs() < 1e-4, "got {capacity}");
         assert!((regen - 1.5).abs() < 1e-4, "got {regen}");
     }

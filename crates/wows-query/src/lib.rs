@@ -13,6 +13,7 @@ pub mod armor;
 pub mod armor_assessment;
 mod armor_models;
 pub mod armor_trace;
+pub mod battery;
 pub mod battle_impact;
 pub mod buffs;
 pub mod builds;

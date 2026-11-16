@@ -28,6 +28,7 @@ use wowsunpack::game_params::ttx::render_stat_rows;
 use wowsunpack::game_params::ttx::special_abilities::BurstShots;
 
 use crate::anti_air::AntiAircraftBuilds;
+use crate::battery::BatteryBuilds;
 use crate::builds::Better;
 use crate::builds::BuildStat;
 use crate::builds::Outcome;
@@ -156,6 +157,11 @@ pub struct WeaponBuilds {
     /// Top speed on the surface and, for submarines, at periscope depth and
     /// submerged.
     pub speed: SpeedBuilds,
+
+    /// Submarine dive capacity: seconds underwater on a full battery and
+    /// recharge on the surface.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery: Option<BatteryBuilds>,
 
     /// Theoretical fire starts per minute of every armament.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -359,6 +365,7 @@ impl GameData {
             burst_fire,
             fires_per_minute: self.fire_rates(&planner)?,
             speed: self.speed_builds(&planner)?,
+            battery: self.battery_builds(&planner)?,
             rates: self.rates(&planner)?,
             anti_aircraft: self.anti_aircraft_builds(&planner)?,
         })

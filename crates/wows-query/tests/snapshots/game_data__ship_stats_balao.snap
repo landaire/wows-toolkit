@@ -1,6 +1,5 @@
 ---
 source: crates/wows-query/tests/game_data.rs
-assertion_line: 3066
 expression: stats.stats
 ---
 - "Hit Points: 20200"
@@ -14,8 +13,8 @@ expression: stats.stats
 - "Maximum Dive and Ascent Speed: 3.3 m/s"
 - "Armor Min: 6 mm"
 - "Armor Max: 25 mm"
-- "Dive Capacity: 240.0"
-- "Dive Capacity Recharge Rate: 1.2"
+- "Dive Capacity: 240.0 s"
+- "Dive Capacity Recharge Rate: 1.2/s"
 - "Torpedo Tube Reload Time: 46.0 s"
 - "Torpedo Tube Traverse Speed (0): 12.0 deg/s"
 - "180° Turn Time (0): 15.0 s"
@@ -85,6 +84,7 @@ expression: stats.stats
 - "Torpedo tubes, all launchers: 10"
 - "Time to use every charge (crashCrew): 225.0 s"
 - "Time to use every charge (fastRudders): 300.0 s"
+- "Submarine dive capacity recharge time: seconds on the surface to refill an empty dive capacity, battery.capacity / battery.regeneration; lower is better: 200.0 s"
 - "Torpedoes per minute with every launcher firing at once, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees: 5.22 torpedoes/min"
 - "Torpedo damage per minute with every launcher firing at once, every torpedo hitting, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees (Mk29 mod. 0): 40870 hp/min"
 - "Torpedo damage per minute with every launcher firing at once, every torpedo hitting, on the launcher reload, loader limits applied, no consumable: a ceiling no single target sees (Mk28 MIE): 82783 hp/min"

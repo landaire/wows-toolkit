@@ -3619,6 +3619,64 @@ fn submarine_speed_per_depth() {
     insta::assert_yaml_snapshot!("submarine_submerged_speed_ranking", search.ranking.expect("a rank was asked for"));
 }
 
+/// Tier 10 submarines ranked by dive capacity, the seconds a full battery
+/// lasts underwater. Thrasher has the largest battery, 340 s base, and stays
+/// first on the best-fit build since every submarine takes the same
+/// capacity skill and upgrade.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn submarine_dive_capacity_ranking() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "rank": { "stat": "battery.capacity", "order": "desc", "limit": 25 },
+                "min_tier": 10,
+                "max_tier": 10,
+                "class": "Submarine",
+                "exclude_test_ships": true,
+            }),
+        )
+        .expect("rank resolves");
+    let ranking = &search["ranking"];
+    let first = &ranking["ships"][0];
+
+    assert!(first["ship"].as_str().is_some_and(|ship| ship.starts_with("T10 Thrasher ")), "{first}");
+    assert_eq!(first["base"], "340 s");
+    insta::assert_yaml_snapshot!(ranking);
+}
+
+/// Balao refills an empty battery in 240 / 1.2 = 200 s on the base build.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn balao_dive_capacity_recharge_time() {
+    let search = game()
+        .call_tool(
+            "stat_search",
+            json!({
+                "rank": { "stat": "battery.recharge_time", "order": "asc", "limit": 25 },
+                "min_tier": 10,
+                "max_tier": 10,
+                "class": "Submarine",
+                "exclude_test_ships": true,
+            }),
+        )
+        .expect("rank resolves");
+    let balao = search["ranking"]["ships"]
+        .as_array()
+        .expect("ships is a list")
+        .iter()
+        .find(|ship| ship["ship"].as_str().is_some_and(|name| name.starts_with("T10 Balao ")))
+        .expect("Balao is ranked");
+
+    assert_eq!(balao["base"], "200 s");
+
+    let stats =
+        game().ship_stats(&ShipStatsArgs { ship: "Balao".to_owned(), ..Default::default() }).expect("Balao exists");
+    let battery = stats.build_stats.expect("no loadout gives build_stats").battery.expect("Balao has a battery");
+    insta::assert_yaml_snapshot!(battery);
+}
+
 /// Top speed with the conditions that raise it only part of a battle:
 /// Engine Boost, signals, conditional skills, special abilities and, with a
 /// commander, talents. Each is an alternative; the best-fit build is

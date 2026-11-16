@@ -84,6 +84,13 @@ pub enum DerivedStat {
     /// consumable: charges times action time plus reload.
     ConsumableAllChargesTime,
 
+    /// Seconds on the surface to refill an empty submarine battery: capacity
+    /// over regeneration. Underwater the battery drains 1 per second
+    /// (`BASE_BATTERY_SPEND_RATE`, m63fc2621.py:99) and on the surface it
+    /// regains `regenRate * batteryRegenCoeff` per second
+    /// (ModifiersApply.py:898-899).
+    BatteryRechargeTime,
+
     /// Theoretical fire starts per minute against one target at the bearing
     /// where the most start: the main battery's best ammo type and every
     /// secondary group from the mounts that bear there, the best squadron of
@@ -208,6 +215,7 @@ impl DerivedStat {
         DerivedStat::SecondaryVerticalDispersionAtStockRange,
         DerivedStat::TorpedoTubes,
         DerivedStat::ConsumableAllChargesTime,
+        DerivedStat::BatteryRechargeTime,
         DerivedStat::FiresPerMinuteTotal,
         DerivedStat::FiresPerMinuteTotalAllMounts,
         DerivedStat::FiresPerMinuteMainBattery,
@@ -263,6 +271,7 @@ impl DerivedStat {
             Self::SecondaryVerticalDispersionAtStockRange => "secondary.dispersion_vertical_at_stock_range",
             Self::TorpedoTubes => "torpedoes.tubes",
             Self::ConsumableAllChargesTime => "consumable.all_charges_time",
+            Self::BatteryRechargeTime => "battery.recharge_time",
             Self::FiresPerMinuteTotal => "fires_per_minute.total",
             Self::FiresPerMinuteTotalAllMounts => "fires_per_minute.total_all_mounts",
             Self::FiresPerMinuteMainBattery => "fires_per_minute.main_battery",
@@ -330,6 +339,9 @@ impl DerivedStat {
             Self::SecondaryVerticalDispersionAtStockRange => "Secondary vertical dispersion at stock secondary range",
             Self::TorpedoTubes => "Torpedo tubes, all launchers",
             Self::ConsumableAllChargesTime => "Time to use every charge",
+            Self::BatteryRechargeTime => {
+                "Submarine dive capacity recharge time: seconds on the surface to refill an empty dive capacity, battery.capacity / battery.regeneration; lower is better"
+            }
             Self::FiresPerMinuteTotal => {
                 "Fire starts per minute against one target at its best bearing, all armament, every projectile hitting"
             }
@@ -441,7 +453,9 @@ impl DerivedStat {
             | Self::MainBatteryVerticalDispersionAtStockRange
             | Self::SecondaryDispersionAtStockRange
             | Self::SecondaryVerticalDispersionAtStockRange => Unit::Meters,
-            Self::ConsumableAllChargesTime | Self::FireDuration | Self::FloodDuration => Unit::Seconds,
+            Self::ConsumableAllChargesTime | Self::BatteryRechargeTime | Self::FireDuration | Self::FloodDuration => {
+                Unit::Seconds
+            }
             Self::FiresPerMinuteTotal
             | Self::FiresPerMinuteTotalAllMounts
             | Self::FiresPerMinuteMainBattery
@@ -490,7 +504,8 @@ impl DerivedStat {
             | Self::FireDamage
             | Self::FloodDuration
             | Self::FloodDamagePerSecond
-            | Self::FloodDamage => Some(Direction::Lower),
+            | Self::FloodDamage
+            | Self::BatteryRechargeTime => Some(Direction::Lower),
 
             // More charges and longer action raise it, and so does a longer reload.
             Self::ConsumableAllChargesTime => None,
@@ -537,6 +552,7 @@ impl DerivedStat {
             Self::ConsumableAllChargesTime => {
                 &[TtxStat::ConsumableCharges, TtxStat::ConsumableWorkTime, TtxStat::ConsumableReloadTime]
             }
+            Self::BatteryRechargeTime => &[TtxStat::BatteryCapacity, TtxStat::BatteryRegeneration],
             Self::FiresPerMinuteTotal | Self::FiresPerMinuteTotalAllMounts => &[
                 TtxStat::ShellBurnChance,
                 TtxStat::ArtilleryReloadTime,
@@ -626,6 +642,7 @@ impl DerivedStat {
             | Self::SecondaryVerticalDispersionAtStockRange
             | Self::TorpedoTubes
             | Self::ConsumableAllChargesTime
+            | Self::BatteryRechargeTime
             | Self::FiresPerMinuteTotal
             | Self::FiresPerMinuteTotalAllMounts
             | Self::FiresPerMinuteMainBattery
@@ -972,6 +989,18 @@ impl Derivation<'_> {
                 stat: DerivedStat::ConsumableAllChargesTime,
                 qualifier: Some(card.label.clone()),
                 value: DerivedValue::Seconds(Seconds::from(charges as f32 * cycle)),
+                consumable: None,
+            });
+        }
+
+        if let Some(battery) = &self.stats.battery
+            && let (Some(capacity), Some(regeneration)) = (battery.capacity, battery.regeneration)
+            && regeneration.value() > 0.0
+        {
+            rows.push(DerivedRow {
+                stat: DerivedStat::BatteryRechargeTime,
+                qualifier: None,
+                value: DerivedValue::Seconds(Seconds::from(capacity.value() / regeneration.value())),
                 consumable: None,
             });
         }
