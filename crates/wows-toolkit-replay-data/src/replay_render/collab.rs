@@ -88,6 +88,23 @@ pub fn ping_ring(age: Duration) -> Option<PingRing> {
     Some(PingRing { radius: PING_RADIUS * (0.3 + age / PING_SECONDS), opacity: 1.0 - age / PING_SECONDS })
 }
 
+/// How opaque a peer's pointer that last moved `age` ago is drawn, from 1 down to 0, or `None`
+/// once it has stood still long enough to be taken down.
+///
+/// A peer whose app froze, or that left without saying its pointer had left the map, would
+/// otherwise leave its name on the map for good. The egui renderer's timings.
+pub fn cursor_opacity(age: Duration) -> Option<f32> {
+    const FADES_AFTER: Duration = Duration::from_secs(3);
+    const GONE_AFTER: Duration = Duration::from_secs(5);
+
+    if age > GONE_AFTER {
+        return None;
+    }
+    let Some(fading) = age.checked_sub(FADES_AFTER) else { return Some(1.0) };
+
+    Some(1.0 - fading.as_secs_f32() / (GONE_AFTER - FADES_AFTER).as_secs_f32())
+}
+
 /// What a session watching this playback is sent for frame `at`.
 ///
 /// Draw commands rather than pixels, so each peer draws the battle with its

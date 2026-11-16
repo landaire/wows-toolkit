@@ -8,9 +8,14 @@ use rust_i18n::t;
 use wows_toolkit_replay_data::replay_render::annotate::ANNOTATION_ACTIONS;
 use wows_toolkit_replay_data::replay_render::annotate::HANDLE_RADIUS;
 use wows_toolkit_replay_data::replay_render::annotate::TOOLS;
+use wows_toolkit_replay_data::replay_render::collab::cursor_opacity;
 use wows_toolkit_replay_data::replay_render::collab::ping_ring;
+use wows_toolkit_replay_data::replay_render::view::MapView;
+use wows_toolkit_services::collab::CollabLink;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::With;
 use zgui::view;
@@ -81,7 +86,7 @@ pub fn AnnotationOverlay(session: RendererSession) -> impl IntoView {
         box(class = "wt-renderer-annotations") {
             RotationHandle(session = session)
             ShapeEditPopup(session = session)
-            PeerMarks(session = session)
+            PeerMarks(map = session.map, origin = session.map_origin, link = session.collab, tick = session.collab_frame)
             Show(when = move || session.ctrl_held.get()) {
                 ShortcutSheet()
             }
@@ -128,19 +133,25 @@ fn RotationHandle(session: RendererSession) -> impl IntoView {
     }
 }
 
-/// Where the peers' pointers are and the pings dropped, this end's own included, read again each
-/// time the session or a ping redraws.
+/// Where the peers' pointers are and the pings dropped, this end's own included, on `map`, read
+/// again each time `tick` moves. `origin` is where the map's corner sits in the frame.
 #[component]
-fn PeerMarks(session: RendererSession) -> impl IntoView {
+fn PeerMarks(
+    #[prop(into)] map: Signal<MapView, LocalStorage>,
+    #[prop(into)] origin: Signal<(f32, f32), LocalStorage>,
+    #[prop(into)] link: Signal<CollabLink, LocalStorage>,
+    #[prop(into)] tick: Signal<u64, LocalStorage>,
+) -> impl IntoView {
     let marks = move || {
-        let _ = session.collab_frame.get();
-        let origin = session.map_origin.get();
-        let (cursors, pings) = session.collab.with(|link| (link.peer_cursors(), link.pings()));
+        let _ = tick.get();
+        let origin = origin.get();
+        let (cursors, pings) = link.with(|link| (link.peer_cursors(), link.pings()));
 
-        session.map.with(|map| {
+        map.with(|map| {
             let mut marks: Vec<AnyView> = Vec::new();
             for cursor in cursors {
                 let Some([x, y]) = cursor.pos else { continue };
+                let Some(opacity) = cursor_opacity(cursor.last_update.elapsed()) else { continue };
                 let Some(at) = map.element_point((x, y), origin) else { continue };
                 let [red, green, blue] = cursor.color;
                 let color = format!("#{red:02x}{green:02x}{blue:02x}");
@@ -150,7 +161,8 @@ fn PeerMarks(session: RendererSession) -> impl IntoView {
                         class = "wt-renderer-annotations__cursor",
                         attr:data-testid = format!("replay-renderer-peer-cursor-{}", cursor.user_id),
                         style:left = format!("{}px", at.x),
-                        style:top = format!("{}px", at.y)
+                        style:top = format!("{}px", at.y),
+                        style:opacity = opacity.to_string()
                     ) {
                         box(class = "wt-renderer-annotations__dot", style:background-color = color.clone())
                         text(class = "wt-renderer-annotations__name", style:color = color) {{name}}

@@ -76,6 +76,7 @@ use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
 use crate::replay_render::collab::adopt_range_overrides;
 use crate::replay_render::collab::adopt_trail_overrides;
+use crate::replay_render::collab::cursor_opacity;
 use crate::replay_render::collab::frame_broadcast_with_trails;
 use crate::replay_render::collab::range_overrides;
 use crate::replay_render::export::BatchStep;
@@ -2383,6 +2384,17 @@ fn a_ping_outlives_its_own_frame() {
 
     link.drop_stale_pings(Duration::from_millis(100));
     assert!(state.lock().pings.is_empty(), "and it goes once it has run out");
+}
+
+/// A peer's pointer is drawn whole for three seconds after it last moved, fades over the next two,
+/// and is taken down after that.
+#[test]
+fn a_still_peer_pointer_fades_and_goes() {
+    assert_eq!(cursor_opacity(Duration::from_secs(1)), Some(1.0), "a pointer that moved lately is drawn whole");
+    assert_eq!(cursor_opacity(Duration::from_secs(3)), Some(1.0));
+    assert_eq!(cursor_opacity(Duration::from_secs(4)), Some(0.5), "halfway through its fade");
+    assert_eq!(cursor_opacity(Duration::from_secs(5)), Some(0.0));
+    assert_eq!(cursor_opacity(Duration::from_millis(5001)), None, "and then it is gone");
 }
 
 /// The first move draws the hull from nothing, because a viewport can open

@@ -352,8 +352,9 @@ fn the_primary_modifier_shows_the_shortcut_sheet() {
     assert!(window.by_test_id("replay-renderer-shortcuts").is_none(), "down once the key is let go");
 }
 
-/// A peer's cursor is drawn where they point on the map, and follows them as the session
-/// redraws; a fresh ping is drawn and one whose ripple has run out is not.
+/// A peer's cursor is drawn where they point on the map, follows them as the session redraws, and
+/// is taken down once it has stood still too long; a fresh ping is drawn and one whose ripple has
+/// run out is not.
 #[test]
 fn a_peer_cursor_appears_where_it_points() {
     let (mut window, session) = open();
@@ -382,6 +383,10 @@ fn a_peer_cursor_appears_where_it_points() {
     let expected = window_point(session, (500.0, 100.0));
     let (left, top) = corner(&window, "replay-renderer-peer-cursor-9");
     assert!((left - expected.x.0).abs() < 1.5 && (top - expected.y.0).abs() < 1.5, "follows to {expected:?}");
+
+    state.lock().cursors[0].last_update = std::time::Instant::now() - Duration::from_secs(6);
+    settle(&mut window);
+    assert!(window.by_test_id("replay-renderer-peer-cursor-9").is_none(), "a pointer still for six seconds is gone");
 
     state.lock().pings.clear();
     push_ping_aged(&state, [200.0, 200.0], Duration::from_secs(5));
