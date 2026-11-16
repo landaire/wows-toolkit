@@ -2112,6 +2112,17 @@ no_meshes_at_lod = "Ten model nie ma siatek na wybranym poziomie szczegółów."
 no_visible_surface = "Ten model nie ma widocznej powierzchni do narysowania."
 section_stand_in = "Ta sekcja kadłuba nie ma własnej geometrii. Okręt rysuje tę część kadłuba w innej sekcji."
 
+[ui.armor.option_tabs]
+label = "Karty opcji"
+ship = "Okręt"
+layers = "Warstwy"
+analysis = "Analiza"
+configuration = "Konfiguracja"
+hull_parts = "Części kadłuba"
+tab_matches = "%{tab}, dopasowania: %{count}"
+empty = "Nic na tej karcie nie dotyczy wyświetlanego modelu."
+no_choices = "Ten model nie ma kadłuba, modułu, kamuflażu ani poziomu szczegółowości do wyboru."
+
 [ui.armor.hidden_ship]
 clan_rental = "Wypożyczenie klanowe"
 other_class = "To nie jest klasa okrętu"

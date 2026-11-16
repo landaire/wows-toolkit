@@ -40,6 +40,11 @@ use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_config::queries::SavedLighting;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
+use wows_toolkit_viewmodel::armor::options_panel::TabMatches;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::model_catalog::ModelPath;
@@ -68,8 +73,6 @@ use crate::services::Services;
 use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ArmorLibrary;
 use crate::tabs::armor_viewer::library::FeedSource;
-use crate::tabs::armor_viewer::options::OptionSection;
-use crate::tabs::armor_viewer::options::OptionSectionsOpen;
 use crate::tabs::armor_viewer::options::TextureFocus;
 use crate::tabs::armor_viewer::panels::incoming::IncomingFire;
 use crate::tabs::armor_viewer::panels::legend::LegendState;
@@ -256,7 +259,15 @@ pub struct ArmorWorkspace {
     pub sidebar_open: RwSignal<bool, LocalStorage>,
     /// Whether the options rail is open, which the status bar toggles.
     pub options_open: RwSignal<bool, LocalStorage>,
+    /// The options tab the reader chose. A search shows another while this one holds no match.
+    pub options_tab: RwSignal<OptionsTab, LocalStorage>,
     pub sections: RwSignal<OptionSectionsOpen, LocalStorage>,
+    /// How many tools and sections a search kept in each tab, as the rail last built them. `None`
+    /// while nothing is searched for.
+    pub options_matches: RwSignal<Option<TabMatches>, LocalStorage>,
+    /// Set once the reader picks a tab or folds a section, which the saved layout read after must
+    /// not undo.
+    options_layout_picked: StoredValue<bool>,
     pub options_filter: RwSignal<String, LocalStorage>,
     pub zone_filter: RwSignal<String, LocalStorage>,
     pub part_filter: RwSignal<String, LocalStorage>,
@@ -295,7 +306,10 @@ impl ArmorWorkspace {
             legend: RwSignal::new_local(LegendState::default()),
             sidebar_open: RwSignal::new_local(true),
             options_open: RwSignal::new_local(true),
+            options_tab: RwSignal::new_local(OptionsTab::default()),
             sections: RwSignal::new_local(OptionSectionsOpen::default()),
+            options_matches: RwSignal::new_local(None),
+            options_layout_picked: StoredValue::new(false),
             options_filter: RwSignal::new_local(String::new()),
             zone_filter: RwSignal::new_local(String::new()),
             part_filter: RwSignal::new_local(String::new()),
@@ -674,10 +688,69 @@ impl ArmorWorkspace {
         self.services.settings.save_armor_defaults(row);
     }
 
-    /// Opens the rail with `section` expanded.
+    /// Takes the options tab and open sections the reader left, unless they picked one while the
+    /// settings were read: that pick is saved in its place.
+    pub fn apply_options_layout(self, layout: OptionsLayout) {
+        if self.options_layout_picked.get_value() {
+            self.save_options_layout();
+            return;
+        }
+        self.options_tab.set(layout.tab);
+        self.sections.set(layout.sections);
+    }
+
+    fn save_options_layout(self) {
+        let layout = OptionsLayout { tab: self.options_tab.get_untracked(), sections: self.sections.get_untracked() };
+        self.services.settings.edit(keys::ARMOR_OPTIONS_LAYOUT, |settings| {
+            settings.armor_options_layout = layout;
+            layout
+        });
+    }
+
+    /// Shows `tab` in the options rail, and saves it as the reader's choice.
+    pub fn select_options_tab(self, tab: OptionsTab) {
+        if self.options_tab.get_untracked() == tab {
+            return;
+        }
+        self.clear_sidebar_hovers();
+        self.options_tab.set(tab);
+        self.options_layout_picked.set_value(true);
+        self.save_options_layout();
+    }
+
+    /// Shows the options tab after or before the one shown, opening the rail if it is closed.
+    /// During a search it moves among the tabs holding a match.
+    pub fn cycle_options_tab(self, forward: bool) {
+        let was_open = self.options_open.get_untracked();
+        let searching = !self.options_filter.get_untracked().is_empty();
+        self.options_open.set(true);
+        // The counts are the closed rail's last, which a pane or scene change since may have made
+        // stale: the reopened rail counts again before a search moves between tabs.
+        if !was_open && searching {
+            return;
+        }
+        let matches = self.options_matches.get_untracked().filter(|_| searching);
+        let chosen = self.options_tab.get_untracked();
+        let next = chosen.cycled(forward, matches.as_ref());
+        if next != chosen.shown(matches.as_ref()) {
+            self.select_options_tab(next);
+        }
+    }
+
+    /// Folds or unfolds `section`, and saves it.
+    pub fn toggle_section(self, section: OptionSection) {
+        self.sections.update(|sections| sections.toggle(section));
+        self.options_layout_picked.set_value(true);
+        self.save_options_layout();
+    }
+
+    /// Opens the rail on the tab holding `section`, with the section expanded.
     pub fn open_section(self, section: OptionSection) {
         self.options_open.set(true);
+        self.options_tab.set(section.tab());
         self.sections.update(|sections| sections.open(section));
+        self.options_layout_picked.set_value(true);
+        self.save_options_layout();
     }
 
     /// Opens the textures section at the material `focus` names.
@@ -686,15 +759,20 @@ impl ArmorWorkspace {
         self.open_section(OptionSection::Textures);
     }
 
-    /// Shows or hides the options rail. A zone row hovered in the rail highlights its zone, and the
-    /// row leaves with the rail rather than from under the pointer, so the highlight is cleared.
+    /// Shows or hides the options rail.
     pub fn toggle_options(self) {
         let open = !self.options_open.get_untracked();
         self.options_open.set(open);
         if !open {
-            for viewport in self.viewports_untracked() {
-                viewport.clear_sidebar_hover();
-            }
+            self.clear_sidebar_hovers();
+        }
+    }
+
+    /// Clears every pane's tree-row highlight: the row hovered is leaving with its tab or the rail,
+    /// so its pointer leave never comes.
+    fn clear_sidebar_hovers(self) {
+        for viewport in self.viewports_untracked() {
+            viewport.clear_sidebar_hover();
         }
     }
 

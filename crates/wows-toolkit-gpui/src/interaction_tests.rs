@@ -518,6 +518,7 @@ pub(crate) fn test_settings() -> StartupSettings {
         armor_defaults: None,
         model_show_armor: true,
         model_xray_highlight: Default::default(),
+        armor_options_layout: Default::default(),
         auto_dump_game_data: false,
         game_data_cache_dir: String::new(),
         game_data_repo_commit: None,

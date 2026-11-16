@@ -2112,6 +2112,17 @@ no_meshes_at_lod = "Bu modelin seçilen ayrıntı düzeyinde ağı yok."
 no_visible_surface = "Bu modelin çizilecek görünür bir yüzeyi yok."
 section_stand_in = "Bu gövde bölümünün kendi geometrisi yok. Gemi, gövdenin bu kısmını başka bir bölümde çiziyor."
 
+[ui.armor.option_tabs]
+label = "Seçenek sekmeleri"
+ship = "Gemi"
+layers = "Katmanlar"
+analysis = "Analiz"
+configuration = "Yapılandırma"
+hull_parts = "Gövde Parçaları"
+tab_matches = "%{tab}, %{count} eşleşme"
+empty = "Bu sekmedeki hiçbir şey gösterilen modele uygulanmıyor."
+no_choices = "Bu modelin seçilecek gövdesi, modülü, kamuflajı veya ayrıntı düzeyi yok."
+
 [ui.armor.hidden_ship]
 clan_rental = "Klan kiralığı"
 other_class = "Bir gemi sınıfı değil"

@@ -9,6 +9,7 @@ use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::queries;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
 use wows_toolkit_viewmodel::mcp::McpSettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -67,6 +68,8 @@ pub struct StartupSettings {
     /// When a hovered part's highlight in the Model Viewer shows through what
     /// is in front of it.
     pub model_xray_highlight: XrayHighlight,
+    /// The armor viewer's options panel tab and open sections.
+    pub armor_options_layout: OptionsLayout,
     /// Whether game data is cached on load so old replays still open after a
     /// game update.
     pub auto_dump_game_data: bool,
@@ -157,6 +160,9 @@ impl StartupSettings {
         // Absent until the reader chooses a mode, and always is the default.
         let model_xray_highlight =
             queries::get_setting::<XrayHighlight>(pool, keys::MODEL_VIEWER_XRAY_HIGHLIGHT).await.unwrap_or_default();
+        // Absent until the reader moves a tab or section, and the default layout is what they saw.
+        let armor_options_layout =
+            queries::get_setting::<OptionsLayout>(pool, keys::ARMOR_OPTIONS_LAYOUT).await.unwrap_or_default();
 
         let auto_dump_game_data = queries::get_setting::<bool>(pool, keys::AUTO_DUMP_GAME_DATA).await.unwrap_or(false);
         let game_data_cache_dir =
@@ -206,6 +212,7 @@ impl StartupSettings {
             armor_defaults,
             model_show_armor,
             model_xray_highlight,
+            armor_options_layout,
             auto_dump_game_data,
             game_data_cache_dir,
             game_data_repo_commit,

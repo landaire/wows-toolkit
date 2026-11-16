@@ -1,4 +1,4 @@
-//! The options rail's tool buttons and the viewport context menu's toggles.
+//! The options panel's tool buttons and the viewport context menu's toggles.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -8,6 +8,8 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -26,7 +28,6 @@ use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;
 use crate::shell::Shell;
-use crate::tabs::armor_viewer::options::OptionSection;
 use crate::tabs::armor_viewer::options::SectionCx;
 use crate::tabs::armor_viewer::options::filter::MarkedLabel;
 use crate::tabs::armor_viewer::options::filter::RailFilter;
@@ -66,10 +67,8 @@ const CSS: &str = css!(
     }"
 );
 
-/// The options rail's tool rows for the active viewport: the view toggles, then the splash tools
-/// and the export.
-pub fn tools(cx: &SectionCx) -> Option<AnyView> {
-    install_stylesheet(SHEET, CSS);
+/// The tool buttons at the head of `tab` for the active viewport, as the filter leaves them.
+pub fn tools(cx: &SectionCx, tab: OptionsTab) -> Vec<AnyView> {
     let viewport = cx.viewport;
     let filter = &cx.filter;
 
@@ -80,22 +79,28 @@ pub fn tools(cx: &SectionCx) -> Option<AnyView> {
     let ship = features.is_none_or(|features| features.ship);
     let has_splash_data = viewport.shown_untracked().is_some_and(|armor| armor.splash_data.is_some());
 
-    let tools: Vec<AnyView> = [
-        armor.then(|| hidden_plates_button(viewport, filter)).flatten(),
-        armor.then(|| gaps_button(viewport, cx)).flatten(),
-        ship.then(|| splash_button(viewport, cx, has_splash_data)).flatten(),
-        ship.then(|| splash_boxes_button(viewport, filter)).flatten(),
-        export_button(cx.workspace, viewport, filter, features),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let tools = match tab {
+        OptionsTab::Ship => vec![export_button(cx.workspace, viewport, filter, features)],
+        OptionsTab::Layers => vec![
+            armor.then(|| hidden_plates_button(viewport, filter)).flatten(),
+            armor.then(|| gaps_button(viewport, cx)).flatten(),
+            ship.then(|| splash_boxes_button(viewport, filter)).flatten(),
+        ],
+        OptionsTab::Analysis => vec![ship.then(|| splash_button(viewport, cx, has_splash_data)).flatten()],
+        OptionsTab::Display => Vec::new(),
+    };
+
+    tools.into_iter().flatten().collect()
+}
+
+/// Tool buttons in two even columns rather than wrapped rows: the labels differ in length, and
+/// wrapping leaves a ragged edge that moves as the rail is resized.
+pub fn tool_grid(tools: Vec<AnyView>) -> Option<AnyView> {
+    install_stylesheet(SHEET, CSS);
     if tools.is_empty() {
         return None;
     }
 
-    // Two even columns rather than wrapped rows: the labels differ in length, and wrapping leaves a
-    // ragged edge that moves as the rail is resized.
     Some(AnyView::new(view! {
         box(class = "wt-armor-tools", attr:data-testid = "armor-options-tools") {{tools}}
     }))

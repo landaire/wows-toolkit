@@ -2112,6 +2112,17 @@ no_meshes_at_lod = "Tento model nemá na zvolené úrovni detailů žádné sít
 no_visible_surface = "Tento model nemá žádný viditelný povrch k vykreslení."
 section_stand_in = "Tato část trupu nemá vlastní geometrii. Loď tuto část trupu vykresluje v jiné sekci."
 
+[ui.armor.option_tabs]
+label = "Karty možností"
+ship = "Loď"
+layers = "Vrstvy"
+analysis = "Analýza"
+configuration = "Konfigurace"
+hull_parts = "Části trupu"
+tab_matches = "%{tab}, shod: %{count}"
+empty = "Nic na této kartě se na zobrazený model nevztahuje."
+no_choices = "Tento model nemá trup, modul, kamufláž ani úroveň detailu na výběr."
+
 [ui.armor.hidden_ship]
 clan_rental = "Klanová zápůjčka"
 other_class = "Není třída lodi"

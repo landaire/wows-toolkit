@@ -2438,6 +2438,17 @@ no_meshes_at_lod = "This model has no meshes at the chosen detail level."
 no_visible_surface = "This model has no visible surface to draw."
 section_stand_in = "This hull section has no geometry of its own. The ship draws this part of its hull in another section."
 
+[ui.armor.option_tabs]
+label = "Option tabs"
+ship = "Ship"
+layers = "Layers"
+analysis = "Analysis"
+configuration = "Configuration"
+hull_parts = "Hull Parts"
+tab_matches = "%{tab}, %{count} matching"
+empty = "Nothing in this tab applies to the shown model."
+no_choices = "This model has no hull, module, camo or detail level to choose."
+
 [ui.armor.hidden_ship]
 clan_rental = "Clan rental"
 other_class = "Not a ship class"

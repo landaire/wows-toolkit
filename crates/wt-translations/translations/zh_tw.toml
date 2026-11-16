@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "此模型在所選細節等級下沒有網格。"
 no_visible_surface = "此模型沒有可繪製的可見表面。"
 section_stand_in = "此船體分段沒有自己的幾何資料。艦船在另一個分段中繪製這部分船體。"
 
+[ui.armor.option_tabs]
+label = "選項分頁"
+ship = "艦船"
+layers = "圖層"
+analysis = "分析"
+configuration = "配置"
+hull_parts = "船體部件"
+tab_matches = "%{tab}，%{count} 項符合"
+empty = "此分頁中沒有適用於目前模型的內容。"
+no_choices = "此模型沒有可選擇的船體、模組、迷彩或細節等級。"
+
 [ui.armor.hidden_ship]
 clan_rental = "公會租借"
 other_class = "不是艦種"

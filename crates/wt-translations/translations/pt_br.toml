@@ -2112,6 +2112,17 @@ no_meshes_at_lod = "Este modelo não tem malhas no nível de detalhe escolhido."
 no_visible_surface = "Este modelo não tem nenhuma superfície visível para desenhar."
 section_stand_in = "Esta seção do casco não tem geometria própria. O navio desenha esta parte do casco em outra seção."
 
+[ui.armor.option_tabs]
+label = "Abas de opções"
+ship = "Navio"
+layers = "Camadas"
+analysis = "Análise"
+configuration = "Configuração"
+hull_parts = "Partes do casco"
+tab_matches = "%{tab}, %{count} correspondências"
+empty = "Nada nesta aba se aplica ao modelo exibido."
+no_choices = "Este modelo não tem casco, módulo, camuflagem nem nível de detalhe para escolher."
+
 [ui.armor.hidden_ship]
 clan_rental = "Aluguel de clã"
 other_class = "Não é uma classe de navio"

@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "Dieses Modell hat in der gewählten Detailstufe keine Meshes
 no_visible_surface = "Dieses Modell hat keine sichtbare Oberfläche zum Zeichnen."
 section_stand_in = "Dieser Rumpfabschnitt hat keine eigene Geometrie. Das Schiff zeichnet diesen Teil des Rumpfs in einem anderen Abschnitt."
 
+[ui.armor.option_tabs]
+label = "Optionsregisterkarten"
+ship = "Schiff"
+layers = "Ebenen"
+analysis = "Analyse"
+configuration = "Konfiguration"
+hull_parts = "Rumpfteile"
+tab_matches = "%{tab}, %{count} Treffer"
+empty = "Nichts auf dieser Registerkarte gilt für das gezeigte Modell."
+no_choices = "Dieses Modell hat keinen Rumpf, kein Modul, keine Tarnung und keine Detailstufe zur Auswahl."
+
 [ui.armor.hidden_ship]
 clan_rental = "Clan-Leihschiff"
 other_class = "Keine Schiffsklasse"

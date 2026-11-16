@@ -1,5 +1,5 @@
-//! The hull section: the hull part tree with its own filter field, the opaque switch, the hull
-//! upgrade, module alternative and LOD choices, and the camo picker.
+//! The hull's sections: its configuration (the hull upgrade, module alternative and LOD choices
+//! and the camo picker), and its part tree with its own filter field and the opaque switch.
 //!
 //! Each choice reloads the scene in the viewport, apart from the camo, which is applied in place.
 //! Hovering a group or mesh row highlights its meshes in the viewport, shown or not.
@@ -57,6 +57,7 @@ const CSS: &str = css!(
     .wt-armor-hull__choices { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .wt-armor-hull__heading { flex: none; font-size: 13px; }
     .wt-armor-hull__title { font-size: 13px; font-weight: 700; }
+    .wt-armor-hull__dim { font-size: 13px; color: var(--wt-color-text-dim); }
     .wt-armor-hull__rule { height: 1px; background-color: var(--lui-color-border); }
     .wt-armor-hull__row { display: flex; align-items: center; gap: 4px; min-width: 0; }
     .wt-armor-hull__children { display: flex; flex-direction: column; gap: 4px; padding-left: 20px; }
@@ -75,8 +76,48 @@ const CSS: &str = css!(
     }"
 );
 
-/// The hull section's body: `None` when the rail's filter keeps nothing in it.
-pub fn body(cx: &SectionCx) -> Option<AnyView> {
+/// The configuration section's body: `None` when the rail's filter keeps nothing in it, or the
+/// shown scene offers no choice.
+pub fn config_body(cx: &SectionCx) -> Option<AnyView> {
+    install_stylesheet(SHEET, CSS);
+    let viewport = cx.viewport;
+    let filter = cx.filter.clone();
+
+    let Some(armor) = viewport.shown_untracked() else {
+        return (!filter.is_active()).then(no_ship_loaded);
+    };
+
+    let upgrade = (armor.hull_upgrade_names.len() > 1).then(|| hull_upgrade_row(viewport, &armor, &filter)).flatten();
+    let modules: Vec<AnyView> = armor
+        .module_alternatives
+        .iter()
+        .filter(|(_, alternatives)| alternatives.len() > 1)
+        .filter_map(|(ct, alternatives)| module_alternative_row(viewport, *ct, alternatives, &filter))
+        .collect();
+    let camo = (!armor.camo_schemes().is_empty()).then(|| camo_picker(viewport, &armor, &filter)).flatten();
+    let lod = (armor.hull_lod_count > 1).then(|| lod_row(viewport, &armor, &filter)).flatten();
+
+    let rows: Vec<AnyView> = upgrade.into_iter().chain(modules).chain(camo).chain(lod).collect();
+    if rows.is_empty() {
+        return (!filter.is_active()).then(no_choices);
+    }
+
+    Some(AnyView::new(view! {
+        column(class = "wt-armor-hull", attr:data-filtering = filter.is_active().then(String::new)) {{rows}}
+    }))
+}
+
+/// What the configuration section says for a scene with nothing to choose.
+fn no_choices() -> AnyView {
+    AnyView::new(view! {
+        text(class = "wt-armor-hull__dim", attr:data-testid = "armor-hull-no-choices") {{
+            t!("ui.armor.option_tabs.no_choices").into_owned()
+        }}
+    })
+}
+
+/// The hull parts section's body: `None` when the rail's filter keeps nothing in it.
+pub fn parts_body(cx: &SectionCx) -> Option<AnyView> {
     install_stylesheet(SHEET, CSS);
     let viewport = cx.viewport;
     let filter = cx.filter.clone();
@@ -110,16 +151,6 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
     let tree = view! {
         column(class = "wt-armor-hull__stack", attr:data-testid = "armor-hull-visibility-tree") {{tree_rows}}
     };
-
-    let upgrade = (armor.hull_upgrade_names.len() > 1).then(|| hull_upgrade_row(viewport, &armor, &filter)).flatten();
-    let modules: Vec<AnyView> = armor
-        .module_alternatives
-        .iter()
-        .filter(|(_, alternatives)| alternatives.len() > 1)
-        .filter_map(|(ct, alternatives)| module_alternative_row(viewport, *ct, alternatives, &filter))
-        .collect();
-    let camo = (!armor.camo_schemes().is_empty()).then(|| camo_picker(viewport, &armor, &filter)).flatten();
-    let lod = (armor.hull_lod_count > 1).then(|| lod_row(viewport, &armor, &filter)).flatten();
     let opaque = filtered_checkbox(
         "armor-hull-vis-opaque".to_owned(),
         t!("ui.armor.opaque").into_owned(),
@@ -129,8 +160,8 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
         move |checked| viewport.set_hull_opaque(checked),
     );
 
-    // While filtering every row that matches by name is drawn, without the bulk switches and
-    // dividers. Only the rail's query drops the tree; its own field narrows the rows in it.
+    // While filtering every row that matches by name is drawn, without the bulk switches. Only
+    // the rail's query drops the tree; its own field narrows the rows in it.
     if filter.is_active() {
         let tree = (match_count(&filter, &groups) > 0).then(|| {
             AnyView::new(view! {
@@ -140,8 +171,7 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
                 }
             })
         });
-        let rows: Vec<AnyView> =
-            opaque.into_iter().chain(upgrade).chain(modules).chain(tree).chain(camo).chain(lod).collect();
+        let rows: Vec<AnyView> = opaque.into_iter().chain(tree).collect();
         return (!rows.is_empty()).then(|| {
             AnyView::new(view! {
                 column(class = "wt-armor-hull", attr:data-filtering = String::new()) {{rows}}
@@ -168,28 +198,13 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
             {opaque}
         }
     };
-    // The part tree comes before the camo and LOD pickers: it is what the reader turns to most,
-    // and the camo list can run long. It has no scroll of its own, so a wheel over it moves only
-    // the rail.
-    let camo = camo.map(|camo| {
-        view! {
-            column(class = "wt-armor-hull") {
-                box(class = "wt-armor-hull__rule") {}
-                {camo}
-            }
-        }
-    });
 
+    // The tree has no scroll of its own, so a wheel over it moves only the rail.
     Some(AnyView::new(view! {
         column(class = "wt-armor-hull") {
             {header}
-            {upgrade}
-            {modules}
-            box(class = "wt-armor-hull__rule") {}
             {field}
             {tree}
-            {camo}
-            {lod}
         }
     }))
 }

@@ -42,6 +42,10 @@ use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_services::dialog::Asked;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -77,8 +81,6 @@ use crate::interaction_tests::settle_in_real_time;
 use crate::tabs::armor_viewer::BUILT;
 use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ViewerFeed;
-use crate::tabs::armor_viewer::options::OptionSection;
-use crate::tabs::armor_viewer::options::OptionSectionsOpen;
 use crate::tabs::armor_viewer::options::TextureFocus;
 use crate::tabs::armor_viewer::viewport::OpeningLayer;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
@@ -97,6 +99,12 @@ impl ArmorWindow {
         window.click(tab).expect("the tab can be pressed");
         settle_in_real_time(&mut window);
         let workspace = BUILT.with(std::cell::Cell::get).expect("the Armor Viewer tab was built");
+        // The tests in this process share one settings database, so the layout another test saved
+        // is put back to the one a first run opens with.
+        workspace.options_tab.set(OptionsTab::default());
+        workspace.sections.set(OptionSectionsOpen::default());
+        window.advance(Duration::from_millis(400));
+
         Self { window, workspace }
     }
 
@@ -190,20 +198,27 @@ impl ArmorWindow {
     fn install(&mut self, scene: LoadedShipArmor, sections: &[OptionSection]) {
         let workspace = self.workspace;
         workspace.active_untracked().show_armor(Arc::new(scene), workspace.opening_layer.get_untracked());
-        workspace.sections.set(OptionSectionsOpen {
-            trajectory: false,
-            pen_check: false,
-            visibility: false,
-            hull: false,
-            textures: false,
-            display: false,
-            camera_rings: false,
-            lighting: false,
-        });
+        workspace.sections.set(OptionSectionsOpen::closed());
         for section in sections {
             workspace.sections.update(|open| open.open(*section));
         }
+        // The tab of the first section asked for, so its body is built.
+        if let Some(section) = sections.first() {
+            workspace.options_tab.set(section.tab());
+        }
         self.settle();
+    }
+
+    /// Chooses `tab` on the options strip.
+    fn show_tab(&mut self, tab: OptionsTab) {
+        self.click(&format!("armor-options-tab-{}", tab.id()));
+    }
+
+    /// The accessible state of `tab` on the options strip.
+    fn tab_state(&mut self, tab: OptionsTab) -> landaire_ui::test_support::A11yState {
+        let id = format!("armor-options-tab-{}", tab.id());
+        let element = self.window.by_test_id(&id).unwrap_or_else(|| panic!("{id} is shown"));
+        self.window.a11y(element).unwrap_or_else(|| panic!("{id} has an accessible state"))
     }
 }
 
@@ -820,20 +835,25 @@ fn a_hardpoint_toggle_marks_and_unmarks_the_open_model() {
 fn a_model_without_armor_keeps_only_the_mesh_and_display_sections() {
     let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
     armor.install(fixtures::model_scene(turret(), Vec::new()), &[OptionSection::Display]);
+    assert!(armor.shown("armor-options-section-Display"), "Display stays");
 
-    for gone in ["Trajectory", "PenCheck", "Visibility"] {
+    armor.show_tab(OptionsTab::Analysis);
+    for gone in ["Trajectory", "PenCheck"] {
         assert!(!armor.shown(&format!("armor-options-section-{gone}")), "{gone} has nothing to act on");
     }
-    for kept in ["Hull", "Display"] {
-        assert!(armor.shown(&format!("armor-options-section-{kept}")), "{kept} stays");
-    }
-    for gone in
-        ["armor-show-hidden-button", "armor-show-gaps-button", "armor-splash-button", "armor-splash-boxes-button"]
-    {
+    assert!(!armor.shown("armor-splash-button"), "splash is a ship's");
+    assert!(armor.shown("armor-options-tab-empty"), "the tab says it has nothing for the model");
+
+    armor.show_tab(OptionsTab::Layers);
+    assert!(!armor.shown("armor-options-section-Visibility"), "a model without armor has no zones");
+    assert!(armor.shown("armor-options-section-HullParts"), "its meshes stay");
+    for gone in ["armor-show-hidden-button", "armor-show-gaps-button", "armor-splash-boxes-button"] {
         assert!(!armor.shown(gone), "{gone} is for armor or a ship");
     }
+
+    armor.show_tab(OptionsTab::Ship);
+    assert!(armor.shown("armor-options-section-Configuration"));
     assert!(armor.shown("armor-export-trigger"), "a model still exports");
-    assert!(!armor.shown("armor-cast-hint"), "there is nothing to cast at");
 }
 
 #[test]
@@ -841,45 +861,52 @@ fn a_model_with_armor_keeps_the_armor_sections_but_not_the_ship_tools() {
     let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
     armor.install(fixtures::armored_model_scene(turret()), &[]);
 
-    for kept in ["Trajectory", "PenCheck", "Visibility"] {
+    armor.show_tab(OptionsTab::Analysis);
+    for kept in ["Trajectory", "PenCheck"] {
         assert!(armor.shown(&format!("armor-options-section-{kept}")), "{kept} reads the model's plates");
     }
+    assert!(!armor.shown("armor-splash-button"), "splash is a ship's");
+
+    armor.show_tab(OptionsTab::Layers);
+    assert!(armor.shown("armor-options-section-Visibility"), "the zones read the model's plates");
     assert!(armor.shown("armor-show-hidden-button"), "plate tools stay");
-    assert!(!armor.shown("armor-splash-button"), "splash boxes are a ship's");
+    assert!(!armor.shown("armor-splash-boxes-button"), "splash boxes are a ship's");
 }
 
-/// In the Hull section the part tree comes before the camouflage picker, and the camouflage
-/// picker before the LOD row.
+/// The ship tab holds the hull configuration, camouflage before the LOD row, and the part tree is
+/// on the layers tab.
 #[test]
-fn the_hull_part_tree_comes_before_the_camo_and_lod_pickers() {
+fn the_hull_configuration_and_part_tree_sit_in_their_tabs() {
     let mut armor = ArmorWindow::open_tall();
     let mut scene = fixtures::hull_scene(turret(), vec![fixtures::hull_mesh()], 2);
     scene.camo_scheme_infos = vec![camo(0, "Default", CamoOrigin::ShipSpecific)].into();
-    armor.install(scene, &[OptionSection::Hull]);
+    armor.install(scene, &[OptionSection::Configuration, OptionSection::HullParts]);
 
-    let bounds = |id: &str| {
+    let bounds = |armor: &ArmorWindow, id: &str| {
         let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
         armor.window.bounds(element).expect("it is laid out")
     };
-    let (tree, camo, lod) =
-        (bounds("armor-hull-visibility-tree"), bounds("armor-camo-picker"), bounds("armor-hull-lod-0"));
-    assert!(tree.bottom() <= camo.top(), "the tree at {tree:?} is above the camo picker at {camo:?}");
+    let (camo, lod) = (bounds(&armor, "armor-camo-picker"), bounds(&armor, "armor-hull-lod-0"));
     assert!(camo.bottom() <= lod.top(), "the camo picker at {camo:?} is above the LOD row at {lod:?}");
+    assert!(!armor.shown("armor-hull-visibility-tree"), "the part tree is on another tab");
+
+    armor.show_tab(OptionsTab::Layers);
+    assert!(armor.shown("armor-hull-visibility-tree"));
+    assert!(!armor.shown("armor-camo-picker"), "the camo picker is on the ship tab");
 }
 
-/// Each section head is a band across its section's whole width, and a group head across the
-/// width of the section it sits in.
+/// Each section head is a band across its section's whole width.
 #[test]
 fn each_folding_head_spans_its_column() {
     let mut armor = ArmorWindow::open_tall();
     let scene = fixtures::hull_scene(turret(), vec![fixtures::hull_mesh()], 1);
-    armor.install(scene, &[OptionSection::Hull, OptionSection::Display, OptionSection::Lighting]);
+    armor.install(scene, &[OptionSection::Display, OptionSection::Lighting]);
 
     let bounds = |id: &str| {
         let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
         armor.window.bounds(element).expect("it is laid out")
     };
-    for which in ["Hull", "Display"] {
+    for which in ["Display", "Lighting"] {
         let head = bounds(&format!("armor-options-section-{which}"));
         let body = bounds(&format!("armor-options-body-{which}"));
         assert!(
@@ -887,10 +914,6 @@ fn each_folding_head_spans_its_column() {
             "{which}'s head at {head:?} spans {body:?}"
         );
     }
-    let display = bounds("armor-options-body-Display");
-    let group = bounds("armor-options-group-Lighting");
-    assert!(group.left() >= display.left(), "the lighting head at {group:?} is inside {display:?}");
-    assert_eq!(group.right(), display.right(), "the lighting head reaches the section's edge");
 }
 
 /// The zone tree's field keeps the parts it matches, each under its zone opened to show it, counts
@@ -931,7 +954,7 @@ fn the_zone_filter_shows_matches_under_their_zones_and_clearing_restores_the_tre
 #[test]
 fn the_part_filter_shows_matches_under_their_groups_and_clearing_restores_the_tree() {
     let mut armor = ArmorWindow::open_tall();
-    armor.install(two_zone_scene(), &[OptionSection::Hull]);
+    armor.install(two_zone_scene(), &[OptionSection::HullParts]);
     let (hull, battery) = ("armor-hull-vis-group-row-Hull", "armor-hull-vis-group-row-Main Battery");
     let (fore, aft) = ("armor-hull-vis-mesh-row-Hull_Fore", "armor-hull-vis-mesh-row-Hull_Aft");
     assert!(!armor.shown(aft), "groups start collapsed");
@@ -958,8 +981,9 @@ fn the_rail_filter_and_a_tree_field_narrow_together() {
     assert!(!armor.shown("armor-vis-zone-row-Bow"), "Bow does not match the rail's filter");
 }
 
-/// The rail's filter finds a camouflage, a zone and a slider, each in a collapsed section it opens
-/// to show it, and Escape clears the filter and puts every section back as it was.
+/// The rail's filter finds a camouflage, a zone and a slider, each in a collapsed section of
+/// another tab, which it shows opened; Escape clears the filter and puts the chosen tab and every
+/// section back as they were.
 #[test]
 fn the_rail_filter_opens_the_section_holding_a_match_and_escape_restores_the_rail() {
     let mut armor = ArmorWindow::open_tall();
@@ -967,21 +991,24 @@ fn the_rail_filter_opens_the_section_holding_a_match_and_escape_restores_the_rai
     scene.camo_scheme_infos =
         vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)].into();
     armor.install(scene, &[]);
-    let bodies = ["Visibility", "Hull", "Display"].map(|which| format!("armor-options-body-{which}"));
-    assert!(bodies.iter().all(|body| !armor.shown(body)), "every section starts closed");
+    armor.show_tab(OptionsTab::Analysis);
+    let bodies = ["Visibility", "Configuration", "Display"].map(|which| format!("armor-options-body-{which}"));
 
     let find = |armor: &mut ArmorWindow, query: &str, check: &dyn Fn(&ArmorWindow)| {
         armor.type_into("armor-options-filter", query);
         check(armor);
         armor.window.press_key(NamedKey::Escape, Modifiers::NONE);
         armor.settle();
-        assert!(bodies.iter().all(|body| !armor.shown(body)), "Escape after {query:?} puts the sections back closed");
+        assert!(armor.shown("armor-options-page-Analysis"), "Escape after {query:?} shows the chosen tab again");
+        assert!(bodies.iter().all(|body| !armor.shown(body)), "Escape after {query:?} leaves the sections closed");
     };
     find(&mut armor, "ocean wave", &|armor| {
-        assert!(armor.shown("armor-options-body-Hull"), "the hull section opens");
+        assert!(armor.shown("armor-options-page-Ship"), "the ship tab holds the match");
+        assert!(armor.shown("armor-options-body-Configuration"), "the configuration section opens");
         assert!(!armor.marked().is_empty(), "the camouflage is drawn marked");
     });
     find(&mut armor, "stern", &|armor| {
+        assert!(armor.shown("armor-options-page-Layers"), "the layers tab holds the match");
         assert!(armor.shown("armor-options-body-Visibility"), "the armor section opens");
         assert!(armor.shown("armor-vis-zone-row-Stern"));
         assert!(!armor.shown("armor-vis-zone-row-Bow"));
@@ -990,6 +1017,147 @@ fn the_rail_filter_opens_the_section_holding_a_match_and_escape_restores_the_rai
     find(&mut armor, &roll, &|armor| {
         assert!(armor.shown("armor-options-body-Display"), "the display section opens");
     });
+    assert_eq!(armor.workspace.options_tab.get_untracked(), OptionsTab::Analysis, "a search does not choose a tab");
+}
+
+/// A search marks each tab holding a match with how many tools and sections it kept, dims and
+/// refuses a tab with none, and keeps the chosen tab while it holds one.
+#[test]
+fn a_search_counts_the_matches_on_each_tab_and_dims_the_rest() {
+    let mut armor = ArmorWindow::open_tall();
+    let mut scene = two_zone_scene();
+    scene.camo_scheme_infos =
+        vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)].into();
+    armor.install(scene, &[]);
+    armor.show_tab(OptionsTab::Layers);
+
+    armor.type_into("armor-options-filter", "ocean wave");
+    let badge = |armor: &ArmorWindow, tab: OptionsTab| armor.shown(&format!("armor-options-tab-count-{}", tab.id()));
+    let counted = |tab: &str, count: usize| {
+        rust_i18n::t!("ui.armor.option_tabs.tab_matches", tab = tab, count = count).into_owned()
+    };
+    assert!(badge(&armor, OptionsTab::Ship), "the configuration section holds it");
+    assert_eq!(armor.tab_state(OptionsTab::Ship).label, Some(counted("Ship", 1)), "the count is read with the tab");
+    assert!(!badge(&armor, OptionsTab::Layers), "no count on a tab without a match");
+    assert!(armor.tab_state(OptionsTab::Layers).disabled, "a tab without a match is dimmed and refused");
+    assert!(!armor.tab_state(OptionsTab::Ship).disabled);
+    assert_eq!(armor.tab_state(OptionsTab::Ship).selected, Some(true), "the strip shows the tab holding it");
+    assert_eq!(armor.window.texts_by_class("wt-armor-tab__count"), ["1"], "one tab holds a match");
+
+    armor.erase("ocean wave");
+    armor.type_into("armor-options-filter", "stern");
+    assert!(armor.shown("armor-options-page-Layers"), "the chosen tab holds a match, so it stays");
+    assert_eq!(armor.tab_state(OptionsTab::Layers).label, Some(counted("Layers", 1)));
+
+    armor.erase("stern");
+    assert!(OptionsTab::ALL.iter().all(|tab| !badge(&armor, *tab)), "no counts without a search");
+    assert!(OptionsTab::ALL.iter().all(|tab| !armor.tab_state(*tab).disabled), "every tab can be chosen again");
+}
+
+/// During a search Ctrl+Tab moves among the tabs holding a match, from the one shown, and leaves
+/// a lone match where it is.
+#[test]
+fn ctrl_tab_during_a_search_skips_the_dimmed_tabs() {
+    let mut armor = ArmorWindow::open_tall();
+    let workspace = armor.workspace;
+    armor.install(tabbed_ship_scene(), &[]);
+    armor.show_tab(OptionsTab::Analysis);
+    armor.type_into("armor-options-filter", "hull");
+    assert!(armor.shown("armor-options-page-Layers"), "Layers holds the first match");
+    let ctrl_tab = |armor: &mut ArmorWindow| {
+        armor.window.press_key(NamedKey::Tab, Modifiers::PRIMARY);
+        armor.settle();
+    };
+
+    armor.click("armor-viewport");
+    ctrl_tab(&mut armor);
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Display, "the next tab holding a match");
+    ctrl_tab(&mut armor);
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "past Ship and Analysis");
+
+    // A closed rail's counts can be stale, so Ctrl+Tab only reopens it during a search.
+    workspace.toggle_options();
+    armor.settle();
+    armor.click("armor-viewport");
+    ctrl_tab(&mut armor);
+    assert!(workspace.options_open.get_untracked(), "Ctrl+Tab reopens the rail");
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "without moving off the tab");
+
+    armor.erase("hull");
+    armor.type_into("armor-options-filter", "stern");
+    armor.click("armor-viewport");
+    ctrl_tab(&mut armor);
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "a lone match keeps its tab");
+}
+
+/// A tab is chosen by a click, by the arrow keys on the strip, and by Ctrl+Tab from the viewer, and
+/// the choice is saved.
+#[test]
+fn the_tabs_switch_by_click_and_keyboard_and_the_choice_is_saved() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    let saved_layout = || {
+        crate::services::saved_for_test()
+            .into_iter()
+            .rev()
+            .find(|(key, _)| *key == wows_toolkit_viewmodel::settings::keys::ARMOR_OPTIONS_LAYOUT)
+            .map(|(_, json)| serde_json::from_str::<OptionsLayout>(&json).expect("the saved layout parses"))
+    };
+
+    armor.show_tab(OptionsTab::Ship);
+    assert!(armor.shown("armor-options-page-Ship"));
+    assert_eq!(saved_layout().map(|layout| layout.tab), Some(OptionsTab::Ship));
+
+    armor.window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
+    armor.settle();
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "the arrows move along the strip");
+    assert!(armor.shown("armor-options-page-Layers"));
+    armor.window.press_key(NamedKey::ArrowUp, Modifiers::NONE);
+    armor.window.press_key(NamedKey::ArrowUp, Modifiers::NONE);
+    armor.settle();
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Display, "the strip wraps");
+
+    workspace.toggle_options();
+    armor.settle();
+    // The keys reach the viewer from the viewport, where the reader's focus is when the rail is shut.
+    armor.click("armor-viewport");
+    armor.window.press_key(NamedKey::Tab, Modifiers::PRIMARY);
+    armor.settle();
+    assert!(workspace.options_open.get_untracked(), "Ctrl+Tab opens the rail");
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Ship, "Ctrl+Tab moves to the next tab");
+    armor.window.press_key(NamedKey::Tab, Modifiers::PRIMARY | Modifiers::SHIFT);
+    armor.settle();
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Display, "Ctrl+Shift+Tab moves back");
+    assert_eq!(saved_layout().map(|layout| layout.tab), Some(OptionsTab::Display));
+}
+
+/// The saved tab and open sections are restored; folding a section saves it.
+#[test]
+fn the_saved_layout_is_restored_and_a_fold_saves_it() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    armor.install(fixtures::armored_model_scene(turret()), &[]);
+    let mut sections = OptionSectionsOpen::closed();
+    sections.open(OptionSection::Visibility);
+    workspace.apply_options_layout(OptionsLayout { tab: OptionsTab::Layers, sections });
+    armor.settle();
+    assert!(armor.shown("armor-options-page-Layers"), "the saved tab is shown");
+    assert!(armor.shown("armor-options-body-Visibility"), "the saved open section is open");
+    assert!(!armor.shown("armor-options-body-HullParts"), "the saved closed section is closed");
+
+    armor.click("armor-options-section-HullParts");
+    let saved = workspace.services.settings.read_untracked(|settings| settings.armor_options_layout);
+    let saved = saved.expect("the settings are loaded");
+    assert!(saved.sections.hull_parts && saved.sections.visibility, "the fold is saved with the rest");
+    assert_eq!(saved.tab, OptionsTab::Layers);
+
+    let other = OptionsLayout { tab: OptionsTab::Display, sections: OptionSectionsOpen::closed() };
+    workspace.apply_options_layout(other);
+    assert_eq!(
+        workspace.options_tab.get_untracked(),
+        OptionsTab::Layers,
+        "a layout read after a pick does not undo it"
+    );
 }
 
 /// A filter that matches nothing in the rail says so.
@@ -1056,69 +1224,70 @@ fn a_rail_filter_finds_a_row_under_a_switch_only_while_it_is_on() {
     let mut armor = ArmorWindow::open_tall();
     armor.install(ship_scene(), &[]);
     armor.type_into("armor-options-filter", "max fov");
-    assert!(!armor.shown("armor-options-group-CameraRings"), "the zoom path is off, so nothing in the group matched");
+    assert!(
+        !armor.shown("armor-options-section-CameraRings"),
+        "the zoom path is off, so nothing in the section matched"
+    );
 
     let viewport = armor.workspace.active_untracked();
     let mut rings = viewport.camera_rings();
     rings.zoom_path = true;
     viewport.set_camera_rings(rings);
     armor.settle();
-    assert!(armor.shown("armor-options-group-CameraRings"), "with the zoom path on its choice matches");
+    assert!(armor.shown("armor-options-section-CameraRings"), "with the zoom path on its choice matches");
     assert!(armor.shown("armor-camera-zoom-path-max"));
 }
 
-/// The cast hint wraps inside the rail at twice the text size, and each tool label stays inside
-/// its button.
+/// Each tool label stays inside its button and the rail at twice the text size.
 #[test]
-fn the_cast_hint_and_tool_labels_stay_inside_the_rail() {
+fn the_tool_labels_stay_inside_the_rail() {
     let zoom = zgui::prelude::Zoom::new(2.0).expect("twice the size is a zoom");
     let options = HeadlessOptions { zoom, ..HeadlessOptions::new(REVIEW_SIZE) };
-    let armor = ArmorWindow::open(options);
-    let bounds = |id: &str| {
+    let mut armor = ArmorWindow::open(options);
+    let bounds = |armor: &ArmorWindow, id: &str| {
         let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
         armor.window.bounds(element).expect("it is laid out")
     };
-    let rail = bounds("armor-options-panel");
+    let rail = bounds(&armor, "armor-options-panel");
     let inside = |inner: zgui::geom::Rect<zgui::geom::DevicePx, zgui::geom::Device>| {
         inner.left() >= rail.left() && inner.right() <= rail.right()
     };
-    let hint = bounds("armor-cast-hint-text");
-    assert!(inside(hint), "the hint at {hint:?} is inside the rail at {rail:?}");
-    for tool in ["armor-show-hidden-button", "armor-show-gaps-button", "armor-splash-button", "armor-export-trigger"] {
-        assert!(inside(bounds(tool)), "{tool} is inside the rail");
+    let tabs = [
+        (OptionsTab::Layers, &["armor-show-hidden-button", "armor-show-gaps-button"][..]),
+        (OptionsTab::Analysis, &["armor-splash-button"][..]),
+        (OptionsTab::Ship, &["armor-export-trigger"][..]),
+    ];
+    for (tab, tools) in tabs {
+        armor.show_tab(tab);
+        for tool in tools {
+            assert!(inside(bounds(&armor, tool)), "{tool} is inside the rail");
+        }
     }
 }
 
 /// The tool buttons fill an even two-column grid, and the firing ship button spans the rail.
 #[test]
 fn the_rail_tools_fill_two_even_columns() {
-    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
-    let bounds = |id: &str| {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let bounds = |armor: &ArmorWindow, id: &str| {
         let element = armor.window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
         armor.window.bounds(element).expect("it is laid out")
     };
-    let grid = bounds("armor-options-tools");
-    let [hidden, gaps, splash, boxes, export] = [
-        "armor-show-hidden-button",
-        "armor-show-gaps-button",
-        "armor-splash-button",
-        "armor-splash-boxes-button",
-        "armor-export-trigger",
-    ]
-    .map(bounds);
 
-    for button in [hidden, gaps, splash, boxes, export] {
+    let group = bounds(&armor, "armor-trajectory");
+    let add_ship = bounds(&armor, "armor-trajectory-add-ship");
+    assert!((add_ship.size.width.0 - group.size.width.0).abs() < 1.0, "{add_ship:?} spans {group:?}");
+
+    armor.show_tab(OptionsTab::Layers);
+    let grid = bounds(&armor, "armor-options-tools");
+    let [hidden, gaps, boxes] = ["armor-show-hidden-button", "armor-show-gaps-button", "armor-splash-boxes-button"]
+        .map(|id| bounds(&armor, id));
+    for button in [hidden, gaps, boxes] {
         assert!((button.size.width.0 - hidden.size.width.0).abs() < 1.0, "{button:?} is as wide as {hidden:?}");
         assert!(button.size.width.0 > grid.size.width.0 * 0.45, "{button:?} fills half of {grid:?}");
     }
-    for (left, right) in [(hidden, gaps), (splash, boxes)] {
-        assert!((left.origin.x.0 - grid.origin.x.0).abs() < 1.0, "{left:?} starts the row");
-        assert!((right.right().0 - grid.right().0).abs() < 1.0, "{right:?} ends the row");
-    }
-
-    let group = bounds("armor-trajectory");
-    let add_ship = bounds("armor-trajectory-add-ship");
-    assert!((add_ship.size.width.0 - group.size.width.0).abs() < 1.0, "{add_ship:?} spans {group:?}");
+    assert!((hidden.origin.x.0 - grid.origin.x.0).abs() < 1.0, "{hidden:?} starts the row");
+    assert!((gaps.right().0 - grid.right().0).abs() < 1.0, "{gaps:?} ends the row");
 }
 
 /// The tab with two real ships compared side by side, then a third opened as a tab beside the
@@ -1423,4 +1592,42 @@ fn a_real_ship_lists_its_textures() {
 
     let path = save_shot(&mut armor.window, "armor-textures-real");
     println!("{}", path.display());
+}
+
+/// A ship with armor zones, hull parts, camouflage and a camera orbit, for the options tabs.
+fn tabbed_ship_scene() -> LoadedShipArmor {
+    let mut scene = ship_scene();
+    let two_zones = two_zone_scene();
+    scene.zone_part_plates = two_zones.zone_part_plates;
+    scene.hull_part_groups = two_zones.hull_part_groups;
+    scene.camo_scheme_infos =
+        vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)].into();
+
+    scene
+}
+
+/// Each options tab, and a search that holds matches in two tabs, drawn in both appearances.
+#[test]
+#[ignore = "draws on the graphics device"]
+fn the_options_tabs_render_in_dark_and_light() {
+    for (appearance, suffix) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
+        let mut armor = ArmorWindow::open(review_options(appearance));
+        let mut sections = vec![OptionSection::Configuration, OptionSection::Visibility, OptionSection::HullParts];
+        sections.extend([OptionSection::Trajectory, OptionSection::Display, OptionSection::Lighting]);
+        armor.install(tabbed_ship_scene(), &sections);
+        settle_in_real_time(&mut armor.window);
+
+        for tab in OptionsTab::ALL {
+            armor.show_tab(tab);
+            settle_in_real_time(&mut armor.window);
+            let path = save_shot(&mut armor.window, &format!("armor-options-tab-{}-{suffix}", tab.id().to_lowercase()));
+            println!("{}", path.display());
+        }
+
+        armor.show_tab(OptionsTab::Analysis);
+        armor.type_into("armor-options-filter", "hull");
+        settle_in_real_time(&mut armor.window);
+        let path = save_shot(&mut armor.window, &format!("armor-options-search-{suffix}"));
+        println!("{}", path.display());
+    }
 }

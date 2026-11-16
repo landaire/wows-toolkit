@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "選択した詳細レベルではこのモデルにメッシ
 no_visible_surface = "このモデルには描画できる可視面がありません。"
 section_stand_in = "この船体セクションには独自のジオメトリがありません。艦艇はこの部分の船体を別のセクションで描画します。"
 
+[ui.armor.option_tabs]
+label = "オプションタブ"
+ship = "艦船"
+layers = "レイヤー"
+analysis = "分析"
+configuration = "構成"
+hull_parts = "船体パーツ"
+tab_matches = "%{tab}、%{count} 件一致"
+empty = "このタブには表示中のモデルに当てはまる項目がありません。"
+no_choices = "このモデルには選択できる船体、モジュール、迷彩、詳細度がありません。"
+
 [ui.armor.hidden_ship]
 clan_rental = "クラン貸与"
 other_class = "艦種ではありません"

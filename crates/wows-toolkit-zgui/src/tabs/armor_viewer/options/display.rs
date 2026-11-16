@@ -1,5 +1,4 @@
-//! The display section: the model settings, then the camera rings and the lighting, each a group
-//! that folds away.
+//! The display tab's sections: the model settings, the camera rings and the lighting.
 
 use landaire_ui::ColorPickerProps;
 use landaire_ui::Rgb;
@@ -25,14 +24,10 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::prelude::Binding;
 
-use crate::tabs::armor_viewer::options::HeadDepth;
 use crate::tabs::armor_viewer::options::MatchState;
-use crate::tabs::armor_viewer::options::OptionSection;
-use crate::tabs::armor_viewer::options::OptionSectionsOpen;
 use crate::tabs::armor_viewer::options::SectionCx;
 use crate::tabs::armor_viewer::options::filter::MarkedLabel;
 use crate::tabs::armor_viewer::options::filter::RailFilter;
-use crate::tabs::armor_viewer::options::folding_head;
 use crate::tabs::armor_viewer::options::tools::choice_button;
 use crate::tabs::armor_viewer::options::tree_filter::filtered_checkbox;
 use crate::tabs::armor_viewer::options::visibility::no_ship_loaded;
@@ -45,7 +40,7 @@ const CSS: &str = css!(
     ".wt-armor-display { display: flex; flex-direction: column; gap: 8px; width: 100%; }
     .wt-armor-display__rows { display: flex; flex-direction: column; gap: 8px; }
     .wt-armor-display__tight { display: flex; flex-direction: column; gap: 4px; }
-    .wt-armor-display__group-body { padding-left: 4px; }
+    .wt-armor-display__group { display: flex; flex-direction: column; gap: 8px; width: 100%; }
     .wt-armor-display__choices { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .wt-armor-display__indent { display: flex; flex-wrap: wrap; gap: 16px; padding-left: 20px; }
     .wt-armor-display__row { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -56,10 +51,9 @@ const CSS: &str = css!(
     .wt-armor-display__dim { font-size: 12px; color: var(--wt-color-text-dim); }"
 );
 
-/// The display section's body: `None` when the rail's filter keeps nothing in it.
+/// The model settings section's body: `None` when the rail's filter keeps nothing in it.
 pub fn body(cx: &SectionCx) -> Option<AnyView> {
     install_stylesheet(SHEET, CSS);
-    let viewport = cx.viewport;
     let filter = &cx.filter;
 
     // Nothing here is drawn without a scene.
@@ -67,67 +61,25 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
         return (!filter.is_active()).then(no_ship_loaded);
     };
 
-    let armor = features.armor;
-    let ship = features.ship;
-    let model = model_rows(cx, armor, ship, filter);
-    // The camera orbits are the ship's own, which a model has none of.
-    let camera = ship
-        .then(|| {
-            display_group(cx, OptionSection::CameraRings, t!("ui.armor.camera_rings").into_owned(), |filter| {
-                camera_rings_group(viewport, filter, cx.matching)
-            })
-        })
-        .flatten();
-    let lighting = display_group(cx, OptionSection::Lighting, t!("ui.armor.lighting").into_owned(), |filter| {
-        lighting_group(viewport, filter)
-    });
+    let model = model_rows(cx, features.armor, features.ship, filter)?;
 
-    let parts: Vec<AnyView> = model.into_iter().chain(camera).chain(lighting).collect();
-    (!parts.is_empty()).then(|| AnyView::new(view! { column(class = "wt-armor-display") {{parts}} }))
+    Some(AnyView::new(view! { column(class = "wt-armor-display") {{model}} }))
 }
 
-/// One folding group inside the display section.
-///
-/// While filtering the group is open whatever the reader left it at, and a match on its title
-/// keeps everything in it; with nothing matched it is not drawn at all. Its head is inert then, so
-/// the open state the reader left is what comes back when the filter is cleared.
-fn display_group(
-    cx: &SectionCx,
-    which: OptionSection,
-    title: String,
-    body: impl FnOnce(&RailFilter) -> Option<AnyView>,
-) -> Option<AnyView> {
-    let filter = &cx.filter;
-    let marked = filter.label(title.clone());
-    let (open, content) = if filter.is_active() {
-        let inner = if marked.is_some() { RailFilter::default() } else { filter.clone() };
-        let content = body(&inner);
-        if content.is_none() && marked.is_none() {
-            return None;
-        }
-        (true, content)
-    } else {
-        let open = cx.sections.is_open(which);
-        (open, if open { body(filter) } else { None })
-    };
-    let title = marked.unwrap_or_else(|| MarkedLabel::plain(title));
+/// The camera rings section's body: the ship's own camera orbits, which a model has none of.
+pub fn camera_body(cx: &SectionCx) -> Option<AnyView> {
+    install_stylesheet(SHEET, CSS);
+    let group = camera_rings_group(cx.viewport, &cx.filter, cx.matching)?;
 
-    let workspace = cx.workspace;
-    let head = folding_head(
-        format!("armor-options-group-{}", OptionSectionsOpen::id(which)),
-        title,
-        open,
-        HeadDepth::Group,
-        (!filter.is_active()).then_some(move || workspace.sections.update(|sections| sections.toggle(which))),
-    );
-    let content = content.map(|content| view! { box(class = "wt-armor-display__group-body") {{content}} });
+    Some(AnyView::new(view! { column(class = "wt-armor-display__group") {{group}} }))
+}
 
-    Some(AnyView::new(view! {
-        column(class = "wt-armor-display__rows") {
-            {head}
-            {content}
-        }
-    }))
+/// The lighting section's body.
+pub fn lighting_body(cx: &SectionCx) -> Option<AnyView> {
+    install_stylesheet(SHEET, CSS);
+    let group = lighting_group(cx.viewport, &cx.filter)?;
+
+    Some(AnyView::new(view! { column(class = "wt-armor-display__group") {{group}} }))
 }
 
 /// A checkbox over one display setting.

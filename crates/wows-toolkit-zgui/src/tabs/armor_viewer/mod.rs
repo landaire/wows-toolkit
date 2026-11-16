@@ -25,6 +25,9 @@ use landaire_ui::SidePanel;
 use landaire_ui::SideSplitProps;
 use landaire_ui::WidthRange;
 use rust_i18n::t;
+use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
+use wows_toolkit_viewmodel::settings::XrayHighlight;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -40,9 +43,13 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::view;
+use zgui::view::EventCx;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
+use zgui::view::events;
 use zgui::view::install_stylesheet;
+use zgui::vocab::Key;
+use zgui::vocab::NamedKey;
 
 use crate::services::Services;
 use crate::shell::Shell;
@@ -77,7 +84,8 @@ const SIDEBAR_WIDTH: PanelWidth = PanelWidth(240.0);
 const SIDEBAR_RANGE: WidthRange = WidthRange { min: PanelWidth(180.0), max: PanelWidth(480.0) };
 
 /// The rail is fixed: its sections are their own widths, so a drag could only overflow or pad them.
-const OPTIONS_WIDTH: PanelWidth = PanelWidth(300.0);
+/// It holds the tab strip beside a 300 px column of sections.
+const OPTIONS_WIDTH: PanelWidth = PanelWidth(330.0);
 const OPTIONS_RANGE: WidthRange = WidthRange::fixed(OPTIONS_WIDTH);
 
 #[cfg(test)]
@@ -136,7 +144,7 @@ pub fn ArmorViewerTab() -> impl IntoView {
     };
 
     view! {
-        column(class = "wt-armor", attr:data-testid = "armor-viewer-tab") {
+        column(class = "wt-armor", attr:data-testid = "armor-viewer-tab", on:key_down = move |ev| cycle_options_tab(workspace, ev)) {
             SideSplit(
                 open = workspace.sidebar_open,
                 width = sidebar_width,
@@ -178,8 +186,8 @@ pub fn ArmorViewerTab() -> impl IntoView {
     }
 }
 
-/// Seeds the panes, the legend and what a model opens showing from the saved settings, once they
-/// are read.
+/// Seeds the panes, the legend, what a model opens showing and the options panel from the saved
+/// settings, once they are read.
 fn adopt_defaults(workspace: ArmorWorkspace) {
     let settings = workspace.services.settings;
     let adopted = StoredValue::new(false);
@@ -187,15 +195,39 @@ fn adopt_defaults(workspace: ArmorWorkspace) {
         if adopted.get_value() {
             return;
         }
-        let Some((defaults, show_armor, xray_highlight)) = settings.read(|settings| {
-            (settings.armor_defaults.clone(), settings.model_show_armor, settings.model_xray_highlight)
+        let Some(saved) = settings.read(|settings| SavedArmorSettings {
+            defaults: settings.armor_defaults.clone(),
+            show_armor: settings.model_show_armor,
+            xray_highlight: settings.model_xray_highlight,
+            layout: settings.armor_options_layout,
         }) else {
             return;
         };
         adopted.set_value(true);
-        workspace.apply_defaults(defaults.as_ref(), show_armor, xray_highlight);
+        workspace.apply_defaults(saved.defaults.as_ref(), saved.show_armor, saved.xray_highlight);
+        workspace.apply_options_layout(saved.layout);
     });
     on_cleanup_local(move || drop(adopting));
+}
+
+/// What the tab takes from the saved settings.
+struct SavedArmorSettings {
+    defaults: Option<ArmorViewerDefaultsRow>,
+    show_armor: bool,
+    xray_highlight: XrayHighlight,
+    layout: OptionsLayout,
+}
+
+/// Ctrl+Tab and Ctrl+Shift+Tab move to the next and previous options tab from anywhere in the
+/// viewer, opening the rail if it is closed.
+fn cycle_options_tab(workspace: ArmorWorkspace, ev: &mut EventCx<'_, events::KeyDown>) {
+    if ev.key != Key::Named(NamedKey::Tab) || !ev.modifiers.primary() {
+        return;
+    }
+
+    workspace.cycle_options_tab(!ev.modifiers.shift());
+    ev.prevent_default();
+    ev.stop_propagation();
 }
 
 /// Opens what the palette and replay viewports ask for, once the ship data has loaded: a ship

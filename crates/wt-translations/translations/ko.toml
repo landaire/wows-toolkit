@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "선택한 세부 수준에서 이 모델에는 메시가 없
 no_visible_surface = "이 모델에는 그릴 수 있는 보이는 표면이 없습니다."
 section_stand_in = "이 선체 구역에는 자체 지오메트리가 없습니다. 함선은 이 부분의 선체를 다른 구역에서 그립니다."
 
+[ui.armor.option_tabs]
+label = "옵션 탭"
+ship = "함선"
+layers = "레이어"
+analysis = "분석"
+configuration = "구성"
+hull_parts = "선체 부품"
+tab_matches = "%{tab}, %{count}개 일치"
+empty = "이 탭에는 표시된 모델에 해당하는 항목이 없습니다."
+no_choices = "이 모델에는 선택할 선체, 모듈, 위장, 세부 수준이 없습니다."
+
 [ui.armor.hidden_ship]
 clan_rental = "클랜 대여"
 other_class = "함종이 아님"

@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "Ce modèle n'a aucun maillage au niveau de détail choisi."
 no_visible_surface = "Ce modèle n'a aucune surface visible à dessiner."
 section_stand_in = "Cette section de coque n'a pas de géométrie propre. Le navire dessine cette partie de sa coque dans une autre section."
 
+[ui.armor.option_tabs]
+label = "Onglets d'options"
+ship = "Navire"
+layers = "Calques"
+analysis = "Analyse"
+configuration = "Configuration"
+hull_parts = "Parties de la coque"
+tab_matches = "%{tab}, %{count} correspondances"
+empty = "Rien dans cet onglet ne s'applique au modèle affiché."
+no_choices = "Ce modèle n'a ni coque, ni module, ni camouflage, ni niveau de détail à choisir."
+
 [ui.armor.hidden_ship]
 clan_rental = "Location de clan"
 other_class = "Pas une classe de navire"

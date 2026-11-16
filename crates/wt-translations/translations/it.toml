@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "Questo modello non ha mesh al livello di dettaglio scelto."
 no_visible_surface = "Questo modello non ha alcuna superficie visibile da disegnare."
 section_stand_in = "Questa sezione dello scafo non ha una geometria propria. La nave disegna questa parte dello scafo in un'altra sezione."
 
+[ui.armor.option_tabs]
+label = "Schede opzioni"
+ship = "Nave"
+layers = "Livelli"
+analysis = "Analisi"
+configuration = "Configurazione"
+hull_parts = "Parti dello scafo"
+tab_matches = "%{tab}, %{count} corrispondenze"
+empty = "Nulla in questa scheda si applica al modello mostrato."
+no_choices = "Questo modello non ha scafo, modulo, mimetica o livello di dettaglio da scegliere."
+
 [ui.armor.hidden_ship]
 clan_rental = "Noleggio del clan"
 other_class = "Non è una classe di nave"

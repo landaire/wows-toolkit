@@ -1,16 +1,24 @@
-//! The options rail: the viewport tools, then the trajectory, penetration, armor, hull, textures
-//! and display sections.
+//! The options panel: a search over every option, a strip of tabs on the panel's outer edge, and
+//! the chosen tab's tools and folding sections.
+//!
+//! - Ship: the hull configuration, the textures and the export.
+//! - Layers: what is drawn, from armor zones and plates to hull parts and splash boxes.
+//! - Analysis: casting at the hull, from trajectories to the penetration check and splash.
+//! - Display: how it is drawn, from the model settings to the camera rings and the lighting.
 //!
 //! Everything here acts on the active pane, which the header names. A change emits from that
 //! pane, and the workspace widens it to the others when the options are synced.
 //!
-//! The filter reaches every option: while it is active every section is open whatever the reader
+//! The search reaches every tab: while it is active every section is open whatever the reader
 //! left it at, a match on a section's title keeps everything in it, and a section with nothing
-//! matched is not drawn. A collapsed section's body is never built.
+//! matched is not drawn. Each tab carries how many tools and sections it kept, one that kept none
+//! is dimmed, and the first tab holding a match is shown while the chosen one holds none. A
+//! collapsed section's body is never built.
 
 mod display;
 pub mod filter;
 mod hull;
+mod tab_strip;
 mod textures;
 mod tools;
 mod tree_filter;
@@ -20,14 +28,18 @@ use std::sync::Arc;
 
 use landaire_ui::EscapeClears;
 use rust_i18n::t;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
+use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
+use wows_toolkit_viewmodel::armor::options_panel::TabMatches;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Memo;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
-use zgui::reactive::prelude::Update;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
@@ -42,9 +54,9 @@ use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;
 
 use crate::icons::AppIconProps;
-use crate::shell::tabs::ModifierKey;
 use crate::tabs::armor_viewer::options::filter::MarkedLabel;
 use crate::tabs::armor_viewer::options::filter::RailFilter;
+use crate::tabs::armor_viewer::options::tab_strip::OptionTabStripProps;
 use crate::tabs::armor_viewer::panels::pen::PenCheckPanelProps;
 use crate::tabs::armor_viewer::panels::splash::SplashReadoutPanelProps;
 use crate::tabs::armor_viewer::panels::trajectory::TrajectoryPanelProps;
@@ -80,10 +92,10 @@ const CSS: &str = css!(
     .wt-armor-options__target[data-comparing] { font-weight: 600; color: var(--lui-color-accent); }
     .wt-armor-options__filter { display: flex; align-items: center; gap: 4px; }
     .wt-armor-options__field { flex: 1 1 auto; min-width: 0; }
-    .wt-armor-options__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .wt-armor-options__main { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; min-width: 0; }
+    .wt-armor-options__body { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; }
     .wt-armor-options__content { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
-    .wt-armor-options__hint { display: flex; align-items: flex-start; gap: 4px; font-size: 12px; color: var(--wt-color-text-dim); }
-    .wt-armor-options__hint-text { flex: 1 1 auto; min-width: 0; white-space: normal; }
+    .wt-armor-options__tab-title { font-size: 12px; font-weight: 700; color: var(--wt-color-text-dim); }
     .wt-armor-options__none { font-size: 13px; color: var(--wt-color-text-dim); }
     .wt-armor-section { display: flex; flex-direction: column; gap: 4px; }
     .wt-armor-section__body { padding-left: 4px; }
@@ -100,106 +112,8 @@ const CSS: &str = css!(
     .wt-armor-head[data-interactive] { cursor: pointer; }
     .wt-armor-head__chevron { transition: transform var(--lui-motion-turn) var(--lui-motion-ease); }
     .wt-armor-head[data-open] .wt-armor-head__chevron { transform: rotate(90deg); }
-    .wt-armor-head__label { font-size: 14px; font-weight: 700; }
-    .wt-armor-head[data-depth=\"group\"] .wt-armor-head__label { font-size: 13px; font-weight: 600; }"
+    .wt-armor-head__label { font-size: 14px; font-weight: 700; }"
 );
-
-/// A section of the options rail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptionSection {
-    Trajectory,
-    PenCheck,
-    Visibility,
-    Hull,
-    Textures,
-    Display,
-    /// The camera ring and camera lock controls inside Display.
-    CameraRings,
-    /// The lighting controls inside Display.
-    Lighting,
-}
-
-/// Which sections of the options rail are expanded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OptionSectionsOpen {
-    pub trajectory: bool,
-    pub pen_check: bool,
-    pub visibility: bool,
-    pub hull: bool,
-    pub textures: bool,
-    pub display: bool,
-    pub camera_rings: bool,
-    pub lighting: bool,
-}
-
-impl Default for OptionSectionsOpen {
-    /// Trajectory and Display: the arcs cast are read there, and Display is the section read most
-    /// often. The camera and lighting groups start closed, since most readers only touch the model
-    /// settings above them.
-    fn default() -> Self {
-        Self {
-            trajectory: true,
-            pen_check: false,
-            visibility: false,
-            hull: false,
-            textures: false,
-            display: true,
-            camera_rings: false,
-            lighting: false,
-        }
-    }
-}
-
-impl OptionSectionsOpen {
-    pub fn is_open(self, section: OptionSection) -> bool {
-        match section {
-            OptionSection::Trajectory => self.trajectory,
-            OptionSection::PenCheck => self.pen_check,
-            OptionSection::Visibility => self.visibility,
-            OptionSection::Hull => self.hull,
-            OptionSection::Textures => self.textures,
-            OptionSection::Display => self.display,
-            OptionSection::CameraRings => self.camera_rings,
-            OptionSection::Lighting => self.lighting,
-        }
-    }
-
-    fn open_mut(&mut self, section: OptionSection) -> &mut bool {
-        match section {
-            OptionSection::Trajectory => &mut self.trajectory,
-            OptionSection::PenCheck => &mut self.pen_check,
-            OptionSection::Visibility => &mut self.visibility,
-            OptionSection::Hull => &mut self.hull,
-            OptionSection::Textures => &mut self.textures,
-            OptionSection::Display => &mut self.display,
-            OptionSection::CameraRings => &mut self.camera_rings,
-            OptionSection::Lighting => &mut self.lighting,
-        }
-    }
-
-    pub fn open(&mut self, section: OptionSection) {
-        *self.open_mut(section) = true;
-    }
-
-    pub fn toggle(&mut self, section: OptionSection) {
-        let open = self.open_mut(section);
-        *open = !*open;
-    }
-
-    /// The test id fragment of `section`.
-    pub const fn id(section: OptionSection) -> &'static str {
-        match section {
-            OptionSection::Trajectory => "Trajectory",
-            OptionSection::PenCheck => "PenCheck",
-            OptionSection::Visibility => "Visibility",
-            OptionSection::Hull => "Hull",
-            OptionSection::Textures => "Textures",
-            OptionSection::Display => "Display",
-            OptionSection::CameraRings => "CameraRings",
-            OptionSection::Lighting => "Lighting",
-        }
-    }
-}
 
 /// The controls of the trajectory and pen check panels, which a filter finds by these names and
 /// then shows whole.
@@ -243,7 +157,7 @@ pub struct SectionCx {
     pub workspace: ArmorWorkspace,
     pub viewport: ArmorViewportState,
     pub filter: RailFilter,
-    /// The open sections and groups, as the rail was built from them.
+    /// The open sections, as the rail was built from them.
     pub sections: OptionSectionsOpen,
     /// What the scene handed to the pane has, as the rail was built from it.
     pub features: Option<SceneFeatures>,
@@ -269,8 +183,6 @@ pub struct MatchState {
 
 /// What the viewport's context menu offers from the tab: the rail and the quick toggles.
 pub fn pane_menu(workspace: ArmorWorkspace, viewport: ArmorViewportState) -> PaneMenu {
-    use zgui::reactive::UnsyncCallback;
-
     PaneMenu {
         toggle_options: UnsyncCallback::new(move |()| workspace.toggle_options()),
         quick_toggles: UnsyncCallback::new(move |()| quick_toggles(workspace, viewport)),
@@ -297,6 +209,8 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
             splash: splash.shown.then_some(splash.zones_reached),
         }
     });
+    // Written as the content is built, which is where a search counts what each tab kept.
+    let matches = workspace.options_matches;
 
     // With a comparison split open the pane is named in the accent its border is drawn in.
     let target = move || {
@@ -354,18 +268,30 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
                     }
                 }
             }
-            box(class = "wt-armor-options__body", attr:data-testid = "armor-options-body") {
-                {move || {
-                    locale.track();
-                    // Another pane, or another scene in this one, builds the rail again.
-                    let _ = workspace.active_id();
-                    let _ = scene.get();
-                    let filter = RailFilter::new(&filter_text.get());
-                    let matching = filter.is_active().then(|| match_state.get());
-                    let sections = workspace.sections.get();
-                    let built = RailInputs { filter, sections, features: features.get(), matching };
-                    rail_content(workspace, built)
-                }}
+            row(class = "wt-armor-options__main") {
+                box(class = "wt-armor-options__body", attr:data-testid = "armor-options-body") {
+                    {move || {
+                        locale.track();
+                        // Another pane, or another scene in this one, builds the rail again.
+                        let _ = workspace.active_id();
+                        let _ = scene.get();
+                        let filter = RailFilter::new(&filter_text.get());
+                        let matching = filter.is_active().then(|| match_state.get());
+                        let inputs = RailInputs {
+                            filter,
+                            sections: workspace.sections.get(),
+                            features: features.get(),
+                            matching,
+                            tab: workspace.options_tab.get(),
+                        };
+                        let built = rail_content(workspace, inputs);
+                        if matches.get_untracked() != built.matches {
+                            matches.set(built.matches);
+                        }
+                        built.view
+                    }}
+                }
+                OptionTabStrip(workspace = workspace, matches = Signal::from(matches))
             }
         }
     }
@@ -378,80 +304,127 @@ struct RailInputs {
     sections: OptionSectionsOpen,
     features: Option<SceneFeatures>,
     matching: Option<MatchState>,
+    /// The tab the reader chose.
+    tab: OptionsTab,
 }
 
-/// The tools, the cast hint and the sections, as the filter leaves them.
-fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> AnyView {
-    let RailInputs { filter, sections, features, matching } = inputs;
+/// The shown tab's content, and what a search kept in each tab.
+struct RailContent {
+    view: AnyView,
+    /// `None` while nothing is searched for.
+    matches: Option<TabMatches>,
+}
+
+/// The chosen tab as the filter leaves it. While a search is typed every tab is built to count
+/// what it kept, and the first tab holding a match is shown in place of a chosen one with none.
+fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> RailContent {
+    let RailInputs { filter, sections, features, matching, tab } = inputs;
     let viewport = workspace.active_untracked();
     let cx = SectionCx { workspace, viewport, filter: filter.clone(), sections, features, matching };
 
-    let tools = tools::tools(&cx);
-    // Nothing open yet keeps every section, each saying so; an open model drops what it has
-    // nothing for.
+    if !filter.is_active() {
+        return RailContent { view: tab_view(tab, tab_parts(&cx, tab), false), matches: None };
+    }
+
+    let mut matches = TabMatches::default();
+    let mut built: Vec<(OptionsTab, TabParts)> = OptionsTab::ALL
+        .into_iter()
+        .map(|tab| {
+            let parts = tab_parts(&cx, tab);
+            matches.add(tab, parts.kept());
+            (tab, parts)
+        })
+        .collect();
+    let shown = tab.shown(Some(&matches));
+    let parts = built.swap_remove(shown.index()).1;
+
+    RailContent { view: tab_view(shown, parts, matches.total() == 0), matches: Some(matches) }
+}
+
+/// What one tab holds, as the filter leaves it.
+struct TabParts {
+    tools: Vec<AnyView>,
+    /// What the splash tool answers. Not an option, so neither the filter keeps it nor a count
+    /// includes it.
+    readout: Option<AnyView>,
+    sections: Vec<AnyView>,
+}
+
+impl TabParts {
+    /// How many tools and sections the filter kept.
+    fn kept(&self) -> usize {
+        self.tools.len() + self.sections.len()
+    }
+}
+
+/// The tools and sections of `tab`. Nothing open yet keeps every section, each saying so; an open
+/// model drops what it has nothing for.
+fn tab_parts(cx: &SectionCx, tab: OptionsTab) -> TabParts {
+    let features = cx.features;
     let has_armor = features.is_none_or(|features| features.armor);
-    // Where a reader looks for how to cast: a Shift-click does it, with nothing to switch on.
-    let cast_hint = (!filter.is_active() && has_armor).then(|| {
-        view! {
-            row(class = "wt-armor-options__hint", attr:data-testid = "armor-cast-hint") {
-                AppIcon(glyph = wows_toolkit_icons::Glyph::Crosshair)
-                text(class = "wt-armor-options__hint-text", attr:data-testid = "armor-cast-hint-text") {{
-                    t!("ui.armor.cast_hint", key = ModifierKey::Shift.label()).into_owned()
-                }}
+    let ship = features.is_some_and(|features| features.ship);
+    let tools = tools::tools(cx, tab);
+    let mut readout = None;
+    let mut sections: Vec<AnyView> = Vec::new();
+
+    match tab {
+        OptionsTab::Ship => {
+            sections.extend(section(
+                cx,
+                OptionSection::Configuration,
+                &t!("ui.armor.option_tabs.configuration"),
+                hull::config_body,
+            ));
+            sections.extend(section(cx, OptionSection::Textures, &t!("ui.armor.textures.title"), textures::body));
+        }
+        OptionsTab::Layers => {
+            if has_armor {
+                sections.extend(section(
+                    cx,
+                    OptionSection::Visibility,
+                    &t!("ui.armor.armor_options"),
+                    visibility::body,
+                ));
+            }
+            sections.extend(section(
+                cx,
+                OptionSection::HullParts,
+                &t!("ui.armor.option_tabs.hull_parts"),
+                hull::parts_body,
+            ));
+        }
+        OptionsTab::Analysis => {
+            if !cx.filter.is_active() && ship {
+                readout = Some(splash_readout(cx));
+            }
+            if has_armor {
+                sections.extend(section(cx, OptionSection::Trajectory, &t!("ui.armor.trajectory"), trajectory_body));
+                sections.extend(section(cx, OptionSection::PenCheck, &t!("ui.armor.pen_check"), pen_check_body));
             }
         }
-    });
-    // What the splash tool answers, under the tools while splash mode is on. Not an option, so the
-    // filter puts it away.
-    let splash_readout = (!filter.is_active() && features.is_some_and(|features| features.ship)).then(|| {
-        let pen = workspace.pen;
-        AnyView::new(view! {
-            if move || viewport.splash_state().shown {
-                SplashReadoutPanel(pen = pen, viewport = viewport)
+        OptionsTab::Display => {
+            sections.extend(section(cx, OptionSection::Display, &t!("ui.armor.display"), display::body));
+            if ship {
+                sections.extend(section(
+                    cx,
+                    OptionSection::CameraRings,
+                    &t!("ui.armor.camera_rings"),
+                    display::camera_body,
+                ));
             }
-        })
-    });
-
-    let mut sections: Vec<AnyView> = Vec::new();
-    // Not built at all for a model without armor.
-    if has_armor {
-        sections.extend(section(&cx, OptionSection::Trajectory, &t!("ui.armor.trajectory"), |cx| {
-            cx.filter.keeps_any_key(&TRAJECTORY_LABELS).then(|| {
-                let workspace = cx.workspace;
-                let open_pen_check = UnsyncCallback::new(move |()| workspace.open_section(OptionSection::PenCheck));
-                AnyView::new(view! {
-                    TrajectoryPanel(pen = workspace.pen, viewport = cx.viewport, on_open_pen_check = Some(open_pen_check))
-                })
-            })
-        }));
-        sections.extend(section(&cx, OptionSection::PenCheck, &t!("ui.armor.pen_check"), |cx| {
-            cx.filter.keeps_any_key(&PEN_CHECK_LABELS).then(|| {
-                let workspace = cx.workspace;
-                let library = workspace.library;
-                let catalog = Signal::derive_local(move || library.ready().map(|bundle| Arc::clone(&bundle.catalog)));
-                let assets = Signal::derive_local(move || library.ready().map(|bundle| Arc::clone(&bundle.assets)));
-                let playback_at = Signal::derive_local(move || workspace.playback_at.get());
-                let on_seek = UnsyncCallback::new(move |clock| workspace.seek_to(clock));
-                AnyView::new(view! {
-                    PenCheckPanel(
-                        pen = workspace.pen,
-                        catalog = catalog,
-                        assets = assets,
-                        incoming = workspace.incoming,
-                        playback_at = playback_at,
-                        viewport = cx.viewport,
-                        on_seek = Some(on_seek)
-                    )
-                })
-            })
-        }));
-        sections.extend(section(&cx, OptionSection::Visibility, &t!("ui.armor.armor_options"), visibility::body));
+            if features.is_some() {
+                sections.extend(section(cx, OptionSection::Lighting, &t!("ui.armor.lighting"), display::lighting_body));
+            }
+        }
     }
-    sections.extend(section(&cx, OptionSection::Hull, &t!("ui.armor.hull_toggle"), hull::body));
-    sections.extend(section(&cx, OptionSection::Textures, &t!("ui.armor.textures.title"), textures::body));
-    sections.extend(section(&cx, OptionSection::Display, &t!("ui.armor.display"), display::body));
 
-    let nothing_matched = filter.is_active() && tools.is_none() && sections.is_empty();
+    TabParts { tools, readout, sections }
+}
+
+/// One tab's content: its tools, then its sections, or a line saying it has nothing for the scene,
+/// or that the search matched nothing in any tab.
+fn tab_view(tab: OptionsTab, parts: TabParts, nothing_matched: bool) -> AnyView {
+    let TabParts { tools, readout, sections } = parts;
     let none = nothing_matched.then(|| {
         view! {
             text(class = "wt-armor-options__none", attr:data-testid = "armor-options-no-match") {{
@@ -459,15 +432,68 @@ fn rail_content(workspace: ArmorWorkspace, inputs: RailInputs) -> AnyView {
             }}
         }
     });
+    let empty = (!nothing_matched && tools.is_empty() && sections.is_empty()).then(|| {
+        view! {
+            text(class = "wt-armor-options__none", attr:data-testid = "armor-options-tab-empty") {{
+                t!("ui.armor.option_tabs.empty").into_owned()
+            }}
+        }
+    });
+    let tools = tools::tool_grid(tools);
 
     AnyView::new(view! {
-        column(class = "wt-armor-options__content") {
+        column(class = "wt-armor-options__content", attr:data-testid = format!("armor-options-page-{}", tab.id())) {
+            text(class = "wt-armor-options__tab-title") {{tab_strip::tab_name(tab)}}
             {tools}
-            {splash_readout}
-            {cast_hint}
+            {readout}
             {sections}
+            {empty}
             {none}
         }
+    })
+}
+
+/// What the splash tool answers, while splash mode is on.
+fn splash_readout(cx: &SectionCx) -> AnyView {
+    let pen = cx.workspace.pen;
+    let viewport = cx.viewport;
+
+    AnyView::new(view! {
+        if move || viewport.splash_state().shown {
+            SplashReadoutPanel(pen = pen, viewport = viewport)
+        }
+    })
+}
+
+fn trajectory_body(cx: &SectionCx) -> Option<AnyView> {
+    cx.filter.keeps_any_key(&TRAJECTORY_LABELS).then(|| {
+        let workspace = cx.workspace;
+        let open_pen_check = UnsyncCallback::new(move |()| workspace.open_section(OptionSection::PenCheck));
+        AnyView::new(view! {
+            TrajectoryPanel(pen = workspace.pen, viewport = cx.viewport, on_open_pen_check = Some(open_pen_check))
+        })
+    })
+}
+
+fn pen_check_body(cx: &SectionCx) -> Option<AnyView> {
+    cx.filter.keeps_any_key(&PEN_CHECK_LABELS).then(|| {
+        let workspace = cx.workspace;
+        let library = workspace.library;
+        let catalog = Signal::derive_local(move || library.ready().map(|bundle| Arc::clone(&bundle.catalog)));
+        let assets = Signal::derive_local(move || library.ready().map(|bundle| Arc::clone(&bundle.assets)));
+        let playback_at = Signal::derive_local(move || workspace.playback_at.get());
+        let on_seek = UnsyncCallback::new(move |clock| workspace.seek_to(clock));
+        AnyView::new(view! {
+            PenCheckPanel(
+                pen = workspace.pen,
+                catalog = catalog,
+                assets = assets,
+                incoming = workspace.incoming,
+                playback_at = playback_at,
+                viewport = cx.viewport,
+                on_seek = Some(on_seek)
+            )
+        })
     })
 }
 
@@ -495,49 +521,29 @@ fn section(
     let workspace = cx.workspace;
     // Inert while filtering, so the open state the reader left is what comes back.
     let interactive = !filter.is_active();
-    let id = OptionSectionsOpen::id(which);
+    let id = which.id();
     let head = folding_head(
         format!("armor-options-section-{id}"),
         title,
         expanded,
-        HeadDepth::Section,
-        interactive.then_some(move || workspace.sections.update(|sections| sections.toggle(which))),
+        interactive.then_some(move || workspace.toggle_section(which)),
     );
     let content = content.map(|content| {
         view! { box(class = "wt-armor-section__body", attr:data-testid = format!("armor-options-body-{id}")) {{content}} }
     });
 
     Some(AnyView::new(view! {
-        column(class = "wt-armor-section") {
+        column(class = "wt-armor-section", attr:data-testid = format!("armor-options-tab-section-{id}")) {
             {head}
             {content}
         }
     }))
 }
 
-/// How deep a folding head sits in the rail.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HeadDepth {
-    /// A section of the rail.
-    Section,
-    /// A group inside a section.
-    Group,
-}
-
-/// The head of a part of the rail that folds away: a band one surface step above the rail, ruled
-/// off at its top, so the reader can see where each part begins. A section's title is set larger
-/// than a group's inside it. `toggle` is `None` while it cannot be folded.
-pub fn folding_head(
-    test_id: String,
-    title: MarkedLabel,
-    open: bool,
-    depth: HeadDepth,
-    toggle: Option<impl Fn() + 'static>,
-) -> AnyView {
-    let (depth_name, chevron_size) = match depth {
-        HeadDepth::Section => ("section", IconSize::Md),
-        HeadDepth::Group => ("group", IconSize::Sm),
-    };
+/// The head of a section that folds away: a band one surface step above the rail, ruled off at
+/// its top, so the reader can see where each section begins. `toggle` is `None` while it cannot be
+/// folded.
+fn folding_head(test_id: String, title: MarkedLabel, open: bool, toggle: Option<impl Fn() + 'static>) -> AnyView {
     let interactive = toggle.is_some();
     let toggle = std::rc::Rc::new(toggle);
 
@@ -545,7 +551,6 @@ pub fn folding_head(
         row(
             class = "wt-armor-head",
             attr:data-testid = test_id,
-            attr:data-depth = depth_name,
             attr:data-open = open.then(String::new),
             attr:data-interactive = interactive.then(String::new),
             a11y:expanded = open,
@@ -555,7 +560,7 @@ pub fn folding_head(
                 }
             }
         ) {
-            Icon(icon = CHEVRON_RIGHT, size = chevron_size, class = "wt-armor-head__chevron")
+            Icon(icon = CHEVRON_RIGHT, size = IconSize::Md, class = "wt-armor-head__chevron")
             box(class = "wt-armor-head__label") {{title.view()}}
         }
     })

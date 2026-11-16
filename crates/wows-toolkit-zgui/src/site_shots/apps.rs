@@ -13,6 +13,7 @@ use wows_toolkit_launcher::test_support;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::load_current_build;
 use wows_toolkit_replay_data::tactics::BoardTool;
+use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::match_stats::Region;
@@ -35,7 +36,6 @@ use crate::launcher::tests::eu;
 use crate::launcher::tests::na;
 use crate::launcher::tests::up_to_date;
 use crate::services::GameDataRequest;
-use crate::tabs::armor_viewer::options::OptionSection;
 use crate::tabs::player_tracker::built_model;
 use crate::tabs::unpacker::pane::PaneState;
 use crate::windows::tactics::tests::BoardWindow;
@@ -141,7 +141,7 @@ fn site_shots_armor() {
         let viewport = workspace.active_untracked();
         viewport.set_all_parts_hidden();
         viewport.set_hull_opaque(true);
-        workspace.open_section(OptionSection::Hull);
+        workspace.open_section(OptionSection::HullParts);
         for _ in 0..2 {
             settle_in_real_time(&mut window);
         }

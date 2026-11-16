@@ -2158,6 +2158,17 @@ no_meshes_at_lod = "Dit model heeft geen meshes op het gekozen detailniveau."
 no_visible_surface = "Dit model heeft geen zichtbaar oppervlak om te tekenen."
 section_stand_in = "Dit rompdeel heeft geen eigen geometrie. Het schip tekent dit deel van de romp in een ander deel."
 
+[ui.armor.option_tabs]
+label = "Optietabbladen"
+ship = "Schip"
+layers = "Lagen"
+analysis = "Analyse"
+configuration = "Configuratie"
+hull_parts = "Rompdelen"
+tab_matches = "%{tab}, %{count} overeenkomsten"
+empty = "Niets op dit tabblad is van toepassing op het getoonde model."
+no_choices = "Dit model heeft geen romp, module, camouflage of detailniveau om te kiezen."
+
 [ui.armor.hidden_ship]
 clan_rental = "Clanhuurschip"
 other_class = "Geen scheepsklasse"
