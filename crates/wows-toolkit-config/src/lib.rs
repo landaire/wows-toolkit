@@ -36,14 +36,24 @@ pub const APP_NAME: &str = "WoWs Toolkit";
 /// App data directory, matching eframe's `storage_dir()` layout so existing
 /// data is found after removing the `persistence` feature.
 ///
-/// - Windows: `%APPDATA%\WoWs Toolkit\data`
-/// - macOS:   `~/Library/Application Support/WoWs-Toolkit`
-/// - Linux:   `$XDG_DATA_HOME/wowstoolkit` or `~/.local/share/wowstoolkit`
+/// A test build never answers with the platform directory: without a choice
+/// made through `storage_override`, it answers with a temporary directory of
+/// the process's own, so no test reads or writes the running user's data.
 pub fn storage_dir() -> Option<PathBuf> {
     if let Some(chosen) = storage_override::get() {
         return Some(chosen);
     }
 
+    platform_storage_dir()
+}
+
+/// Where the platform keeps the app's data, whatever this process chose.
+/// Only for comparing a path against it; data goes through [`storage_dir`].
+///
+/// - Windows: `%APPDATA%\WoWs Toolkit\data`
+/// - macOS:   `~/Library/Application Support/WoWs-Toolkit`
+/// - Linux:   `$XDG_DATA_HOME/wowstoolkit` or `~/.local/share/wowstoolkit`
+pub fn platform_storage_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         // %APPDATA% = roaming appdata, same as eframe's FOLDERID_RoamingAppData
@@ -80,9 +90,9 @@ pub async fn test_pool() -> sqlx::SqlitePool {
 
 /// A storage directory chosen for this process in place of the platform one.
 ///
-/// Tests set it so nothing reads or writes the running user's own data: the
-/// settings tab measures the game-data cache under [`storage_dir`], and
-/// against a real install that is a walk of several gigabytes.
+/// Test builds always have one: the first [`super::storage_dir`] call that
+/// finds none chosen takes a temporary directory, so a test that forgets to
+/// choose cannot reach the running user's settings, session or caches.
 #[cfg(feature = "test-support")]
 pub mod storage_override {
     use std::path::PathBuf;
@@ -100,7 +110,17 @@ pub mod storage_override {
     }
 
     pub(crate) fn get() -> Option<PathBuf> {
-        CHOSEN.get().cloned()
+        let chosen = CHOSEN.get_or_init(|| {
+            // The time as well as the process id: a later process may be given the same id.
+            let started =
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_nanos());
+            let name = format!("wows-toolkit-test-storage-{}-{started}", std::process::id());
+            let dir = std::env::temp_dir().join(name);
+            std::fs::create_dir_all(&dir).expect("the test storage directory can be made");
+            dir
+        });
+
+        Some(chosen.clone())
     }
 }
 
@@ -148,9 +168,11 @@ mod dump_base_tests {
 
     #[test]
     fn an_empty_or_relative_override_falls_back_to_the_default() {
+        let storage = storage_dir().expect("a test build always has a storage directory");
+
         // A relative path is refused for the same reason an empty one is: it
         // names no fixed place for a cache that outlives the session.
-        assert_eq!(game_data_dump_base_with_override(""), game_data_dump_base());
+        assert_eq!(game_data_dump_base_with_override(""), Some(storage.join("game_data")));
         assert_eq!(game_data_dump_base_with_override("game_data"), game_data_dump_base());
     }
 }

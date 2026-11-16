@@ -123,10 +123,11 @@ pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetada
 #[cfg(test)]
 mod tests {
     /// The CLIs resolve the override root through wows-data-mgr; if the two
-    /// disagree, a cache rebuilt by one tool is invisible to the other.
+    /// disagree, a cache rebuilt by one tool is invisible to the other. The
+    /// platform directory is compared: a test build keeps its own storage.
     #[test]
     fn override_root_matches_the_apps_storage_dir() {
-        let Some(storage) = crate::storage_dir() else {
+        let Some(storage) = wows_toolkit_config::platform_storage_dir() else {
             eprintln!("skipping: no storage dir on this machine");
             return;
         };

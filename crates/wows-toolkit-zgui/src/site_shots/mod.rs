@@ -48,7 +48,7 @@ pub(crate) fn use_site_storage() {
             .unwrap_or_else(|err| panic!("WT_SITE_STORAGE {} does not resolve: {err}", dir.display()));
 
         // The shots write settings into the directory, so the reader's own must never be used.
-        let normal = wows_toolkit_config::storage_dir().and_then(|normal| std::fs::canonicalize(normal).ok());
+        let normal = wows_toolkit_config::platform_storage_dir().and_then(|normal| std::fs::canonicalize(normal).ok());
         assert!(
             normal.as_ref() != Some(&dir),
             "WT_SITE_STORAGE {} is the app's own storage directory; point it at a copy",
