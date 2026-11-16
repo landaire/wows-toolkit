@@ -21,6 +21,9 @@ use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Rect;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::view;
@@ -683,6 +686,82 @@ fn a_missing_auto_export_directory_is_marked() {
 
     click(&mut window, "auto-export-data");
     assert_eq!(window.attribute(row, "data-error"), None, "nothing is lost while exporting is off");
+}
+
+/// A path too long for its line gives way in the middle: the directory it names stays as wide as
+/// it is on a line with room, and its start is cut short.
+#[test]
+fn a_long_path_keeps_its_last_directory_in_view() {
+    let roomy = auto_export_path_parts("/replays/exported battles");
+    let cut = auto_export_path_parts(
+        "/home/someone/games/world of warships/an/archive/of/replays/kept/for/a/long/time/exported battles",
+    );
+
+    assert_eq!(cut.end_text, ["/exported battles"]);
+    assert!((cut.end.size.width.0 - roomy.end.size.width.0).abs() < 0.5, "the last directory is whole: {cut:?}");
+    assert!(
+        cut.end.origin.x.0 + cut.end.size.width.0 <= cut.line.origin.x.0 + cut.line.size.width.0 + 0.5,
+        "and ends inside the line: {cut:?}"
+    );
+    assert!(cut.start.size.width.0 < roomy.line.size.width.0, "the start gave way: {cut:?}");
+}
+
+/// Where the auto-export path's line and its two parts are drawn.
+#[derive(Debug)]
+struct PathParts {
+    line: Rect<DevicePx, Device>,
+    start: Rect<DevicePx, Device>,
+    end: Rect<DevicePx, Device>,
+    end_text: Vec<String>,
+}
+
+fn auto_export_path_parts(path: &str) -> PathParts {
+    let mut settings = test_settings();
+    settings.replay.auto_export_path = path.to_owned();
+    let mut window = open(None, Some(settings), HeadlessOptions::new(REVIEW_SIZE));
+    shell().settings_drawer.open_at(Setting::AutoExport);
+    settle(&mut window);
+
+    let bounds = |class: &str| {
+        let element = window.by_class(class).unwrap_or_else(|| panic!("{class} is drawn"));
+        window.bounds(element).expect("the part has a box")
+    };
+
+    PathParts {
+        line: window.bounds(find(&window, "settings-auto-export-path")).expect("the path has a box"),
+        start: bounds("wt-settings__path-start"),
+        end: bounds("wt-settings__path-end"),
+        end_text: window.texts_by_class("wt-settings__path-end"),
+    }
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the drawer"]
+fn long_paths_render_cut_in_the_middle() {
+    const LONG: &str =
+        "/home/someone/games/world of warships/an/archive/of/replays/kept/for/a/long/time/exported battles";
+
+    for (setting, name) in
+        [(Setting::AutoExport, "settings-long-export-path"), (Setting::CacheDirectory, "settings-long-cache-path")]
+    {
+        let mut settings = test_settings();
+        settings.replay.auto_export_path = LONG.to_owned();
+        settings.game_data_cache_dir = LONG.to_owned();
+        let options = HeadlessOptions {
+            drawing: Drawing::Device,
+            desktop: Some(DesktopAppearance::Dark),
+            ..HeadlessOptions::new(REVIEW_SIZE)
+        };
+        let mut window = open(None, Some(settings), options);
+        shell().settings_drawer.open_at(setting);
+        settle(&mut window);
+        settle(&mut window);
+
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots").join(format!("{name}.png"));
+        window.save_png(&path).expect("the drawer is drawn to a PNG");
+        println!("{}", path.display());
+    }
 }
 
 /// A setting in error is marked as a whole, along with its section's button and the gear, until

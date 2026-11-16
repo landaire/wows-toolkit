@@ -127,9 +127,19 @@ const CSS: &str = css!(
         pointer-events: none;
         overflow: hidden;
         white-space: nowrap;
-        text-overflow: ellipsis;
         font-size: 13px;
     }
+    /* A path cut in the middle: its start gives way, and its last part only once nothing of the
+       start is left. */
+    .wt-settings__ends { display: flex; flex-direction: row; }
+    .wt-settings__path-start, .wt-settings__path-end {
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+    .wt-settings__path-start { flex: 0 1 auto; }
+    .wt-settings__path-end { flex: none; max-width: 100%; }
     .wt-settings__path[data-invalid] .wt-settings__path-shown,
     .wt-settings__path[data-invalid] .zui-input { color: var(--wt-color-error); }
     .wt-settings__themes {
@@ -815,16 +825,36 @@ fn PathField(
                     // An empty field shows its own placeholder, which the overlay would draw a
                     // second time.
                     if move || !editing() && !value.with(String::is_empty) {
-                        text(
+                        box(
                             class = "wt-settings__path-shown",
                             attr:data-testid = format!("settings-path-{setting:?}"),
                             a11y:hidden = true
-                        ) {{move || value.get()}}
+                        ) {{path_ends(move || value.get())}}
                     } else {}
                 }
             }
             TooltipContent {{whole.clone()}}
         }
+    }
+}
+
+/// `path` cut in the middle where it does not fit, so both its start and its last part, which
+/// names the directory, stay in view.
+fn path_ends(path: impl Fn() -> String + Copy + 'static) -> impl IntoView {
+    let start = move || split_last_part(&path()).0.to_owned();
+    let end = move || split_last_part(&path()).1.to_owned();
+
+    view! {
+        text(class = "wt-settings__path-start") {{start}}
+        text(class = "wt-settings__path-end") {{end}}
+    }
+}
+
+/// `path` split before its last part. All of it is the last part when it has no separator.
+fn split_last_part(path: &str) -> (&str, &str) {
+    match path.trim_end_matches(['/', '\\']).rfind(['/', '\\']) {
+        Some(at) => path.split_at(at),
+        None => ("", path),
     }
 }
 
@@ -1202,11 +1232,11 @@ fn AutoExport(shell: Shell) -> impl IntoView {
                 }
                 Tooltip {
                     TooltipTrigger(class = "wt-settings__clip") {
-                        text(
-                            class = "wt-settings__clip",
+                        box(
+                            class = "wt-settings__clip wt-settings__ends",
                             attr:data-testid = "settings-auto-export-path",
                             attr:data-error = move || (!setting_faults(shell, Setting::AutoExport).is_empty()).then(String::new)
-                        ) {{shown}}
+                        ) {{path_ends(shown)}}
                     }
                     TooltipContent {{shown}}
                 }
