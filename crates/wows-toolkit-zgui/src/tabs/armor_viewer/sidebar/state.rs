@@ -544,14 +544,15 @@ impl SidebarState {
         }
     }
 
-    /// Selects the open target's row, or nothing when it is not listed.
+    /// Selects the open target's row, or nothing when it is not listed. The list stays scrolled
+    /// where the reader left it: a search or a load landing must not pull it elsewhere.
     fn highlight_open_row(self) {
         let ids = self.open_row_ids();
         let listed = self.tree.with_untracked(|tree| ids.into_iter().find(|id| tree.contains(id)));
         match listed {
             Some(id) => {
                 self.selection.set(HashSet::from([id.clone()]));
-                self.handle.select_key(id);
+                self.handle.mark_key(id);
             }
             None => {
                 if self.selection.with_untracked(|selected| !selected.is_empty()) {

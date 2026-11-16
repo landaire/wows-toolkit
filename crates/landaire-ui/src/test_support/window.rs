@@ -487,6 +487,12 @@ impl HeadlessWindow {
         self.deliver(SurfaceEvent::Key { state: KeyState::Pressed, event, modifiers, timestamp: Timestamp::ORIGIN });
     }
 
+    /// Delivers the key-repeat press a held named key sends. `modifiers` are those held.
+    pub fn repeat_key(&mut self, key: NamedKey, modifiers: Modifiers) {
+        let event = KeyEvent { repeat: true, ..KeyEvent::named(key, physical_key(key)) };
+        self.deliver(SurfaceEvent::Key { state: KeyState::Pressed, event, modifiers, timestamp: Timestamp::ORIGIN });
+    }
+
     /// Releases a named key held by [`Self::hold_key`]. `modifiers` are those still held after it.
     pub fn release_key(&mut self, key: NamedKey, modifiers: Modifiers) {
         let event = KeyEvent::named(key, physical_key(key));

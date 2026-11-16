@@ -51,7 +51,8 @@ pub(crate) fn command(key: &Key, modifiers: Modifiers) -> Option<Command> {
         NamedKey::End => Command::Move(Travel::Last),
         NamedKey::ArrowRight => Command::Open,
         NamedKey::ArrowLeft => Command::Close,
-        NamedKey::Enter => Command::Activate,
+        // Only a plain Enter opens the row; a modified one is the surroundings' shortcut.
+        NamedKey::Enter if modifiers.is_empty() => Command::Activate,
         NamedKey::Space => Command::Select,
         NamedKey::ContextMenu => Command::OpenMenu,
         NamedKey::F10 if modifiers.shift() => Command::OpenMenu,

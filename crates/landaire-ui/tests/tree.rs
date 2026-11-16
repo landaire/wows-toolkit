@@ -271,6 +271,11 @@ fn arrow_keys_walk_the_rows_and_left_steps_out_to_the_parent() {
 
     press(&mut window, NamedKey::Enter, Modifiers::NONE);
     assert_eq!(probe.activated.get_untracked(), vec![10]);
+    // Held, the key repeats, and a modified Enter belongs to whatever holds the tree.
+    window.repeat_key(NamedKey::Enter, Modifiers::NONE);
+    window.advance(SETTLE);
+    press(&mut window, NamedKey::Enter, Modifiers::PRIMARY);
+    assert_eq!(probe.activated.get_untracked(), vec![10], "neither opens the row again");
 
     window.press_character('a', Modifiers::PRIMARY);
     window.advance(SETTLE);

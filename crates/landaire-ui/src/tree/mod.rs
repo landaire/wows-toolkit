@@ -210,6 +210,8 @@ pub struct TreeHandle<K: 'static> {
 struct Landing<K> {
     key: K,
     focus: bool,
+    /// Whether the list scrolls to show the row.
+    reveal: bool,
 }
 
 impl<K: 'static> TreeHandle<K> {
@@ -226,12 +228,17 @@ impl<K: 'static> TreeHandle<K> {
     /// Makes the row of `key` the selection and the cursor, and scrolls it into view. A key no
     /// visible row shows yet waits for the rows to change, until another key is asked for.
     pub fn select_key(&self, key: K) {
-        self.landing.set(Some(Landing { key, focus: false }));
+        self.landing.set(Some(Landing { key, focus: false, reveal: true }));
+    }
+
+    /// As [`Self::select_key`], leaving the list scrolled where the reader left it.
+    pub fn mark_key(&self, key: K) {
+        self.landing.set(Some(Landing { key, focus: false, reveal: false }));
     }
 
     /// As [`Self::select_key`], and gives the tree the keyboard focus.
     pub fn focus_key(&self, key: K) {
-        self.landing.set(Some(Landing { key, focus: true }));
+        self.landing.set(Some(Landing { key, focus: true, reveal: true }));
     }
 }
 
@@ -437,7 +444,7 @@ where
             typed: Typeahead::new(),
         };
         let on_key_down = move |ev: &mut EventCx<'_, events::KeyDown>| {
-            if keyboard.key(&ev.key, ev.modifiers) {
+            if keyboard.key(&ev.key, ev.modifiers, ev.repeat) {
                 // Claimed, so an arrow does not also scroll whatever the tree is in.
                 ev.prevent_default();
                 ev.stop_propagation();
@@ -552,8 +559,9 @@ struct Keyboard<M: TreeModel> {
 }
 
 impl<M: TreeModel> Keyboard<M> {
-    /// Carries out what `key` asks, and says whether it asked for anything.
-    fn key(&self, key: &Key, modifiers: Modifiers) -> bool {
+    /// Carries out what `key` asks, and says whether it asked for anything. A held Enter opens its
+    /// row once rather than at the key-repeat rate.
+    fn key(&self, key: &Key, modifiers: Modifiers, repeat: bool) -> bool {
         let state = self.state;
         let Some(command) = keys::command(key, modifiers) else {
             return self.type_ahead(key, modifiers);
@@ -563,6 +571,7 @@ impl<M: TreeModel> Keyboard<M> {
             Command::Move(travel) => state.travel(travel, modifiers, self.page()),
             Command::Open => state.open(),
             Command::Close => state.close(),
+            Command::Activate if repeat => None,
             Command::Activate => {
                 if let (Some(activate), Some(index)) = (self.on_activate, state.cursor_index())
                     && let Some(key) = state.key_at(index)
@@ -908,7 +917,7 @@ fn follow_landing<M: TreeModel>(
     row_height: Signal<RowHeight, LocalStorage>,
 ) -> RenderEffect<()> {
     RenderEffect::new(move |_| {
-        let Some(Landing { key, focus }) = handle.landing.get() else {
+        let Some(Landing { key, focus, reveal }) = handle.landing.get() else {
             return;
         };
 
@@ -920,7 +929,9 @@ fn follow_landing<M: TreeModel>(
         };
         handle.landing.set(None);
         state.select_only(key);
-        bring_into_view(port, count, row_height.get_untracked(), index);
+        if reveal {
+            bring_into_view(port, count, row_height.get_untracked(), index);
+        }
         if focus {
             port.focus();
         }
