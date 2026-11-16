@@ -2198,6 +2198,7 @@ unlock_hint = "Votre trousseau système peut demander à être déverrouillé po
 
 [ui.launcher.play]
 play = "Jouer"
+play_through_steam = "Jouer via Steam"
 set_up_game = "Configurer le jeu"
 set_up_runner = "Configurer Proton"
 sign_in_again = "Se reconnecter"
@@ -2245,6 +2246,19 @@ toolkit = "Répertoire du jeu du toolkit"
 played = "Le compte par défaut joue celle-ci"
 play_from = "Jouer depuis ici"
 update = "Mettre à jour"
+
+[ui.launcher.wgc_login]
+label = "Utiliser la connexion Wargaming"
+about = "Lance cette installation Steam via la connexion du toolkit au lieu de Steam. Les paramètres et les replays sont conservés séparément des lancements via Steam. Le portefeuille Steam, les succès et le temps de jeu ne fonctionnent pas dans ce mode."
+steam_accounts = "Les comptes créés via Steam ont besoin d'une adresse e-mail et d'un mot de passe. Ajoutez-les d'abord dans la Gestion du compte Wargaming."
+steam_accounts_link = "Comment ajouter une adresse e-mail et un mot de passe"
+ready = "Fichiers du Game Center prêts"
+fetchable = "L'activation télécharge les fichiers du Game Center de WG pour cette version (%{size})."
+downloading = "Téléchargement des fichiers du Game Center : %{percent}%"
+downloading_unknown = "Téléchargement des fichiers du Game Center"
+checking = "Recherche des fichiers du Game Center de cette version..."
+needs_sign_in = "Ajoutez d'abord un compte Wargaming au toolkit."
+unavailable = "Indisponible pour cette version : %{error}"
 
 [ui.launcher.replay]
 no_install = "Aucune installation ne possède la version du jeu %{build}. Conservez ou installez une copie de cette version pour regarder ce replay."

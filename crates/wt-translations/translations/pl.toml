@@ -2152,6 +2152,7 @@ unlock_hint = "Systemowy pęk kluczy może poprosić o odblokowanie, aby Toolkit
 
 [ui.launcher.play]
 play = "Graj"
+play_through_steam = "Graj przez Steam"
 set_up_game = "Skonfiguruj grę"
 set_up_runner = "Skonfiguruj Proton"
 sign_in_again = "Zaloguj ponownie"
@@ -2199,6 +2200,19 @@ toolkit = "Katalog gry używany przez Toolkit"
 played = "Używana przez konto domyślne"
 play_from = "Graj z tej instalacji"
 update = "Aktualizuj"
+
+[ui.launcher.wgc_login]
+label = "Użyj logowania Wargaming"
+about = "Uruchamia tę instalację ze Steam przez logowanie Toolkit zamiast przez Steam. Ustawienia i powtórki są przechowywane osobno od uruchomień przez Steam. Portfel Steam, osiągnięcia i czas gry nie działają w tym trybie."
+steam_accounts = "Konta utworzone przez Steam wymagają adresu e-mail i hasła. Najpierw dodaj je w Zarządzaniu kontem Wargaming."
+steam_accounts_link = "Jak dodać adres e-mail i hasło"
+ready = "Pliki Game Center gotowe"
+fetchable = "Włączenie tej opcji pobiera pliki Game Center od WG dla tego buildu (%{size})."
+downloading = "Pobieranie plików Game Center: %{percent}%"
+downloading_unknown = "Pobieranie plików Game Center"
+checking = "Wyszukiwanie plików Game Center dla tego buildu..."
+needs_sign_in = "Najpierw dodaj konto Wargaming do Toolkit."
+unavailable = "Niedostępne dla tego buildu: %{error}"
 
 [ui.launcher.replay]
 no_install = "Żadna instalacja nie ma buildu gry %{build}. Zachowaj lub zainstaluj kopię tego buildu, aby obejrzeć tę powtórkę."

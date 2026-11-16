@@ -2152,6 +2152,7 @@ unlock_hint = "Системная связка ключей может попр�
 
 [ui.launcher.play]
 play = "Играть"
+play_through_steam = "Играть через Steam"
 set_up_game = "Настроить игру"
 set_up_runner = "Настроить Proton"
 sign_in_again = "Войти снова"
@@ -2199,6 +2200,19 @@ toolkit = "Каталог игры Toolkit"
 played = "Используется учётной записью по умолчанию"
 play_from = "Играть отсюда"
 update = "Обновить"
+
+[ui.launcher.wgc_login]
+label = "Использовать вход Wargaming"
+about = "Запускает эту установку Steam через вход Toolkit вместо Steam. Настройки и реплеи хранятся отдельно от запусков через Steam. Кошелёк Steam, достижения и время в игре в этом режиме не работают."
+steam_accounts = "Учётным записям, созданным через Steam, нужны адрес эл. почты и пароль. Сначала добавьте их в управлении учётной записью Wargaming."
+steam_accounts_link = "Как добавить эл. почту и пароль"
+ready = "Файлы Game Center готовы"
+fetchable = "При включении будут загружены файлы Game Center от WG для этой версии (%{size})."
+downloading = "Загрузка файлов Game Center: %{percent}%"
+downloading_unknown = "Загрузка файлов Game Center"
+checking = "Поиск файлов Game Center для этой версии..."
+needs_sign_in = "Сначала добавьте учётную запись Wargaming в Toolkit."
+unavailable = "Недоступно для этой версии: %{error}"
 
 [ui.launcher.replay]
 no_install = "Нет установки с версией игры %{build}. Сохраните или установите копию этой версии, чтобы посмотреть этот реплей."

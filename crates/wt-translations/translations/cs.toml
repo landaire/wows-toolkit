@@ -2152,6 +2152,7 @@ unlock_hint = "Systémová klíčenka může požádat o odemčení, aby toolkit
 
 [ui.launcher.play]
 play = "Hrát"
+play_through_steam = "Hrát přes Steam"
 set_up_game = "Nastavit hru"
 set_up_runner = "Nastavit Proton"
 sign_in_again = "Přihlásit se znovu"
@@ -2199,6 +2200,19 @@ toolkit = "Herní adresář toolkitu"
 played = "Výchozí účet hraje tuto instalaci"
 play_from = "Hrát odsud"
 update = "Aktualizovat"
+
+[ui.launcher.wgc_login]
+label = "Použít přihlášení Wargaming"
+about = "Spouští tuto instalaci ze Steamu přes přihlášení toolkitu místo přes Steam. Nastavení a záznamy se uchovávají odděleně od spuštění přes Steam. Peněženka Steamu, úspěchy a odehraný čas v tomto režimu nefungují."
+steam_accounts = "Účty vytvořené přes Steam potřebují e-mail a heslo. Nejprve je přidejte ve správě účtu Wargaming."
+steam_accounts_link = "Jak přidat e-mail a heslo"
+ready = "Soubory Game Center připraveny"
+fetchable = "Zapnutím se stáhnou soubory Game Center od WG pro tento build (%{size})."
+downloading = "Stahování souborů Game Center: %{percent}%"
+downloading_unknown = "Stahování souborů Game Center"
+checking = "Hledání souborů Game Center pro tento build..."
+needs_sign_in = "Nejprve přidejte do toolkitu účet Wargaming."
+unavailable = "Pro tento build není k dispozici: %{error}"
 
 [ui.launcher.replay]
 no_install = "Žádná instalace nemá build hry %{build}. Pro přehrání tohoto záznamu si ponechte nebo nainstalujte kopii tohoto buildu."

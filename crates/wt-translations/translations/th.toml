@@ -2198,6 +2198,7 @@ unlock_hint = "คีย์ริงของระบบอาจขอให�
 
 [ui.launcher.play]
 play = "เล่น"
+play_through_steam = "เล่นผ่าน Steam"
 set_up_game = "ตั้งค่าเกม"
 set_up_runner = "ตั้งค่า Proton"
 sign_in_again = "ลงชื่อเข้าใช้อีกครั้ง"
@@ -2245,6 +2246,19 @@ toolkit = "ไดเรกทอรีเกมของ toolkit"
 played = "บัญชีเริ่มต้นเล่นจากที่นี่"
 play_from = "เล่นจากที่นี่"
 update = "อัปเดต"
+
+[ui.launcher.wgc_login]
+label = "ใช้การเข้าสู่ระบบ Wargaming"
+about = "เรียกใช้การติดตั้ง Steam นี้ผ่านการลงชื่อเข้าใช้ของ toolkit แทน Steam การตั้งค่าและรีเพลย์จะแยกเก็บจากการเปิดผ่าน Steam กระเป๋าเงิน Steam ความสำเร็จ และเวลาเล่นจะไม่ทำงานในโหมดนี้"
+steam_accounts = "บัญชีที่สร้างผ่าน Steam ต้องมีอีเมลและรหัสผ่าน เพิ่มข้อมูลเหล่านี้ในการจัดการบัญชี Wargaming ก่อน"
+steam_accounts_link = "วิธีเพิ่มอีเมลและรหัสผ่าน"
+ready = "ไฟล์ Game Center พร้อมแล้ว"
+fetchable = "การเปิดใช้งานนี้จะดาวน์โหลดไฟล์ Game Center ของ WG สำหรับบิลด์นี้ (%{size})"
+downloading = "กำลังดาวน์โหลดไฟล์ Game Center: %{percent}%"
+downloading_unknown = "กำลังดาวน์โหลดไฟล์ Game Center"
+checking = "กำลังค้นหาไฟล์ Game Center ของบิลด์นี้..."
+needs_sign_in = "เพิ่มบัญชี Wargaming ลงใน toolkit ก่อน"
+unavailable = "ไม่พร้อมใช้งานสำหรับบิลด์นี้: %{error}"
 
 [ui.launcher.replay]
 no_install = "ไม่มีการติดตั้งที่มีบิลด์เกม %{build} เก็บหรือติดตั้งสำเนาของบิลด์นั้นเพื่อดูรีเพลย์นี้"

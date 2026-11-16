@@ -2198,6 +2198,7 @@ unlock_hint = "Ihr System-Schlüsselbund fragt möglicherweise nach dem Entsperr
 
 [ui.launcher.play]
 play = "Spielen"
+play_through_steam = "Über Steam spielen"
 set_up_game = "Spiel einrichten"
 set_up_runner = "Proton einrichten"
 sign_in_again = "Erneut anmelden"
@@ -2245,6 +2246,19 @@ toolkit = "Spielverzeichnis des Toolkits"
 played = "Standardkonto spielt diese"
 play_from = "Von hier spielen"
 update = "Aktualisieren"
+
+[ui.launcher.wgc_login]
+label = "Wargaming-Anmeldung verwenden"
+about = "Startet diese Steam-Installation über die Anmeldung des Toolkits statt über Steam. Einstellungen und Replays werden getrennt von Steam-Starts gespeichert. Steam-Guthaben, Errungenschaften und Spielzeit funktionieren in diesem Modus nicht."
+steam_accounts = "Über Steam erstellte Konten benötigen eine E-Mail-Adresse und ein Passwort. Fügen Sie diese zuerst in der Wargaming-Kontoverwaltung hinzu."
+steam_accounts_link = "So fügen Sie E-Mail-Adresse und Passwort hinzu"
+ready = "Game-Center-Dateien bereit"
+fetchable = "Beim Einschalten werden die Game-Center-Dateien von WG für diesen Build heruntergeladen (%{size})."
+downloading = "Game-Center-Dateien werden heruntergeladen: %{percent}%"
+downloading_unknown = "Game-Center-Dateien werden heruntergeladen"
+checking = "Game-Center-Dateien für diesen Build werden gesucht..."
+needs_sign_in = "Fügen Sie dem Toolkit zuerst ein Wargaming-Konto hinzu."
+unavailable = "Für diesen Build nicht verfügbar: %{error}"
 
 [ui.launcher.replay]
 no_install = "Keine Installation hat den Spiel-Build %{build}. Behalten oder installieren Sie eine Kopie dieses Builds, um dieses Replay anzusehen."

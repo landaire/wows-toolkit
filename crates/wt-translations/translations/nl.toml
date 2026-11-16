@@ -2198,6 +2198,7 @@ unlock_hint = "Uw systeemsleutelbos kan vragen om ontgrendeld te worden, zodat d
 
 [ui.launcher.play]
 play = "Spelen"
+play_through_steam = "Spelen via Steam"
 set_up_game = "Spel instellen"
 set_up_runner = "Proton instellen"
 sign_in_again = "Opnieuw aanmelden"
@@ -2245,6 +2246,19 @@ toolkit = "Spelmap van de toolkit"
 played = "Standaardaccount speelt deze"
 play_from = "Vanaf hier spelen"
 update = "Bijwerken"
+
+[ui.launcher.wgc_login]
+label = "Wargaming-aanmelding gebruiken"
+about = "Start deze Steam-installatie via de aanmelding van de toolkit in plaats van via Steam. Instellingen en replays worden apart gehouden van starts via Steam. Steam-portemonnee, prestaties en speeltijd werken niet in deze modus."
+steam_accounts = "Accounts die via Steam zijn aangemaakt, hebben een e-mailadres en wachtwoord nodig. Voeg deze eerst toe in Wargaming Accountbeheer."
+steam_accounts_link = "Een e-mailadres en wachtwoord toevoegen"
+ready = "Game Center-bestanden gereed"
+fetchable = "Inschakelen downloadt de Game Center-bestanden van WG voor deze build (%{size})."
+downloading = "Game Center-bestanden downloaden: %{percent}%"
+downloading_unknown = "Game Center-bestanden downloaden"
+checking = "Zoeken naar de Game Center-bestanden van deze build..."
+needs_sign_in = "Voeg eerst een Wargaming-account toe aan de toolkit."
+unavailable = "Niet beschikbaar voor deze build: %{error}"
 
 [ui.launcher.replay]
 no_install = "Geen installatie heeft spelbuild %{build}. Bewaar of installeer een kopie van die build om deze replay te bekijken."

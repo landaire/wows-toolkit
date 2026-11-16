@@ -2198,6 +2198,7 @@ unlock_hint = "系统密钥环可能会要求解锁，以便 Toolkit 读取您�
 
 [ui.launcher.play]
 play = "开始游戏"
+play_through_steam = "通过 Steam 开始游戏"
 set_up_game = "设置游戏"
 set_up_runner = "设置 Proton"
 sign_in_again = "重新登录"
@@ -2245,6 +2246,19 @@ toolkit = "Toolkit 的游戏目录"
 played = "默认账号使用此安装"
 play_from = "从此处开始游戏"
 update = "更新"
+
+[ui.launcher.wgc_login]
+label = "使用 Wargaming 登录"
+about = "通过 Toolkit 的登录（而非 Steam）运行此 Steam 安装。设置和回放与通过 Steam 运行时分开保存。此模式下 Steam 钱包、成就和游戏时间不可用。"
+steam_accounts = "通过 Steam 创建的账号需要电子邮箱和密码。请先在 Wargaming 账号管理中添加。"
+steam_accounts_link = "如何添加电子邮箱和密码"
+ready = "Game Center 文件已就绪"
+fetchable = "开启后将下载此构建的 WG Game Center 文件（%{size}）。"
+downloading = "正在下载 Game Center 文件：%{percent}%"
+downloading_unknown = "正在下载 Game Center 文件"
+checking = "正在查找此构建的 Game Center 文件..."
+needs_sign_in = "请先向 Toolkit 添加 Wargaming 账号。"
+unavailable = "此构建不可用：%{error}"
 
 [ui.launcher.replay]
 no_install = "没有安装游戏构建 %{build}。请保留或安装该构建的副本以观看此回放。"

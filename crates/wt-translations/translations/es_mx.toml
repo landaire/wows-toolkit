@@ -2152,6 +2152,7 @@ unlock_hint = "Es posible que el llavero del sistema pida desbloquearse para que
 
 [ui.launcher.play]
 play = "Jugar"
+play_through_steam = "Jugar a través de Steam"
 set_up_game = "Configurar el juego"
 set_up_runner = "Configurar Proton"
 sign_in_again = "Volver a iniciar sesión"
@@ -2199,6 +2200,19 @@ toolkit = "Directorio del juego de Toolkit"
 played = "La cuenta predeterminada juega con esta"
 play_from = "Jugar desde aquí"
 update = "Actualizar"
+
+[ui.launcher.wgc_login]
+label = "Usar el inicio de sesión de Wargaming"
+about = "Ejecuta esta instalación de Steam con el inicio de sesión de Toolkit en lugar de Steam. La configuración y las repeticiones se guardan aparte de las ejecuciones con Steam. La billetera de Steam, los logros y el tiempo de juego no funcionan en este modo."
+steam_accounts = "Las cuentas creadas a través de Steam necesitan un correo electrónico y una contraseña. Agrégalos primero en la Administración de cuenta de Wargaming."
+steam_accounts_link = "Cómo agregar un correo electrónico y una contraseña"
+ready = "Archivos de Game Center listos"
+fetchable = "Al activar esta opción se descargan los archivos de Game Center de WG para este build (%{size})."
+downloading = "Descargando los archivos de Game Center: %{percent}%"
+downloading_unknown = "Descargando los archivos de Game Center"
+checking = "Buscando los archivos de Game Center de este build..."
+needs_sign_in = "Primero agrega una cuenta de Wargaming a Toolkit."
+unavailable = "No disponible para este build: %{error}"
 
 [ui.launcher.replay]
 no_install = "Ninguna instalación tiene el build %{build} del juego. Conserva o instala una copia de ese build para ver esta repetición."

@@ -2198,6 +2198,7 @@ unlock_hint = "系統金鑰圈可能會要求解鎖，以便 Toolkit 讀取您�
 
 [ui.launcher.play]
 play = "開始遊戲"
+play_through_steam = "透過 Steam 開始遊戲"
 set_up_game = "設定遊戲"
 set_up_runner = "設定 Proton"
 sign_in_again = "重新登入"
@@ -2245,6 +2246,19 @@ toolkit = "Toolkit 的遊戲目錄"
 played = "預設帳號使用此安裝"
 play_from = "從此處開始遊戲"
 update = "更新"
+
+[ui.launcher.wgc_login]
+label = "使用 Wargaming 登入"
+about = "透過 Toolkit 的登入（而非 Steam）執行此 Steam 安裝。設定和回放與透過 Steam 執行時分開儲存。此模式下 Steam 錢包、成就和遊戲時數無法使用。"
+steam_accounts = "透過 Steam 建立的帳號需要電子郵件和密碼。請先在 Wargaming 帳號管理中新增。"
+steam_accounts_link = "如何新增電子郵件和密碼"
+ready = "Game Center 檔案已就緒"
+fetchable = "開啟後將下載此組建的 WG Game Center 檔案（%{size}）。"
+downloading = "正在下載 Game Center 檔案：%{percent}%"
+downloading_unknown = "正在下載 Game Center 檔案"
+checking = "正在尋找此組建的 Game Center 檔案..."
+needs_sign_in = "請先將 Wargaming 帳號新增至 Toolkit。"
+unavailable = "此組建無法使用：%{error}"
 
 [ui.launcher.replay]
 no_install = "沒有安裝遊戲組建 %{build}。請保留或安裝該組建的副本以觀看此回放。"

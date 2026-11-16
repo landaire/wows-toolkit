@@ -2063,6 +2063,7 @@ unlock_hint = "Your system keyring may ask to unlock so the toolkit can read you
 
 [ui.launcher.play]
 play = "Play"
+play_through_steam = "Play through Steam"
 set_up_game = "Set up game"
 set_up_runner = "Set up Proton"
 sign_in_again = "Sign in again"
@@ -2112,6 +2113,19 @@ toolkit = "Toolkit's game directory"
 played = "Default account plays this"
 play_from = "Play from here"
 update = "Update"
+
+[ui.launcher.wgc_login]
+label = "Use Wargaming login"
+about = "Runs this Steam install through the toolkit's sign-in instead of Steam. Settings and replays are kept apart from Steam runs. Steam wallet, achievements and playtime don't work in this mode."
+steam_accounts = "Accounts created through Steam need an email and password. Add them in Wargaming Account Management first."
+steam_accounts_link = "How to add an email and password"
+ready = "Game Center files ready"
+fetchable = "Turning this on downloads WG's Game Center files for this build (%{size})."
+downloading = "Downloading the Game Center files: %{percent}%"
+downloading_unknown = "Downloading the Game Center files"
+checking = "Looking for the Game Center files of this build..."
+needs_sign_in = "Add a Wargaming account to the toolkit first."
+unavailable = "Not available for this build: %{error}"
 
 [ui.launcher.replay]
 no_install = "No install has game build %{build}. Keep or install a copy of that build to watch this replay."

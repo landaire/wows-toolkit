@@ -2198,6 +2198,7 @@ unlock_hint = "ツールキットが保存済みのサインインを読み取�
 
 [ui.launcher.play]
 play = "プレイ"
+play_through_steam = "Steam 経由でプレイ"
 set_up_game = "ゲームをセットアップ"
 set_up_runner = "Proton をセットアップ"
 sign_in_again = "再度サインイン"
@@ -2245,6 +2246,19 @@ toolkit = "ツールキットのゲームディレクトリ"
 played = "デフォルトアカウントがこれでプレイ"
 play_from = "ここからプレイ"
 update = "アップデート"
+
+[ui.launcher.wgc_login]
+label = "Wargaming ログインを使用"
+about = "この Steam インストールを、Steam ではなくツールキットのサインインで起動します。設定とリプレイは Steam での起動とは別に保持されます。このモードでは Steam ウォレット、実績、プレイ時間は機能しません。"
+steam_accounts = "Steam で作成したアカウントにはメールアドレスとパスワードが必要です。先に Wargaming のアカウント管理で追加してください。"
+steam_accounts_link = "メールアドレスとパスワードを追加する方法"
+ready = "Game Center ファイルの準備完了"
+fetchable = "オンにすると、このビルド用の WG の Game Center ファイル (%{size}) をダウンロードします。"
+downloading = "Game Center ファイルをダウンロード中: %{percent}%"
+downloading_unknown = "Game Center ファイルをダウンロード中"
+checking = "このビルドの Game Center ファイルを探しています..."
+needs_sign_in = "先にツールキットに Wargaming アカウントを追加してください。"
+unavailable = "このビルドでは利用できません: %{error}"
 
 [ui.launcher.replay]
 no_install = "ゲームビルド %{build} のインストールがありません。このリプレイを視聴するには、そのビルドのコピーを保持するかインストールしてください。"

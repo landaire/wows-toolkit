@@ -2152,6 +2152,7 @@ unlock_hint = "Toolkit'in kaydedilen oturumunuzu okuyabilmesi için sistem anaht
 
 [ui.launcher.play]
 play = "Oyna"
+play_through_steam = "Steam üzerinden oyna"
 set_up_game = "Oyunu kur"
 set_up_runner = "Proton'u kur"
 sign_in_again = "Yeniden oturum aç"
@@ -2199,6 +2200,19 @@ toolkit = "Toolkit'in oyun dizini"
 played = "Varsayılan hesap bunu oynar"
 play_from = "Buradan oyna"
 update = "Güncelle"
+
+[ui.launcher.wgc_login]
+label = "Wargaming oturum açmayı kullan"
+about = "Bu Steam kurulumunu Steam yerine toolkit'in oturum açma işlemiyle çalıştırır. Ayarlar ve tekrarlar Steam üzerinden yapılan başlatmalardan ayrı tutulur. Steam cüzdanı, başarımlar ve oynama süresi bu modda çalışmaz."
+steam_accounts = "Steam üzerinden oluşturulan hesapların bir e-posta ve parolaya ihtiyacı vardır. Bunları önce Wargaming Hesap Yönetimi'nde ekleyin."
+steam_accounts_link = "E-posta ve parola nasıl eklenir"
+ready = "Game Center dosyaları hazır"
+fetchable = "Bunu açmak, bu sürüm için WG'nin Game Center dosyalarını indirir (%{size})."
+downloading = "Game Center dosyaları indiriliyor: %{percent}%"
+downloading_unknown = "Game Center dosyaları indiriliyor"
+checking = "Bu sürümün Game Center dosyaları aranıyor..."
+needs_sign_in = "Önce toolkit'e bir Wargaming hesabı ekleyin."
+unavailable = "Bu sürüm için kullanılamıyor: %{error}"
 
 [ui.launcher.replay]
 no_install = "Hiçbir kurulumda %{build} oyun sürümü yok. Bu tekrarı izlemek için o sürümün bir kopyasını saklayın veya kurun."
