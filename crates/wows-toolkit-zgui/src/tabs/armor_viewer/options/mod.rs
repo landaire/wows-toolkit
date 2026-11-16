@@ -534,9 +534,9 @@ pub fn folding_head(
     depth: HeadDepth,
     toggle: Option<impl Fn() + 'static>,
 ) -> AnyView {
-    let depth_name = match depth {
-        HeadDepth::Section => "section",
-        HeadDepth::Group => "group",
+    let (depth_name, chevron_size) = match depth {
+        HeadDepth::Section => ("section", IconSize::Md),
+        HeadDepth::Group => ("group", IconSize::Sm),
     };
     let interactive = toggle.is_some();
     let toggle = std::rc::Rc::new(toggle);
@@ -555,7 +555,7 @@ pub fn folding_head(
                 }
             }
         ) {
-            Icon(icon = CHEVRON_RIGHT, size = IconSize::Sm, class = "wt-armor-head__chevron")
+            Icon(icon = CHEVRON_RIGHT, size = chevron_size, class = "wt-armor-head__chevron")
             box(class = "wt-armor-head__label") {{title.view()}}
         }
     })
