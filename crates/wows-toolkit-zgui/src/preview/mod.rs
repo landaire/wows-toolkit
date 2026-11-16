@@ -48,7 +48,6 @@ use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::Task;
 use zgui::task::spawn_local;
-use zgui::view::IntervalHandle;
 use zgui::view::NodeRef;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
@@ -59,6 +58,7 @@ use crate::preview::bake::BakeStreams;
 use crate::preview::bake::GameDataBaker;
 use crate::preview::bake::PreviewBaker;
 use crate::services::Services;
+use crate::ticker::Ticker;
 
 /// The row the pointer settled on.
 #[derive(Clone)]
@@ -255,7 +255,7 @@ impl HoverPreview {
             if run.track.is_some() {
                 return false;
             }
-            run.track = Some(Track { frames, ticks: 0, presented: None, map_only: true });
+            run.track = Some(Track { frames, played: Duration::ZERO, presented: None, map_only: true });
             run.present();
             true
         });
@@ -269,9 +269,16 @@ impl HoverPreview {
         let first = self.with_run(|run| {
             let first = run.track.as_ref().is_none_or(|track| track.map_only);
             if first {
-                run.track =
-                    Some(Track { frames: PreviewFrames::streaming(), ticks: 0, presented: None, map_only: false });
-                run.ticker = run.timers.as_ref().map(|timers| timers.set_interval(FRAME_INTERVAL, move || self.tick()));
+                run.track = Some(Track {
+                    frames: PreviewFrames::streaming(),
+                    played: Duration::ZERO,
+                    presented: None,
+                    map_only: false,
+                });
+                run.ticker = run
+                    .timers
+                    .as_ref()
+                    .map(|timers| Ticker::start(timers, FRAME_INTERVAL, move |elapsed| self.tick(elapsed)));
             }
             if let Some(track) = run.track.as_mut() {
                 track.frames.push(frame);
@@ -284,10 +291,10 @@ impl HoverPreview {
         }
     }
 
-    fn tick(self) {
+    fn tick(self, elapsed: Duration) {
         self.with_run(|run| {
             if let Some(track) = run.track.as_mut() {
-                track.ticks += 1;
+                track.played += elapsed;
             }
             run.present();
         });
@@ -397,7 +404,7 @@ struct Run {
     /// Set when a bake in flight should stop.
     cancel: Arc<AtomicBool>,
     dwell_timer: Option<TimeoutHandle>,
-    ticker: Option<IntervalHandle>,
+    ticker: Option<Ticker>,
     bake: Option<Task>,
 }
 
@@ -425,7 +432,7 @@ impl Run {
     /// Hands over the frame the playback clock has reached, unless it is the one already shown.
     fn present(&mut self) {
         let Some(track) = self.track.as_mut() else { return };
-        let Some(index) = track.frames.index_at(FRAME_INTERVAL * track.ticks) else { return };
+        let Some(index) = track.frames.index_at(track.played) else { return };
         if track.presented == Some(index) {
             return;
         }
@@ -439,9 +446,8 @@ impl Run {
 /// A baked track and where playback is in it.
 struct Track {
     frames: PreviewFrames,
-    /// Frame intervals since the track started. Counted rather than measured, so playback runs on
-    /// the window's clock.
-    ticks: u32,
+    /// How long the track has played, as the window's clock measured it.
+    played: Duration,
     presented: Option<usize>,
     /// Whether this is the still map standing in for a track that has not arrived.
     map_only: bool,
