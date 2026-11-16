@@ -241,6 +241,7 @@ open_data_dir = "Otwórz folder danych aplikacji"
 open_data_dir_tooltip = "Otwórz folder danych aplikacji (ustawienia, logi, dane w pamięci podręcznej) w menedżerze plików."
 proxy_url = "Serwer proxy HTTP"
 proxy_url_hint = "host:port lub pozostaw puste, aby użyć systemowych ustawień proxy (działa po ponownym uruchomieniu)"
+proxy_url_hint_live = "host:port lub pozostaw puste, aby użyć systemowych ustawień proxy"
 
 [ui.settings.wows]
 heading = "Ustawienia World of Warships"

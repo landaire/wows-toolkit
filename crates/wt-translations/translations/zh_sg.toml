@@ -265,6 +265,7 @@ open_data_dir = "打开应用数据文件夹"
 open_data_dir_tooltip = "在文件管理器中打开应用数据文件夹（设置、日志、缓存数据）。"
 proxy_url = "HTTP 代理"
 proxy_url_hint = "host:port，留空则使用系统代理设置（重启后生效）"
+proxy_url_hint_live = "host:port，留空则使用系统代理设置"
 
 [ui.settings.wows]
 heading = "World of Warships 设置"

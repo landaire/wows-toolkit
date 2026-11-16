@@ -265,6 +265,7 @@ open_data_dir = "Anwendungsdatenordner öffnen"
 open_data_dir_tooltip = "Den Anwendungsdatenordner (Einstellungen, Protokolle, zwischengespeicherte Daten) im Dateimanager öffnen."
 proxy_url = "HTTP-Proxy"
 proxy_url_hint = "host:port, oder leer lassen, um die Proxy-Einstellungen des Systems zu verwenden (wird beim Neustart wirksam)"
+proxy_url_hint_live = "host:port, oder leer lassen, um die Proxy-Einstellungen des Systems zu verwenden"
 
 [ui.settings.wows]
 heading = "World of Warships Einstellungen"

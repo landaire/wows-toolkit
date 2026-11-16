@@ -50,6 +50,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
@@ -457,14 +458,9 @@ type BuildSlot = OnceLock<Result<Arc<LoadedGameData>, ReplayLoadError>>;
 #[derive(Clone)]
 pub struct GameDataCache {
     wows_dir: Option<PathBuf>,
-    /// Where the dumped builds are, for a replay the install cannot answer.
-    ///
-    /// `None` only when there is no storage directory at all, which is the one
-    /// case nothing can be cached anywhere.
-    dump_base: Option<PathBuf>,
-    /// Whether a build loaded out of the install is written to that cache, which
-    /// is the `auto_dump_game_data` setting.
-    auto_dump: bool,
+    /// Shared by every clone, so a change of setting reaches the next build load
+    /// wherever it starts.
+    storage: Arc<RwLock<CacheStorage>>,
     locale: Arc<Mutex<String>>,
     locale_generation: Arc<AtomicU64>,
     loaded: Arc<Mutex<HashMap<u32, Arc<BuildSlot>>>>,
@@ -493,14 +489,23 @@ impl GameDataCache {
     }
 
     fn with_install(wows_dir: Option<PathBuf>) -> Self {
+        let storage = CacheStorage { dump_base: wows_toolkit_config::game_data_dump_base(), auto_dump: false };
+
         Self {
             wows_dir,
-            dump_base: wows_toolkit_config::game_data_dump_base(),
-            auto_dump: false,
+            storage: Arc::new(RwLock::new(storage)),
             locale: Arc::new(Mutex::new("en".to_owned())),
             locale_generation: Arc::new(AtomicU64::new(0)),
             loaded: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn dump_base(&self) -> Option<PathBuf> {
+        self.storage.read().unwrap_or_else(|poisoned| poisoned.into_inner()).dump_base.clone()
+    }
+
+    fn auto_dumps(&self) -> bool {
+        self.storage.read().unwrap_or_else(|poisoned| poisoned.into_inner()).auto_dump
     }
 
     pub fn with_locale(self, locale: &str) -> Self {
@@ -523,7 +528,7 @@ impl GameDataCache {
             let Some(Ok(loaded)) = slot.get() else { continue };
             let build = loaded.build();
             let translations =
-                load_translations_for_build(self.wows_dir.as_deref(), self.dump_base.as_deref(), build, locale);
+                load_translations_for_build(self.wows_dir.as_deref(), self.dump_base().as_deref(), build, locale);
             if let Some(translations) = translations {
                 let current = self.locale.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 if *current == locale && self.locale_generation.load(Ordering::Acquire) == generation {
@@ -538,17 +543,30 @@ impl GameDataCache {
     ///
     /// This is what the `auto_dump_game_data` checkbox governs. Off by default,
     /// which is the stored default too: a dump is gigabytes.
-    pub fn with_auto_dump(mut self, auto_dump: bool) -> Self {
-        self.auto_dump = auto_dump;
+    pub fn with_auto_dump(self, auto_dump: bool) -> Self {
+        self.set_auto_dump(auto_dump);
         self
+    }
+
+    /// [`Self::with_auto_dump`] for a cache already in use, from the next build
+    /// loaded on.
+    pub fn set_auto_dump(&self, auto_dump: bool) {
+        self.storage.write().unwrap_or_else(|poisoned| poisoned.into_inner()).auto_dump = auto_dump;
     }
 
     /// Points the cache at the directory the reader chose for it, which is the
     /// `game_data_cache_dir` row both apps share. An empty string is the
     /// default location.
-    pub fn with_cache_dir(mut self, custom: &str) -> Self {
-        self.dump_base = wows_toolkit_config::game_data_dump_base_with_override(custom);
+    pub fn with_cache_dir(self, custom: &str) -> Self {
+        self.set_cache_dir(custom);
         self
+    }
+
+    /// [`Self::with_cache_dir`] for a cache already in use. Builds already
+    /// loaded stay; the next one is read from and dumped to `custom`.
+    pub fn set_cache_dir(&self, custom: &str) {
+        let dump_base = wows_toolkit_config::game_data_dump_base_with_override(custom);
+        self.storage.write().unwrap_or_else(|poisoned| poisoned.into_inner()).dump_base = dump_base;
     }
 
     /// Whether this build could be read at all: installed, already loaded, or in
@@ -566,12 +584,12 @@ impl GameDataCache {
         }) {
             return true;
         }
-        self.dump_base.as_deref().and_then(|base| dump_for_build(base, build, version)).is_some()
+        self.dump_base().as_deref().and_then(|base| dump_for_build(base, build, version)).is_some()
     }
 
     /// Where `build`'s dump sits, for a caller reading a file written beside it.
     pub fn dump_dir_for(&self, build: u32, version: Option<&str>) -> Option<PathBuf> {
-        self.dump_base.as_deref().and_then(|base| dump_for_build(base, build, version))
+        self.dump_base().as_deref().and_then(|base| dump_for_build(base, build, version))
     }
 
     /// `build`'s game data if it is already loaded, without loading it.
@@ -653,7 +671,7 @@ impl GameDataCache {
             .get_or_init(|| {
                 Self::load_build_checked(
                     self.wows_dir.as_deref(),
-                    self.dump_base.as_deref(),
+                    self.dump_base().as_deref(),
                     build,
                     hint.as_deref(),
                     &locale,
@@ -669,7 +687,7 @@ impl GameDataCache {
             && let Ok(loaded) = &result
             && let Some(translations) = load_translations_for_build(
                 self.wows_dir.as_deref(),
-                self.dump_base.as_deref(),
+                self.dump_base().as_deref(),
                 loaded.build(),
                 &current_locale,
             )
@@ -683,7 +701,7 @@ impl GameDataCache {
         // Written after the load rather than during it: the dump reads the same
         // files, and a reader waiting for a replay should not wait for gigabytes
         // of copying first.
-        if result.is_ok() && self.auto_dump {
+        if result.is_ok() && self.auto_dumps() {
             self.dump_installed_build(build);
         }
 
@@ -708,7 +726,7 @@ impl GameDataCache {
     /// install's own `preferences.xml`, which is what names the data being
     /// copied, and a dump already present is left alone.
     fn dump_installed_build(&self, build: u32) {
-        let Some(dump_base) = self.dump_base.clone() else { return };
+        let Some(dump_base) = self.dump_base() else { return };
         let Some(wows_dir) = self.wows_dir.clone() else { return };
         let Some(version) = installed_version(&wows_dir) else {
             tracing::warn!("auto-dump: the install names no version, so nothing is dumped");
@@ -779,6 +797,18 @@ impl GameDataCache {
             Err(panic) => Err(ReplayLoadError::GameData(format!("game data load panicked: {}", panic_message(&panic)))),
         }
     }
+}
+
+/// Where builds are cached, and whether a build loaded out of the install is
+/// written there.
+struct CacheStorage {
+    /// Where the dumped builds are, for a replay the install cannot answer.
+    ///
+    /// `None` only when there is no storage directory at all, which is the one
+    /// case nothing can be cached anywhere.
+    dump_base: Option<PathBuf>,
+    /// The `auto_dump_game_data` setting.
+    auto_dump: bool,
 }
 
 /// Puts this app's versioned constants in the dump beside the build, so a later
@@ -1546,6 +1576,25 @@ mod tests {
         assert_eq!(super::stale_cache_build("wows_toolkit.db"), None);
         assert_eq!(super::stale_cache_build("game_params.bin"), None, "the unkeyed one is handled on its own");
         assert_eq!(super::stale_cache_build("game_params_notabuild.bin"), None);
+    }
+
+    /// A cache directory chosen while the game data is in use reaches every
+    /// holder of the cache, without loading it again.
+    #[test]
+    fn a_cache_directory_chosen_later_reaches_every_clone() {
+        const BUILD: u32 = 987_654_321;
+
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let dump = wows_data_mgr::dump::dump_dir(dir.path(), "14.1.0", BUILD);
+        std::fs::create_dir_all(&dump).expect("the dump directory is made");
+        std::fs::write(dump.join("metadata.toml"), "").expect("the metadata is written");
+
+        let cache = super::GameDataCache::without_install();
+        let held = cache.clone();
+        assert_eq!(held.dump_dir_for(BUILD, None), None);
+
+        cache.set_cache_dir(dir.path().to_str().expect("the temp path is UTF-8"));
+        assert_eq!(held.dump_dir_for(BUILD, None), Some(dump));
     }
 
     /// A build the install no longer has is answered from the game-data cache:

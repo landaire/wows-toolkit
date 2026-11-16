@@ -145,6 +145,8 @@ pub struct UpdateFlow {
     /// The status bar's line for a check the reader asked for, held until the check answers.
     asked_job: StoredValue<Option<JobHandle>, LocalStorage>,
     source: StoredValue<Rc<dyn ReleaseSource>, LocalStorage>,
+    /// Whether the check the setting asks for has run this session.
+    checked_unasked: StoredValue<bool, LocalStorage>,
 }
 
 impl UpdateFlow {
@@ -153,6 +155,7 @@ impl UpdateFlow {
             status: RwSignal::new_local(UpdateStatus::Idle),
             asked_job: StoredValue::new_local(None),
             source: StoredValue::new_local(Rc::new(PublishedReleases)),
+            checked_unasked: StoredValue::new_local(false),
         }
     }
 
@@ -190,6 +193,18 @@ fn describe_download(step: Downloaded) -> String {
 
 fn describe_failure(error: &rootcause::Report) -> String {
     format!("{}", error.format_with(&DefaultReportFormatter::ASCII))
+}
+
+/// The check the Check for updates setting asks for: once a session, at startup or as soon as the
+/// setting is turned on, as the egui app does.
+pub fn check_unasked(services: Services, shell: Shell) {
+    let flow = shell.update;
+    if flow.checked_unasked.get_value() {
+        return;
+    }
+
+    flow.checked_unasked.set_value(true);
+    check_for_update(services, shell, Asked::AtStartup);
 }
 
 /// Looks for a newer release, and offers to install one.

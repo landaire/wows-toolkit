@@ -265,6 +265,7 @@ open_data_dir = "앱 데이터 폴더 열기"
 open_data_dir_tooltip = "파일 관리자에서 애플리케이션 데이터 폴더(설정, 로그, 캐시 데이터)를 엽니다."
 proxy_url = "HTTP 프록시"
 proxy_url_hint = "host:port 형식, 비워 두면 시스템 프록시 설정 사용 (재시작 후 적용)"
+proxy_url_hint_live = "host:port 형식, 비워 두면 시스템 프록시 설정 사용"
 
 [ui.settings.wows]
 heading = "World of Warships 설정"

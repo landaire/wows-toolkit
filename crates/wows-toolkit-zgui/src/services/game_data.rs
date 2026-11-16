@@ -183,6 +183,20 @@ impl GameData {
         });
     }
 
+    /// Points the cache in use at the cache directory setting `dir`, from the next build loaded on.
+    pub fn set_cache_dir(self, dir: &str) {
+        if let Some(cache) = self.cache.get_untracked() {
+            cache.set_cache_dir(dir);
+        }
+    }
+
+    /// Has the cache in use dump the builds it loads out of the install, from the next one on.
+    pub fn set_auto_dump(self, on: bool) {
+        if let Some(cache) = self.cache.get_untracked() {
+            cache.set_auto_dump(on);
+        }
+    }
+
     /// Rewrites the names of every loaded build in `code`, off the UI thread: each build's
     /// translations are read from disk.
     pub fn set_locale(self, code: LanguageCode) {

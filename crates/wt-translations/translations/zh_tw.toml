@@ -265,6 +265,7 @@ open_data_dir = "開啟應用程式資料資料夾"
 open_data_dir_tooltip = "在檔案管理器中開啟應用程式資料資料夾（設定、日誌、快取資料）。"
 proxy_url = "HTTP 代理"
 proxy_url_hint = "host:port，留空則使用系統代理設定（重啟後生效）"
+proxy_url_hint_live = "host:port，留空則使用系統代理設定"
 
 [ui.settings.wows]
 heading = "World of Warships 設定"

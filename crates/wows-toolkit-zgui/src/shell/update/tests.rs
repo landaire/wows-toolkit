@@ -18,6 +18,7 @@ use super::Asked;
 use super::ReleaseSource;
 use super::UpdateStatus;
 use super::check_for_update;
+use super::check_unasked;
 use super::install_update;
 use crate::interaction_tests::open_bare_shell;
 use crate::interaction_tests::shell;
@@ -160,6 +161,21 @@ fn a_check_by_hand_that_finds_nothing_says_the_app_is_up_to_date() {
 
     let toasts = window.texts_by_class("zui-toast").concat();
     assert!(toasts.contains(t!("ui.messages.app_up_to_date").as_ref()), "{toasts}");
+}
+
+/// The setting's own check runs once a session: turning it off and on again does not ask again.
+#[test]
+fn the_check_the_setting_asks_for_runs_once_a_session() {
+    let (mut window, releases) = open();
+    check_unasked(shell().services(), shell());
+    settle(&mut window);
+    assert_eq!(releases.checks.borrow().len(), 1, "turning the setting on checks at once");
+    releases.answer_check(Ok(None));
+    settle(&mut window);
+
+    check_unasked(shell().services(), shell());
+    settle(&mut window);
+    assert!(releases.checks.borrow().is_empty(), "the session has had its check");
 }
 
 #[test]

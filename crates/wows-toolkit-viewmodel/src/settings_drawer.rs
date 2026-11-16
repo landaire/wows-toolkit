@@ -234,7 +234,8 @@ impl Setting {
             Self::Language => t!("ui.settings.panel.language_description"),
             Self::DataSharing => t!("ui.settings.panel.data_sharing_description"),
             Self::CodeIntegrity => t!("ui.settings.panel.code_integrity_description"),
-            Self::Proxy => t!("ui.settings.app.proxy_url_hint"),
+            // The proxy applies to the next request, and the Twitch poll restarts with it.
+            Self::Proxy => t!("ui.settings.app.proxy_url_hint_live"),
             Self::CheckForUpdates => t!("ui.settings.panel.check_for_updates_description"),
             Self::EnableLogging => t!("ui.settings.app.enable_logging_tooltip"),
             Self::DataFolder => t!("ui.settings.app.open_data_dir_tooltip"),

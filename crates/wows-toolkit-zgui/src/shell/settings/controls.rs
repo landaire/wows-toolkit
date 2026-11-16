@@ -72,6 +72,7 @@ use crate::shell::settings::faults::setting_faults;
 use crate::shell::settings::zoom_anchor::ZoomAnchor;
 use crate::shell::twitch::TwitchPaste;
 use crate::shell::twitch::TwitchStatus;
+use crate::shell::update;
 use crate::theme::palette_choice;
 
 const SHEET: &str = "wt-settings-controls";
@@ -247,6 +248,8 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                             settings.proxy_url = url.clone();
                             url
                         });
+                        // Each request builds its client with the proxy, except the running poll.
+                        shell.restart_twitch_poll();
                     }
                 })
             )
@@ -261,6 +264,10 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                     settings.check_for_updates = on;
                     on
                 });
+                // Asked at once rather than at the next launch.
+                if on {
+                    update::check_unasked(shell.services(), shell);
+                }
             },
         ),
         Setting::EnableLogging => setting_switch(
@@ -299,6 +306,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                     settings.auto_dump_game_data = on;
                     on
                 });
+                shell.services().game_data.set_auto_dump(on);
             },
         ),
         Setting::CacheDirectory => AnyView::new(view! { CacheDirectory(shell = shell) }),
@@ -911,6 +919,7 @@ fn CacheDirectory(shell: Shell) -> impl IntoView {
         if unchanged != Some(false) {
             return;
         }
+        shell.services().game_data.set_cache_dir(&dir);
         settings.edit(keys::GAME_DATA_CACHE_DIR, |settings| {
             settings.game_data_cache_dir = dir.clone();
             dir

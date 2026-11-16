@@ -265,6 +265,7 @@ open_data_dir = "アプリデータフォルダを開く"
 open_data_dir_tooltip = "アプリケーションデータフォルダ（設定、ログ、キャッシュデータ）をファイルマネージャーで開きます。"
 proxy_url = "HTTP プロキシ"
 proxy_url_hint = "host:port 形式。空欄の場合はシステムのプロキシ設定を使用します (再起動後に反映)"
+proxy_url_hint_live = "host:port 形式。空欄の場合はシステムのプロキシ設定を使用します"
 
 [ui.settings.wows]
 heading = "World of Warships 設定"

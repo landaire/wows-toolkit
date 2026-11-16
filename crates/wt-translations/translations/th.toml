@@ -265,6 +265,7 @@ open_data_dir = "เปิดโฟลเดอร์ข้อมูลแอป
 open_data_dir_tooltip = "เปิดโฟลเดอร์ข้อมูลแอปพลิเคชัน (การตั้งค่า บันทึก ข้อมูลแคช) ในตัวจัดการไฟล์ของคุณ"
 proxy_url = "HTTP Proxy"
 proxy_url_hint = "host:port หรือเว้นว่างเพื่อใช้การตั้งค่าพร็อกซีของระบบ (มีผลหลังรีสตาร์ท)"
+proxy_url_hint_live = "host:port หรือเว้นว่างเพื่อใช้การตั้งค่าพร็อกซีของระบบ"
 
 [ui.settings.wows]
 heading = "การตั้งค่า World of Warships"

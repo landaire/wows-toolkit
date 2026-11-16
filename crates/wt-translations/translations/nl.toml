@@ -265,6 +265,7 @@ open_data_dir = "App-gegevensmap openen"
 open_data_dir_tooltip = "Open de applicatiegegevensmap (instellingen, logboeken, gecachte gegevens) in uw bestandsbeheerder."
 proxy_url = "HTTP-proxy"
 proxy_url_hint = "host:poort, of leeg laten om de proxy-instellingen van het systeem te gebruiken (van kracht na herstart)"
+proxy_url_hint_live = "host:poort, of leeg laten om de proxy-instellingen van het systeem te gebruiken"
 
 [ui.settings.wows]
 heading = "World of Warships-instellingen"

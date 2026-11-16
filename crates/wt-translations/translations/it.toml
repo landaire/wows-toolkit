@@ -265,6 +265,7 @@ open_data_dir = "Apri cartella dati applicazione"
 open_data_dir_tooltip = "Apri la cartella dati dell'applicazione (impostazioni, log, dati in cache) nel tuo gestore file."
 proxy_url = "Proxy HTTP"
 proxy_url_hint = "host:porta, oppure lascia vuoto per usare le impostazioni proxy di sistema (effettivo al riavvio)"
+proxy_url_hint_live = "host:porta, oppure lascia vuoto per usare le impostazioni proxy di sistema"
 
 [ui.settings.wows]
 heading = "Impostazioni World of Warships"

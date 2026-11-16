@@ -241,6 +241,7 @@ open_data_dir = "Uygulama Veri Klasörünü Aç"
 open_data_dir_tooltip = "Uygulama veri klasörünü (ayarlar, günlükler, önbelleğe alınmış veriler) dosya yöneticinizde açın."
 proxy_url = "HTTP Proxy"
 proxy_url_hint = "host:port; sistem proxy ayarlarını kullanmak için boş bırakın (yeniden başlatınca geçerli olur)"
+proxy_url_hint_live = "host:port; sistem proxy ayarlarını kullanmak için boş bırakın"
 
 [ui.settings.wows]
 heading = "World of Warships Ayarları"

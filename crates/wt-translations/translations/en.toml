@@ -280,6 +280,7 @@ open_data_dir = "Open App Data Folder"
 open_data_dir_tooltip = "Open the application data folder (settings, logs, cached data) in your file manager."
 proxy_url = "HTTP Proxy"
 proxy_url_hint = "host:port, or leave empty to use your system proxy settings (takes effect on restart)"
+proxy_url_hint_live = "host:port, or leave empty to use your system proxy settings"
 
 
 [ui.settings.wows]
