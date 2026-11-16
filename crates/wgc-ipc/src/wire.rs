@@ -84,7 +84,7 @@ impl<'a> Reader<'a> {
         if count > self.remaining() as u64 / 8 {
             return Err(CodecError::Truncated {
                 offset: self.bytes.len(),
-                needed: count * 8 - self.remaining() as u64,
+                needed: count.saturating_mul(8) - self.remaining() as u64,
             });
         }
 

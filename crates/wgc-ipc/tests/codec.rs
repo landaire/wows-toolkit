@@ -5,6 +5,7 @@ use wgc_ipc::Message;
 use wgc_ipc::command::Command;
 use wgc_ipc::command::CommandKind;
 use wgc_ipc::command::GetAuthenticationOption;
+use wgc_ipc::command::GetGameInstallationState;
 use wgc_ipc::command::GetLoginInfo;
 use wgc_ipc::command::Status;
 use wgc_ipc::message::ClassVersion;
@@ -86,6 +87,37 @@ fn unknown_command_type_is_reported_by_name() {
         name: "Ipc::Commands::GetHardwareId",
     }
     "#);
+}
+
+#[test]
+fn huge_vector_count_is_reported_as_truncation() {
+    let frame = CommandFrame {
+        class_version: ClassVersion(0),
+        base_class_version: ClassVersion(0),
+        uid: CommandUid(String::new()),
+        flags: CommandFlags(0),
+        command: Command::GetGameInstallationState(GetGameInstallationState {
+            status: Status(0),
+            game_folder: String::new(),
+            can_start: false,
+            parts: Vec::new(),
+            client_type: String::new(),
+            app_type: String::new(),
+            dlc: [Vec::new(), Vec::new()],
+        }),
+    };
+    let mut bytes = Message { commands: vec![frame] }.encode().unwrap().to_vec();
+
+    // The second DLC list's count ends the message.
+    let count_at = bytes.len() - 8;
+    bytes[count_at..].copy_from_slice(&u64::MAX.to_le_bytes());
+
+    insta::assert_debug_snapshot!(Message::decode(&bytes).unwrap_err(), @r"
+    Truncated {
+        offset: 136,
+        needed: 18446744073709551615,
+    }
+    ");
 }
 
 /// The second use of a type in one message repeats only its id, and the
