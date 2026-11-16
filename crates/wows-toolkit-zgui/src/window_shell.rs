@@ -110,11 +110,14 @@ pub fn secondary_window_options(
 /// `outer_position_pixels`. The window reports its position only where the desktop lets an
 /// application know it, which no Wayland compositor does; there the position is left out.
 fn geometry_of(window: &WindowHandle) -> WindowSettings {
+    // The content size is divided by the zoom, and a window opens at its size before the zoom
+    // applies. Without this the window shrinks by the zoom on every launch.
+    let zoom = window.zoom().get_untracked().get();
     let size = window.size().get_untracked();
     let position = window.position();
 
     WindowSettings {
-        inner_size_points: Some([size.width.0, size.height.0]),
+        inner_size_points: Some([size.width.0 * zoom, size.height.0 * zoom]),
         outer_position_pixels: position.map(|at| [at.x.0, at.y.0]),
         fullscreen: window.fullscreen().get_untracked().is_some(),
         maximized: window.maximized().get_untracked(),
@@ -230,6 +233,38 @@ mod tests {
         let geometry = WindowSettings { inner_size_points: Some([640.0, 480.0]), ..WindowSettings::default() };
         assert!(!store(services, WindowKind::ReplayRenderer, geometry), "nothing is left to store into");
         store_before_exit(services, WindowKind::ReplayRenderer, geometry);
+    }
+
+    /// A window opened at a size under a zoom remembers that size, not the smaller content size the
+    /// zoom leaves, so it opens at the same size next launch.
+    #[test]
+    fn a_zoomed_window_remembers_the_size_it_opened_at() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        use landaire_ui::test_support::HeadlessOptions;
+        use landaire_ui::test_support::HeadlessWindow;
+        use landaire_ui::test_support::WindowSize;
+        use zgui::prelude::Zoom;
+        use zgui::prelude::try_use_window;
+        use zgui::view;
+
+        use super::geometry_of;
+
+        let mut options = HeadlessOptions::new(WindowSize { width: 1200.0, height: 800.0 });
+        options.zoom = Zoom::new(1.15).expect("1.15 is in range");
+        let handle = Rc::new(RefCell::new(None));
+        let captured = Rc::clone(&handle);
+        let mut window = HeadlessWindow::open(options, move || {
+            *captured.borrow_mut() = try_use_window();
+            view! { text {"body"} }
+        })
+        .expect("the window opens headlessly");
+        window.advance(std::time::Duration::from_millis(100));
+
+        let handle = handle.borrow().clone().expect("the view runs in a window");
+        let [width, height] = geometry_of(&handle).inner_size_points.expect("the size is known");
+        assert!((width - 1200.0).abs() < 0.5 && (height - 800.0).abs() < 0.5, "remembered {width}x{height}");
     }
 
     /// The title bar and frame appear only while the desktop leaves the frame to the app, and go
