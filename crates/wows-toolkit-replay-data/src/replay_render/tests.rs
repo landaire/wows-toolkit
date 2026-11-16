@@ -1822,6 +1822,48 @@ fn a_measurement_reaches_the_frame_with_its_distance() {
     assert_eq!(figures, ["2", "2.5 km"]);
 }
 
+/// While the host has locked the drawing nothing changes from here: a tool in hand neither draws
+/// nor keeps the map from panning, nothing is picked, and undo, erase, Clear All and the edit
+/// popup are all refused.
+#[test]
+fn a_locked_drawing_refuses_every_change() {
+    let (state, link, sent) = session();
+    let rectangle = Annotation::Rectangle {
+        center: [200.0, 200.0],
+        half_size: [20.0, 10.0],
+        rotation: 0.0,
+        color: [255; 4],
+        width: 2.0,
+        filled: false,
+    };
+    state.lock().current_annotation_sync =
+        Some(AnnotationSyncState { annotations: vec![rectangle], ids: vec![9], owners: vec![1] });
+    let mut view = painted();
+    let mut annotator = Annotator::new();
+    let on = window_point(&view, (220.0, 200.0)).expect("a point the viewport is showing");
+    assert_eq!(annotator.click(&link, &view, DEFAULT_MAP_ORIGIN, on, false, 1), Click::Picked);
+    assert!(annotator.edit_picked(&link, ShapeEdit::Filled(true)), "unlocked, the edit lands");
+    assert!(annotator.rotation_handle(&link, &view, DEFAULT_MAP_ORIGIN).is_some(), "and it can be turned");
+    let _ = sent.try_iter().count();
+
+    state.lock().permissions.annotations_locked = true;
+    assert!(!annotator.undo(&link), "undo is refused");
+    assert!(!annotator.edit_picked(&link, ShapeEdit::Filled(false)), "as is an edit");
+    assert!(!annotator.erase_picked(&link), "an erasure");
+    assert!(!annotator.clear_all(&link), "and Clear All");
+    assert!(annotator.rotation_handle(&link, &view, DEFAULT_MAP_ORIGIN).is_none(), "nor can it be turned");
+
+    annotator.take_up(Tool::Line);
+    let to = window_point(&view, (300.0, 260.0)).expect("and another");
+    assert_eq!(press(&mut annotator, &link, &mut view, on), PointerDown::Unclaimed, "the press pans the map");
+    view.end_pan();
+    assert_eq!(annotator.pointer_up(&link, &view, DEFAULT_MAP_ORIGIN, to), PointerUp::Nothing);
+    assert_eq!(annotator.click(&link, &view, DEFAULT_MAP_ORIGIN, on, false, 1), Click::Ignored);
+
+    assert!(sent.try_iter().next().is_none(), "the session was told nothing");
+    assert_eq!(link.annotation_count(), 1, "and the filled rectangle is all there is");
+}
+
 /// Drawing with a tool sends what it drew to the session, and the pointer
 /// goes to the tool rather than to panning the map.
 #[test]

@@ -1730,6 +1730,7 @@ edit = "그림 편집"
 size = "크기"
 color = "색상"
 filled = "채우기"
+locked = "호스트가 주석을 잠갔습니다"
 
 [ui.armor.cast]
 prompt = "%{key}+클릭으로 선체에 착탄 지점을 추가합니다"

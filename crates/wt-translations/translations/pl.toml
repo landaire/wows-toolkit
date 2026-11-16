@@ -1684,6 +1684,7 @@ edit = "Edytuj rysunek"
 size = "Rozmiar"
 color = "Kolor"
 filled = "Wypełniony"
+locked = "Adnotacje zablokowane przez hosta"
 
 [ui.armor.cast]
 prompt = "%{key}+kliknij kadłub, aby dodać punkt trafienia"

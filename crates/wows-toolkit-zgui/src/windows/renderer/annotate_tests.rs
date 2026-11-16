@@ -543,3 +543,25 @@ fn the_edit_popup_moves_a_ship_to_the_other_side() {
     let side = session.collab.with_untracked(|link| link.annotation_at(0));
     assert!(matches!(side, Some(Annotation::Ship { friendly: false, .. })), "moved to the enemy: {side:?}");
 }
+
+/// While the host has locked the drawing the tools are refused and say why, and a drag with a
+/// tool in hand draws nothing.
+#[test]
+fn locked_annotations_refuse_the_tools() {
+    let (mut window, session) = open();
+    let state = Arc::default();
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    state.lock().permissions.annotations_locked = true;
+    session.set_collab(link);
+    session.take_up(Tool::Line);
+    settle(&mut window);
+
+    let toggle = window.by_test_id("replay-renderer-tools-toggle").expect("the tools control is drawn");
+    let shown = window.a11y(toggle).expect("the control is described");
+    assert!(shown.disabled, "refused while locked");
+    assert_eq!(shown.label, Some(t!("ui.renderer.annotations.locked").into_owned()), "and says why");
+
+    window.drag_from(window_point(session, (200.0, 200.0)), window_point(session, (320.0, 260.0)), 4);
+    settle(&mut window);
+    assert_eq!(session.collab.with_untracked(CollabLink::annotation_count), 0, "nothing was drawn");
+}

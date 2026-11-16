@@ -1730,6 +1730,7 @@ edit = "Modifier le dessin"
 size = "Taille"
 color = "Couleur"
 filled = "Rempli"
+locked = "Annotations verrouillées par l'hôte"
 
 [ui.armor.cast]
 prompt = "%{key}+clic sur la coque pour ajouter un point d'impact"

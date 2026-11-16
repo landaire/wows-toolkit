@@ -1481,6 +1481,7 @@ edit = "Edit drawing"
 size = "Size"
 color = "Color"
 filled = "Filled"
+locked = "Annotations locked by host"
 
 [ui.renderer.settings]
 title = "Display Settings"

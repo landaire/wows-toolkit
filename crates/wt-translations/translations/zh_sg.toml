@@ -1730,6 +1730,7 @@ edit = "编辑绘图"
 size = "大小"
 color = "颜色"
 filled = "填充"
+locked = "主持人已锁定标注"
 
 [ui.armor.cast]
 prompt = "%{key}+点击舰体以添加命中点"

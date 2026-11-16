@@ -1730,6 +1730,7 @@ edit = "Tekening bewerken"
 size = "Grootte"
 color = "Kleur"
 filled = "Gevuld"
+locked = "Annotaties vergrendeld door de host"
 
 [ui.armor.cast]
 prompt = "%{key}+klik op de romp om een inslagpunt toe te voegen"

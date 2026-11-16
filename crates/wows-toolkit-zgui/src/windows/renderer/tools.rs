@@ -68,21 +68,34 @@ const CSS: &str = css!(
     .wt-renderer-tools__nib { width: 16px; font-size: 12px; }
     .wt-renderer-tools__ink { width: 18px; height: 18px; border-radius: 3px; cursor: pointer; }
     .wt-renderer-tools__ink[data-chosen] { border: 2px solid #ffffff; }
-    .wt-renderer-tools__clear.wt-renderer-tools__clear { color: var(--lui-color-danger); }"
+    .wt-renderer-tools__clear.wt-renderer-tools__clear { color: var(--lui-color-danger); }
+    .wt-renderer-tools__toggle[data-locked] { color: var(--wt-color-warn); }"
 );
 
 /// The drawing tools, on the transport beside the gear. Offered alone as in a session: a reader
-/// draws on their own replay whether or not anyone else sees it.
+/// draws on their own replay whether or not anyone else sees it. Refused with a lock while the
+/// session's host has locked what is drawn, as the egui toolbar is.
 #[component]
 pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
+    // The host's permissions change under the session, so they are read again as it redraws.
+    let locked = Signal::derive_local(move || {
+        let _ = session.collab_frame.get();
+        session.collab.with(CollabLink::annotations_locked)
+    });
     // Kept with the transport, so the catalogue is read once rather than each time the popover opens.
     let catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage> = StoredValue::new_local(None);
     // The ship chooser's search, held here so Escape in it empties it before it closes the popover.
     let query = RwSignal::new_local(String::new());
     let escape = EscapeClears::new(query);
-    let named = t!("ui.renderer.annotations.title").into_owned();
-    let label = named.clone();
+    let named = move || {
+        let key = if locked.get() { "ui.renderer.annotations.locked" } else { "ui.renderer.annotations.title" };
+        t!(key).into_owned()
+    };
+    let glyph = move || {
+        let glyph = if locked.get() { Glyph::Lock } else { Glyph::NotebookPen };
+        view! { AppIcon(glyph = glyph) }
+    };
 
     view! {
         Tooltip {
@@ -91,17 +104,21 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
                     PopoverTrigger(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::IconXs,
+                        class = "wt-renderer-tools__toggle",
                         attr:data-testid = "replay-renderer-tools-toggle",
-                        a11y:label = label.clone()
+                        attr:data-locked = move || locked.get().then(String::new),
+                        state:disabled = move || locked.get(),
+                        a11y:disabled = move || locked.get(),
+                        a11y:label = named
                     ) {
-                        AppIcon(glyph = Glyph::NotebookPen)
+                        {glyph}
                     }
                     PopoverContent(dismiss_on_escape = escape.dismiss_on_escape(), attr:data-testid = "replay-renderer-tools") {
                         ToolsPanel(session = session, catalog = catalog, query = query, escape = escape)
                     }
                 }
             }
-            TooltipContent {{named.clone()}}
+            TooltipContent {{named}}
         }
     }
 }

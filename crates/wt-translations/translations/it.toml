@@ -1730,6 +1730,7 @@ edit = "Modifica disegno"
 size = "Dimensione"
 color = "Colore"
 filled = "Riempito"
+locked = "Annotazioni bloccate dall'host"
 
 [ui.armor.cast]
 prompt = "%{key}+clic sullo scafo per aggiungere un punto di impatto"

@@ -1684,6 +1684,7 @@ edit = "Editar desenho"
 size = "Tamanho"
 color = "Cor"
 filled = "Preenchido"
+locked = "Anotações bloqueadas pelo anfitrião"
 
 [ui.armor.cast]
 prompt = "%{key}+clique no casco para adicionar um ponto de impacto"

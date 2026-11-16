@@ -1730,6 +1730,7 @@ edit = "描画を編集"
 size = "サイズ"
 color = "色"
 filled = "塗りつぶし"
+locked = "ホストが注釈をロックしています"
 
 [ui.armor.cast]
 prompt = "%{key}+クリックで船体に着弾点を追加"

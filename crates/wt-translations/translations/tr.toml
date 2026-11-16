@@ -1684,6 +1684,7 @@ edit = "Çizimi düzenle"
 size = "Boyut"
 color = "Renk"
 filled = "Dolgulu"
+locked = "Açıklamalar sunucu tarafından kilitlendi"
 
 [ui.armor.cast]
 prompt = "Darbe noktası eklemek için gövdeye %{key}+tıklayın"

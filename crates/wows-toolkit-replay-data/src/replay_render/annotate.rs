@@ -439,7 +439,13 @@ impl Annotator {
 
     /// Puts the session back the way it was before the last change this end
     /// made. Returns whether there was one.
+    ///
+    /// This and every other change from here is refused while the session's
+    /// host has locked what is drawn, as the egui toolbar is.
     pub fn undo(&mut self, link: &CollabLink) -> bool {
+        if link.annotations_locked() {
+            return false;
+        }
         let Some(was) = self.history.pop() else { return false };
         link.restore(&was);
         // What was picked out may no longer be there.
@@ -450,7 +456,7 @@ impl Annotator {
 
     /// Erases whatever is picked out. Returns whether anything was.
     pub fn erase_picked(&mut self, link: &CollabLink) -> bool {
-        if self.picked.is_empty() {
+        if link.annotations_locked() || self.picked.is_empty() {
             return false;
         }
         self.remember(link);
@@ -469,7 +475,7 @@ impl Annotator {
     /// Erases everything drawn, as the egui toolbar's Clear All does, so one undo puts it all
     /// back. Returns whether there was anything.
     pub fn clear_all(&mut self, link: &CollabLink) -> bool {
-        if link.annotation_count() == 0 {
+        if link.annotations_locked() || link.annotation_count() == 0 {
             return false;
         }
         self.remember(link);
@@ -484,6 +490,9 @@ impl Annotator {
     /// The frame carries the part-drawn shape, so a front end redraws after
     /// every stroke.
     pub fn stroke(&mut self, link: &CollabLink, stroke: Stroke) {
+        if link.annotations_locked() {
+            return;
+        }
         let existing = link.annotations();
         match self.drawing.handle(stroke, &existing) {
             Some(Drawn::Added(annotation)) => {
@@ -531,6 +540,9 @@ impl Annotator {
         param_index: &str,
         display_name: String,
     ) -> bool {
+        if link.annotations_locked() {
+            return false;
+        }
         let Some(index) = self.picked.single() else { return false };
         let Some(Annotation::Ship { pos, yaw, friendly, .. }) = link.annotation_at(index) else {
             return false;
@@ -558,6 +570,9 @@ impl Annotator {
     /// The single picked shape and where its edit popup sits, while it is on screen: beside its
     /// right-hand side, or over its middle when that side is off the map.
     pub fn picked_shape(&self, link: &CollabLink, view: &MapView, map_origin: (f32, f32)) -> Option<PickedShape> {
+        if link.annotations_locked() {
+            return None;
+        }
         let index = self.picked.single()?;
         let annotation = link.annotation_at(index)?;
         let [left, top, right, bottom] = annotation_bounds(&annotation);
@@ -572,6 +587,9 @@ impl Annotator {
     /// Changes the single picked shape as the edit popup asks. Returns whether it changed: an
     /// edit the shape does not take, or one that leaves it as it was, is not kept for undo.
     pub fn edit_picked(&mut self, link: &CollabLink, edit: ShapeEdit) -> bool {
+        if link.annotations_locked() {
+            return false;
+        }
         let Some(index) = self.picked.single() else { return false };
         let Some(was) = link.annotation_at(index) else { return false };
         let mut edited = was.clone();
@@ -592,6 +610,9 @@ impl Annotator {
     /// Turning several at once about their own middles is not what one handle
     /// means, and a circle looks the same at every angle.
     pub fn rotation_handle(&self, link: &CollabLink, view: &MapView, map_origin: (f32, f32)) -> Option<RotationHandle> {
+        if link.annotations_locked() {
+            return None;
+        }
         let index = self.picked.single()?;
         let annotation = link.annotation_at(index)?;
         if !can_rotate(&annotation) {
@@ -627,7 +648,8 @@ impl Annotator {
     ///
     /// A tool in hand takes the press: a reader dragging to draw is not
     /// asking to pan the map under their line. Nor is one taking hold of a
-    /// rotation handle, or dragging what they have already picked out.
+    /// rotation handle, or dragging what they have already picked out. While
+    /// the drawing is locked every press goes to the map.
     pub fn pointer_down(
         &mut self,
         link: &CollabLink,
@@ -636,6 +658,9 @@ impl Annotator {
         position: WindowPoint,
     ) -> PointerDown {
         let Some(at) = view.map_point(position, map_origin) else { return PointerDown::OffMap };
+        if link.annotations_locked() {
+            return PointerDown::Unclaimed;
+        }
         if self.has_tool() {
             self.stroke(link, Stroke::Began { at: [at.0, at.1] });
             return PointerDown::Stroked;
@@ -671,6 +696,9 @@ impl Annotator {
         straight: bool,
     ) -> PointerMove {
         self.pointer_at = view.map_point(position, map_origin).map(|(x, y)| [x, y]);
+        if link.annotations_locked() {
+            return PointerMove::Unclaimed;
+        }
 
         if let Some(turn) = &self.turning
             && held
@@ -709,6 +737,13 @@ impl Annotator {
         map_origin: (f32, f32),
         position: WindowPoint,
     ) -> PointerUp {
+        // A lock that lands mid-drag drops what the drag was doing.
+        if link.annotations_locked() {
+            self.turning = None;
+            self.moving = None;
+            self.drawing.cancel();
+            return PointerUp::Nothing;
+        }
         if self.has_tool()
             && self.drawing.is_drawing()
             && let Some(at) = view.map_point(position, map_origin)
@@ -759,6 +794,9 @@ impl Annotator {
         click_count: usize,
     ) -> Click {
         let at = view.map_point(position, map_origin);
+        if link.annotations_locked() {
+            return if click_count < 2 { Click::Ignored } else { Click::ResetView };
+        }
         if self.has_tool() {
             let Some(at) = at else { return Click::Ignored };
             self.stroke(link, Stroke::Clicked { at: [at.0, at.1] });

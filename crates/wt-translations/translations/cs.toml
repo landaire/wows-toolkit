@@ -1684,6 +1684,7 @@ edit = "Upravit kresbu"
 size = "Velikost"
 color = "Barva"
 filled = "Vyplněno"
+locked = "Anotace uzamkl hostitel"
 
 [ui.armor.cast]
 prompt = "%{key}+kliknutím na trup přidáte bod zásahu"
