@@ -5,16 +5,21 @@
 use std::time::Duration;
 
 use landaire_ui::CollapseButtonProps;
+use landaire_ui::HeadlessError;
 use landaire_ui::MotionPreference;
 use landaire_ui::PanelSide;
+use landaire_ui::Rgb;
 use landaire_ui::Scheme;
 use landaire_ui::ThemeChoice;
 use landaire_ui::ThemeRootProps;
+use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::component;
 use zgui::css;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
@@ -25,6 +30,8 @@ use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Role;
 use zgui::vocab::Toggled;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonVariant;
 use zgui_ui::SwitchProps;
 use zgui_ui_tokens::ThemeProviderProps;
 
@@ -120,4 +127,49 @@ fn the_theme_root_zooms_its_window() {
     let bounds = window.bounds(square).expect("the square has a box");
 
     assert_eq!((bounds.size.width.0, bounds.size.height.0), (20.0, 20.0));
+}
+
+#[test]
+fn a_held_button_is_drawn_a_step_darker_than_under_the_pointer() {
+    let options = HeadlessOptions { drawing: Drawing::Device, ..HeadlessOptions::new(SIZE) };
+    let opened = HeadlessWindow::open(options, || {
+        view! {
+            ThemeRoot(choice = ThemeChoice::Fixed(Scheme::Dark), motion = MotionPreference::Reduced) {
+                Button(variant = ButtonVariant::Ghost, attr:data-testid = "button") {"Press"}
+            }
+        }
+    });
+    let mut window = match opened {
+        Ok(window) => window,
+        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+            eprintln!("skipped: no graphics adapter to compose on");
+            return;
+        }
+        Err(err) => panic!("the window opens: {err}"),
+    };
+    let button = window.by_test_id("button").expect("the button is in the document");
+    let bounds = window.bounds(button).expect("the button has a box");
+    // Off the label, on the button's own fill.
+    let at = Point::new(DevicePx(bounds.origin.x.0 + 3.0), DevicePx(bounds.origin.y.0 + bounds.size.height.0 / 2.0));
+    let fill = |window: &mut HeadlessWindow| {
+        let pixels = window.pixels().expect("the window is drawn on the device");
+        let [red, green, blue, _] = pixels.rgba(at.x.0 as i32, at.y.0 as i32);
+        Rgb::from_channels(red, green, blue)
+    };
+
+    window.hover_at(at);
+    window.advance(Duration::from_millis(16));
+    let hovered = fill(&mut window);
+    window.press_at(at);
+    window.advance(Duration::from_millis(16));
+    let pressed = fill(&mut window);
+
+    let palette = Scheme::Dark.palette();
+    let near = |drawn: Rgb, want: Rgb| {
+        [(drawn.red(), want.red()), (drawn.green(), want.green()), (drawn.blue(), want.blue())]
+            .iter()
+            .all(|(drawn, want)| drawn.abs_diff(*want) <= 2)
+    };
+    assert!(near(hovered, palette.widget_hot), "under the pointer: {hovered:?}");
+    assert!(near(pressed, palette.widget_pressed()), "held down: {pressed:?}, want {:?}", palette.widget_pressed());
 }

@@ -143,6 +143,15 @@ impl Palette {
         contrast::accent_foreground(self.accent)
     }
 
+    /// A control held down: a step darker than under the pointer, so a press reads as the control
+    /// going in. A fixed step reads alike on light and dark palettes.
+    pub fn widget_pressed(&self) -> Rgb {
+        const STEP: f32 = 0.035;
+
+        let hot = self.widget_hot.to_hsl();
+        Rgb::from_hsl(Hsl { lightness: (hot.lightness - STEP).max(0.0), ..hot })
+    }
+
     /// The fill behind selected text: a blue, as far off the panel as the text on it allows.
     /// Text keeps the readable floor and dim text 3:1, since both are selected. The hue tells a
     /// selection apart from the grey row tones where a palette leaves little room in lightness.

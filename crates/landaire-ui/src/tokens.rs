@@ -153,6 +153,7 @@ pub fn lui_declarations(palette: &Palette) -> Declarations {
         declarations.push(tier_property(tier), &palette.tier(tier).to_string());
     }
     declarations.push("--lui-color-accent-foreground", &palette.accent_foreground().to_string());
+    declarations.push("--lui-color-widget-pressed", &palette.widget_pressed().to_string());
     declarations.push("--lui-color-text-faint", &tones.text_faint.to_string());
     // The dimming behind a drawer, the same black on either appearance.
     declarations.push("--lui-color-scrim", &Rgb::BLACK.with_opacity(Opacity(0.25)).to_string());
@@ -210,6 +211,13 @@ pub fn lui_sheet(choice: ThemeChoice) -> String {
     css.push_str(
         ":root { background-color: var(--lui-color-surface); color: var(--lui-color-text); \
          font-family: var(--lui-font-family); font-size: var(--lui-font-size); }\n",
+    );
+    // zgui-ui outline and ghost buttons hover in the widget-hot tone and do nothing more while
+    // held. Under `:root` so the rule outranks the button sheet's own `:hover`, whichever sheet is
+    // installed first.
+    css.push_str(
+        ":root .zui-button[data-variant=\"outline\"]:active, \
+         :root .zui-button[data-variant=\"ghost\"]:active { background-color: var(--lui-color-widget-pressed); }\n",
     );
 
     let mut stilled = Declarations::new();
