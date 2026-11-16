@@ -173,16 +173,19 @@ pub enum InstallFiles {
 impl InstallFiles {
     /// The files of the install at `install_root` as its last prepared view
     /// left them, without probing or creating overlay state. An install
-    /// never run from an overlay is read in place.
+    /// never run from an overlay is read in place. Install paths keep the
+    /// caller's spelling of `install_root`, so they match paths the caller
+    /// stored; the resolved root only finds the overlay state.
     pub fn existing(install_root: &Path, dirs: &RuntimeDirs) -> Result<Self, ViewError> {
         let root = canonical_root(install_root)?;
         let plain = dirs.install_state(&root);
         let delta = read_delta_record(&plain.delta_record())?;
         let state = if delta.is_some() { plain.with_delta() } else { plain };
+        let named = install_root.to_path_buf();
 
         Ok(match read_backend_record(&state.backend_record())? {
-            Some(backend) => Self::Overlay { lower: root, delta, upper: state.upper(), backend },
-            None => Self::Direct { root },
+            Some(backend) => Self::Overlay { lower: named, delta, upper: state.upper(), backend },
+            None => Self::Direct { root: named },
         })
     }
 
@@ -651,16 +654,13 @@ mod tests {
         write(&state.with_delta().backend_record(), "fuse-overlayfs");
         let delta = tmp.path().join("delta");
 
-        assert_eq!(
-            InstallFiles::existing(&install, &dirs).unwrap(),
-            InstallFiles::Direct { root: install.canonicalize().unwrap() }
-        );
+        assert_eq!(InstallFiles::existing(&install, &dirs).unwrap(), InstallFiles::Direct { root: install.clone() });
 
         InstallView::select_delta(&install, &dirs, Some(&delta)).unwrap();
         assert_eq!(
             InstallFiles::existing(&install, &dirs).unwrap(),
             InstallFiles::Overlay {
-                lower: install.canonicalize().unwrap(),
+                lower: install.clone(),
                 delta: Some(delta),
                 upper: state.with_delta().upper(),
                 backend: OverlayBackend::FuseOverlayfs,
@@ -669,6 +669,31 @@ mod tests {
 
         InstallView::select_delta(&install, &dirs, None).unwrap();
         assert!(matches!(InstallFiles::existing(&install, &dirs).unwrap(), InstallFiles::Direct { .. }));
+    }
+
+    /// An install named through a link is read under the link, and its overlay state is found
+    /// under the resolved name, so paths stored before the first overlay launch keep matching.
+    #[test]
+    fn an_install_named_through_a_link_keeps_the_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("install")).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let install = link.join("install");
+        let dirs = RuntimeDirs::new(&tmp.path().join("app"));
+        let state = dirs.install_state(&std::fs::canonicalize(&install).unwrap());
+        write(&state.backend_record(), "kernel-bwrap");
+
+        assert_eq!(
+            InstallFiles::existing(&install, &dirs).unwrap(),
+            InstallFiles::Overlay {
+                lower: install.clone(),
+                delta: None,
+                upper: state.upper(),
+                backend: OverlayBackend::KernelBwrap,
+            }
+        );
     }
 
     #[test]

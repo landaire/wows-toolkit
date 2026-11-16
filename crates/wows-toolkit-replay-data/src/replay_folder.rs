@@ -84,7 +84,23 @@ struct InstallFolder {
     /// The overlay record the launcher writes on the first launch from an overlay. `None` without
     /// runtime directories or an install to canonicalize.
     record: Option<PathBuf>,
+    /// The content directories whose resolved name differs from the one they are read by.
+    respelled: Vec<Respelled>,
     inputs: Inputs,
+}
+
+/// A content directory under the name the folder reads it by and under its resolved name, which
+/// a ledger or the index may hold some of its replays under.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Respelled {
+    named: PathBuf,
+    resolved: PathBuf,
+}
+
+/// The names of one content directory.
+struct LayerNames {
+    named: PathBuf,
+    resolved: Option<PathBuf>,
 }
 
 /// Stamps of the files the folder was resolved from, compared to notice a change without reading
@@ -172,22 +188,57 @@ impl ReplayFolder {
         self.overlay().is_some()
     }
 
-    /// The paths of `path`'s name in the folder's other layers: the copies the game replaced when
-    /// it rewrote the file under an overlay. Empty for a folder that is not overlaid, or a path
+    /// The other paths of the file at `path` in its own directory: the directory under its
+    /// resolved name when the folder reads it by another, and the reverse. Empty for a path
     /// outside the folder.
-    pub fn layer_copies(&self, path: &Path) -> Vec<PathBuf> {
-        let (Some(name), Some(parent)) = (path.file_name(), path.parent()) else {
+    pub fn spellings(&self, path: &Path) -> Vec<PathBuf> {
+        let Some((name, layers, held)) = self.locate(path) else {
             return Vec::new();
         };
+
+        layers[held].paths(name).filter(|other| other != path).collect()
+    }
+
+    /// The paths of `path`'s name in the folder's other layers, under each of their names: the
+    /// copies the game replaced when it rewrote the file under an overlay. Empty for a folder that
+    /// is not overlaid, or a path outside the folder.
+    pub fn layer_copies(&self, path: &Path) -> Vec<PathBuf> {
         if !self.is_overlaid() {
             return Vec::new();
         }
-        let dirs = self.content_dirs();
-        if !dirs.iter().any(|dir| dir == parent) {
+        let Some((name, layers, held)) = self.locate(path) else {
             return Vec::new();
-        }
+        };
 
-        dirs.into_iter().map(|dir| dir.join(name)).filter(|copy| copy != path).collect()
+        layers.iter().enumerate().filter(|(layer, _)| *layer != held).flat_map(|(_, names)| names.paths(name)).collect()
+    }
+
+    /// Every path a ledger or the index may hold the battle at `path` under: its
+    /// [`Self::spellings`] and its [`Self::layer_copies`].
+    pub fn other_paths(&self, path: &Path) -> Vec<PathBuf> {
+        let mut others = self.spellings(path);
+        others.extend(self.layer_copies(path));
+
+        others
+    }
+
+    /// `path`'s file name, the names of each content directory, and the one that holds `path`.
+    fn locate<'a>(&self, path: &'a Path) -> Option<(&'a OsStr, Vec<LayerNames>, usize)> {
+        let (Some(name), Some(parent)) = (path.file_name(), path.parent()) else {
+            return None;
+        };
+        let respelled = self.install.as_ref().map_or(&[][..], |install| install.respelled.as_slice());
+        let layers: Vec<LayerNames> = self
+            .content_dirs()
+            .into_iter()
+            .map(|named| {
+                let resolved = respelled.iter().find(|dir| dir.named == named).map(|dir| dir.resolved.clone());
+                LayerNames { named, resolved }
+            })
+            .collect();
+        let held = layers.iter().position(|names| names.holds(parent))?;
+
+        Some((name, layers, held))
     }
 
     /// Where a battle in progress keeps its two halves. A half that does not exist yet is named
@@ -357,12 +408,23 @@ impl InstallFolder {
         let inputs = Inputs::read(&files, record.as_deref());
         let versioned = versioned_setting(&files);
         let relative = folder_relative(&files, versioned);
+        let respelled = respelled_dirs(&files, &relative);
 
-        InstallFolder { install_dir, runtime_dirs, files, relative, versioned, record, inputs }
+        InstallFolder { install_dir, runtime_dirs, files, relative, versioned, record, respelled, inputs }
     }
 
     fn path(&self) -> PathBuf {
         self.install_dir.join(&self.relative)
+    }
+}
+
+impl LayerNames {
+    fn holds(&self, dir: &Path) -> bool {
+        self.named == dir || self.resolved.as_deref() == Some(dir)
+    }
+
+    fn paths<'a>(&'a self, name: &'a OsStr) -> impl Iterator<Item = PathBuf> + 'a {
+        std::iter::once(&self.named).chain(&self.resolved).map(move |dir| dir.join(name))
     }
 }
 
@@ -431,7 +493,8 @@ pub fn app_runtime_dirs() -> Option<RuntimeDirs> {
 }
 
 /// The install's files as the game sees them. An install the launcher ran from an overlay is read
-/// through it; any other is read in place, under the name the reader gave it.
+/// through it; any other is read in place. Either way under the name the reader gave the install,
+/// so the paths found match those already listed, indexed and sent.
 pub fn install_files(install_dir: &Path, runtime_dirs: Option<&RuntimeDirs>) -> InstallFiles {
     let direct = InstallFiles::Direct { root: install_dir.to_path_buf() };
     let Some(dirs) = runtime_dirs else {
@@ -439,10 +502,7 @@ pub fn install_files(install_dir: &Path, runtime_dirs: Option<&RuntimeDirs>) -> 
     };
 
     match InstallFiles::existing(install_dir, dirs) {
-        Ok(overlay @ InstallFiles::Overlay { .. }) => overlay,
-        // Read under the reader's own name rather than the canonical one, so the paths found
-        // match those already listed and indexed.
-        Ok(InstallFiles::Direct { .. }) => direct,
+        Ok(files) => files,
         // Nothing to read either way; the reader reports the missing folder.
         Err(ViewError::InstallMissing { .. }) => direct,
         // The launcher refuses to start the game until the overlay state is readable again, so
@@ -452,6 +512,35 @@ pub fn install_files(install_dir: &Path, runtime_dirs: Option<&RuntimeDirs>) -> 
             direct
         }
     }
+}
+
+/// The `replays` directory in each layer of the install at `install_dir` as the app's launcher
+/// left it, upper first. Every replay folder of the install is in one of them.
+pub fn app_install_replay_dirs(install_dir: &Path) -> Vec<PathBuf> {
+    let replays = Path::new("replays");
+    let files = install_files(install_dir, app_runtime_dirs().as_ref());
+
+    // `replays` is a plain relative path, which every view takes.
+    files.layer_dirs(replays).unwrap_or_else(|_| vec![install_dir.join(replays)])
+}
+
+/// The content directories of `relative` whose layer resolves to another name than the one it is
+/// read by.
+fn respelled_dirs(files: &InstallFiles, relative: &Path) -> Vec<Respelled> {
+    let roots: Vec<&PathBuf> = match files {
+        InstallFiles::Direct { root } => vec![root],
+        InstallFiles::Overlay { lower, delta, upper, .. } => {
+            std::iter::once(upper).chain(delta).chain(std::iter::once(lower)).collect()
+        }
+    };
+
+    roots
+        .into_iter()
+        .filter_map(|root| {
+            let resolved = std::fs::canonicalize(root).ok()?;
+            (resolved != *root).then(|| Respelled { named: root.join(relative), resolved: resolved.join(relative) })
+        })
+        .collect()
 }
 
 /// The highest `bin/<build>` directory the install shows.

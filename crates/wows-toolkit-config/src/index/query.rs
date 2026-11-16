@@ -439,6 +439,22 @@ pub async fn forget_records(pool: &SqlitePool, source: SourceId, paths: &[PathBu
     Ok(forgotten)
 }
 
+/// Moves the record of `from` in `source` to `to`, unless `to` already has one. For a replay
+/// recorded under another spelling of the path it is read by. Returns whether a record moved.
+pub async fn rename_record(pool: &SqlitePool, source: SourceId, from: &Path, to: &Path) -> Result<bool, IndexError> {
+    let moved = sqlx::query(
+        "UPDATE replay_record SET replay_path = ?3 WHERE source_id = ?1 AND replay_path = ?2 \
+         AND NOT EXISTS (SELECT 1 FROM replay_record WHERE source_id = ?1 AND replay_path = ?3)",
+    )
+    .bind(source.0)
+    .bind(from.to_string_lossy().to_string())
+    .bind(to.to_string_lossy().to_string())
+    .execute(pool)
+    .await?;
+
+    Ok(moved.rows_affected() > 0)
+}
+
 /// Incremental write; see [`upsert_match_with_mode`].
 pub async fn upsert_match(pool: &SqlitePool, m: &ObjectiveMatch) -> Result<(), IndexError> {
     upsert_match_with_mode(pool, m, IndexWriteMode::Incremental).await

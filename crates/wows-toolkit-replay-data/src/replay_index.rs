@@ -348,8 +348,9 @@ pub fn build_index(
 
 /// Walks `folder` and indexes every replay in it into `source_id`,
 /// reporting as it goes. A replay is recorded under the real path it is read
-/// from; when an overlaid install's game rewrites one, the record of the copy
-/// it replaced is dropped, so the battle is held once.
+/// from. A record of it under another spelling of that path is renamed rather
+/// than read again, and when an overlaid install's game rewrites one, the
+/// record of the copy it replaced is dropped, so the battle is held once.
 ///
 /// One replay's failure does not stop the pass: a directory of a few hundred
 /// replays reliably holds one the parser cannot read, and stopping there
@@ -384,7 +385,8 @@ pub fn build_folder_index(
     // tried again.
     let mut unindexable = runtime.block_on(Unindexable::load(pool));
     let mut ledger_grew = false;
-    // Records of copies a replay that is now indexed replaced in another layer.
+    // Records of a replay that is now indexed under its other spellings, and of the copies it
+    // replaced in another layer.
     let mut superseded: Vec<PathBuf> = Vec::new();
 
     let replays = folder_replays(folder);
@@ -395,11 +397,26 @@ pub fn build_folder_index(
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        let known = indexed.contains(path.to_string_lossy().as_ref());
-        if known {
-            superseded.extend(folder.layer_copies(&path));
-        }
+        let spellings = folder.spellings(&path);
+        let indexed_here = indexed.contains(path.to_string_lossy().as_ref());
+        let indexed_as = if indexed_here {
+            None
+        } else {
+            spellings.iter().find(|other| indexed.contains(other.to_string_lossy().as_ref()))
+        };
+        // A record the path already has, though stale, is the one to refresh: the read below
+        // updates it, and the other spelling's record is forgotten.
+        let renamed = match indexed_as {
+            Some(stored) => runtime.block_on(query::rename_record(pool, source_id, stored, &path))?,
+            None => false,
+        };
+
+        let known = indexed_here || renamed;
         if known || unindexable.contains(&path) {
+            if known {
+                superseded.extend(spellings);
+                superseded.extend(folder.layer_copies(&path));
+            }
             progress.skipped += 1;
             progress.done += 1;
             report(progress);
@@ -410,6 +427,7 @@ pub fn build_folder_index(
         match index_one(runtime, pool, &path, game_data, personal_rating, source_id, indexed_at, mode.write_mode()) {
             Ok(()) => {
                 progress.indexed += 1;
+                superseded.extend(spellings);
                 superseded.extend(folder.layer_copies(&path));
             }
             Err(err) => {
@@ -841,5 +859,70 @@ mod tests {
         let summaries = rt.block_on(query::row_summaries_for_source(&pool, source)).expect("the summaries read");
         let held: Vec<&PathBuf> = summaries.keys().collect();
         assert_eq!(held, vec![&upper], "only the copy the game sees is held");
+    }
+
+    /// An install named through a link stays indexed once the launcher runs it from an overlay:
+    /// its replays are listed under the name it was given, a record stored under its resolved
+    /// name is moved rather than read again, and every replay, the one only the overlay holds
+    /// included, is held once however many passes run.
+    #[cfg(unix)]
+    #[test]
+    fn an_install_named_through_a_link_stays_indexed_once_overlaid() {
+        let tmp = tempfile::tempdir().expect("a temporary directory");
+        let base = std::fs::canonicalize(tmp.path()).expect("the directory resolves");
+        let real = base.join("real");
+        std::fs::create_dir_all(real.join("install/replays")).expect("the install is made");
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("the link is made");
+        let install = link.join("install");
+        let dirs = wgc_launch::RuntimeDirs::new(&link.join("app"));
+        let older = touch(&install.join("replays"), "older.wowsreplay");
+        let newer = touch(&install.join("replays"), "newer.wowsreplay");
+
+        let rt = runtime();
+        let pool = rt.block_on(wows_toolkit_config::test_pool());
+        let cancel = AtomicBool::new(false);
+        let pass = |folder: &ReplayFolder, source: SourceId| {
+            let game_data = GameDataCache::without_install();
+            build_folder_index(&rt, &pool, source, folder, &game_data, None, &cancel, IndexMode::FillGaps, |_| {})
+                .expect("the pass runs")
+        };
+        let held = |source: SourceId| {
+            let summaries = rt.block_on(query::row_summaries_for_source(&pool, source)).expect("the summaries read");
+            let mut held: Vec<PathBuf> = summaries.into_keys().collect();
+            held.sort();
+            held
+        };
+
+        // The files are not real replays, so storing stands in for the read of a pass.
+        rt.block_on(store_rated_battle(&pool, &older, None));
+        let source = rt.block_on(store_rated_battle(&pool, &newer, None));
+        let plain = ReplayFolder::from_install(&install, Some(&dirs));
+        let built = pass(&plain, source);
+        assert_eq!((built.skipped, built.indexed, built.failed), (2, 0, 0), "indexed before any overlay");
+
+        // The launcher's first run from an overlay. A battle indexed while an overlay named the
+        // install by its resolved name, and one the game wrote into the overlay.
+        let state = dirs.install_state(&std::fs::canonicalize(&install).expect("the install resolves"));
+        std::fs::create_dir_all(state.upper().join("replays")).expect("the upper directory is made");
+        std::fs::write(state.backend_record(), "kernel-bwrap").expect("the backend is recorded");
+        let respelled = touch(&install.join("replays"), "respelled.wowsreplay");
+        rt.block_on(store_rated_battle(&pool, &real.join("install/replays/respelled.wowsreplay"), None));
+        let upper = touch(&state.upper().join("replays"), "upper.wowsreplay");
+        rt.block_on(store_rated_battle(&pool, &upper, None));
+
+        let folder = ReplayFolder::from_install(&install, Some(&dirs));
+        assert!(folder.is_overlaid());
+        let mut listed = folder.replay_files();
+        listed.sort();
+        let mut expected = vec![older, newer, respelled, upper];
+        expected.sort();
+        assert_eq!(listed, expected, "the install's replays keep the name it was given");
+
+        for _ in 0..2 {
+            let built = pass(&folder, source);
+            assert_eq!((built.skipped, built.indexed, built.failed), (4, 0, 0), "nothing is read again");
+            assert_eq!(held(source), expected, "every listed replay is held once");
+        }
     }
 }
