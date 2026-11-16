@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(wows-query)* Run jq filters over JSON values in the sandboxed worker with `jq_worker::evaluate_json`, alongside stored GameParams entries with `jq_worker::evaluate`
 - *(wows-query)* Tell whether one main battery salvo can sink a ship with `salvo_kill`: trace the shell through the target's armor, place every shell where it deals the most given saturation, and give the shells that must hit at stock HP and with the target's best HP build. `ship_hit_locations` explains that a section keeps taking its own 16.5% once the hull pool is spent
 - *(wows-query)* Explain submarine dive capacity as the seconds a full battery lasts underwater and its recharge rate as seconds regained per second on the surface, rank `battery.recharge_time` (time to refill from empty) in `stat_search`, and give the dive capacity, recharge rate and recharge time with builds in `ship_stats`
 - *(zgui)* List a ship's splash boxes by group in the armor viewer's Layers tab, with a checkbox for each box and group, and outline the boxes of a hovered row on the hull

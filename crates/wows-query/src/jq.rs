@@ -1,4 +1,5 @@
-//! The jq engine: compiles a filter with jaq and runs it over jaq values.
+//! The jq engine: compiles a filter with jaq and runs it over jaq values or
+//! JSON texts.
 //!
 //! This runs inside the jq worker process (see [`crate::jq_worker`]), which
 //! the caller kills at a deadline. The engine itself bounds what it can:
@@ -160,6 +161,23 @@ impl Program {
         }
 
         (outputs, stop)
+    }
+
+    /// Runs the filter on one JSON text, as [`Self::run`] does on its value.
+    /// Text that is not JSON is an error of this input.
+    pub(crate) fn run_json(
+        &self,
+        input: &[u8],
+        steps: u64,
+        deadline: Instant,
+        output_left: &mut usize,
+    ) -> (InputOutputs, Option<Stop>) {
+        match jaq_json::read::parse_single(input) {
+            Ok(value) => self.run(value, steps, deadline, output_left),
+            Err(error) => {
+                (InputOutputs { error: Some(format!("record is not JSON: {error}")), ..Default::default() }, None)
+            }
+        }
     }
 }
 

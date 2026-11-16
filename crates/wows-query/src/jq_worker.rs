@@ -9,14 +9,18 @@
 //! call [`init`] first in `main` of every program that serves
 //! `gameparams_query`.
 //!
-//! The worker maps the raw GameParams store named by [`STORE_ENV`] before it
-//! denies itself filesystem access, so filters read entries in place from
-//! pages every process shares. The parent writes one JSON request line
-//! naming the filter and the entries; the worker answers with one JSON
-//! [`Reply`] line per entry and a final line.
+//! A request names its inputs in one of two ways. A store request names
+//! entries of the raw GameParams store named by [`STORE_ENV`], which the
+//! worker maps before it denies itself filesystem access, so filters read
+//! entries in place from pages every process shares. A JSON request is
+//! followed by each input as a 4-byte little-endian length and its JSON
+//! text, until the parent closes the pipe. The parent writes one JSON
+//! request line; the worker answers with one JSON [`Reply`] line per input
+//! and a final line.
 
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::BufWriter;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
@@ -87,7 +91,17 @@ pub struct Evaluation {
 struct Request {
     program: String,
     limits: Limits,
-    entries: Vec<EntryPosition>,
+    inputs: RequestInputs,
+}
+
+/// Where the worker finds the inputs of a request.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RequestInputs {
+    /// Entries of the store named by [`STORE_ENV`].
+    Store(Vec<EntryPosition>),
+    /// Length-prefixed JSON texts after the request line.
+    Json,
 }
 
 /// Why a worker could not read the store.
@@ -182,6 +196,34 @@ pub fn evaluate(
     entries: &[EntryPosition],
     limits: Limits,
 ) -> Result<Evaluation, JqError> {
+    // The worker starts in its own working directory, where a relative path
+    // names nothing. Only an empty path fails, and a store has a file name.
+    let store_path = std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
+    let request = Request { program: program.to_owned(), limits, inputs: RequestInputs::Store(entries.to_vec()) };
+
+    run_worker(&request, Some(&store_path), std::iter::empty())
+}
+
+/// Runs `program` once per input, each a JSON text, in a worker process.
+/// Inputs are pulled as the worker consumes them, so only a few are held at
+/// a time. Two workers run at once; a caller waits at most 15 s for one.
+pub fn evaluate_json(
+    program: &str,
+    inputs: impl Iterator<Item = Vec<u8>> + Send,
+    limits: Limits,
+) -> Result<Evaluation, JqError> {
+    let request = Request { program: program.to_owned(), limits, inputs: RequestInputs::Json };
+
+    run_worker(&request, None, inputs)
+}
+
+/// Starts a worker that maps `store`, if given, writes `request` and then
+/// `records` to it, and collects its replies.
+fn run_worker(
+    request: &Request,
+    store: Option<&Path>,
+    records: impl Iterator<Item = Vec<u8>> + Send,
+) -> Result<Evaluation, JqError> {
     let Some(worker) = WORKER_PROGRAM.get() else {
         return Err(JqError::NoWorker);
     };
@@ -198,12 +240,12 @@ pub fn evaluate(
         NEXT_WORKDIR.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&workdir).map_err(|source| JqError::Workdir { path: workdir.clone(), source })?;
-    // The worker starts in its own working directory, where a relative path
-    // names nothing. Only an empty path fails, and a store has a file name.
-    let store_path = std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
     let mut command = Command::new(worker);
     // The filter must not see the host's secrets; `env` is also disabled.
-    command.env_clear().env(WORKER_ENV, "1").env(STORE_ENV, &store_path).current_dir(&workdir);
+    command.env_clear().env(WORKER_ENV, "1").current_dir(&workdir);
+    if let Some(store) = store {
+        command.env(STORE_ENV, store);
+    }
     // Windows programs fail to start some system services without it.
     #[cfg(windows)]
     if let Some(system_root) = std::env::var_os("SystemRoot") {
@@ -219,8 +261,8 @@ pub fn evaluate(
     };
     let stdin = child.stdin.take().expect("stdin is piped");
     let stdout = child.stdout.take().expect("stdout is piped");
-    let request = Request { program: program.to_owned(), limits, entries: entries.to_vec() };
 
+    let limits = request.limits;
     let deadline = Instant::now() + limits.time + GRACE;
     let mut evaluation = Evaluation { inputs: Vec::new(), output_bytes: 0, stopped: None };
     let pid = child.id();
@@ -228,7 +270,7 @@ pub fn evaluate(
         let (sender, receiver) = mpsc::channel();
         let (watching, stop_watching) = mpsc::channel::<()>();
         let watch_sender = sender.clone();
-        scope.spawn(move || write_request(stdin, &request));
+        let writer = scope.spawn(move || write_request(stdin, request, records));
         scope.spawn(move || read_replies(stdout, &sender));
         scope.spawn(move || watch_memory(pid, limits.memory_bytes, &stop_watching, &watch_sender));
 
@@ -237,7 +279,8 @@ pub fn evaluate(
         // Ends a worker past its deadline or its memory limit, and with it both pipe threads.
         let _ = child.kill();
 
-        outcome
+        let written = writer.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        written.and(outcome)
     });
     let status = child.wait().ok();
     // The directory stays empty; a failure leaves an empty directory behind.
@@ -306,12 +349,28 @@ fn warn_unconfined(confinement: Confinement) {
     tracing::warn!(%reason, "jq workers run with filesystem access");
 }
 
-/// Writes the request. A failed write means the worker already stopped;
-/// its replies, or their absence, say why.
-fn write_request(mut stdin: ChildStdin, request: &Request) {
+/// Writes the request, then each record as its 4-byte little-endian length
+/// and its text. Stops quietly when the worker stops reading, which it does
+/// once evaluation ends early; its replies, or their absence, say why.
+fn write_request(stdin: ChildStdin, request: &Request, records: impl Iterator<Item = Vec<u8>>) -> Result<(), JqError> {
+    let mut writer = BufWriter::new(stdin);
     let mut header = serde_json::to_vec(request).expect("a request serializes");
     header.push(b'\n');
-    let _ = stdin.write_all(&header);
+    if writer.write_all(&header).is_err() {
+        return Ok(());
+    }
+
+    for record in records {
+        let len = u32::try_from(record.len()).map_err(|_| JqError::InputTooLarge { bytes: record.len() })?;
+        if writer.write_all(&len.to_le_bytes()).and_then(|()| writer.write_all(&record)).is_err() {
+            return Ok(());
+        }
+    }
+
+    // A failed flush means the worker already stopped reading.
+    let _ = writer.flush();
+
+    Ok(())
 }
 
 fn read_replies(stdout: ChildStdout, sender: &mpsc::Sender<Event>) {
@@ -350,9 +409,10 @@ fn watch_memory(pid: u32, limit: u64, stop: &mpsc::Receiver<()>, sender: &mpsc::
     }
 }
 
-/// The worker side: maps the store, denies itself filesystem access, then
-/// evaluates on a thread with a large stack, so deeply nested values a
-/// filter builds do not overflow the main thread's stack.
+/// The worker side: maps the store, if one is named, denies itself
+/// filesystem access, then evaluates on a thread with a large stack, so
+/// deeply nested values a filter builds do not overflow the main thread's
+/// stack.
 fn serve() -> std::io::Result<()> {
     // Reserved address space; pages are committed as used.
     const STACK_BYTES: usize = 256 * 1024 * 1024;
@@ -404,35 +464,78 @@ fn serve_request(
         Ok(program) => program,
         Err(error) => return write_reply(&mut output, &Reply::Compile(error)),
     };
-    let store = match store {
-        Ok(store) => store,
-        Err(failure) => return write_reply(&mut output, &Reply::Store(failure)),
-    };
 
     let limits = request.limits;
     let deadline = Instant::now() + limits.time;
     let mut output_left = limits.output_bytes;
-    let mut inputs = Inputs::new(store.tables());
-    for position in request.entries {
-        let Some(entry) = store.entry(position) else {
-            return write_reply(&mut output, &Reply::Store(StoreFailure::Damaged(StoreDamage::Entry)));
-        };
-        let value = match inputs.value(entry.root()) {
-            Ok(value) => value,
-            Err(damage) => {
-                return write_reply(&mut output, &Reply::Store(StoreFailure::DamagedEntry { position, damage }));
+    match request.inputs {
+        RequestInputs::Store(entries) => {
+            let store = match store {
+                Ok(store) => store,
+                Err(failure) => return write_reply(&mut output, &Reply::Store(failure)),
+            };
+            let mut inputs = Inputs::new(store.tables());
+            for position in entries {
+                let Some(entry) = store.entry(position) else {
+                    return write_reply(&mut output, &Reply::Store(StoreFailure::Damaged(StoreDamage::Entry)));
+                };
+                let value = match inputs.value(entry.root()) {
+                    Ok(value) => value,
+                    Err(damage) => {
+                        return write_reply(
+                            &mut output,
+                            &Reply::Store(StoreFailure::DamagedEntry { position, damage }),
+                        );
+                    }
+                };
+                let (outputs, stop) = program.run(value, limits.steps_per_input, deadline, &mut output_left);
+                if let Some(stop) = reply_input(&mut output, outputs, stop, deadline)? {
+                    return write_reply(&mut output, &Reply::Stopped(stop));
+                }
             }
-        };
-        let (outputs, stop) = program.run(value, limits.steps_per_input, deadline, &mut output_left);
-        write_reply(&mut output, &Reply::Input(outputs))?;
-
-        let stop = stop.or_else(|| (Instant::now() >= deadline).then_some(Stop::TimeLimit));
-        if let Some(stop) = stop {
-            return write_reply(&mut output, &Reply::Stopped(stop));
+        }
+        RequestInputs::Json => {
+            let mut record = Vec::new();
+            while read_record(&mut input, &mut record)? {
+                let (outputs, stop) = program.run_json(&record, limits.steps_per_input, deadline, &mut output_left);
+                if let Some(stop) = reply_input(&mut output, outputs, stop, deadline)? {
+                    return write_reply(&mut output, &Reply::Stopped(stop));
+                }
+            }
         }
     }
 
     write_reply(&mut output, &Reply::Done)
+}
+
+/// Replies with the outputs of one input. Returns why evaluation ends here:
+/// the input's own stop, or the deadline passing during it.
+fn reply_input(
+    output: &mut impl Write,
+    outputs: InputOutputs,
+    stop: Option<Stop>,
+    deadline: Instant,
+) -> std::io::Result<Option<Stop>> {
+    write_reply(output, &Reply::Input(outputs))?;
+
+    Ok(stop.or_else(|| (Instant::now() >= deadline).then_some(Stop::TimeLimit)))
+}
+
+/// Reads one length-prefixed record into `record`; `false` at the end of
+/// input.
+fn read_record(input: &mut impl Read, record: &mut Vec<u8>) -> std::io::Result<bool> {
+    let mut len = [0u8; 4];
+    match input.read_exact(&mut len) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
+        Err(error) => return Err(error),
+    }
+
+    record.clear();
+    record.resize(u32::from_le_bytes(len) as usize, 0);
+    input.read_exact(record)?;
+
+    Ok(true)
 }
 
 fn write_reply(output: &mut impl Write, reply: &Reply) -> std::io::Result<()> {

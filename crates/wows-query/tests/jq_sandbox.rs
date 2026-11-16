@@ -6,10 +6,14 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::json;
+use wows_query::error::JqError;
+use wows_query::jq_worker::Evaluation;
 use wows_query::jq_worker::Limits;
+use wows_query::jq_worker::Stop;
 use wows_query::raw_params::EntryPosition;
 use wows_query::raw_params::Localization;
 use wows_query::raw_params::RawParams;
@@ -96,9 +100,9 @@ fn limits() -> Limits {
     }
 }
 
-fn probe(filter: &'static str, store: &RawParams, positions: &[EntryPosition]) -> Probe {
-    let limits = limits();
-    let outcome = match wows_query::jq_worker::evaluate(filter, store, positions, limits) {
+/// The outcome of `filter` on the first of the inputs `evaluate` runs it over.
+fn probe(filter: &'static str, evaluate: impl Fn(&str) -> Result<Evaluation, JqError>) -> Probe {
+    let outcome = match evaluate(filter) {
         Ok(evaluation) => {
             assert_eq!(evaluation.stopped, None, "{filter} stopped early");
             let first = evaluation.inputs.into_iter().next().expect("the first input was evaluated");
@@ -114,7 +118,7 @@ fn probe(filter: &'static str, store: &RawParams, positions: &[EntryPosition]) -
 }
 
 /// The host side, run in the child process `filters_cannot_reach_the_host`
-/// starts. Prints the probes as one JSON line.
+/// starts. Prints the probes over stored and JSON inputs, one JSON line each.
 #[test]
 fn host() {
     if std::env::var_os(SENTINEL_ENV).is_none() {
@@ -123,18 +127,75 @@ fn host() {
 
     wows_query::jq_worker::set_worker_program(worker());
     let (store, positions) = store("host", vec![json!({"a": 1}), json!({"b": 2})]);
-    let probes: Vec<Probe> = PROBES.iter().map(|filter| probe(filter, &store, &positions)).collect();
-    println!("PROBES {}", serde_json::to_string(&probes).expect("probes serialize"));
+    let stored: Vec<Probe> = PROBES
+        .iter()
+        .map(|filter| probe(filter, |filter| wows_query::jq_worker::evaluate(filter, &store, &positions, limits())))
+        .collect();
+    println!("PROBES-STORE {}", serde_json::to_string(&stored).expect("probes serialize"));
+
+    let json: Vec<Probe> = PROBES
+        .iter()
+        .map(|filter| {
+            probe(filter, |filter| {
+                let inputs = [b"{\"a\": 1}".to_vec(), b"{\"b\": 2}".to_vec()];
+                wows_query::jq_worker::evaluate_json(filter, inputs.into_iter(), limits())
+            })
+        })
+        .collect();
+    println!("PROBES-JSON {}", serde_json::to_string(&json).expect("probes serialize"));
+}
+
+#[test]
+fn json_inputs_are_evaluated_in_order() {
+    wows_query::jq_worker::set_worker_program(worker());
+    let inputs = [b"{\"a\": 1}".to_vec(), b"{\"b\": 2}".to_vec(), b"{\"a\":".to_vec()];
+    let evaluation =
+        wows_query::jq_worker::evaluate_json(".a // .b", inputs.into_iter(), limits()).expect("the worker starts");
+
+    assert_eq!(evaluation.stopped, None);
+    let [first, second, third] = evaluation.inputs.try_into().expect("every input was evaluated");
+    assert_eq!((first.values, first.error), (vec!["1".to_owned()], None));
+    assert_eq!((second.values, second.error), (vec!["2".to_owned()], None));
+    assert!(third.error.is_some_and(|error| error.starts_with("record is not JSON")));
+}
+
+/// More input than the pipe holds, so the parent is still writing when the
+/// worker stops reading.
+#[test]
+fn json_output_stops_at_the_output_limit() {
+    wows_query::jq_worker::set_worker_program(worker());
+    let inputs = std::iter::repeat_n(b"\"abcdefgh\"".to_vec(), 100_000);
+    let evaluation = wows_query::jq_worker::evaluate_json(".", inputs, Limits { output_bytes: 16, ..limits() })
+        .expect("the worker starts");
+
+    assert_eq!(evaluation.stopped, Some(Stop::OutputLimit));
+    let values: Vec<Vec<String>> = evaluation.inputs.into_iter().map(|input| input.values).collect();
+    assert_eq!(values, [vec!["\"abcdefgh\"".to_owned()], vec!["\"abcde".to_owned()]]);
+}
+
+#[test]
+fn a_json_filter_stops_at_its_time_limit() {
+    wows_query::jq_worker::set_worker_program(worker());
+    let inputs = [b"null".to_vec(), b"null".to_vec()];
+    let limits = Limits { steps_per_input: u64::MAX, time: Duration::from_millis(200), ..limits() };
+    let evaluation = wows_query::jq_worker::evaluate_json("last(range(1e12))", inputs.into_iter(), limits)
+        .expect("the worker starts");
+
+    assert_eq!(evaluation.stopped, Some(Stop::TimeLimit));
+    assert_eq!(evaluation.inputs.len(), 1, "the second input is not evaluated");
 }
 
 #[test]
 fn unbounded_recursion_ends_only_the_worker() {
     wows_query::jq_worker::set_worker_program(worker());
     let (store, positions) = store("recursion", vec![json!(null)]);
-    let evaluation =
+    let stored =
         wows_query::jq_worker::evaluate("def f: 1 + f; f", &store, &positions, limits()).expect("the worker starts");
+    let json = wows_query::jq_worker::evaluate_json("def f: 1 + f; f", [b"null".to_vec()].into_iter(), limits())
+        .expect("the worker starts");
 
-    assert_eq!(evaluation.stopped, Some(wows_query::jq_worker::Stop::Crashed));
+    assert_eq!(stored.stopped, Some(Stop::Crashed));
+    assert_eq!(json.stopped, Some(Stop::Crashed));
 }
 
 /// The parent ends a worker over its memory limit, on systems where nothing
@@ -153,7 +214,15 @@ fn a_worker_over_its_memory_limit_is_ended() {
     let limited =
         wows_query::jq_worker::evaluate(filter, &store, &positions, Limits { memory_bytes: 256 << 20, ..limits() })
             .expect("the worker starts");
-    assert_eq!(limited.stopped, Some(wows_query::jq_worker::Stop::Crashed));
+    assert_eq!(limited.stopped, Some(Stop::Crashed));
+
+    let limited_json = wows_query::jq_worker::evaluate_json(
+        filter,
+        [b"null".to_vec()].into_iter(),
+        Limits { memory_bytes: 256 << 20, ..limits() },
+    )
+    .expect("the worker starts");
+    assert_eq!(limited_json.stopped, Some(Stop::Crashed));
 }
 
 #[test]
@@ -180,12 +249,16 @@ fn filters_cannot_reach_the_host() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "host failed: {stdout}{}", String::from_utf8_lossy(&output.stderr));
 
-    // libtest prints the test name on the same line.
-    let line = stdout
-        .lines()
-        .find_map(|line| line.split_once("PROBES ").map(|(_, probes)| probes))
-        .unwrap_or_else(|| panic!("the host printed no probes: {stdout}"));
-    assert!(!line.contains(SENTINEL), "a filter reached the sentinel: {line}");
-    let probes: serde_json::Value = serde_json::from_str(line).expect("probes parse");
+    // libtest prints the test name on the same line as the first.
+    let printed = |prefix: &str| {
+        let line = stdout
+            .lines()
+            .find_map(|line| line.split_once(prefix).map(|(_, probes)| probes))
+            .unwrap_or_else(|| panic!("the host printed no {prefix}: {stdout}"));
+        assert!(!line.contains(SENTINEL), "a filter reached the sentinel: {line}");
+        serde_json::from_str::<serde_json::Value>(line).expect("probes parse")
+    };
+    let probes = printed("PROBES-STORE ");
+    assert_eq!(printed("PROBES-JSON "), probes, "JSON inputs reach what stored inputs reach");
     insta::assert_yaml_snapshot!(probes);
 }
