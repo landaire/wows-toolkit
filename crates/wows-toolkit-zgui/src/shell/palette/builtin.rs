@@ -96,6 +96,10 @@ pub struct TestModes {
     pub folders: Option<Vec<std::path::PathBuf>>,
     /// Read in place of the replay index for the players list.
     pub players: Option<std::rc::Rc<dyn Fn(String) -> super::ModeQuery>>,
+    /// Read in place of the replay index for the list of ships played.
+    pub my_ships: Option<std::rc::Rc<dyn Fn() -> modes::IndexRead>>,
+    /// Ranks the list of ships played in place of the shared ranking.
+    pub my_ships_rank: Option<modes::Rank>,
 }
 
 #[cfg(test)]
@@ -122,6 +126,10 @@ fn offer_test_modes(shell: Shell) {
     if let Some(players) = offered.players {
         let spec = super::ModeSpec { source: super::ModeSource::Query(players), on_enter: None };
         shell.palette.offer_mode(PaletteMode::Players, spec);
+    }
+    if let Some(read) = offered.my_ships {
+        let rank = offered.my_ships_rank.unwrap_or(wows_toolkit_viewmodel::palette::seeded_searches);
+        shell.palette.offer_mode(PaletteMode::MyShips, modes::index_mode(move || read(), rank));
     }
 }
 

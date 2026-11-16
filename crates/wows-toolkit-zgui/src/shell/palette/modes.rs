@@ -5,7 +5,12 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use futures::FutureExt;
+use futures::TryFutureExt;
+use futures::future::LocalBoxFuture;
+use futures::future::Shared;
 use rust_i18n::t;
 use wows_replay_insights::build::shiptool;
 use wows_toolkit_icons::Glyph;
@@ -53,42 +58,53 @@ use crate::text_marks::marks_within;
 /// Players the replay index has seen whose name matches the query, best first, each leading to
 /// the battles they were in.
 pub fn players(services: Services) -> ModeSpec {
-    index_mode(services, IndexList::Players)
+    index_mode(move || Box::pin(load(services, IndexList::Players)), palette::seeded_searches)
 }
 
 /// Ships the reader has played whose name matches the query, best first, each leading to the
 /// reader's own battles in it.
 pub fn my_ships(services: Services) -> ModeSpec {
-    index_mode(services, IndexList::MyShips)
+    index_mode(move || Box::pin(load(services, IndexList::MyShips)), palette::seeded_searches)
 }
 
-/// Reads the list once each time the mode is entered and ranks it for every query typed.
-fn index_mode(services: Services, list: IndexList) -> ModeSpec {
-    let read: Rc<RefCell<Option<Rc<IndexLookup>>>> = Rc::default();
-    let held = Rc::clone(&read);
+/// One read of an index-backed mode's list, or the rows saying why it failed.
+pub type IndexRead = LocalBoxFuture<'static, Result<IndexLookup, ModeRows>>;
+
+/// A read every query typed while it runs waits on.
+type SharedRead = Shared<LocalBoxFuture<'static, Result<Arc<IndexLookup>, ModeRows>>>;
+
+/// Ranks an index-backed mode's list against a query, off the UI thread.
+pub type Rank = fn(&IndexLookup, &FilterQuery) -> Vec<SeededSearch>;
+
+/// Reads the list with `read` once each time the mode is entered and ranks it with `rank` off the
+/// UI thread for every query typed. Replacing a query cancels only its ranking: the read carries
+/// on for the next query.
+pub(super) fn index_mode(read: impl Fn() -> IndexRead + 'static, rank: Rank) -> ModeSpec {
+    let held: Rc<RefCell<Option<SharedRead>>> = Rc::default();
+    let kept = Rc::clone(&held);
     let fetch = move |needle: String| -> ModeQuery {
+        let shared = held.borrow_mut().get_or_insert_with(|| read().map_ok(Arc::new).boxed_local().shared()).clone();
         let held = Rc::clone(&held);
         Box::pin(async move {
-            let cached = held.borrow().clone();
-            let lookup = match cached {
-                Some(lookup) => lookup,
-                None => match load(services, list).await {
-                    Ok(lookup) => {
-                        let lookup = Rc::new(lookup);
-                        *held.borrow_mut() = Some(Rc::clone(&lookup));
-                        lookup
+            let lookup = match shared.clone().await {
+                Ok(lookup) => lookup,
+                Err(unavailable) => {
+                    // Dropped so that the next query reads again.
+                    let mut slot = held.borrow_mut();
+                    if slot.as_ref().is_some_and(|current| current.ptr_eq(&shared)) {
+                        *slot = None;
                     }
-                    Err(unavailable) => return unavailable,
-                },
+                    return unavailable;
+                }
             };
             let query = FilterQuery::new(&needle);
 
-            ModeRows::Ready(
-                palette::seeded_searches(&lookup, &query).into_iter().map(|found| seeded_row(found, &query)).collect(),
-            )
+            let (found, query) = blocking(move || (rank(&lookup, &query), query)).await;
+
+            ModeRows::Ready(found.into_iter().map(|found| seeded_row(found, &query)).collect())
         })
     };
-    let forget = move || drop(read.borrow_mut().take());
+    let forget = move || drop(kept.borrow_mut().take());
 
     ModeSpec { source: ModeSource::Query(Rc::new(fetch)), on_enter: Some(Rc::new(forget)) }
 }

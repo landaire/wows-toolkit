@@ -1,8 +1,12 @@
 //! The palette driven through the shell, as the reader drives it.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Mutex;
+use std::thread;
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use futures::channel::oneshot;
@@ -11,7 +15,14 @@ use landaire_ui::MARK_CLASS;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use wows_replay_insights::build::shiptool;
+use wows_toolkit_config::index::rows::ShipFacet;
+use wows_toolkit_viewmodel::name_lookup::ShipLookup;
+use wows_toolkit_viewmodel::palette;
+use wows_toolkit_viewmodel::palette::IndexLookup;
 use wows_toolkit_viewmodel::palette::PaletteMode;
+use wows_toolkit_viewmodel::palette::SeededSearch;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wowsunpack::game_types::GameParamId;
 use zgui::reactive::Mounted;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::vocab::Modifiers;
@@ -35,6 +46,7 @@ use crate::shell::palette::ShipParamIndex;
 use crate::shell::palette::builtin::TEST_MODES;
 use crate::shell::palette::builtin::TestModes;
 use crate::shell::palette::modes::ArmorShipRow;
+use crate::shell::palette::modes::IndexRead;
 
 /// The dialog itself, open or closing.
 const PALETTE: &str = "palette";
@@ -409,6 +421,77 @@ fn an_answer_to_a_replaced_query_is_dropped() {
     answer("ab");
     window.advance(Duration::from_millis(20));
     assert_eq!(label(&mut window, "palette-row-0").as_deref(), Some("answer to ab"));
+}
+
+/// Queries typed while the replay index is read wait on that one read rather than each starting
+/// another, and the rows listed once it lands answer the latest query.
+#[test]
+fn queries_typed_during_the_index_read_share_it() {
+    let reads = Rc::new(Cell::new(0_usize));
+    let waiting: Rc<RefCell<Vec<oneshot::Sender<IndexLookup>>>> = Rc::default();
+    let my_ships = {
+        let reads = Rc::clone(&reads);
+        let waiting = Rc::clone(&waiting);
+        move || -> IndexRead {
+            reads.set(reads.get() + 1);
+            let (answer, answered) = oneshot::channel();
+            waiting.borrow_mut().push(answer);
+            Box::pin(
+                async move { answered.await.map_err(|_| ModeRows::Unavailable("the read was dropped".to_owned())) },
+            )
+        }
+    };
+    let mut window = open_window(TestModes { my_ships: Some(Rc::new(my_ships)), ..TestModes::default() });
+
+    shortcut(&mut window, 'k');
+    type_text(&mut window, "my matches");
+    press(&mut window, NamedKey::Enter);
+    assert!(shown(&window, "palette-mode-my-ships"));
+    type_text(&mut window, "a");
+    type_text(&mut window, "b");
+    assert_eq!(reads.get(), 1, "each query waits on the read already running");
+
+    let ship =
+        |id: u32, name: &str| ShipFacet { ship_id: GameParamId::from(id), ship_name: name.to_owned(), match_count: 1 };
+    let lookup = IndexLookup::Ships(ShipLookup::new(vec![ship(1, "Atago"), ship(2, "Abukuma")]));
+    let answer = waiting.borrow_mut().pop().expect("the read is waiting");
+    assert!(answer.send(lookup).is_ok(), "the read is still awaited");
+    settle_in_real_time(&mut window);
+
+    let first = label(&mut window, "palette-row-0").expect("the read lists a row");
+    assert!(first.starts_with("Abukuma"), "the latest query ranks the rows: {first}");
+    assert!(!shown(&window, "palette-row-1"), "Atago does not hold \"ab\"");
+    assert_eq!(reads.get(), 1);
+}
+
+/// The list read from the replay index is ranked off the UI thread, so a long list does not
+/// stall typing.
+#[test]
+fn the_index_list_is_ranked_off_the_ui_thread() {
+    static RANKED_ON: Mutex<Option<ThreadId>> = Mutex::new(None);
+
+    fn rank(lookup: &IndexLookup, query: &FilterQuery) -> Vec<SeededSearch> {
+        *RANKED_ON.lock().expect("no ranking panicked") = Some(thread::current().id());
+        palette::seeded_searches(lookup, query)
+    }
+
+    let my_ships = || -> IndexRead {
+        let ship = ShipFacet { ship_id: GameParamId::from(1_u32), ship_name: "Atago".to_owned(), match_count: 1 };
+        Box::pin(async move { Ok::<_, ModeRows>(IndexLookup::Ships(ShipLookup::new(vec![ship]))) })
+    };
+    let mut window =
+        open_window(TestModes { my_ships: Some(Rc::new(my_ships)), my_ships_rank: Some(rank), ..TestModes::default() });
+
+    shortcut(&mut window, 'k');
+    type_text(&mut window, "my matches");
+    press(&mut window, NamedKey::Enter);
+    type_text(&mut window, "at");
+    settle_in_real_time(&mut window);
+
+    let first = label(&mut window, "palette-row-0").expect("the list is ranked");
+    assert!(first.starts_with("Atago"), "{first}");
+    let ranked_on = RANKED_ON.lock().expect("no ranking panicked").expect("the list was ranked");
+    assert_ne!(ranked_on, thread::current().id(), "the ranking ran on the UI thread");
 }
 
 fn local_mode() -> ModeSpec {
