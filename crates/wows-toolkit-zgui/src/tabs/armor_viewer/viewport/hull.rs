@@ -363,7 +363,7 @@ impl ViewportModel {
         self.selected_camo = id;
         self.camo_generation = self.camo_generation.wrapping_add(1);
 
-        let Some((id, armor)) = id.zip(self.current_armor.clone()) else {
+        if id.is_none() || self.current_armor.is_none() {
             self.active_camo_textures.clear();
             self.active_camo_uvs.clear();
             self.hull_textures.forget_camo();
@@ -371,8 +371,21 @@ impl ViewportModel {
             cx.emit(ViewportChange::Settings);
             cx.notify();
             return;
-        };
+        }
 
+        // One decode runs at a time; the one running starts the newest pick when it ends, so
+        // rapid picks do not pile up decodes.
+        if !self.camo_decoding {
+            self.decode_selected_camo(cx);
+        }
+        cx.notify();
+    }
+
+    /// Decodes the selected scheme for the scene shown, off the UI thread.
+    fn decode_selected_camo(&mut self, cx: &mut ViewCx) {
+        let Some((id, armor)) = self.selected_camo.zip(self.current_armor.clone()) else { return };
+
+        self.camo_decoding = true;
         let generation = self.camo_generation;
         let cached = self.camo_texture_cache.get(id);
         cx.defer(move |state| {
@@ -381,12 +394,13 @@ impl ViewportModel {
                 state.update(|this, cx| this.apply_camo_decode(generation, id, decode, cx));
             });
         });
-        cx.notify();
     }
 
-    /// Takes a finished camo decode, unless the selection moved on while it ran.
+    /// Takes a finished camo decode, or starts one for the scheme picked while it ran.
     fn apply_camo_decode(&mut self, generation: u64, id: CamoSchemeId, decode: CamoDecode, cx: &mut ViewCx) {
+        self.camo_decoding = false;
         if generation != self.camo_generation {
+            self.decode_selected_camo(cx);
             return;
         }
         if let Some(textures) = decode.decoded {
@@ -774,6 +788,7 @@ impl ArmorViewportState {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use wows_toolkit_armor::load_model::fixtures::model_scene;
     use wowsunpack::export::camo_textures::CamoSchemeId;
@@ -781,8 +796,11 @@ mod tests {
     use wowsunpack::export::gltf_export::CamoOrigin;
     use wowsunpack::export::model_catalog::ModelPath;
 
+    use super::CamoDecode;
+    use super::ViewportModel;
     use super::reload_camo;
     use super::remap_camo_selection;
+    use crate::tabs::armor_viewer::viewport::state::ViewCx;
 
     fn scheme(id: usize, display_name: &str, origin: CamoOrigin) -> CamoSchemeInfo {
         CamoSchemeInfo {
@@ -831,5 +849,27 @@ mod tests {
 
         assert_eq!((reloaded.was, reloaded.now), (CamoSchemeId(0), Some(CamoSchemeId(1))));
         assert!(reload_camo(CamoSchemeId(5), &old, &armor).now.is_none(), "an unknown scheme reverts to stock");
+    }
+
+    /// Picks made while a decode runs start no decode of their own; the one running hands over to
+    /// the newest pick when it ends, and the picks between are never decoded.
+    #[test]
+    fn rapid_camo_picks_decode_only_the_newest() {
+        let path = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let mut model = ViewportModel::new();
+        model.current_armor = Some(Arc::new(model_scene(path, Vec::new())));
+        let mut cx = ViewCx::for_test();
+
+        model.select_camo(Some(CamoSchemeId(0)), &mut cx);
+        let first = model.camo_generation;
+        model.select_camo(Some(CamoSchemeId(1)), &mut cx);
+        model.select_camo(Some(CamoSchemeId(2)), &mut cx);
+        assert_eq!(cx.deferred_count(), 1, "one decode runs");
+
+        let mut cx = ViewCx::for_test();
+        let stock = CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() };
+        model.apply_camo_decode(first, CamoSchemeId(0), stock, &mut cx);
+        assert_eq!(cx.deferred_count(), 1, "the newest pick is decoded next");
+        assert!(model.camo_decoding);
     }
 }

@@ -327,6 +327,8 @@ pub struct ViewportModel {
     /// Bumped by every camo selection and every armor swap, so a decode that lands after the
     /// reader moved on is dropped.
     pub(super) camo_generation: u64,
+    /// Whether a camo decode is running. A pick made meanwhile waits for it to end.
+    pub(super) camo_decoding: bool,
     /// The active camo's composited hull textures, by mfm stem.
     pub(super) active_camo_textures: CamoTextures,
     /// The active camo's UV transforms, by mfm stem, for stems left tiled.
@@ -482,6 +484,7 @@ impl ViewportModel {
             selected_camo: None,
             camo_texture_cache: CamoTextureCache::default(),
             camo_generation: 0,
+            camo_decoding: false,
             active_camo_textures: HashMap::new(),
             active_camo_uvs: HashMap::new(),
             hull_textures: HullTextureCache::default(),

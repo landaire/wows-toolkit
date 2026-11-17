@@ -114,6 +114,11 @@ impl ViewCx {
     pub(super) fn notified(&self) -> bool {
         self.notify
     }
+
+    #[cfg(test)]
+    pub(super) fn deferred_count(&self) -> usize {
+        self.deferred.len()
+    }
 }
 
 thread_local! {
