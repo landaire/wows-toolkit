@@ -510,30 +510,69 @@ impl RendererSession {
             self.status.set(Status::Failed(t!("ui.replay.loading_game_data").into_owned()));
             return;
         };
-        self.status.set(Status::Baking);
+        // A battle already on screen stays there, playing, until the new bake lands.
+        let shown = self.track_untracked();
+        if shown.is_none() {
+            self.status.set(Status::Baking);
+        }
+        let Some(services) = self.services() else { return };
         self.spawn(async move {
             let options = RenderOptions { player_names: names, ..playback_options() };
-            let baked = long_job(move || bake(&request.path, &request.alts, &game_data, &cancel, options)).await;
+            let merged = !request.alts.is_empty();
+            let baking = long_job(move || bake(&request.path, &request.alts, &game_data, &cancel, options));
+            // Read beside the bake, so the first frame is drawn with what the reader saved.
+            let first = shown.is_none();
+            let defaults = async move { if first { Some(load_saved_defaults(services).await) } else { None } };
+            let (baked, saved) = futures::join!(baking, defaults);
             let current = self.run.try_with_value(|run| run.bake_generation == generation);
             if current != Some(true) {
                 return;
             }
-            match baked {
-                Ok((track, renderer)) => {
-                    self.run.update_value(|run| {
-                        run.renderer = Some(renderer);
-                        run.renderer_generation.next();
-                        run.layout = SidePanelLayout::None;
-                    });
-                    self.map_origin.set(track.map_origin);
-                    self.playback.update(|playback| playback.stop());
-                    self.status.set(Status::Ready(Arc::new(track)));
-                    self.share_playback();
-                    self.adopt_saved_defaults().await;
-                    self.show_renamed_armor();
+            let (track, renderer) = match baked {
+                Ok(baked) => baked,
+                // A battle already on screen stays: only the recordings asked for since failed.
+                Err(err) if shown.is_some() => {
+                    let messages = self.run.try_with_value(|run| run.messages).flatten();
+                    if let Some(messages) = messages {
+                        messages.failed(format!("{}: {err}", t!("ui.replay.renderer.failed")));
+                    }
+                    return;
                 }
-                Err(err) => self.status.set(Status::Failed(err.to_string())),
+                Err(err) => {
+                    self.status.set(Status::Failed(err.to_string()));
+                    return;
+                }
+            };
+            let track = Arc::new(track);
+            self.run.update_value(|run| {
+                run.renderer = Some(renderer);
+                run.renderer_generation.next();
+                run.layout = SidePanelLayout::None;
+            });
+            self.map_origin.set(track.map_origin);
+            match shown {
+                Some(shown) => {
+                    // Playback carries on from the same moment of the battle, on the canvas the
+                    // layers on screen need.
+                    let clock = self.playback.with_untracked(|playback| playback.clock(&shown));
+                    self.status.set(Status::Ready(Arc::clone(&track)));
+                    self.change_playback(|playback| playback.go_to_clock(&track, clock));
+                    self.follow_armor();
+                    self.set_layers(|_| {});
+                }
+                None => {
+                    self.playback.update(|playback| playback.stop());
+                    if let Some(saved) = saved {
+                        self.adopt_saved_defaults(&saved, &track, merged);
+                    }
+                    self.status.set(Status::Ready(track));
+                }
             }
+            // The session's layers stand over the reader's own defaults, as they do in egui.
+            self.with_run(|run| run.display_seen.settings = SyncVersion::NONE);
+            self.follow_session_display();
+            self.share_playback();
+            self.show_renamed_armor();
         });
     }
 
@@ -579,33 +618,17 @@ impl RendererSession {
     }
 
     /// Opens showing what the reader last saved as the defaults, and a merged replay on the
-    /// rosters. Runs once the bake has landed, because the rosters are a wider canvas rather than
-    /// a layer.
-    async fn adopt_saved_defaults(self) {
-        let Some((services, merged)) = self.run.try_with_value(|run| (run.services, !run.request.alts.is_empty()))
-        else {
-            return;
-        };
-        let saved = match services.settings.pool() {
-            Some(pool) => services
-                .on_tokio(async move { wows_toolkit_replay_data::render_defaults::load(&pool).await })
-                .await
-                .unwrap_or_default(),
-            // No store to read: what the renderer itself defaults to, as an unwritten row reads.
-            None => SavedRenderOptions::default(),
-        };
-        self.export.update(|export| export.settings = export_settings_of(&saved));
+    /// rosters, before the first frame of `track` is drawn.
+    fn adopt_saved_defaults(self, saved: &SavedRenderOptions, track: &Track, merged: bool) {
+        self.export.update(|export| export.settings = export_settings_of(saved));
         self.set_layers(|layers| {
-            adopt_saved_defaults(&saved, &mut layers.options, &mut layers.show_dead_ships);
+            adopt_saved_defaults(saved, &mut layers.options, &mut layers.show_dead_ships);
             if merged {
                 open_merged_on_rosters(&mut layers.options);
             }
         });
-        let own = self.track_untracked().and_then(|track| self_player(&track.frames));
-        self.change_choices(|choices, _, options| adopt_saved_self_ranges(&saved, own.as_deref(), choices, options));
-        // The session's layers stand over the reader's own defaults, as they do in egui.
-        self.with_run(|run| run.display_seen.settings = SyncVersion::NONE);
-        self.follow_session_display();
+        let own = self_player(&track.frames);
+        self.change_choices(|choices, _, options| adopt_saved_self_ranges(saved, own.as_deref(), choices, options));
     }
 
     /// Writes what this viewport shows back as what a viewport opens with. Resolves to whether it
@@ -1793,6 +1816,18 @@ struct RasterOutput {
     frame: BgraFrame,
     size: FrameSize,
     regions: Vec<DrawnRegion>,
+}
+
+/// What the reader saved as the defaults a viewport opens with.
+async fn load_saved_defaults(services: Services) -> SavedRenderOptions {
+    match services.settings.pool() {
+        Some(pool) => services
+            .on_tokio(async move { wows_toolkit_replay_data::render_defaults::load(&pool).await })
+            .await
+            .unwrap_or_default(),
+        // No store to read: what the renderer itself defaults to, as an unwritten row reads.
+        None => SavedRenderOptions::default(),
+    }
 }
 
 /// What the status bar calls an export at `stage`.

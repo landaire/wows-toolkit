@@ -61,6 +61,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Refresh the renderer's Previous and Next event buttons as playback passes an event
 - *(zgui)* Give the replay renderer the keyboard as it opens and after it is popped out
 - *(zgui)* Show your own pings in the replay renderer, also without a collab session
+- *(zgui)* Keep the battle on screen and playing while the replay renderer bakes it again, and draw the first frame with the saved defaults
 - *(zgui)* Play replays in the renderer at thirty frames a second at every speed, with ships, planes, shells, torpedoes, smoke and capture progress moved between the stored frames, and keep 1x at real time on long battles. Seeks and event jumps land on the exact time, so Next event moves on from an event between stored frames. Exported videos move the same things between frames
 - *(zgui)* Pace the hover preview by the window's clock, so it no longer falls behind 15 frames a second
 - *(zgui)* Record the players in every replay put in the index in the Player Tracker, mark division mates, and make the tracker's Populate button fill it from the replay index

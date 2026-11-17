@@ -685,6 +685,26 @@ fn a_seek_into_a_closed_session_does_nothing() {
     assert!(session.track_untracked().is_none());
 }
 
+/// Baking the battle again through more recordings keeps the battle on screen where playback is
+/// until the new bake lands, rather than blanking the map, and keeps it when that bake fails.
+#[test]
+fn a_rebake_keeps_the_battle_on_screen() {
+    let (mut window, session) = open_viewport(track(half_second_frames(60)));
+    session.hold_game_data_for_test(empty_game_data());
+    session.seek_by(10.0);
+
+    session.rebake_with_alts(vec![PathBuf::from("other.wowsreplay")]);
+    // Read before the bake has had a frame to land in.
+    assert!(session.track_untracked().is_some(), "the map is not blanked while the battle is baked again");
+    assert_eq!(at(session), 20, "and playback stays where it was");
+
+    // Neither recording is on disk, so the bake fails.
+    pointer_over_viewport(&mut window);
+    crate::interaction_tests::settle_in_real_time(&mut window);
+    assert!(session.track_untracked().is_some(), "a failed bake leaves the battle there was");
+    assert!(window.by_test_id("replay-renderer-failed").is_none());
+}
+
 /// Game data with nothing in it, which reads no replay the tests name.
 fn empty_game_data() -> wows_toolkit_replay_data::load::GameDataCache {
     let provider = wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
