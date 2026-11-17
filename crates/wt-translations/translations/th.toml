@@ -390,6 +390,7 @@ contributing = "กำลังส่งรีเพลย์ %{done} จาก 
 contributed = "ส่งรีเพลย์แล้ว %{sent} จาก %{total} รายการ"
 contribute_nothing_shared = "เลือกสิ่งที่จะแชร์ในการตั้งค่าก่อน"
 contribute_none_listed = "ไม่มีรีเพลย์ในรายการให้ส่ง"
+contribute_not_ready = "ส่งรีเพลย์ได้เมื่อโหลดข้อมูลเกมและการตั้งค่าเสร็จแล้ว"
 contribute_already_running = "การส่งข้อมูลกำลังทำงานอยู่แล้ว"
 auto_export_failed = "เขียนข้อมูลการรบไม่สำเร็จ: %{error}"
 auto_exported = "ส่งออกการรบไปยัง %{file} แล้ว"

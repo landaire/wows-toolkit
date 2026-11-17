@@ -22,7 +22,6 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
 use zgui::reactive::Task;
 use zgui::reactive::prelude::GetUntracked;
-use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::WithValue;
@@ -82,8 +81,9 @@ pub struct Arrivals {
     held: StoredValue<HashMap<PathBuf, Task>, LocalStorage>,
     /// The replays being read for sharing, by these arrivals, the sweep or the bulk send.
     reads: SharingReads,
-    /// Whether this session's sweep of the install's replays has started.
-    swept: StoredValue<bool, LocalStorage>,
+    /// The game directory whose replays this session's sweep has read. Another directory set in
+    /// the settings is swept in turn.
+    swept: StoredValue<Option<String>, LocalStorage>,
 }
 
 impl Arrivals {
@@ -93,7 +93,7 @@ impl Arrivals {
             exports: StoredValue::new_local(HashMap::new()),
             held: StoredValue::new_local(HashMap::new()),
             reads,
-            swept: StoredValue::new_local(false),
+            swept: StoredValue::new_local(None),
         };
         reads.on_again(move |path| arrivals.contribute(workspace, &path));
         arrivals
@@ -206,18 +206,19 @@ impl Arrivals {
 
 impl Arrivals {
     /// Contributes the replays the install's directory holds that were never contributed, once a
-    /// session, as the egui app does when its background parser starts. Waits for the settings
-    /// and game data; sharing that is off when they are ready skips this session's sweep.
+    /// session for each game directory set, as the egui app does when its background parser
+    /// starts. Waits for the settings and game data; sharing that is off when they are ready skips
+    /// the directory's sweep.
     pub fn sweep(self, workspace: ReplayWorkspace) {
-        if self.swept.get_value() {
-            return;
-        }
         let services = workspace.services;
         let Some(wows_dir) = services.settings.read_untracked(|settings| settings.wows_dir.clone()) else { return };
+        if self.swept.with_value(|swept| swept.as_ref() == Some(&wows_dir)) {
+            return;
+        }
         if services.game_data.cache_untracked().is_none() {
             return;
         }
-        self.swept.set_value(true);
+        self.swept.set_value(Some(wows_dir.clone()));
         if wows_dir.is_empty() {
             return;
         }
@@ -325,6 +326,11 @@ impl Arrivals {
     #[cfg(test)]
     pub fn holds(self, path: &Path) -> bool {
         self.held.with_value(|held| held.get(path).is_some_and(|task| !task.is_finished()))
+    }
+
+    #[cfg(test)]
+    pub fn swept(self) -> Option<String> {
+        self.swept.with_value(Clone::clone)
     }
 }
 

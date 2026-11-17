@@ -833,3 +833,43 @@ fn a_replay_being_read_for_sharing_is_not_read_again_until_that_read_ends() {
     reads.finish(&path);
     assert_eq!(asked_again.get(), 1, "a read nothing waited on runs nothing after it");
 }
+
+/// A game directory set after the startup sweep is swept in turn.
+#[test]
+fn a_game_directory_set_later_is_swept_in_turn() {
+    let (_window, workspace) = open();
+    let services = workspace.services;
+    services.settings.use_private_database_for_test();
+    let arrivals = workspace.under_tab(|| Arrivals::new(workspace, SharingReads::new()));
+    let set_wows_dir = |dir: &str| {
+        services.settings.edit(wows_toolkit_viewmodel::settings::keys::WOWS_DIR, |settings| {
+            settings.wows_dir = dir.to_owned();
+            dir.to_owned()
+        })
+    };
+
+    set_wows_dir("/games/first");
+    arrivals.sweep(workspace);
+    assert_eq!(arrivals.swept().as_deref(), Some("/games/first"));
+
+    set_wows_dir("/games/second");
+    arrivals.sweep(workspace);
+    assert_eq!(arrivals.swept().as_deref(), Some("/games/second"), "the new directory is swept");
+}
+
+/// Sending every listed battle before the settings have loaded says why nothing was sent.
+#[test]
+fn sending_every_replay_before_the_settings_load_says_so() {
+    let mut window = crate::interaction_tests::open_bare_shell();
+    window.press_character('k', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(400));
+    window.type_text("send all");
+    window.advance(Duration::from_millis(400));
+
+    let command = window.by_test_id("palette-item-send-all-replays").expect("the command is offered");
+    window.click(command).expect("the command has a box");
+    window.advance(Duration::from_millis(400));
+
+    let toasts = window.texts_by_class("lui-toasts").concat();
+    assert!(toasts.contains(t!("ui.replay.contribute_not_ready").as_ref()), "{toasts:?}");
+}

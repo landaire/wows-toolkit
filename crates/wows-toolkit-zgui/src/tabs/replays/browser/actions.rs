@@ -1320,12 +1320,18 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
     let services = shell.services();
     let toasts = shell.toasts();
     let work = control.work;
-    let Some(mode) = services.settings.read_untracked(|settings| settings.data_sharing) else { return };
+    let Some(mode) = services.settings.read_untracked(|settings| settings.data_sharing) else {
+        toasts.warn(t!("ui.replay.contribute_not_ready").into_owned());
+        return;
+    };
     if mode == DataSharingMode::Off {
         toasts.warn(t!("ui.replay.contribute_nothing_shared").into_owned());
         return;
     }
-    let Some(contributor) = Contributor::new(services) else { return };
+    let Some(contributor) = Contributor::new(services) else {
+        toasts.warn(t!("ui.replay.contribute_not_ready").into_owned());
+        return;
+    };
     let Some(listing) = control.selected_listing() else { return };
     let paths = listing.listed_paths();
     if paths.is_empty() {
