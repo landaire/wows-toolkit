@@ -25,6 +25,7 @@ use crate::load::GameDataCache;
 use crate::replay_folder::MergedView;
 use crate::replay_folder::ReplayFolder;
 use crate::replay_folder::Seen;
+use crate::replay_folder::Subfolders;
 use crate::replay_folder::WatchPlan;
 use crate::replay_folder::WatchTargets;
 use crate::replay_index::SourceScope;
@@ -87,8 +88,8 @@ pub struct ScannedDir {
     pub walked: HashSet<PathBuf>,
 }
 
-/// Lists every non-temp `*.wowsreplay` file directly inside `replays_dir` and
-/// reads each one's header-only metadata. See [`scan_folder`].
+/// Lists every non-temp `*.wowsreplay` file in `replays_dir` and its
+/// subdirectories and reads each one's header-only metadata. See [`scan_folder`].
 pub fn scan_replay_files(
     replays_dir: &Path,
     reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
@@ -253,6 +254,8 @@ pub struct WatchSink {
     single_dir: bool,
     /// `Some` for a folder spread over overlay layers.
     merged: Option<MergedView>,
+    /// `Some` for a folder listed with its subdirectories.
+    subfolders: Option<Subfolders>,
     messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
     stopped: bool,
     /// Cleared when this is dropped, which the watcher's thread does as it
@@ -264,17 +267,26 @@ impl WatchSink {
     pub fn new(dir: PathBuf, messages: futures::channel::mpsc::UnboundedSender<WatchMessage>) -> Self {
         let targets = WatchTargets { contents: vec![dir], ..WatchTargets::default() };
 
-        Self::with_targets(targets, None, messages)
+        Self::with_targets(targets, None, None, messages)
     }
 
     fn with_targets(
         targets: WatchTargets,
         merged: Option<MergedView>,
+        subfolders: Option<Subfolders>,
         messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
     ) -> Self {
         let single_dir = targets.watched().len() == 1;
 
-        Self { targets, single_dir, merged, messages, stopped: false, thread_alive: Arc::new(AtomicBool::new(true)) }
+        Self {
+            targets,
+            single_dir,
+            merged,
+            subfolders,
+            messages,
+            stopped: false,
+            thread_alive: Arc::new(AtomicBool::new(true)),
+        }
     }
 
     pub fn handle(&mut self, event: notify::Result<notify::Event>) {
@@ -311,6 +323,14 @@ impl WatchSink {
             let _ = self.messages.unbounded_send(WatchMessage::Rescan);
             return None;
         }
+        // A subdirectory removed or moved away takes its replays with it, though no event names
+        // them.
+        let lost = gone
+            && self.subfolders.as_ref().is_some_and(|subfolders| event.paths.iter().any(|path| subfolders.lost(path)));
+        if lost {
+            let _ = self.messages.unbounded_send(WatchMessage::Rescan);
+            return None;
+        }
 
         let seen = match event.kind {
             notify::EventKind::Create(_)
@@ -340,6 +360,14 @@ impl WatchSink {
             if !self.single_dir && !self.targets.holds(&path) {
                 continue;
             }
+            // A subdirectory created or moved in brings replays no event names.
+            if seen == Seen::Created
+                && let Some(subfolders) = &mut self.subfolders
+            {
+                for replay in subfolders.arrived(&path) {
+                    let _ = self.messages.unbounded_send(WatchMessage::Missed(replay));
+                }
+            }
             let changes = match &mut self.merged {
                 Some(merged) => merged.apply(&path, seen),
                 None if is_finished_replay(&path) => vec![match seen {
@@ -350,6 +378,9 @@ impl WatchSink {
                 None => Vec::new(),
             };
             for change in changes {
+                if let (Some(subfolders), DirChange::Appeared(replay)) = (&mut self.subfolders, &change) {
+                    subfolders.hold(replay);
+                }
                 self.change(change);
             }
         }
@@ -440,10 +471,10 @@ pub fn start_planned_watch(
     plan: WatchPlan,
     messages: futures::channel::mpsc::UnboundedSender<WatchMessage>,
 ) -> Result<DirWatch, WatchStopCause> {
-    let WatchPlan { targets, merged } = plan;
+    let WatchPlan { targets, merged, subfolders } = plan;
     let watched = targets.watched();
 
-    start(&watched, WatchSink::with_targets(targets, merged, messages))
+    start(&watched, WatchSink::with_targets(targets, merged, subfolders, messages))
 }
 
 /// Watches `watched`, the first of which names the watch to a test.
@@ -467,14 +498,21 @@ fn filesystem_watch(watched: &[PathBuf], mut sink: WatchSink) -> Result<Filesyst
     use notify::Watcher as _;
 
     let thread_alive = Arc::clone(&sink.thread_alive);
+    let modes: Vec<notify::RecursiveMode> = watched
+        .iter()
+        .map(|dir| {
+            if sink.targets.is_recursive(dir) {
+                notify::RecursiveMode::Recursive
+            } else {
+                notify::RecursiveMode::NonRecursive
+            }
+        })
+        .collect();
     let watcher = notify::recommended_watcher(move |event| sink.handle(event))
         .map_err(|err| WatchStopCause::NoWatcher { error: err.to_string() })?;
     let mut watch = FilesystemWatch { watcher: ManuallyDrop::new(watcher), thread_alive };
-    for dir in watched {
-        watch
-            .watcher
-            .watch(dir, notify::RecursiveMode::NonRecursive)
-            .map_err(|err| WatchStopCause::NotWatchable { error: err.to_string() })?;
+    for (dir, mode) in watched.iter().zip(modes) {
+        watch.watcher.watch(dir, mode).map_err(|err| WatchStopCause::NotWatchable { error: err.to_string() })?;
     }
 
     Ok(watch)
@@ -744,5 +782,70 @@ mod tests {
             }
         };
         assert_eq!(stopped, Some(WatchStopCause::DirectoryGone));
+    }
+
+    /// A chosen folder's watch reports a replay written into a subfolder and the replays of a
+    /// subfolder moved in, and has the folder read again when a subfolder holding replays leaves.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_chosen_folder_is_watched_with_its_subfolders() {
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use super::DirChange;
+        use super::ReplayFolder;
+        use super::WatchMessage;
+
+        // Waits for a report `wanted` accepts, passing over other changes. A rescan or a stop
+        // that is not wanted fails the wait.
+        fn wait_for(
+            messages: &mut futures::channel::mpsc::UnboundedReceiver<WatchMessage>,
+            wanted: impl Fn(&WatchMessage) -> bool,
+        ) -> bool {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match messages.try_recv() {
+                    Ok(message) if wanted(&message) => return true,
+                    Ok(WatchMessage::Rescan | WatchMessage::Stopped(_)) => return false,
+                    Ok(WatchMessage::Change(_) | WatchMessage::Missed(_)) => {}
+                    Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                    Err(_) => return false,
+                }
+            }
+        }
+
+        let parent = tempfile::tempdir().expect("a temp directory");
+        let root = parent.path().join("chosen");
+        std::fs::create_dir_all(root.join("13.11.0.0")).expect("the directory is made");
+        std::fs::write(root.join("13.11.0.0/old.wowsreplay"), b"listed").expect("the file is written");
+        let (sender, mut messages) = futures::channel::mpsc::unbounded();
+        let plan = ReplayFolder::from_dir(root.clone()).watch_plan();
+        let _watch = super::start_planned_watch(plan, sender).expect("the directory is watchable");
+
+        let written = root.join("13.11.0.0/new.wowsreplay");
+        std::fs::write(&written, b"not yet a replay").expect("the file is written");
+        assert!(
+            wait_for(
+                &mut messages,
+                |message| matches!(message, WatchMessage::Change(DirChange::Appeared(path)) if *path == written)
+            ),
+            "a replay written into a subfolder is reported"
+        );
+
+        let staged = parent.path().join("staged");
+        std::fs::create_dir_all(staged.join("deeper")).expect("the directory is made");
+        std::fs::write(staged.join("deeper/moved.wowsreplay"), b"not a replay").expect("the file is written");
+        std::fs::rename(&staged, root.join("13.12.0.0")).expect("the directory is moved in");
+        let moved = root.join("13.12.0.0/deeper/moved.wowsreplay");
+        assert!(
+            wait_for(&mut messages, |message| matches!(message, WatchMessage::Missed(path) if *path == moved)),
+            "the replays of a subfolder moved in are reported"
+        );
+
+        std::fs::rename(root.join("13.11.0.0"), parent.path().join("away")).expect("the directory is moved out");
+        assert!(
+            wait_for(&mut messages, |message| matches!(message, WatchMessage::Rescan)),
+            "a subfolder moved out has the folder read again"
+        );
     }
 }

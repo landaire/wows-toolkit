@@ -469,10 +469,10 @@ pub async fn has_stale_records_in(
     Ok(false)
 }
 
-/// The replays of `folder`, newest first. A plain directory is walked as [`replays_under`] walks
-/// it.
+/// The replays of `folder`, newest first. The game's own plain directory is walked as
+/// [`replays_under`] walks it.
 fn folder_replays(folder: &ReplayFolder) -> Vec<PathBuf> {
-    if !folder.is_overlaid() {
+    if !folder.is_overlaid() && !folder.lists_subfolders() {
         return replays_under(folder.path());
     }
 
@@ -809,6 +809,20 @@ mod tests {
         // whoever put it there.
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("a.wowsreplay"));
+    }
+
+    /// A directory the reader chose is indexed with its subdirectories, as it is listed.
+    #[test]
+    fn a_chosen_folder_is_walked_with_its_subfolders() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        touch(dir.path(), "a.wowsreplay");
+        std::fs::create_dir_all(dir.path().join("sub/deeper")).expect("the directory can be made");
+        touch(&dir.path().join("sub/deeper"), "b.wowsreplay");
+
+        let mut found = folder_replays(&ReplayFolder::from_dir(dir.path().to_path_buf()));
+        found.sort();
+
+        assert_eq!(found, [dir.path().join("a.wowsreplay"), dir.path().join("sub/deeper/b.wowsreplay")]);
     }
 
     #[test]

@@ -5,6 +5,7 @@
 //! versioned folders setting is on, the game writes to `replays/<version>` instead of `replays`.
 
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::io;
@@ -44,6 +45,8 @@ pub struct ReplayFolder {
 pub struct WatchTargets {
     /// Real directories that hold the folder's entries.
     pub contents: Vec<PathBuf>,
+    /// Whether `contents` are watched with all their subdirectories.
+    pub nested: bool,
     /// Paths not yet created whose creation moves the folder. Watched through their parents.
     pub awaited: Vec<PathBuf>,
     /// Directories in which any new directory may be the folder of a new game version.
@@ -54,6 +57,7 @@ pub struct WatchTargets {
 pub struct WatchPlan {
     pub(crate) targets: WatchTargets,
     pub(crate) merged: Option<MergedView>,
+    pub(crate) subfolders: Option<Subfolders>,
 }
 
 /// The finished replays of an overlaid folder as last listed, so an event in either layer becomes
@@ -62,6 +66,12 @@ pub(crate) struct MergedView {
     files: InstallFiles,
     relative: PathBuf,
     known: BTreeMap<OsString, PathBuf>,
+}
+
+/// The directories of a folder listed with its subdirectories that hold listed replays, so the
+/// removal of one, which names none of its replays, is noticed.
+pub(crate) struct Subfolders {
+    holding: HashSet<PathBuf>,
 }
 
 /// What a filesystem event did to the file it names.
@@ -171,8 +181,15 @@ impl ReplayFolder {
     pub fn replay_files(&self) -> Vec<PathBuf> {
         match self.overlay() {
             Some((files, relative)) => overlay_replays(files, relative).into_values().collect(),
+            None if self.lists_subfolders() => nested_replays(&self.path),
             None => plain_replays(&self.path),
         }
+    }
+
+    /// Whether the replays in the folder's subdirectories are the folder's too: a directory the
+    /// reader chose is listed with them, the folder the game writes to is not.
+    pub fn lists_subfolders(&self) -> bool {
+        self.install.is_none()
     }
 
     /// The real directories that hold the folder's entries, upper first.
@@ -262,7 +279,7 @@ impl ReplayFolder {
     /// What a watch of the folder registers.
     pub fn watch_targets(&self) -> WatchTargets {
         let Some(install) = &self.install else {
-            return WatchTargets { contents: vec![self.path.clone()], ..WatchTargets::default() };
+            return WatchTargets { contents: vec![self.path.clone()], nested: true, ..WatchTargets::default() };
         };
 
         let overlay = matches!(install.files, InstallFiles::Overlay { .. });
@@ -311,8 +328,15 @@ impl ReplayFolder {
             relative: relative.to_path_buf(),
             known: overlay_replays(files, relative),
         });
+        let subfolders = self.lists_subfolders().then(|| Subfolders {
+            holding: nested_replays(&self.path)
+                .iter()
+                .filter_map(|replay| replay.parent())
+                .map(Path::to_path_buf)
+                .collect(),
+        });
 
-        WatchPlan { targets: self.watch_targets(), merged }
+        WatchPlan { targets: self.watch_targets(), merged, subfolders }
     }
 
     fn overlay(&self) -> Option<(&InstallFiles, &Path)> {
@@ -338,6 +362,11 @@ impl WatchTargets {
         watched
     }
 
+    /// Whether `dir`, one of [`Self::watched`], is registered with its subdirectories.
+    pub(crate) fn is_recursive(&self, dir: &Path) -> bool {
+        self.nested && self.contents.iter().any(|content| content == dir)
+    }
+
     /// Whether `path` is an entry of the folder. A platform that reports paths under another
     /// spelling than the one watched leaves an entry of a lone content directory recognizable
     /// only by not being under any other watched directory.
@@ -345,7 +374,7 @@ impl WatchTargets {
         let Some(parent) = path.parent() else {
             return false;
         };
-        if self.contents.iter().any(|dir| dir == parent) {
+        if self.contents.iter().any(|dir| dir == parent || (self.nested && parent.starts_with(dir))) {
             return true;
         }
 
@@ -365,6 +394,39 @@ impl WatchTargets {
         }
 
         path.parent().is_some_and(|parent| self.version_parents.iter().any(|dir| dir == parent)) && path.is_dir()
+    }
+}
+
+impl Subfolders {
+    /// Notes that `replay` is listed, so its directory's removal is noticed.
+    pub(crate) fn hold(&mut self, replay: &Path) {
+        if let Some(dir) = replay.parent() {
+            self.holding.insert(dir.to_path_buf());
+        }
+    }
+
+    /// Whether `path`, now gone, held listed replays.
+    pub(crate) fn lost(&self, path: &Path) -> bool {
+        if std::fs::symlink_metadata(path).is_ok() {
+            return false;
+        }
+
+        self.holding.iter().any(|dir| dir.starts_with(path))
+    }
+
+    /// The replays in `path` when it is a directory just created or moved in, which no event
+    /// names. Each is held.
+    pub(crate) fn arrived(&mut self, path: &Path) -> Vec<PathBuf> {
+        if !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+            return Vec::new();
+        }
+
+        let replays = nested_replays(path);
+        for replay in &replays {
+            self.hold(replay);
+        }
+
+        replays
     }
 }
 
@@ -616,6 +678,30 @@ fn plain_replays(dir: &Path) -> Vec<PathBuf> {
     entries.flatten().filter_map(|entry| listed_replay(&entry)).collect()
 }
 
+/// The finished replays in `root` and every directory under it. A directory reached through a
+/// symlink is not entered, so a link back up the tree cannot loop the walk. A directory that
+/// cannot be read holds none, so one bad directory does not lose the rest.
+fn nested_replays(root: &Path) -> Vec<PathBuf> {
+    let mut replays = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            // `DirEntry::file_type` does not follow a symlink.
+            if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+                pending.push(entry.path());
+                continue;
+            }
+            replays.extend(listed_replay(&entry));
+        }
+    }
+
+    replays
+}
+
 /// The finished replays of the overlaid folder `relative`, by name. A folder that cannot be listed
 /// holds none, as a plain directory that cannot be read does.
 fn overlay_replays(files: &InstallFiles, relative: &Path) -> BTreeMap<OsString, PathBuf> {
@@ -819,5 +905,48 @@ mod tests {
 
         assert!(folder.refresh(), "the folder moved");
         assert_eq!(folder.path(), root.join("replays/13.12.0.0"));
+    }
+
+    /// A directory the reader chose lists the replays of its subdirectories, once each, and a
+    /// symlink back up the tree does not loop the walk.
+    #[test]
+    fn a_chosen_folder_lists_its_subfolders_without_following_a_directory_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write(&root.join("a.wowsreplay"), "a");
+        write(&root.join("13.11.0.0/b.wowsreplay"), "b");
+        write(&root.join("13.11.0.0/deeper/c.wowsreplay"), "c");
+        write(&root.join("13.11.0.0/temp.wowsreplay"), "battle in progress");
+        write(&root.join("13.11.0.0/notes.txt"), "");
+        std::os::unix::fs::symlink(root, root.join("13.11.0.0/loop")).unwrap();
+
+        let folder = ReplayFolder::from_dir(root.to_path_buf());
+        let mut listed: Vec<PathBuf> =
+            folder.replay_files().iter().map(|path| path.strip_prefix(root).unwrap().to_path_buf()).collect();
+        listed.sort();
+
+        assert_eq!(
+            listed,
+            [
+                PathBuf::from("13.11.0.0/b.wowsreplay"),
+                PathBuf::from("13.11.0.0/deeper/c.wowsreplay"),
+                PathBuf::from("a.wowsreplay"),
+            ]
+        );
+        assert!(folder.watch_targets().nested, "the watch covers the subfolders");
+    }
+
+    /// The folder the game writes to is listed alone, as the game never records below it.
+    #[test]
+    fn an_install_folder_lists_no_subfolders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write(&root.join("replays/a.wowsreplay"), "a");
+        write(&root.join("replays/kept/b.wowsreplay"), "b");
+
+        let folder = ReplayFolder::from_install(root, None);
+
+        assert_eq!(folder.replay_files(), [root.join("replays/a.wowsreplay")]);
+        assert!(!folder.watch_targets().nested);
     }
 }
