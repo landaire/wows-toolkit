@@ -230,6 +230,21 @@ fn typing_narrows_the_root_list_and_enter_runs_the_entry() {
     assert!(shown(&window, "palette-item-go-to-stats"), "and the whole list is back");
 }
 
+/// Home and End move the caret in the field rather than the highlight, so a query can be edited
+/// at either end.
+#[test]
+fn home_and_end_move_the_caret_in_the_field() {
+    let mut window = open_window(TestModes::default());
+
+    shortcut(&mut window, 'k');
+    type_text(&mut window, "tat");
+    press(&mut window, NamedKey::Home);
+    type_text(&mut window, "s");
+    press(&mut window, NamedKey::End);
+    type_text(&mut window, "s");
+    assert!(shown(&window, "palette-item-go-to-stats"), "the query reads \"stats\" and finds the entry");
+}
+
 /// A mode replaces the root list under a header leading back. Backspace in its empty field, or
 /// Escape once the query is empty, returns to the root list.
 #[test]

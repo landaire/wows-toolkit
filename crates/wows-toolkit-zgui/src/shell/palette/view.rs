@@ -552,7 +552,9 @@ fn PaletteField(
                     return;
                 }
 
-                if listbox.is_some_and(|listbox| listbox.handle(&ev.key)) {
+                // Home and End move the caret in the query rather than the highlight.
+                let caret = matches!(ev.key, Key::Named(NamedKey::Home | NamedKey::End));
+                if !caret && listbox.is_some_and(|listbox| listbox.handle(&ev.key)) {
                     ev.prevent_default();
                     ev.stop_propagation();
                 }
