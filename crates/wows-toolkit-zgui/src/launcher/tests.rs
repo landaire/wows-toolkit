@@ -374,6 +374,16 @@ fn after_opting_out_operations_are_refused_and_results_land_without_follow_on_wo
 }
 
 #[test]
+fn turning_the_launcher_on_again_looks_for_installs_again() {
+    let launcher = ready();
+    launcher.model.disable();
+
+    launcher.model.enable();
+
+    assert!(launcher.model.with_untracked(|state| state.launcher.is_discovering()));
+}
+
+#[test]
 fn play_reads_the_default_account_when_ready() {
     let launcher = ready();
 

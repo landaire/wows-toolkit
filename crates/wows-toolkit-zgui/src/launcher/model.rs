@@ -198,9 +198,10 @@ impl LauncherModel {
     }
 
     /// Turns the launcher off. Work already running finishes and its results are kept; nothing
-    /// new starts.
+    /// new starts until it is turned on again, which starts the work afresh.
     pub fn disable(self) {
         self.clear_pending_play();
+        self.working.set_value(false);
         self.edit_settings(LauncherSettings::disable);
     }
 
