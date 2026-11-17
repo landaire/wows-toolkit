@@ -280,6 +280,8 @@ pub struct ArmorWorkspace {
     pub options_scene: StoredValue<Option<(PaneId, Option<usize>)>>,
     pub zone_filter: RwSignal<String, LocalStorage>,
     pub part_filter: RwSignal<String, LocalStorage>,
+    /// The pen checker's ship search, held here so folding the section keeps it.
+    pub pen_search: RwSignal<String, LocalStorage>,
     /// The mesh whose material the textures section shows open, as the viewport menu chose it.
     pub texture_focus: RwSignal<Option<TextureFocus>, LocalStorage>,
     /// The scenes whose textures are being read, by scene identity. A read ends by leaving it.
@@ -323,6 +325,7 @@ impl ArmorWorkspace {
             options_scene: StoredValue::new(None),
             zone_filter: RwSignal::new_local(String::new()),
             part_filter: RwSignal::new_local(String::new()),
+            pen_search: RwSignal::new_local(String::new()),
             texture_focus: RwSignal::new_local(None),
             texture_reads: RwSignal::new_local(HashSet::new()),
         };

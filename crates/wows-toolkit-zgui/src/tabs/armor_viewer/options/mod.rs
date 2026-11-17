@@ -61,6 +61,7 @@ use crate::tabs::armor_viewer::options::filter::MarkedLabel;
 use crate::tabs::armor_viewer::options::filter::RailFilter;
 use crate::tabs::armor_viewer::options::tab_strip::OptionTabStripProps;
 use crate::tabs::armor_viewer::panels::pen::PenCheckPanelProps;
+use crate::tabs::armor_viewer::panels::pen::ShipSearchInputs;
 use crate::tabs::armor_viewer::panels::splash::SplashReadoutPanelProps;
 use crate::tabs::armor_viewer::panels::trajectory::TrajectoryPanelProps;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
@@ -520,11 +521,11 @@ fn pen_check_body(cx: &SectionCx) -> Option<AnyView> {
         let assets = Signal::derive_local(move || library.ready().map(|bundle| Arc::clone(&bundle.assets)));
         let playback_at = Signal::derive_local(move || workspace.playback_at.get());
         let on_seek = UnsyncCallback::new(move |clock| workspace.seek_to(clock));
+        let search = ShipSearchInputs { catalog, assets, text: workspace.pen_search };
         AnyView::new(view! {
             PenCheckPanel(
                 pen = workspace.pen,
-                catalog = catalog,
-                assets = assets,
+                search = search,
                 incoming = workspace.incoming,
                 playback_at = playback_at,
                 viewport = cx.viewport,

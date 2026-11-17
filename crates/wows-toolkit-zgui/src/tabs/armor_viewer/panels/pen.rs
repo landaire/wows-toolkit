@@ -234,13 +234,21 @@ impl PenetrationState {
     }
 }
 
+/// What the ship search reads: the ships to search, and the text typed, which the caller owns so
+/// it outlives the panel.
+#[derive(Clone, Copy)]
+pub struct ShipSearchInputs {
+    pub catalog: Signal<Option<Arc<ShipCatalog>>, LocalStorage>,
+    pub assets: Signal<Option<Arc<ShipAssets>>, LocalStorage>,
+    pub text: RwSignal<String, LocalStorage>,
+}
+
 /// The checker's section: the plate being read against and the IFHE skill, the search, one block
 /// per ship being compared, and the incoming fire log of a ship opened from a replay.
 #[component]
 pub fn PenCheckPanel(
     pen: RwSignal<PenetrationState, LocalStorage>,
-    #[prop(into)] catalog: Signal<Option<Arc<ShipCatalog>>, LocalStorage>,
-    #[prop(into)] assets: Signal<Option<Arc<ShipAssets>>, LocalStorage>,
+    search: ShipSearchInputs,
     incoming: RwSignal<IncomingFire, LocalStorage>,
     #[prop(into)] playback_at: Signal<Option<GameClock>, LocalStorage>,
     viewport: ArmorViewportState,
@@ -319,7 +327,7 @@ pub fn PenCheckPanel(
                     TooltipContent {{locale.text("ui.armor.pen.ifhe_tooltip")}}
                 }
             }
-            ShipSearch(pen = pen, catalog = catalog, assets = assets)
+            ShipSearch(pen = pen, inputs = search)
             column(class = "wt-armor-pen__ships-slot") {
                 {ships}
             }
@@ -331,12 +339,8 @@ pub fn PenCheckPanel(
 /// The search that adds a ship to the comparison list, which both the checker and the trajectory
 /// casts draw their attackers from.
 #[component]
-fn ShipSearch(
-    pen: RwSignal<PenetrationState, LocalStorage>,
-    catalog: Signal<Option<Arc<ShipCatalog>>, LocalStorage>,
-    assets: Signal<Option<Arc<ShipAssets>>, LocalStorage>,
-) -> impl IntoView {
-    let query = RwSignal::new_local(String::new());
+fn ShipSearch(pen: RwSignal<PenetrationState, LocalStorage>, inputs: ShipSearchInputs) -> impl IntoView {
+    let ShipSearchInputs { catalog, assets, text: query } = inputs;
     let escape = EscapeClears::new(query);
     // Flattened once per catalog: thousands of names are folded for the search.
     let flattened: StoredValue<Option<FlattenedCatalog>, LocalStorage> = StoredValue::new_local(None);

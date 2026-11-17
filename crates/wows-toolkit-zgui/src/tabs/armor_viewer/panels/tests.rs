@@ -53,6 +53,7 @@ use crate::tabs::armor_viewer::panels::legend::LegendState;
 use crate::tabs::armor_viewer::panels::pen::PenCheckPanelProps;
 use crate::tabs::armor_viewer::panels::pen::PenetrationState;
 use crate::tabs::armor_viewer::panels::pen::PlateUnderPointer;
+use crate::tabs::armor_viewer::panels::pen::ShipSearchInputs;
 use crate::tabs::armor_viewer::panels::splash::SplashReadoutPanelProps;
 use crate::tabs::armor_viewer::panels::trajectory::TrajectoryPanelProps;
 use crate::tabs::armor_viewer::test_fixtures::add_cast_arc;
@@ -97,14 +98,14 @@ fn Page(caught: Caught, catalog: Option<Arc<ShipCatalog>>, assets: Option<Arc<Sh
     caught.set(Some(Mounted { shell, legend, saved, pen, viewport }));
     let catalog = Signal::stored_local(catalog);
     let assets = Signal::stored_local(assets);
+    let search = ShipSearchInputs { catalog, assets, text: RwSignal::new_local(String::new()) };
 
     view! {
         row(style = "width: 100%; height: 100%; gap: 12px; padding: 8px; background-color: var(--lui-color-bg)") {
             column(style = "width: 360px; gap: 16px") {
                 PenCheckPanel(
                     pen = pen,
-                    catalog = catalog,
-                    assets = assets,
+                    search = search,
                     incoming = incoming,
                     playback_at = Signal::stored_local(None),
                     viewport = viewport

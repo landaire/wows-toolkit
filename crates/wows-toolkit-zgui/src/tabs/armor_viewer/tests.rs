@@ -1171,6 +1171,24 @@ fn a_search_for_hull_finds_the_configuration_section() {
     assert!(!armor.tab_state(OptionsTab::Ship).disabled, "the ship tab holds a match");
 }
 
+/// The pen checker's ship search keeps its text while its section is folded.
+#[test]
+fn the_pen_ship_search_survives_a_fold() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(two_zone_scene(), &[OptionSection::PenCheck]);
+    let typed = |armor: &mut ArmorWindow| {
+        let search = armor.window.by_test_id("armor-pen-search").expect("the search is shown");
+        armor.window.a11y(search).and_then(|state| state.value).unwrap_or_default()
+    };
+    armor.type_into("armor-pen-search", "mont");
+
+    armor.click("armor-options-section-PenCheck");
+    assert!(!armor.shown("armor-pen-search"), "the section folds");
+    armor.click("armor-options-section-PenCheck");
+
+    assert_eq!(typed(&mut armor), "mont");
+}
+
 /// A tab is chosen by a click, by the arrow keys on the strip, and by Ctrl+Tab from the viewer, and
 /// the choice is saved.
 #[test]
