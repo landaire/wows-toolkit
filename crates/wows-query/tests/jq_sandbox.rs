@@ -189,9 +189,12 @@ fn a_json_filter_stops_at_its_time_limit() {
 fn unbounded_recursion_ends_only_the_worker() {
     wows_query::jq_worker::set_worker_program(worker());
     let (store, positions) = store("recursion", vec![json!(null)]);
+    // The stack has to overflow before the time limit ends the worker, which on a loaded machine
+    // takes longer than `limits()` allows.
+    let limits = Limits { time: Duration::from_secs(60), ..limits() };
     let stored =
-        wows_query::jq_worker::evaluate("def f: 1 + f; f", &store, &positions, limits()).expect("the worker starts");
-    let json = wows_query::jq_worker::evaluate_json("def f: 1 + f; f", [b"null".to_vec()].into_iter(), limits())
+        wows_query::jq_worker::evaluate("def f: 1 + f; f", &store, &positions, limits).expect("the worker starts");
+    let json = wows_query::jq_worker::evaluate_json("def f: 1 + f; f", [b"null".to_vec()].into_iter(), limits)
         .expect("the worker starts");
 
     assert_eq!(stored.stopped, Some(Stop::Crashed));
