@@ -73,7 +73,7 @@ pub fn skill_grid(version: &Version, species: Species) -> Option<&'static [GridS
 /// One skill in a SkillGridRow, translated and flagged learned. Carries the
 /// stable CrewSkillName as its identity. `point_cost` is `None` when the cost
 /// for this ship species is unknown (event ships not enumerated by CrewSkillTiers).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SkillGridSkill {
     pub internal_name: CrewSkillName,
@@ -87,7 +87,7 @@ pub struct SkillGridSkill {
 }
 
 /// A row of the captain skill grid: all skills sharing one point cost, or `None` for species with no cost table.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SkillGridRow {
     pub point_cost: Option<SkillPointCost>,

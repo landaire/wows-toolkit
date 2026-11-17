@@ -67,7 +67,7 @@ use crate::links;
 /// are derived per-cell in `columns::cell_value` from the plain fields below
 /// (relation, division/abuser flags, skill tier, PR category), so this type
 /// stays a pure data record.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlayerRow {
     pub db_id: AccountId,
     pub team_id: TeamId,

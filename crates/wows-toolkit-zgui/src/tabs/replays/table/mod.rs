@@ -176,9 +176,18 @@ impl PartialEq for ModelRows {
 }
 
 impl ModelRows {
-    fn of(model: &ReplayReportModel) -> Self {
+    /// `model`'s rows. A row equal to the one `previous` shares at its place keeps that shared
+    /// value, so a change to other rows leaves its cells and open tooltips as they are.
+    fn of(model: &ReplayReportModel, previous: Option<&Self>) -> Self {
         let all: Arc<[PlayerRow]> = model.rows.clone().into();
-        let shared = all.iter().map(|row| Arc::new(row.clone())).collect();
+        let shared = all
+            .iter()
+            .enumerate()
+            .map(|(position, row)| {
+                let kept = previous.and_then(|previous| previous.shared.get(position)).filter(|kept| ***kept == *row);
+                kept.map_or_else(|| Arc::new(row.clone()), Arc::clone)
+            })
+            .collect();
 
         Self { all, shared, match_contribution_withheld: model.match_contribution_withheld }
     }
@@ -309,7 +318,7 @@ pub fn PlayerTable(
         services.settings.read(|settings| settings.replay_sort).unwrap_or_else(|| unsaved_sort.get())
     });
 
-    let model_rows = Memo::new(move |_| model.with(|model| ModelRows::of(model)));
+    let model_rows = Memo::new(move |previous: Option<&ModelRows>| model.with(|model| ModelRows::of(model, previous)));
     let rows = Memo::new(move |_| {
         let order = sort.get();
         let debug = debug.get();

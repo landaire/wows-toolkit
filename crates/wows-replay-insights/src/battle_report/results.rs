@@ -426,7 +426,7 @@ impl ControllerDamage {
 }
 
 /// Damage breakdown by type.
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct Damage {
     pub ap: Option<u64>,
     pub sap: Option<u64>,
@@ -440,7 +440,7 @@ pub struct Damage {
 }
 
 /// Hit counts by weapon type.
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct Hits {
     pub ap: Option<u64>,
     pub sap: Option<u64>,
@@ -454,7 +454,7 @@ pub struct Hits {
 }
 
 /// Potential damage breakdown by source type.
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct PotentialDamage {
     pub artillery: u64,
     pub torpedoes: u64,
@@ -464,7 +464,7 @@ pub struct PotentialDamage {
 /// Per-victim damage interaction. Totals + percentages for tables, plus the
 /// per-type breakdown the UI hover needs (the export projects this down to
 /// totals only).
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct DamageInteraction {
     pub damage_dealt: u64,
     pub damage_dealt_by_type: Damage,

@@ -15,7 +15,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::skill_translation_keys_for;
 
 /// An effective fire chance and the names of the modifiers and ships it reports.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FireChance {
     pub analysis: EffectiveFireChance,
     pub names: FireChanceNames,

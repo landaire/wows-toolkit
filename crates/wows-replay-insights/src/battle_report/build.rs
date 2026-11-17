@@ -33,14 +33,14 @@ pub struct SkillInfo {
 }
 
 /// A translated consumable ability.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct TranslatedAbility {
     pub name: Option<String>,
     pub game_params_name: String,
 }
 
 /// A translated ship module (upgrade).
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct TranslatedModule {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -48,7 +48,7 @@ pub struct TranslatedModule {
 }
 
 /// A player's complete translated build including modules, abilities, and skills.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct TranslatedBuild {
     /// Upgrade slots in slot order; `None` is an empty slot. Length is the ship's
     /// total modernization slot count.
@@ -186,7 +186,7 @@ impl TranslatedBuild {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct AchievementResult {
     pub name: String,
     pub display_name: String,
@@ -195,7 +195,7 @@ pub struct AchievementResult {
     pub count: usize,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct RibbonResult {
     pub name: String,
     pub display_name: String,
@@ -206,7 +206,7 @@ pub struct RibbonResult {
     pub count: u64,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ConsumableResult {
     pub display_name: String,
     pub description: String,

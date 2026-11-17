@@ -577,6 +577,24 @@ fn each_twitch_login_in_the_menu_is_marked_as_a_copy() {
     }
 }
 
+/// A Twitch lookup that names one player changes that row alone: every other row keeps its cells.
+#[test]
+fn a_change_to_one_row_keeps_the_cells_of_the_others() {
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, sample_model(), false);
+    let model = MODEL.with(Cell::take).expect("the table was built");
+    let kept = kills_cell(&window, 2);
+    assert!(window.by_test_id("player-twitch").is_none(), "no row has a Twitch chip yet");
+
+    let mut looked_up = sample_model();
+    let row = looked_up.rows.iter_mut().find(|row| row.db_id.raw() == 1).expect("the sample has player 1");
+    row.twitch_candidates = vec![SniperCandidate { login: "harvey635".to_owned(), minutes: vec![3] }];
+    model.set(Rc::new(looked_up));
+    window.advance(Duration::from_millis(300));
+
+    assert!(window.by_test_id("player-twitch").is_some(), "the named row shows its chip");
+    assert_eq!(kills_cell(&window, 2), kept, "another row keeps its cell");
+}
+
 #[test]
 fn without_a_detail_no_row_offers_to_open() {
     let (mut window, expanded) = open_table_over(Drawing::Recorded, Scheme::Dark, sample_model(), false);

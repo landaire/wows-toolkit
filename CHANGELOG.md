@@ -77,6 +77,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Read the Player Tracker tables again when a battle is recorded while the tab is open, and run a search again when a battle that lands in a watched folder is indexed. A battle recorded during an indexing pass is read once the pass ends
 - *(egui)* Record the players met in a replay by the rules the zgui app and the replay index share, so reading an older replay no longer puts back a name or clan the player has since changed
 - *(zgui)* Keep the player table's scroll position, selection and keyboard row when a column filter or the language changes
+- *(zgui)* Keep the player table's other rows and their open tooltips when a rating table, Twitch lookup or stat hide changes one row
 - *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
 - *(zgui)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state
 - *(zgui)* Finish a renderer video export when its viewport or window is closed, and say where the video was saved or that it was copied
