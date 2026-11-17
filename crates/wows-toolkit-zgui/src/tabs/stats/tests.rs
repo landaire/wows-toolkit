@@ -233,6 +233,75 @@ fn the_status_bar_hides_and_shows_the_chart_dock() {
     assert!(showing(&mut window), "and opens it again");
 }
 
+/// Makes the database refuse a chart settings row naming `stat`, or stops it refusing. Other
+/// tests share the database, so only the rows of a statistic they never chart are refused.
+fn refuse_chart_rows_naming(stat: ChartableStat, refuse: bool) {
+    let name = serde_json::to_string(&stat).expect("a statistic serializes");
+    let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+    runtime.block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+        for event in ["INSERT", "UPDATE"] {
+            let trigger = format!("refuse_chart_rows_{}", event.to_lowercase());
+            let statement = if refuse {
+                format!(
+                    "CREATE TRIGGER IF NOT EXISTS {trigger} BEFORE {event} ON settings \
+                     WHEN NEW.key = '{key}' AND instr(NEW.value, '{name}') > 0 \
+                     BEGIN SELECT RAISE(ABORT, 'refused by the test'); END",
+                    key = super::CHARTS_SETTINGS_KEY,
+                )
+            } else {
+                format!("DROP TRIGGER IF EXISTS {trigger}")
+            };
+            sqlx::query(&statement).execute(&pool).await.expect("the trigger is changed");
+        }
+    });
+}
+
+/// The stats of the saved chart row, or `None` when no row has been written.
+fn saved_chart_stats() -> Option<Vec<ChartableStat>> {
+    let runtime = wows_toolkit_services::runtime::build().expect("a tokio runtime starts");
+    runtime.block_on(async {
+        let pool = wows_toolkit_config::open_db().await.expect("the settings database opens");
+        let saved =
+            wows_toolkit_config::queries::try_get_setting::<Vec<ChartSettings>>(&pool, super::CHARTS_SETTINGS_KEY)
+                .await
+                .expect("the saved charts are read")?;
+
+        Some(saved.into_iter().map(|settings| settings.stat).collect())
+    })
+}
+
+/// Adds a chart whose settings row the database refuses, and lets the write fail.
+fn fail_a_chart_save(window: &mut HeadlessWindow) {
+    refuse_chart_rows_naming(ChartableStat::SpottingDamage, true);
+    click(window, "stats-add-chart");
+    click(window, &format!("stats-add-chart-stat-{}", ChartableStat::SpottingDamage as usize));
+    settle_in_real_time(window);
+}
+
+#[test]
+fn a_failed_chart_save_is_shown_until_a_retry_writes_it() {
+    let mut window = open_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    fail_a_chart_save(&mut window);
+    assert!(window.by_test_id("stats-charts-error").is_some(), "the refused write shows in the bar");
+    let saved = saved_chart_stats();
+    assert!(
+        !saved.is_some_and(|stats| stats.contains(&ChartableStat::SpottingDamage)),
+        "the refused write is not saved"
+    );
+
+    click(&mut window, "stats-retry-chart-load");
+    settle_in_real_time(&mut window);
+    assert!(window.by_test_id("stats-charts-error").is_some(), "a retry that fails again stays shown");
+
+    refuse_chart_rows_naming(ChartableStat::SpottingDamage, false);
+    click(&mut window, "stats-retry-chart-load");
+    settle_in_real_time(&mut window);
+    assert!(window.by_test_id("stats-charts-error").is_none(), "the error goes once the write lands");
+    let saved = saved_chart_stats().expect("the retry wrote the chart row");
+    assert!(saved.contains(&ChartableStat::SpottingDamage), "the retry wrote the charts on screen");
+}
+
 #[test]
 fn a_chart_tab_names_its_statistic_and_how_it_is_plotted() {
     let damage = ChartableStat::Damage.label();
@@ -508,4 +577,13 @@ fn the_stats_session_control_renders_in_dark_and_light() {
         settle_in_real_time(&mut window);
         println!("{}", save_shot(&mut window, name).display());
     }
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the tab"]
+fn the_chart_save_error_renders() {
+    let mut window = open_stats(review_options(Appearance::Dark));
+    fail_a_chart_save(&mut window);
+    println!("{}", save_shot(&mut window, "stats-save-error").display());
+    refuse_chart_rows_naming(ChartableStat::SpottingDamage, false);
 }

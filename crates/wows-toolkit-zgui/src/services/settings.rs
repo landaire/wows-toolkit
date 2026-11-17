@@ -27,6 +27,8 @@ use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::task::spawn_detached;
 
+use crate::services::TokioError;
+
 /// Where the settings read has got.
 pub enum SettingsState {
     Loading,
@@ -149,23 +151,31 @@ impl Settings {
     /// Fire and forget: the control has already moved, and a failed write is logged rather than
     /// shown, as the other front ends do. Saves of one key commit in the order they were made.
     pub fn save<T: Serialize>(self, key: &'static str, value: &T) {
+        self.save_reported(key, value, |_| {});
+    }
+
+    /// [`Self::save`] for a caller that shows a failed write; the failure is logged either way.
+    /// `report` gets how the write ended, unless a newer save of `key` has been made by then:
+    /// that save's result is the one that holds.
+    pub fn save_reported<T: Serialize>(
+        self,
+        key: &'static str,
+        value: &T,
+        report: impl FnOnce(Result<(), SaveError>) + 'static,
+    ) {
         let json = match serde_json::to_string(value) {
             Ok(json) => json,
-            Err(err) => {
-                tracing::error!("settings: {key} could not be serialized: {err}");
-                return;
-            }
+            Err(err) => return report(Err(logged(key, SaveError::Serialize(err)))),
         };
 
         #[cfg(test)]
         SAVED.with(|saved| saved.borrow_mut().push((key, json.clone())));
 
         let Some(writer) = self.writer.get_value() else {
-            tracing::warn!("settings: {key} was not saved because the config database is not open");
-            return;
+            return report(Err(logged(key, SaveError::DatabaseClosed)));
         };
 
-        self.commit_detached(writer.begin(key, json));
+        self.commit_detached(key, writer.begin(key, json), report);
     }
 
     /// Writes the armor viewer's defaults row, which is a table of its own rather than a key, and
@@ -185,7 +195,7 @@ impl Settings {
             return;
         };
 
-        self.commit_detached(writer.begin_armor_defaults(row));
+        self.commit_detached("the armor viewer defaults", writer.begin_armor_defaults(row), |_| {});
     }
 
     /// Puts the persisted settings back to their defaults, as the egui crash window's Clear
@@ -228,24 +238,39 @@ impl Settings {
         });
     }
 
-    /// Commits `pending` once its turn comes, unless a newer save has overtaken it.
+    /// Commits `pending` once its turn comes, unless a newer save has overtaken it, logs a failure
+    /// as `what`, and tells `report` how the write ended while it is still the newest save.
     ///
     /// On the tokio runtime rather than the UI executor, and tracked: a save must land even when
     /// the view that made it goes away first, and when the app quits straight after it
     /// ([`finish_pending_writes`]).
-    fn commit_detached(self, pending: PendingWrite) {
-        let key = pending.key();
+    fn commit_detached(
+        self,
+        what: &'static str,
+        pending: PendingWrite,
+        report: impl FnOnce(Result<(), SaveError>) + 'static,
+    ) {
         let Some(runtime) = self.runtime.get_value() else {
-            tracing::error!("settings: {key} was not written because no tokio runtime is running");
-            return;
+            return report(Err(logged(what, SaveError::Incomplete(TokioError::NoRuntime))));
         };
-
-        runtime.spawn(self.tracked(async move {
-            let Some(write) = pending.turn().await else { return };
-            if let Err(err) = write.commit().await {
-                tracing::error!("settings: {key} could not be written: {err}");
-            }
+        let stamp = pending.stamp();
+        let written = runtime.spawn(self.tracked(async move {
+            let write = pending.turn().await?;
+            // Logged here: after the window loop returns, the UI task below never runs again.
+            Some(write.commit().await.map_err(|err| logged(what, SaveError::Write(err))))
         }));
+        spawn_detached(async move {
+            let result = match written.await {
+                Ok(None) => return,
+                Ok(Some(committed)) => committed,
+                Err(err) => Err(logged(what, SaveError::Incomplete(TokioError::Join(err)))),
+            };
+            // The write order is released on the tokio runtime, so a newer save of the key can
+            // finish and report before this task runs again.
+            if stamp.is_newest() {
+                report(result);
+            }
+        });
     }
 
     /// `write` counted among this window's writes and the process's, so both the services going
@@ -291,6 +316,24 @@ fn wait_for_writes(runtime: &Runtime, writes: &TaskTracker, timeout: Duration) {
     if runtime.block_on(async { tokio::time::timeout(timeout, writes.wait()).await }).is_err() {
         tracing::warn!("settings: {} writes were still pending and are lost", writes.len());
     }
+}
+
+/// Why a settings write did not land.
+#[derive(Debug, thiserror::Error)]
+pub enum SaveError {
+    #[error("the value could not be serialized: {0}")]
+    Serialize(#[source] serde_json::Error),
+    #[error("the config database is not open")]
+    DatabaseClosed,
+    #[error("{0}")]
+    Write(#[source] sqlx::Error),
+    #[error("the write did not complete: {0}")]
+    Incomplete(#[source] TokioError),
+}
+
+fn logged(what: &str, err: SaveError) -> SaveError {
+    tracing::warn!("settings: {what} was not saved: {err}");
+    err
 }
 
 /// What [`saved_for_test`] names a write of the armor viewer defaults row.

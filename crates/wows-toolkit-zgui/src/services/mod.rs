@@ -40,6 +40,7 @@ pub use crate::services::jobs::Progress;
 pub use crate::services::session::Session;
 #[cfg(test)]
 pub use crate::services::settings::CLEARED;
+pub use crate::services::settings::SaveError;
 pub use crate::services::settings::Settings;
 pub use crate::services::settings::SettingsState;
 pub use crate::services::settings::WRITE_GRACE;

@@ -39,6 +39,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use serde::Serialize;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::queries;
 use wows_toolkit_icons::Glyph;
@@ -66,6 +67,7 @@ use zgui::css;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
+use zgui::reactive::Owner;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -78,6 +80,7 @@ use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
@@ -117,6 +120,7 @@ use zgui_ui_icons::set::mark::PLUS;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
+use crate::services::SaveError;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::palette::StatsSource;
@@ -429,18 +433,30 @@ pub fn StatsBody(
     };
 
     let charts = RwSignal::new_local(Vec::<ChartSlot>::new());
+    let slot_owner = StoredValue::new(Owner::current().expect("a component body runs under an owner"));
     let next_chart_id = StoredValue::new(0_usize);
     let dock = DockState::new(PanelRegistry::new());
     size_regions(dock);
     register_panels(
         dock,
-        PanelSources { charts, games, filtered, per_ship, filters, personal_rating, session, clear_error, services },
+        PanelSources {
+            charts,
+            slot_owner,
+            games,
+            filtered,
+            per_ship,
+            filters,
+            personal_rating,
+            session,
+            clear_error,
+            services,
+        },
     );
 
     let open_chart = move |settings: ChartSettings, placement: DockTarget| {
         let id = settings.id.unwrap_or_else(|| next_chart_id.get_value());
         next_chart_id.set_value(next_chart_id.get_value().max(id.saturating_add(1)));
-        let slot = chart_slot(charts, id, settings);
+        let slot = chart_slot(charts, slot_owner, id, settings);
         if let Err(err) = dock.add_panel(placement, chart_entry(slot.id)) {
             tracing::warn!("stats: chart {id} was not added: {err}");
         }
@@ -465,6 +481,8 @@ pub fn StatsBody(
         user_modified: StoredValue::new(false),
         restoring: StoredValue::new(false),
         saved_layout: StoredValue::new(None),
+        failed_saves: StoredValue::new(BTreeSet::new()),
+        error: charts_error,
     };
 
     // A chart whose tab was closed is let go, and is not reopened by the next load.
@@ -489,7 +507,7 @@ pub fn StatsBody(
             }
             persistence.user_modified.set_value(true);
             persistence.enabled.set_value(true);
-            services.settings.save(CHARTS_SETTINGS_KEY, &settings);
+            save_chart_row(services, persistence, ChartRow::Settings, &settings);
         });
         effect(move |_| {
             let layout = dock.dump();
@@ -507,9 +525,9 @@ pub fn StatsBody(
             }
             persistence.user_modified.set_value(true);
             persistence.enabled.set_value(true);
-            services.settings.save(CHARTS_DOCK_LAYOUT_KEY, &layout);
+            save_chart_row(services, persistence, ChartRow::Layout, &layout);
         });
-        load_charts(services, dock, charts, next_chart_id, persistence, charts_error, open_chart);
+        load_charts(services, dock, charts, slot_owner, next_chart_id, persistence, open_chart);
     }
 
     publish_toggles(dock);
@@ -579,17 +597,20 @@ pub fn StatsBody(
             let retry_save = error.on_save;
             view! {
                 row(class = "wt-stats__group") {
-                    text(class = "wt-stats__error") {{error.reason}}
+                    text(class = "wt-stats__error", attr:data-testid = "stats-charts-error") {{error.reason}}
                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, attr:data-testid = "stats-retry-chart-load", on:click = move |_| {
-                        charts_error.set(None);
+                        // A failed save stays shown until the rewrite lands.
                         if retry_save {
                             keep_current_layout(services, dock, charts, persistence);
                         } else {
-                            load_charts(services, dock, charts, next_chart_id, persistence, charts_error, open_chart);
+                            charts_error.set(None);
+                            load_charts(services, dock, charts, slot_owner, next_chart_id, persistence, open_chart);
                         }
                     }) {{t!("ui.buttons.retry").into_owned()}}
                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, attr:data-testid = "stats-keep-current-layout", on:click = move |_| {
-                        charts_error.set(None);
+                        if !retry_save {
+                            charts_error.set(None);
+                        }
                         keep_current_layout(services, dock, charts, persistence);
                     }) {{t!("ui.stats.keep_current_layout").into_owned()}}
                 }
@@ -740,6 +761,7 @@ pub fn StatsBody(
 #[derive(Clone, Copy)]
 struct PanelSources {
     charts: RwSignal<Vec<ChartSlot>, LocalStorage>,
+    slot_owner: StoredValue<Owner>,
     games: Signal<Arc<[PerGameStat]>>,
     filtered: Signal<Arc<[PerGameStat]>>,
     per_ship: Signal<Arc<[PerGameStat]>>,
@@ -751,8 +773,18 @@ struct PanelSources {
 }
 
 fn register_panels(dock: DockState, sources: PanelSources) {
-    let PanelSources { charts, games, filtered, per_ship, filters, personal_rating, session, clear_error, services } =
-        sources;
+    let PanelSources {
+        charts,
+        slot_owner,
+        games,
+        filtered,
+        per_ship,
+        filters,
+        personal_rating,
+        session,
+        clear_error,
+        services,
+    } = sources;
     dock.register(
         PanelKind::new(OVERVIEW_KIND),
         PanelFactory::new(
@@ -786,7 +818,7 @@ fn register_panels(dock: DockState, sources: PanelSources) {
     );
     let slot_of = move |id: &PanelId| {
         let id = chart_id(id)?;
-        Some(chart_slot(charts, id, ChartSettings { id: Some(id), ..ChartSettings::default() }))
+        Some(chart_slot(charts, slot_owner, id, ChartSettings { id: Some(id), ..ChartSettings::default() }))
     };
     dock.register(
         PanelKind::new(CHART_KIND),
@@ -816,11 +848,20 @@ fn register_panels(dock: DockState, sources: PanelSources) {
 }
 
 /// The slot for chart `id`, made with `settings` when there is none yet.
-fn chart_slot(charts: RwSignal<Vec<ChartSlot>, LocalStorage>, id: ChartId, settings: ChartSettings) -> ChartSlot {
+///
+/// The settings live as long as `owner`, the tab's body: a slot made where a menu or a load asked
+/// for it would otherwise go with that scope while its panel still reads it.
+fn chart_slot(
+    charts: RwSignal<Vec<ChartSlot>, LocalStorage>,
+    owner: StoredValue<Owner>,
+    id: ChartId,
+    settings: ChartSettings,
+) -> ChartSlot {
     if let Some(slot) = charts.with_untracked(|charts| charts.iter().find(|slot| slot.id == id).copied()) {
         return slot;
     }
-    let slot = ChartSlot { id, settings: RwSignal::new(ChartSettings { id: Some(id), ..settings }) };
+    let settings = owner.with_value(|owner| owner.with(|| RwSignal::new(ChartSettings { id: Some(id), ..settings })));
+    let slot = ChartSlot { id, settings };
     charts.update(|charts| charts.push(slot));
     slot
 }
@@ -906,6 +947,10 @@ struct ChartPersistence {
     restoring: StoredValue<bool>,
     /// The layout last saved or restored, so a layout the tab made itself is not written.
     saved_layout: StoredValue<Option<SavedLayout>>,
+    /// The chart rows whose last write failed. The error stays until each of them has saved.
+    failed_saves: StoredValue<BTreeSet<ChartRow>>,
+    /// Why the saved charts could not be read or written, shown in the filter bar.
+    error: RwSignal<Option<ChartsError>>,
 }
 
 /// Reopens the charts and dock arrangement the session was left with.
@@ -913,9 +958,9 @@ fn load_charts(
     services: Services,
     dock: DockState,
     charts: RwSignal<Vec<ChartSlot>, LocalStorage>,
+    slot_owner: StoredValue<Owner>,
     next_chart_id: StoredValue<usize>,
     persistence: ChartPersistence,
-    charts_error: RwSignal<Option<ChartsError>>,
     open_chart: impl Fn(ChartSettings, DockTarget) + Copy + 'static,
 ) {
     // The pool opens with the startup settings, which may not have landed yet.
@@ -937,19 +982,19 @@ fn load_charts(
             let (saved, layout) = match stored {
                 Ok((Ok(saved), Ok(layout))) => (saved, layout),
                 Ok((Err(err), _)) => {
-                    return fail_load(charts_error, format!("Could not read saved chart settings: {err}"));
+                    return fail_load(persistence.error, format!("Could not read saved chart settings: {err}"));
                 }
                 Ok((_, Err(err))) => {
-                    return fail_load(charts_error, format!("Could not read saved chart layout: {err}"));
+                    return fail_load(persistence.error, format!("Could not read saved chart layout: {err}"));
                 }
-                Err(err) => return fail_load(charts_error, err.to_string()),
+                Err(err) => return fail_load(persistence.error, err.to_string()),
             };
             if persistence.user_modified.get_value() {
                 persistence.enabled.set_value(true);
                 return;
             }
             persistence.restoring.set_value(true);
-            restore_charts(dock, charts, next_chart_id, saved, layout, open_chart);
+            restore_charts(dock, charts, slot_owner, next_chart_id, saved, layout, open_chart);
             persistence.saved_layout.set_value(Some(dock.dump_untracked()));
             persistence.restoring.set_value(false);
             persistence.enabled.set_value(true);
@@ -967,6 +1012,7 @@ fn fail_load(charts_error: RwSignal<Option<ChartsError>>, reason: String) {
 fn restore_charts(
     dock: DockState,
     charts: RwSignal<Vec<ChartSlot>, LocalStorage>,
+    slot_owner: StoredValue<Owner>,
     next_chart_id: StoredValue<usize>,
     saved: Option<Vec<ChartSettings>>,
     layout: Option<SavedLayout>,
@@ -989,7 +1035,7 @@ fn restore_charts(
                     .as_ref()
                     .and_then(|saved| saved.iter().find(|settings| settings.id == Some(id)).cloned())
                     .unwrap_or_default();
-                chart_slot(charts, id, settings);
+                chart_slot(charts, slot_owner, id, settings);
             }
             next_chart_id.set_value(laid_out.iter().max().map_or(0, |id| id.saturating_add(1)));
             if let Err(err) = dock.restore(&layout) {
@@ -1060,9 +1106,61 @@ fn keep_current_layout(
     let settings: Vec<ChartSettings> =
         charts.with_untracked(|charts| charts.iter().map(|slot| slot.settings.get_untracked()).collect());
     let layout = dock.dump_untracked();
-    services.settings.save(CHARTS_SETTINGS_KEY, &settings);
-    services.settings.save(CHARTS_DOCK_LAYOUT_KEY, &layout);
+    save_chart_row(services, persistence, ChartRow::Settings, &settings);
+    save_chart_row(services, persistence, ChartRow::Layout, &layout);
     persistence.saved_layout.set_value(Some(layout));
+}
+
+/// A settings row the session's charts are saved in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ChartRow {
+    Settings,
+    Layout,
+}
+
+impl ChartRow {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Settings => CHARTS_SETTINGS_KEY,
+            Self::Layout => CHARTS_DOCK_LAYOUT_KEY,
+        }
+    }
+
+    fn save_failed(self, err: &SaveError) -> String {
+        let reason = err.to_string();
+        match self {
+            Self::Settings => t!("ui.stats.charts_save_failed", reason = reason),
+            Self::Layout => t!("ui.stats.layout_save_failed", reason = reason),
+        }
+        .into_owned()
+    }
+}
+
+/// Writes one of the rows the charts are saved in. A failed write shows in the filter bar with a
+/// Retry, until every such row has saved.
+fn save_chart_row<T: Serialize>(services: Services, persistence: ChartPersistence, row: ChartRow, value: &T) {
+    services.settings.save_reported(row.key(), value, move |result| match result {
+        Ok(()) => {
+            // The tab may have closed while the write ran.
+            let Some(all_saved) = persistence.failed_saves.try_update_value(|failed| {
+                failed.remove(&row);
+                failed.is_empty()
+            }) else {
+                return;
+            };
+            let showing_save =
+                persistence.error.with_untracked(|error| error.as_ref().is_some_and(|error| error.on_save));
+            if all_saved && showing_save {
+                persistence.error.set(None);
+            }
+        }
+        Err(err) => {
+            if persistence.failed_saves.try_update_value(|failed| failed.insert(row)).is_none() {
+                return;
+            }
+            persistence.error.set(Some(ChartsError { reason: row.save_failed(&err), on_save: true }));
+        }
+    });
 }
 
 /// Writes the filter bar's state to the rows `load_filters` reads.

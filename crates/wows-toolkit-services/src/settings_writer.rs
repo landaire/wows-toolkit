@@ -85,10 +85,6 @@ pub struct PendingWrite {
 }
 
 impl PendingWrite {
-    pub fn key(&self) -> &'static str {
-        self.key
-    }
-
     /// Waits until every earlier write has committed. `None` when a newer save
     /// of the same key has been made since, which leaves nothing to write.
     /// Runs on any executor.
@@ -100,6 +96,27 @@ impl PendingWrite {
         }
 
         Some(TurnedWrite { pending: self })
+    }
+
+    /// What tells, once the write has ended, whether it is still the newest
+    /// save of its key. A result that arrives after a newer save was made is
+    /// stale: the newer save's result is the one that holds.
+    pub fn stamp(&self) -> WriteStamp {
+        WriteStamp { writes: Arc::clone(&self.writer.writes), key: self.key, generation: self.generation }
+    }
+}
+
+/// One save's place in its key's order, kept past the write itself.
+pub struct WriteStamp {
+    writes: Arc<Writes>,
+    key: &'static str,
+    generation: u64,
+}
+
+impl WriteStamp {
+    /// Whether no save of the same key has been made since this one.
+    pub fn is_newest(&self) -> bool {
+        self.writes.is_latest(self.key, self.generation)
     }
 }
 
@@ -260,5 +277,29 @@ mod tests {
 
         assert_eq!(committed.0, None, "the save made before the clear is cleared");
         assert_eq!(committed.1.as_deref(), Some("Dark"), "the save made after the clear stays");
+    }
+
+    /// A write already under way when a newer save of its key is made: its
+    /// result, whenever it arrives, is stale, and the newer one's holds.
+    #[test]
+    fn a_write_overtaken_while_it_runs_is_stamped_stale() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime starts");
+        let _entered = runtime.enter();
+        let pool = SqlitePoolOptions::new().connect_lazy("sqlite::memory:").expect("an in-memory pool opens");
+        let writer = SettingsWriter::new(pool);
+
+        let older = writer.begin("stats_charts", "[]".to_owned());
+        let older_stamp = older.stamp();
+        let running = futures::executor::block_on(older.turn()).expect("the older write takes its turn");
+        assert!(older_stamp.is_newest(), "nothing has overtaken it yet");
+
+        let other_key = writer.begin("stats_charts_dock_layout_zgui", "{}".to_owned());
+        assert!(older_stamp.is_newest(), "a save of another key does not overtake it");
+
+        let newer = writer.begin("stats_charts", "[{}]".to_owned());
+        drop(running);
+        assert!(!older_stamp.is_newest(), "the newer save overtakes the running write");
+        assert!(newer.stamp().is_newest());
+        assert!(other_key.stamp().is_newest());
     }
 }
