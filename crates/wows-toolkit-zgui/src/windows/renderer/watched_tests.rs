@@ -19,6 +19,7 @@ use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::ShipVisibility;
+use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_replays::types::ElapsedClock;
@@ -364,6 +365,40 @@ fn the_sessions_shapes_are_drawn_over_the_watched_battle() {
     take_in(&mut window);
 
     assert_eq!(shapes(watch), 1, "the host's circle is drawn over the battle");
+}
+
+/// A measurement the session holds is drawn with its distance marks and figure, as the renderer
+/// draws it, not as a bare line.
+#[test]
+fn a_measurement_is_drawn_with_its_distance() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![torpedo()]));
+    {
+        let mut held = state.lock();
+        held.current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![Annotation::Measurement {
+                start: [100.0, 100.0],
+                end: [400.0, 100.0],
+                color: [255, 255, 255, 255],
+                width: 2.0,
+            }],
+            owners: vec![1],
+            ids: vec![5],
+        });
+        held.annotation_sync_version = 1;
+        held.repaint_viewport(REPLAY);
+    }
+    take_in(&mut window);
+
+    let figures = watch
+        .shown()
+        .expect("a frame has arrived")
+        .into_iter()
+        .filter(|command| matches!(command, DrawCommand::Annotation { shape: AnnotationShape::Label { .. }, .. }))
+        .count();
+    assert!(figures > 0, "the distance is figured beside the line");
 }
 
 /// The watched window takes up what the reader saved as the renderer's defaults, less the gutter

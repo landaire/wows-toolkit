@@ -20,6 +20,7 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
+use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::drawing::SidePanelLayout;
@@ -58,6 +59,7 @@ use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::collab::SyncVersion;
 use wt_collab_client::geometry::annotation_commands;
+use wt_collab_client::geometry::measurement_commands;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -187,6 +189,9 @@ struct WatchRun {
     replay_id: ReplayId,
     /// The map's space name, for drawing with this build's own art where it has it.
     space: String,
+    /// How wide the map is in world units, which a measurement's kilometres are read from. `None`
+    /// where this build has no such map, and then a measurement is marked in minimap units.
+    space_size: Option<f32>,
     /// The art the owning end sent, for a map this build ships none of.
     art: Option<Arc<image::RgbImage>>,
     game_data: Option<GameDataCache>,
@@ -241,6 +246,12 @@ impl WatchSession {
             }
         });
 
+        let space_size = game_data
+            .as_ref()
+            .and_then(GameDataCache::newest_loaded)
+            .and_then(|loaded| assets::load_map_info(&shared.map_name, loaded.vfs()))
+            .map(|info| info.space_size as f32);
+
         Self {
             clock: RwSignal::new_local(None),
             drawn: RwSignal::new_local(false),
@@ -252,6 +263,7 @@ impl WatchSession {
             run: StoredValue::new_local(WatchRun {
                 replay_id,
                 space: shared.map_name,
+                space_size,
                 art,
                 game_data,
                 frames,
@@ -348,8 +360,13 @@ impl WatchSession {
                 let mut shown = self.layers.with_untracked(|layers| {
                     shown_commands(latest.iter().cloned(), &layers.options, layers.show_dead_ships, &choices)
                 });
-                // Not filtered, and over the battle, as the renderer draws them.
-                shown.extend(run.link.annotations().iter().flat_map(annotation_commands));
+                // Not filtered, and over the battle, as the renderer draws them, measurements with
+                // their distance marks. A placed ship's range circles are not: they are read from
+                // the battle's own build, which a watcher does not have.
+                for annotation in run.link.annotations() {
+                    shown.extend(annotation_commands(&annotation));
+                    shown.extend(measurement_commands(&annotation, run.space_size));
+                }
                 Some(shown)
             })
             .flatten()
