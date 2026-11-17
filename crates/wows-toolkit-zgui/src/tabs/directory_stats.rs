@@ -244,7 +244,12 @@ fn DirectoryStats(
         column(class = "wt-directory-stats") {
             DirectoryHeader(root = root, read = read, on_reload = reload)
             box(class = "wt-directory-stats__body") {
-                StatsBody(scope = StatsScope::Directory, games = games, personal_rating = personal_rating)
+                StatsBody(
+                    scope = StatsScope::Directory,
+                    games = games,
+                    personal_rating = personal_rating,
+                    reading = Signal::derive_local(move || read.get().state != ReadState::Finished)
+                )
             }
         }
     }

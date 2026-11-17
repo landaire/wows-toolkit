@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
@@ -7,9 +10,13 @@ use landaire_ui::DockTarget;
 use landaire_ui::PanelFactory;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
+use landaire_ui::ThemeRootProps;
+use landaire_ui::ToastHostProps;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use rust_i18n::t;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
@@ -18,13 +25,21 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use wows_toolkit_viewmodel::stats::setting_keys;
+use zgui::component;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
+use zgui::reactive::prelude::Set;
+use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::IntoView;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 use zgui::vocab::Toggled;
 
 use super::CHART_KIND;
+use super::StatsBodyProps;
+use super::StatsScope;
 use super::chart_entry;
 use super::chart_title;
 use super::layout_chart_ids;
@@ -35,6 +50,7 @@ use crate::interaction_tests::settle_in_real_time;
 use crate::interaction_tests::shell;
 use crate::services::Services;
 use crate::services::saved_for_test;
+use crate::theme::SemanticTokensProps;
 
 /// A session over three ships, two modes, solo and division games, oldest first.
 fn sample_games() -> Vec<PerGameStat> {
@@ -178,6 +194,83 @@ fn the_mode_filter_button_shows_when_it_narrows_the_games() {
 
     click(&mut window, "stats-mode-pvp");
     assert!(!narrowed(&window), "unticking it shows every mode again");
+}
+
+/// What a test drives a [`DirectoryRoot`] through: its games, and whether they are being read.
+#[derive(Clone, Copy)]
+struct DirectoryHandles {
+    games: RwSignal<Arc<[PerGameStat]>>,
+    reading: RwSignal<bool, LocalStorage>,
+}
+
+/// A directory's Stats body over games the test replaces, with the services and theme the shell
+/// gives it.
+#[component]
+fn DirectoryRoot(handles: Rc<RefCell<Option<DirectoryHandles>>>) -> impl IntoView {
+    Services::provide(None);
+    let games: RwSignal<Arc<[PerGameStat]>> = RwSignal::new(Arc::from(sample_games()));
+    let reading = RwSignal::new_local(false);
+    *handles.borrow_mut() = Some(DirectoryHandles { games, reading });
+    let rating = RwSignal::new(None::<Arc<PersonalRatingData>>);
+    view! {
+        ThemeRoot {
+            SemanticTokens(choice = ThemeChoice::System)
+            ToastHost {
+                column(style:width = "100%", style:height = "100%") {
+                    StatsBody(scope = StatsScope::Directory, games = games, personal_rating = rating, reading = reading)
+                }
+            }
+        }
+    }
+}
+
+/// A directory's Stats body over the sample games, with Ranked ticked in the mode filter.
+fn open_directory_on_ranked() -> (HeadlessWindow, DirectoryHandles) {
+    let handles = Rc::new(RefCell::new(None));
+    let mut window = {
+        let handles = Rc::clone(&handles);
+        HeadlessWindow::open(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE), move || {
+            view! { DirectoryRoot(handles = Rc::clone(&handles)) }
+        })
+        .expect("the stats body opens headlessly")
+    };
+    window.advance(Duration::from_millis(300));
+    let handles = handles.borrow_mut().take().expect("the root publishes its handles");
+
+    click(&mut window, "stats-mode-filter-trigger");
+    click(&mut window, "stats-mode-ranked");
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("stats-overview-summary").is_some(), "the ranked games are summed");
+    (window, handles)
+}
+
+#[test]
+fn a_ticked_mode_whose_games_are_gone_is_dropped() {
+    let (mut window, handles) = open_directory_on_ranked();
+
+    let random: Vec<PerGameStat> = sample_games().into_iter().filter(|game| game.match_group == "pvp").collect();
+    handles.games.set(Arc::from(random));
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("stats-mode-filter-trigger").is_none(), "one mode left hides the mode menu");
+    assert!(window.by_test_id("stats-overview-summary").is_some(), "the remaining games are summed");
+}
+
+/// A reload empties the games before it reads them again; the ticked mode outlasts that.
+#[test]
+fn a_ticked_mode_outlasts_a_directory_reload() {
+    let (mut window, handles) = open_directory_on_ranked();
+
+    handles.reading.set(true);
+    handles.games.set(Arc::from([]));
+    window.advance(Duration::from_millis(300));
+    handles.games.set(Arc::from(sample_games()));
+    handles.reading.set(false);
+    window.advance(Duration::from_millis(300));
+
+    let trigger = window.by_test_id("stats-mode-filter-trigger").expect("two modes offer the mode filter");
+    assert!(window.all_by_attribute("data-narrowed", "true").contains(&trigger), "Ranked is still ticked");
+    assert!(window.by_test_id("stats-overview-summary").is_some(), "the ranked games are summed again");
 }
 
 #[test]

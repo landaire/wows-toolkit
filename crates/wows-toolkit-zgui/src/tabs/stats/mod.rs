@@ -384,13 +384,15 @@ struct ChartsError {
 
 /// The filter bar over the dock of Overview, Ships and charts, for `games` oldest first.
 ///
-/// `session`, when given, is where the filters live and what the Clear buttons empty.
+/// `session`, when given, is where the filters live and what the Clear buttons empty. `reading`,
+/// when given, says `games` is still being read, so is not yet every game there is.
 #[component]
 pub fn StatsBody(
     scope: StatsScope,
     #[prop(into)] games: Signal<Arc<[PerGameStat]>>,
     #[prop(into)] personal_rating: Signal<Option<Arc<PersonalRatingData>>>,
     #[prop(optional)] session: Option<SessionStats>,
+    #[prop(optional, into)] reading: Option<Signal<bool, LocalStorage>>,
     #[prop(attrs)] attrs: zgui::view::Attrs,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
@@ -419,10 +421,29 @@ pub fn StatsBody(
         }
     });
 
+    // A ticked mode whose games are gone would empty every panel, and once one mode or none is
+    // left the mode menu that could untick it is hidden. Only a complete set of games decides
+    // that: the first run may come before the session is read, and a read in progress holds part
+    // of the games, or none while it restarts.
+    effect(move |previous| {
+        let read = !reading.is_some_and(|reading| reading.get());
+        let stale = available_modes.with(|modes| {
+            filters.with_untracked(|filters| filters.game_modes.iter().any(|mode| !modes.contains(mode)))
+        });
+        if previous.is_none() || !read || !stale {
+            return;
+        }
+        filters.update(|filters| {
+            available_modes.with_untracked(|modes| filters.game_modes.retain(|mode| modes.contains(mode)));
+        });
+        if persists {
+            save_filters(services, &filters.get_untracked());
+        }
+    });
+
     let change_filters = move |change: &dyn Fn(&mut StatsFilters)| {
         filters.update(|filters| {
             change(filters);
-            available_modes.with_untracked(|modes| filters.game_modes.retain(|mode| modes.contains(mode)));
         });
         if let Some(session) = session {
             session.filters_edited.set_value(true);
