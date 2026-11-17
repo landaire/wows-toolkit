@@ -19,6 +19,7 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::drawing::SidePanelLayout;
@@ -38,6 +39,7 @@ use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
 use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
 use wows_toolkit_replay_data::replay_render::collab::ranges_by_player;
+use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
 use wows_toolkit_replay_data::replay_render::options::playback_options_hidden;
 use wows_toolkit_replay_data::replay_render::raster::shown_commands;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
@@ -335,6 +337,21 @@ impl WatchSession {
             .flatten()
     }
 
+    /// Takes up what the reader saved as the renderer's defaults, as a renderer opens on them, with
+    /// the session's display settings over them where it holds some, as an egui peer does.
+    pub fn adopt_defaults(self, saved: &SavedRenderOptions) {
+        let mut layers = self.layers.get_untracked();
+        adopt_saved_defaults(saved, &mut layers.options, &mut layers.show_dead_ships);
+        // A watched frame has no gutter beside the map to draw these in.
+        layers.options.show_team_rosters = false;
+        layers.options.show_stats_panel = false;
+        self.layers.set(layers);
+
+        self.run.update_value(|run| run.display_seen.settings = SyncVersion::NONE);
+        self.follow_session_display();
+        self.redraw();
+    }
+
     /// Changes what is drawn and draws the last frame again, so a toggle shows before the host
     /// sends another.
     pub fn set_layers(self, apply: impl FnOnce(&mut Layers)) {
@@ -558,8 +575,19 @@ impl RasterJob {
 /// A viewport onto a battle the session is playing elsewhere.
 #[component]
 pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView {
-    let game_data = Services::current().game_data.cache_untracked();
-    let watch = WatchSession::open(shared, link, game_data);
+    let services = Services::current();
+    let watch = WatchSession::open(shared, link, services.game_data.cache_untracked());
+    spawn_local(async move {
+        let saved = match services.settings.pool() {
+            Some(pool) => services
+                .on_tokio(async move { wows_toolkit_replay_data::render_defaults::load(&pool).await })
+                .await
+                .unwrap_or_default(),
+            // No store to read: what the renderer itself defaults to, as an unwritten row reads.
+            None => SavedRenderOptions::default(),
+        };
+        watch.adopt_defaults(&saved);
+    });
 
     view! { WatchedView(watch = watch) }
 }

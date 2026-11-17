@@ -13,6 +13,7 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
+use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_replays::types::ElapsedClock;
@@ -311,4 +312,36 @@ fn the_sessions_shapes_are_drawn_over_the_watched_battle() {
     take_in(&mut window);
 
     assert_eq!(shapes(watch), 1, "the host's circle is drawn over the battle");
+}
+
+/// The watched window takes up what the reader saved as the renderer's defaults, less the gutter
+/// layers it has no room for, and the session's display settings, where it holds some, stand over
+/// them.
+#[test]
+fn the_watched_window_takes_up_the_saved_defaults_under_the_sessions() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
+    take_in(&mut window);
+    let saved = SavedRenderOptions { show_timer: false, show_team_rosters: true, ..SavedRenderOptions::default() };
+
+    watch.adopt_defaults(&saved);
+
+    assert!(!shows_timer(watch), "the saved defaults leave the timer off");
+    assert!(
+        !watch.layers.with_untracked(|layers| layers.options.show_team_rosters),
+        "and the rosters, which a watched frame has no room for, stay off"
+    );
+
+    {
+        let mut held = state.lock();
+        held.current_render_options = Some(CollabRenderOptions { show_timer: true, ..CollabRenderOptions::default() });
+        held.render_options_version = 1;
+        held.repaint_viewport(REPLAY);
+    }
+    take_in(&mut window);
+    watch.adopt_defaults(&saved);
+
+    assert!(shows_timer(watch), "the session's timer stands over the saved defaults");
 }
