@@ -13,6 +13,7 @@ use landaire_ui::MarkedTextProps;
 use landaire_ui::MenuItems;
 use landaire_ui::NodeKind;
 use landaire_ui::PanelSide;
+use landaire_ui::SelectionMode;
 use landaire_ui::SidePanel;
 use landaire_ui::SideSplitProps;
 use landaire_ui::TABULAR_CLASS;
@@ -263,6 +264,7 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     row = move |row: TreeRow<DirKey>| folder_row(pane, row),
                     expanded = pane.expanded,
                     selection = pane.tree_selection,
+                    selection_mode = SelectionMode::Single,
                     handle = pane.tree_handle,
                     label = pane.source.title(),
                     attr:data-testid = format!("unpacker-{fragment}-tree")

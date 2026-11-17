@@ -323,6 +323,24 @@ fn a_filter_result_shows_its_folder() {
     assert_eq!(pane.listing_selection.get_untracked(), HashSet::from([RowKey(0)]), "the file is selected");
 }
 
+/// The folder tree selects one directory: ctrl-click replaces the selection, as a click does.
+#[test]
+fn ctrl_click_selects_one_folder() {
+    let mut tab = UnpackerWindow::with_vfs(options(), fixture());
+    let pane = tab.model.pkg;
+    pane.expanded.set(HashSet::from([DirKey::root(), DirKey("/content".to_string())]));
+    tab.settle();
+
+    tab.click("unpacker-pkg-folder-/content");
+    let nested = tab.window.by_test_id("unpacker-pkg-folder-/content/gameplay").expect("the nested folder is shown");
+    tab.window.click_with(nested, Modifiers::PRIMARY).expect("the folder can be pressed");
+    tab.settle();
+
+    let folder = DirKey("/content/gameplay".to_string());
+    assert_eq!(pane.tree_selection.get_untracked(), HashSet::from([folder.clone()]));
+    assert_eq!(pane.selected_dir.get_untracked(), folder.0);
+}
+
 #[test]
 fn a_search_opens_a_results_panel_that_reveals_its_hits() {
     let mut tab = UnpackerWindow::with_vfs(options(), fixture());

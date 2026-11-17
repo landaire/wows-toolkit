@@ -317,9 +317,16 @@ impl Pane {
             self.rows.set(rows);
             self.select_revealed();
         });
-        // A directory picked in the tree is the one the listing shows.
+        // A directory picked in the tree is the one the listing shows. The tree selects one row
+        // at a time; a set of any other size picks nothing.
         let picked = RenderEffect::new(move |_| {
-            let picked = self.tree_selection.with(|selection| selection.iter().next().cloned());
+            let picked = self.tree_selection.with(|selection| {
+                let mut keys = selection.iter();
+                match (keys.next(), keys.next()) {
+                    (Some(key), None) => Some(key.clone()),
+                    _ => None,
+                }
+            });
             if let Some(DirKey(dir)) = picked
                 && self.selected_dir.get_untracked() != dir
             {
