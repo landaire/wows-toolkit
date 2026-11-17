@@ -180,7 +180,7 @@ impl Semantic {
             .iter()
             .map(|(property, color)| format!("{property}: {color}; "))
             .collect();
-        for category in RATING_BANDS {
+        for category in PersonalRatingCategory::ALL {
             let text = Rgb::new(personal_rating::chip_text(category, dark));
             let hue = Rgb::new(personal_rating::chip_hue(category));
             let name = rating_band_name(category);
@@ -194,17 +194,6 @@ impl Semantic {
         format!(":root {{ {declarations}}}")
     }
 }
-
-const RATING_BANDS: [PersonalRatingCategory; 8] = [
-    PersonalRatingCategory::Bad,
-    PersonalRatingCategory::BelowAverage,
-    PersonalRatingCategory::Average,
-    PersonalRatingCategory::Good,
-    PersonalRatingCategory::VeryGood,
-    PersonalRatingCategory::Great,
-    PersonalRatingCategory::Unicum,
-    PersonalRatingCategory::SuperUnicum,
-];
 
 /// The suffix of a rating band's `--wt-pr-*` properties.
 pub const fn rating_band_name(category: PersonalRatingCategory) -> &'static str {
