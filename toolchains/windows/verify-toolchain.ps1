@@ -6,7 +6,10 @@ param(
     [string]$InstallRoot = (Join-Path $PSScriptRoot "offline/installed"),
     [string]$ManifestPath = (Join-Path $PSScriptRoot "toolchain-manifest.json"),
     [string]$BuckConfigPath = "",
-    [switch]$ArchivesOnly
+    [switch]$ArchivesOnly,
+    # Checks a tree installed earlier, which may have been restored without the
+    # archives it came from.
+    [switch]$InstalledOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,9 +57,15 @@ if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     Fail "Missing toolchain manifest: $ManifestPath"
 }
 
+if ($ArchivesOnly -and $InstalledOnly) {
+    Fail "-ArchivesOnly and -InstalledOnly cannot be combined."
+}
+
 $manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json -AsHashtable
-foreach ($archive in $manifest.archives) {
-    Test-ArchiveHash $archive
+if (-not $InstalledOnly) {
+    foreach ($archive in $manifest.archives) {
+        Test-ArchiveHash $archive
+    }
 }
 
 # vs_BuildTools.exe resolves its payload from Microsoft's channel manifest, so
@@ -72,21 +81,23 @@ if (Test-Path -LiteralPath $msvcToolsets -PathType Container) {
     }
 }
 
-$vsArchive = $manifest.archives | Where-Object { $_.name -eq "visual_studio_build_tools" } | Select-Object -First 1
-$vsLayout = Join-Path $OfflineRoot $vsArchive.layout_path
-if (-not (Test-Path -LiteralPath $vsLayout -PathType Container)) {
-    Fail "Missing Visual Studio offline layout: $vsLayout"
-}
+if (-not $InstalledOnly) {
+    $vsArchive = $manifest.archives | Where-Object { $_.name -eq "visual_studio_build_tools" } | Select-Object -First 1
+    $vsLayout = Join-Path $OfflineRoot $vsArchive.layout_path
+    if (-not (Test-Path -LiteralPath $vsLayout -PathType Container)) {
+        Fail "Missing Visual Studio offline layout: $vsLayout"
+    }
 
-if ($ArchivesOnly) {
-    Write-Host "Verified $($manifest.archives.Count) offline archive hashes."
-    exit 0
-}
+    if ($ArchivesOnly) {
+        Write-Host "Verified $($manifest.archives.Count) offline archive hashes."
+        exit 0
+    }
 
-$vsVerify = Start-Process -FilePath (Join-Path $vsLayout "vs_BuildTools.exe") `
-    -ArgumentList @("--layout", $vsLayout, "--verify", "--quiet", "--wait") -Wait -PassThru
-if ($vsVerify.ExitCode -ne 0) {
-    Fail "Visual Studio offline layout verification failed with exit code $($vsVerify.ExitCode)."
+    $vsVerify = Start-Process -FilePath (Join-Path $vsLayout "vs_BuildTools.exe") `
+        -ArgumentList @("--layout", $vsLayout, "--verify", "--quiet", "--wait") -Wait -PassThru
+    if ($vsVerify.ExitCode -ne 0) {
+        Fail "Visual Studio offline layout verification failed with exit code $($vsVerify.ExitCode)."
+    }
 }
 
 foreach ($entry in $manifest.tools.GetEnumerator()) {

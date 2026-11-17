@@ -1,0 +1,91 @@
+name: Provision the Windows Buck toolchain
+description: >-
+  Installs the pinned offline toolchain to C:\bt and writes C:\w\.buckconfig.local.
+  Run scripts/prepare-windows-runner.ps1 first; it copies the checkout to C:\w.
+inputs:
+  cache-installed-tree:
+    description: >-
+      Restore the installed tree from the Actions cache, and save it after a
+      fresh install. When false, the tree is always installed from the pinned
+      archives.
+    default: "true"
+runs:
+  using: composite
+  steps:
+    # Keyed on the files provision-toolchain.ps1 stamps the tree with, so a hit
+    # is a tree it reuses without installing anything.
+    - name: Restore the installed toolchain
+      id: installed
+      if: inputs.cache-installed-tree == 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: C:\bt
+        key: windows-buck-installed-${{ hashFiles('toolchains/windows/toolchain-manifest.json', 'toolchains/windows/*.ps1') }}
+
+    # The archives are needed only to install. Restoring them next to the
+    # installed tree would cost minutes and keep both in the repository's cache
+    # budget.
+    - name: Restore the offline toolchain archives
+      id: archives
+      if: steps.installed.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}\bo
+        key: windows-buck-toolchain-${{ hashFiles('toolchains/windows/toolchain-manifest.json') }}
+
+    # Visual Studio caps the length of its install root, hence C:\bt.
+    - name: Provision the toolchain
+      shell: pwsh
+      working-directory: C:\w
+      run: |
+        try {
+          ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+        } catch {
+          # ::error:: text lands in the check annotations, which are readable
+          # without a token; the job log is not.
+          $msg = (($_ | Out-String) -replace "`r?`n", " | ")
+          Write-Host "::error::PROVISION: $msg"
+          Get-ChildItem $env:TEMP -Filter *.log -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-25) } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+              $tail = ((Get-Content $_.FullName -Tail 30) -join " | ")
+              if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
+              Write-Host "::error::$($_.Name): $tail"
+            }
+          exit 1
+        }
+
+    - name: Save the offline toolchain archives
+      if: steps.archives.outcome == 'success' && steps.archives.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}\bo
+        key: ${{ steps.archives.outputs.cache-primary-key }}
+
+    # tar does not reliably round-trip a junction, so the SDK junction stays out
+    # of the cached tree and provisioning recreates it after the save.
+    - name: Detach the Windows SDK junction
+      if: inputs.cache-installed-tree == 'true' && steps.installed.outputs.cache-hit != 'true'
+      shell: pwsh
+      working-directory: C:\w
+      run: |
+        $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+        $sdk = $manifest.archives | Where-Object { $_.name -eq "windows_sdk" } | Select-Object -First 1
+        $link = Get-Item -LiteralPath (Join-Path "C:\bt" $sdk.install_path) -Force -ErrorAction SilentlyContinue
+        if ($link -and $link.LinkType -eq "Junction") {
+          # Non-recursive: removes the link, not the system SDK behind it.
+          [IO.Directory]::Delete($link.FullName, $false)
+        }
+
+    - name: Save the installed toolchain
+      if: inputs.cache-installed-tree == 'true' && steps.installed.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: C:\bt
+        key: ${{ steps.installed.outputs.cache-primary-key }}
+
+    - name: Reattach the Windows SDK junction
+      if: inputs.cache-installed-tree == 'true' && steps.installed.outputs.cache-hit != 'true'
+      shell: pwsh
+      working-directory: C:\w
+      run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"

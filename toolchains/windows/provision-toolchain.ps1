@@ -70,23 +70,102 @@ function Invoke-MsiAdministrativeInstall([string]$Archive, [string]$Destination,
     }
 }
 
-$manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json -AsHashtable
+function Get-ToolchainFingerprint {
+    # Everything that decides the installed tree. CI keys its cache of the tree
+    # on the same files.
+    $files = @(Get-Item -LiteralPath $ManifestPath) + @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1" -File | Sort-Object Name)
+    $hashes = $files | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    $stream = [IO.MemoryStream]::new([Text.Encoding]::ASCII.GetBytes($hashes -join "`n"))
+    return (Get-FileHash -InputStream $stream -Algorithm SHA256).Hash
+}
+
+$fetchedArchives = @{}
 
 # Fetching is the only step allowed to reach the network. Everything downstream,
-# including every Buck action, runs against the resulting offline tree. Existing
-# files are left alone; verify-toolchain rejects any that do not hash correctly.
-foreach ($archive in $manifest.archives) {
-    $destination = Join-Path $OfflineRoot $archive.path
+# including every Buck action, runs against the resulting offline tree.
+function Get-PinnedArchive($Archive) {
+    $destination = Join-Path $OfflineRoot $Archive.path
+    if ($fetchedArchives.ContainsKey($Archive.name)) {
+        return $destination
+    }
     if (Test-Path -LiteralPath $destination -PathType Leaf) {
-        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -eq $archive.sha256) {
-            continue
+        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -eq $Archive.sha256) {
+            $fetchedArchives[$Archive.name] = $true
+            return $destination
         }
-        Write-Host "Refetching $($archive.name): on-disk copy does not match its pin"
+        Write-Host "Refetching $($Archive.name): on-disk copy does not match its pin"
         Remove-Item -LiteralPath $destination -Force
     }
     New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent) | Out-Null
-    Write-Host "Downloading $($archive.name)"
-    Invoke-WebRequest -Uri $archive.url -OutFile $destination -UseBasicParsing
+    Write-Host "Downloading $($Archive.name)"
+    Invoke-WebRequest -Uri $Archive.url -OutFile $destination -UseBasicParsing
+    $actual = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+    if ($actual -ne $Archive.sha256) {
+        throw "Downloaded $($Archive.name) does not match its pin. Expected $($Archive.sha256), got $actual."
+    }
+    $fetchedArchives[$Archive.name] = $true
+    return $destination
+}
+
+function Install-WindowsSdk {
+    if (Test-Path -LiteralPath $sdkTarget) {
+        return
+    }
+    # The SDK bundle refuses to place a second copy of a version the machine
+    # already has and exits 1001, and CI images ship exactly the version pinned
+    # here. When that is the case, link the pinned version in rather than
+    # fighting it; the verifier still checks the tool versions behind the link.
+    $systemSdk = Join-Path ${env:ProgramFiles(x86)} ("Windows Kits" + [IO.Path]::DirectorySeparatorChar + "10")
+    $systemHeaders = Join-Path $systemSdk "Include\$sdkVersionDir"
+    if (Test-Path -LiteralPath $systemHeaders -PathType Container) {
+        Write-Host "Using the Windows SDK already installed at $systemSdk"
+        New-Item -ItemType Directory -Force -Path (Split-Path $sdkTarget -Parent) | Out-Null
+        New-Item -ItemType Junction -Path $sdkTarget -Target $systemSdk | Out-Null
+        return
+    }
+    $sdkImage = Get-PinnedArchive $sdk
+    $mountedImage = Mount-DiskImage -ImagePath $sdkImage -PassThru
+    try {
+        $sdkVolume = $mountedImage | Get-Volume
+        $sdkSetup = Join-Path "$($sdkVolume.DriveLetter):" "WinSDKSetup.exe"
+        $sdkProcess = Start-Process -FilePath $sdkSetup -ArgumentList @(
+            "/quiet", "/norestart", "/installpath", $sdkTarget,
+            "/features", "OptionId.WindowsSoftwareDevelopmentKit", "OptionId.DesktopCPPx64"
+        ) -Wait -PassThru
+        if ($sdkProcess.ExitCode -ne 0) {
+            throw "Windows SDK offline installation failed with exit code $($sdkProcess.ExitCode)."
+        }
+    }
+    finally {
+        Dismount-DiskImage -ImagePath $sdkImage | Out-Null
+    }
+}
+
+$manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json -AsHashtable
+$sdk = $manifest.archives | Where-Object { $_.name -eq "windows_sdk" } | Select-Object -First 1
+$sdkTarget = Join-Path $InstallRoot $sdk.install_path
+$sdkVersionDir = "10.0.26100.0"
+$fingerprint = Get-ToolchainFingerprint
+$stamp = Join-Path $InstallRoot "provisioned.sha256"
+
+# A stamped tree was installed and verified from exactly these pins and scripts,
+# so the archives are not needed. Only what lives outside the tree is redone:
+# the SDK junction, which CI's cache of the tree leaves out, and .buckconfig.local.
+if ((Test-Path -LiteralPath $stamp -PathType Leaf) -and (Get-Content -Raw -LiteralPath $stamp).Trim() -eq $fingerprint) {
+    Install-WindowsSdk
+    & $verifier -OfflineRoot $OfflineRoot -InstallRoot $InstallRoot -ManifestPath $ManifestPath -BuckConfigPath $BuckConfigPath -InstalledOnly
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    Write-Host "Reused the provisioned offline Windows toolchain tree at $InstallRoot."
+    exit 0
+}
+if (Test-Path -LiteralPath $stamp) {
+    Remove-Item -LiteralPath $stamp -Force
+}
+
+foreach ($archive in $manifest.archives) {
+    Get-PinnedArchive $archive | Out-Null
 }
 
 $vs = $manifest.archives | Where-Object { $_.name -eq "visual_studio_build_tools" } | Select-Object -First 1
@@ -149,39 +228,7 @@ if ($vsInstallPath.Length -gt 64) {
 }
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-
-$sdk = $manifest.archives | Where-Object { $_.name -eq "windows_sdk" } | Select-Object -First 1
-$sdkTarget = Join-Path $InstallRoot $sdk.install_path
-$sdkVersionDir = "10.0.26100.0"
-
-# The SDK bundle refuses to place a second copy of a version the machine already
-# has and exits 1001, and CI images ship exactly the version pinned here. When
-# that is the case, link the pinned version in rather than fighting it; the
-# verifier still checks the tool versions behind the link.
-$systemSdk = Join-Path ${env:ProgramFiles(x86)} ("Windows Kits" + [IO.Path]::DirectorySeparatorChar + "10")
-$systemHeaders = Join-Path $systemSdk "Include\$sdkVersionDir"
-if ((Test-Path -LiteralPath $systemHeaders -PathType Container) -and -not (Test-Path -LiteralPath $sdkTarget)) {
-    Write-Host "Using the Windows SDK already installed at $systemSdk"
-    New-Item -ItemType Directory -Force -Path (Split-Path $sdkTarget -Parent) | Out-Null
-    New-Item -ItemType Junction -Path $sdkTarget -Target $systemSdk | Out-Null
-} elseif (-not (Test-Path -LiteralPath $sdkTarget)) {
-    $sdkImage = Join-Path $OfflineRoot $sdk.path
-    $mountedImage = Mount-DiskImage -ImagePath $sdkImage -PassThru
-    try {
-        $sdkVolume = $mountedImage | Get-Volume
-        $sdkSetup = Join-Path "$($sdkVolume.DriveLetter):" "WinSDKSetup.exe"
-        $sdkProcess = Start-Process -FilePath $sdkSetup -ArgumentList @(
-            "/quiet", "/norestart", "/installpath", $sdkTarget,
-            "/features", "OptionId.WindowsSoftwareDevelopmentKit", "OptionId.DesktopCPPx64"
-        ) -Wait -PassThru
-        if ($sdkProcess.ExitCode -ne 0) {
-            throw "Windows SDK offline installation failed with exit code $($sdkProcess.ExitCode)."
-        }
-    }
-    finally {
-        Dismount-DiskImage -ImagePath $sdkImage | Out-Null
-    }
-}
+Install-WindowsSdk
 
 $vsArguments = @("--noWeb", "--quiet", "--wait", "--norestart", "--installPath", (Join-Path $InstallRoot $vs.install_path), "--includeRecommended")
 foreach ($component in $vs.component_ids) {
@@ -257,4 +304,5 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+[IO.File]::WriteAllText($stamp, $fingerprint)
 Write-Host "Provisioned offline Windows toolchain tree at $InstallRoot."

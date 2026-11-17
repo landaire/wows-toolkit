@@ -23,10 +23,11 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
 
-      - name: Provision the Buck toolchain
-        shell: pwsh
-        working-directory: C:\w
-        run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+      # A tag build attaches its output to the release, so it installs from the
+      # pinned archives rather than reusing a cached tree.
+      - uses: ./.github/actions/provision-windows-toolchain
+        with:
+          cache-installed-tree: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build the tools
         shell: pwsh

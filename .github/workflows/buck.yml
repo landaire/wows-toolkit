@@ -189,12 +189,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache the offline Buck toolchain
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}\bo
-          key: windows-buck-toolchain-${{ hashFiles('toolchains/windows/toolchain-manifest.json') }}
-
       - name: Copy the checkout to a short path
         shell: pwsh
         working-directory: ${{ github.workspace }}
@@ -205,23 +199,7 @@ jobs:
           name: affected-targets
           path: C:\w
 
-      - name: Provision the Buck toolchain
-        shell: pwsh
-        run: |
-          try {
-            ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
-          } catch {
-            $msg = (($_ | Out-String) -replace "`r?`n", " | ")
-            Write-Host "::error::PROVISION: $msg"
-            Get-ChildItem $env:TEMP -Filter *.log -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-25) } |
-              Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
-                $tail = ((Get-Content $_.FullName -Tail 30) -join " | ")
-                if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
-                Write-Host "::error::$($_.Name): $tail"
-              }
-            exit 1
-          }
+      - uses: ./.github/actions/provision-windows-toolchain
 
       - name: Build the affected aliases
         shell: pwsh

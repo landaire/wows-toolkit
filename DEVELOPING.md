@@ -85,7 +85,9 @@ It installs [DotSlash](https://dotslash-cli.com) into `.tools`, fetches the Buck
 
 Run Buck through `bin/buck2` (`bin\buck2.cmd` on Windows), or put `bin` on PATH; `mise` does that for you. `bin/buck2` runs the bootstrap's Buck2 half by itself the first time, so a checkout that only needs Buck2 can skip the bootstrap.
 
-On Windows provisioning needs elevation because the Visual Studio and Windows SDK installers do, and it caches several GB of archives in `%LOCALAPPDATA%\wows-toolkit-buck-offline` by default. Pass `-OfflineRoot` to put them elsewhere.
+On Windows provisioning needs elevation because the Visual Studio and Windows SDK installers do, and it caches several GB of archives in `%LOCALAPPDATA%\wows-toolkit-buck-offline` by default. Pass `-OfflineRoot` to put them elsewhere. A finished install is stamped with a hash of `toolchains/windows/toolchain-manifest.json` and the provisioning scripts. While the stamp matches, provisioning installs nothing and only checks the tool versions and rewrites `.buckconfig.local`.
+
+CI caches the installed tree (`C:\bt`) under that same hash through `.github/actions/provision-windows-toolchain`, so only a run that changes the manifest or the scripts installs from the archives. The release build in `build.yml` and tag builds of the tools always install from the archives.
 
 Provisioning runs the platform toolchain bootstrap (`scripts/refresh-buck-toolchain.nu` or `toolchains/windows/provision-toolchain.ps1`), which writes the machine-local `.buckconfig.local`. Buck fails with a message naming it if `.buckconfig.local` is missing.
 
@@ -445,7 +447,7 @@ CI runs only buck2 commands (`.github/workflows/buck.yml`), after `./bootstrap.s
 
 Each run checks only the first-party targets a change affects. `buck2 run //ci:affected -- --base <commit>` compares every first-party target's recursive target hash against the last successful run on `main`. The hash covers the target's sources, attributes and dependencies, so a target is selected when its own code changes or when a crate or toolchain it depends on does. Third-party targets are never checked directly. A change to Buck configuration, `.bzl` rules or `toolchains/` checks everything, because no target hash covers those. A change to `flake.nix`, `flake.lock` or `rust-toolchain.toml` checks everything only when the Buck toolchain's store paths change. The checks are targets in `root//ci` too, and each `nu_script` there lists the scripts it runs in `srcs`. A change to the scripts of the lint or the hermeticity check checks everything, and a change to the build-graph tests runs them. A manual run of the workflow checks everything. The build-graph tests also run when everything is checked or a `BUCK` file or manifest changed. The `root//ci/...` checks always run.
 
-Windows is not one of those jobs: provisioning mirrors a multi-gigabyte Visual Studio layout and nothing caches it yet, so Windows-only graph breakage surfaces in `build.yml` at tag time instead.
+The Windows job only runs `buck2 build -m release` over the affected aliases, without the web sites. Its toolchain is restored from the Actions cache, so it installs from the archives only when the Windows toolchain manifest or provisioning scripts change.
 
 `.github/workflows/pages.yml` deploys `//crates/wt-web:site` with the rest of `site/` on each stable tag.
 
