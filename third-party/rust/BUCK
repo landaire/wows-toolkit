@@ -32,9 +32,9 @@ git_fetch(
 )
 
 git_fetch(
-    name = "zgui-63af9009fcc5319e.git",
+    name = "zgui-f0249fd68b75634a.git",
     repo = "https://github.com/landaire-contrib/zgui",
-    rev = "1b48374c22371d046ef6fb101e646a15975ad92b",
+    rev = "5b45b2cee190af56d0c485a70b358ef43b89d99c",
     sub_targets = [
         "crates/zgui-css",
         "crates/zgui-render-wgpu",
@@ -5836,7 +5836,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":termcolor-1",
-        ":unicode-width-0.1",
+        ":unicode-width-0.2",
     ],
 )
 
@@ -5968,7 +5968,7 @@ cargo.rust_library(
     },
     platform = {
         "windows-msvc": dict(
-            deps = [":windows-sys-0.48"],
+            deps = [":windows-sys-0.59"],
         ),
     },
     visibility = [],
@@ -12605,13 +12605,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "fontique-0.11",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "fontique",
-    crate_root = "zgui-63af9009fcc5319e/vendor/fontique/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/vendor/fontique/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "fontique",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/vendor/fontique",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/vendor/fontique",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Font enumeration and fallback.",
         "CARGO_PKG_NAME": "fontique",
@@ -46425,7 +46425,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-    deps = [":windows-sys-0.48"],
+    deps = [":windows-sys-0.61"],
 )
 
 http_archive(
@@ -46878,48 +46878,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "windows-sys-0.48.0.crate",
-    sha256 = "677d2418bec65e3338edb076e806bc1ec15693c5d0104683f2efe857f61056a9",
-    size_bytes = 2628884,
-    strip_prefix = "windows-sys-0.48.0",
-    urls = ["https://static.crates.io/crates/windows-sys/0.48.0/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "windows-sys-0.48",
-    srcs = [":windows-sys-0.48.0.crate"],
-    crate = "windows_sys",
-    crate_root = "windows-sys-0.48.0.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "windows_sys",
-        "CARGO_MANIFEST_DIR": "windows-sys-0.48.0.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Rust for Windows",
-        "CARGO_PKG_NAME": "windows-sys",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_VERSION": "0.48.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "48",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "Win32",
-        "Win32_Foundation",
-        "Win32_Storage",
-        "Win32_Storage_FileSystem",
-        "Win32_System",
-        "Win32_System_Console",
-        "Win32_System_SystemInformation",
-        "default",
-    ],
-    visibility = [],
-    deps = [":windows-targets-0.48"],
-)
-
-http_archive(
     name = "windows-sys-0.52.0.crate",
     sha256 = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d",
     size_bytes = 2576877,
@@ -47165,38 +47123,6 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [":windows-link-0.2"],
-)
-
-http_archive(
-    name = "windows-targets-0.48.5.crate",
-    sha256 = "9a2fa6e2155d7247be68c096456083145c183cbbbc2764150dda45a87197940c",
-    size_bytes = 6904,
-    strip_prefix = "windows-targets-0.48.5",
-    urls = ["https://static.crates.io/crates/windows-targets/0.48.5/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "windows-targets-0.48",
-    srcs = [":windows-targets-0.48.5.crate"],
-    crate = "windows_targets",
-    crate_root = "windows-targets-0.48.5.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "windows_targets",
-        "CARGO_MANIFEST_DIR": "windows-targets-0.48.5.crate",
-        "CARGO_PKG_AUTHORS": "Microsoft",
-        "CARGO_PKG_DESCRIPTION": "Import libs for Windows",
-        "CARGO_PKG_NAME": "windows-targets",
-        "CARGO_PKG_REPOSITORY": "https://github.com/microsoft/windows-rs",
-        "CARGO_PKG_VERSION": "0.48.5",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "48",
-        "CARGO_PKG_VERSION_PATCH": "5",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    rustc_flags = ["--cfg=windows_raw_dylib"],
-    visibility = [],
 )
 
 http_archive(
@@ -49125,13 +49051,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Native Rust UI framework with fine-grained signals, CSS and a retained GPU renderer",
         "CARGO_PKG_NAME": "zgui",
@@ -49176,13 +49102,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-a11y-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_a11y",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-a11y/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-a11y/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_a11y",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-a11y",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-a11y",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Accessibility tree for zgui documents, published through AccessKit",
         "CARGO_PKG_NAME": "zgui-a11y",
@@ -49209,13 +49135,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-anim-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_anim",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-anim/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-anim/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_anim",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-anim",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-anim",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Transitions and keyframe animations for zgui",
         "CARGO_PKG_NAME": "zgui-anim",
@@ -49239,13 +49165,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-arena-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_arena",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-arena/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-arena/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_arena",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-arena",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-arena",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Arena storage with stable addresses and typed handles",
         "CARGO_PKG_NAME": "zgui-arena",
@@ -49261,13 +49187,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-atlas-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_atlas",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-atlas/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-atlas/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_atlas",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-atlas",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-atlas",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Texture atlas allocation and eviction policy for zgui renderers",
         "CARGO_PKG_NAME": "zgui-atlas",
@@ -49290,13 +49216,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-bits-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_bits",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-bits/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-bits/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_bits",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-bits",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-bits",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Invalidation primitives: dirty flags and damage sets",
         "CARGO_PKG_NAME": "zgui-bits",
@@ -49316,13 +49242,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-canvas-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_canvas",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-canvas/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-canvas/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_canvas",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-canvas",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-canvas",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Retained shape lists that applications draw into",
         "CARGO_PKG_NAME": "zgui-canvas",
@@ -49346,13 +49272,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-color-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_color",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-color/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-color/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_color",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-color",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-color",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "CSS color spaces, conversion and interpolation",
         "CARGO_PKG_NAME": "zgui-color",
@@ -49374,13 +49300,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-css-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_css",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-css/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-css/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_css",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-css",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-css",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Computed-style facade over the zgui style engine",
         "CARGO_PKG_NAME": "zgui-css",
@@ -49410,13 +49336,13 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "zgui-css-0.1-build-script-build",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "build_script_build",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-css/build.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-css/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-css",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-css",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Computed-style facade over the zgui style engine",
         "CARGO_PKG_NAME": "zgui-css",
@@ -49444,19 +49370,19 @@ buildscript_run(
         "CARGO_PKG_VERSION_PRE": "",
         "DEP_SERVO_STYLE_CRATE_OUT_DIR": "$(location :stylo-0.19-build-script-run[out_dir])",
     },
-    manifest_dir = ":zgui-63af9009fcc5319e.git[crates/zgui-css]",
+    manifest_dir = ":zgui-f0249fd68b75634a.git[crates/zgui-css]",
     version = "0.1.0",
 )
 
 cargo.rust_library(
     name = "zgui-custom-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_custom",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-custom/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-custom/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_custom",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-custom",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-custom",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Trait-based custom elements with their own layout and paint",
         "CARGO_PKG_NAME": "zgui-custom",
@@ -49482,13 +49408,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-dom-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_dom",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-dom/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-dom/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_dom",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-dom",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-dom",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The zgui document: an arena of nodes and their records",
         "CARGO_PKG_NAME": "zgui-dom",
@@ -49524,13 +49450,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-edit-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_edit",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-edit/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-edit/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_edit",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-edit",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-edit",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Text editing: caret, selection, undo, IME composition and hit testing",
         "CARGO_PKG_NAME": "zgui-edit",
@@ -49552,13 +49478,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-elements-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_elements",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-elements/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-elements/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_elements",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-elements",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-elements",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Typed builders for the zgui element vocabulary",
         "CARGO_PKG_NAME": "zgui-elements",
@@ -49583,13 +49509,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-geom-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_geom",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-geom/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-geom/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_geom",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-geom",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-geom",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Coordinate spaces and geometry types shared by zgui crates",
         "CARGO_PKG_NAME": "zgui-geom",
@@ -49612,13 +49538,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-image-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_image",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-image/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-image/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_image",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-image",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-image",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Raster image decoding for zgui",
         "CARGO_PKG_NAME": "zgui-image",
@@ -49639,13 +49565,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-input-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_input",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-input/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-input/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_input",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-input",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-input",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Event dispatch: hit testing, interaction state and focus",
         "CARGO_PKG_NAME": "zgui-input",
@@ -49673,13 +49599,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-interned-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_interned",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-interned/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-interned/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_interned",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-interned",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-interned",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Interned strings for names that zgui compares often",
         "CARGO_PKG_NAME": "zgui-interned",
@@ -49696,13 +49622,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-layout-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_layout",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-layout/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-layout/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_layout",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-layout",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-layout",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Box layout for zgui documents: flexbox, grid, block and inline",
         "CARGO_PKG_NAME": "zgui-layout",
@@ -49735,13 +49661,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-paint-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_paint",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-paint/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-paint/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_paint",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-paint",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-paint",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Paint stage: computed style and fragments into scene primitives",
         "CARGO_PKG_NAME": "zgui-paint",
@@ -49779,13 +49705,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-platform-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_platform",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-platform/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-platform/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_platform",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-platform",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-platform",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Platform contract that windowing backends implement",
         "CARGO_PKG_NAME": "zgui-platform",
@@ -49814,13 +49740,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-platform-headless-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_platform_headless",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-platform-headless/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-platform-headless/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_platform_headless",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-platform-headless",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-platform-headless",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Headless zgui platform with a test clock and scripted input",
         "CARGO_PKG_NAME": "zgui-platform-headless",
@@ -49842,13 +49768,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-platform-wayland-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_platform_wayland",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-platform-wayland/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-platform-wayland/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_platform_wayland",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-platform-wayland",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-platform-wayland",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Native Wayland platform backend for zgui",
         "CARGO_PKG_NAME": "zgui-platform-wayland",
@@ -49882,13 +49808,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-platform-winit-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_platform_winit",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-platform-winit/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-platform-winit/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_platform_winit",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-platform-winit",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-platform-winit",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "winit platform backend for zgui on Windows, macOS and Linux",
         "CARGO_PKG_NAME": "zgui-platform-winit",
@@ -49930,13 +49856,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-profile-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_profile",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-profile/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-profile/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_profile",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-profile",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-profile",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Frame stages and work counters for zgui",
         "CARGO_PKG_NAME": "zgui-profile",
@@ -49954,13 +49880,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-reactive-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_reactive",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-reactive/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-reactive/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_reactive",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-reactive",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-reactive",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Signals, effects and the UI-thread executor for zgui",
         "CARGO_PKG_NAME": "zgui-reactive",
@@ -49986,13 +49912,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-render-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_render",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-render/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-render/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_render",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-render",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-render",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Renderer contract for drawing zgui scenes",
         "CARGO_PKG_NAME": "zgui-render",
@@ -50015,13 +49941,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-render-vector-coverage-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_render_vector_coverage",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-render-vector-coverage/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-render-vector-coverage/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_render_vector_coverage",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-render-vector-coverage",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-render-vector-coverage",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Vector rasterizer for devices without compute shaders",
         "CARGO_PKG_NAME": "zgui-render-vector-coverage",
@@ -50056,13 +49982,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-render-vector-vello-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_render_vector_vello",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-render-vector-vello/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-render-vector-vello/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_render_vector_vello",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-render-vector-vello",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-render-vector-vello",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Vector rasterizer built on Vello",
         "CARGO_PKG_NAME": "zgui-render-vector-vello",
@@ -50099,13 +50025,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-render-wgpu-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_render_wgpu",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-render-wgpu/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-render-wgpu/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_render_wgpu",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-render-wgpu",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-render-wgpu",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "wgpu renderer for zgui scenes",
         "CARGO_PKG_NAME": "zgui-render-wgpu",
@@ -50141,13 +50067,13 @@ cargo.rust_library(
 
 cargo.rust_binary(
     name = "zgui-render-wgpu-0.1-build-script-build",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "build_script_build",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-render-wgpu/build.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-render-wgpu/build.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-render-wgpu",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-render-wgpu",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "wgpu renderer for zgui scenes",
         "CARGO_PKG_NAME": "zgui-render-wgpu",
@@ -50179,19 +50105,19 @@ buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    manifest_dir = ":zgui-63af9009fcc5319e.git[crates/zgui-render-wgpu]",
+    manifest_dir = ":zgui-f0249fd68b75634a.git[crates/zgui-render-wgpu]",
     version = "0.1.0",
 )
 
 cargo.rust_library(
     name = "zgui-runtime-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_runtime",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-runtime/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-runtime/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_runtime",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-runtime",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-runtime",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The zgui frame pipeline: style, layout, paint and draw in a window",
         "CARGO_PKG_NAME": "zgui-runtime",
@@ -50238,13 +50164,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-scene-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_scene",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-scene/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-scene/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_scene",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-scene",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-scene",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Renderer-independent display list for zgui frames",
         "CARGO_PKG_NAME": "zgui-scene",
@@ -50273,13 +50199,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-scroll-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_scroll",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-scroll/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-scroll/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_scroll",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-scroll",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-scroll",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Scroll state: offsets, chaining, overscroll and momentum",
         "CARGO_PKG_NAME": "zgui-scroll",
@@ -50304,13 +50230,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-shader-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_shader",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-shader/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-shader/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_shader",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-shader",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-shader",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Custom application shaders for zgui elements",
         "CARGO_PKG_NAME": "zgui-shader",
@@ -50335,13 +50261,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-shader-macro-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_shader_macro",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-shader-macro/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-shader-macro/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_shader_macro",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-shader-macro",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-shader-macro",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Macros to declare zgui application shaders",
         "CARGO_PKG_NAME": "zgui-shader-macro",
@@ -50366,13 +50292,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-style-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_style",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-style/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-style/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_style",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-style",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-style",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Style engine for zgui documents, built on Stylo",
         "CARGO_PKG_NAME": "zgui-style",
@@ -50411,13 +50337,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-svg-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_svg",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-svg/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-svg/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_svg",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-svg",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-svg",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "SVG documents as drawable zgui content",
         "CARGO_PKG_NAME": "zgui-svg",
@@ -50447,13 +50373,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-testkit-scene-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_testkit_scene",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-testkit-scene/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-testkit-scene/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_testkit_scene",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-testkit-scene",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-testkit-scene",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Test kit for zgui without a GPU or font files",
         "CARGO_PKG_NAME": "zgui-testkit-scene",
@@ -50482,13 +50408,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-text-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_text",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-text/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-text/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_text",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-text",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-text",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Text contracts shared by zgui crates",
         "CARGO_PKG_NAME": "zgui-text",
@@ -50516,13 +50442,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-text-parley-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_text_parley",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-text-parley/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-text-parley/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_text_parley",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-text-parley",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-text-parley",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Text engine for zgui, built on Parley",
         "CARGO_PKG_NAME": "zgui-text-parley",
@@ -50554,13 +50480,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-text-style-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_text_style",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-text-style/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-text-style/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_text_style",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-text-style",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-text-style",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Text properties resolved from the zgui cascade",
         "CARGO_PKG_NAME": "zgui-text-style",
@@ -50591,13 +50517,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-ui-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_ui",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-ui/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-ui/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_ui",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-ui",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-ui",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "shadcn-style component library for zgui",
         "CARGO_PKG_NAME": "zgui-ui",
@@ -50625,13 +50551,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-ui-icons-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_ui_icons",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-ui-icons/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-ui-icons/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_ui_icons",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-ui-icons",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-ui-icons",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Vector icon set for zgui-ui",
         "CARGO_PKG_NAME": "zgui-ui-icons",
@@ -50654,13 +50580,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-ui-primitives-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_ui_primitives",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-ui-primitives/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-ui-primitives/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_ui_primitives",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-ui-primitives",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-ui-primitives",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Headless interaction primitives for zgui-ui",
         "CARGO_PKG_NAME": "zgui-ui-primitives",
@@ -50683,13 +50609,13 @@ alias(
 
 cargo.rust_library(
     name = "zgui-ui-tokens-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_ui_tokens",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-ui-tokens/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-ui-tokens/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_ui_tokens",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-ui-tokens",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-ui-tokens",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Design tokens and themes for zgui-ui",
         "CARGO_PKG_NAME": "zgui-ui-tokens",
@@ -50706,13 +50632,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-view-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_view",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-view/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-view/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_view",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-view",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-view",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "View layer for zgui: views, components and children",
         "CARGO_PKG_NAME": "zgui-view",
@@ -50734,13 +50660,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-view-dom-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_view_dom",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-view-dom/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-view-dom/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_view_dom",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-view-dom",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-view-dom",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "zgui views over a real document",
         "CARGO_PKG_NAME": "zgui-view-dom",
@@ -50764,13 +50690,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-view-macro-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_view_macro",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-view-macro/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-view-macro/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_view_macro",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-view-macro",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-view-macro",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The view!, #[component], css! and style! macros for zgui",
         "CARGO_PKG_NAME": "zgui-view-macro",
@@ -50792,13 +50718,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-vocab-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_vocab",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-vocab/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-vocab/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_vocab",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-vocab",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-vocab",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Shared types for the zgui view layer and document",
         "CARGO_PKG_NAME": "zgui-vocab",
@@ -50819,13 +50745,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-wgpu-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_wgpu",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-wgpu/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-wgpu/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_wgpu",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-wgpu",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-wgpu",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Surface elements that show textures from another wgpu renderer",
         "CARGO_PKG_NAME": "zgui-wgpu",
@@ -50857,13 +50783,13 @@ cargo.rust_library(
 
 cargo.rust_library(
     name = "zgui-wgsl-0.1",
-    srcs = [":zgui-63af9009fcc5319e.git"],
+    srcs = [":zgui-f0249fd68b75634a.git"],
     crate = "zgui_wgsl",
-    crate_root = "zgui-63af9009fcc5319e/crates/zgui-wgsl/src/lib.rs",
+    crate_root = "zgui-f0249fd68b75634a/crates/zgui-wgsl/src/lib.rs",
     edition = "2024",
     env = {
         "CARGO_CRATE_NAME": "zgui_wgsl",
-        "CARGO_MANIFEST_DIR": "zgui-63af9009fcc5319e/crates/zgui-wgsl",
+        "CARGO_MANIFEST_DIR": "zgui-f0249fd68b75634a/crates/zgui-wgsl",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "WGSL building blocks for zgui shaders",
         "CARGO_PKG_NAME": "zgui-wgsl",
