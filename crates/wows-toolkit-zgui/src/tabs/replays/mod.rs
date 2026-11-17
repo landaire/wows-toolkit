@@ -368,8 +368,8 @@ fn follow_dock(workspace: ReplayWorkspace) {
     });
 }
 
-/// Hands open viewports the collab session as it starts and stops, and opens the battles it asks
-/// to be watched.
+/// Hands open viewports the collab session as it starts and stops, opens the battles it asks to be
+/// watched, and closes the watched battles it stops listing.
 fn follow_session(workspace: ReplayWorkspace) {
     let collab = workspace.shell.collab;
     let link = collab.link();
@@ -385,9 +385,11 @@ fn follow_session(workspace: ReplayWorkspace) {
             workspace.watch(shared);
         }
     });
+    let unlisting = RenderEffect::new(move |_| workspace.close_unlisted_watches(&collab.shared_replay_ids()));
     on_cleanup_local(move || {
         drop(sharing);
         drop(watching);
+        drop(unlisting);
     });
 }
 

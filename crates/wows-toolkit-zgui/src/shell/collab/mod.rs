@@ -167,6 +167,12 @@ impl CollabHost {
         self.active.get()
     }
 
+    /// The ids of the battles the session lists, following its changes. Ids only: a listed battle
+    /// carries its map art, which is not copied on every wake.
+    pub fn shared_replay_ids(self) -> Vec<u64> {
+        self.read(|state| state.state.lock().open_replays.iter().map(|replay| replay.replay_id).collect())
+    }
+
     /// Takes every shared window asked to be watched, oldest first, subscribing to the next one.
     pub fn take_watch_requests(self) -> Vec<SharedWindow> {
         if self.watch_requests.with(Vec::is_empty) {
@@ -692,8 +698,7 @@ fn SessionActive(shell: Shell) -> impl IntoView {
         if move || collab.read(|state| !state.state.lock().open_replays.is_empty()) {
             Separator()
             text(class = "wt-collab__title") {{locale.text("ui.collab.shared_windows")}}
-            // Ids only: a shared window carries its map art, which is not copied on every wake.
-            for replay_id in move || collab.read(|state| state.state.lock().open_replays.iter().map(|replay| replay.replay_id).collect::<Vec<u64>>()), key = |replay_id: &u64| *replay_id {
+            for replay_id in move || collab.shared_replay_ids(), key = |replay_id: &u64| *replay_id {
                 SharedWindowRow(shell = shell, replay_id = replay_id, may_steer = may_steer)
             }
         } else {}

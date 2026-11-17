@@ -18,8 +18,11 @@ use wows_core::pseudonym;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::sample::sample_model;
+use wows_toolkit_services::collab::CollabState;
+use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
+use wt_collab_client::OpenReplay;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -465,6 +468,55 @@ fn a_split_keeps_an_open_replays_view() {
     assert!(laid_out(&window, "replay-panel-failed"), "the view still shows the read");
     assert_eq!(window.by_test_id("replay-panel-failed"), Some(shown), "and is the view it was");
     assert_eq!(workspace.read_failure_for_test(&path), Some(read), "and the file was not read again");
+}
+
+/// A watched battle closes when the host closes its replay, and every one closes when the session
+/// ends: neither has anything more to show.
+#[test]
+fn a_watched_battle_closes_when_the_session_stops_listing_it() {
+    let (mut window, workspace) = open();
+    let shell = workspace.shell;
+    let battle = |replay_id: u64| OpenReplay {
+        replay_id,
+        replay_name: format!("battle {replay_id}"),
+        map_image_png: Vec::new(),
+        game_version: "15.0".to_owned(),
+        map_name: "16_OC_bees_to_honey".to_owned(),
+        display_name: "Sleeping Giant".to_owned(),
+    };
+    let watched = || {
+        let mut ids: Vec<u64> = workspace
+            .dock
+            .panels_untracked()
+            .iter()
+            .filter_map(|entry| match Docked::of(&entry.id) {
+                Some(Docked::Watched(watch)) => Some(watch.0),
+                _ => None,
+            })
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+    shell.collab.edit_for_test(shell, |collab| collab.state.lock().open_replays = vec![battle(7), battle(8)]);
+    for replay_id in [7, 8] {
+        workspace.watch(SharedWindow {
+            replay_id,
+            replay_name: format!("battle {replay_id}"),
+            map: "Sleeping Giant".to_owned(),
+            map_name: "16_OC_bees_to_honey".to_owned(),
+            art_png: None,
+        });
+    }
+    window.advance(Duration::from_millis(100));
+    assert_eq!(watched(), [7, 8], "both battles are watched");
+
+    shell.collab.edit_for_test(shell, |collab| collab.state.lock().open_replays = vec![battle(8)]);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(watched(), [8], "the battle the host closed is closed here");
+
+    shell.collab.edit_for_test(shell, CollabState::leave);
+    window.advance(Duration::from_millis(100));
+    assert!(watched().is_empty(), "and the rest close as the session ends");
 }
 
 /// A parse that panics fails that replay's tab as any failed read does, and the app goes on

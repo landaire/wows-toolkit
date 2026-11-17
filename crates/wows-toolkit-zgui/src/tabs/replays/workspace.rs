@@ -460,6 +460,22 @@ impl ReplayWorkspace {
         }
     }
 
+    /// Closes the watched battles the session no longer lists, `listed` being those it does. The
+    /// host closed the replay or the session ended, and either leaves a watch on its last frame.
+    pub fn close_unlisted_watches(self, listed: &[u64]) {
+        let unlisted: Vec<WatchId> = self
+            .watched
+            .with_untracked(|watched| watched.keys().filter(|watch| !listed.contains(&watch.0)).copied().collect());
+        if unlisted.is_empty() {
+            return;
+        }
+
+        for watch in unlisted {
+            let _ = self.dock.remove(&Docked::Watched(watch).panel_id());
+        }
+        self.forget_closed();
+    }
+
     /// Takes a panel out of the dock. A viewport's session closes with it.
     pub fn remove(self, docked: &Docked) {
         let _ = self.dock.remove(&docked.panel_id());
