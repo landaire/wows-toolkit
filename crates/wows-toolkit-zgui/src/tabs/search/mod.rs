@@ -534,7 +534,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
     let mut columns: Vec<GridColumn<ResultRow>> = ResultColumn::all()
         .into_iter()
         .map(|column| {
-            GridColumn::new(column_id(column), column.label(), move |row: &ResultRow| {
+            GridColumn::new(column_id(column), t!(column.label_key()).into_owned(), move |row: &ResultRow| {
                 let (text, outcome, rating, hover) = match column {
                     ResultColumn::Sortable(sortable) => (
                         cell_text(&row.hit, sortable),

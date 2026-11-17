@@ -1,0 +1,15 @@
+---
+source: crates/wows-toolkit-viewmodel/src/search_results.rs
+expression: labels
+---
+[
+    "Datum",
+    "Karte",
+    "Modus",
+    "Ihr Schiff",
+    "Ergebnis",
+    "Schaden",
+    "Abschüsse",
+    "PR",
+    "MC",
+]

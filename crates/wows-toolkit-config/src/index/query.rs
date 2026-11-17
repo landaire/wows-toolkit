@@ -1815,23 +1815,6 @@ impl SortColumn {
         SortColumn::Mc,
     ];
 
-    /// The column's header name, so both front ends label it the same.
-    ///
-    /// Matches the `ui.search.column.*` strings the egui header reads; a
-    /// front end with translations resolves those instead.
-    pub fn label(self) -> &'static str {
-        match self {
-            SortColumn::Date => "Date",
-            SortColumn::Map => "Map",
-            SortColumn::Mode => "Mode",
-            SortColumn::Outcome => "Result",
-            SortColumn::Damage => "Damage",
-            SortColumn::Kills => "Kills",
-            SortColumn::Pr => "PR",
-            SortColumn::Mc => "MC",
-        }
-    }
-
     /// The expression the rows are ordered on, qualified by the aliases the
     /// search query uses (`m` for `indexed_match`, `r` for `replay_record`).
     /// Picked by a closed match on the enum, never built from user text.

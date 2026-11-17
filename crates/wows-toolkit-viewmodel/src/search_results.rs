@@ -48,10 +48,19 @@ impl ResultColumn {
         columns
     }
 
-    pub fn label(self) -> &'static str {
+    /// The translation key the header reads, the same `ui.search.column.*` key the egui header
+    /// reads.
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::Sortable(column) => column.label(),
-            Self::Ship => "Ship",
+            Self::Sortable(SortColumn::Date) => "ui.search.column.date",
+            Self::Sortable(SortColumn::Map) => "ui.search.column.map",
+            Self::Sortable(SortColumn::Mode) => "ui.search.column.mode",
+            Self::Ship => "ui.search.column.ship",
+            Self::Sortable(SortColumn::Outcome) => "ui.search.column.result",
+            Self::Sortable(SortColumn::Damage) => "ui.search.column.damage",
+            Self::Sortable(SortColumn::Kills) => "ui.search.column.kills",
+            Self::Sortable(SortColumn::Pr) => "ui.search.column.pr",
+            Self::Sortable(SortColumn::Mc) => "ui.search.column.mc",
         }
     }
 
@@ -259,6 +268,14 @@ mod tests {
         let mode = columns.iter().position(|column| *column == ResultColumn::Sortable(SortColumn::Mode));
         assert_eq!(columns.get(mode.expect("mode is drawn") + 1), Some(&ResultColumn::Ship));
         assert_eq!(columns.len(), SortColumn::ALL.len() + 1);
+    }
+
+    /// Each header reads its egui translation, in the reader's language.
+    #[test]
+    fn headers_read_the_translated_column_names() {
+        let labels: Vec<String> =
+            ResultColumn::all().into_iter().map(|column| t!(column.label_key(), locale = "de").into_owned()).collect();
+        insta::assert_debug_snapshot!(labels);
     }
 
     fn hit(game_type: &str, match_group: &str) -> MatchHit {
