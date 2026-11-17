@@ -28,6 +28,8 @@ use landaire_ui::SidePanel;
 use landaire_ui::SideSplitProps;
 use landaire_ui::WidthRange;
 use rust_i18n::t;
+use wows_toolkit_armor::load_ship::SceneSubject;
+use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
@@ -73,6 +75,7 @@ use crate::tabs::armor_viewer::sidebar::ArmorSidebarProps;
 use crate::tabs::armor_viewer::sidebar::ModelsSource;
 use crate::tabs::armor_viewer::sidebar::SidebarCatalog;
 use crate::tabs::armor_viewer::sidebar::SidebarEvent;
+use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use crate::tabs::armor_viewer::viewport::XRAY_KEY;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
 
@@ -390,6 +393,17 @@ fn follow_xray_key(shell: Shell, workspace: ArmorWorkspace) {
     on_cleanup_local(move || drop(depth));
 }
 
+/// The hull `viewport` shows `ship` on, which the export starts from. `None` when it shows another
+/// ship or none, whose hull would not belong to `ship`.
+fn export_seed_hull(viewport: ArmorViewportState, ship: &VehicleParamIndex) -> Option<String> {
+    let armor = viewport.shown_untracked()?;
+    let SceneSubject::Ship(shown) = &armor.subject else {
+        return None;
+    };
+
+    (shown.vehicle_param_index == *ship).then(|| armor.loaded_hull.clone()).flatten()
+}
+
 fn on_sidebar_event(shell: Shell, workspace: ArmorWorkspace, event: SidebarEvent) {
     match event {
         SidebarEvent::OpenShip(ship) => workspace.open_ship(ship.param_index.as_str().to_owned(), ship.display_name),
@@ -406,8 +420,7 @@ fn on_sidebar_event(shell: Shell, workspace: ArmorWorkspace, event: SidebarEvent
                 tracing::warn!("armor viewer: export requested before ship assets finished loading");
                 return;
             };
-            // The hull the pane is showing, which is the one the reader is looking at.
-            let seed_hull = workspace.active_untracked().selected_hull();
+            let seed_hull = export_seed_hull(workspace.active_untracked(), &ship.param_index);
             let request = ExportRequest::Ship {
                 param_index: ship.param_index.as_str().to_owned(),
                 display_name: ship.display_name,

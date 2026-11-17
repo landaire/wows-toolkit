@@ -1189,6 +1189,24 @@ fn the_pen_ship_search_survives_a_fold() {
     assert_eq!(typed(&mut armor), "mont");
 }
 
+/// An export asked for from a ship row starts from the pane's hull only when the pane shows that
+/// ship.
+#[test]
+fn an_export_from_a_ship_row_seeds_the_hull_of_that_ship_only() {
+    let mut armor = ArmorWindow::open_tall();
+    let mut scene = plated_ship_scene();
+    scene.loaded_hull = Some("PASB001_B_Hull".to_owned());
+    armor.install(scene, &[]);
+    let viewport = armor.workspace.active_untracked();
+
+    assert_eq!(
+        super::export_seed_hull(viewport, &VehicleParamIndex::new("PASB001")),
+        Some("PASB001_B_Hull".to_owned()),
+        "the ship shown starts from its hull"
+    );
+    assert_eq!(super::export_seed_hull(viewport, &VehicleParamIndex::new("PJSB018")), None, "another ship does not");
+}
+
 /// A tab is chosen by a click, by the arrow keys on the strip, and by Ctrl+Tab from the viewer, and
 /// the choice is saved.
 #[test]
