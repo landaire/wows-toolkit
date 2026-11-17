@@ -733,6 +733,23 @@ fn an_unreadable_battle_says_it_has_no_events() {
     assert!(is_disabled(&mut window, "replay-renderer-next-event"));
 }
 
+/// The rosters' wider canvas is built off the UI thread: the switch is on as soon as it is
+/// pressed, and a canvas that cannot be built turns it off again once the build has failed.
+#[test]
+fn the_rosters_canvas_is_built_off_the_ui_thread() {
+    let (mut window, session) = open_viewport(track(half_second_frames(10)));
+    session.hold_game_data_for_test(empty_game_data());
+    let rosters = || session.layers.with_untracked(|layers| layers.options.show_team_rosters);
+
+    session.set_layers(|layers| layers.options.show_team_rosters = true);
+    assert!(rosters(), "on while the canvas is built");
+    pointer_over_viewport(&mut window);
+
+    // The viewport's replay is not on disk, so the canvas cannot be built.
+    crate::interaction_tests::settle_in_real_time(&mut window);
+    assert!(!rosters(), "and off once it could not be");
+}
+
 /// A watched window, mounted while `shown` holds, over a session the test feeds frames into.
 #[component]
 fn Watching(shared: SharedWindow, link: CollabLink, shown: Rc<Cell<Option<RwSignal<bool>>>>) -> impl IntoView {

@@ -1698,6 +1698,30 @@ fn the_canvas_follows_the_gutter_layer_that_is_on() {
     assert_eq!(crate::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
 }
 
+/// While a wider canvas is built, a frame is drawn on the canvas there is, with the gutter layers
+/// it has no room for left off.
+#[test]
+fn the_options_drawn_fit_the_canvas_there_is() {
+    use crate::replay_render::raster::fit_to_canvas;
+    use std::borrow::Cow;
+
+    let plain = playback_options_hidden();
+    let rosters = RenderOptions { show_team_rosters: true, ..plain.clone() };
+
+    assert!(matches!(fit_to_canvas(&rosters, SidePanelLayout::TeamRosters), Cow::Borrowed(_)), "it fits already");
+    let on_bare_map = fit_to_canvas(&rosters, SidePanelLayout::None);
+    assert_eq!(crate::minimap_preview::layout_for(&on_bare_map), SidePanelLayout::None);
+    let stats = RenderOptions { show_stats_panel: true, ..rosters.clone() };
+    assert_eq!(
+        crate::minimap_preview::layout_for(&fit_to_canvas(&stats, SidePanelLayout::StatsPanel)),
+        SidePanelLayout::StatsPanel
+    );
+    assert_eq!(
+        crate::minimap_preview::layout_for(&fit_to_canvas(&plain, SidePanelLayout::TeamRosters)),
+        SidePanelLayout::TeamRosters
+    );
+}
+
 /// A playback bake carries the rosters and the stats panel, or their switches
 /// would have nothing to show.
 #[test]

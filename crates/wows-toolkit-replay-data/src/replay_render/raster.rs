@@ -1,6 +1,7 @@
 //! Which of a baked frame's commands are drawn, and the canvas they are drawn
 //! on.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use wows_minimap_renderer::RenderOptions;
@@ -11,6 +12,7 @@ use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_replays::types::GameClock;
 
 use crate::load::GameDataCache;
+use crate::minimap_preview::PreviewError;
 use crate::minimap_preview::SharedPreviewRenderer;
 use crate::minimap_preview::layout_for;
 use crate::minimap_preview::renderer_for_replay;
@@ -19,17 +21,12 @@ use crate::replay_render::motion::reach_ships;
 use crate::replay_render::ships::ShipChoices;
 use crate::replay_render::track::Track;
 
-/// What following the options onto the canvas they need came to.
-pub enum LayoutChange {
-    /// The canvas already suits them.
-    Unchanged,
-    /// A different canvas, and the renderer that draws on it. The frame on
-    /// screen was drawn on the old canvas, so it is the wrong shape until the
-    /// next one is drawn, and the track's map origin moves to `map_origin`.
-    Moved { layout: SidePanelLayout, renderer: SharedPreviewRenderer, map_origin: (f32, f32) },
-    /// No canvas could be built for the gutter layers, so they were turned
-    /// off rather than drawn on a canvas with no room for them.
-    Refused,
+/// A canvas built for one side-panel layout: the renderer that draws on it,
+/// and where the map's corner sits on it.
+pub struct Canvas {
+    pub layout: SidePanelLayout,
+    pub renderer: SharedPreviewRenderer,
+    pub map_origin: (f32, f32),
 }
 
 /// The commands drawn at `clock`, between `motion`'s frame and the next.
@@ -88,32 +85,35 @@ pub fn shown_commands(
         .collect()
 }
 
-/// Moves a viewport onto the canvas `options` now need. Blocks while a new
-/// renderer is built.
+/// Builds the canvas `layout` needs for the replay at `path`. Blocks while the
+/// replay, the map and the fonts are read, so it runs off the UI thread.
 ///
 /// The rosters sit in gutters either side of the map, so turning them on is
 /// not a layer but a wider canvas. The renderer for one is kept, so switching
-/// back and forth costs nothing after the first time.
-pub fn follow_layout(
-    path: &Path,
-    game_data: &GameDataCache,
-    options: &mut RenderOptions,
-    current: SidePanelLayout,
-) -> LayoutChange {
-    let wanted = layout_for(options);
-    if wanted == current {
-        return LayoutChange::Unchanged;
-    }
+/// back and forth costs little after the first time.
+pub fn build_canvas(path: &Path, game_data: &GameDataCache, layout: SidePanelLayout) -> Result<Canvas, PreviewError> {
+    let (renderer, origin) = renderer_for_replay(path, game_data, layout)?;
+    Ok(Canvas { layout, renderer, map_origin: (origin.0 as f32, origin.1 as f32) })
+}
 
-    match renderer_for_replay(path, game_data, wanted) {
-        Ok((renderer, origin)) => {
-            LayoutChange::Moved { layout: wanted, renderer, map_origin: (origin.0 as f32, origin.1 as f32) }
-        }
-        Err(reason) => {
-            tracing::warn!("replay renderer: the canvas for {wanted:?} could not be built: {reason}");
-            options.show_team_rosters = false;
-            options.show_stats_panel = false;
-            LayoutChange::Refused
-        }
+/// `options` as a canvas laid out for `layout` can draw them: the gutter
+/// layers it has no room for are off. Borrowed when they already fit, which
+/// is every draw but those while a wider canvas is being built.
+pub fn fit_to_canvas(options: &RenderOptions, layout: SidePanelLayout) -> Cow<'_, RenderOptions> {
+    if layout_for(options) == layout {
+        return Cow::Borrowed(options);
     }
+    let mut fitted = options.clone();
+    match layout {
+        SidePanelLayout::None => {
+            fitted.show_team_rosters = false;
+            fitted.show_stats_panel = false;
+        }
+        SidePanelLayout::StatsPanel => {
+            fitted.show_team_rosters = false;
+            fitted.show_stats_panel = true;
+        }
+        SidePanelLayout::TeamRosters => fitted.show_team_rosters = true,
+    }
+    Cow::Owned(fitted)
 }

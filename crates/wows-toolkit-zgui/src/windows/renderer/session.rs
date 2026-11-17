@@ -24,6 +24,7 @@ use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::frame::BgraFrame;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::minimap_preview::SharedPreviewRenderer;
+use wows_toolkit_replay_data::minimap_preview::layout_for;
 use wows_toolkit_replay_data::replay_render::annotate::Annotator;
 use wows_toolkit_replay_data::replay_render::annotate::Click;
 use wows_toolkit_replay_data::replay_render::annotate::PointerDown;
@@ -68,8 +69,9 @@ use wows_toolkit_replay_data::replay_render::playback::FRAME_INTERVAL;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
 use wows_toolkit_replay_data::replay_render::playback::Tick;
-use wows_toolkit_replay_data::replay_render::raster::LayoutChange;
-use wows_toolkit_replay_data::replay_render::raster::follow_layout;
+use wows_toolkit_replay_data::replay_render::raster::Canvas;
+use wows_toolkit_replay_data::replay_render::raster::build_canvas;
+use wows_toolkit_replay_data::replay_render::raster::fit_to_canvas;
 use wows_toolkit_replay_data::replay_render::raster::raster_commands;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_replay_data::replay_render::ships::ShipMenu;
@@ -245,7 +247,13 @@ struct Run {
     /// Moved on whenever `renderer` is replaced, so a frame drawn on the old canvas, and the old
     /// renderer it brings back, are dropped.
     renderer_generation: Generation,
+    /// The layout `renderer` draws on.
     layout: SidePanelLayout,
+    /// The layout of the canvas being built off the UI thread, while one is.
+    building: Option<SidePanelLayout>,
+    /// The canvas build in flight. A newer one, or a return to the canvas there is, drops what an
+    /// older one builds.
+    canvas_generation: Generation,
     /// A frame was asked for while one was being drawn, and whether any such ask put its frame in
     /// front of the session. The draw in flight starts another as it finishes, so what ends up on
     /// screen is the newest thing asked for.
@@ -333,6 +341,8 @@ impl RendererSession {
                 renderer: None,
                 renderer_generation: Generation::default(),
                 layout: SidePanelLayout::None,
+                building: None,
+                canvas_generation: Generation::default(),
                 redraw_wanted: None,
                 pending_export: None,
                 regions: Vec::new(),
@@ -548,6 +558,8 @@ impl RendererSession {
                 run.renderer = Some(renderer);
                 run.renderer_generation.next();
                 run.layout = SidePanelLayout::None;
+                run.building = None;
+                run.canvas_generation.next();
             });
             self.map_origin.set(track.map_origin);
             match shown {
@@ -700,31 +712,68 @@ impl RendererSession {
     }
 
     /// Moves onto the canvas the layers now need: the rosters are a wider canvas, not a layer.
+    /// The canvas is built off the UI thread, and frames are drawn on the one there is until it
+    /// lands.
     fn follow_layout(self, options: &mut RenderOptions) {
-        let Some((path, game_data, current)) =
-            self.run.try_with_value(|run| (run.request.path.clone(), run.game_data.clone(), run.layout))
-        else {
-            return;
-        };
-        let Some(game_data) = game_data else {
-            // Nothing to build a canvas from, so the gutter layers cannot be shown.
-            options.show_team_rosters = false;
-            options.show_stats_panel = false;
-            return;
-        };
-        match follow_layout(&path, &game_data, options, current) {
-            LayoutChange::Unchanged | LayoutChange::Refused => {}
-            LayoutChange::Moved { layout, renderer, map_origin } => {
-                self.run.update_value(|run| {
-                    run.layout = layout;
-                    // A draw or an export in flight on the old renderer drops it as it finishes.
-                    run.renderer = Some(renderer);
-                    run.renderer_generation.next();
-                    run.redraw_wanted = Some(Share::Yes);
-                });
-                self.map_origin.set(map_origin);
+        let wanted = layout_for(options);
+        let start = self.with_run(|run| {
+            if wanted == run.layout {
+                // Back on the canvas there is: a build for another one is not wanted.
+                run.building = None;
+                run.canvas_generation.next();
+                return CanvasStart::Unneeded;
             }
-        }
+            if run.building == Some(wanted) {
+                return CanvasStart::Unneeded;
+            }
+            let Some(game_data) = run.game_data.clone() else { return CanvasStart::NoGameData };
+            run.building = Some(wanted);
+            CanvasStart::Build { path: run.request.path.clone(), game_data, generation: run.canvas_generation.next() }
+        });
+        let (path, game_data, generation) = match start {
+            Some(CanvasStart::Build { path, game_data, generation }) => (path, game_data, generation),
+            Some(CanvasStart::NoGameData) => {
+                // Nothing to build a canvas from, so the gutter layers cannot be shown.
+                options.show_team_rosters = false;
+                options.show_stats_panel = false;
+                return;
+            }
+            Some(CanvasStart::Unneeded) | None => return,
+        };
+        self.spawn(async move {
+            let built = long_job(move || build_canvas(&path, &game_data, wanted)).await;
+            let current = self.with_run(|run| {
+                let current = run.canvas_generation == generation;
+                if current {
+                    run.building = None;
+                }
+                current
+            });
+            if current != Some(true) {
+                return;
+            }
+            match built {
+                Ok(Canvas { layout, renderer, map_origin }) => {
+                    self.run.update_value(|run| {
+                        run.layout = layout;
+                        // A draw or an export in flight on the old renderer drops it as it finishes.
+                        run.renderer = Some(renderer);
+                        run.renderer_generation.next();
+                    });
+                    self.map_origin.set(map_origin);
+                }
+                // Back to the layers the canvas there is can draw, rather than gutter layers with
+                // no room for them or empty gutters with nothing in them.
+                Err(reason) => {
+                    tracing::warn!("replay renderer: the canvas for {wanted:?} could not be built: {reason}");
+                    let Some(layout) = self.run.try_with_value(|run| run.layout) else { return };
+                    let mut layers = self.layers.get_untracked();
+                    layers.options = fit_to_canvas(&layers.options, layout).into_owned();
+                    self.store_layers(layers);
+                }
+            }
+            self.draw();
+        });
     }
 
     /// Moves playback to `at`, follows it with the armor viewer, and draws it.
@@ -1429,7 +1478,7 @@ impl RendererSession {
     fn draw_shared(self, share: Share) {
         let Some(track) = self.track_untracked() else { return };
         let Some(game_data) = self.run.try_with_value(|run| run.game_data.clone()).flatten() else { return };
-        let Some((renderer, generation, share)) = self
+        let Some(DrawStart { renderer, generation, share, layout }) = self
             .with_run(|run| {
                 let wanted = run.redraw_wanted.take();
                 let share = wanted.map_or(share, |wanted| wanted.max(share));
@@ -1438,7 +1487,7 @@ impl RendererSession {
                     return None;
                 };
                 // This draw is of the newest state, which is what any earlier ask wanted.
-                Some((renderer, run.renderer_generation, share))
+                Some(DrawStart { renderer, generation: run.renderer_generation, share, layout: run.layout })
             })
             .flatten()
         else {
@@ -1453,8 +1502,9 @@ impl RendererSession {
         let link = self.collab.get_untracked();
         let drawn_on = self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data));
         let shown = self.layers.with_untracked(|layers| {
+            let options = fit_to_canvas(&layers.options, layout);
             self.choices.with_untracked(|choices| {
-                raster_commands(&track, &motion, clock, &layers.options, layers.show_dead_ships, choices, drawn_on)
+                raster_commands(&track, &motion, clock, &options, layers.show_dead_ships, choices, drawn_on)
             })
         });
         if share == Share::Yes {
@@ -1605,15 +1655,18 @@ impl RendererSession {
         }
         let settings = self.export.with_untracked(|export| export.settings);
         let link = self.collab.get_untracked();
-        let game_data = self.run.try_with_value(|run| run.game_data.clone()).flatten();
+        let Some((game_data, layout)) = self.run.try_with_value(|run| (run.game_data.clone(), run.layout)) else {
+            return;
+        };
         let drawn_on = match game_data {
             Some(game_data) => {
                 self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data))
             }
             None => Vec::new(),
         };
+        // Filmed on the canvas the renderer it holds draws on.
         let layers = self.layers.with_untracked(|layers| ExportLayers {
-            options: layers.options.clone(),
+            options: fit_to_canvas(&layers.options, layout).into_owned(),
             show_dead_ships: layers.show_dead_ships,
             choices: self.choices.get_untracked(),
             drawn_on,
@@ -1794,6 +1847,28 @@ impl Generation {
         self.0 += 1;
         *self
     }
+}
+
+/// What a draw takes from the session as it starts.
+struct DrawStart {
+    renderer: SharedPreviewRenderer,
+    generation: Generation,
+    share: Share,
+    /// The layout `renderer` draws on.
+    layout: SidePanelLayout,
+}
+
+/// What following the layers onto their canvas comes to.
+enum CanvasStart {
+    /// The canvas there is suits them, or the one they need is being built.
+    Unneeded,
+    /// No game data to build a canvas from.
+    NoGameData,
+    Build {
+        path: PathBuf,
+        game_data: GameDataCache,
+        generation: Generation,
+    },
 }
 
 /// What a bake needs, read as it starts.
