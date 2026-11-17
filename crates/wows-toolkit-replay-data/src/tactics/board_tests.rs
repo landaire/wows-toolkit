@@ -13,14 +13,19 @@ use wt_collab_client::PeerRole;
 use wt_collab_client::SessionState;
 use wt_collab_client::TacticsBoardSessionState;
 use wt_collab_client::TacticsMapInfo;
+use wt_collab_client::drawing::Tool;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
 
 use crate::load::GameDataCache;
 use crate::load::LoadedGameData;
+use crate::tactics::ElementPos;
+use crate::tactics::ElementSize;
 use crate::tactics::MapChoice;
 use crate::tactics::board::Board;
+use crate::tactics::board::BoardKey;
 use crate::tactics::board::BoardNotice;
+use crate::tactics::board::Modifiers;
 
 /// This end's user in the session.
 const ME: u64 = 1;
@@ -152,4 +157,51 @@ fn a_full_session_keeps_a_peers_board_on_its_map() {
     assert_eq!(board.map().cloned(), was, "the board stays on the peer's map");
     assert!(board.is_a_peers());
     assert_eq!(board.take_notices(), [BoardNotice::SessionBoardsFull { limit: MAX_TACTICS_BOARDS }]);
+}
+
+/// A board with no session on a map, shown at the minimap's own size so an element point is the
+/// same map point.
+fn board_at_minimap_size() -> Board {
+    let mut board = Board::new(None, CapLayoutDb::default());
+    board.set_map(MapChoice { map_id: Some(1), space: "spaces/01_solomon_islands".into(), label: "Solomon".into() });
+    board.set_element(ElementSize { width: 768.0, height: 768.0 });
+    board.drawn(Some((768.0, 768.0)));
+
+    board
+}
+
+/// Drags `tool` from `from` to `to`, then puts it down.
+fn draw(board: &mut Board, tool: Tool, from: ElementPos, to: ElementPos) {
+    board.set_tool(tool.clone());
+    board.pointer_down(from, Modifiers::default());
+    board.pointer_move(to, true);
+    board.pointer_up(to);
+    board.set_tool(tool);
+}
+
+/// Presses and lets go at `at` with nothing in hand, which picks out the shape there.
+fn click(board: &mut Board, at: ElementPos) {
+    board.pointer_down(at, Modifiers::default());
+    board.pointer_up(at);
+}
+
+/// The first Escape puts the tool down and keeps the pick; the next puts the pick and placing a
+/// capture point down too.
+#[test]
+fn escape_puts_the_tool_down_then_the_selection() {
+    let mut board = board_at_minimap_size();
+    let corner = ElementPos { x: 200.0, y: 200.0 };
+    draw(&mut board, Tool::Rectangle { filled: false }, corner, ElementPos { x: 400.0, y: 300.0 });
+    click(&mut board, corner);
+    assert!(board.rotation_handle().is_some(), "the rectangle is picked out");
+
+    board.set_tool(Tool::Line);
+    board.key(BoardKey::Escape, Modifiers::default());
+    assert_eq!(*board.tool(), Tool::None);
+    assert!(board.rotation_handle().is_some(), "the pick outlasts the tool");
+
+    board.set_adding(true);
+    board.key(BoardKey::Escape, Modifiers::default());
+    assert!(board.rotation_handle().is_none(), "the pick is put down");
+    assert!(!board.adding(), "and so is placing a capture point");
 }

@@ -1858,8 +1858,9 @@ impl Board {
     /// The board's keyboard: the chords the egui board takes.
     ///
     /// The modifier with Z takes a change back and with Y or Shift+Z puts it back; with 1..7 and M
-    /// it selects drawing tools. Escape puts the tool down, `[` and `]` step the nib, and Delete
-    /// erases what is picked out. `true` when the key was one of these.
+    /// it selects drawing tools. Escape puts the tool down, or with no tool in hand puts down the
+    /// selection and placing a capture point; `[` and `]` step the nib, and Delete erases what is
+    /// picked out. `true` when the key was one of these.
     pub fn key(&mut self, key: BoardKey<'_>, held: Modifiers) -> bool {
         if held.secondary {
             let BoardKey::Text(text) = key else { return false };
@@ -1874,7 +1875,7 @@ impl Board {
             return true;
         }
         match key {
-            BoardKey::Escape => self.set_tool(Tool::None),
+            BoardKey::Escape => self.escape(),
             BoardKey::Text("[") if self.has_tool() => self.step_nib(-1.0),
             BoardKey::Text("]") if self.has_tool() => self.step_nib(1.0),
             // What is picked out is what a delete is about: a drawn shape if one is picked, and the
@@ -1884,6 +1885,24 @@ impl Board {
             _ => return false,
         }
         true
+    }
+
+    /// Puts down the tool in hand, or with none in hand whatever is picked out or selected, as the
+    /// egui board's Escape does.
+    fn escape(&mut self) {
+        if self.has_tool() {
+            self.set_tool(Tool::None);
+            return;
+        }
+        self.adding = false;
+        self.selected = None;
+        if self.picked.is_empty() {
+            self.changed();
+            return;
+        }
+        // A picked shape is drawn with a halo under it, which goes with the pick.
+        self.picked.clear();
+        self.redraw();
     }
 
     /// Sets the board on a map, which replaces whatever was on it.
