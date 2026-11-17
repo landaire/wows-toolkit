@@ -206,7 +206,8 @@ pub fn copy_bug_report_info(shell: Shell) {
 /// Puts the newest log file on the clipboard, for a bug report.
 pub fn copy_latest_log(shell: Shell) {
     let Some(path) = wows_toolkit_services::logging::newest_log() else {
-        shell.toasts().warn(t!("ui.messages.log_not_found").into_owned());
+        let dir = wows_toolkit_services::logging::log_dir().display().to_string();
+        shell.toasts().warn(t!("ui.messages.log_not_found", dir = dir).into_owned());
         return;
     };
 
@@ -235,6 +236,7 @@ mod tests {
     use zgui::vocab::Modifiers;
     use zgui::vocab::NamedKey;
 
+    use super::copy_latest_log;
     use super::show_crash_report;
     use crate::desktop::opened_for_test;
     use crate::interaction_tests::REVIEW_SIZE;
@@ -267,6 +269,19 @@ mod tests {
 
     fn cleared() -> bool {
         saved_for_test().iter().any(|(key, _)| *key == CLEARED)
+    }
+
+    #[test]
+    fn a_missing_log_names_where_it_was_looked_for() {
+        let mut window = open_bare_shell();
+        assert!(wows_toolkit_services::logging::newest_log().is_none(), "the test binary's directory holds no log");
+
+        copy_latest_log(shell());
+        settle(&mut window);
+
+        let dir = wows_toolkit_services::logging::log_dir().display().to_string();
+        let toasts = window.texts_by_class("zui-toast").concat();
+        assert!(toasts.contains(rust_i18n::t!("ui.messages.log_not_found", dir = dir).as_ref()), "{toasts}");
     }
 
     #[test]
