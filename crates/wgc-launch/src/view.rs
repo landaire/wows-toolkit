@@ -773,4 +773,59 @@ mod tests {
         assert!(matches!(chosen, Err(ViewError::NoOverlayBackend)));
         assert_eq!(read_backend_record(&state.backend_record()).unwrap(), None);
     }
+
+    /// Mounts a real fuse-overlayfs. Skipped when the host lacks the tools or this process cannot
+    /// open /dev/fuse, as in a container that lists the device without granting it.
+    #[test]
+    fn real_fuse_overlayfs_probe_detects_the_backend() {
+        let mut path = std::env::var_os("PATH").unwrap_or_default();
+        path.push(":/usr/local/bin:/usr/bin:/bin");
+        let tmp = tempfile::tempdir().unwrap();
+        let search = HostSearch::with_home(tmp.path().to_path_buf(), Some(path));
+        let usable = std::fs::OpenOptions::new().read(true).write(true).open("/dev/fuse").is_ok();
+        let Some(tools) = OverlayTools::find(OverlayBackend::FuseOverlayfs, &search).filter(|_| usable) else {
+            eprintln!("skipped: /dev/fuse, fuse-overlayfs or fusermount is unavailable");
+            return;
+        };
+
+        let install = tmp.path().join("install");
+        write(&install.join("res/game.xml"), "lower");
+        let install = install.canonicalize().unwrap();
+        let dirs = RuntimeDirs::new(&tmp.path().join("data"));
+        let detect = |lower: &Path| {
+            let state = dirs.install_state(lower);
+            std::fs::create_dir_all(state.dir()).unwrap();
+            let state = state.canonicalize().unwrap();
+            let layers = OverlayLayers {
+                lower: lower.to_path_buf(),
+                delta: None,
+                upper: state.upper(),
+                work: state.work(),
+                merged: state.merged(),
+            };
+            let chosen = choose_backend(&state, [tools.clone()], |tools| tools.probe(&layers, state.dir()));
+            let record = read_backend_record(&state.backend_record()).unwrap();
+            let leftovers: Vec<OsString> = std::fs::read_dir(state.dir())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .filter(|name| name.to_string_lossy().starts_with(".overlay-probe-"))
+                .collect();
+            (chosen, record, leftovers)
+        };
+
+        let (chosen, record, leftovers) = detect(&install);
+        assert_eq!(chosen.unwrap().backend(), OverlayBackend::FuseOverlayfs);
+        assert_eq!(record, Some(OverlayBackend::FuseOverlayfs));
+        assert_eq!(leftovers, Vec::<OsString>::new());
+
+        // fuse-overlayfs refuses a lower directory that does not exist.
+        let (chosen, record, leftovers) = detect(&tmp.path().join("missing"));
+        assert!(matches!(chosen, Err(ViewError::NoOverlayBackend)));
+        assert_eq!(record, None);
+        assert_eq!(leftovers, Vec::<OsString>::new());
+
+        let mounts = std::fs::read_to_string("/proc/self/mountinfo").unwrap();
+        let resolved = tmp.path().canonicalize().unwrap();
+        assert!(!mounts.contains(resolved.to_str().unwrap()), "a probe mount is still mounted");
+    }
 }
