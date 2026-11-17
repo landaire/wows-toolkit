@@ -67,7 +67,8 @@ const CSS: &str = css!(
 const GAP: f32 = 8.0;
 
 /// The popup, over the map beside the single picked shape. A control rather than part of the map,
-/// so a press in it is kept from the map under it.
+/// so a press in it is kept from the map under it. A release is not: a drag begun on the map may
+/// end over the popup, and the map has to hear it.
 #[component]
 pub fn ShapeEditPopup(session: RendererSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
@@ -102,7 +103,6 @@ pub fn ShapeEditPopup(session: RendererSession) -> impl IntoView {
                 style:left = left,
                 style:top = top,
                 on:pointer_down = move |ev| ev.stop_propagation(),
-                on:pointer_up = move |ev| ev.stop_propagation(),
                 on:click = move |ev| ev.stop_propagation(),
                 on:double_click = move |ev| ev.stop_propagation(),
                 on:wheel = move |ev| ev.stop_propagation()

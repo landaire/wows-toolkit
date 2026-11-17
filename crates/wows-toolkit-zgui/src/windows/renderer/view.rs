@@ -300,7 +300,8 @@ fn MapArea(session: RendererSession, map: NodeRef, root: NodeRef) -> impl IntoVi
                 session.pointer_move(window_point(ev.position), held, ev.modifiers.shift());
             },
             on:pointer_up = move |ev| {
-                if ev.button == Some(PointerButton::Primary) {
+                // Only a press the map took is ended here: a release reaches it from the edit popup too.
+                if ev.button == Some(PointerButton::Primary) && pressed.get_value() {
                     pressed.set_value(false);
                     session.pointer_up(window_point(ev.position));
                 }

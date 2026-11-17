@@ -15,6 +15,7 @@ use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::drawing_style::MAX_NIB;
 use wows_toolkit_replay_data::replay_render::annotate::HANDLE_RADIUS;
+use wows_toolkit_replay_data::replay_render::annotate::PointerLook;
 use wows_toolkit_replay_data::replay_render::track::DEFAULT_MAP_ORIGIN;
 use wows_toolkit_replay_data::replay_render::track::Track;
 use wows_toolkit_replay_data::replay_render::view::FrameSize;
@@ -413,6 +414,46 @@ fn the_pointer_shows_what_a_press_would_do() {
     window.release();
     settle(&mut window);
     assert_eq!(window.cursor(), Some(CursorStyle::Grab), "and let go after");
+}
+
+/// A drag of the picked shape let go over its own edit popup ends there: the shape moves and is
+/// no longer held.
+#[test]
+fn a_move_let_go_over_the_edit_popup_ends() {
+    let (mut window, session) = open();
+    session.collab.with_untracked(|link| {
+        link.add_annotation(Annotation::Circle {
+            center: [300.0, 400.0],
+            radius: 20.0,
+            color: [255; 4],
+            width: 2.0,
+            filled: false,
+        });
+    });
+    let on_circle = window_point(session, (320.0, 400.0));
+    window.click_at(on_circle);
+    settle(&mut window);
+    let popup = window.by_test_id("replay-renderer-shape-edit").expect("the edit popup is up");
+    let bounds = window.bounds(popup).expect("the popup has a box");
+    let over_popup = Point::new(
+        DevicePx(bounds.origin.x.0 + bounds.size.width.0 / 2.0),
+        DevicePx(bounds.origin.y.0 + bounds.size.height.0 / 2.0),
+    );
+
+    window.press_at(on_circle);
+    window.hover_at(over_popup);
+    settle(&mut window);
+    window.release();
+    settle(&mut window);
+    let circle = session.collab.with_untracked(|link| link.annotation_at(0));
+    assert!(
+        matches!(circle, Some(Annotation::Circle { center: [x, _], .. }) if x > 300.5),
+        "the circle moved toward the popup: {circle:?}"
+    );
+    let look = session
+        .collab
+        .with_untracked(|link| session.annotator.with_untracked(|annotator| annotator.pointer_look(link)));
+    assert_eq!(look, PointerLook::Grab, "and is no longer held");
 }
 
 /// A right-click with a tool in hand puts it down and drops the shape half-drawn with it.
