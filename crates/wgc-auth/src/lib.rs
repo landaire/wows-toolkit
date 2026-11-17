@@ -46,3 +46,4 @@ pub use token::ExchangeCode;
 pub use token::SecretPassword;
 pub use token::TokenExpiry;
 pub use token::TokenPair;
+pub use token::TwoFactorToken;

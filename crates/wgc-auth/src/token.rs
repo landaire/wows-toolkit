@@ -51,6 +51,26 @@ impl fmt::Debug for AccessToken {
     }
 }
 
+/// The WGNI challenge token that pairs a two-factor code with the login it answers.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct TwoFactorToken(String);
+
+impl TwoFactorToken {
+    pub fn new(token: String) -> TwoFactorToken {
+        TwoFactorToken(token)
+    }
+
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for TwoFactorToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("TwoFactorToken").field(&"<redacted>").finish()
+    }
+}
+
 /// Client-generated nonce paired with an `AccessToken` for the
 /// `Bearer <access_token>:<exchange_code>` header. Not secret-strength (it never authenticates on its own),
 /// so a plain `Debug` is fine.
@@ -113,6 +133,14 @@ mod tests {
     }
 
     #[test]
+    fn two_factor_token_debug_is_redacted() {
+        let token = TwoFactorToken::new("tft-secret".to_string());
+        let debug = format!("{token:?}");
+        assert!(!debug.contains("tft-secret"), "debug output leaked the token: {debug}");
+        assert!(debug.contains("redacted"), "debug output missing redaction marker: {debug}");
+    }
+
+    #[test]
     fn token_pair_debug_is_redacted() {
         let pair = TokenPair {
             access_token: AccessToken::new("super-secret-token".to_string()),
@@ -142,5 +170,6 @@ mod tests {
     const _: fn() = || {
         _assert_zeroize_on_drop::<SecretPassword>();
         _assert_zeroize_on_drop::<AccessToken>();
+        _assert_zeroize_on_drop::<TwoFactorToken>();
     };
 }

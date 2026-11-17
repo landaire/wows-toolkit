@@ -163,7 +163,7 @@ pub fn keyring_probed(state: KeyringState) -> LauncherEvent {
 }
 
 /// A sign-in that WGNI answered with a two-factor challenge.
-pub fn two_factor_required(twofactor_token: String) -> LauncherEvent {
+pub fn two_factor_required(twofactor_token: wgc_auth::TwoFactorToken) -> LauncherEvent {
     LauncherEvent(Event::Login(LoginMsg::TwoFactorRequired { twofactor_token }))
 }
 
@@ -231,7 +231,9 @@ impl SignInScript {
                 storage: SessionStorage::PlaintextFile,
                 keyring: KeyringState::Unavailable,
             },
-            ScriptedSignIn::TwoFactor => LoginMsg::TwoFactorRequired { twofactor_token: "challenge".into() },
+            ScriptedSignIn::TwoFactor => {
+                LoginMsg::TwoFactorRequired { twofactor_token: wgc_auth::TwoFactorToken::new("challenge".to_string()) }
+            }
             ScriptedSignIn::WrongCode => LoginMsg::TwoFactorRetry,
             ScriptedSignIn::Fail(error) => crate::accounts::refused(&rootcause::report!(error)),
         })

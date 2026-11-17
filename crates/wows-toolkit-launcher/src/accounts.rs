@@ -256,7 +256,7 @@ pub(crate) enum LoginMsg {
         keyring: KeyringState,
     },
     TwoFactorRequired {
-        twofactor_token: String,
+        twofactor_token: wgc_auth::TwoFactorToken,
     },
     /// The code was rejected but the challenge is still open: keep it and the pending password
     /// so the user retries the code, not the whole login.
@@ -271,7 +271,7 @@ pub(crate) struct PendingLogin {
     pub(crate) realm: wgc_auth::AccountRealm,
     pub(crate) username: String,
     pub(crate) password: wgc_auth::SecretPassword,
-    pub(crate) twofactor_token: Option<String>,
+    pub(crate) twofactor_token: Option<wgc_auth::TwoFactorToken>,
 }
 
 pub(crate) struct LoginState {

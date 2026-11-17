@@ -26,6 +26,7 @@ use crate::token::ExchangeCode;
 use crate::token::SecretPassword;
 use crate::token::TokenExpiry;
 use crate::token::TokenPair;
+use crate::token::TwoFactorToken;
 
 /// WGNI API path version.
 ///
@@ -112,7 +113,7 @@ impl AuthClient {
     pub async fn login_with_two_factor(
         &self,
         credentials: AccountCredentials,
-        twofactor_token: String,
+        twofactor_token: TwoFactorToken,
         code: TwoFactorCode,
     ) -> rootcause::Result<StoredSession, AuthError> {
         self.login_inner(&credentials, Some((twofactor_token, code))).await
@@ -121,7 +122,7 @@ impl AuthClient {
     async fn login_inner(
         &self,
         credentials: &AccountCredentials,
-        twofactor: Option<(String, TwoFactorCode)>,
+        twofactor: Option<(TwoFactorToken, TwoFactorCode)>,
     ) -> rootcause::Result<StoredSession, AuthError> {
         let challenge_wire = self.request_challenge().await?;
         let challenge = to_pow_challenge(&challenge_wire);
@@ -246,7 +247,7 @@ impl AuthClient {
         &self,
         credentials: &AccountCredentials,
         pow: PowSolution,
-        twofactor: Option<&(String, TwoFactorCode)>,
+        twofactor: Option<&(TwoFactorToken, TwoFactorCode)>,
     ) -> rootcause::Result<models::TokenSuccessResponse, AuthError> {
         let url = self.endpoint("account/credentials/create/oauth/token/");
         let realm_config = self.realm.config();
@@ -260,7 +261,7 @@ impl AuthClient {
             ("pow", &pow_str),
         ];
         if let Some((token, code)) = twofactor {
-            form.push(("twofactor_token", token.as_str()));
+            form.push(("twofactor_token", token.expose_secret()));
             match code {
                 TwoFactorCode::Otp(v) => form.push(("otp_code", v.as_str())),
                 TwoFactorCode::Backup(v) => form.push(("backup_code", v.as_str())),
@@ -331,7 +332,7 @@ impl AuthClient {
         // parse here just means no structured error/error_description to
         // classify on, which classify_token_error already handles via `None`.
         let mut error: Option<models::TokenErrorResponse> = serde_json::from_slice(&body).ok();
-        let twofactor_token = error.as_mut().and_then(|e| e.twofactor_token.take());
+        let twofactor_token = error.as_mut().and_then(|e| e.twofactor_token.take()).map(TwoFactorToken::new);
         let error_code = error.as_ref().and_then(|e| e.error.as_deref());
         let description = error.as_ref().and_then(|e| e.error_description.as_deref());
 
@@ -560,10 +561,10 @@ fn generate_exchange_code() -> String {
 fn classify_known_code(
     code: &str,
     rejection: &TokenRejection,
-    twofactor_token: Option<String>,
+    twofactor_token: &mut Option<TwoFactorToken>,
 ) -> Option<rootcause::Report<AuthError>> {
     Some(match code {
-        "twofactor_required" => match twofactor_token {
+        "twofactor_required" => match twofactor_token.take() {
             Some(token) => report!(AuthError::TwoFactorRequired { twofactor_token: token }).attach(rejection.clone()),
             None => report!(AuthError::BadResponse {
                 detail: "WGNI reported twofactor_required with no twofactor_token".to_string(),
@@ -598,7 +599,7 @@ fn classify_token_error(
     http_status: u16,
     error: Option<&str>,
     error_description: Option<&str>,
-    twofactor_token: Option<String>,
+    mut twofactor_token: Option<TwoFactorToken>,
 ) -> rootcause::Report<AuthError> {
     let rejection = TokenRejection {
         status: http_status,
@@ -610,12 +611,12 @@ fn classify_token_error(
         return report!(AuthError::RateLimited).attach(rejection);
     }
     if let Some(error) = error
-        && let Some(report) = classify_known_code(error, &rejection, twofactor_token.clone())
+        && let Some(report) = classify_known_code(error, &rejection, &mut twofactor_token)
     {
         return report;
     }
     if let Some(description) = error_description
-        && let Some(report) = classify_known_code(description, &rejection, twofactor_token)
+        && let Some(report) = classify_known_code(description, &rejection, &mut twofactor_token)
     {
         return report;
     }
@@ -652,6 +653,10 @@ fn classify_token_error(
 mod tests {
     use super::*;
 
+    fn two_factor_token() -> TwoFactorToken {
+        TwoFactorToken::new("tft-123".to_string())
+    }
+
     #[test]
     fn new_builds_without_panicking() {
         let tracking_id = TrackingId::parse("test-tracking-id").expect("valid");
@@ -682,9 +687,9 @@ mod tests {
     #[test]
     fn classify_twofactor_required_carries_token_via_error_field() {
         // The `error` field itself is the known code: primary classification path.
-        let report = classify_token_error(400, Some("twofactor_required"), None, Some("tft-123".to_string()));
+        let report = classify_token_error(400, Some("twofactor_required"), None, Some(two_factor_token()));
         assert!(
-            matches!(report.current_context(), AuthError::TwoFactorRequired { twofactor_token } if twofactor_token == "tft-123")
+            matches!(report.current_context(), AuthError::TwoFactorRequired { twofactor_token } if twofactor_token.expose_secret() == "tft-123")
         );
     }
 
@@ -693,9 +698,9 @@ mod tests {
         // Live capture: `error` is the generic OAuth bucket, `error_description`
         // carries WG's specific reason. Exercises the fallback path.
         let report =
-            classify_token_error(400, Some("invalid_grant"), Some("twofactor_required"), Some("tft-123".to_string()));
+            classify_token_error(400, Some("invalid_grant"), Some("twofactor_required"), Some(two_factor_token()));
         assert!(
-            matches!(report.current_context(), AuthError::TwoFactorRequired { twofactor_token } if twofactor_token == "tft-123")
+            matches!(report.current_context(), AuthError::TwoFactorRequired { twofactor_token } if twofactor_token.expose_secret() == "tft-123")
         );
     }
 

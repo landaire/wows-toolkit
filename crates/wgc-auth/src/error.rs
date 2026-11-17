@@ -18,6 +18,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::realm::AccountRealm;
+use crate::token::TwoFactorToken;
 
 /// A WGNI OAuth token-endpoint error body, verbatim.
 ///
@@ -66,7 +67,7 @@ pub enum AuthError {
     AccountBanned,
 
     #[error("two-factor authentication required")]
-    TwoFactorRequired { twofactor_token: String },
+    TwoFactorRequired { twofactor_token: TwoFactorToken },
 
     #[error("two-factor code was invalid")]
     TwoFactorInvalidCode,
