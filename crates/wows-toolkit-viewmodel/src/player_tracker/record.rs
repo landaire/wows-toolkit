@@ -1,13 +1,11 @@
-//! Folding one battle's roster into the tracked players.
-//!
-//! The rules are the egui tracker's (`ui/player_tracker/mod.rs`'s
-//! `ingest_roster`), so a battle recorded by either front end leaves the same
-//! rows.
+//! Folding one battle's roster into the tracked players. Every front end and the replay index
+//! record through these rules, so a battle recorded by any of them leaves the same rows.
 
 use std::collections::HashMap;
 
 use jiff::Timestamp;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
 
@@ -56,6 +54,33 @@ impl<'a> BattleRoster<'a> {
         Self { arena_id, timestamp: report.metadata.timestamp, players }
     }
 
+    /// The roster of a parsed battle, read before its normalized report is built. Reads each
+    /// player as [`NormalizedBattleReport`] does.
+    pub fn from_players(
+        players: impl IntoIterator<Item = &'a Player>,
+        arena_id: ArenaId,
+        timestamp: Timestamp,
+    ) -> Self {
+        let players = players
+            .into_iter()
+            .map(|player| {
+                let state = player.initial_state();
+                RosterPlayer {
+                    account: state.db_id(),
+                    name: state.username(),
+                    clan: state.clan(),
+                    clan_id: state.clan_id(),
+                    // The parser reads no division as zero.
+                    division_id: u32::try_from(state.division_id()).ok().filter(|division| *division > 0),
+                    is_bot: state.is_bot(),
+                    is_self: player.relation().is_self(),
+                }
+            })
+            .collect();
+
+        Self { arena_id, timestamp, players }
+    }
+
     /// The accounts whose tracker rows this battle can change: every human but
     /// the recording player.
     pub fn met_accounts(&self) -> Vec<AccountId> {
@@ -69,13 +94,16 @@ impl<'a> BattleRoster<'a> {
 /// twice does not count it twice. The recording player and bots are never
 /// recorded. A player in the recording player's division has the encounter
 /// marked, so the tables can hide it.
+///
+/// Returns whether any player's encounters changed, for the aggregates cached over them.
 pub fn record_roster(
     players: &mut HashMap<AccountId, TrackedPlayer>,
     pending: &mut Pending,
     roster: &BattleRoster<'_>,
-) {
+) -> bool {
     let BattleRoster { arena_id, timestamp, .. } = *roster;
     let recorder = roster.players.iter().find(|player| player.is_self);
+    let mut changed = false;
 
     for player in &roster.players {
         if player.is_bot || player.is_self {
@@ -93,6 +121,7 @@ pub fn record_roster(
         // Marked before the arena guard below: reading a battle already recorded
         // is still the first chance to mark it.
         let marked = is_division_mate && tracked.division_encounters.mark(arena_id, timestamp);
+        changed |= marked;
 
         if tracked.arena_ids.contains(&arena_id) {
             if marked {
@@ -117,7 +146,10 @@ pub fn record_roster(
         tracked.timestamps.insert(timestamp);
         tracked.arena_ids.insert(arena_id);
         pending.encounter_changed(player.account, arena_id, timestamp);
+        changed = true;
     }
+
+    changed
 }
 
 #[cfg(test)]
@@ -177,8 +209,9 @@ mod tests {
         record_roster(&mut players, &mut pending, &battle(10, 1_000, "Enemy"));
 
         let mut again = Pending::default();
-        record_roster(&mut players, &mut again, &battle(10, 1_000, "Enemy"));
+        let changed = record_roster(&mut players, &mut again, &battle(10, 1_000, "Enemy"));
 
+        assert!(!changed, "the second read changes no encounter");
         assert_eq!(players[&ENEMY].arena_ids.len(), 1);
         assert_eq!(players[&ENEMY].timestamps.len(), 1);
         assert!(again.is_empty(), "nothing new to write: {again:?}");
@@ -205,8 +238,9 @@ mod tests {
         let mut players = HashMap::from([(MATE, mate)]);
         let mut pending = Pending::default();
 
-        record_roster(&mut players, &mut pending, &battle(10, 1_000, "Enemy"));
+        let changed = record_roster(&mut players, &mut pending, &battle(10, 1_000, "Enemy"));
 
+        assert!(changed, "a first mark changes what the tables count");
         assert!(players[&MATE].arena_in_division(ArenaId::new(10)));
         assert!(pending.changed_arenas().any(|change| change == (MATE, ArenaId::new(10))));
     }

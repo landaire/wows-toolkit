@@ -340,7 +340,7 @@ fn unpacker(data: &SharedBuildData, mut report: Report) {
 /// A tracker holding `count` battles' worth of encounters, drawn from a pool of
 /// `pool` accounts.
 ///
-/// Mirrors the per-player writes `ingest_roster` makes: one timestamp and one
+/// Mirrors the per-player writes `record_roster` makes: one timestamp and one
 /// arena id per battle per player met, both kept forever.
 fn synthetic_tracker(count: usize, pool: u64) -> PlayerTracker {
     let mut tracker = PlayerTracker::default();
@@ -469,7 +469,7 @@ fn listing(data: &SharedBuildData, count: usize, mut report: Report) {
 
 /// What the player tracker holds after `count` battles.
 ///
-/// Mirrors the per-player writes `ingest_roster` makes: one timestamp and one
+/// Mirrors the per-player writes `record_roster` makes: one timestamp and one
 /// arena id per battle per player met, both kept forever. The roster is drawn
 /// from a pool sized the way a real one repeats -- the same clans and the same
 /// server population turn up again and again -- so the distinct-player count

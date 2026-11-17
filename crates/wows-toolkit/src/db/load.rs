@@ -557,7 +557,7 @@ mod tests {
         });
 
         // A battle that ended just after launch. One of its players is the
-        // account the blob already knows, met again: `ingest_roster` records it
+        // account the blob already knows, met again: `record_roster` records it
         // with the name that battle reported and nothing else, so the entry in
         // memory has no note and no aliases. That is the account an import can
         // overwrite with an empty note, so it is the one worth driving.
