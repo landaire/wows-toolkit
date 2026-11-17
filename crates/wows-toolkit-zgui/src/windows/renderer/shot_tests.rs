@@ -42,6 +42,9 @@ const TAB_SIZE: WindowSize = WindowSize { width: 1280.0, height: 800.0 };
 /// A popped-out renderer's window when nothing was remembered.
 const POPPED_OUT_SIZE: WindowSize = WindowSize { width: 1000.0, height: 860.0 };
 
+/// A large window, where a frame drawn at the canvas's own size would be enlarged.
+const LARGE_SIZE: WindowSize = WindowSize { width: 2400.0, height: 1600.0 };
+
 /// Eight minutes into the battle, when the ships have spread over the map.
 const MID_BATTLE: f32 = 480.0;
 
@@ -176,4 +179,18 @@ fn the_drawing_tools_on_a_real_replay() {
         run_in_real_time(&mut window);
     }
     println!("{}", save_shot(&mut window, "renderer-shape-edit").display());
+}
+
+#[test]
+#[ignore = "draws a real replay on the graphics device; run by hand to review the renderer"]
+fn the_renderer_is_sharp_in_a_large_window() {
+    let Some((mut window, session)) = open(ThemeChoice::Dark, LARGE_SIZE, false) else { return };
+    // A frame drawn at the window's own pixels takes longer than one at the canvas's size.
+    let settle = |window: &mut HeadlessWindow| (0..50).for_each(|_| run_in_real_time(window));
+    settle(&mut window);
+    println!("{}", save_shot(&mut window, "renderer-large").display());
+
+    session.zoom_to(3.0);
+    settle(&mut window);
+    println!("{}", save_shot(&mut window, "renderer-large-zoomed").display());
 }
