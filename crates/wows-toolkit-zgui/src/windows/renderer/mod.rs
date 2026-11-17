@@ -73,5 +73,6 @@ pub fn pop_out(session: RendererSession) -> Option<WindowHandle> {
             ReplayRenderer(session = session)
         }
     });
+    session.hold_window(handle.clone());
     Some(handle)
 }

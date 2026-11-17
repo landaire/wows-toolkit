@@ -407,6 +407,15 @@ impl ReplayWorkspace {
             }
             return;
         }
+        // A viewport moved into a window of its own is the one open on this replay.
+        let popped = self.popped.with_value(|popped| {
+            popped.iter().copied().find(|session| session.path().is_some_and(|path| path == request.path))
+        });
+        if let Some(session) = popped {
+            session.rebake_with_alts(request.alts);
+            session.raise();
+            return;
+        }
 
         let path = request.path.clone();
         let link = self.shell.collab.link().get_untracked();

@@ -96,6 +96,7 @@ use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SyncVersion;
 use wt_collab_client::drawing::Tool;
 use wt_collab_client::protocol::CollabRenderOptions;
+use zgui::prelude::WindowHandle;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
@@ -293,6 +294,8 @@ struct Run {
     on_armor: Option<UnsyncCallback<ArmorRequest>>,
     /// Where a renderer's window was last, read as the session opens so a pop-out opens there.
     remembered: Option<wows_toolkit_config::WindowSettings>,
+    /// The window the viewport was moved into, once it has one to itself.
+    window: Option<WindowHandle>,
 }
 
 impl RendererSession {
@@ -366,6 +369,7 @@ impl RendererSession {
                 armor: None,
                 on_armor: None,
                 remembered: None,
+                window: None,
                 request,
             }),
         }
@@ -1818,6 +1822,23 @@ impl RendererSession {
     /// Records that the viewport has a window to itself.
     pub fn mark_popped_out(self) {
         self.popped_out.set(true);
+    }
+
+    /// Records the window the viewport was moved into, which [`Self::raise`] brings forward.
+    pub fn hold_window(self, window: WindowHandle) {
+        self.with_run(|run| run.window = Some(window));
+    }
+
+    /// Brings forward the window the viewport has to itself, if it has one.
+    pub fn raise(self) {
+        if let Some(window) = self.run.try_with_value(|run| run.window.clone()).flatten() {
+            window.focus();
+        }
+    }
+
+    /// The replay this viewport plays. `None` once it has closed.
+    pub fn path(self) -> Option<PathBuf> {
+        self.run.try_with_value(|run| run.request.path.clone())
     }
 }
 

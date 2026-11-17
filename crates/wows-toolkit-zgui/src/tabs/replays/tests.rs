@@ -271,6 +271,26 @@ fn rendering_an_open_replay_again_brings_its_viewport_forward() {
     workspace.remove(&Docked::Renderer(path));
 }
 
+/// Asking again for a battle whose viewport has a window of its own finds that viewport, rather
+/// than docking a second one and baking the battle again.
+#[test]
+fn rendering_a_popped_out_replay_again_finds_its_viewport() {
+    let (mut window, workspace) = open();
+    let path = PathBuf::from("popped.wowsreplay");
+
+    workspace.render(RenderRequest { path: path.clone(), alts: Vec::new() });
+    let popped = workspace.session_for_test(&path).expect("the viewport has a session");
+    popped.popped_out.set(true);
+    window.advance(Duration::from_millis(32));
+    assert!(workspace.open_renderers().is_empty(), "the popped-out viewport left the dock");
+
+    workspace.render(RenderRequest { path: path.clone(), alts: Vec::new() });
+    window.advance(Duration::from_millis(32));
+    assert!(workspace.open_renderers().is_empty(), "no second viewport is docked");
+    assert!(workspace.session_for_test(&path).is_none());
+    popped.close();
+}
+
 /// What Search, a drop or the palette asks of the replays tab lands there; only a clipboard render
 /// leaves the reader where they were.
 #[test]
