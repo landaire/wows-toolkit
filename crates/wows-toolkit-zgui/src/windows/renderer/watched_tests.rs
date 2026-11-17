@@ -79,7 +79,12 @@ fn open(link: CollabLink) -> (HeadlessWindow, WatchSession) {
         };
         let watch = WatchSession::open(shared, link.clone(), None);
         built.set(Some(watch));
-        view! { WatchedView(watch = watch) }
+        // As a dock panel holds it: the whole of the window.
+        view! {
+            column(style = "width: 100%; height: 100%") {
+                WatchedView(watch = watch)
+            }
+        }
     })
     .expect("the watched window opens headlessly");
     let watch = handle.get().expect("the watch was opened");
@@ -254,6 +259,34 @@ fn the_watched_map_zooms_pans_and_resets() {
     window.double_click(viewport).expect("the map takes a double click");
     take_in(&mut window);
     assert!(watch.map.with_untracked(|map| map.view().is_whole_map()), "a double click shows the whole map");
+}
+
+/// A resize while zoomed in reshapes the window onto the map, so the frame is drawn again without
+/// waiting for the host. At the whole map the shape does not change, and nothing is drawn.
+#[test]
+fn a_resize_while_zoomed_draws_the_watched_frame_again() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    watch.frame_size.set(Some(FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }));
+    take_in(&mut window);
+
+    let at_rest = watch.redraws_asked();
+    window.resize(WindowSize { width: 900.0, height: 800.0 }).expect("the window resizes");
+    take_in(&mut window);
+    assert_eq!(watch.redraws_asked(), at_rest, "the whole map keeps its shape");
+
+    let viewport = window.by_test_id("watched-playback-viewport").expect("the map is drawn");
+    window.wheel(viewport, -100.0).expect("the map takes the wheel");
+    take_in(&mut window);
+    let zoomed = watch.redraws_asked();
+    let shape = watch.map.with_untracked(MapView::shaped_view);
+    assert!(shape.zoom() > 1.0, "the wheel zoomed in: {shape:?}");
+    window.resize(WindowSize { width: 1600.0, height: 800.0 }).expect("the window resizes");
+    take_in(&mut window);
+    let wider = watch.map.with_untracked(MapView::shaped_view);
+    assert_ne!(wider, shape, "a zoomed map widens with the window");
+    assert!(watch.redraws_asked() > zoomed, "and is drawn again");
 }
 
 /// The peers' pointers and pings are drawn over the watched battle and a pointer that has stood

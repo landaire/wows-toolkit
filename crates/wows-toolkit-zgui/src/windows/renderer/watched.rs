@@ -208,6 +208,9 @@ struct WatchRun {
     /// playback. A frame that arrives during one is drawn when it finishes.
     rasterising: bool,
     stale: bool,
+    /// Draws asked for since the watch opened, which is what a test reads a redraw by.
+    #[cfg(test)]
+    redraws_asked: u64,
     owner: Owner,
     link: CollabLink,
 }
@@ -256,10 +259,18 @@ impl WatchSession {
                 sink: FrameSink::new(),
                 rasterising: false,
                 stale: false,
+                #[cfg(test)]
+                redraws_asked: 0,
                 owner: Owner::current().expect("a watch is opened from a component's body"),
                 link,
             }),
         }
+    }
+
+    /// How many draws have been asked for since the watch opened.
+    #[cfg(test)]
+    pub fn redraws_asked(self) -> u64 {
+        self.run.with_value(|run| run.redraws_asked)
     }
 
     pub fn sink(self) -> FrameSink {
@@ -413,17 +424,26 @@ impl WatchSession {
         self.redraw();
     }
 
-    /// Records where the frame sits on screen, which every pointer position is read against.
+    /// Records where the frame sits on screen, which every pointer position is read against, and
+    /// draws again when that reshapes the window onto the map, as a resize does while zoomed in.
+    ///
+    /// Drawn at one pixel per canvas pixel whatever the screen, so the scale the renderer's own
+    /// frames follow is not asked about here.
     pub fn place(self, bounds: ElementBounds) {
         // Named in full: `Placement` here is the popover's.
         let placement = self
             .frame_size
             .get_untracked()
             .map(|frame| wows_toolkit_replay_data::replay_render::view::Placement { bounds, frame });
-        if self.map.with_untracked(|map| map.placement() == placement) {
+        let Some(before) = self.map.with_untracked(|map| (map.placement() != placement).then(|| map.shaped_view()))
+        else {
             return;
-        }
+        };
         self.map.update(|map| map.set_placement(placement));
+
+        if self.map.with_untracked(MapView::shaped_view) != before {
+            self.redraw();
+        }
     }
 
     /// The wheel zooms about whatever is under the pointer.
@@ -493,6 +513,8 @@ impl WatchSession {
 
     /// Draws the frame this viewport last had, off the UI thread.
     fn redraw(self) {
+        #[cfg(test)]
+        self.run.try_update_value(|run| run.redraws_asked += 1);
         let Some(commands) = self.shown() else { return };
         let started = self.run.try_update_value(|run| {
             // The fonts and icons a frame needs are this build's own: without them there is
