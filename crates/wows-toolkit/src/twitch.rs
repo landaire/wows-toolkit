@@ -31,8 +31,6 @@ pub struct TwitchState {
     pub token_validation_failed: bool,
 }
 
-pub use wows_toolkit_viewmodel::twitch::login_matches_ign;
-
 impl TwitchState {
     pub fn token_is_valid(&self) -> bool {
         if let Some(token) = self.token.as_ref() { token.expires_in().as_secs() > 0 } else { false }
@@ -72,6 +70,7 @@ impl TwitchState {
 mod tests {
     use super::*;
     use jiff::Unit;
+    use wows_toolkit_viewmodel::twitch::login_matches_ign;
 
     /// Helper: create a TwitchState with the given viewer entries.
     fn state_with_viewers(viewers: Vec<(&str, Vec<Timestamp>)>) -> TwitchState {

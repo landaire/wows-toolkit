@@ -24,12 +24,14 @@ use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::unindexable::Unindexable;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
+use wows_toolkit_viewmodel::index_rows::apply_sniper_flags;
 use wows_toolkit_viewmodel::index_rows::map_rows;
 use wows_toolkit_viewmodel::index_rows::pr_repairs;
 use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::player_tracker::record::BattleRoster;
 use wows_toolkit_viewmodel::player_tracker::store as tracker_store;
+use wows_toolkit_viewmodel::twitch;
 
 use crate::load::GameDataCache;
 use crate::load::IndexableBattle;
@@ -277,7 +279,18 @@ async fn store_battle(
         fit: battle.constants_fit,
     };
 
-    let rows = map_rows(&battle.normalized, &context);
+    let mut rows = map_rows(&battle.normalized, &context);
+    // The Twitch chat seen around the battle, so a search for stream snipers finds it.
+    let battle_at = rows.objective.timestamp.as_second();
+    let window_start = battle_at + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64;
+    let window_end = battle_at + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64;
+    match query::observations_in_window(pool, window_start, window_end).await {
+        Ok(observations) => apply_sniper_flags(&mut rows.vehicles, &observations),
+        Err(err) => {
+            tracing::warn!("replay index: the chat seen around {} was not read: {err}", stored.path.display())
+        }
+    }
+
     let results = match battle.constants_fit {
         ConstantsFit::Matched => ResultsWrite::Store,
         ConstantsFit::Mismatched => ResultsWrite::Keep,
@@ -674,6 +687,47 @@ mod tests {
             assert_eq!(enemy.last_name, "Player2");
             assert_eq!(enemy.arena_ids.iter().collect::<Vec<_>>(), vec![ArenaId::new(1)]);
             assert_eq!(enemy.timestamps.len(), 1);
+        });
+    }
+
+    /// A player whose name the chat seen from two minutes before the battle to twenty after it
+    /// names is stored as a stream sniper, so a search for snipers finds the battle. Chat seen
+    /// later does not count.
+    #[test]
+    fn a_battle_is_stored_with_the_snipers_the_chat_around_it_names() {
+        runtime().block_on(async {
+            let pool = wows_toolkit_config::test_pool().await;
+            let path = Path::new("G:/wows/replays/sniped.wowsreplay");
+            let mut battle = rated_battle();
+            // Names no login of the other's could be mistaken for.
+            for (player, name) in battle.normalized.players.iter_mut().zip(["Ambermoor", "Whitecrest"]) {
+                player.name = name.to_owned();
+            }
+            // The fixture battle starts at the epoch.
+            let seen = [("whitecrest".to_owned(), 19 * 60), ("ambermoor".to_owned(), 21 * 60)];
+            query::record_twitch_observations(&pool, &seen).await.expect("the chat is recorded");
+            let now = Timestamp::now();
+            let source = query::ensure_default_source(&pool, Path::new("G:/wows/replays"), now)
+                .await
+                .expect("the live source is made");
+            let stored = StoredReplay {
+                path,
+                file_mtime: None,
+                source_id: source,
+                indexed_at: now,
+                mode: IndexWriteMode::Incremental,
+            };
+
+            store_battle(&pool, battle, None, &stored).await.expect("the battle is written");
+
+            let roster = query::roster(&pool, ArenaId::new(1)).await.expect("the roster reads");
+            let flags = |name: &str| {
+                let vehicle = roster.iter().find(|vehicle| vehicle.player_name == name);
+                let vehicle = vehicle.expect("the player is stored");
+                (vehicle.is_stream_sniper, vehicle.sniper_twitch_login.clone())
+            };
+            assert_eq!(flags("Whitecrest"), (Some(true), Some("whitecrest".to_owned())));
+            assert_eq!(flags("Ambermoor"), (Some(false), None), "chat seen after the window names nobody");
         });
     }
 

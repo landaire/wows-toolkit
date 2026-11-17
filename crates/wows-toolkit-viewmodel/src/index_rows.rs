@@ -30,6 +30,8 @@ use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::VehicleRelation;
 use wowsunpack::rating_scope::RatingScope;
 
+use crate::twitch::login_matches_ign;
+
 /// Whether the constants file matches the build the replay was recorded on.
 ///
 /// Results resolved against the wrong constants are wrong rather than merely
@@ -270,6 +272,28 @@ pub fn suppress_untrusted_results(rows: &mut MappedRows) {
     rows.record.self_kills = None;
     rows.record.self_pr = None;
     rows.record.results_available = false;
+}
+
+/// Flags each real player in `vehicles` whose name a login in `observations`,
+/// the Twitch chat seen around the battle as (login, seen_at) pairs, plausibly
+/// names.
+///
+/// No observations leaves every row unknown rather than flagging nobody: no
+/// Twitch data covered the battle. Bots carry account id 0, which no login
+/// can name, and are left unknown as well.
+pub fn apply_sniper_flags(vehicles: &mut [IndexedVehicleRow], observations: &[(String, i64)]) {
+    if observations.is_empty() {
+        return;
+    }
+
+    for vehicle in vehicles.iter_mut() {
+        if vehicle.account_id.raw() == 0 {
+            continue;
+        }
+        let matched = observations.iter().find(|(login, _)| login_matches_ign(login, &vehicle.player_name));
+        vehicle.is_stream_sniper = Some(matched.is_some());
+        vehicle.sniper_twitch_login = matched.map(|(login, _)| login.clone());
+    }
 }
 
 /// The MC revision an indexing pass rating against `table` writes, or `None`

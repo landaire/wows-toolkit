@@ -14,6 +14,7 @@ use tracing::warn;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit as SharedFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
+use wows_toolkit_viewmodel::index_rows::apply_sniper_flags;
 use wows_toolkit_viewmodel::index_rows::pr_repairs;
 use wows_toolkit_viewmodel::index_rows::single_battle_pr;
 
@@ -21,7 +22,6 @@ use crate::data::constants::ConstantsFit;
 use crate::db::index::query;
 use crate::db::index::rows::IndexError;
 use crate::db::index::rows::IndexWriteMode;
-use crate::db::index::rows::IndexedVehicleRow;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::PrInputs;
 use crate::db::index::rows::ResultsWrite;
@@ -136,39 +136,6 @@ pub use wows_toolkit_viewmodel::index_rows::suppress_untrusted_results;
 /// `TwitchState::player_is_potential_stream_sniper`'s -2..+20 minute window.
 const SNIPER_WINDOW_BEFORE_SECS: i64 = 2 * 60;
 const SNIPER_WINDOW_AFTER_SECS: i64 = 20 * 60;
-
-/// Applies stream-sniper flags to `vehicles` from a match's in-window Twitch
-/// chat `observations` (login, seen_at unix seconds; already filtered to the
-/// match's window by the caller).
-///
-/// If `observations` is empty, every row is left as-is (`None`, meaning
-/// "unknown": no Twitch data was available for this match's window) -- this
-/// is never turned into a `Some(false)` sentinel. Otherwise, each real player
-/// (bots, which carry `AccountId(0)`, are always left `None` since they have
-/// no Twitch-matchable account) gets `is_stream_sniper = Some(true)` plus the
-/// matching login if any observation's login fuzzy-matches their player
-/// name via `login_matches_ign`, or `Some(false)` if detection ran and found
-/// no match.
-pub fn apply_sniper_flags(vehicles: &mut [IndexedVehicleRow], observations: &[(String, i64)]) {
-    if observations.is_empty() {
-        return;
-    }
-    for vehicle in vehicles.iter_mut() {
-        if vehicle.account_id.raw() == 0 {
-            continue;
-        }
-        match observations.iter().find(|(login, _)| crate::twitch::login_matches_ign(login, &vehicle.player_name)) {
-            Some((login, _)) => {
-                vehicle.is_stream_sniper = Some(true);
-                vehicle.sniper_twitch_login = Some(login.clone());
-            }
-            None => {
-                vehicle.is_stream_sniper = Some(false);
-                vehicle.sniper_twitch_login = None;
-            }
-        }
-    }
-}
 
 /// Counts the index writes this process has made.
 ///
@@ -329,6 +296,7 @@ mod tests {
     use super::*;
     // Built directly here rather than through `map_rows`, which needs a
     // parsed replay these tests do not have.
+    use crate::db::index::rows::IndexedVehicleRow;
     use crate::db::index::rows::MatchOutcome;
     use crate::db::index::rows::ObjectiveMatch;
     use crate::db::index::rows::ReplayRecord;
