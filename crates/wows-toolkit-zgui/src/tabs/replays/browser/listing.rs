@@ -65,8 +65,10 @@ use zgui::reactive::prelude::WithValue;
 use zgui::task::Task;
 use zgui::task::blocking;
 use zgui::task::spawn_local;
+use zgui::view::FrameHandle;
 use zgui::view::TimeoutHandle;
 use zgui::view::Timers;
+use zgui::vocab::Timestamp;
 
 use crate::long_job::long_job;
 use crate::services::GameDataState;
@@ -188,6 +190,7 @@ struct Work {
     /// Replays already sent to be indexed again, so a row the index cannot freshen is not read
     /// on every reload of the summaries.
     reindex_asked: HashSet<PathBuf>,
+    glows: GlowClock,
 }
 
 impl Listing {
@@ -235,6 +238,7 @@ impl Listing {
                 known_groups: HashSet::new(),
                 dropped_scopes: HashMap::new(),
                 reindex_asked: HashSet::new(),
+                glows: GlowClock::default(),
             }),
         };
 
@@ -243,6 +247,7 @@ impl Listing {
             listing.work.try_update_value(|work| {
                 work.watcher = None;
                 work.restart = None;
+                work.glows.frame = None;
             });
         });
         // The install's directory follows the game directory, which the settings name once they
@@ -376,18 +381,54 @@ impl Listing {
         }
     }
 
-    /// Has `path`'s row glow for as long as its arrival animation runs.
+    /// Has `path`'s row glow for as long as its arrival animation runs, timed by the window's
+    /// frames.
     fn glow(self, path: PathBuf) {
         self.glowing.update(|glowing| {
             glowing.insert(path.clone());
         });
-        // Scoped to the listing, which cancels it with the listing's signals.
-        let _glow = self.spawn(async move {
-            self.sleep(ARRIVAL_GLOW).await;
-            self.glowing.update(|glowing| {
-                glowing.remove(&path);
-            });
+        let idle = self.work.try_update_value(|work| {
+            work.glows.started.insert(path, None);
+            work.glows.frame.is_none()
         });
+        if idle == Some(true) {
+            self.next_glow_frame();
+        }
+    }
+
+    fn next_glow_frame(self) {
+        let Some(timers) = self.work.with_value(|work| work.timers.clone()) else { return };
+        let frame = timers.request_frame(move |now| self.glow_frame(now));
+        self.work.update_value(|work| work.glows.frame = Some(frame));
+    }
+
+    /// Moves the glows on to the frame at `now`, taking off those that have run their length.
+    fn glow_frame(self, now: Timestamp) {
+        let ticked = self.work.try_update_value(|work| {
+            let ended = work.glows.tick(now);
+            if work.glows.started.is_empty() {
+                work.glows.now = None;
+                work.glows.frame = None;
+            }
+            (ended, !work.glows.started.is_empty())
+        });
+        let Some((ended, glowing)) = ticked else { return };
+
+        if !ended.is_empty() {
+            self.glowing.update(|shown| {
+                for path in &ended {
+                    shown.remove(path);
+                }
+            });
+        }
+        if glowing {
+            self.next_glow_frame();
+        }
+    }
+
+    /// How long `path`'s row has glowed, or `None` when it does not glow.
+    pub fn glow_elapsed(self, path: &Path) -> Option<Duration> {
+        self.work.try_with_value(|work| work.glows.elapsed(path)).flatten()
     }
 
     pub fn set_grouping(self, grouping: ReplayGrouping) {
@@ -888,6 +929,53 @@ impl Listing {
         }
         self.watch_state.set(WatchState::Stopped { cause: cause.clone(), next });
         self.say(ListingEvent::WatchStopped { cause, next });
+    }
+}
+
+/// When each glowing row's replay arrived, on the window's clock, so a row built again while it
+/// glows carries on its fade rather than starting it over.
+#[derive(Default)]
+struct GlowClock {
+    /// Each glowing replay's first frame, once a frame has run since it arrived.
+    started: HashMap<PathBuf, Option<Timestamp>>,
+    /// The newest frame's time, while a row glows.
+    now: Option<Timestamp>,
+    /// The next frame's callback, while a row glows.
+    frame: Option<FrameHandle>,
+}
+
+impl GlowClock {
+    /// How long `path`'s row has glowed, or `None` when it does not glow.
+    fn elapsed(&self, path: &Path) -> Option<Duration> {
+        let started = self.started.get(path)?;
+        let elapsed = match (started, self.now) {
+            (Some(started), Some(now)) => now.saturating_since(*started),
+            // It arrived since the last frame.
+            _ => Duration::ZERO,
+        };
+
+        Some(elapsed)
+    }
+
+    /// Starts at `now` the glows that arrived since the last frame, and gives back those that have
+    /// run their length.
+    fn tick(&mut self, now: Timestamp) -> Vec<PathBuf> {
+        self.now = Some(now);
+        for started in self.started.values_mut() {
+            started.get_or_insert(now);
+        }
+
+        let ended: Vec<PathBuf> = self
+            .started
+            .iter()
+            .filter(|(_, started)| started.is_some_and(|started| now.saturating_since(started) >= ARRIVAL_GLOW))
+            .map(|(path, _)| path.clone())
+            .collect();
+        for path in &ended {
+            self.started.remove(path);
+        }
+
+        ended
     }
 }
 

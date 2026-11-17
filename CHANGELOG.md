@@ -83,6 +83,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Draw a replay's icons and tab flag from the build it was read through, and from the newest build only what that build lacks, so old replays keep retired module and skill icons
 - *(zgui)* Keep the replay listing scrolled where it was, with its keyboard cursor and shift anchor, when a battle lands, the folder is read again or game data loads
 - *(zgui)* Keep a replay listing group closed and selected when its count or results change, and keep the rows' index facts while a listing is read again rather than showing them unindexed
+- *(zgui)* Fade a landed battle's row glow once from its arrival, rather than glowing again when the row is built again before the glow is over
 - *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
 - *(zgui)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state
 - *(zgui)* Finish a renderer video export when its viewport or window is closed, and say where the video was saved or that it was copied

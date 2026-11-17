@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use landaire_ui::Appearance;
 use landaire_ui::TreeModel;
+use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
@@ -35,6 +36,7 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
+use zgui::view;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -51,6 +53,7 @@ use super::tree::BrowserTree;
 use super::tree::LeafMc;
 use super::tree::NodeKey;
 use super::tree::TreeInputs;
+use crate::game_art;
 use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
@@ -502,22 +505,16 @@ impl Landed {
         control.pin_folder(folder_id(control, &root), true);
         settle_in_real_time(window);
         let listing = listing(control, &root);
-
-        let path = root.join(FIXTURES[1]);
-        std::fs::copy(fixture(FIXTURES[1]), &path).expect("the replay is copied");
-        simulated_watch::report(&root, DirChange::Appeared(path.clone()));
-        // The header is read off the UI thread, so frames are run in step with real time.
-        for _ in 0..100 {
-            if listing.holds(&path) {
-                break;
-            }
-            window.advance(Duration::from_millis(16));
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(listing.holds(&path), "the watch lists the battle");
-        window.advance(Duration::from_millis(32));
+        let path = arrive(window, listing, &root, FIXTURES[1]);
 
         Self { _dir: dir, listing, path }
+    }
+
+    /// Lands `name` beside the first battle and returns once the listing holds it.
+    fn land_another(&self, window: &mut HeadlessWindow, name: &str) -> PathBuf {
+        let root = self.path.parent().expect("the battle is in a folder");
+
+        arrive(window, self.listing, root, name)
     }
 
     fn is_new(&self) -> bool {
@@ -527,6 +524,25 @@ impl Landed {
     fn glows(&self, window: &HeadlessWindow) -> bool {
         window.all_by_class("wt-row-arrived").contains(&row(window, &self.path))
     }
+}
+
+/// Copies `name` into `root`, has the watch report it and returns once `listing` holds it.
+fn arrive(window: &mut HeadlessWindow, listing: Listing, root: &Path, name: &str) -> PathBuf {
+    let path = root.join(name);
+    std::fs::copy(fixture(name), &path).expect("the replay is copied");
+    simulated_watch::report(root, DirChange::Appeared(path.clone()));
+    // The header is read off the UI thread, so frames are run in step with real time.
+    for _ in 0..100 {
+        if listing.holds(&path) {
+            break;
+        }
+        window.advance(Duration::from_millis(16));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(listing.holds(&path), "the watch lists the battle");
+    window.advance(Duration::from_millis(32));
+
+    path
 }
 
 /// A battle opened by "Autoload Latest Replay" as it lands is not tagged New, and its row glows
@@ -544,6 +560,92 @@ fn an_autoloaded_arrival_glows_but_is_not_tagged() {
     assert!(landed.glows(&window), "the row glows as it arrives");
     window.advance(Duration::from_millis(1300));
     assert!(!landed.glows(&window), "once");
+}
+
+/// The shell drawn on the graphics device, with the replays tab's browser and simulated directory
+/// watches. `None` on a machine with no graphics device.
+fn open_on_device() -> Option<(HeadlessWindow, BrowserControl)> {
+    let probe =
+        HeadlessOptions { drawing: Drawing::Device, ..HeadlessOptions::new(WindowSize { width: 16.0, height: 16.0 }) };
+    match HeadlessWindow::open(probe, || view! { box(class = "wt-device-probe") }) {
+        Ok(_) => {}
+        Err(err) if game_art::testing::no_device(&err) => return None,
+        Err(err) => panic!("the probe window opens: {err}"),
+    }
+    simulated_watch::install();
+    let window = open_shell(review_options(Appearance::Dark));
+    let control = MADE.with(std::cell::Cell::get).expect("the replays tab made its browser");
+
+    Some((window, control))
+}
+
+/// The colour drawn just inside the right edge of `path`'s row, where only the row's own ground
+/// shows.
+fn row_ground(window: &mut HeadlessWindow, path: &Path) -> [u8; 3] {
+    let bounds = window.bounds(row(window, path)).expect("the row has a box");
+    let pixels = window.pixels().expect("the window is drawn on the device");
+    let x = (bounds.origin.x.0 + bounds.size.width.0 - 3.0) as i32;
+    let y = (bounds.origin.y.0 + bounds.size.height.0 / 2.0) as i32;
+    let [red, green, blue, _] = pixels.rgba(x, y);
+
+    [red, green, blue]
+}
+
+/// The largest difference between two colours in any one channel.
+fn colour_distance(left: [u8; 3], right: [u8; 3]) -> u8 {
+    left.iter().zip(right).map(|(left, right)| left.abs_diff(right)).max().unwrap_or(0)
+}
+
+/// A landed battle's row built again late in its glow, as when another battle lands beside it,
+/// carries on its fade rather than glowing at full strength again.
+#[test]
+fn a_row_built_again_while_it_glows_carries_on_its_fade() {
+    let Some((mut window, control)) = open_on_device() else {
+        eprintln!("skipped: no graphics adapter to draw the listing on");
+        return;
+    };
+    set_autoload(&mut window, control, false);
+    let landed = Landed::new(&mut window, control);
+    let fresh = row_ground(&mut window, &landed.path);
+
+    window.advance(Duration::from_millis(600));
+    let first = row(&window, &landed.path);
+    let late = row_ground(&mut window, &landed.path);
+    landed.land_another(&mut window, FIXTURES[2]);
+    assert_ne!(row(&window, &landed.path), first, "another landing builds the row again");
+    let rebuilt = row_ground(&mut window, &landed.path);
+
+    window.advance(Duration::from_millis(1500));
+    let faded = row_ground(&mut window, &landed.path);
+
+    assert!(colour_distance(fresh, faded) > 24, "the row glows as it lands: {fresh:?} against {faded:?}");
+    assert!(
+        colour_distance(rebuilt, faded) <= colour_distance(late, faded),
+        "the row built again glows no more than before: {rebuilt:?} against {late:?}, faded {faded:?}"
+    );
+}
+
+/// A landed battle's row whose index facts arrive while it glows keeps its fade where it was
+/// rather than skipping ahead.
+#[test]
+fn a_row_freshened_while_it_glows_keeps_its_fade() {
+    let Some((mut window, control)) = open_on_device() else {
+        eprintln!("skipped: no graphics adapter to draw the listing on");
+        return;
+    };
+    set_autoload(&mut window, control, false);
+    let landed = Landed::new(&mut window, control);
+
+    window.advance(Duration::from_millis(300));
+    let first = row(&window, &landed.path);
+    let before = row_ground(&mut window, &landed.path);
+    let random = RatingScope::Rated(RatedBattle::Random);
+    landed.listing.summaries.set(HashMap::from([(landed.path.clone(), summary(MatchOutcome::Win, random, None))]));
+    window.advance(Duration::from_millis(16));
+    assert_eq!(row(&window, &landed.path), first, "the facts are drawn into the same row");
+    let after = row_ground(&mut window, &landed.path);
+
+    assert!(colour_distance(before, after) <= 4, "the fade goes on from where it was: {before:?} against {after:?}");
 }
 
 /// A battle opened from outside the listing, as search, the palette and a lone drop do, is not

@@ -6,6 +6,7 @@ use std::num::NonZeroU64;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use landaire_ui::BranchClick;
 use landaire_ui::Fraction;
@@ -441,9 +442,13 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
             let depth = row.depth;
             let leaf_path = path.clone();
             let left_path = path.clone();
+            // A row made while it glows, as when another landing moves it, carries on its fade.
+            // Taken once per row: the row is kept while its facts change, and a new delay would
+            // move its running fade on.
+            let glowed = listing.glow_elapsed(&path);
             let content = move || {
                 let leaf = listing.tree.with(|tree| tree.leaf(&leaf_path).cloned())?;
-                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, depth))
+                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, depth, glowed))
             };
             let enter = move |_: &mut EventCx<'_, events::PointerEnter>| {
                 let map_name = listing.tree.with_untracked(|tree| tree.leaf(&path).map(|leaf| leaf.map_name.clone()));
@@ -486,8 +491,16 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
 }
 
 /// What a replay row draws: the outcome edge, the map, the identity line with its tags and the
-/// stats line. The map is set in by `depth`, since the tree indents nothing.
-fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: LeafRow, depth: TreeDepth) -> AnyView {
+/// stats line. The map is set in by `depth`, since the tree indents nothing. `glowed` is how long
+/// the row had glowed when it was made.
+fn leaf_view(
+    listing: Listing,
+    thumbnails: Thumbnails,
+    path: PathBuf,
+    leaf: LeafRow,
+    depth: TreeDepth,
+    glowed: Option<Duration>,
+) -> AnyView {
     // Under a group the map starts 24px in from the edge, as the other front end's does.
     const LEVEL_INSET: f32 = 17.0;
 
@@ -500,6 +513,7 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
     let (tagged_path, glow_path) = (path.clone(), path.clone());
     let tagged = Signal::derive_local(move || listing.arrivals.with(|arrivals| arrivals.contains(&tagged_path)));
     let glowing = Signal::derive_local(move || listing.glowing.with(|glowing| glowing.contains(&glow_path)));
+    let glow_delay = glowed.map(|elapsed| format!("-{}ms", elapsed.as_millis()));
     let space = leaf.map_name.clone();
     let thumb = move || match thumbnails.get(&space) {
         Some(Thumbnail::Ready(bytes)) => AnyView::new(view! {
@@ -577,7 +591,12 @@ fn leaf_view(listing: Listing, thumbnails: Thumbnails, path: PathBuf, leaf: Leaf
     let inset = format!("{}px", depth.0 as f32 * LEVEL_INSET);
 
     AnyView::new(view! {
-        row(class = "wt-row", class:wt-row-arrived = glowing, attr:data-testid = format!("replay-row-{}", path.display())) {
+        row(
+            class = "wt-row",
+            class:wt-row-arrived = glowing,
+            style:animation-delay = move || glow_delay.clone(),
+            attr:data-testid = format!("replay-row-{}", path.display())
+        ) {
             box(class = edge)
             box(class = "wt-row__thumb-slot", style:margin-left = inset) {{thumb}}
             column(class = "wt-row__lines") {
