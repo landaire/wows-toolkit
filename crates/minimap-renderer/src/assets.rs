@@ -784,6 +784,7 @@ fn load_system_fallback_font() -> Option<(FontArc, Arc<Vec<u8>>)> {
         // Linux
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
     ];
     for path in CANDIDATES {
