@@ -475,20 +475,58 @@ fn store_battle(control: BrowserControl, path: &Path, file_mtime: Option<i64>) {
 }
 
 /// A battle the game rewrote, as it does when the results of a battle the player left arrive, is
-/// sent to the index again: the write roots the Live source, which nothing else here makes.
+/// sent to the index again: the write roots the Live source, which nothing else here makes. The
+/// battle is written after startup, which would index a battle already there.
 #[test]
 fn a_rewritten_battle_is_indexed_again() {
     let (mut window, control) = open();
     let (pool, runtime) = own_index(control);
-    let install = adopt_install(control, &[FIXTURES[0]]);
+    let install = adopt_install(control, &[]);
     settle_in_real_time(&mut window);
     let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
     let live = || runtime.block_on(query::live_source_id(&pool)).expect("the live source reads");
     assert_eq!(live(), None, "nothing has made the Live source yet");
 
+    std::fs::copy(fixture(FIXTURES[0]), replays.join(FIXTURES[0])).expect("the replay is copied");
     simulated_watch::report(&replays, DirChange::Changed(replays.join(FIXTURES[0])));
 
     settle_until(&mut window, "the rewritten battle is indexed again", |_| live().is_some());
+}
+
+/// A battle played while the app was closed, which the index does not hold, is indexed as the app
+/// starts rather than waiting for the reader to build the index.
+#[test]
+fn a_battle_played_while_the_app_was_closed_is_indexed_at_startup() {
+    let (mut window, control) = open();
+    let (pool, runtime) = own_index(control);
+    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let live = || runtime.block_on(query::live_source_id(&pool)).expect("the live source reads");
+
+    settle_until(&mut window, "the startup pass makes the Live source to write under", |_| live().is_some());
+}
+
+/// A startup catch-up another pass would refuse waits for that pass to end, rather than being
+/// counted as done.
+#[test]
+fn the_startup_catch_up_runs_once_a_busy_pass_ends() {
+    let (mut window, control) = open();
+    let (pool, runtime) = own_index(control);
+    let index = control.work.shell_index;
+    index.set_folder_pass(true);
+    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let live = || runtime.block_on(query::live_source_id(&pool)).expect("the live source reads");
+    settle_in_real_time(&mut window);
+    assert_eq!(live(), None, "nothing is indexed beside the running pass");
+
+    index.set_folder_pass(false);
+    settle_until(&mut window, "the catch-up runs once the pass ends", |_| live().is_some());
+}
+
+/// Copies the fixture `name` into the install's replays directory after startup, so the startup
+/// pass does not read it.
+fn add_after_startup(install: &tempfile::TempDir, name: &str) {
+    let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
+    std::fs::copy(fixture(name), replays.join(name)).expect("the replay is copied");
 }
 
 /// A listed battle whose file changed after the index read it, as when its results arrived while
@@ -596,7 +634,9 @@ fn listed_candidates(window: &mut HeadlessWindow, control: BrowserControl) -> Ve
 fn a_forced_reindex_stopped_before_reading_says_so() {
     let (mut window, control) = open();
     own_index(control);
-    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    add_after_startup(&install, FIXTURES[0]);
     let candidates = listed_candidates(&mut window, control);
     let build = force_reindex::builds(&candidates)[0].release.build.0;
     // Nothing local and nothing to fetch, so every replay's build is one nothing can supply.
@@ -621,7 +661,9 @@ fn a_forced_reindex_stopped_before_reading_says_so() {
 fn a_forced_reindex_does_not_fetch_while_the_cache_is_busy() {
     let (mut window, control) = open();
     own_index(control);
-    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    add_after_startup(&install, FIXTURES[0]);
     let candidates = listed_candidates(&mut window, control);
     let releases: BTreeSet<Release> = force_reindex::builds(&candidates).into_iter().map(|need| need.release).collect();
     let summary = force_reindex::summarize(&candidates, &BTreeSet::new(), &Fetchable::Releases(releases));
@@ -647,7 +689,9 @@ fn a_forced_reindex_does_not_fetch_while_the_cache_is_busy() {
 fn downloads_hold_the_cache_until_their_worker_exits() {
     let (mut window, control) = open();
     own_index(control);
-    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let install = adopt_install(control, &[]);
+    settle_in_real_time(&mut window);
+    add_after_startup(&install, FIXTURES[0]);
     let candidates = listed_candidates(&mut window, control);
     let release = force_reindex::builds(&candidates)[0].release;
 

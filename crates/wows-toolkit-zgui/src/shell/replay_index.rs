@@ -4,11 +4,13 @@
 //! The build outlives the drawer, which is rebuilt each time it opens, so its state is the shell's
 //! and its task is detached.
 
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_config::index::rows::IndexError;
@@ -41,6 +43,10 @@ use crate::services::Job;
 use crate::services::Progress;
 use crate::services::progress;
 use crate::shell::Shell;
+use crate::tabs::replays::arrivals::AutoExport;
+use crate::tabs::replays::arrivals::say_export_failed;
+use crate::tabs::replays::arrivals::say_exported;
+use crate::tabs::replays::panel::ExportError;
 
 /// Counts the indexing passes that finished having written rows, so a view that read the index can
 /// tell it changed since.
@@ -135,6 +141,12 @@ impl ReplayIndexJobs {
 
     pub fn is_running_untracked(self) -> bool {
         self.progress.with_untracked(Option::is_some)
+    }
+
+    /// Whether the build or a directory's own pass is reading replays, which refuses another.
+    /// Subscribes to both.
+    pub fn is_busy(self) -> bool {
+        self.progress.with(Option::is_some) || self.folder_pass.get()
     }
 
     pub fn progress(self) -> Option<IndexProgress> {
@@ -243,6 +255,16 @@ impl Default for ReplayIndexJobs {
     }
 }
 
+/// Whether an index build that was asked for started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildStart {
+    Started,
+    /// Another pass is reading replays.
+    Busy,
+    /// There is no game directory, settings database, runtime or game data to build with.
+    Unready,
+}
+
 impl Shell {
     /// Walks the install's replays folder and indexes what is in it.
     ///
@@ -250,22 +272,41 @@ impl Shell {
     /// is not there, or rebuilding one whose rows an older parse got wrong. Refused without a game
     /// directory, since the replays are under it, and while another build runs.
     pub fn build_replay_index(self, mode: IndexMode) {
+        // Refused, it says so itself.
+        self.run_index_build(mode, None);
+    }
+
+    /// Indexes the replays of the install's folder the index lacks, and writes each battle read
+    /// that has its results to `export`: the battles played while the app was closed, which the
+    /// egui app indexes and exports as it starts.
+    pub fn catch_up_replay_index(self, export: Option<AutoExport>) -> BuildStart {
+        self.run_index_build(IndexMode::FillGaps, export)
+    }
+
+    fn run_index_build(self, mode: IndexMode, export: Option<AutoExport>) -> BuildStart {
         let index = self.replay_index;
         // Two passes at once would each load and save the unreadable-file ledger over the other's.
         if index.progress.with_untracked(Option::is_some) || index.folder_pass.get_untracked() {
             self.toasts().warn(t!("ui.reindex.busy_index").into_owned());
-            return;
+            return BuildStart::Busy;
         }
 
         let services = self.services();
-        let Some(wows_dir) = services.settings.read_untracked(|settings| settings.wows_dir.clone()) else { return };
+        let Some(wows_dir) = services.settings.read_untracked(|settings| settings.wows_dir.clone()) else {
+            return BuildStart::Unready;
+        };
         if wows_dir.is_empty() {
-            return;
+            return BuildStart::Unready;
         }
-        let Some(pool) = services.settings.pool() else { return };
-        let Some(runtime) = services.runtime() else { return };
-        let Some(game_data) = services.game_data.cache_untracked() else { return };
-        let Some(proxy) = services.settings.read_untracked(|settings| settings.proxy_url.clone()) else { return };
+        let (Some(pool), Some(runtime), Some(game_data)) =
+            (services.settings.pool(), services.runtime(), services.game_data.cache_untracked())
+        else {
+            return BuildStart::Unready;
+        };
+        let Some(proxy) = services.settings.read_untracked(|settings| settings.proxy_url.clone()) else {
+            return BuildStart::Unready;
+        };
+        let debug = self.debug_mode.get_untracked();
 
         let wows_dir = PathBuf::from(wows_dir);
         // Roots the Live source when this pass creates it; the replays are read from the folder.
@@ -286,7 +327,8 @@ impl Shell {
                     wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
                 let source = runtime.block_on(live)?;
                 let rating = owner_rating(&runtime, &proxy);
-                let outcome = wows_toolkit_replay_data::replay_index::build_folder_index(
+                let mut exported = Exported::default();
+                let progress = wows_toolkit_replay_data::replay_index::build_folder_index(
                     &runtime,
                     &pool,
                     source,
@@ -298,8 +340,13 @@ impl Shell {
                     |step| {
                         let _ = reports.unbounded_send(step);
                     },
-                );
-                Ok::<_, IndexError>((outcome?, rating.is_some()))
+                    |path, parsed| {
+                        if let Some(target) = &export {
+                            exported.note(path, target.write_read(parsed, debug));
+                        }
+                    },
+                )?;
+                Ok::<_, IndexError>(Built { progress, rated: rating.is_some(), exported })
             });
             let built = progress::follow(working, received, |step| {
                 index.progress.set(Some(step));
@@ -313,13 +360,14 @@ impl Shell {
             }
 
             // Before the progress clears, since the replays tab reads it as the build ends.
-            if let Ok((_, rated)) = built {
-                index.wrote_unrated.set_value(!rated);
+            if let Ok(built) = &built {
+                index.wrote_unrated.set_value(!built.rated);
+                built.exported.say(self.toasts());
             }
             index.progress.set(None);
             index.cancel.set_value(None);
             let said = match built {
-                Ok((progress, _)) => {
+                Ok(Built { progress, .. }) => {
                     index.note_written(progress.indexed);
                     let said = if progress.skipped > 0 {
                         t!(
@@ -349,6 +397,8 @@ impl Shell {
             // while the reader is somewhere else.
             index.outcome.set(Some(said));
         });
+
+        BuildStart::Started
     }
 
     /// Indexes the install's replays again when their MC is from an older formula or missing and
@@ -413,6 +463,49 @@ fn follows_recordings() -> bool {
 #[cfg(test)]
 pub fn follow_recordings_in_this_test() {
     FOLLOWS_RECORDINGS.with(|follows| follows.set(true));
+}
+
+/// What a finished build read and wrote.
+struct Built {
+    progress: IndexProgress,
+    /// Whether its rows were rated, which they are not without a rating table.
+    rated: bool,
+    exported: Exported,
+}
+
+/// What a build exported of the battles it read: the last file written, and the last export that
+/// failed, which are what the reader is told.
+#[derive(Default)]
+struct Exported {
+    written: Option<PathBuf>,
+    failed: Option<ExportError>,
+}
+
+impl Exported {
+    fn note(&mut self, path: &Path, written: Result<Option<PathBuf>, ExportError>) {
+        match written {
+            Ok(Some(out)) => {
+                tracing::info!(path = %path.display(), "auto-export: the battle was written");
+                self.written = Some(out);
+            }
+            Ok(None) => {
+                tracing::debug!(path = %path.display(), "auto-export: no battle results, so nothing is written");
+            }
+            Err(err) => {
+                tracing::warn!(path = %path.display(), %err, "auto-export failed");
+                self.failed = Some(err);
+            }
+        }
+    }
+
+    fn say(&self, toasts: Toasts) {
+        if let Some(out) = &self.written {
+            say_exported(toasts, out);
+        }
+        if let Some(err) = &self.failed {
+            say_export_failed(toasts, err.to_string());
+        }
+    }
 }
 
 /// The expected-values table each indexed row's owner rating is computed from, read from the

@@ -35,6 +35,7 @@ use wows_toolkit_viewmodel::twitch;
 
 use crate::load::GameDataCache;
 use crate::load::IndexableBattle;
+use crate::load::ParsedReplay;
 use crate::load::parse_replay;
 use crate::recording;
 use crate::replay_folder::ReplayFolder;
@@ -225,6 +226,25 @@ pub fn index_one(
     // Rated here rather than by the parse: the parse would also rate every row
     // of the player table, which the index never reads.
     let parsed = parse_replay(path, game_data, None).map_err(IndexOneError::Parse)?;
+
+    index_parsed(runtime, pool, path, parsed.indexable, personal_rating, source_id, indexed_at, mode)
+}
+
+/// Stores what `battle`, parsed from `path` by the caller, says, rating it
+/// against `personal_rating` when there is one.
+///
+/// Blocking: the writes are awaited on the runtime the caller provides.
+#[allow(clippy::too_many_arguments)]
+pub fn index_parsed(
+    runtime: &tokio::runtime::Runtime,
+    pool: &SqlitePool,
+    path: &Path,
+    battle: IndexableBattle,
+    personal_rating: Option<&PersonalRatingData>,
+    source_id: SourceId,
+    indexed_at: Timestamp,
+    mode: IndexWriteMode,
+) -> Result<(), IndexOneError> {
     let file_mtime = std::fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok()
@@ -232,7 +252,7 @@ pub fn index_one(
         .map(|since| since.as_secs() as i64);
     let stored = StoredReplay { path, file_mtime, source_id, indexed_at, mode };
 
-    runtime.block_on(store_battle(pool, parsed.indexable, personal_rating, &stored))
+    runtime.block_on(store_battle(pool, battle, personal_rating, &stored))
 }
 
 /// Where and how one parsed battle is written.
@@ -352,7 +372,7 @@ pub fn build_index(
 ) -> Result<IndexProgress, IndexError> {
     let folder = ReplayFolder::from_dir(root.to_path_buf());
 
-    build_folder_index(runtime, pool, source_id, &folder, game_data, personal_rating, cancel, mode, report)
+    build_folder_index(runtime, pool, source_id, &folder, game_data, personal_rating, cancel, mode, report, |_, _| {})
 }
 
 /// Walks `folder` and indexes every replay in it into `source_id`,
@@ -366,7 +386,9 @@ pub fn build_index(
 /// would leave the rest unindexed.
 ///
 /// `cancel` is checked between replays, so a build stops within one parse of
-/// being asked to.
+/// being asked to. `on_read` is handed each replay the pass parses, before its
+/// rows are written, so a caller that wants more of the battle than the index
+/// holds does not read it again.
 #[allow(clippy::too_many_arguments)]
 pub fn build_folder_index(
     runtime: &tokio::runtime::Runtime,
@@ -378,6 +400,7 @@ pub fn build_folder_index(
     cancel: &AtomicBool,
     mode: IndexMode,
     report: impl Fn(IndexProgress),
+    mut on_read: impl FnMut(&Path, &ParsedReplay),
 ) -> Result<IndexProgress, IndexError> {
     // What is already in, so a second run costs a directory listing rather than
     // a re-parse of every replay in it. The egui app skips on the same ledger
@@ -433,7 +456,14 @@ pub fn build_folder_index(
         }
 
         let indexed_at = Timestamp::now();
-        match index_one(runtime, pool, &path, game_data, personal_rating, source_id, indexed_at, mode.write_mode()) {
+        // Rated by the parse, so what `on_read` is handed carries the ratings too.
+        let read = parse_replay(&path, game_data, personal_rating).map_err(IndexOneError::Parse);
+        let stored = read.and_then(|parsed| {
+            on_read(&path, &parsed);
+            let write_mode = mode.write_mode();
+            index_parsed(runtime, pool, &path, parsed.indexable, personal_rating, source_id, indexed_at, write_mode)
+        });
+        match stored {
             Ok(()) => {
                 progress.indexed += 1;
                 superseded.extend(spellings);
@@ -480,6 +510,29 @@ pub async fn has_stale_records_in(
     }
 
     Ok(false)
+}
+
+/// Whether `folder` holds a replay the Live source has no current record of under any of its
+/// paths and that no earlier pass found unreadable: a battle the game wrote while the app was
+/// closed. Blocking: it lists the folder and awaits the reads on `runtime`.
+pub fn has_unindexed_replays(
+    runtime: &tokio::runtime::Runtime,
+    pool: &SqlitePool,
+    folder: &ReplayFolder,
+    rateable_mc: Option<MatchContributionVersion>,
+) -> Result<bool, IndexError> {
+    let replays = folder_replays(folder);
+    if replays.is_empty() {
+        return Ok(false);
+    }
+    let Some(source) = runtime.block_on(query::live_source_id(pool))? else { return Ok(true) };
+    let indexed = runtime.block_on(query::record_paths_in_source(pool, source, rateable_mc))?;
+    let unindexable = runtime.block_on(Unindexable::load(pool));
+    let held = |path: &Path| indexed.contains(path.to_string_lossy().as_ref());
+
+    Ok(replays.iter().any(|path| {
+        !held(path) && !folder.spellings(path).iter().any(|other| held(other)) && !unindexable.contains(path)
+    }))
 }
 
 /// The replays of `folder`, newest first. The game's own plain directory is walked as
@@ -908,6 +961,33 @@ mod tests {
         assert!(found[1].ends_with("older.wowsreplay"));
     }
 
+    /// A replay the index holds no record of, as one the game wrote while the app was closed, is
+    /// one to read. One the index holds, and one an earlier pass could not read, are not.
+    #[test]
+    fn a_replay_the_index_does_not_hold_is_one_to_read() {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+        let folder = ReplayFolder::from_dir(root.clone());
+        let rt = runtime();
+        let pool = rt.block_on(wows_toolkit_config::test_pool());
+        let unindexed = || has_unindexed_replays(&rt, &pool, &folder, None).expect("the index reads");
+        assert!(!unindexed(), "an empty folder has nothing to read");
+
+        let played = touch(&root, "played.wowsreplay");
+        assert!(unindexed(), "a replay with no source to hold it is read");
+
+        rt.block_on(store_rated_battle(&pool, &played, None));
+        assert!(!unindexed(), "a replay the index holds is not read again");
+
+        let broken = touch(&root, "broken.wowsreplay");
+        assert!(unindexed(), "a replay the game wrote while the app was closed is read");
+
+        let mut unindexable = rt.block_on(Unindexable::load(&pool));
+        unindexable.insert(&broken);
+        rt.block_on(unindexable.save(&pool)).expect("the ledger is written");
+        assert!(!unindexed(), "a replay an earlier pass could not read is not read again");
+    }
+
     /// A replay the game rewrote under an overlay is held once: the record of the copy it replaced
     /// in the install is dropped once the rewritten one is indexed.
     #[cfg(unix)]
@@ -941,6 +1021,7 @@ mod tests {
             &cancel,
             IndexMode::FillGaps,
             |_| {},
+            |_, _| {},
         )
         .expect("the pass runs");
 
@@ -973,7 +1054,9 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let pass = |folder: &ReplayFolder, source: SourceId| {
             let game_data = GameDataCache::without_install();
-            build_folder_index(&rt, &pool, source, folder, &game_data, None, &cancel, IndexMode::FillGaps, |_| {})
+            let only_index = |_: &Path, _: &ParsedReplay| {};
+            let mode = IndexMode::FillGaps;
+            build_folder_index(&rt, &pool, source, folder, &game_data, None, &cancel, mode, |_| {}, only_index)
                 .expect("the pass runs")
         };
         let held = |source: SourceId| {

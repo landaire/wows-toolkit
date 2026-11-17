@@ -1,13 +1,16 @@
 //! What happens once the window is open: the settings read, and everything that waits on it.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
+use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_replay_data::force_reindex::version_said;
 use wows_toolkit_replay_data::heap_profile;
 use wows_toolkit_replay_data::replay_folder::ReplayFolder;
-use wows_toolkit_replay_data::replay_index::IndexMode;
+use wows_toolkit_replay_data::replay_index::has_stale_records_in;
+use wows_toolkit_replay_data::replay_index::has_unindexed_replays;
 use wows_toolkit_services::constants::Checked;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
@@ -16,8 +19,15 @@ use wows_toolkit_viewmodel::first_run::adopt_found_install;
 use wows_toolkit_viewmodel::first_run::adopt_system_locale;
 use wows_toolkit_viewmodel::settings::keys;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::Track;
+use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::WithValue;
 use zgui::task::blocking;
 use zgui::task::spawn_detached;
 use zgui::task::spawn_local;
@@ -34,8 +44,10 @@ use crate::shell::ReplayRequest;
 use crate::shell::Shell;
 use crate::shell::crash;
 use crate::shell::first_run;
+use crate::shell::replay_index::BuildStart;
 use crate::shell::settings::Setting;
 use crate::shell::update;
+use crate::tabs::replays::arrivals::AutoExport;
 
 /// The message key a game directory that holds no install stays up under until it is fixed.
 pub const STUCK_WOWS_DIR: &str = "wows-dir";
@@ -45,7 +57,7 @@ pub fn begin(services: Services, shell: Shell) {
     announce_game_data(services, shell);
     maintain_game_data_cache(services);
     check_published_constants(services, shell);
-    rebuild_stale_index(services, shell);
+    catch_up_index(services, shell);
 
     let system_locale = sys_locale::get_locale();
     let fallback_locale = system_locale.clone();
@@ -305,39 +317,87 @@ fn constants_checked(services: Services, shell: Shell, outcome: Checked) {
     }
 }
 
-/// Once a session, as soon as the game data is in: indexes the install's replays again when rows
-/// an older parse wrote are out of date, so an update's fixes reach rows already indexed.
-fn rebuild_stale_index(services: Services, shell: Shell) {
-    let checking = RenderEffect::new(move |started: Option<bool>| {
-        if started == Some(true) {
-            return true;
-        }
+/// How long the catch-up waits after a check that failed before it checks again.
+const CATCH_UP_RETRY: Duration = Duration::from_secs(60);
+
+/// Where the catch-up stands, for the game directory it names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CatchUp {
+    Unchecked,
+    Checking(String),
+    /// Nothing was missing, or the pass that adds it started.
+    Done(String),
+}
+
+/// Once for each game directory set, as soon as the game data is in: indexes the install's
+/// replays the index does not hold, the battles played while the app was closed, and those whose
+/// rows an older parse wrote, so an update's fixes reach rows already indexed. The battles read
+/// are exported when the reader asked for every battle to be, as the egui app does as it starts
+/// and when its game directory changes.
+///
+/// A directory counts as caught up only once nothing is missing or its pass has started. A check
+/// that failed is made again after a while, and one another pass refused once that pass ends.
+fn catch_up_index(services: Services, shell: Shell) {
+    let state = StoredValue::new_local(CatchUp::Unchecked);
+    let attempts = RwSignal::new_local(0u32);
+    let checking = RenderEffect::new(move |_| {
+        attempts.track();
         if services.game_data.cache().is_none() {
-            return false;
+            return;
         }
-        let Some(wows_dir) = services.settings.read(|settings| settings.wows_dir.clone()) else { return false };
-        let Some(pool) = services.settings.pool() else { return false };
+        let Some(wows_dir) = services.settings.read(|settings| settings.wows_dir.clone()) else { return };
+        // A pass running now would refuse the catch-up; this runs again when it ends.
+        if shell.replay_index.is_busy() {
+            return;
+        }
+        let settled = state.with_value(|state| match state {
+            CatchUp::Checking(dir) | CatchUp::Done(dir) => *dir == wows_dir,
+            CatchUp::Unchecked => false,
+        });
+        if settled {
+            return;
+        }
+        let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else { return };
         if wows_dir.is_empty() {
-            return true;
+            state.set_value(CatchUp::Done(wows_dir));
+            return;
         }
 
-        let wows_dir = PathBuf::from(wows_dir);
+        state.set_value(CatchUp::Checking(wows_dir.clone()));
+        let install = PathBuf::from(&wows_dir);
         spawn_local(async move {
-            let dirs = blocking(move || ReplayFolder::from_app_install(&wows_dir).content_dirs()).await;
-            let stale = services
-                .on_tokio(async move {
-                    let rateable_mc = crate::shell::replay_index::cached_rateable_mc();
-                    wows_toolkit_replay_data::replay_index::has_stale_records_in(&pool, &dirs, rateable_mc).await
-                })
-                .await;
-            match stale {
-                Ok(Ok(true)) => shell.build_replay_index(IndexMode::FillGaps),
-                Ok(Ok(false)) => {}
-                Ok(Err(err)) => tracing::warn!(%err, "replay index revision could not be checked"),
-                Err(err) => tracing::warn!(%err, "replay index revision check did not complete"),
+            let checked = long_job(move || {
+                let folder = ReplayFolder::from_app_install(&install);
+                let rateable_mc = crate::shell::replay_index::cached_rateable_mc();
+                let stale = runtime.block_on(has_stale_records_in(&pool, &folder.content_dirs(), rateable_mc))?;
+
+                Ok::<_, IndexError>(stale || has_unindexed_replays(&runtime, &pool, &folder, rateable_mc)?)
+            })
+            .await;
+            let failed = checked.is_err();
+            let done = match checked {
+                Ok(true) => {
+                    let export =
+                        services.settings.read_untracked(|settings| AutoExport::from_settings(&settings.replay));
+                    shell.catch_up_replay_index(export.flatten()) == BuildStart::Started
+                }
+                Ok(false) => true,
+                Err(err) => {
+                    tracing::warn!(%err, "replay index could not be checked against the install");
+                    false
+                }
+            };
+            // A directory set meanwhile is the newer check's to settle.
+            let checking = CatchUp::Checking(wows_dir.clone());
+            let _ = state.try_update_value(|state| {
+                if *state == checking {
+                    *state = if done { CatchUp::Done(wows_dir) } else { CatchUp::Unchecked };
+                }
+            });
+            if failed && services.on_tokio(async { tokio::time::sleep(CATCH_UP_RETRY).await }).await.is_ok() {
+                let _ = attempts.try_update(|attempts| *attempts = attempts.wrapping_add(1));
             }
         });
-        true
     });
     on_cleanup_local(move || drop(checking));
 }

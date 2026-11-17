@@ -10,13 +10,17 @@ use std::time::Duration;
 use futures::channel::oneshot;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
+use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_replay_data::error::ReplayLoadError;
+use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::load::parse_replay;
 use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_services::upload::LedgerUse;
 use wows_toolkit_services::upload::Outcome;
+use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
@@ -30,6 +34,7 @@ use zgui::task::spawn_local;
 use zgui::view::Timers;
 
 use crate::long_job::long_job;
+use crate::tabs::replays::panel::ExportError;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::export_extension;
 use crate::tabs::replays::panel::write_export;
@@ -50,25 +55,64 @@ const NEW_BATTLE: &str = "replay-new-battle";
 /// and each write is a file event.
 const AUTO_EXPORT_QUIET: Duration = Duration::from_millis(500);
 
-/// Where the battles that land are exported to, when the reader asked for that.
+/// Where every battle the game writes is exported to, when the reader asked for that.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AutoExport {
-    Off,
-    To { directory: PathBuf, format: ReplayExportFormat },
+pub struct AutoExport {
+    directory: PathBuf,
+    format: ReplayExportFormat,
 }
 
 impl AutoExport {
-    /// Reads the setting, refusing a directory that is not one.
-    pub fn from_settings(settings: &ReplaySettings) -> Self {
+    /// Reads the setting. `None` while it is off or its directory is not one.
+    pub fn from_settings(settings: &ReplaySettings) -> Option<Self> {
         if !settings.auto_export_data {
-            return Self::Off;
+            return None;
         }
         let directory = PathBuf::from(&settings.auto_export_path);
         if !directory.is_dir() {
-            return Self::Off;
+            return None;
         }
-        Self::To { directory, format: settings.auto_export_format }
+
+        Some(Self { directory, format: settings.auto_export_format })
     }
+
+    /// Writes `export`, the battle named `stem`, returning the file written. Outside debug mode
+    /// what an ordinary export leaves out is stripped first.
+    pub fn write(&self, export: ExportedMatch, stem: &str, debug: bool) -> Result<PathBuf, ExportError> {
+        let out = self.directory.join(stem).with_extension(export_extension(self.format));
+        let export = if debug { export } else { export.stripped() };
+        write_export(&export, &out, self.format)?;
+
+        Ok(out)
+    }
+
+    /// Writes the battle `parsed` holds, when it has its results, returning the file written. One
+    /// with no results yet is left: they arrive later as a rewrite of the file.
+    pub fn write_read(&self, parsed: &ParsedReplay, debug: bool) -> Result<Option<PathBuf>, ExportError> {
+        if parsed.raw_results_json.is_none() {
+            return Ok(None);
+        }
+
+        self.write(parsed.export.clone(), &parsed.export_stem, debug).map(Some)
+    }
+}
+
+/// Says that a battle was exported to `out`, replacing any notice that an export failed.
+pub fn say_exported(toasts: Toasts, out: &Path) {
+    let file = out.file_name().unwrap_or(out.as_os_str()).to_string_lossy().into_owned();
+    toasts.withdraw(&ToastKey::new(AUTO_EXPORT_FAILED));
+    toasts
+        .show(Notice::ok(t!("ui.replay.auto_exported", file = file).into_owned()).keyed(ToastKey::new(AUTO_EXPORTED)));
+}
+
+/// Says that an export failed. Kept up: the reader asked for a file per battle and is not getting
+/// one.
+pub fn say_export_failed(toasts: Toasts, reason: String) {
+    toasts.show(
+        Notice::failed(t!("ui.replay.auto_export_failed", error = reason).into_owned())
+            .keyed(ToastKey::new(AUTO_EXPORT_FAILED))
+            .sticky(),
+    );
 }
 
 /// The exports waiting for their replay to go quiet. A newer event for the same replay replaces,
@@ -136,7 +180,7 @@ impl Arrivals {
         let Some(replay) = workspace.services.settings.read_untracked(|settings| settings.replay.clone()) else {
             return;
         };
-        let AutoExport::To { directory, format } = AutoExport::from_settings(&replay) else { return };
+        let Some(target) = AutoExport::from_settings(&replay) else { return };
         let Some(game_data) = workspace.services.game_data.cache_untracked() else { return };
         let Some(timers) = workspace.under_tab(Timers::current) else { return };
         let debug = workspace.shell.debug_mode.get_untracked();
@@ -157,40 +201,27 @@ impl Arrivals {
                 let reading = named.clone();
                 let written = long_job(move || {
                     let parsed = parse_replay(&reading, &game_data, personal_rating.as_deref())
-                        .map_err(|err| ExportFailure::Parse(err.to_string()))?;
+                        .map_err(ExportFailure::Parse)?;
                     if parsed.raw_results_json.is_none() {
                         return Ok(None);
                     }
-                    let out = directory.join(&parsed.export_stem).with_extension(export_extension(format));
-                    let export = if debug { parsed.export } else { parsed.export.stripped() };
-                    write_export(&export, &out, format).map_err(|err| ExportFailure::Write(err.to_string()))?;
-                    Ok(Some(out))
+                    target.write(parsed.export, &parsed.export_stem, debug).map(Some).map_err(ExportFailure::Write)
                 })
                 .await;
                 match written {
                     Ok(Some(out)) => {
                         tracing::info!(path = %named.display(), "auto-export: the battle was written");
-                        let file = out.file_name().unwrap_or(out.as_os_str()).to_string_lossy().into_owned();
-                        toasts.withdraw(&ToastKey::new(AUTO_EXPORT_FAILED));
-                        toasts.show(
-                            Notice::ok(t!("ui.replay.auto_exported", file = file).into_owned())
-                                .keyed(ToastKey::new(AUTO_EXPORTED)),
-                        );
+                        say_exported(toasts, &out);
                     }
                     Ok(None) => {
                         tracing::debug!(path = %named.display(), "auto-export: no battle results, so nothing is written");
                     }
-                    Err(ExportFailure::Parse(reason)) => {
-                        tracing::warn!(path = %named.display(), %reason, "auto-export: the replay did not parse");
+                    Err(ExportFailure::Parse(err)) => {
+                        tracing::warn!(path = %named.display(), %err, "auto-export: the replay did not parse");
                     }
-                    // Kept up: the reader asked for a file per battle and is not getting one.
-                    Err(ExportFailure::Write(reason)) => {
-                        tracing::warn!(path = %named.display(), %reason, "auto-export failed");
-                        toasts.show(
-                            Notice::failed(t!("ui.replay.auto_export_failed", error = reason).into_owned())
-                                .keyed(ToastKey::new(AUTO_EXPORT_FAILED))
-                                .sticky(),
-                        );
+                    Err(ExportFailure::Write(err)) => {
+                        tracing::warn!(path = %named.display(), %err, "auto-export failed");
+                        say_export_failed(toasts, err.to_string());
                     }
                 }
             })
@@ -337,6 +368,6 @@ impl Arrivals {
 /// Why an auto-export wrote nothing.
 #[derive(Debug)]
 enum ExportFailure {
-    Parse(String),
-    Write(String),
+    Parse(ReplayLoadError),
+    Write(ExportError),
 }
