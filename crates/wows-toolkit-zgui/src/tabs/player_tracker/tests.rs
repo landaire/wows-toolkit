@@ -290,6 +290,25 @@ fn clicking_a_column_sorts_by_it_and_clicking_again_reverses() {
     assert_eq!(abel < harvey, !ascending, "the second press reverses the order");
 }
 
+/// Clan leads as in egui's historical table, and the expand caret sits under the Player heading.
+#[test]
+fn the_player_headings_follow_the_egui_column_order() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    tracker.seed_two_players();
+
+    let mut headings: Vec<(f32, &str)> = ["Name", "Clan", "TotalEncounters", "Encounters", "LastEncountered"]
+        .into_iter()
+        .map(|column| (tracker.left(&format!("tracker-sort-{column}")), column))
+        .collect();
+    headings.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let order: Vec<&str> = headings.iter().map(|(_, column)| *column).collect();
+    assert_eq!(order, ["Clan", "Name", "TotalEncounters", "Encounters", "LastEncountered"]);
+
+    let caret = tracker.left("tracker-player-expand-7");
+    assert!(caret >= tracker.left("tracker-sort-Name"), "the caret is in the Player column");
+    assert!(caret < tracker.left("tracker-sort-TotalEncounters"), "the caret is in the Player column");
+}
+
 #[test]
 fn the_filter_narrows_the_rows_to_matching_names() {
     let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));

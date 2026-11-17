@@ -165,8 +165,9 @@ pub enum SortColumn {
 }
 
 impl SortColumn {
+    /// Header order, clan first as in the egui historical table.
     pub const ALL: [SortColumn; 5] =
-        [Self::Name, Self::Clan, Self::TotalEncounters, Self::Encounters, Self::LastEncountered];
+        [Self::Clan, Self::Name, Self::TotalEncounters, Self::Encounters, Self::LastEncountered];
 
     /// The translation key the column's heading reads from.
     pub fn label_key(self) -> &'static str {

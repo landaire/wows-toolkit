@@ -324,6 +324,7 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
             a11y:label = name.clone()
         ) {
             row(class = "wt-tracker-cells") {
+                MarkedText(class = "wt-tracker-col--clan wt-tracker-dim", text = clan, ranges = clan_marks)
                 row(class = "wt-tracker-col--name") {
                     ExpandCaret(
                         test_id = format!("tracker-player-expand-{}", account.raw()),
@@ -332,7 +333,6 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
                     )
                     MarkedText(class = "wt-tracker-truncate", text = name, ranges = name_marks)
                 }
-                MarkedText(class = "wt-tracker-col--clan wt-tracker-dim", text = clan, ranges = clan_marks)
                 text(class = "wt-tracker-col--count", class = TABULAR_CLASS, attr:data-severity = tone.clone()) {{count_text(row.total_encounters)}}
                 text(class = "wt-tracker-col--range", class = TABULAR_CLASS, attr:data-severity = tone) {{separate_number(row.encounters_in_range as i64, None)}}
                 LastSeen(at = row.last_seen)
