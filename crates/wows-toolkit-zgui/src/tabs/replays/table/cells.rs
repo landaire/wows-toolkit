@@ -185,6 +185,19 @@ fn note_cell(cx: TableCx, row: RowId, col: ReplayColumn) -> impl Fn(&mut EventCx
     }
 }
 
+/// Keeps a double click on a cell's text, figure or icon from opening or closing the row, which a
+/// double click beside them does.
+fn keep_double(ev: &mut EventCx<'_, events::DoubleClick>) {
+    ev.stop_propagation();
+}
+
+/// Keeps a press on a control from selecting the row. A right press still opens the row's menu.
+fn keep_primary_press(ev: &mut EventCx<'_, events::PointerDown>) {
+    if ev.button == Some(PointerButton::Primary) {
+        ev.stop_propagation();
+    }
+}
+
 /// `content` with `hover` shown over it, one line per line of the text.
 pub(super) fn with_hover(content: AnyView, hover: Option<String>) -> AnyView {
     let Some(hover) = hover else { return content };
@@ -218,7 +231,12 @@ fn cell_text(cell: &CellValue) -> AnyView {
     let text = cell.text.clone();
 
     AnyView::new(view! {
-        text(class = "wt-pt-text", attr:data-chip = chipped, style:background-color = chip) {{text}}
+        text(
+            class = "wt-pt-text",
+            attr:data-chip = chipped,
+            style:background-color = chip,
+            on:double_click = keep_double
+        ) {{text}}
     })
 }
 
@@ -251,13 +269,15 @@ fn figure_cell(col: ReplayColumn, row: &TableRow, cx: TableCx, cell: &CellValue,
     let text = cell_text(cell);
     let flag = (col == ReplayColumn::ShipName).then(|| row.row.ship_nation.clone()).flatten().map(|nation| {
         AnyView::new(move || {
-            art::flag(cx.art, &nation).map(|src| view! { image(class = "wt-pt-flag", src = src, a11y:hidden = true) })
+            art::flag(cx.art, &nation).map(|src| {
+                view! { image(class = "wt-pt-flag", src = src, a11y:hidden = true, on:double_click = keep_double) }
+            })
         })
     });
     let content = match (mix, flag) {
         (Some(mix), _) => {
             let bar = damage_mix::stacked_bar(mix);
-            AnyView::new(view! { box(class = "wt-pt-figure") { {text} {bar} } })
+            AnyView::new(view! { box(class = "wt-pt-figure", on:double_click = keep_double) { {text} {bar} } })
         }
         (None, Some(flag)) => AnyView::new(view! { {flag} {text} }),
         (None, None) => text,
@@ -366,7 +386,11 @@ fn skills_cell(row: &TableRow, cx: TableCx) -> AnyView {
     }
     let markers: Vec<AnyView> = markers
         .into_iter()
-        .map(|glyph| AnyView::new(view! { AppIcon(glyph = glyph, class = "wt-pt-marker") }))
+        .map(|glyph| {
+            AnyView::new(
+                view! { box(on:double_click = keep_double) { AppIcon(glyph = glyph, class = "wt-pt-marker") } },
+            )
+        })
         .collect();
     let text = cell_text(&cell);
     let note = note_cell(cx, row.id, ReplayColumn::Skills);
@@ -412,8 +436,6 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     };
     // A press on the disclosure opens or closes the row and leaves the selection as it was.
     let keep_press = |ev: &mut EventCx<'_, events::PointerDown>| ev.stop_propagation();
-    // A double click on the disclosure is two presses of it, not also an activation of the row.
-    let keep_double = |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation();
     let caret = cx.expandable.then(|| {
         AnyView::new(view! {
             box(
@@ -456,7 +478,7 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
         let tip = t!("ui.replay.player.hidden_profile").into_owned();
         AnyView::new(view! {
             Tooltip {
-                TooltipTrigger { AppIcon(glyph = Glyph::EyeOff) }
+                TooltipTrigger { box(on:double_click = keep_double) { AppIcon(glyph = Glyph::EyeOff) } }
                 TooltipContent {{tip.clone()}}
             }
         })
@@ -582,6 +604,8 @@ fn connection_chip(note: &ConnectionNote, cx: TableCx) -> AnyView {
                     var:--wt-pt-depth = depth,
                     attr:data-testid = "player-disconnect",
                     on:click = copy,
+                    on:pointer_down = keep_primary_press,
+                    on:double_click = keep_double,
                     {..ink}
                 ) {
                     box { AppIcon(glyph = Glyph::Plug) }
@@ -620,7 +644,13 @@ fn twitch_chip(candidates: &[SniperCandidate], cx: TableCx) -> Option<AnyView> {
         };
         return Some(with_hover(
             AnyView::new(view! {
-                box(class = "wt-pt-marker", attr:data-testid = "player-twitch", on:click = copy) {
+                box(
+                    class = "wt-pt-marker",
+                    attr:data-testid = "player-twitch",
+                    on:click = copy,
+                    on:pointer_down = keep_primary_press,
+                    on:double_click = keep_double
+                ) {
                     AppIcon(glyph = Glyph::Twitch)
                 }
             }),
@@ -652,11 +682,13 @@ fn twitch_chip(candidates: &[SniperCandidate], cx: TableCx) -> Option<AnyView> {
 
     Some(with_hover(
         AnyView::new(view! {
-            DropdownMenu {
-                DropdownMenuTrigger(variant = ButtonVariant::Ghost, size = ButtonSize::IconSm, attr:data-testid = "player-twitch") {
-                    AppIcon(glyph = Glyph::Twitch)
+            box(on:pointer_down = keep_primary_press, on:double_click = keep_double) {
+                DropdownMenu {
+                    DropdownMenuTrigger(variant = ButtonVariant::Ghost, size = ButtonSize::IconSm, attr:data-testid = "player-twitch") {
+                        AppIcon(glyph = Glyph::Twitch)
+                    }
+                    DropdownMenuContent {{items()}}
                 }
-                DropdownMenuContent {{items()}}
             }
         }),
         Some(hover),

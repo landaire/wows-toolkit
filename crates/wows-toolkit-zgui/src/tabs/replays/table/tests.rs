@@ -231,7 +231,7 @@ fn bots_sharing_an_account_each_keep_their_own_row() {
 
     let bravo = window.by_label("Bot_Bravo").expect("the bot's name is drawn");
     let kills = cell_on_line_of(&window, bravo, ReplayColumn::Kills);
-    window.double_click(kills).expect("the row takes a double click");
+    double_click_beside_text(&mut window, kills);
     window.advance(Duration::from_millis(400));
     assert_eq!(expanded.with_untracked(HashSet::len), 1, "only the bot pressed opens");
     assert_eq!(window.all_by_attribute("data-testid", "detail-0-name").len(), 1, "one detail is drawn");
@@ -295,8 +295,8 @@ fn the_sort_opens_as_saved_and_a_press_saves_it_for_every_table() {
     assert_eq!(shared, Some(SortOrder::Asc(SortColumn::Kills)), "a table opened next starts from it");
 }
 
-/// The Kills cell on player `id`'s line: the Name cell's text keeps a double click to itself, so
-/// tests open a row from here.
+/// The Kills cell on player `id`'s line. Its figure keeps a double click to itself, so tests open
+/// a row with [`double_click_beside_text`] on it.
 pub(crate) fn kills_cell(window: &HeadlessWindow, id: i64) -> Element {
     let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
     let line = window.bounds(name).expect("the name has a box");
@@ -313,12 +313,34 @@ pub(crate) fn kills_cell(window: &HeadlessWindow, id: i64) -> Element {
         .expect("the player's line has a Kills cell")
 }
 
+/// Double-clicks `cell` at its far end, beside its text, where a double click opens or closes the
+/// row.
+pub(crate) fn double_click_beside_text(window: &mut HeadlessWindow, cell: Element) {
+    let bounds = window.bounds(cell).expect("the cell has a box");
+    let at = Point::<DevicePx, Device>::new(
+        DevicePx(bounds.origin.x.0 + bounds.size.width.0 - 2.0),
+        DevicePx(bounds.origin.y.0 + bounds.size.height.0 / 2.0),
+    );
+    window.click_at(at);
+    window.click_at(at);
+}
+
+/// The text drawn in `cell`.
+fn text_in(window: &HeadlessWindow, cell: Element) -> Element {
+    let bounds = window.bounds(cell).expect("the cell has a box");
+    window
+        .all_by_class("wt-pt-text")
+        .into_iter()
+        .find(|text| window.bounds(*text).is_some_and(|text| bounds.contains(text.origin)))
+        .expect("the cell has text")
+}
+
 #[test]
 fn a_double_click_opens_a_rows_detail_and_its_disclosure_closes_it() {
     let (mut window, expanded) = open_table(Drawing::Recorded, Scheme::Dark);
     let cell = kills_cell(&window, 2);
 
-    window.double_click(cell).expect("the row takes a double click");
+    double_click_beside_text(&mut window, cell);
     window.advance(Duration::from_millis(400));
     assert!(window.by_test_id("detail-2-name").is_some(), "the row's detail is open");
 
@@ -337,6 +359,64 @@ fn a_double_click_on_the_players_name_leaves_the_row_closed() {
     window.double_click(name).expect("the name takes a double click");
     window.advance(Duration::from_millis(400));
     assert!(expanded.with_untracked(HashSet::is_empty), "no row opens");
+}
+
+/// A double click on a figure or a chip, or anywhere in an open detail, leaves the row as it is.
+/// A press on a chip or in the detail leaves the selection as it is.
+#[test]
+fn double_clicks_on_figures_chips_and_the_detail_leave_the_row_as_it_is() {
+    let mut model = split_damage(sample_model());
+    let row = model.rows.iter_mut().find(|row| row.db_id.raw() == 2).expect("the sample has player 2");
+    row.twitch_candidates = vec![SniperCandidate { login: "harvey635".to_owned(), minutes: vec![3] }];
+    let (mut window, expanded) = open_table_over(Drawing::Recorded, Scheme::Dark, model, true);
+    let selection = SELECTION.with(Cell::take).expect("the table was built");
+
+    let chip = window.by_test_id("player-twitch").expect("the row has its Twitch chip");
+    window.double_click(chip).expect("the chip takes a double click");
+    window.advance(Duration::from_millis(400));
+    assert!(expanded.with_untracked(HashSet::is_empty), "a double click on a chip leaves the row closed");
+    assert!(selected_rows(selection).is_empty(), "a press on a chip selects nothing");
+
+    let figure = text_in(&window, kills_cell(&window, 2));
+    window.double_click(figure).expect("the figure takes a double click");
+    window.advance(Duration::from_millis(400));
+    assert!(expanded.with_untracked(HashSet::is_empty), "a double click on a figure leaves the row closed");
+
+    let opened = kills_cell(&window, 2);
+    double_click_beside_text(&mut window, opened);
+    window.advance(Duration::from_millis(400));
+    window.click(kills_cell(&window, 1)).expect("the row takes a click");
+    window.advance(Duration::from_millis(400));
+    let detail = window.by_test_id("detail-2-name").expect("the row's detail is open");
+    window.click(detail).expect("the detail takes a click");
+    window.double_click(detail).expect("the detail takes a double click");
+    window.advance(Duration::from_millis(600));
+
+    assert_eq!(expanded.get_untracked(), HashSet::from([sample_row(2)]), "the detail stays open");
+    assert_eq!(selected_rows(selection), HashSet::from([sample_row(1)]), "the detail leaves the selection");
+}
+
+/// A plain click selects only its row, ctrl adds a row or takes it out, and shift selects the run
+/// from the row clicked before.
+#[test]
+fn a_plain_click_selects_only_its_row_and_ctrl_adds_another() {
+    let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
+    let selection = SELECTION.with(Cell::take).expect("the table was built");
+    let order = expected_order(SortOrder::default());
+    let rows = |ids: &[i64]| ids.iter().map(|id| sample_row(*id)).collect::<HashSet<_>>();
+
+    window.click(kills_cell(&window, order[0])).expect("the row takes a click");
+    window.click(kills_cell(&window, order[1])).expect("the row takes a click");
+    assert_eq!(selected_rows(selection), rows(&[order[1]]), "a plain click replaces the selection");
+
+    window.click_with(kills_cell(&window, order[3]), Modifiers::PRIMARY).expect("the row takes a click");
+    assert_eq!(selected_rows(selection), rows(&[order[1], order[3]]), "ctrl adds the row");
+
+    window.click_with(kills_cell(&window, order[1]), Modifiers::PRIMARY).expect("the row takes a click");
+    assert_eq!(selected_rows(selection), rows(&[order[3]]), "ctrl again takes it out");
+
+    window.click_with(kills_cell(&window, order[5]), Modifiers::SHIFT).expect("the row takes a click");
+    assert_eq!(selected_rows(selection), rows(&order[1..=5]), "shift selects the run from the anchor");
 }
 
 #[test]
@@ -469,7 +549,7 @@ fn a_column_dragged_narrow_fits_an_open_detail_and_saves_only_the_drag() {
     assert!(!dragged.is_empty(), "the drag saved the widths");
 
     let cell = kills_cell(&window, 2);
-    window.double_click(cell).expect("the row takes a double click");
+    double_click_beside_text(&mut window, cell);
     window.advance(Duration::from_millis(400));
     let detail = window.by_test_id("detail-2-kills").expect("the Kills detail is open");
     let needs = window.bounds(detail).expect("the detail has a box").size.width.0;
@@ -477,7 +557,7 @@ fn a_column_dragged_narrow_fits_an_open_detail_and_saves_only_the_drag() {
     assert_eq!(header_width(&mut window), needs, "the column widens to the detail");
 
     let cell = kills_cell(&window, 2);
-    window.double_click(cell).expect("the row takes a double click");
+    double_click_beside_text(&mut window, cell);
     window.advance(Duration::from_millis(600));
     assert_eq!(header_width(&mut window), set, "closed, the column returns to the width dragged to");
     assert_eq!(saved_widths(), dragged, "and the detail saved no width of its own");
@@ -601,7 +681,7 @@ fn without_a_detail_no_row_offers_to_open() {
     assert!(window.by_test_id("player-caret-2").is_none(), "no disclosure without a detail");
 
     let cell = kills_cell(&window, 2);
-    window.double_click(cell).expect("the row takes a double click");
+    double_click_beside_text(&mut window, cell);
     window.advance(Duration::from_millis(400));
     assert!(expanded.with_untracked(HashSet::is_empty), "no row opens");
 }
@@ -610,7 +690,7 @@ fn without_a_detail_no_row_offers_to_open() {
 fn an_open_detail_follows_a_column_pinned_after_it_opened() {
     let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
     let cell = kills_cell(&window, 2);
-    window.double_click(cell).expect("the row takes a double click");
+    double_click_beside_text(&mut window, cell);
     window.advance(Duration::from_millis(400));
     let kills_key = ReplayColumn::Kills.storage_key();
     let part = format!("detail-2-{kills_key}");

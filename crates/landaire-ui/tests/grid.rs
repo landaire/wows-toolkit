@@ -736,6 +736,33 @@ fn a_column_detail_opens_each_part_under_its_own_column() {
 }
 
 #[test]
+fn a_press_or_double_click_inside_a_detail_leaves_its_row_as_it_was() {
+    let handles = Rc::new(Handles::default());
+    let detail = || {
+        RowMode::with_column_detail(|item: &Item, column: &ColumnId| {
+            (column.as_str() == "name").then(|| {
+                view! { box(attr:data-testid = format!("part-{}", item.id), style = "height: 40px; width: 20px") {} }
+            })
+        })
+    };
+    let mut window = open(items(3), detail, Rc::clone(&handles));
+    window.double_click(cell(&window, "name-1")).expect("the cell has a box");
+    window.click(cell(&window, "name-0")).expect("the cell has a box");
+    window.advance(Duration::from_millis(400));
+
+    let part = cell(&window, "part-1");
+    window.click(part).expect("the part has a box");
+    window.double_click(part).expect("the part has a box");
+    window.advance(Duration::from_millis(400));
+
+    assert!(window.by_test_id("part-1").is_some(), "the detail stays open");
+    let rows = window.by_role(Role::Row);
+    let selected: Vec<bool> =
+        rows[1..].iter().map(|row| window.a11y(*row).and_then(|state| state.selected) == Some(true)).collect();
+    assert_eq!(selected, [true, false, false], "the row pressed before stays the one selected");
+}
+
+#[test]
 fn a_row_detail_fades_in_as_it_opens() {
     let handles = Rc::new(Handles::default());
     let detail = || {

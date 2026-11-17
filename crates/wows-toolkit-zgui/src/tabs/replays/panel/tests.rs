@@ -286,7 +286,7 @@ fn the_player_table_slot_draws_the_table_and_opens_a_rows_detail() {
     let cell = crate::tabs::replays::table::tests::kills_cell(&window, with_detail.db_id.raw());
     assert!(window.by_class("wt-xr-frame").is_none(), "no row starts open");
 
-    window.double_click(cell).expect("the row takes a double click");
+    crate::tabs::replays::table::tests::double_click_beside_text(&mut window, cell);
     window.advance(Duration::from_millis(600));
     assert!(window.by_class("wt-xr-frame").is_some(), "the row's detail opens");
 }

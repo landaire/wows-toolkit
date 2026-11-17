@@ -600,7 +600,9 @@ where
             node_ref = filler,
             attr:data-state = move || line.state.get(),
             var:--lui-grid-detail-height = move || line.height.get(),
-            a11y:hidden = true
+            a11y:hidden = true,
+            on:pointer_down = keep_detail_press,
+            on:double_click = keep_detail_double
         ) {}
     }
 }
@@ -703,6 +705,8 @@ where
             var:--lui-grid-detail-height = move || line.height.get(),
             var:--lui-grid-room = limit,
             a11y:hidden = move || !open.get(),
+            on:pointer_down = keep_detail_press,
+            on:double_click = keep_detail_double,
             {..own}
         ) {
             {mark}
@@ -773,13 +777,29 @@ where
             attr:data-state = state,
             var:--lui-grid-detail-height = height,
             var:--lui-grid-view = move || view_width.get(),
-            a11y:hidden = move || !open.get()
+            a11y:hidden = move || !open.get(),
+            on:pointer_down = keep_detail_press,
+            on:double_click = keep_detail_double
         ) {
             box(class = "lui-grid__detail-body", node_ref = inner) {
                 {move || value.with(|row| row.as_ref().map(|row| detail(row)))}
             }
         }
     }
+}
+
+/// Keeps a plain press inside a row's detail from selecting the row. A press with ctrl or shift
+/// held selects as it does on the row's line.
+fn keep_detail_press(ev: &mut EventCx<'_, events::PointerDown>) {
+    let plain = !ev.modifiers.primary() && !ev.modifiers.shift();
+    if ev.button == Some(PointerButton::Primary) && plain {
+        ev.stop_propagation();
+    }
+}
+
+/// Keeps a double click inside a row's detail from opening or closing the row.
+fn keep_detail_double(ev: &mut EventCx<'_, events::DoubleClick>) {
+    ev.stop_propagation();
 }
 
 /// What a key pressed on the grid itself does.
