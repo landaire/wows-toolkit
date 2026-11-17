@@ -28,6 +28,12 @@ pub trait TreeModel: 'static {
     fn text(&self, _key: &Self::Key) -> Option<&str> {
         None
     }
+
+    /// Whether `key` can be selected. A row that cannot, such as a heading, is passed over by
+    /// the keyboard, by type-ahead and by a press.
+    fn is_selectable(&self, _key: &Self::Key) -> bool {
+        true
+    }
 }
 
 impl<M> TreeModel for Rc<M>
@@ -54,5 +60,9 @@ where
 
     fn text(&self, key: &Self::Key) -> Option<&str> {
         (**self).text(key)
+    }
+
+    fn is_selectable(&self, key: &Self::Key) -> bool {
+        (**self).is_selectable(key)
     }
 }

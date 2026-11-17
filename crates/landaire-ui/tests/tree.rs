@@ -44,11 +44,18 @@ struct Nodes {
     children: HashMap<u32, Vec<u32>>,
     parents: HashMap<u32, u32>,
     names: HashMap<u32, String>,
+    unselectable: HashSet<u32>,
 }
 
 impl Nodes {
     fn new() -> Self {
-        Self { roots: Vec::new(), children: HashMap::new(), parents: HashMap::new(), names: HashMap::new() }
+        Self {
+            roots: Vec::new(),
+            children: HashMap::new(),
+            parents: HashMap::new(),
+            names: HashMap::new(),
+            unselectable: HashSet::new(),
+        }
     }
 
     fn add(&mut self, key: u32, parent: Option<u32>, name: &str) {
@@ -99,6 +106,10 @@ impl TreeModel for Nodes {
 
     fn text(&self, key: &u32) -> Option<&str> {
         self.names.get(key).map(String::as_str)
+    }
+
+    fn is_selectable(&self, key: &u32) -> bool {
+        !self.unselectable.contains(key)
     }
 }
 
@@ -393,6 +404,30 @@ fn typing_moves_to_the_row_whose_text_begins_with_it() {
     window.type_text("ho");
     window.advance(SETTLE);
     assert_eq!(selected(probe), HashSet::from([3]));
+}
+
+#[test]
+fn rows_that_cannot_be_selected_are_passed_over_by_keys_typing_and_presses() {
+    let mut nodes = Nodes::small();
+    nodes.unselectable.insert(2);
+    let (mut window, probe) = open(nodes, &[]);
+
+    window.click(row(&window, 2)).expect("the row has a box");
+    assert!(selected(probe).is_empty(), "a press does not select it");
+
+    window.click(row(&window, 1)).expect("the row has a box");
+    press(&mut window, NamedKey::ArrowDown, Modifiers::NONE);
+    assert_eq!(selected(probe), HashSet::from([3]), "down steps over it");
+    press(&mut window, NamedKey::ArrowUp, Modifiers::NONE);
+    assert_eq!(selected(probe), HashSet::from([1]), "and so does up");
+
+    window.type_text("fox");
+    window.advance(SETTLE);
+    assert_eq!(selected(probe), HashSet::from([1]), "typing does not find it");
+
+    window.press_character('a', Modifiers::PRIMARY);
+    window.advance(SETTLE);
+    assert_eq!(selected(probe), HashSet::from([1, 3]), "select all leaves it out");
 }
 
 #[test]

@@ -197,7 +197,8 @@ impl<M: TreeModel> TreeState<M> {
 
         let first = self.rows.with_untracked(|rows| {
             let selected = rows.keys().position(|key| self.selection.contains_untracked(key));
-            let index = RowIndex(selected.unwrap_or(0));
+            let index = selected.or_else(|| rows.keys().position(|key| self.selectable(key)))?;
+            let index = RowIndex(index);
             rows.get(index).map(|row| (index, row.key.clone()))
         });
         let (index, key) = first?;
@@ -213,7 +214,15 @@ impl<M: TreeModel> TreeState<M> {
         self.rows.with_untracked(|rows| rows.get(index).map(|row| row.key.clone()))
     }
 
+    fn selectable(&self, key: &M::Key) -> bool {
+        self.model.with_untracked(|model| model.is_selectable(key))
+    }
+
     pub fn select_only(&self, key: M::Key) {
+        if !self.selectable(&key) {
+            return;
+        }
+
         self.selection.replace(HashSet::from([key.clone()]));
         self.anchor.set(Some(key.clone()));
         self.cursor.set(Some(key));
@@ -225,7 +234,9 @@ impl<M: TreeModel> TreeState<M> {
             self.select_only(key);
             return;
         }
-
+        if !self.selectable(&key) {
+            return;
+        }
         let toggled = key.clone();
         self.selection.update(move |set| {
             if !set.remove(&toggled) {
@@ -256,7 +267,9 @@ impl<M: TreeModel> TreeState<M> {
             return;
         };
 
-        let run: HashSet<M::Key> = self.rows.with_untracked(|rows| rows.keys_between(from..=to).cloned().collect());
+        let run: HashSet<M::Key> = self
+            .rows
+            .with_untracked(|rows| rows.keys_between(from..=to).filter(|key| self.selectable(key)).cloned().collect());
         if adding {
             self.selection.update(move |set| set.extend(run));
         } else {
@@ -267,6 +280,10 @@ impl<M: TreeModel> TreeState<M> {
 
     /// What a press on `key` with `modifiers` held selects.
     pub fn press(&self, key: M::Key, modifiers: Modifiers) {
+        if !self.selectable(&key) {
+            return;
+        }
+
         if modifiers.shift() {
             let index = self.rows.with_untracked(|rows| rows.position(&key));
             match index {
@@ -289,7 +306,8 @@ impl<M: TreeModel> TreeState<M> {
             return;
         }
 
-        let every: HashSet<M::Key> = self.rows.with_untracked(|rows| rows.keys().cloned().collect());
+        let every: HashSet<M::Key> =
+            self.rows.with_untracked(|rows| rows.keys().filter(|key| self.selectable(key)).cloned().collect());
         self.selection.replace(every);
     }
 
@@ -300,19 +318,29 @@ impl<M: TreeModel> TreeState<M> {
         let last = count.checked_sub(1)?;
         let current = self.cursor_index();
 
-        let target = match (travel, current) {
-            (Travel::First, _) | (Travel::Next | Travel::PageDown, None) => 0,
-            (Travel::Last, _) | (Travel::Previous | Travel::PageUp, None) => last,
-            (Travel::Previous, Some(at)) => at.0.saturating_sub(1),
-            (Travel::Next, Some(at)) => (at.0 + 1).min(last),
-            (Travel::PageUp, Some(at)) => at.0.saturating_sub(page),
-            (Travel::PageDown, Some(at)) => (at.0 + page).min(last),
+        let (target, forward) = match (travel, current) {
+            (Travel::First, _) | (Travel::Next | Travel::PageDown, None) => (0, true),
+            (Travel::Last, _) | (Travel::Previous | Travel::PageUp, None) => (last, false),
+            (Travel::Previous, Some(at)) => (at.0.saturating_sub(1), false),
+            (Travel::Next, Some(at)) => ((at.0 + 1).min(last), true),
+            (Travel::PageUp, Some(at)) => (at.0.saturating_sub(page), false),
+            (Travel::PageDown, Some(at)) => ((at.0 + page).min(last), true),
         };
-        let target = RowIndex(target);
+        let target = self.nearest_selectable(target, forward, last)?;
 
         self.land(target, modifiers);
 
         Some(target)
+    }
+
+    /// The first selectable row from `index` in the direction of travel, or else the nearest one
+    /// behind it.
+    fn nearest_selectable(&self, index: usize, forward: bool, last: usize) -> Option<RowIndex> {
+        let usable = |at: &usize| self.key_at(RowIndex(*at)).is_some_and(|key| self.selectable(&key));
+        let ahead = if forward { (index..=last).find(usable) } else { (0..=index).rev().find(usable) };
+        let behind = || if forward { (0..index).rev().find(usable) } else { (index + 1..=last).find(usable) };
+
+        ahead.or_else(behind).map(RowIndex)
     }
 
     /// Puts the cursor on `index` and selects as `modifiers` ask: shift extends the run, the
@@ -402,7 +430,10 @@ impl<M: TreeModel> TreeState<M> {
             self.model.with_untracked(|model| {
                 let count = rows.len();
                 (0..count).map(|step| RowIndex((start + step) % count)).find(|&index| {
-                    rows.get(index).and_then(|row| model.text(&row.key)).is_some_and(|text| begins_with(text, search))
+                    rows.get(index).is_some_and(|row| {
+                        model.is_selectable(&row.key)
+                            && model.text(&row.key).is_some_and(|text| begins_with(text, search))
+                    })
                 })
             })
         })

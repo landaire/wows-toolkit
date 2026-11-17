@@ -22,6 +22,7 @@ use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_armor::model_tree::ModelBuildings;
 use wows_toolkit_armor::model_tree::ModelTreeIndex;
 use wows_toolkit_armor::sidebar_tree::RowId;
+use wows_toolkit_armor::sidebar_tree::SEPARATOR_ID;
 use wows_toolkit_armor::sidebar_tree::building_row_id;
 use wows_toolkit_armor::sidebar_tree::fixture;
 use wows_toolkit_armor::sidebar_tree::model_building_row_id;
@@ -353,6 +354,27 @@ fn enter_on_the_highlighted_row_opens_it_or_its_folder() {
     sidebar.enter_on(&japan);
     assert!(sidebar.listed(&RowId::from("model-folder/nation-japan/Ship")), "the folder opened");
     assert_eq!(sidebar.selected(), HashSet::from([japan]), "and stays highlighted");
+}
+
+/// The models heading takes no click, and the arrow keys step over it.
+#[test]
+fn the_models_heading_cannot_be_selected() {
+    let mut sidebar = Sidebar::open();
+    let heading = RowId::from(SEPARATOR_ID);
+    let (before, after) = sidebar.state.tree.with_untracked(|tree| {
+        let listed = tree.listed();
+        let at = listed.iter().position(|id| **id == heading).expect("the heading is listed");
+        (listed[at - 1].clone(), listed[at + 1].clone())
+    });
+
+    sidebar.state.handle.focus_key(before.clone());
+    sidebar.settle();
+    sidebar.click_row(&heading);
+    assert_eq!(sidebar.selected(), HashSet::from([before]), "a click leaves the selection");
+
+    sidebar.window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
+    sidebar.settle();
+    assert_eq!(sidebar.selected(), HashSet::from([after]), "down steps over it");
 }
 
 #[test]

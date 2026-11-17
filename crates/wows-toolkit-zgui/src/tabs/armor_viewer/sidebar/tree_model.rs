@@ -1,6 +1,7 @@
 //! The sidebar's rows as a [`TreeModel`]: one built listing, with what each row refers to.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use landaire_ui::TreeModel;
 use wows_toolkit_armor::sidebar_tree::BuiltTree;
@@ -20,6 +21,8 @@ pub struct SidebarTree {
     rows: HashMap<RowId, RowKind>,
     notes: HashMap<RowId, RowNote>,
     unavailable: HashMap<RowId, GeometryAvailability>,
+    /// Headings and status lines, which a press or the keyboard passes over.
+    unselectable: HashSet<RowId>,
 }
 
 struct Node {
@@ -33,11 +36,15 @@ impl SidebarTree {
     pub fn from_built(built: BuiltTree) -> Self {
         let BuiltTree { items, rows, notes, unavailable } = built;
         let mut nodes = HashMap::new();
+        let mut unselectable = HashSet::new();
         let roots = items.iter().map(|item| item.id.clone()).collect();
 
         let mut pending: Vec<(SidebarItem, Option<RowId>)> = items.into_iter().map(|item| (item, None)).collect();
         while let Some((item, parent)) = pending.pop() {
-            let SidebarItem { id, label, disabled: _, children } = item;
+            let SidebarItem { id, label, disabled, children } = item;
+            if disabled {
+                unselectable.insert(id.clone());
+            }
             let (branch, children) = match children {
                 ItemChildren::Leaf => (false, Vec::new()),
                 ItemChildren::Collapsed => (true, Vec::new()),
@@ -48,7 +55,7 @@ impl SidebarTree {
             nodes.insert(id, Node { label, parent, children: child_ids, branch });
         }
 
-        Self { roots, nodes, rows, notes, unavailable }
+        Self { roots, nodes, rows, notes, unavailable, unselectable }
     }
 
     pub fn kind(&self, id: &RowId) -> Option<&RowKind> {
@@ -113,5 +120,9 @@ impl TreeModel for SidebarTree {
 
     fn text(&self, key: &RowId) -> Option<&str> {
         self.label(key)
+    }
+
+    fn is_selectable(&self, key: &RowId) -> bool {
+        !self.unselectable.contains(key)
     }
 }
