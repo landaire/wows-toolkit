@@ -4,42 +4,61 @@
 //! provides it.
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use landaire_ui::ThemeRootProps;
+use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use tokio::runtime::Runtime;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::SavedRenderOptions;
+use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_replays::types::ElapsedClock;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::replay_render::view::FrameSize;
 use wows_toolkit_replay_data::replay_render::view::MapView;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::collab::push_ping_aged;
+use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wt_collab_client::AnnotationSyncState;
+use wt_collab_client::OpenReplay;
 use wt_collab_client::PlaybackFrame;
 use wt_collab_client::UserCursor;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::DisplayOptionField;
 use wt_collab_client::types::Annotation;
+use zgui::component;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::reactive::Signal;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
+use zgui::view::IntoView;
+use zgui::view::ShowProps;
 
+use crate::interaction_tests::save_shot;
+use crate::services::GameDataRequest;
+use crate::services::GameDataState;
 use crate::services::Services;
+use crate::theme::SemanticTokensProps;
+use crate::theme::palette_choice;
+use crate::windows::WindowSurfaceProps;
 use crate::windows::renderer::watched::WatchSession;
+use crate::windows::renderer::watched::WatchedPlaybackProps;
 use crate::windows::renderer::watched::WatchedViewProps;
 
 const VIEWPORT: WindowSize = WindowSize { width: 1000.0, height: 800.0 };
@@ -344,4 +363,145 @@ fn the_watched_window_takes_up_the_saved_defaults_under_the_sessions() {
     watch.adopt_defaults(&saved);
 
     assert!(shows_timer(watch), "the session's timer stands over the saved defaults");
+}
+
+/// A watched window in the dark theme with this machine's game data, for review.
+#[component]
+fn Reviewed(runtime: Arc<Runtime>, shared: SharedWindow, link: CollabLink) -> impl IntoView {
+    let services = Services::provide(Some(runtime));
+    services.game_data.adopt(GameDataRequest {
+        wows_dir: std::env::var_os("WT_WOWS_DIR").map(PathBuf::from),
+        cache_dir: String::new(),
+        locale: None,
+        auto_dump: false,
+    });
+    let choice = Signal::stored_local(palette_choice(ThemeChoice::Dark));
+    let shown = Signal::stored_local(ThemeChoice::Dark);
+
+    view! {
+        ThemeRoot(choice = choice) {
+            SemanticTokens(choice = shown)
+            WindowSurface {
+                // The watch draws with the builds loaded when it opens, so it opens once one has.
+                Show(when = move || matches!(services.game_data.state(), GameDataState::Ready(_))) {
+                    WatchedPlayback(shared = shared.clone(), link = link.clone())
+                }
+            }
+        }
+    }
+}
+
+/// A ship of `species` at `(x, y)` on the minimap, friendly or not.
+fn reviewed_ship(entity: u32, species: &str, friendly: bool, x: f32, y: f32) -> DrawCommand {
+    DrawCommand::Ship {
+        entity_id: EntityId::from(entity),
+        pos: MinimapPos { x, y },
+        yaw: 0.8,
+        species: Some(species.to_owned()),
+        color: Some(if friendly { [76, 232, 170] } else { [254, 77, 42] }),
+        visibility: ShipVisibility::Visible,
+        opacity: 1.0,
+        is_self: false,
+        player_name: None,
+        ship_name: None,
+        is_detected_teammate: false,
+        is_disconnected: false,
+        name_color: None,
+    }
+}
+
+/// A watched battle with its HUD, a peer's pointer, a ping and a drawing over it, drawn on the
+/// graphics device for review. Reads the game data dump, or `WT_WOWS_DIR`'s install.
+#[test]
+#[ignore = "draws on the graphics device with real game data; run by hand to review the watched view"]
+fn the_watched_view_draws_the_hud_peers_and_drawings() {
+    let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let shared = SharedWindow {
+        replay_id: REPLAY,
+        replay_name: "watched".to_owned(),
+        map: "Trap".to_owned(),
+        map_name: "spaces/28_naval_mission".to_owned(),
+        art_png: None,
+    };
+    state.lock().open_replays.push(OpenReplay {
+        replay_id: REPLAY,
+        replay_name: shared.replay_name.clone(),
+        map_image_png: Vec::new(),
+        game_version: String::new(),
+        map_name: shared.map_name.clone(),
+        display_name: shared.map.clone(),
+    });
+    let options = HeadlessOptions { drawing: Drawing::Device, ..HeadlessOptions::new(VIEWPORT) };
+    let mut window = HeadlessWindow::open(options, move || {
+        let (runtime, shared, link) = (Arc::clone(&runtime), shared.clone(), link.clone());
+        view! { Reviewed(runtime = runtime, shared = shared, link = link) }
+    })
+    .expect("the watched window opens on the graphics device");
+    let in_real_time = |window: &mut HeadlessWindow| {
+        window.advance(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let started = std::time::Instant::now();
+    while window.by_test_id("watched-playback").is_none() {
+        assert!(started.elapsed() < Duration::from_secs(600), "the game data loads");
+        in_real_time(&mut window);
+    }
+
+    let score = DrawCommand::ScoreBar {
+        team0: 620,
+        team1: 410,
+        team0_color: [76, 232, 170],
+        team1_color: [254, 77, 42],
+        max_score: 1000,
+        team0_timer: Some("4:12".to_owned()),
+        team1_timer: None,
+        advantage: None,
+    };
+    let ships = vec![
+        reviewed_ship(1, "Destroyer", true, 220.0, 520.0),
+        reviewed_ship(2, "Cruiser", true, 260.0, 580.0),
+        reviewed_ship(3, "Battleship", true, 180.0, 610.0),
+        reviewed_ship(4, "Cruiser", false, 520.0, 220.0),
+        reviewed_ship(5, "Destroyer", false, 470.0, 300.0),
+    ];
+    {
+        let mut held = state.lock();
+        held.push_frame(REPLAY, frame([vec![score, timer()], ships].concat()));
+        held.cursors.push(UserCursor {
+            user_id: 9,
+            name: "Peer".to_owned(),
+            color: [0, 200, 255],
+            pos: Some([420.0, 360.0]),
+            last_update: std::time::Instant::now(),
+        });
+        held.current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![Annotation::Circle {
+                center: [470.0, 300.0],
+                radius: 60.0,
+                color: [255, 220, 0, 255],
+                width: 3.0,
+                filled: false,
+            }],
+            owners: vec![9],
+            ids: vec![1],
+        });
+        held.annotation_sync_version = 1;
+        held.repaint_viewport(REPLAY);
+    }
+    let started = std::time::Instant::now();
+    while window.by_test_id("watched-playback-waiting").is_some() {
+        let taken = window.by_test_id("watched-playback-clock").is_some();
+        assert!(started.elapsed() < Duration::from_secs(300), "the frame is drawn (taken from the session: {taken})");
+        in_real_time(&mut window);
+    }
+    for _ in 0..3 {
+        in_real_time(&mut window);
+    }
+    // A ripple lasts a second of real time, so it is dropped just before the shot.
+    push_ping_aged(&state, [300.0, 520.0], Duration::from_millis(300));
+    window.advance(Duration::from_millis(50));
+
+    println!("{}", save_shot(&mut window, "watched-dark").display());
 }
