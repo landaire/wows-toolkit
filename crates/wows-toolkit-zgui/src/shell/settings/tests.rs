@@ -36,6 +36,7 @@ use crate::i18n::LanguageCode;
 use crate::shell::AppRootProps;
 use crate::shell::Shell;
 use crate::shell::settings::Setting;
+use crate::shell::settings::SettingsDrawerControl;
 use crate::shell::settings::SettingsSection;
 use crate::shell::settings::category_test_id;
 use crate::shell::settings::row_test_id;
@@ -926,4 +927,19 @@ fn the_drawer_renders_in_dark_and_light_and_searched() {
     ] {
         println!("{}", shoot(desktop, shot, name).display());
     }
+}
+
+/// Choosing a tab shuts the drawer, and a popped-out viewport can choose one after the main window
+/// owning the drawer is gone.
+#[test]
+fn the_drawer_shuts_quietly_once_the_main_window_is_gone() {
+    zgui::reactive::install().expect("the reactive runtime installs");
+    let main = zgui::reactive::Mounted::new();
+    let drawer = main.with(SettingsDrawerControl::new);
+    drawer.open();
+    drawer.close();
+    assert!(!drawer.open.get_untracked(), "the drawer shuts while the main window is up");
+
+    main.unmount();
+    drawer.close();
 }

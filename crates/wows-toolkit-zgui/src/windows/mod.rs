@@ -15,6 +15,7 @@ use zgui::css;
 use zgui::prelude::WindowHandle;
 use zgui::prelude::WindowOptions;
 use zgui::prelude::use_windows;
+use zgui::reactive::Memo;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::provide_local_context;
@@ -79,10 +80,13 @@ where
 fn WindowRoot(services: Services, appearance: Appearance, title: String, content: AnyView) -> impl IntoView {
     provide_local_context(services);
     provide_local_context(appearance);
-    let choice = Signal::derive_local(move || palette_choice(appearance.shown_theme()));
-    let shown = Signal::derive_local(move || appearance.shown_theme());
-    let motion = Signal::derive_local(move || appearance.motion.get());
-    let zoom = Signal::derive_local(move || crate::zoom::to_window(appearance.zoom.get()));
+    let shown = follow_main(move || appearance.try_shown_theme());
+    let motion = follow_main(move || appearance.motion.try_get());
+    let zoom = follow_main(move || appearance.zoom.try_get());
+    let choice = Signal::derive_local(move || palette_choice(shown.get()));
+    let shown = Signal::derive_local(move || shown.get());
+    let motion = Signal::derive_local(move || motion.get());
+    let zoom = Signal::derive_local(move || crate::zoom::to_window(zoom.get()));
 
     view! {
         ThemeRoot(choice = choice, motion = motion, zoom = zoom) {
@@ -96,6 +100,17 @@ fn WindowRoot(services: Services, appearance: Appearance, title: String, content
             }
         }
     }
+}
+
+/// Follows a value of the main window's appearance, then holds the last one read once the main
+/// window is gone: a secondary window can outlive it at exit.
+fn follow_main<T>(read: impl Fn() -> Option<T> + Send + Sync + 'static) -> Memo<T>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    let opened = read().expect("a secondary window opens from inside the main window");
+
+    Memo::new(move |last: Option<&T>| read().or_else(|| last.cloned()).unwrap_or_else(|| opened.clone()))
 }
 
 /// What fills a secondary window: its content, on the surface the main window's shell draws. The
@@ -192,5 +207,40 @@ mod tests {
         window.advance(Duration::from_millis(100));
 
         assert_eq!(appearance.zoom.get_untracked(), before.zoomed_in());
+    }
+
+    thread_local! {
+        static MAIN: Cell<Option<(Services, Appearance)>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn SecondaryOfMain() -> impl IntoView {
+        let (services, appearance) = MAIN.get().expect("the main window's state is made first");
+        let content = AnyView::new(view! { Panel() });
+
+        view! { WindowRoot(services = services, appearance = appearance, title = "Panel".to_owned(), content = content) }
+    }
+
+    /// The app's exit disposes the main window, which owns the services and the appearance, before
+    /// the secondary windows. Until it closes, a secondary window keeps drawing in the last palette
+    /// and zoom, and its zoom keys do nothing.
+    #[test]
+    fn a_secondary_window_outlives_the_main_windows_state() {
+        zgui::reactive::install().expect("the reactive runtime installs");
+        let main = zgui::reactive::Mounted::new();
+        let (services, appearance) = main.with(|| (Services::provide(None), Appearance::new()));
+        services.settings.adopt_unsaved(crate::shell::settings::tests::test_settings());
+        MAIN.set(Some((services, appearance)));
+        let mut window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 400.0, height: 200.0 }), || {
+            view! { SecondaryOfMain() }
+        })
+        .expect("the window opens headlessly");
+        window.advance(Duration::from_millis(50));
+
+        main.unmount();
+        window.press_character('=', Modifiers::PRIMARY);
+        window.resize(WindowSize { width: 500.0, height: 300.0 }).expect("the window resizes");
+        window.advance(Duration::from_millis(100));
+        assert!(window.is_open(), "the window still runs");
     }
 }

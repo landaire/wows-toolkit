@@ -119,13 +119,15 @@ fn take_step(services: Services, appearance: Appearance, toasts: Toasts, step: Z
     // The message a zoom step says, which the next step's replaces.
     const ZOOM_TOAST: &str = "zoom";
 
+    // `try_`, as a secondary window can outlive the main window that owns the zoom.
+    let Some(current) = appearance.zoom.try_get_untracked() else { return };
     // The zoom waits for the settings, which hold the zoom it steps from. Settings that could not
     // be read leave the default zoom to step from.
     if services.settings.is_loading_untracked() {
         return;
     }
 
-    let zoom = step.applied_to(appearance.zoom.get_untracked());
+    let zoom = step.applied_to(current);
     apply(services, appearance, zoom);
 
     // Said, since the tab with the zoom slider may not be the one open.

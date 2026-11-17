@@ -420,7 +420,8 @@ impl RendererSession {
         owner.cleanup();
     }
 
-    /// Whether the session's state is still there to read.
+    /// Whether the session's state is still there to read. The reader's input returns early when
+    /// it is not: a popped-out viewport's window outlives the main window owning its state at exit.
     pub fn is_open(self) -> bool {
         self.run.try_with_value(|_| ()).is_some()
     }
@@ -686,7 +687,7 @@ impl RendererSession {
 
     /// Changes what is drawn and redraws the frame on screen, so a toggle shows while paused.
     pub fn set_layers(self, apply: impl FnOnce(&mut Layers)) {
-        let mut layers = self.layers.get_untracked();
+        let Some(mut layers) = self.layers.try_get_untracked() else { return };
         apply(&mut layers);
         self.follow_layout(&mut layers.options);
         self.store_layers(layers);
@@ -697,7 +698,7 @@ impl RendererSession {
     /// peer the host has locked out of the settings keeps what the host shows, since the host
     /// drops the change.
     pub fn toggle_layer(self, toggle: &'static Toggle, on: bool) {
-        if self.collab.with_untracked(CollabLink::settings_locked) {
+        if !self.is_open() || self.collab.with_untracked(CollabLink::settings_locked) {
             return;
         }
         let was = self.layers.with_untracked(Layers::collab_display);
@@ -985,7 +986,7 @@ impl RendererSession {
     /// Draws again when the frame on screen no longer suits the element, paused or not: a resize
     /// reshapes a zoomed view, and changes how many pixels a sharp frame needs.
     pub fn place(self, bounds: ElementBounds) {
-        let frame = self.frame_size.get_untracked();
+        let Some(frame) = self.frame_size.try_get_untracked() else { return };
         let placement = frame.map(|frame| Placement { bounds, frame });
         let suited = |map: &MapView| (map.shaped_view(), map.render_scale());
         let Some(before) = self.map.with_untracked(|map| (map.placement() != placement).then(|| suited(map))) else {
@@ -1000,7 +1001,7 @@ impl RendererSession {
 
     /// The wheel zooms about whatever is under the pointer.
     pub fn wheel(self, position: WindowPoint, delta_y: f32) {
-        let origin = self.map_origin.get_untracked();
+        let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let wheel = self
             .map
             .try_maybe_update(|map| {
@@ -1015,6 +1016,9 @@ impl RendererSession {
 
     /// A primary press on the map: the tool in hand, a handle, a move, or a pan.
     pub fn pointer_down(self, position: WindowPoint) {
+        if !self.is_open() {
+            return;
+        }
         self.menu.set(None);
         let origin = self.map_origin.get_untracked();
         let link = self.collab.get_untracked();
@@ -1038,6 +1042,9 @@ impl RendererSession {
     /// The pointer moved. `held` is whether the primary button is down, `straight` whether a
     /// straight line is asked for.
     pub fn pointer_move(self, position: WindowPoint, held: bool, straight: bool) {
+        if !self.is_open() {
+            return;
+        }
         self.report_cursor(position);
         self.update_hover(position);
 
@@ -1064,6 +1071,9 @@ impl RendererSession {
     }
 
     pub fn pointer_up(self, position: WindowPoint) {
+        if !self.is_open() {
+            return;
+        }
         self.change_map(|map| {
             let panning = map.is_panning();
             map.end_pan();
@@ -1086,7 +1096,7 @@ impl RendererSession {
 
     /// A click on the map. `add` adds to what is picked; `count` is how many clicks this ends.
     pub fn click(self, position: WindowPoint, add: bool, count: usize) {
-        let origin = self.map_origin.get_untracked();
+        let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let link = self.collab.get_untracked();
         let map = self.map.get_untracked();
         let mut click = Click::Ignored;
@@ -1099,7 +1109,7 @@ impl RendererSession {
 
     /// The pointer left the map.
     pub fn pointer_left(self) {
-        let link = self.collab.get_untracked();
+        let Some(link) = self.collab.try_get_untracked() else { return };
         self.run.update_value(|run| run.cursor.report(&link, None));
         if self.hovered.with_untracked(Option::is_some) {
             self.hovered.set(None);
@@ -1108,7 +1118,7 @@ impl RendererSession {
 
     /// Opens the per-ship menu on whatever was right-clicked.
     pub fn open_ship_menu(self, position: WindowPoint) {
-        let origin = self.map_origin.get_untracked();
+        let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let Some(at) = self.map.with_untracked(|map| map.map_point(position, origin)) else { return };
         let picked = self.frame_commands().and_then(|commands| ship_at(&commands, at));
         self.menu.set(picked.map(|ship| ShipMenu::open(ship, position)));
@@ -1143,7 +1153,7 @@ impl RendererSession {
 
     /// Drops a ping where the pointer is, shown here and to everyone in the session.
     pub fn ping(self, position: WindowPoint) {
-        let origin = self.map_origin.get_untracked();
+        let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let Some((x, y)) = self.map.with_untracked(|map| map.map_point(position, origin)) else { return };
         self.collab.with_untracked(|link| link.send_ping([x, y]));
         self.follow_collab();
@@ -1152,7 +1162,7 @@ impl RendererSession {
     /// Changes whose trails and ranges are drawn, and redraws. A session is told whichever
     /// changed. Refused, as a toggle is, while the host has locked the settings.
     pub fn choose(self, apply: impl FnOnce(&mut ShipChoices, &[String], &mut RenderOptions)) {
-        if self.collab.with_untracked(CollabLink::settings_locked) {
+        if !self.is_open() || self.collab.with_untracked(CollabLink::settings_locked) {
             return;
         }
         let was = self.choices.get_untracked();
@@ -1193,13 +1203,14 @@ impl RendererSession {
         track.commands(at).map(drawn_ships).unwrap_or_default()
     }
 
-    /// Changes the annotations through the tool state and the session, and redraws.
-    pub fn annotate<T>(self, apply: impl FnOnce(&mut Annotator, &CollabLink) -> T) -> T {
-        let link = self.collab.get_untracked();
-        let mut out = None;
-        self.annotator.update(|annotator| out = Some(apply(annotator, &link)));
+    /// Changes the annotations through the tool state and the session, and redraws. `None` once
+    /// the session has closed.
+    pub fn annotate<T>(self, apply: impl FnOnce(&mut Annotator, &CollabLink) -> T) -> Option<T> {
+        let link = self.collab.try_get_untracked()?;
+        let out = self.annotator.try_update(|annotator| apply(annotator, &link))?;
         self.draw();
-        out.expect("update runs its closure")
+
+        Some(out)
     }
 
     /// Takes up `tool`, or puts the one in hand down with `Tool::None`.
@@ -1601,7 +1612,8 @@ impl RendererSession {
     /// The transport's keyboard, saying on `toasts` where an event jump lands. Returns whether the
     /// key was taken.
     pub fn key(self, key: &Key, unmodified: &Key, modifiers: Modifiers, toasts: Option<Toasts>) -> bool {
-        if !self.status.with_untracked(|status| matches!(status, Status::Ready(_))) {
+        let ready = self.status.try_with_untracked(|status| matches!(status, Status::Ready(_)));
+        if ready != Some(true) {
             return false;
         }
         let has_tool = self.annotator.with_untracked(Annotator::has_tool);
@@ -1650,14 +1662,14 @@ impl RendererSession {
     /// Whether an export would have to encode in software although the reader did not ask for it,
     /// which is worth saying before a wait several times as long.
     pub fn export_needs_notice(self) -> bool {
-        let settings = self.export.with_untracked(|export| export.settings);
+        let Some(settings) = self.export.try_with_untracked(|export| export.settings) else { return false };
         must_use_cpu(&settings, encoder_status()) && !settings.prefer_cpu
     }
 
     /// Asks where to write, then encodes the baked track there, or to a temporary file handed to
     /// the clipboard.
     pub fn start_export(self, target: ExportTarget) {
-        if self.export.with_untracked(|export| export.progress.is_some()) {
+        if self.export.try_with_untracked(|export| export.progress.is_some()) != Some(false) {
             return;
         }
         let Some(track) = self.track_untracked() else { return };

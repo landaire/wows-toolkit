@@ -98,9 +98,10 @@ impl Services {
     }
 
     /// The shared runtime itself, for work that owns a long-lived task on it rather than one
-    /// future, such as a collab session.
+    /// future, such as a collab session. `None` once the main window owning the services is gone,
+    /// which a secondary window can outlive.
     pub fn runtime(self) -> Option<Arc<Runtime>> {
-        self.runtime.get_value()
+        self.runtime.try_get_value().flatten()
     }
 
     /// The watchdog over the long-lived worker threads. `None` when it could not be started.
@@ -117,7 +118,7 @@ impl Services {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        on_tokio(self.runtime.get_value(), future)
+        on_tokio(self.runtime(), future)
     }
 }
 

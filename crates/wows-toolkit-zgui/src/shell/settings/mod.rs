@@ -342,8 +342,10 @@ impl SettingsDrawerControl {
         self.open.set(true);
     }
 
+    /// Shuts the drawer. `try_`, as choosing a tab from a popped-out viewport can come after the
+    /// main window owning the drawer is gone.
     pub fn close(self) {
-        if self.open.get_untracked() {
+        if self.open.try_get_untracked() == Some(true) {
             self.open.set(false);
             self.jump.set(None);
         }

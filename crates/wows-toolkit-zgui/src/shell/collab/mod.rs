@@ -219,9 +219,9 @@ impl CollabHost {
     }
 
     /// Takes what the peer task raised: says each notice at its own level, and asks for whatever
-    /// the host opened for everyone.
+    /// the host opened for everyone. Nothing once the shell is gone.
     fn poll(self, shell: Shell) {
-        let notices = self.state.update_value_returning(CollabState::poll);
+        let Some(notices) = self.state.try_update_value(CollabState::poll) else { return };
         for notice in &notices {
             say(shell, notice);
         }
@@ -357,19 +357,6 @@ impl CollabHost {
 impl Default for CollabHost {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// `StoredValue::update_value` with the closure's result handed back.
-trait UpdateValueReturning<T> {
-    fn update_value_returning<R>(&self, update: impl FnOnce(&mut T) -> R) -> R;
-}
-
-impl<T: 'static> UpdateValueReturning<T> for StoredValue<T, LocalStorage> {
-    fn update_value_returning<R>(&self, update: impl FnOnce(&mut T) -> R) -> R {
-        let mut out = None;
-        self.update_value(|value| out = Some(update(value)));
-        out.expect("a stored value outlives the shell that reads it")
     }
 }
 

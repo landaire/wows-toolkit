@@ -266,6 +266,15 @@ impl Appearance {
     pub fn shown_theme(self) -> ThemeChoice {
         self.theme_preview.get().unwrap_or_else(|| self.theme.get())
     }
+
+    /// [`Self::shown_theme`] for a reader in a secondary window, which can outlive the main window
+    /// that owns the appearance. `None` once it is gone.
+    pub fn try_shown_theme(self) -> Option<ThemeChoice> {
+        let preview = self.theme_preview.try_get()?;
+        let saved = self.theme.try_get()?;
+
+        Some(preview.unwrap_or(saved))
+    }
 }
 
 /// The main window's chrome, as one handle.

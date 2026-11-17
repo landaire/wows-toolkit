@@ -741,6 +741,56 @@ fn a_seek_into_a_closed_session_does_nothing() {
     assert!(session.track_untracked().is_none());
 }
 
+/// A viewport moved into a window of its own, as `pop_out` leaves it: its state lives under the
+/// main window's services, not under this window.
+#[component]
+fn PoppedViewport(services: Services, session: RendererSession) -> impl IntoView {
+    zgui::reactive::provide_local_context(services);
+    let choice = Signal::stored_local(ThemeChoice::Fixed(Scheme::Dark));
+
+    view! {
+        ThemeRoot(choice = choice) {
+            ToastHost {
+                ReplayRenderer(session = session)
+            }
+        }
+    }
+}
+
+/// The app's exit disposes the main window, under which a popped-out viewport's state lives,
+/// before the viewport's own window. Until that window closes, it takes input and lays out
+/// without reading the state that is gone.
+#[test]
+fn a_popped_out_viewport_outlives_its_session() {
+    zgui::reactive::install().expect("the reactive runtime installs");
+    let main = zgui::reactive::Mounted::new();
+    let (services, session) = main.with(|| {
+        let services = Services::provide(None);
+        (services, RendererSession::ready_for_test(track(half_second_frames(10))))
+    });
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(VIEWPORT), move || {
+        view! { PoppedViewport(services = services, session = session) }
+    })
+    .expect("the viewport opens headlessly");
+    window.advance(Duration::from_millis(50));
+    focus_viewport(&mut window);
+
+    main.unmount();
+    pointer_over_viewport(&mut window);
+    let viewport = find(&window, "replay-renderer-viewport");
+    window.click(viewport).expect("the map takes a click");
+    window.right_click(viewport).expect("the map takes a right-click");
+    window.middle_click(viewport).expect("the map takes a middle click");
+    window.wheel(viewport, 3.0).expect("the map takes the wheel");
+    window.press_key(NamedKey::ArrowRight, Modifiers::NONE);
+    window.press_character(' ', Modifiers::NONE);
+    window.press_character('z', Modifiers::PRIMARY);
+    window.resize(WindowSize { width: 1200.0, height: 600.0 }).expect("the window resizes");
+    window.advance(Duration::from_millis(200));
+
+    assert!(!session.is_open());
+}
+
 /// Baking the battle again through more recordings keeps the battle on screen where playback is
 /// until the new bake lands, rather than blanking the map, and keeps it when that bake fails.
 #[test]

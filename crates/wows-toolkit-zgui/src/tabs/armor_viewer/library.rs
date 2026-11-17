@@ -140,7 +140,9 @@ impl ArmorLibrary {
 
     /// Asks for the data to be loaded.
     pub fn want(self) {
-        if !self.wanted.get_untracked() {
+        // `try_`, as a popped-out replay viewport sends to the viewer from a window that can
+        // outlive the main window owning the library.
+        if self.wanted.try_get_untracked() == Some(false) {
             self.wanted.set(true);
         }
     }
@@ -309,4 +311,25 @@ pub fn ship_rows(catalog: &ShipCatalog) -> Vec<ArmorShipRow> {
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use zgui::reactive::Mounted;
+
+    use super::*;
+
+    /// A popped-out replay viewport asks for the viewer from a window that can outlive the main
+    /// window owning the library.
+    #[test]
+    fn a_request_after_the_library_is_gone_does_nothing() {
+        zgui::reactive::install().expect("the reactive runtime installs");
+        let main = Mounted::new();
+        let library = main.with(ArmorLibrary::new);
+        library.want();
+        assert!(library.wanted.get_untracked(), "a request is held while the main window is");
+
+        main.unmount();
+        library.want();
+    }
 }

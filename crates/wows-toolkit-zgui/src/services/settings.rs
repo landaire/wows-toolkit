@@ -92,20 +92,25 @@ impl Settings {
         self.state.set(SettingsState::Failed(reason));
     }
 
-    /// Reads the settings, subscribing to every change. `None` while they are not loaded.
+    /// Reads the settings, subscribing to every change. `None` while they are not loaded, and once
+    /// the services are gone.
     pub fn read<R>(self, read: impl FnOnce(&StartupSettings) -> R) -> Option<R> {
-        self.state.with(|state| match state {
-            SettingsState::Loaded(settings) => Some(read(settings)),
-            SettingsState::Loading | SettingsState::Failed(_) => None,
-        })
+        self.state
+            .try_with(|state| match state {
+                SettingsState::Loaded(settings) => Some(read(settings)),
+                SettingsState::Loading | SettingsState::Failed(_) => None,
+            })
+            .flatten()
     }
 
     /// [`Self::read`] without subscribing.
     pub fn read_untracked<R>(self, read: impl FnOnce(&StartupSettings) -> R) -> Option<R> {
-        self.state.with_untracked(|state| match state {
-            SettingsState::Loaded(settings) => Some(read(settings)),
-            SettingsState::Loading | SettingsState::Failed(_) => None,
-        })
+        self.state
+            .try_with_untracked(|state| match state {
+                SettingsState::Loaded(settings) => Some(read(settings)),
+                SettingsState::Loading | SettingsState::Failed(_) => None,
+            })
+            .flatten()
     }
 
     /// Whether the read has finished, and how.
@@ -171,7 +176,7 @@ impl Settings {
         #[cfg(test)]
         SAVED.with(|saved| saved.borrow_mut().push((key, json.clone())));
 
-        let Some(writer) = self.writer.get_value() else {
+        let Some(writer) = self.writer() else {
             return report(Err(logged(key, SaveError::DatabaseClosed)));
         };
 
@@ -190,7 +195,7 @@ impl Settings {
         #[cfg(test)]
         SAVED.with(|saved| saved.borrow_mut().push((ARMOR_DEFAULTS, format!("{row:?}"))));
 
-        let Some(writer) = self.writer.get_value() else {
+        let Some(writer) = self.writer() else {
             tracing::warn!("settings: the armor viewer defaults were not saved because the database is not open");
             return;
         };
@@ -207,11 +212,11 @@ impl Settings {
         #[cfg(test)]
         SAVED.with(|saved| saved.borrow_mut().push((CLEARED, String::new())));
 
-        let Some(writer) = self.writer.get_value() else {
+        let Some(writer) = self.writer() else {
             tracing::warn!("settings: nothing was cleared because the config database is not open");
             return;
         };
-        let Some(runtime) = self.runtime.get_value() else {
+        let Some(runtime) = self.runtime() else {
             tracing::error!("settings: nothing was cleared because no tokio runtime is running");
             return;
         };
@@ -250,7 +255,7 @@ impl Settings {
         pending: PendingWrite,
         report: impl FnOnce(Result<(), SaveError>) + 'static,
     ) {
-        let Some(runtime) = self.runtime.get_value() else {
+        let Some(runtime) = self.runtime() else {
             return report(Err(logged(what, SaveError::Incomplete(TokioError::NoRuntime))));
         };
         let stamp = pending.stamp();
@@ -283,7 +288,17 @@ impl Settings {
     /// read has opened it, and once the services are gone: a secondary window can outlive the main
     /// window that owns them.
     pub fn pool(self) -> Option<SqlitePool> {
-        self.writer.try_get_value().flatten().map(|writer| writer.pool().clone())
+        self.writer().map(|writer| writer.pool().clone())
+    }
+
+    /// `None` before the startup read has opened the database, and once the services are gone.
+    fn writer(self) -> Option<SettingsWriter> {
+        self.writer.try_get_value().flatten()
+    }
+
+    /// `None` without a tokio runtime, and once the services are gone.
+    fn runtime(self) -> Option<Arc<Runtime>> {
+        self.runtime.try_get_value().flatten()
     }
 }
 
@@ -447,5 +462,27 @@ mod tests {
         let read = |key| runtime.block_on(wows_toolkit_config::queries::get_setting::<String>(&pool, key));
         assert_eq!(read(BEFORE), None, "the earlier save is cleared");
         assert_eq!(read(AFTER).as_deref(), Some("after"), "the later save stays");
+    }
+
+    /// A secondary window outlives the main window that owns the services when the app exits. Its
+    /// settings reads and saves then find nothing rather than a freed value.
+    #[test]
+    fn settings_answer_nothing_once_the_services_are_gone() {
+        zgui::reactive::install().expect("the reactive runtime installs");
+        let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
+        let main = Mounted::new();
+        let services = main.with(|| Services::provide(Some(Arc::clone(&runtime))));
+        let pool = runtime.block_on(wows_toolkit_config::test_pool());
+        let settings = runtime.block_on(StartupSettings::load(&pool));
+        services.settings.adopt(settings, pool);
+        assert!(services.settings.read(|_| ()).is_some(), "the settings are loaded while the main window is");
+        assert!(services.runtime().is_some(), "the runtime is up while the main window is");
+
+        main.unmount();
+        assert!(services.settings.read(|_| ()).is_none());
+        assert!(services.settings.read_untracked(|_| ()).is_none());
+        assert!(services.runtime().is_none());
+        services.settings.save("zgui_test_saved_after_exit", &"late");
+        services.settings.clear();
     }
 }

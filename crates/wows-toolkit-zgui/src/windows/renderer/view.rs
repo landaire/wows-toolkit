@@ -178,7 +178,8 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     // makes another observer.
     let border = map.observe_border_box();
     let placing = RenderEffect::new(move |_| {
-        let _ = session.frame_size.get();
+        // `try_`: the element's size is this window's and can change after the session is gone.
+        let _ = session.frame_size.try_get();
         let _ = border.get();
         place(session, map);
     });
