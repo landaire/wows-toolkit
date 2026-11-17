@@ -203,10 +203,13 @@ The point of the Buck build is that its actions cannot reach outside their decla
 buck2 run //ci:hermetic
 ```
 
-`scripts/test-*.nu` are the build-graph tests: toolchain configuration, build-script boundaries, build modes, workspace targets, and the hermeticity check against fixtures that must be rejected. Run them all after touching anything under `toolchains/`, `build-support/buck/`, or `third-party/rust/fixups/`:
+`scripts/test-*.nu` are the build-graph tests: toolchain configuration, build-script boundaries, build modes, workspace targets, and the hermeticity check against fixtures that must be rejected. They query the graph and do not build the aliases, so run them together with a build in both modes and the hermeticity check after touching anything under `toolchains/`, `build-support/buck/`, or `third-party/rust/fixups/`:
 
 ```bash
 buck2 run //ci:graph_tests
+buck2 build //:
+buck2 build -m release //:
+buck2 run //ci:hermetic
 ```
 
 ### Updating Rust dependencies

@@ -1,10 +1,6 @@
 #!/usr/bin/env nu
 
 def main [] {
-    ^nu scripts/test-native-build-modes.nu
-    ^nu scripts/test-buildscript-environment.nu
-    ^nu scripts/test-workspace-package-metadata.nu
-
     # Enumerated from the root BUCK file rather than repeated here, so a new
     # alias is covered without touching this test.
     let targets = (^buck2 uquery "kind(alias, root//:)" | lines | where {|line| ($line | str trim) != "" })
@@ -30,14 +26,5 @@ def main [] {
         if ($owners.stdout | str trim | is-empty) {
             error make {msg: $"($target) has no native rust_binary owner."}
         }
-
-        ^buck2 build $target
-        ^nu scripts/check-buck-hermetic.nu $target
-    }
-
-    for alias in ["wows_toolkit_egui" "replayshark" "minimap_renderer"] {
-        let target = $"//:($alias)"
-        ^buck2 build -m release $target
-        ^nu scripts/check-buck-hermetic.nu $target release
     }
 }

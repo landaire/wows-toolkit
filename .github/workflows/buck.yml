@@ -58,7 +58,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # The three phases overlap instead of adding their wall clock. Each starts from
+  # The two phases overlap instead of adding their wall clock. Each starts from
   # a cold buck-out, which is still cheaper in wall clock than a serial run.
   linux:
     name: Linux x86_64 (${{ matrix.phase }})
@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        phase: [checks, release, graph-tests]
+        phase: [checks, release]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -137,8 +137,9 @@ jobs:
         if: matrix.phase == 'checks'
         run: nix develop --command buck2 test $(jq -r '.tests | join(" ")' affected.json)
 
+      # Queries only: the builds and hermetic checks above cover the aliases.
       - name: Build-graph tests
-        if: matrix.phase == 'graph-tests'
+        if: matrix.phase == 'checks'
         run: |
           if ! jq -e .graph_tests affected.json >/dev/null; then echo "No BUCK file or manifest changed."; exit 0; fi
           nix develop --command buck2 run //ci:graph_tests
