@@ -553,24 +553,28 @@ impl RendererSession {
         self.spawn(async move {
             let read =
                 long_job(move || wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)).await;
-            match read {
+            if self.run.try_with_value(|run| run.event_generation == generation) != Some(true) {
+                return;
+            }
+            let mut events = match read {
                 Ok((mut read, shots)) => {
-                    if self.run.try_with_value(|run| run.event_generation == generation) != Some(true) {
-                        return;
-                    }
                     if names.is_pseudonym() {
                         for event in &mut read.events {
                             event.kind.anonymize();
                         }
                     }
-                    let filter = self.events.with_untracked(|events| events.filter().clone());
-                    let mut events = BattleEvents::from_extraction(read, shots);
-                    events.set_filter(|kept| *kept = filter);
-                    self.events.set(events);
+                    BattleEvents::from_extraction(read, shots)
                 }
-                // The viewport still plays; only the event controls are worse off.
-                Err(reason) => tracing::warn!("replay renderer: the battle's events could not be read: {reason}"),
-            }
+                // The viewport still plays. The timeline says there is nothing to step between
+                // rather than reading for ever.
+                Err(reason) => {
+                    tracing::warn!("replay renderer: the battle's events could not be read: {reason}");
+                    BattleEvents::from_read(Vec::new(), None, std::collections::HashMap::new())
+                }
+            };
+            let filter = self.events.with_untracked(|events| events.filter().clone());
+            events.set_filter(|kept| *kept = filter);
+            self.events.set(events);
         });
     }
 

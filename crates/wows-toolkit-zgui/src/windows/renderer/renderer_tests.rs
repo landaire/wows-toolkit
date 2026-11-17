@@ -148,6 +148,13 @@ fn focus_viewport(window: &mut HeadlessWindow) {
     click(window, "replay-renderer-viewport");
 }
 
+/// Moves the pointer over the map, which gives the window a frame to start work a test spawned
+/// from outside one.
+fn pointer_over_viewport(window: &mut HeadlessWindow) {
+    let viewport = find(window, "replay-renderer-viewport");
+    window.hover(viewport).expect("the map has a box");
+}
+
 /// Events at the battle clocks given.
 fn events_at(at: &[f32]) -> BattleEvents {
     let events = at
@@ -649,6 +656,34 @@ fn a_seek_into_a_closed_session_does_nothing() {
     session.go_to_elapsed(2.0);
     session.seek_by(1.0);
     assert!(session.track_untracked().is_none());
+}
+
+/// Game data with nothing in it, which reads no replay the tests name.
+fn empty_game_data() -> wows_toolkit_replay_data::load::GameDataCache {
+    let provider = wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())
+        .expect("an empty provider builds");
+    let vfs: wowsunpack::vfs::VfsPath = wowsunpack::vfs::MemoryFS::new().into();
+    wows_toolkit_replay_data::load::GameDataCache::holding_for_test(Arc::new(
+        wows_toolkit_replay_data::load::LoadedGameData::for_test(provider, vfs, 1),
+    ))
+}
+
+/// A replay whose events cannot be read says the battle had none, rather than reading for ever.
+#[test]
+fn an_unreadable_battle_says_it_has_no_events() {
+    let (mut window, session) = open_viewport(track(half_second_frames(10)));
+    session.hold_game_data_for_test(empty_game_data());
+
+    // The viewport's replay is not on disk, so the scan fails.
+    session.scan_events_for_test();
+    pointer_over_viewport(&mut window);
+    crate::interaction_tests::settle_in_real_time(&mut window);
+    assert!(session.events.with_untracked(BattleEvents::is_read), "the scan finished");
+
+    click(&mut window, "replay-renderer-timeline-toggle");
+    let said = window.texts_by_class("wt-renderer-timeline__said").concat();
+    assert_eq!(said, rust_i18n::t!("ui.replay.timeline_no_events"), "the timeline says so");
+    assert!(is_disabled(&mut window, "replay-renderer-next-event"));
 }
 
 /// A watched window, mounted while `shown` holds, over a session the test feeds frames into.
