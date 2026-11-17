@@ -79,12 +79,32 @@ impl ReplayLite {
     }
 }
 
+/// What a group gathers its replays by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GroupKind {
+    Date,
+    Ship,
+}
+
+impl GroupKind {
+    /// The grouping that makes groups of this kind, which decides what its rows leave out.
+    fn grouping(self) -> ReplayGrouping {
+        match self {
+            Self::Date => ReplayGrouping::Date,
+            Self::Ship => ReplayGrouping::Ship,
+        }
+    }
+}
+
 /// One row of the file-browser tree: a Date/Ship group with its children, or
 /// a single replay leaf. A leaf carries both of its lines plus the outcome
 /// its first line is tinted by; a group's label already encodes its win rate.
 #[derive(Debug, Clone)]
 pub enum BrowserNode {
     Group {
+        kind: GroupKind,
+        /// The date or ship the group gathers, which stays while its count and results change.
+        name: String,
         label: String,
         children: Vec<BrowserNode>,
     },
@@ -154,10 +174,10 @@ fn win_rate_label(replays: &[&ReplayLite]) -> String {
 
 /// Builds one `BrowserNode::Group` from a named bucket of replays: label
 /// `"{name} ({count})" + win_rate_label`, children labeled by `leaf_label`.
-fn group_node(name: String, replays: Vec<&ReplayLite>, grouping: ReplayGrouping, locale: Option<&str>) -> BrowserNode {
+fn group_node(kind: GroupKind, name: String, replays: Vec<&ReplayLite>, locale: Option<&str>) -> BrowserNode {
     let label = format!("{} ({}){}", name, replays.len(), win_rate_label(&replays));
-    let children = replays.into_iter().map(|r| leaf(r, grouping, locale)).collect();
-    BrowserNode::Group { label, children }
+    let children = replays.into_iter().map(|r| leaf(r, kind.grouping(), locale)).collect();
+    BrowserNode::Group { kind, name, label, children }
 }
 
 /// Groups path-descending-sorted `files` by the date part of `game_time`
@@ -178,7 +198,7 @@ fn build_date_groups(files: &[&ReplayLite], locale: Option<&str>) -> Vec<Browser
         });
         groups[index].1.push(r);
     }
-    groups.into_iter().map(|(date, replays)| group_node(date, replays, ReplayGrouping::Date, locale)).collect()
+    groups.into_iter().map(|(date, replays)| group_node(GroupKind::Date, date, replays, locale)).collect()
 }
 
 /// Groups path-descending-sorted `files` by ship name. Groups are ordered by
@@ -200,10 +220,7 @@ fn build_ship_groups(files: &[&ReplayLite], locale: Option<&str>) -> Vec<Browser
         b_recent.cmp(a_recent)
     });
 
-    groups
-        .into_iter()
-        .map(|(ship, replays)| group_node(ship.to_string(), replays, ReplayGrouping::Ship, locale))
-        .collect()
+    groups.into_iter().map(|(ship, replays)| group_node(GroupKind::Ship, ship.to_string(), replays, locale)).collect()
 }
 
 #[cfg(test)]
@@ -242,7 +259,7 @@ mod tests {
     fn flatten(nodes: &[BrowserNode], depth: usize, out: &mut Vec<(usize, String)>) {
         for node in nodes {
             match node {
-                BrowserNode::Group { label, children } => {
+                BrowserNode::Group { label, children, .. } => {
                     out.push((depth, label.clone()));
                     flatten(children, depth + 1, out);
                 }

@@ -13,12 +13,16 @@ use wows_core::pseudonym::NameDisplay;
 use wows_core::rating_scope::RatedBattle;
 use wows_core::rating_scope::RatingScope;
 use wows_toolkit_config::ReplayGrouping;
+use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::ObjectiveMatch;
+use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::HeaderReadError;
 use wows_toolkit_replay_data::replay_dir::ScanProgress;
 use wows_toolkit_replay_data::replay_dir::read_replay;
+use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_replay_data::simulated_panic;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_services::settings::StartupSettings;
@@ -26,6 +30,7 @@ use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
+use wowsunpack::game_types::ArenaId;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
@@ -706,6 +711,122 @@ fn the_rows_keep_their_scroll_and_cursor_as_battles_land_and_the_folder_is_read_
         vec![numbered(22), numbered(23), cursor],
         "a shift run starts from the anchor set before the read"
     );
+}
+
+/// A group the reader closed and selected stays closed and selected as results reach its rows and
+/// battles land in it, which change its label.
+#[test]
+fn a_closed_group_stays_closed_and_selected_as_its_label_changes() {
+    let (mut window, control) = open();
+    set_autoload(&mut window, control, false);
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.grouping.set(ReplayGrouping::Date);
+    let (_dir, root) = replay_dir(1);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    control.pin_folder(folder_id(control, &root), true);
+    settle_in_real_time(&mut window);
+    let shown = listing(control, &root);
+    let group = || {
+        shown.tree.with_untracked(|tree| {
+            let id = tree.groups().next().cloned().expect("the replay is grouped by its date");
+            let label = tree.group(&id).map(|group| group.label.clone()).unwrap_or_default();
+            (NodeKey::Group(id), label)
+        })
+    };
+
+    let header = window.by_class("wt-row__group-label").expect("the group has a header");
+    window.click(header).expect("the header has a box");
+    window.advance(Duration::from_millis(50));
+    let (closed, unscored) = group();
+    assert!(!shown.expanded.with_untracked(|expanded| expanded.contains(&closed)), "a click closes the group");
+
+    let won = HashMap::from([(root.join(FIXTURES[0]), summary(MatchOutcome::Win, RatingScope::Unrated, None))]);
+    shown.summaries.set(won);
+    window.advance(Duration::from_millis(50));
+    let (scored, label) = group();
+    assert_ne!(label, unscored, "the result reaches the group's label");
+    assert_eq!(scored, closed, "and the group keeps its row");
+
+    land(&root, FIXTURES[0], &mut window);
+    let (landed, label) = group();
+    assert!(label.contains("(2)"), "the landed battle joins the group: {label}");
+    assert_eq!(landed, closed, "which keeps its row");
+    assert!(!shown.expanded.with_untracked(|expanded| expanded.contains(&closed)), "closed");
+    assert!(shown.selection.with_untracked(|selection| selection.contains(&closed)), "and selected");
+}
+
+/// Puts the shell's settings over an empty index of the test's own, so the facts the listing reads
+/// are only those the test wrote. Call before anything is indexed.
+fn own_index(control: BrowserControl) -> (sqlx::SqlitePool, std::sync::Arc<tokio::runtime::Runtime>) {
+    let services = control.shell().services();
+    let shared = services.settings.pool().expect("the settings database is open");
+    let runtime = services.runtime().expect("the runtime is up");
+    let settings = runtime.block_on(StartupSettings::load(&shared));
+    let pool = runtime.block_on(wows_toolkit_config::test_pool());
+    services.settings.adopt(settings, pool.clone());
+
+    (pool, runtime)
+}
+
+/// Reading dropped replays again leaves their rows the facts the index gave them until the index
+/// answers again, so the rows never read as unindexed in between. An index that cannot answer
+/// leaves them as they were.
+#[test]
+fn reading_dropped_replays_again_leaves_their_index_facts_to_the_next_answer() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.adopt_folder_history(FolderHistory::default());
+    let (pool, runtime) = own_index(control);
+    let (_dir, root) = replay_dir(2);
+    let [won, other] = [FIXTURES[0], FIXTURES[1]].map(|name| root.join(name));
+    runtime.block_on(async {
+        let now = jiff::Timestamp::now();
+        let source = SourceScope::Folder(root.clone()).ensure(&pool, &root, now).await.expect("the source is made");
+        let arena_id = ArenaId::new(4_100_200_310);
+        let battle = ObjectiveMatch {
+            arena_id,
+            timestamp: now,
+            map: "Ocean".into(),
+            game_mode: "Domination".into(),
+            game_mode_id: None,
+            game_type: "pvp".into(),
+            match_group: "pvp".into(),
+            version_build: None,
+        };
+        query::upsert_match(&pool, &battle).await.expect("the match inserts");
+        let record = ReplayRecord {
+            arena_id,
+            source_id: source,
+            replay_path: won.clone(),
+            file_mtime: None,
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: None,
+            self_survived: None,
+            self_damage: None,
+            self_kills: None,
+            self_pr: None,
+            results_available: true,
+            indexed_at: now,
+        };
+        query::upsert_record(&pool, &record).await.expect("the record inserts");
+    });
+
+    workspace().shell.dropped(vec![won.clone(), other]);
+    settle_in_real_time(&mut window);
+    let (id, _) = dropped_tabs(control).into_iter().next().expect("the drop has a tab");
+    let shown = control.listing(id).expect("the tab has a listing");
+    let indexed = || shown.summaries.with_untracked(|summaries| summaries.contains_key(&won));
+    assert!(indexed(), "the index's facts reach the row");
+
+    // Closed, so the next read of the index fails and nothing but the read again can touch the
+    // facts.
+    runtime.block_on(pool.close());
+    shown.relist();
+    settle_in_real_time(&mut window);
+    assert!(shown.holds(&won), "the replays are read again");
+    assert!(indexed(), "and the row keeps its facts");
 }
 
 #[test]

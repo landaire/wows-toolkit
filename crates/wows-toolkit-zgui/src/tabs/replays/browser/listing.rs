@@ -477,7 +477,8 @@ impl Listing {
             let directory_changed = self.directory.get_untracked().as_ref() != Some(&dir);
             if directory_changed {
                 self.directory.set(Some(dir.clone()));
-                self.summaries.set(HashMap::new());
+                // The facts held are replaced when the index answers, so the rows do not read as
+                // unindexed meanwhile.
                 self.load_summaries();
             }
 
@@ -548,7 +549,6 @@ impl Listing {
         self.files.set(read.files);
         self.unreadable.set(read.unreadable);
         self.set_status(ScanStatus::Loaded);
-        self.summaries.set(HashMap::new());
         self.load_summaries();
         self.report_missing_builds();
     }

@@ -1,7 +1,6 @@
 //! The listing's rows as a [`TreeModel`]: the shared Date/Ship grouping with what each row draws.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -12,6 +11,7 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::browser_tree::BrowserNode;
+use wows_toolkit_replay_data::browser_tree::GroupKind;
 use wows_toolkit_replay_data::browser_tree::ReplayLite;
 use wows_toolkit_replay_data::browser_tree::build_browser_tree;
 use wows_toolkit_replay_data::load::GameDataCache;
@@ -23,10 +23,15 @@ use wows_toolkit_viewmodel::listing_row::hover_facts;
 use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
-/// A group row, by its place under its parent and its label. A rebuild that keeps a group's label
-/// keeps its key, so it stays collapsed or selected.
+/// A group row, by what it gathers and the date or ship it gathers. A rebuild that changes the
+/// group's count or results keeps its key, so it stays collapsed or selected.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct GroupId(String);
+pub struct GroupId {
+    kind: GroupKind,
+    name: String,
+    /// How many groups of the same name come before it.
+    repeat: usize,
+}
 
 /// One row of the listing.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -149,24 +154,19 @@ impl BrowserTree {
         let nodes = build_browser_tree(&lites, inputs.grouping, inputs.locale);
 
         let mut tree = Self::default();
-        let mut used: HashSet<String> = HashSet::new();
-        // A worklist of (node, parent key, parent id prefix), walked in order so the visible order
-        // of the replays is the order they are pushed in.
-        let mut work: Vec<(BrowserNode, Option<NodeKey>, String)> =
-            nodes.into_iter().rev().map(|node| (node, None, "replay-browser-group".to_owned())).collect();
-        while let Some((node, parent, prefix)) = work.pop() {
+        // A worklist of (node, parent key), walked in order so the visible order of the replays is
+        // the order they are pushed in.
+        let mut work: Vec<(BrowserNode, Option<NodeKey>)> = nodes.into_iter().rev().map(|node| (node, None)).collect();
+        while let Some((node, parent)) = work.pop() {
             let (key, below) = match node {
-                BrowserNode::Group { label, children } => {
-                    let mut id = format!("{prefix}/{label}");
-                    let mut repeat = 1;
-                    while !used.insert(id.clone()) {
-                        id = format!("{prefix}/{label}#{repeat}");
-                        repeat += 1;
+                BrowserNode::Group { kind, name, label, children } => {
+                    let mut group = GroupId { kind, name, repeat: 0 };
+                    while tree.groups.contains_key(&group) {
+                        group.repeat += 1;
                     }
                     let paths = descendant_paths(&children);
-                    let group = GroupId(id.clone());
                     tree.groups.insert(group.clone(), GroupRow { label, paths });
-                    (NodeKey::Group(group), Some((children, id)))
+                    (NodeKey::Group(group), Some(children))
                 }
                 BrowserNode::Leaf { label, battle, stats, path, map_name, outcome, in_division } => {
                     let summary = inputs.summaries.get(&path);
@@ -198,8 +198,8 @@ impl BrowserTree {
                 }
                 None => tree.roots.push(key.clone()),
             }
-            if let Some((children, id)) = below {
-                work.extend(children.into_iter().rev().map(|child| (child, Some(key.clone()), id.clone())));
+            if let Some(children) = below {
+                work.extend(children.into_iter().rev().map(|child| (child, Some(key.clone()))));
             }
         }
         for unreadable in inputs.unreadable {
