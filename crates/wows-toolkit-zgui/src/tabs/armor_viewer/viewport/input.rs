@@ -9,6 +9,7 @@ use wows_toolkit_armor::viewport::camera::Axis;
 use wows_toolkit_armor::viewport::gizmo;
 use wows_toolkit_armor::viewport::types::Vec2;
 use wows_toolkit_armor::viewport::types::ViewRect;
+use zgui::vocab::ClickSettings;
 use zgui::vocab::PointerButton;
 use zgui::vocab::Timestamp;
 
@@ -26,11 +27,6 @@ const GIZMO_SNAP_DURATION_SECS: f32 = 0.35;
 /// How far the pointer moves, in pixels, between a press and its release before the press is a
 /// drag rather than a click, as egui classifies it.
 const DRAG_THRESHOLD_PX: f32 = 4.0;
-
-/// How close in time and place a second primary press must follow the first to be a
-/// double-click.
-const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(500);
-const DOUBLE_CLICK_SLOP_PX: f32 = 4.0;
 
 /// The step a frame of held-key motion takes when the previous frame's time is unknown, and the
 /// most a slow frame may take, so a stall does not throw the camera across the scene.
@@ -172,9 +168,16 @@ impl ViewportModel {
         self.last_bounds.map(gizmo::gizmo_rect)
     }
 
-    /// A press over the viewport. Says whether the press starts a drag, which the element then
-    /// captures the pointer for.
-    pub(super) fn pointer_down(&mut self, at: Vec2, button: PointerButton, when: Timestamp, cx: &mut ViewCx) -> bool {
+    /// A press over the viewport, which `clicks` says may be the second of a double-click. Says
+    /// whether the press starts a drag, which the element then captures the pointer for.
+    pub(super) fn pointer_down(
+        &mut self,
+        at: Vec2,
+        button: PointerButton,
+        when: Timestamp,
+        clicks: ClickSettings,
+        cx: &mut ViewCx,
+    ) -> bool {
         if !self.is_gpu_ready() {
             return false;
         }
@@ -184,8 +187,8 @@ impl ViewportModel {
                 self.gizmo_press_in_box = in_gizmo;
                 let previous = self.last_press.replace(LastPress { at, when });
                 let double = previous.is_some_and(|previous| {
-                    when.saturating_since(previous.when) <= DOUBLE_CLICK_TIME
-                        && (at - previous.at).norm() <= DOUBLE_CLICK_SLOP_PX
+                    when.saturating_since(previous.when) <= clicks.interval
+                        && (at - previous.at).norm() <= clicks.slop.0
                 });
                 if !in_gizmo && double && !self.perspective.enabled {
                     // A third press starts counting again.

@@ -276,9 +276,6 @@ const CSS: &str = css!(
     }"
 );
 
-/// How tall a line of wheel scrolling is, in CSS pixels.
-const WHEEL_LINE: f32 = 20.0;
-
 /// How long the reason a cast missed stays over the viewport.
 const MISS_SHOWN_FOR: Duration = Duration::from_millis(3000);
 
@@ -327,7 +324,8 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
         let Some(at) = local(ev.position) else { return };
         area.focus();
         let when = ev.timestamp;
-        let drag = state.update(|model, cx| model.pointer_down(at, button, when, cx)).unwrap_or(false);
+        let clicks = ev.click_settings();
+        let drag = state.update(|model, cx| model.pointer_down(at, button, when, clicks, cx)).unwrap_or(false);
         if drag {
             ev.capture_pointer();
         }
@@ -434,7 +432,8 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                         state.update(|model, _| model.pointer_left());
                     },
                     on:wheel = move |ev| {
-                        let notches = ev.delta.to_pixels(CssPx(WHEEL_LINE)).height.0;
+                        let Some(line) = ev.line_height() else { return };
+                        let notches = ev.delta.to_pixels(line).height.0;
                         if notches != 0.0 {
                             // A wheel turned away from the reader reports a negative delta, which
                             // brings the camera closer.
