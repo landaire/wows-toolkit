@@ -35,6 +35,26 @@ pub enum ReplayLoadError {
     AltRefused(#[from] AltRefusal),
 }
 
+impl ReplayLoadError {
+    /// Whether the file itself is what failed, and so is worth recording as
+    /// unreadable until it changes.
+    ///
+    /// Missing or broken game data is this machine's state, not the file's:
+    /// recording it would have later passes skip a good replay. A reader fault
+    /// is this build's, and a later build may read the file.
+    pub fn is_unreadable_file(&self) -> bool {
+        match self {
+            Self::Io(_) | Self::VersionParse | Self::Parse(_) => true,
+            Self::UnsupportedVersion { .. }
+            | Self::GameData(_)
+            | Self::Panicked { .. }
+            | Self::LoaderStopped { .. }
+            | Self::LoaderGone { .. }
+            | Self::AltRefused(_) => false,
+        }
+    }
+}
+
 /// Why another recording was refused.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum AltRefusal {

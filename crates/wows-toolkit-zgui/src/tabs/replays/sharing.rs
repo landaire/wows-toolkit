@@ -100,8 +100,20 @@ impl Contributor {
         if ledger == LedgerUse::Consult && self.ledger_has(other_paths.clone()).await {
             return Ok(Outcome::AlreadySent);
         }
+        // A file a read already failed on is not read again until it changes, as in the egui app.
+        if self.unreadable(&path).await {
+            return Ok(Outcome::Skipped);
+        }
         let (reading, cache) = (path.clone(), self.game_data.clone());
-        let parsed = long_job(move || parse_replay(&reading, &cache, None)).await.map_err(ContributeError::Unparsed)?;
+        let parsed = match long_job(move || parse_replay(&reading, &cache, None)).await {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                if err.is_unreadable_file() {
+                    self.remember_unreadable(path).await;
+                }
+                return Err(ContributeError::Unparsed(err));
+            }
+        };
 
         // The anchor both apps keep, recorded on the first sight of this replay: the grace window
         // for its results runs from there.
@@ -180,6 +192,31 @@ impl Contributor {
             Ok(Ok(())) => {}
             Ok(Err(err)) => tracing::warn!(%err, "sharing: the ineligible replay was not recorded"),
             Err(err) => tracing::warn!(%err, "sharing: the ineligible replay was not recorded"),
+        }
+    }
+
+    /// Whether `path`, as it is now, is on the unreadable list. A list that cannot be read lists
+    /// nothing, and the read goes ahead.
+    async fn unreadable(&self, path: &Path) -> bool {
+        let (pool, named) = (self.pool.clone(), path.to_path_buf());
+        self.services.on_tokio(async move { Unindexable::load(&pool).await.contains(&named) }).await.unwrap_or(false)
+    }
+
+    /// Records that `path`, as it is now, could not be read, so no pass reads it again until it
+    /// changes.
+    async fn remember_unreadable(&self, path: PathBuf) {
+        let pool = self.pool.clone();
+        let saved = self
+            .services
+            .on_tokio(async move {
+                let mut unindexable = Unindexable::load(&pool).await;
+                if unindexable.insert(&path) { unindexable.save(&pool).await } else { Ok(()) }
+            })
+            .await;
+        match saved {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => tracing::warn!(%err, "sharing: the unreadable replay was not recorded"),
+            Err(err) => tracing::warn!(%err, "sharing: the unreadable replay was not recorded"),
         }
     }
 
@@ -369,7 +406,100 @@ pub fn battles_of(folder: &ReplayFolder) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::time::Instant;
+
+    use landaire_ui::test_support::HeadlessOptions;
+    use landaire_ui::test_support::HeadlessWindow;
+    use landaire_ui::test_support::WindowSize;
+    use wows_toolkit_services::settings::StartupSettings;
+    use zgui::task::spawn_local;
+
     use super::*;
+    use crate::interaction_tests::open_shell;
+    use crate::interaction_tests::shell;
+    use crate::services::GameDataRequest;
+
+    /// The shell sharing whole replays, with `wows_dir` as the game directory, settings over an
+    /// empty database of the test's own, and game data over no install. Without a game directory
+    /// the startup sweep reads nothing, so only the test reads its replays.
+    fn sharing(wows_dir: Option<&Path>) -> (HeadlessWindow, Contributor, SqlitePool) {
+        let window = open_shell(HeadlessOptions::new(WindowSize { width: 800.0, height: 600.0 }));
+        let services = shell().services();
+        let runtime = services.runtime().expect("the runtime is up");
+        let pool = runtime.block_on(wows_toolkit_config::test_pool());
+        let mut settings = runtime.block_on(StartupSettings::load(&pool));
+        settings.data_sharing = DataSharingMode::Replays;
+        // The setting holds an empty string for no game directory.
+        settings.wows_dir = wows_dir.map(|dir| dir.display().to_string()).unwrap_or_default();
+        services.settings.adopt(settings, pool.clone());
+        services.game_data.adopt(GameDataRequest {
+            wows_dir: None,
+            cache_dir: String::new(),
+            locale: None,
+            auto_dump: false,
+        });
+        let contributor = Contributor::new(services).expect("sharing is on and its store and game data are ready");
+
+        (window, contributor, pool)
+    }
+
+    /// Runs `work` on the UI thread to its end, letting frames and the tokio runtime run meanwhile.
+    fn finish<T: 'static>(window: &mut HeadlessWindow, work: impl Future<Output = T> + 'static) -> T {
+        let done = Rc::new(RefCell::new(None));
+        let slot = Rc::clone(&done);
+        spawn_local(async move {
+            *slot.borrow_mut() = Some(work.await);
+        });
+        let started = Instant::now();
+        loop {
+            if let Some(value) = done.borrow_mut().take() {
+                return value;
+            }
+            assert!(started.elapsed() < Duration::from_secs(30), "the work ends within 30 seconds");
+            window.advance(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn unindexable(window: &mut HeadlessWindow, pool: &SqlitePool, path: &Path) -> bool {
+        let (pool, path) = (pool.clone(), path.to_path_buf());
+        let read = shell().services().on_tokio(async move { Unindexable::load(&pool).await.contains(&path) });
+
+        finish(window, read).expect("the runtime is up")
+    }
+
+    /// A replay sharing could not read is remembered as unreadable, as the egui app does, so no
+    /// later pass reads it again until it changes.
+    #[test]
+    fn a_replay_that_did_not_parse_is_remembered_as_unreadable() {
+        let (_dir, root) = dir_with(&["broken.wowsreplay"]);
+        let path = root.join("broken.wowsreplay");
+        let (mut window, contributor, pool) = sharing(None);
+
+        let outcome = finish(&mut window, async move { contributor.contribute(path, LedgerUse::Consult).await });
+
+        assert!(matches!(outcome, Err(ContributeError::Unparsed(_))), "{outcome:?}");
+        assert!(unindexable(&mut window, &pool, &root.join("broken.wowsreplay")));
+    }
+
+    /// A replay on the unreadable list is not read for sharing, as the egui app skips it.
+    #[test]
+    fn a_replay_remembered_as_unreadable_is_not_read() {
+        let (_dir, root) = dir_with(&["broken.wowsreplay"]);
+        let path = root.join("broken.wowsreplay");
+        let (mut window, contributor, pool) = sharing(None);
+        let mut listed = Unindexable::default();
+        assert!(listed.insert(&path));
+        let saving = pool.clone();
+        let saved = shell().services().on_tokio(async move { listed.save(&saving).await });
+        finish(&mut window, saved).expect("the runtime is up").expect("the list is saved");
+
+        // A read would fail on these contents rather than skip them.
+        let outcome = finish(&mut window, async move { contributor.contribute(path, LedgerUse::Consult).await });
+
+        assert!(matches!(outcome, Ok(Outcome::Skipped)), "{outcome:?}");
+    }
 
     /// A directory holding a file per name, each with its name as its contents.
     fn dir_with(names: &[&str]) -> (tempfile::TempDir, PathBuf) {

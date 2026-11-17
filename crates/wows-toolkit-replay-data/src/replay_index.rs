@@ -195,27 +195,12 @@ pub enum IndexOneError {
 
 impl IndexOneError {
     /// Whether the file itself is what failed, and so is worth recording as
-    /// unreadable until it changes.
-    ///
-    /// Missing or broken game data and a database that would not take the
-    /// rows are this machine's state, not the file's: recording them would
-    /// have later passes skip a good replay. A reader fault is this build's,
-    /// and a later build may read the file.
+    /// unreadable until it changes. A database that would not take the rows is
+    /// this machine's state, not the file's.
     pub fn is_unreadable_file(&self) -> bool {
-        use crate::error::ReplayLoadError;
-
         match self {
-            Self::Parse(ReplayLoadError::Io(_) | ReplayLoadError::VersionParse | ReplayLoadError::Parse(_)) => true,
-            Self::Parse(
-                ReplayLoadError::UnsupportedVersion { .. }
-                | ReplayLoadError::GameData(_)
-                | ReplayLoadError::Panicked { .. }
-                | ReplayLoadError::LoaderStopped { .. }
-                | ReplayLoadError::LoaderGone { .. }
-                | ReplayLoadError::AltRefused(_),
-            )
-            | Self::Store(_)
-            | Self::Source(_) => false,
+            Self::Parse(err) => err.is_unreadable_file(),
+            Self::Store(_) | Self::Source(_) => false,
         }
     }
 }
