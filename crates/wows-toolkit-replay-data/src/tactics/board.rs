@@ -50,6 +50,7 @@ use crate::drawing_style::DEFAULT_NIB;
 use crate::drawing_style::MAX_NIB;
 use crate::drawing_style::MIN_NIB;
 use crate::load::GameDataCache;
+use crate::replay_render::annotate::halo;
 use crate::replay_render::collab::CursorReport;
 use crate::replay_render::view::ZOOM_PER_PIXEL;
 use crate::ship_list::ShipChoice;
@@ -74,7 +75,6 @@ use crate::tactics::ShipModifier;
 use crate::tactics::WORLD_UNITS_PER_KM;
 use crate::tactics::band_in_world;
 use crate::tactics::caps_of;
-use crate::tactics::halo;
 use crate::tactics::maps;
 use crate::tactics::modes;
 use crate::tactics::render::ArtRequest;
@@ -455,7 +455,7 @@ impl Board {
         // A shape the reader has picked out is drawn again underneath in a wider stroke, which is
         // what says it is the one a drag will move.
         let mut annotations: Vec<Annotation> =
-            self.picked.picked().iter().filter_map(|at| shapes.get(*at)).map(halo).collect();
+            self.picked.picked().iter().filter_map(|at| shapes.get(*at)).filter_map(halo).collect();
         annotations.extend(shapes);
         // The shape under the pointer is drawn the way the finished one will be.
         if let Some(part_drawn) = self.pointer_at.and_then(|at| self.drawing.in_progress(at)) {

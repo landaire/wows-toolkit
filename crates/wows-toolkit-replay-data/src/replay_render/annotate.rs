@@ -842,6 +842,20 @@ impl Annotator {
 
         drawn_on
     }
+
+    /// A halo for every picked shape, drawn under [`Self::overlay_commands`] on screen. Left out
+    /// of an exported video, which shows what was drawn rather than what was picked.
+    pub fn picked_halos(&self, link: &CollabLink) -> Vec<DrawCommand> {
+        let annotations = link.annotations();
+
+        self.picked
+            .picked()
+            .iter()
+            .filter_map(|at| annotations.get(*at))
+            .filter_map(halo)
+            .flat_map(|halo| annotation_commands(&halo))
+            .collect()
+    }
 }
 
 impl Default for Annotator {
@@ -949,6 +963,38 @@ pub fn shape_filled(annotation: &Annotation) -> Option<bool> {
         | Annotation::Triangle { filled, .. } => Some(*filled),
         _ => None,
     }
+}
+
+/// The same shape, drawn wider and dimmer: what sits under a picked one to say it is picked.
+/// `None` for a ship marker, which is drawn from its species rather than stroked, so it has no
+/// width to widen; it reads as picked by the handles on it.
+pub fn halo(annotation: &Annotation) -> Option<Annotation> {
+    const HALO_WIDTH: f32 = 4.0;
+    const HALO_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0x80];
+
+    let mut halo = annotation.clone();
+    let widened = |width: &mut f32| *width = (*width + HALO_WIDTH).max(HALO_WIDTH);
+    let tinted = |color: &mut [u8; 4]| *color = HALO_INK;
+    match &mut halo {
+        Annotation::Ship { .. } => return None,
+        Annotation::FreehandStroke { color, width, .. }
+        | Annotation::Line { color, width, .. }
+        | Annotation::Arrow { color, width, .. }
+        | Annotation::Measurement { color, width, .. } => {
+            tinted(color);
+            widened(width);
+        }
+        Annotation::Circle { color, width, filled, .. }
+        | Annotation::Rectangle { color, width, filled, .. }
+        | Annotation::Triangle { color, width, filled, .. } => {
+            tinted(color);
+            widened(width);
+            // Hollow, so the shape it is under is still read through it.
+            *filled = false;
+        }
+    }
+
+    Some(halo)
 }
 
 /// Applies `edit` to `annotation`, leaving it as it was when the shape does not take that edit.

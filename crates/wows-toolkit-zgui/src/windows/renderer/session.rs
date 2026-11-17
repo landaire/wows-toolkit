@@ -1541,7 +1541,11 @@ impl RendererSession {
             return;
         };
         let link = self.collab.get_untracked();
-        let drawn_on = self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data));
+        let drawn_on = self.annotator.with_untracked(|annotator| {
+            let mut drawn_on = annotator.picked_halos(&link);
+            drawn_on.extend(annotator.overlay_commands(&link, &track, &game_data));
+            drawn_on
+        });
         let shown = self.layers.with_untracked(|layers| {
             let options = fit_to_canvas(&layers.options, layout);
             self.choices.with_untracked(|choices| {

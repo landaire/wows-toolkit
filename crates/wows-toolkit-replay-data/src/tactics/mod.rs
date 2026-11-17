@@ -35,7 +35,6 @@ use wt_collab_client::drawing::Tool;
 use wt_collab_client::geometry::ENEMY_COLOR;
 use wt_collab_client::geometry::FRIENDLY_COLOR;
 use wt_collab_client::protocol::WireCapPoint;
-use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationRangeFilter;
 use wt_collab_client::types::AnnotationShipConfig;
 
@@ -284,38 +283,6 @@ pub const RADIUS_STEP_KM: f32 = 0.5;
 pub fn radius_km(radius: f32) -> f32 {
     radius / WORLD_UNITS_PER_KM
 }
-
-/// The same shape, drawn wider and dimmer: what sits under a picked one to say it is picked.
-pub fn halo(annotation: &Annotation) -> Annotation {
-    let mut halo = annotation.clone();
-    let widened = |width: &mut f32| *width = (*width + HALO_WIDTH).max(HALO_WIDTH);
-    let tinted = |color: &mut [u8; 4]| *color = HALO_INK;
-    match &mut halo {
-        // A ship marker is drawn from its species rather than stroked, so it has no width to
-        // widen; it reads as picked by the handles on it.
-        Annotation::Ship { .. } => {}
-        Annotation::FreehandStroke { color, width, .. }
-        | Annotation::Line { color, width, .. }
-        | Annotation::Arrow { color, width, .. }
-        | Annotation::Measurement { color, width, .. } => {
-            tinted(color);
-            widened(width);
-        }
-        Annotation::Circle { color, width, filled, .. }
-        | Annotation::Rectangle { color, width, filled, .. }
-        | Annotation::Triangle { color, width, filled, .. } => {
-            tinted(color);
-            widened(width);
-            // Hollow, so the shape it is under is still read through it.
-            *filled = false;
-        }
-    }
-    halo
-}
-
-/// How much wider a picked shape's halo is drawn, and in what.
-const HALO_WIDTH: f32 = 4.0;
-const HALO_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0x80];
 
 /// A position in the element the map is drawn in, in CSS pixels from its top left corner.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1860,6 +1860,58 @@ fn a_measurement_reaches_the_frame_with_its_distance() {
     assert_eq!(figures, ["2", "2.5 km"]);
 }
 
+/// A picked shape gets a wider, hollow halo in another ink to draw under it on screen. The halo
+/// stays out of what an export draws, and goes with the pick.
+#[test]
+fn a_picked_shape_is_drawn_with_a_halo() {
+    let link = CollabLink::default();
+    let track = track(vec![0.0, 30.0]);
+    let ink = [230, 50, 50, 255];
+    link.add_annotation(Annotation::Circle {
+        center: [300.0, 300.0],
+        radius: 40.0,
+        color: ink,
+        width: 2.0,
+        filled: true,
+    });
+    let mut annotator = Annotator::new();
+    let exported =
+        |annotator: &Annotator| annotator.overlay_commands(&link, &track, &GameDataCache::without_install()).len();
+    let unpicked = exported(&annotator);
+    assert!(annotator.picked_halos(&link).is_empty(), "nothing is picked");
+
+    annotator.pick_at(&link, [340.0, 300.0], false);
+    let [DrawCommand::Annotation { shape: AnnotationShape::Circle { filled, .. }, color, width }] =
+        &annotator.picked_halos(&link)[..]
+    else {
+        panic!("one halo for the circle: {:?}", annotator.picked_halos(&link));
+    };
+    assert!(!filled && *color != ink && *width > 2.0, "hollow, in another ink and wider: {color:?} {width}");
+    assert_eq!(exported(&annotator), unpicked, "an export draws the same picked or not");
+
+    assert!(annotator.escape(), "the pick is put down");
+    assert!(annotator.picked_halos(&link).is_empty(), "and its halo with it");
+}
+
+/// A picked ship marker has no halo: it is drawn from its species, so a halo would only draw the
+/// same marker a second time.
+#[test]
+fn a_picked_ship_is_drawn_once() {
+    let link = CollabLink::default();
+    link.add_annotation(Annotation::Ship {
+        pos: [500.0, 500.0],
+        yaw: 0.0,
+        species: "Destroyer".to_owned(),
+        friendly: true,
+        config: None,
+    });
+    let mut annotator = Annotator::new();
+    annotator.pick_at(&link, [500.0, 500.0], false);
+
+    assert!(annotator.picked_halos(&link).is_empty(), "the picked ship has no halo");
+    assert!(annotator.edit_picked(&link, ShapeEdit::Friendly(false)), "while the ship is picked");
+}
+
 /// While the host has locked the drawing nothing changes from here: a tool in hand neither draws
 /// nor keeps the map from panning, nothing is picked, and undo, erase, Clear All and the edit
 /// popup are all refused.
