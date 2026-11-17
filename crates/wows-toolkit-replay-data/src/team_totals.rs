@@ -1,5 +1,7 @@
 //! Each team's sum of a player table's figures, and a row's share of its team's sum.
 
+use std::borrow::Borrow;
+
 use rust_i18n::t;
 use wows_replays::types::TeamId;
 
@@ -35,10 +37,13 @@ pub struct TeamRun {
 
 /// The run each team's rows form, in table order, or `None` when the sort
 /// interleaves the teams and a heading would split a team in two.
-pub fn team_runs(rows: &[PlayerRow], self_team: TeamId) -> Option<Vec<TeamRun>> {
+pub fn team_runs<R>(rows: &[R], self_team: TeamId) -> Option<Vec<TeamRun>>
+where
+    R: Borrow<PlayerRow>,
+{
     let mut runs: Vec<TeamRun> = Vec::new();
     for (start, row) in rows.iter().enumerate() {
-        let side = TeamSide::of(row, self_team);
+        let side = TeamSide::of(row.borrow(), self_team);
         if runs.last().is_some_and(|run| run.side == side) {
             continue;
         }

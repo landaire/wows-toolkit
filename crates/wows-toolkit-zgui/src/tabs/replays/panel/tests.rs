@@ -159,7 +159,10 @@ fn fake_table() -> TableSlot {
         let art = crate::game_art::GameArt::new();
         let expanded: Vec<_> = [ReplayColumn::Name, ReplayColumn::Skills, ReplayColumn::ActualDamage]
             .into_iter()
-            .filter_map(|column| detail(PlayerDetailCx { row: Arc::clone(&row), rows: Arc::clone(&rows), column, art }))
+            .filter_map(|column| {
+                let id = crate::tabs::replays::table::RowId::from_position(0);
+                detail(PlayerDetailCx { id, row: Arc::clone(&row), rows: Arc::clone(&rows), column, art })
+            })
             .collect();
         AnyView::new(view! {
             column(attr:data-testid = "fake-table") {

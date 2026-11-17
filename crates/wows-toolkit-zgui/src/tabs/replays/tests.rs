@@ -15,7 +15,6 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
 use wows_core::pseudonym;
-use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
 use wows_toolkit_replay_data::sample::sample_model;
@@ -613,7 +612,8 @@ fn only_the_panel_on_screen_names_its_mode() {
     workspace.open(behind.clone(), OpenTarget::ShowingTab);
     workspace.open(front.clone(), OpenTarget::NewTab);
     window.advance(Duration::from_millis(32));
-    workspace.control_for_test(&behind).expect("the replay is open").note_shares_for_test(AccountId(1));
+    let row = crate::tabs::replays::table::RowId::from_position(0);
+    workspace.control_for_test(&behind).expect("the replay is open").note_shares_for_test(row);
     window.advance(Duration::from_millis(32));
     assert_eq!(mode(), None, "the replay showing lists no damage shares");
 

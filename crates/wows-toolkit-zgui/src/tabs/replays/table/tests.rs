@@ -25,6 +25,7 @@ use wows_replay_insights::match_contribution::TankingRatios;
 use wows_replay_insights::match_contribution::TeamDamageShare;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::rate_single_battle;
+use wows_replays::types::AccountId;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
 use wows_toolkit_replay_data::sample::sample_model;
@@ -51,7 +52,7 @@ const SIZE: WindowSize = WindowSize { width: 1280.0, height: 720.0 };
 
 thread_local! {
     /// The open rows of the table built last on this thread.
-    pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<AccountId>, LocalStorage>>> = const { Cell::new(None) };
+    pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<RowId>, LocalStorage>>> = const { Cell::new(None) };
     /// The services of the table built last on this thread.
     static SERVICES: Cell<Option<Services>> = const { Cell::new(None) };
 }
@@ -130,7 +131,7 @@ fn split_damage(mut model: ReplayReportModel) -> ReplayReportModel {
     model
 }
 
-fn open_table(drawing: Drawing, scheme: Scheme) -> (HeadlessWindow, RwSignal<HashSet<AccountId>, LocalStorage>) {
+fn open_table(drawing: Drawing, scheme: Scheme) -> (HeadlessWindow, RwSignal<HashSet<RowId>, LocalStorage>) {
     open_table_over(drawing, scheme, split_damage(sample_model()), true)
 }
 
@@ -139,7 +140,7 @@ fn open_table_over(
     scheme: Scheme,
     model: ReplayReportModel,
     with_detail: bool,
-) -> (HeadlessWindow, RwSignal<HashSet<AccountId>, LocalStorage>) {
+) -> (HeadlessWindow, RwSignal<HashSet<RowId>, LocalStorage>) {
     let model = Rc::new(model);
     let options = HeadlessOptions { drawing, desktop: Some(Appearance::Dark), ..HeadlessOptions::new(SIZE) };
     let mut window = HeadlessWindow::open(options, move || {
@@ -174,6 +175,61 @@ fn expected_order(order: SortOrder) -> Vec<i64> {
     sort_rows(&mut model.rows, model.self_team, order, false);
 
     model.rows.iter().map(|row| row.db_id.raw()).collect()
+}
+
+/// The row of the sample's player `db_id`.
+fn sample_row(db_id: i64) -> RowId {
+    let position = sample_model().rows.iter().position(|row| row.db_id.raw() == db_id);
+
+    RowId(position.expect("the sample has the player"))
+}
+
+/// The cell in `column` on the line `element` is drawn on.
+fn cell_on_line_of(window: &HeadlessWindow, element: Element, column: ReplayColumn) -> Element {
+    let line = window.bounds(element).expect("the element has a box");
+    let middle = line.origin.y.0 + line.size.height.0 / 2.0;
+    window
+        .all_by_attribute("data-column", column.storage_key())
+        .into_iter()
+        .find(|cell| {
+            window
+                .bounds(*cell)
+                .is_some_and(|cell| cell.origin.y.0 <= middle && middle < cell.origin.y.0 + cell.size.height.0)
+        })
+        .expect("the line has the cell")
+}
+
+#[test]
+fn bots_sharing_an_account_each_keep_their_own_row() {
+    let mut model = sample_model();
+    let bots = ["Bot_Alpha", "Bot_Bravo", "Bot_Charlie"];
+    let enemies = model.rows.iter_mut().filter(|row| row.team_id != model.self_team);
+    for (row, name) in enemies.zip(bots) {
+        row.db_id = AccountId(0);
+        row.is_bot = true;
+        name.clone_into(&mut row.display_name);
+    }
+    let (mut window, expanded) = open_table_over(Drawing::Recorded, Scheme::Dark, model, true);
+    let names = window.texts_by_class("wt-pt-text");
+    for bot in bots {
+        assert_eq!(names.iter().filter(|name| *name == bot).count(), 1, "{bot} has a row of its own");
+    }
+
+    let bravo = window.by_label("Bot_Bravo").expect("the bot's name is drawn");
+    let kills = cell_on_line_of(&window, bravo, ReplayColumn::Kills);
+    window.double_click(kills).expect("the row takes a double click");
+    window.advance(Duration::from_millis(400));
+    assert_eq!(expanded.with_untracked(HashSet::len), 1, "only the bot pressed opens");
+    assert_eq!(window.all_by_attribute("data-testid", "detail-0-name").len(), 1, "one detail is drawn");
+
+    let bravo = window.by_label("Bot_Bravo").expect("the bot's name is drawn");
+    window.right_click(bravo).expect("the name takes a right click");
+    window.advance(Duration::from_millis(300));
+    let heading = window.by_test_id("player-menu-name").expect("the menu names its player");
+    let named = window.a11y(heading).and_then(|state| state.label);
+    assert_eq!(named.as_deref(), Some("Bot_Bravo"), "the menu is the pressed bot's");
+    let copy_cell = t!("ui.replay.context.copy_cell").into_owned();
+    assert!(window.by_role_and_label(Role::MenuItem, &copy_cell).is_some(), "the pressed cell is the bot's");
 }
 
 #[test]
@@ -697,14 +753,14 @@ fn the_player_table_renders_in_dark_and_light() {
     let shots = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/zgui-shots");
     for (scheme, name) in [(Scheme::Dark, "player-table-dark"), (Scheme::Light, "player-table-light")] {
         let (mut window, expanded) = open_table(Drawing::Device, scheme);
-        expanded.set(HashSet::from([AccountId::from(1i64)]));
+        expanded.set(HashSet::from([sample_row(1)]));
         window.advance(Duration::from_millis(600));
 
         window.save_png(&shots.join(format!("{name}.png"))).expect("the window is drawn to a PNG");
     }
 
     let (mut window, expanded) = open_table(Drawing::Device, Scheme::Dark);
-    expanded.set(HashSet::from([AccountId::from(1i64)]));
+    expanded.set(HashSet::from([sample_row(1)]));
     window.advance(Duration::from_millis(80));
     window.save_png(&shots.join("player-table-opening-dark.png")).expect("the window is drawn to a PNG");
 }

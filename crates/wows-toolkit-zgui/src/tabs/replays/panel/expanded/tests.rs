@@ -40,6 +40,7 @@ use crate::game_art::Art;
 use crate::game_art::ArtKey;
 use crate::game_art::GameArt;
 use crate::shell::ShellHarnessProps;
+use crate::tabs::replays::table::RowId;
 
 /// The block expands under Name, after the damage events; Kills has nothing of its own.
 #[test]
@@ -233,6 +234,7 @@ fn open_detail_with(
                 AnyView::new(view! {
                     ColumnDetail(
                         column = *column,
+                        id = RowId::from_position(0),
                         row = Arc::clone(&row),
                         rows = Arc::clone(&rows),
                         debug = debug,
@@ -365,6 +367,7 @@ fn an_open_row_reports_its_shares_while_a_damage_column_is_shown() {
                     AnyView::new(view! {
                         ColumnDetail(
                             column = ReplayColumn::ActualDamage,
+                            id = RowId::from_position(0),
                             row = Arc::clone(&row),
                             rows = Arc::clone(&rows),
                             debug = false,

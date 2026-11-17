@@ -12,7 +12,6 @@ use landaire_ui::text_on;
 use rust_i18n::t;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::TimeOffline;
-use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::columns::BattleOutcome;
 use wows_toolkit_replay_data::columns::CaptainPointsTier;
@@ -55,6 +54,7 @@ use zgui_ui_icons::set::chevron::CHEVRON_RIGHT;
 use crate::icons::AppIconProps;
 use crate::tabs::replays::rating_hover::RatedFigure;
 use crate::tabs::replays::rating_hover::with_rating_hover;
+use crate::tabs::replays::table::RowId;
 use crate::tabs::replays::table::TableCx;
 use crate::tabs::replays::table::TableRow;
 use crate::tabs::replays::table::TeamHeading;
@@ -177,10 +177,10 @@ pub(super) fn team_heading(team: TeamHeading) -> AnyView {
 }
 
 /// Records which cell a right-click landed on, so the row's menu can copy it.
-fn note_cell(cx: TableCx, player: AccountId, col: ReplayColumn) -> impl Fn(&mut EventCx<'_, events::PointerDown>) {
+fn note_cell(cx: TableCx, row: RowId, col: ReplayColumn) -> impl Fn(&mut EventCx<'_, events::PointerDown>) {
     move |ev: &mut EventCx<'_, events::PointerDown>| {
         if ev.button == Some(PointerButton::Secondary) {
-            cx.noted.note(player, col);
+            cx.noted.note(row, col);
         }
     }
 }
@@ -262,7 +262,7 @@ fn figure_cell(col: ReplayColumn, row: &TableRow, cx: TableCx, cell: &CellValue,
         (None, Some(flag)) => AnyView::new(view! { {flag} {text} }),
         (None, None) => text,
     };
-    let note = note_cell(cx, row.row.db_id, col);
+    let note = note_cell(cx, row.id, col);
 
     AnyView::new(view! {
         box(
@@ -369,7 +369,7 @@ fn skills_cell(row: &TableRow, cx: TableCx) -> AnyView {
         .map(|glyph| AnyView::new(view! { AppIcon(glyph = glyph, class = "wt-pt-marker") }))
         .collect();
     let text = cell_text(&cell);
-    let note = note_cell(cx, player.db_id, ReplayColumn::Skills);
+    let note = note_cell(cx, row.id, ReplayColumn::Skills);
     let hover = cell.hover.clone();
 
     with_hover(
@@ -401,12 +401,13 @@ pub(super) const fn row_mark(row: &PlayerRow, side: TeamSide) -> &'static str {
 /// then the profile, Twitch and connection markers, with the row's actions at its end.
 fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     let player = Arc::clone(&row.row);
+    let id = row.id;
     let db_id = player.db_id;
 
     let expanded = cx.expanded;
-    let open = move || expanded.with(|expanded| expanded.contains(&db_id)).then(String::new);
+    let open = move || expanded.with(|expanded| expanded.contains(&id)).then(String::new);
     let toggle = move |ev: &mut EventCx<'_, events::Click>| {
-        cx.toggle_expanded(db_id);
+        cx.toggle_expanded(id);
         ev.stop_propagation();
     };
     // A press on the disclosure opens or closes the row and leaves the selection as it was.
@@ -462,8 +463,8 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     });
     let twitch = twitch_chip(&player.twitch_candidates, cx);
     let connection = player.connection.as_ref().map(|note| connection_chip(note, cx));
-    let actions = menu::row_actions(db_id, cx);
-    let note = note_cell(cx, db_id, ReplayColumn::Name);
+    let actions = menu::row_actions(id, db_id, cx);
+    let note = note_cell(cx, id, ReplayColumn::Name);
 
     AnyView::new(view! {
         box(

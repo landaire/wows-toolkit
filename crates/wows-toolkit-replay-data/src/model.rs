@@ -487,22 +487,16 @@ impl ReplayReportModel {
     }
 
     /// Fills in each row's Actions-column URLs and raw-metadata JSON from the
-    /// battle report's raw `Player` list, matched to rows by `db_id`. Split
-    /// out from `from_normalized` (rather than folded into
-    /// `PlayerRow::from_normalized_player`) because building these needs the
-    /// raw `Player` + `GameMetadataProvider`, neither of which
-    /// `NormalizedPlayer` carries; mirrors `populate_personal_ratings`'s
-    /// separate-pass shape for the same "needs data `NormalizedPlayer`
-    /// doesn't have" reason. A `Player` with no matching row (should not
-    /// happen; `NormalizedBattleReport::from_battle_report` builds one row
-    /// per `BattleReport::players()` entry) is silently skipped rather than
-    /// panicking.
+    /// battle report's raw `Player` list. Split out from `from_normalized`
+    /// (rather than folded into `PlayerRow::from_normalized_player`) because
+    /// building these needs the raw `Player` + `GameMetadataProvider`,
+    /// neither of which `NormalizedPlayer` carries.
+    ///
+    /// Joined by position: `NormalizedBattleReport::from_battle_report` builds
+    /// one row per `BattleReport::players()` entry in that order, and bots all
+    /// share account id 0, so an id would land every bot's links on one row.
     pub fn populate_action_links(&mut self, players: &[ReplayRc<Player>], metadata_provider: &GameMetadataProvider) {
-        for player in players {
-            let db_id = player.initial_state().db_id();
-            let Some(row) = self.rows.iter_mut().find(|row| row.db_id == db_id) else {
-                continue;
-            };
+        for (row, player) in self.rows.iter_mut().zip(players) {
             row.ship_config_url = links::build_ship_config_url(player, metadata_provider);
             row.short_ship_config_url = links::build_short_ship_config_url(player, metadata_provider);
             row.shiptool_url = links::build_shiptool_url(player, metadata_provider);

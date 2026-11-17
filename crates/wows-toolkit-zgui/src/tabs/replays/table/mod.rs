@@ -10,7 +10,7 @@ mod style;
 #[cfg(test)]
 pub(crate) mod tests;
 
-use std::collections::HashMap;
+use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -29,7 +29,6 @@ use landaire_ui::RowMode;
 use landaire_ui::SortDirection;
 use landaire_ui::Toasts;
 use rust_i18n::t;
-use wows_replays::types::AccountId;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::StoredArrangement;
 use wows_toolkit_replay_data::columns::cell_value;
@@ -90,9 +89,22 @@ use crate::theme::palette_choice;
 /// Builds one column's part of an expanded row; `None` for a column with nothing to show.
 pub type PlayerDetail = Rc<dyn Fn(PlayerDetailCx) -> Option<AnyView>>;
 
+/// A row's place in the order the replay lists its players. Rows are told apart by it rather than
+/// by account, since every bot has account id 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RowId(usize);
+
+impl RowId {
+    #[cfg(test)]
+    pub fn from_position(position: usize) -> Self {
+        Self(position)
+    }
+}
+
 /// What one column's part of an expanded row is built from.
 #[derive(Clone)]
 pub struct PlayerDetailCx {
+    pub id: RowId,
     pub row: Arc<PlayerRow>,
     /// Every player in the replay, for a detail that refers to other rows.
     pub rows: Arc<[PlayerRow]>,
@@ -104,6 +116,7 @@ pub struct PlayerDetailCx {
 /// One row as the grid holds it: the player, and what its cells draw from the rows around it.
 #[derive(Clone)]
 struct TableRow {
+    id: RowId,
     row: Arc<PlayerRow>,
     /// Indexed by `ReplayColumn as usize`.
     shares: Arc<[Option<TeamShare>]>,
@@ -117,12 +130,19 @@ struct TableRow {
 
 impl PartialEq for TableRow {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.row, &other.row)
+        self.id == other.id
+            && Arc::ptr_eq(&self.row, &other.row)
             && self.shares == other.shares
             && self.side == other.side
             && self.team == other.team
             && self.debug == other.debug
             && self.match_contribution_withheld == other.match_contribution_withheld
+    }
+}
+
+impl Borrow<PlayerRow> for TableRow {
+    fn borrow(&self) -> &PlayerRow {
+        &self.row
     }
 }
 
@@ -143,7 +163,8 @@ struct TeamHeading {
 #[derive(Clone)]
 struct ModelRows {
     all: Arc<[PlayerRow]>,
-    by_player: Arc<HashMap<AccountId, Arc<PlayerRow>>>,
+    /// Each of `all`, shared, at its `RowId`.
+    shared: Arc<[Arc<PlayerRow>]>,
     match_contribution_withheld: Option<MatchContributionWithheld>,
 }
 
@@ -156,9 +177,9 @@ impl PartialEq for ModelRows {
 impl ModelRows {
     fn of(model: &ReplayReportModel) -> Self {
         let all: Arc<[PlayerRow]> = model.rows.clone().into();
-        let by_player = all.iter().map(|row| (row.db_id, Arc::new(row.clone()))).collect();
+        let shared = all.iter().map(|row| Arc::new(row.clone())).collect();
 
-        Self { all, by_player: Arc::new(by_player), match_contribution_withheld: model.match_contribution_withheld }
+        Self { all, shared, match_contribution_withheld: model.match_contribution_withheld }
     }
 }
 
@@ -169,7 +190,7 @@ impl ModelRows {
 /// follows `cell` and a press that reached no cell clears it before the menu is drawn.
 #[derive(Clone, Copy)]
 struct NotedCell {
-    cell: RwSignal<Option<(AccountId, ReplayColumn)>, LocalStorage>,
+    cell: RwSignal<Option<(RowId, ReplayColumn)>, LocalStorage>,
     /// Whether a cell noted the press under way.
     fresh: StoredValue<bool, LocalStorage>,
 }
@@ -179,9 +200,9 @@ impl NotedCell {
         Self { cell: RwSignal::new_local(None), fresh: StoredValue::new_local(false) }
     }
 
-    fn note(self, player: AccountId, col: ReplayColumn) {
+    fn note(self, row: RowId, col: ReplayColumn) {
         self.fresh.set_value(true);
-        self.cell.set(Some((player, col)));
+        self.cell.set(Some((row, col)));
     }
 
     /// Ends a right press that has reached the table.
@@ -199,7 +220,7 @@ impl NotedCell {
     }
 
     /// The cell the latest right press landed on, if it landed on one.
-    fn current(self) -> Option<(AccountId, ReplayColumn)> {
+    fn current(self) -> Option<(RowId, ReplayColumn)> {
         self.cell.get()
     }
 }
@@ -207,7 +228,7 @@ impl NotedCell {
 /// What the cells and the row menus act through.
 #[derive(Clone, Copy)]
 struct TableCx {
-    expanded: RwSignal<HashSet<AccountId>, LocalStorage>,
+    expanded: RwSignal<HashSet<RowId>, LocalStorage>,
     noted: NotedCell,
     rows: Memo<Vec<TableRow>>,
     shown: Memo<Vec<ReplayColumn>>,
@@ -216,7 +237,7 @@ struct TableCx {
     clipboard: StoredValue<Option<Clipboards>, LocalStorage>,
     toasts: Option<Toasts>,
     on_view_raw_json: Option<UnsyncCallback<String>>,
-    menus: RowMenuHandle<AccountId>,
+    menus: RowMenuHandle<RowId>,
     art: GameArt,
     /// The palettes on screen, which a clan tag's colour is fitted to.
     theme: Signal<landaire_ui::ThemeChoice, LocalStorage>,
@@ -225,10 +246,10 @@ struct TableCx {
 }
 
 impl TableCx {
-    fn toggle_expanded(self, player: AccountId) {
+    fn toggle_expanded(self, row: RowId) {
         self.expanded.update(|expanded| {
-            if !expanded.remove(&player) {
-                expanded.insert(player);
+            if !expanded.remove(&row) {
+                expanded.insert(row);
             }
         });
     }
@@ -435,6 +456,7 @@ pub fn PlayerTable(
             Some(detail) => RowMode::with_column_detail(move |row: &TableRow, id: &ColumnId| {
                 let column = ReplayColumn::from_storage_key(id.as_str())?;
                 detail(PlayerDetailCx {
+                    id: row.id,
                     row: Arc::clone(&row.row),
                     rows: model_rows.with_untracked(|rows| Arc::clone(&rows.all)),
                     column,
@@ -452,7 +474,7 @@ pub fn PlayerTable(
             unpin: t!("ui.replay.context.unpin_column").into_owned(),
             ..GridStrings::new()
         };
-        let row_menu: RowMenu<AccountId> = Rc::new(move |player: AccountId| menu::row_menu(player, cx));
+        let row_menu: RowMenu<RowId> = Rc::new(move |row: RowId| menu::row_menu(row, cx));
         let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));
         let label = t!("ui.tabs.replay_parser").into_owned();
 
@@ -460,7 +482,7 @@ pub fn PlayerTable(
             Grid(
                 rows = Signal::derive_local(move || rows.get()),
                 columns = grid_columns,
-                row_key = |row: &TableRow| row.row.db_id,
+                row_key = |row: &TableRow| row.id,
                 mode = mode,
                 layout = layout,
                 sort = grid_sort,
@@ -495,30 +517,33 @@ fn table_rows(
     order: SortOrder,
     debug: bool,
 ) -> Vec<TableRow> {
-    let mut sorted: Vec<PlayerRow> = rows.all.to_vec();
-    sort_rows(&mut sorted, self_team, order, debug);
-    let totals = TeamTotals::of(&sorted, self_team, debug);
-    // Headings only while each team's rows stay together under the sort.
-    let grouped = team_runs(&sorted, self_team).is_some();
+    let totals = TeamTotals::of(&rows.all, self_team, debug);
     let damage = totals.column(ReplayColumn::ActualDamage);
 
-    sorted
+    let mut table: Vec<TableRow> = rows
+        .shared
         .iter()
-        .filter_map(|row| {
-            let shared = rows.by_player.get(&row.db_id)?;
-            let shares = ReplayColumn::ALL.iter().map(|col| totals.share(row, *col, debug)).collect();
-            let side = TeamSide::of(row, self_team);
-            let team = grouped.then_some(TeamHeading { side, damage });
-            Some(TableRow {
-                row: Arc::clone(shared),
-                shares,
-                side,
-                team,
-                debug,
-                match_contribution_withheld: rows.match_contribution_withheld,
-            })
+        .enumerate()
+        .map(|(position, row)| TableRow {
+            id: RowId(position),
+            shares: ReplayColumn::ALL.iter().map(|col| totals.share(row, *col, debug)).collect(),
+            side: TeamSide::of(row, self_team),
+            team: None,
+            debug,
+            match_contribution_withheld: rows.match_contribution_withheld,
+            row: Arc::clone(row),
         })
-        .collect()
+        .collect();
+    sort_rows(&mut table, self_team, order, debug);
+
+    // Headings only while each team's rows stay together under the sort.
+    if team_runs(&table, self_team).is_some() {
+        for row in &mut table {
+            row.team = Some(TeamHeading { side: row.side, damage });
+        }
+    }
+
+    table
 }
 
 /// The grid's column for `col`.

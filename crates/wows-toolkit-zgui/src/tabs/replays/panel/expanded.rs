@@ -20,7 +20,6 @@ use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
-use wows_replays::types::AccountId;
 use wows_toolkit_replay_data::columns::NDA;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
@@ -58,6 +57,7 @@ use crate::icons::AppIconProps;
 use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
 use crate::shell::tabs::ModifierKey;
+use crate::tabs::replays::table::RowId;
 
 const SHEET: &str = "wt-replay-expanded";
 
@@ -242,14 +242,14 @@ pub fn shows_damage_shares(row: &PlayerRow, rows: &[PlayerRow], columns: &[Repla
 
 /// The damage columns of one panel's open rows whose part lists damage shares.
 #[derive(Clone, Copy)]
-pub struct ShareRows(RwSignal<HashSet<(AccountId, ReplayColumn)>, LocalStorage>);
+pub struct ShareRows(RwSignal<HashSet<(RowId, ReplayColumn)>, LocalStorage>);
 
 impl ShareRows {
     pub fn new() -> Self {
         Self(RwSignal::new_local(HashSet::new()))
     }
 
-    pub(super) fn mark(self, row: AccountId, column: ReplayColumn, shows: bool) {
+    pub(super) fn mark(self, row: RowId, column: ReplayColumn, shows: bool) {
         // `try_`, as a row's cleanup can run after the panel's control is gone.
         let part = (row, column);
         if self.0.try_with_untracked(|parts| parts.contains(&part) != shows) != Some(true) {
@@ -305,9 +305,11 @@ pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRo
 /// One column's part of `row`'s detail, in a sunk well under the column's own header; nothing
 /// when the column has none. A damage column's part tells `share_rows` while it lists damage
 /// shares.
+#[allow(clippy::too_many_arguments, reason = "each prop is a named field of the props builder")]
 #[component]
 pub fn ColumnDetail(
     column: ReplayColumn,
+    id: RowId,
     row: Arc<PlayerRow>,
     rows: Rows,
     #[prop(into)] debug: Signal<bool, LocalStorage>,
@@ -321,15 +323,14 @@ pub fn ColumnDetail(
     if let Some(share_rows) = share_rows
         && matches!(column, ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage)
     {
-        let player = row.db_id;
         let marked = Arc::clone(&row);
         let named = Arc::clone(&rows);
         let marking = RenderEffect::new(move |_| {
-            share_rows.mark(player, column, shows_damage_shares(&marked, &named, &[column], debug.get()));
+            share_rows.mark(id, column, shows_damage_shares(&marked, &named, &[column], debug.get()));
         });
         on_cleanup_local(move || {
             drop(marking);
-            share_rows.mark(player, column, false);
+            share_rows.mark(id, column, false);
         });
     }
 

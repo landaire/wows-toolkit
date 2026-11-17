@@ -2,6 +2,7 @@
 //! sort-key tuple built by `UiReport::sort_players` in `ui/replay_parser/mod.rs:899-975`
 //! (allies-before-enemies, the per-column key, then a stable db_id tiebreak).
 
+use std::borrow::Borrow;
 use std::cmp::Reverse;
 
 use wows_replays::types::TeamId;
@@ -82,17 +83,21 @@ fn row_key(row: &PlayerRow, self_team: TeamId, column: SortColumn, debug: bool) 
 
 /// Sorts `rows` in place. Mirrors `UiReport::sort_players`. `debug` lifts the
 /// NDA-hidden-stat gate on the relevant columns, matching the app's
-/// debug-mode override.
-pub fn sort_rows(rows: &mut [PlayerRow], self_team: TeamId, order: SortOrder, debug: bool) {
+/// debug-mode override. Rows that tie, as bots sharing account id 0 can,
+/// keep the order they came in.
+pub fn sort_rows<R>(rows: &mut [R], self_team: TeamId, order: SortOrder, debug: bool)
+where
+    R: Borrow<PlayerRow>,
+{
     match order {
         SortOrder::Desc(column) => {
-            rows.sort_unstable_by_key(|row| {
-                let (team, key, id) = row_key(row, self_team, column, debug);
+            rows.sort_by_cached_key(|row| {
+                let (team, key, id) = row_key(row.borrow(), self_team, column, debug);
                 (team, Reverse(key), id)
             });
         }
         SortOrder::Asc(column) => {
-            rows.sort_unstable_by_key(|row| row_key(row, self_team, column, debug));
+            rows.sort_by_cached_key(|row| row_key(row.borrow(), self_team, column, debug));
         }
     }
 }
@@ -161,6 +166,19 @@ mod tests {
 
         sort_rows(&mut rows, self_team, SortOrder::Asc(SortColumn::ActualDamage), false);
         assert_eq!(rows.iter().map(|r| r.db_id.raw()).collect::<Vec<_>>(), vec![2, 3, 5]);
+    }
+
+    #[test]
+    fn rows_sharing_an_account_keep_their_order() {
+        let self_team = TeamId::from(0i64);
+        let bot =
+            |name: &str| PlayerRow { display_name: name.to_owned(), ..row_with(0, 1, Relation::new(2), false, None) };
+        let mut rows = vec![bot("c"), bot("a"), bot("b")];
+
+        sort_rows(&mut rows, self_team, SortOrder::Desc(SortColumn::ActualDamage), false);
+
+        let names: Vec<&str> = rows.iter().map(|row| row.display_name.as_str()).collect();
+        assert_eq!(names, ["c", "a", "b"]);
     }
 
     #[test]

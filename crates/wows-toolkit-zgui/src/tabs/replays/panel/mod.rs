@@ -479,10 +479,10 @@ impl PanelControl {
         self.share_rows.any().then_some(SHARE_MODE)
     }
 
-    /// Marks `player`'s open row as listing damage shares, as its detail does once drawn.
+    /// Marks the open row `id` as listing damage shares, as its detail does once drawn.
     #[cfg(test)]
-    pub fn note_shares_for_test(self, player: wows_replays::types::AccountId) {
-        self.share_rows.mark(player, wows_toolkit_replay_data::columns::ReplayColumn::ActualDamage, true);
+    pub fn note_shares_for_test(self, id: crate::tabs::replays::table::RowId) {
+        self.share_rows.mark(id, wows_toolkit_replay_data::columns::ReplayColumn::ActualDamage, true);
     }
 }
 
@@ -886,13 +886,14 @@ pub fn ReplayPanel(
                 let model: Signal<Rc<ReplayReportModel>, LocalStorage> = Signal::derive_local(move || shown.get());
                 let alt_held = Signal::derive_local(move || shell.held_modifiers().alt());
                 let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
-                    let PlayerDetailCx { row, rows, column, art } = cx;
+                    let PlayerDetailCx { id, row, rows, column, art } = cx;
                     if !has_column_detail(column, &row, &rows, debug.get()) {
                         return None;
                     }
                     Some(AnyView::new(view! {
                         ColumnDetail(
                             column = column,
+                            id = id,
                             row = row,
                             rows = rows,
                             debug = debug,

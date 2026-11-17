@@ -41,22 +41,21 @@ use zgui_ui_primitives::Binding;
 
 use crate::desktop;
 use crate::icons::AppIconProps;
+use crate::tabs::replays::table::RowId;
 use crate::tabs::replays::table::TableCx;
 use crate::tabs::replays::table::cells::clan_ink;
 use crate::tabs::replays::table::cells::class_mark;
 use crate::tabs::replays::table::cells::player_color;
 
-/// What builds `player`'s menu. Nothing when the player is no longer in the table.
-pub(super) fn row_menu(player: AccountId, cx: TableCx) -> Option<MenuItems> {
-    let row = cx
-        .rows
-        .with_untracked(|rows| rows.iter().find(|row| row.row.db_id == player).map(|row| Arc::clone(&row.row)))?;
+/// What builds the menu of the row `id`. Nothing when the row is no longer in the table.
+pub(super) fn row_menu(id: RowId, cx: TableCx) -> Option<MenuItems> {
+    let row = cx.rows.with_untracked(|rows| rows.iter().find(|row| row.id == id).map(|row| Arc::clone(&row.row)))?;
 
-    Some(MenuItems::new(move || row_menu_items(Arc::clone(&row), player, cx)))
+    Some(MenuItems::new(move || row_menu_items(Arc::clone(&row), id, cx)))
 }
 
-/// The items of `player`'s menu, read from `row`.
-fn row_menu_items(row: Arc<PlayerRow>, player: AccountId, cx: TableCx) -> AnyView {
+/// The items of the menu of the row `id`, read from `row`.
+fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
     let debug = cx.debug.get_untracked();
     let mut items: Vec<AnyView> = vec![heading(&row, cx), AnyView::new(view! { MenuSeparator() })];
 
@@ -95,7 +94,7 @@ fn row_menu_items(row: Arc<PlayerRow>, player: AccountId, cx: TableCx) -> AnyVie
         items.push(AnyView::new(view! { MenuSeparator() }));
     }
 
-    if let Some((_, col)) = cx.noted.current().filter(|(noted, _)| *noted == player) {
+    if let Some((_, col)) = cx.noted.current().filter(|(noted, _)| *noted == id) {
         let row = Arc::clone(&row);
         items.push(copy_item(t!("ui.replay.context.copy_cell").into_owned(), cx, move || {
             Some((cell_value(&row, col, cx.debug.get_untracked()).text, copied()))
@@ -209,20 +208,21 @@ fn copy_item(caption: String, cx: TableCx, produce: impl Fn() -> Option<(String,
 }
 
 /// The dots that open the row's actions, shown while the pointer is on the row or the menu is
-/// open. The Name cell holds their room so nothing moves when they appear.
-pub(super) fn row_actions(player: AccountId, cx: TableCx) -> AnyView {
+/// open. The Name cell holds their room so nothing moves when they appear. `player` names them
+/// for a test.
+pub(super) fn row_actions(id: RowId, player: AccountId, cx: TableCx) -> AnyView {
     let anchor = NodeRef::new();
     let hint = t!("ui.replay.row_actions_hint").into_owned();
     let label = hint.clone();
     let menus = cx.menus;
     // The tip stays shut while the menu it names is open over it.
     let tip_wanted = RwSignal::new_local(false);
-    let tip_open = Signal::derive_local(move || tip_wanted.get() && menus.open_row() != Some(player));
+    let tip_open = Signal::derive_local(move || tip_wanted.get() && menus.open_row() != Some(id));
     // A press on the dots is theirs, not a press on the row, and the menu it opens has no cell.
     let open = move |ev: &mut EventCx<'_, events::Click>| {
         ev.stop_propagation();
         cx.noted.clear();
-        menus.open(player, anchor);
+        menus.open(id, anchor);
     };
     let keep_press = |ev: &mut EventCx<'_, events::PointerDown>| ev.stop_propagation();
     let keep_double = |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation();
@@ -230,7 +230,7 @@ pub(super) fn row_actions(player: AccountId, cx: TableCx) -> AnyView {
     AnyView::new(view! {
         box(
             class = "wt-pt-actions",
-            attr:data-open = move || (menus.open_row() == Some(player)).then(String::new),
+            attr:data-open = move || (menus.open_row() == Some(id)).then(String::new),
             on:pointer_down = keep_press,
             on:double_click = keep_double
         ) {
