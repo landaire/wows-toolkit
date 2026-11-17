@@ -788,7 +788,7 @@ impl GameDataCache {
             // is kept for.
             match dump_base.and_then(|base| dump_for_build(base, build, version)) {
                 Some(dump_dir) => LoadedGameData::load_dump(&dump_dir, build, locale),
-                None => Err(ReplayLoadError::UnsupportedVersion { build }),
+                None => Err(ReplayLoadError::UnsupportedVersion { build, version: version.map(str::to_owned) }),
             }
         }));
 
@@ -1818,7 +1818,7 @@ dumped_at = "2026-01-01T00:00:00Z"
         assert!(poisoned.is_err(), "the spawned thread was expected to panic");
 
         match cache.get_or_load_build(1) {
-            Err(ReplayLoadError::UnsupportedVersion { build: 1 }) => {}
+            Err(ReplayLoadError::UnsupportedVersion { build: 1, .. }) => {}
             Err(other) => panic!("expected UnsupportedVersion despite the poisoned lock, got: {other}"),
             Ok(_) => panic!("expected UnsupportedVersion despite the poisoned lock, got Ok"),
         }
@@ -1832,8 +1832,8 @@ dumped_at = "2026-01-01T00:00:00Z"
         let game_dir = EmptyGameDir::new("retry");
         let cache = GameDataCache::new(game_dir.0.clone());
 
-        assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7 })));
-        assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7 })));
+        assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7, .. })));
+        assert!(matches!(cache.get_or_load_build(7), Err(ReplayLoadError::UnsupportedVersion { build: 7, .. })));
         assert!(cache.loaded.lock().unwrap().is_empty(), "a failed build's slot should not linger in the cache");
     }
 

@@ -17,6 +17,7 @@ use rust_i18n::t;
 use wows_core::pseudonym;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
 use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_services::collab::CollabState;
 use wows_toolkit_services::collab::SharedWindow;
@@ -539,6 +540,54 @@ fn a_parse_that_panics_fails_its_tab_and_the_app_goes_on() {
     workspace.open(next.clone(), OpenTarget::NewTab);
     settle_in_real_time(&mut window);
     assert!(workspace.read_failure_for_test(&next).is_some(), "a later replay is still read");
+}
+
+/// A replay whose build this machine lacks offers that build for download, as the listing offers
+/// the builds its replays need.
+#[test]
+fn a_replay_of_a_missing_build_offers_the_build() {
+    let (mut window, workspace) = open();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let name = "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay";
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../wows-replay-insights/tests/fixtures/replays").join(name);
+    let path = dir.path().join(name);
+    std::fs::copy(fixture, &path).expect("the replay is copied");
+    super::testing::take_held_offers();
+
+    workspace.open(path.clone(), OpenTarget::ShowingTab);
+    settle_in_real_time(&mut window);
+
+    assert!(workspace.read_failure_for_test(&path).is_some(), "the replay does not read");
+    let expected = MissingBuild { build: 9_251_401, version: Some("13.11.0".to_owned()), replays: 1 };
+    assert_eq!(super::testing::take_held_offers(), [expected], "its build is offered");
+}
+
+/// The download offer a replay of a missing build raises, for review. Plans the download against
+/// the published repository.
+#[test]
+#[ignore = "reaches the game data repository and draws on the graphics device"]
+fn a_missing_builds_offer_renders() {
+    let _fetches = super::testing::allow_fetches();
+    let mut window = open_shell(review_options(Appearance::Dark));
+    let workspace = BUILT.with(std::cell::Cell::get).expect("the replays tab made its workspace");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let name = "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay";
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../wows-replay-insights/tests/fixtures/replays").join(name);
+    let path = dir.path().join(name);
+    std::fs::copy(fixture, &path).expect("the replay is copied");
+
+    workspace.open(path, OpenTarget::ShowingTab);
+    for _ in 0..10 {
+        settle_in_real_time(&mut window);
+        if window.by_test_id("download-offer").is_some() {
+            break;
+        }
+    }
+
+    assert!(window.by_test_id("download-offer").is_some(), "the build is offered");
+    println!("{}", save_shot(&mut window, "replay-missing-build-offer").display());
 }
 
 /// The status bar carries the listing's toggle on the replays tab.

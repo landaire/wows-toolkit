@@ -784,7 +784,10 @@ mod tests {
 
         assert!(IndexOneError::Parse(ReplayLoadError::Parse("garbage".to_owned())).is_unreadable_file());
         assert!(IndexOneError::Parse(ReplayLoadError::Io("truncated".to_owned())).is_unreadable_file());
-        assert!(!IndexOneError::Parse(ReplayLoadError::UnsupportedVersion { build: 300 }).is_unreadable_file());
+        assert!(
+            !IndexOneError::Parse(ReplayLoadError::UnsupportedVersion { build: 300, version: None })
+                .is_unreadable_file()
+        );
         assert!(!IndexOneError::Parse(ReplayLoadError::GameData("broken dump".to_owned())).is_unreadable_file());
     }
 

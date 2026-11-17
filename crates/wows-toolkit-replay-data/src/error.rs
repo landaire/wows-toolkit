@@ -9,11 +9,14 @@ pub enum ReplayLoadError {
     /// The replay's `clientVersionFromExe` did not parse into a build number.
     #[error("could not parse the replay's client version")]
     VersionParse,
-    /// The replay's build has no matching `bin/<build>` directory in the
-    /// install. Loading an uninstalled build's data from a dump is not
-    /// implemented yet.
+    /// The replay's build is neither installed nor in the game data cache.
     #[error("replay build {build} is not installed (no bin/{build} directory found)")]
-    UnsupportedVersion { build: u32 },
+    UnsupportedVersion {
+        build: u32,
+        /// The `major.minor.patch` the replay names, which a download can match on another
+        /// server's build. `None` when the caller did not give it.
+        version: Option<String>,
+    },
     /// The game VFS, `GameParams`, or entity scripts could not be loaded.
     #[error("failed to load game data: {0}")]
     GameData(String),

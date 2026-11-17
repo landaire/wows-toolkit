@@ -15,6 +15,7 @@ use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
 use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
 use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -43,6 +44,7 @@ use crate::tabs::armor_viewer::library::FeedSource;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::replays::browser::BrowserControl;
 use crate::tabs::replays::constants::ResultMappings;
+use crate::tabs::replays::offer::GameDataOffer;
 use crate::tabs::replays::panel::PanelControl;
 use crate::tabs::replays::panel::PanelEvents;
 use crate::tabs::replays::panel::PanelSetup;
@@ -145,6 +147,8 @@ pub struct ReplayWorkspace {
     pub columns: Signal<Vec<ReplayColumn>, LocalStorage>,
     pub personal_rating: RwSignal<Option<Arc<PersonalRatingData>>, LocalStorage>,
     pub mappings: ResultMappings,
+    /// The offer to fetch builds this machine lacks, which a replay of one raises.
+    pub offer: GameDataOffer,
     /// The listings, whose New tag comes off a replay once it is opened.
     browser: BrowserControl,
     /// Replays opened from the install's listing whose tab has yet to read them; each counts toward
@@ -169,6 +173,7 @@ impl ReplayWorkspace {
             columns,
             personal_rating: RwSignal::new_local(None),
             mappings: ResultMappings::new(),
+            offer: GameDataOffer::new(),
             browser,
             uncounted: StoredValue::new_local(HashSet::new()),
             owner: StoredValue::new_local(Owner::current().expect("the workspace is made inside a component")),
@@ -268,6 +273,9 @@ impl ReplayWorkspace {
                 if self.uncounted.try_update_value(|uncounted| uncounted.remove(&path)) == Some(true) {
                     self.count_read(path.clone());
                 }
+            })),
+            on_build_missing: Some(UnsyncCallback::new(move |missing: MissingBuild| {
+                self.offer.offer(self.shell, vec![missing]);
             })),
         };
         let columns = self.columns;

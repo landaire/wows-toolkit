@@ -180,7 +180,7 @@ pub fn ReplaysTab() -> impl IntoView {
     #[cfg(test)]
     BUILT.with(|built| built.set(Some(workspace)));
     let arrivals = Arrivals::new(workspace, control.sharing_reads());
-    let offer = GameDataOffer::new();
+    let offer = workspace.offer;
     let session_reads = SessionReads::new(workspace, control);
 
     load_personal_rating(workspace);

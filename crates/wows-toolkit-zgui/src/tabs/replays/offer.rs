@@ -104,6 +104,7 @@ impl GameDataOffer {
     pub fn offer(self, shell: Shell, missing: Vec<MissingBuild>) {
         #[cfg(test)]
         if !crate::tabs::replays::testing::fetches_allowed() {
+            crate::tabs::replays::testing::hold_offer(&missing);
             return;
         }
 

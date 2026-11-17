@@ -50,6 +50,7 @@ use wows_toolkit_replay_data::model::MatchContext;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::model::battle_title;
+use wows_toolkit_replay_data::replay_dir::MissingBuild;
 use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
@@ -550,6 +551,9 @@ pub struct PanelEvents {
     pub on_constants_mismatched: Option<UnsyncCallback<ConstantsMismatched>>,
     /// A read landed, which [`PanelControl::read_game`] then answers with.
     pub on_read: Option<UnsyncCallback<()>>,
+    /// The battle's build is not on this machine; the owner can offer to fetch it and then
+    /// [`PanelControl::reparse`].
+    pub on_build_missing: Option<UnsyncCallback<MissingBuild>>,
 }
 
 /// A read battle and what its panels show. Owned by no scope, so it outlives the view that read it.
@@ -1011,6 +1015,11 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> O
                 return Some(
                     cause.map_or(ReparseCause::AltPerspective, |cause| ReparseCause::AltPerspective.with(cause)),
                 );
+            }
+            if let ReplayLoadError::UnsupportedVersion { build, version } = &err
+                && let Some(on_build_missing) = events.with_value(|events| events.on_build_missing)
+            {
+                on_build_missing.run(MissingBuild { build: *build, version: version.clone(), replays: 1 });
             }
             shell.toasts().failed(t!("ui.messages.replay_load_failed").into_owned());
             state.set(LoadState::Failed(err.to_string()));
