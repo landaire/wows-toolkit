@@ -433,6 +433,21 @@ pub enum Species {
 }
 
 impl Species {
+    /// The species a playable ship carries. Ship lists keep these and leave out buildings and the
+    /// other params that also have a species.
+    pub const SHIP_CLASSES: [Species; 6] =
+        [Self::AirCarrier, Self::Battleship, Self::Cruiser, Self::Destroyer, Self::Submarine, Self::Auxiliary];
+
+    /// The order ship lists group classes in.
+    pub const CLASS_DISPLAY_ORDER: [Species; 5] =
+        [Self::Destroyer, Self::Cruiser, Self::Battleship, Self::AirCarrier, Self::Submarine];
+
+    /// Where this species sorts in [`Self::CLASS_DISPLAY_ORDER`]. Every other species sorts after
+    /// those, together.
+    pub fn class_display_rank(self) -> usize {
+        Self::CLASS_DISPLAY_ORDER.iter().position(|class| *class == self).unwrap_or(Self::CLASS_DISPLAY_ORDER.len())
+    }
+
     pub fn from_name(name: &str) -> crate::recognized::Recognized<Self> {
         use crate::recognized::Recognized;
         match name {
@@ -620,6 +635,13 @@ impl Species {
     pub fn translation_id(&self) -> String {
         format!("IDS_{}", self.name())
     }
+}
+
+/// A ship tier as the game writes it, in roman numerals. A tier outside I to XI shows as `?`.
+pub fn tier_roman(tier: u32) -> &'static str {
+    const NUMERALS: [&str; 11] = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"];
+
+    tier.checked_sub(1).and_then(|index| NUMERALS.get(index as usize)).copied().unwrap_or("?")
 }
 
 #[derive(Builder, Debug, Clone)]
@@ -4466,6 +4488,24 @@ pub fn secondary_gun_ammo_param<P: GameParamProvider + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tier_roman_covers_i_through_xi_and_falls_back_for_unknown_tiers() {
+        let expected = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"];
+        for (tier, roman) in (1..=11u32).zip(expected) {
+            assert_eq!(tier_roman(tier), roman);
+        }
+        assert_eq!(tier_roman(0), "?");
+        assert_eq!(tier_roman(12), "?");
+    }
+
+    #[test]
+    fn ship_classes_sort_destroyers_first_and_other_species_last() {
+        let mut species = Species::SHIP_CLASSES.to_vec();
+        species.push(Species::Artillery);
+        species.sort_by_key(|species| species.class_display_rank());
+        insta::assert_debug_snapshot!(species);
+    }
 
     #[test]
     fn secondary_ammo_strings_map_to_ammo_type() {

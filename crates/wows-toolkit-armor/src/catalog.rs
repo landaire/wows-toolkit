@@ -114,7 +114,7 @@ fn group_ships(ships: impl IntoIterator<Item = (String, String, Species, ShipEnt
                     ClassGroup { species, ships }
                 })
                 .collect();
-            classes.sort_by_key(|c| species_order(&c.species));
+            classes.sort_by_key(|class| class.species.class_display_rank());
             NationGroup { nation, display_name, classes }
         })
         .collect();
@@ -178,36 +178,6 @@ impl From<TierRange> for [u32; 2] {
     }
 }
 
-/// Canonical display order for ship classes.
-fn species_order(s: &Species) -> u32 {
-    match s {
-        Species::Destroyer => 0,
-        Species::Cruiser => 1,
-        Species::Battleship => 2,
-        Species::AirCarrier => 3,
-        Species::Submarine => 4,
-        _ => 5,
-    }
-}
-
-/// Roman numeral for tier display.
-pub fn tier_roman(tier: u32) -> &'static str {
-    match tier {
-        1 => "I",
-        2 => "II",
-        3 => "III",
-        4 => "IV",
-        5 => "V",
-        6 => "VI",
-        7 => "VII",
-        8 => "VIII",
-        9 => "IX",
-        10 => "X",
-        11 => "XI",
-        _ => "?",
-    }
-}
-
 /// Species display name.
 pub fn species_name(s: &Species) -> &'static str {
     match s {
@@ -220,15 +190,6 @@ pub fn species_name(s: &Species) -> &'static str {
         _ => "Other",
     }
 }
-
-const SHIP_SPECIES: &[Species] = &[
-    Species::AirCarrier,
-    Species::Battleship,
-    Species::Cruiser,
-    Species::Destroyer,
-    Species::Submarine,
-    Species::Auxiliary,
-];
 
 /// A nation or armor zone name in the current locale.
 ///
@@ -266,7 +227,7 @@ impl ShipCatalog {
                 continue;
             };
 
-            let reason = if !SHIP_SPECIES.contains(&species) {
+            let reason = if !Species::SHIP_CLASSES.contains(&species) {
                 Some(HiddenReason::OtherClass)
             } else if vehicle.group() == "clan" {
                 Some(HiddenReason::ClanRental)
@@ -323,16 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn tier_roman_covers_i_through_xi_and_falls_back_for_unknown_tiers() {
-        let expected = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"];
-        for (tier, roman) in (1..=11u32).zip(expected) {
-            assert_eq!(tier_roman(tier), roman);
-        }
-        assert_eq!(tier_roman(0), "?");
-        assert_eq!(tier_roman(12), "?");
-    }
-
-    #[test]
     fn species_name_covers_every_ship_species_and_falls_back_for_others() {
         assert_eq!(species_name(&Species::Destroyer), "Destroyer");
         assert_eq!(species_name(&Species::Cruiser), "Cruiser");
@@ -342,19 +293,6 @@ mod tests {
         assert_eq!(species_name(&Species::Auxiliary), "Auxiliary");
         // Any non-ship species (e.g. a weapon-mount species) falls back to "Other".
         assert_eq!(species_name(&Species::Artillery), "Other");
-    }
-
-    #[test]
-    fn species_order_ranks_destroyer_first_and_non_combatant_species_last() {
-        assert_eq!(species_order(&Species::Destroyer), 0);
-        assert_eq!(species_order(&Species::Cruiser), 1);
-        assert_eq!(species_order(&Species::Battleship), 2);
-        assert_eq!(species_order(&Species::AirCarrier), 3);
-        assert_eq!(species_order(&Species::Submarine), 4);
-        // Auxiliary is filterable into the catalog but has no canonical slot
-        // in the class ordering, same as any other non-combatant species.
-        assert_eq!(species_order(&Species::Auxiliary), 5);
-        assert_eq!(species_order(&Species::Artillery), 5);
     }
 
     /// Pins `ShipCatalog::build`'s per-class ship sort (tier ascending, then
@@ -438,13 +376,13 @@ mod tests {
         assert!(total_ships > 0, "expected at least one ship in the catalog");
 
         for nation in &catalog.nations {
-            let mut prev_order: Option<u32> = None;
+            let mut prev_rank: Option<usize> = None;
             for class in &nation.classes {
-                let order = species_order(&class.species);
-                if let Some(prev) = prev_order {
-                    assert!(order >= prev, "classes within a nation should be sorted by species_order");
+                let rank = class.species.class_display_rank();
+                if let Some(prev) = prev_rank {
+                    assert!(rank >= prev, "classes within a nation should be in class display order");
                 }
-                prev_order = Some(order);
+                prev_rank = Some(rank);
 
                 for pair in class.ships.windows(2) {
                     let [a, b] = pair else { continue };

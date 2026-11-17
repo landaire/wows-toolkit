@@ -1,0 +1,13 @@
+---
+source: crates/wowsunpack/src/game_params/types.rs
+expression: species
+---
+[
+    Destroyer,
+    Cruiser,
+    Battleship,
+    AirCarrier,
+    Submarine,
+    Auxiliary,
+    Artillery,
+]

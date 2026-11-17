@@ -30,35 +30,13 @@ pub struct ShipList {
     ships: Vec<ShipChoice>,
 }
 
-/// The ship classes a board places, which leaves out buildings and other params with a species.
-const SHIP_SPECIES: &[Species] = &[
-    Species::AirCarrier,
-    Species::Battleship,
-    Species::Cruiser,
-    Species::Destroyer,
-    Species::Submarine,
-    Species::Auxiliary,
-];
-
-/// The armor viewer's order of classes.
-fn species_order(species: &Species) -> u32 {
-    match species {
-        Species::Destroyer => 0,
-        Species::Cruiser => 1,
-        Species::Battleship => 2,
-        Species::AirCarrier => 3,
-        Species::Submarine => 4,
-        _ => 5,
-    }
-}
-
 impl ShipList {
     pub fn build(metadata: &GameMetadataProvider) -> Self {
         let mut nation_names: HashMap<String, String> = HashMap::new();
         let mut ships: Vec<(String, ShipChoice)> = Vec::new();
         for param in metadata.params() {
             let Some(species) = param.species().and_then(|species| species.known().copied()) else { continue };
-            if !SHIP_SPECIES.contains(&species) {
+            if !Species::SHIP_CLASSES.contains(&species) {
                 continue;
             }
             let Some(vehicle) = param.vehicle() else { continue };
@@ -90,7 +68,7 @@ impl ShipList {
             nation_names[a_nation]
                 .cmp(&nation_names[b_nation])
                 .then(a_nation.cmp(b_nation))
-                .then(species_order(&a.species).cmp(&species_order(&b.species)))
+                .then(a.species.class_display_rank().cmp(&b.species.class_display_rank()))
                 .then(a.tier.cmp(&b.tier))
                 .then(a.display_name.cmp(&b.display_name))
         });
@@ -106,23 +84,5 @@ impl ShipList {
         }
 
         query.rank(&self.ships, |ship| &ship.key).into_iter().take(SHIP_MATCHES).cloned().collect()
-    }
-}
-
-/// Roman numeral for a tier.
-pub fn tier_roman(tier: u32) -> &'static str {
-    match tier {
-        1 => "I",
-        2 => "II",
-        3 => "III",
-        4 => "IV",
-        5 => "V",
-        6 => "VI",
-        7 => "VII",
-        8 => "VIII",
-        9 => "IX",
-        10 => "X",
-        11 => "XI",
-        _ => "?",
     }
 }

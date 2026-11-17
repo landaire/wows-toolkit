@@ -24,6 +24,7 @@ use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_catalog::ModelVariantKind;
 use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_params::types::tier_roman;
 use wowsunpack::game_types::GameParamId;
 
 use crate::catalog::HiddenReason;
@@ -32,7 +33,6 @@ use crate::catalog::ShipCatalog;
 use crate::catalog::ShipEntry;
 use crate::catalog::TierRange;
 use crate::catalog::species_name;
-use crate::catalog::tier_roman;
 use crate::filter_fields::FilterFields;
 use crate::model_refs::HardpointTarget;
 use crate::model_refs::OpenTarget;

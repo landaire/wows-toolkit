@@ -15,6 +15,7 @@ use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_params::types::tier_roman;
 use wt_collab_client::drawing::Drawing;
 use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Held;
@@ -979,11 +980,7 @@ pub struct PlaceableShip {
 impl PlaceableShip {
     /// What the chooser's row says: the tier in roman numerals, then the name.
     pub fn label(&self) -> String {
-        const ROMAN: [&str; 11] = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"];
-
-        let tier = self.tier.checked_sub(1).and_then(|index| ROMAN.get(index as usize)).copied().unwrap_or("?");
-
-        format!("{tier} {}", self.display_name)
+        format!("{} {}", tier_roman(self.tier), self.display_name)
     }
 }
 
@@ -995,20 +992,11 @@ pub struct ShipCatalog {
 
 impl ShipCatalog {
     pub fn build(metadata: &GameMetadataProvider) -> Self {
-        const SHIP_SPECIES: &[Species] = &[
-            Species::AirCarrier,
-            Species::Battleship,
-            Species::Cruiser,
-            Species::Destroyer,
-            Species::Submarine,
-            Species::Auxiliary,
-        ];
-
         let mut ships: Vec<PlaceableShip> = metadata
             .params()
             .iter()
             .filter_map(|param| {
-                let species = *param.species()?.known().filter(|species| SHIP_SPECIES.contains(species))?;
+                let species = *param.species()?.known().filter(|species| Species::SHIP_CLASSES.contains(species))?;
                 let vehicle = param.vehicle()?;
                 if vehicle.group() == "clan" {
                     return None;
