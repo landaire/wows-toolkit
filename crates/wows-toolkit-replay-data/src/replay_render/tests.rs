@@ -2407,6 +2407,29 @@ fn a_wide_viewport_fills_its_sides_as_the_map_is_zoomed() {
     assert!(filled > 1.9 && filled < 2.1, "about the shape of the viewport: {filled}");
 }
 
+/// A zoomed map widened across a wide viewport answers the pointer, and places a peer's mark, on
+/// both of its sides, not only over the square the map takes at rest.
+#[test]
+fn a_widened_map_answers_the_pointer_across_its_width() {
+    let mut view = MapView::new();
+    let (w, h) = (MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
+    let bounds =
+        ElementBounds { origin: WindowPoint { x: 0.0, y: 0.0 }, width: w * 2.0, height: h, density: PixelDensity(1.0) };
+    view.set_placement(Some(Placement { bounds, frame: FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT } }));
+    view.set_view(MapViewport::new(6.0, (0.0, 0.0)));
+    // The canvas a widened window is drawn on is as wide as the map it draws.
+    let width = view.shaped_view().drawn_width().round() as u32;
+    view.set_placement(Some(Placement { bounds, frame: FrameSize { width, height: CANVAS_HEIGHT } }));
+    let below_strip = DEFAULT_MAP_ORIGIN.1 + 100.0;
+
+    for x in [20.0, width as f32 * 0.9] {
+        let at = WindowPoint { x, y: below_strip };
+        let map = view.map_point(at, DEFAULT_MAP_ORIGIN).unwrap_or_else(|| panic!("the map is under {x}"));
+        let mark = view.element_point(map, DEFAULT_MAP_ORIGIN).unwrap_or_else(|| panic!("a mark at {x} is shown"));
+        assert!((mark.x - x).abs() < 1.0 && (mark.y - below_strip).abs() < 1.0, "back where it was: {mark:?} for {x}");
+    }
+}
+
 /// A ping is shed only once its ripple has run out.
 #[test]
 fn a_ping_outlives_its_own_frame() {

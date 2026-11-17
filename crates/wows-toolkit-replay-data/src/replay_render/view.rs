@@ -224,9 +224,10 @@ impl MapView {
     pub fn drawn_point(&self, position: WindowPoint, map_origin: (f32, f32)) -> Option<(f32, f32)> {
         let (x, y) = self.canvas_point(position)?;
         let (x, y) = (x - map_origin.0, y - map_origin.1);
-        let span = MINIMAP_SIZE as f32;
+        // A widened window draws the map wider than it is tall.
+        let (width, height) = (self.shaped_view().drawn_width(), MINIMAP_SIZE as f32);
 
-        (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
+        (x >= 0.0 && x < width && y >= 0.0 && y < height).then_some((x, y))
     }
 
     /// Where in the map a window position falls, in the map's own pixels.
@@ -248,8 +249,8 @@ impl MapView {
         let strip = self.hud_strip()?;
         let view = self.shaped_view();
         let drawn = (view.x(at.0), view.y(at.1));
-        let span = MINIMAP_SIZE as f32;
-        if drawn.0 < 0.0 || drawn.0 >= span || drawn.1 < 0.0 || drawn.1 >= span {
+        let (width, height) = (view.drawn_width(), MINIMAP_SIZE as f32);
+        if drawn.0 < 0.0 || drawn.0 >= width || drawn.1 < 0.0 || drawn.1 >= height {
             return None;
         }
 
