@@ -241,8 +241,9 @@ impl ViewportModel {
             }
         }
 
-        // The gizmo orients a model; with none loaded there is nothing for it to orient.
-        if self.current_armor.is_some() && self.scene_problem.is_none() {
+        // The gizmo orients a model; with none loaded there is nothing for it to orient, and the
+        // camera lock owns the camera.
+        if self.current_armor.is_some() && self.scene_problem.is_none() && self.camera_is_free() {
             let gizmo_rect = gizmo::gizmo_rect(rect);
             let center = gizmo_rect.center();
             let balls = gizmo::ball_draw_order(&camera.view_matrix())
@@ -628,10 +629,17 @@ impl Canvas<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use wows_toolkit_armor::load_model::fixtures::armored_model_scene;
     use wows_toolkit_armor::viewport::types::Vec2;
     use wows_toolkit_armor::viewport::types::Vec3;
+    use wows_toolkit_armor::viewport::types::ViewRect;
+    use wowsunpack::export::model_catalog::ModelPath;
 
     use super::Cardinal;
+    use super::ViewportModel;
     use super::compass_arms;
     use super::visible_runs;
 
@@ -690,5 +698,17 @@ mod tests {
         let north = arms.iter().find(|(cardinal, _)| *cardinal == Cardinal::North).map(|(_, arm)| *arm);
 
         assert!(north.is_some_and(|arm| (arm - Vec2::new(1.0, 0.0)).norm() < 1e-3), "north at {north:?}");
+    }
+
+    #[test]
+    fn the_gizmo_is_hidden_while_the_camera_is_locked() {
+        let path = ModelPath::parse("content/gameplay/usa/gun/main/AGM034/AGM034.model").expect("a model path");
+        let mut model = ViewportModel::new();
+        model.last_bounds = Some(ViewRect::new(0.0, 0.0, 160.0, 120.0));
+        model.current_armor = Some(Arc::new(armored_model_scene(path)));
+        assert!(model.overlay_scene(Instant::now()).gizmo.is_some(), "the free camera shows the gizmo");
+
+        model.perspective.enabled = true;
+        assert!(model.overlay_scene(Instant::now()).gizmo.is_none());
     }
 }
