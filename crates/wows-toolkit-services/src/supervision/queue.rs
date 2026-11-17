@@ -1,5 +1,5 @@
-//! A worker thread that answers requests in the order they are made, supervised by the
-//! [`Watchdog`].
+//! A worker thread that answers requests in the order they are made, those queued ahead first,
+//! supervised by the [`Watchdog`].
 //!
 //! A request is queued and answered through a future, so a caller on a UI thread never blocks on
 //! the worker or joins it. When the thread stops, the watchdog answers the request it stopped on
@@ -47,7 +47,8 @@ pub trait Work: Send + Sync + 'static {
     fn stopped(&self, request: &Self::Request, stop: &WorkerStop) -> Self::Response;
 }
 
-/// What a queue holds: the request being answered, then those waiting, oldest first.
+/// What a queue holds: the request being answered, then those waiting, in the order they are
+/// answered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activity<S> {
     pub working: Option<S>,
@@ -102,9 +103,20 @@ impl<W: Work> SupervisedQueue<W> {
         Ok(Self { owner: Arc::new(Owner { registration: Some(registration), shared }) })
     }
 
-    /// Queues `request`. The answer arrives through the returned future. While the watchdog has
-    /// given the worker up, the request is answered at once through [`Work::stopped`].
+    /// Queues `request` behind every request waiting. The answer arrives through the returned
+    /// future. While the watchdog has given the worker up, the request is answered at once
+    /// through [`Work::stopped`].
     pub fn request(&self, request: W::Request) -> Reply<W::Response> {
+        self.enqueue(request, Place::InTurn)
+    }
+
+    /// Queues `request` ahead of the requests waiting in turn, behind those queued ahead before
+    /// it. Answered as [`SupervisedQueue::request`] answers.
+    pub fn request_ahead(&self, request: W::Request) -> Reply<W::Response> {
+        self.enqueue(request, Place::Ahead)
+    }
+
+    fn enqueue(&self, request: W::Request, place: Place) -> Reply<W::Response> {
         let shared = &self.owner.shared;
         let (reply, answer) = oneshot::channel();
         let mut state = shared.lock();
@@ -117,7 +129,15 @@ impl<W: Work> SupervisedQueue<W> {
             let _ = reply.send(shared.work.stopped(&request, &stop));
             return Reply { answer };
         }
-        state.waiting.push_back(Pending { request: Arc::new(request), reply });
+        let at = match place {
+            Place::Ahead => state.waiting.iter().position(|pending| pending.place == Place::InTurn),
+            Place::InTurn => None,
+        };
+        let pending = Pending { request: Arc::new(request), reply, place };
+        match at {
+            Some(at) => state.waiting.insert(at, pending),
+            None => state.waiting.push_back(pending),
+        }
         shared.publish(&mut state);
         shared.arrived.notify_one();
 
@@ -245,6 +265,14 @@ struct State<W: Work> {
 struct Pending<W: Work> {
     request: Arc<W::Request>,
     reply: oneshot::Sender<W::Response>,
+    place: Place,
+}
+
+/// Where a request was queued.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Place {
+    Ahead,
+    InTurn,
 }
 
 /// Answers requests until the queue is closed and nothing waits, beating `heartbeat` while idle
@@ -300,7 +328,8 @@ mod tests {
     use super::*;
     use crate::supervision::watchdog::WorkerName;
 
-    /// Doubles a number, noting each it is asked. Panics on 13, once let through.
+    /// Doubles a number, noting each it is asked. Holds 0 until let through, and panics on 13,
+    /// once let through.
     struct Doubling {
         gate: Mutex<Receiver<()>>,
         ran: Mutex<Vec<u32>>,
@@ -317,8 +346,10 @@ mod tests {
 
         fn run(&self, request: &u32) -> Result<u32, WorkerStop> {
             self.ran.lock().unwrap_or_else(PoisonError::into_inner).push(*request);
-            if *request == 13 {
+            if *request == 0 || *request == 13 {
                 let _ = self.gate.lock().unwrap_or_else(PoisonError::into_inner).recv();
+            }
+            if *request == 13 {
                 panic!("unlucky");
             }
             Ok(request * 2)
@@ -416,5 +447,26 @@ mod tests {
         assert_eq!(block_on(kept).expect("the new worker answers"), Ok(4));
         let ran = queue.owner.shared.work.ran.lock().unwrap_or_else(PoisonError::into_inner).clone();
         assert_eq!(ran, [13, 2], "the dropped request was not run");
+    }
+
+    /// Requests queued ahead are answered before those waiting in turn, in the order they were
+    /// queued.
+    #[test]
+    fn requests_queued_ahead_are_answered_before_those_in_turn() {
+        let (_watchdog, queue, open) = doubling();
+        let mut activity = queue.activity();
+        let held = queue.request(0);
+        while block_on(activity.next()).expect("the queue reports").working != Some(0) {}
+
+        let in_turn = [queue.request(1), queue.request(2)];
+        let ahead = [queue.request_ahead(3), queue.request_ahead(4)];
+        open.send(()).expect("the gate opens");
+
+        assert_eq!(block_on(held).expect("the worker answers"), Ok(0));
+        for reply in ahead.into_iter().chain(in_turn) {
+            assert!(block_on(reply).expect("the worker answers").is_ok());
+        }
+        let ran = queue.owner.shared.work.ran.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        assert_eq!(ran, [0, 3, 4, 1, 2]);
     }
 }

@@ -184,7 +184,7 @@ struct Opening {
 
 fn open(opening: Opening) -> Opened {
     let Opening { seed, events, table, rating, theme, drawing, size, control } = opening;
-    let control = control.unwrap_or_default();
+    let control = control.unwrap_or_else(|| super::PanelControl::new(super::TabOpening::Asked));
     let table = table.unwrap_or_else(fake_table);
     SEED.with(|slot| *slot.borrow_mut() = seed);
     let mut options = HeadlessOptions::new(size.unwrap_or(WindowSize { width: 1100.0, height: 700.0 }));
@@ -640,7 +640,7 @@ fn results_that_land_later_fill_the_table() {
         row.received_damage = None;
         row.received_damage_text = None;
     }
-    let control = super::PanelControl::new();
+    let control = super::PanelControl::new(super::TabOpening::Asked);
     let Opened { mut window } = open(Opening {
         seed: Some(loaded(pending, false)),
         size: Some(WindowSize { width: 1700.0, height: 950.0 }),

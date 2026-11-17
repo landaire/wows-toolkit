@@ -50,6 +50,7 @@ use crate::tabs::replays::panel::PanelTitle;
 use crate::tabs::replays::panel::ReadGame;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::ReplayPanelProps;
+use crate::tabs::replays::panel::TabOpening;
 use crate::tabs::replays::player_table_slot;
 use crate::tabs::replays::session_stats;
 use crate::tabs::replays::title::ReplayTabTitleProps;
@@ -358,7 +359,7 @@ impl ReplayWorkspace {
             OpenTarget::ShowingTab => self.replaceable(),
             OpenTarget::NewTab => None,
         };
-        let control = self.under_tab(PanelControl::new);
+        let control = self.under_tab(|| PanelControl::new(TabOpening::Asked));
         self.replays.update(|replays| {
             replays.insert(path.clone(), control);
         });
@@ -610,7 +611,7 @@ impl ReplayWorkspace {
     /// Records the replays a restored layout shows, so their panels find them as they are built.
     pub(crate) fn adopt_restored(self, paths: Vec<PathBuf>) {
         let opened: Vec<(PathBuf, PanelControl)> =
-            paths.into_iter().map(|path| (path, self.under_tab(PanelControl::new))).collect();
+            paths.into_iter().map(|path| (path, self.under_tab(|| PanelControl::new(TabOpening::Restored)))).collect();
         self.replays.update(|replays| replays.extend(opened));
     }
 }

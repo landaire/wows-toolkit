@@ -1,5 +1,5 @@
-//! The replay loader: one supervised thread that reads the replays a front end opens, in the
-//! order asked.
+//! The replay loader: one supervised thread that reads the replays a front end opens, those the
+//! reader waits on first, then the rest in the order asked.
 //!
 //! Opening a replay only queues a [`LoadRequest`]; the answer arrives through a future, so the
 //! front end never blocks on the loader or joins it. A panic in one parse is that replay's
@@ -36,6 +36,15 @@ pub struct LoadRequest {
     pub personal_rating: Option<Arc<PersonalRatingData>>,
 }
 
+/// Whether the reader waits on a read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadPriority {
+    /// The reader opened the replay or asked for the read, and is read ahead of the rest.
+    Asked,
+    /// A replay read again or reopened on its own, read in turn.
+    Background,
+}
+
 /// A handle on the replay loader. Cheap to clone; the loader ends when the last handle goes.
 #[derive(Clone)]
 pub struct ReplayLoader {
@@ -61,9 +70,13 @@ impl ReplayLoader {
     pub fn read(
         &self,
         request: LoadRequest,
+        priority: ReadPriority,
     ) -> impl Future<Output = Result<ParsedReplay, ReplayLoadError>> + Send + use<> {
         let path = request.path.clone();
-        let reply = self.queue.request(request);
+        let reply = match priority {
+            ReadPriority::Asked => self.queue.request_ahead(request),
+            ReadPriority::Background => self.queue.request(request),
+        };
 
         async move { reply.await.unwrap_or_else(|QueueClosed| Err(ReplayLoadError::LoaderGone { path })) }
     }
@@ -99,6 +112,8 @@ impl Work for ReadReplays {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use futures::executor::block_on;
 
     use super::*;
@@ -129,14 +144,14 @@ mod tests {
         let faulting = request(&dir, "faulting.wowsreplay");
         crate::simulated_panic::panic_on_parse(&faulting.path);
 
-        let read = block_on(loader.read(faulting));
+        let read = block_on(loader.read(faulting, ReadPriority::Background));
         assert!(
             matches!(read, Err(ReplayLoadError::Panicked { .. })),
             "the panic is the read's error: {:?}",
             read.err()
         );
 
-        let next = block_on(loader.read(request(&dir, "next.wowsreplay")));
+        let next = block_on(loader.read(request(&dir, "next.wowsreplay"), ReadPriority::Background));
         assert!(matches!(next, Err(ReplayLoadError::Parse(_))), "the next replay is read: {:?}", next.err());
     }
 
@@ -149,8 +164,8 @@ mod tests {
         let stopping_path = stopping.path.clone();
         crate::simulated_panic::stop_loader_on(&stopping_path);
 
-        let stopped = loader.read(stopping);
-        let waiting = loader.read(request(&dir, "waiting.wowsreplay"));
+        let stopped = loader.read(stopping, ReadPriority::Background);
+        let waiting = loader.read(request(&dir, "waiting.wowsreplay"), ReadPriority::Background);
 
         match block_on(stopped) {
             Err(ReplayLoadError::LoaderStopped { path, stop: WorkerStop::Panicked(report) }) => {
@@ -161,5 +176,39 @@ mod tests {
         }
         let read = block_on(waiting);
         assert!(matches!(read, Err(ReplayLoadError::Parse(_))), "the waiting replay is read: {:?}", read.err());
+    }
+
+    /// A replay the reader opens is read before the re-reads queued ahead of it.
+    #[test]
+    fn a_replay_asked_for_is_read_before_the_re_reads_waiting() {
+        // The loader's thread stops on the first read, and a slow watchdog keeps it down while
+        // the others queue.
+        let watchdog = Watchdog::start_with_period(Duration::from_millis(300)).expect("the watchdog starts");
+        let loader = ReplayLoader::start(&watchdog).expect("the loader starts");
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let mut activity = loader.activity();
+        let stopping = request(&dir, "stopping.wowsreplay");
+        crate::simulated_panic::stop_loader_on(&stopping.path);
+
+        let mut replies = vec![loader.read(stopping, ReadPriority::Background)];
+        for name in ["first.wowsreplay", "second.wowsreplay"] {
+            replies.push(loader.read(request(&dir, name), ReadPriority::Background));
+        }
+        replies.push(loader.read(request(&dir, "opened.wowsreplay"), ReadPriority::Asked));
+        for reply in replies {
+            let _ = block_on(reply);
+        }
+
+        let mut read: Vec<String> = Vec::new();
+        while read.len() < 4 {
+            let report = block_on(futures::StreamExt::next(&mut activity)).expect("the loader reports");
+            let Some(name) = report.working.as_deref().and_then(Path::file_stem) else { continue };
+            let name = name.to_string_lossy().into_owned();
+            if read.last() != Some(&name) {
+                read.push(name);
+            }
+        }
+        read.retain(|name| name != "stopping");
+        assert_eq!(read, ["opened", "first", "second"]);
     }
 }

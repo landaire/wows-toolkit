@@ -43,6 +43,7 @@ use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::loader::LoadRequest;
+use wows_toolkit_replay_data::loader::ReadPriority;
 use wows_toolkit_replay_data::minimap_preview;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::MatchContext;
@@ -355,11 +356,32 @@ impl ReparseCause {
     }
 }
 
+/// How a tab came to be open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabOpening {
+    /// The reader opened it, and waits on its first read.
+    Asked,
+    /// A saved layout reopened it.
+    Restored,
+}
+
+/// Where a read waits behind the others the loader holds: a read the reader waits on goes ahead
+/// of re-reads and restored tabs.
+fn read_priority(opening: TabOpening, cause: Option<ReparseCause>) -> ReadPriority {
+    match (cause, opening) {
+        (None, TabOpening::Asked) | (Some(ReparseCause::AltPerspective), _) => ReadPriority::Asked,
+        (None, TabOpening::Restored) | (Some(ReparseCause::FileRewritten | ReparseCause::GameDataArrived), _) => {
+            ReadPriority::Background
+        }
+    }
+}
+
 /// What the panel's owner drives it through, and what the panel read. `Copy`; make one per panel
 /// in a scope that outlives the panel's view, so a view the dock builds again shows the battle
 /// without reading the file again.
 #[derive(Clone, Copy)]
 pub struct PanelControl {
+    opening: TabOpening,
     reparse: RwSignal<Option<(u64, ReparseCause)>, LocalStorage>,
     state: RwSignal<LoadState, LocalStorage>,
     /// The other recordings the battle is read through.
@@ -375,8 +397,9 @@ pub struct PanelControl {
 }
 
 impl PanelControl {
-    pub fn new() -> Self {
+    pub fn new(opening: TabOpening) -> Self {
         Self {
+            opening,
             reparse: RwSignal::new_local(None),
             state: RwSignal::new_local(LoadState::Loading),
             alts: RwSignal::new_local(Vec::new()),
@@ -449,12 +472,6 @@ impl PanelControl {
     #[cfg(test)]
     pub fn note_shares_for_test(self, player: wows_replays::types::AccountId) {
         self.share_rows.mark(player, wows_toolkit_replay_data::columns::ReplayColumn::ActualDamage, true);
-    }
-}
-
-impl Default for PanelControl {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -617,7 +634,7 @@ pub fn ReplayPanel(
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
     let shell = Shell::current();
-    let control = control.unwrap_or_default();
+    let control = control.unwrap_or_else(|| PanelControl::new(TabOpening::Asked));
     let PanelSetup { path, columns: initial_columns, personal_rating: initial_rating } = setup;
 
     let state = control.state;
@@ -710,12 +727,10 @@ pub fn ReplayPanel(
         underway.set_value(Some(Underway { cause, trial: trial.clone() }));
         parsing.set(true);
         let reading = services.supervision.replay_loader().map(|loader| {
-            loader.read(LoadRequest {
-                path: primary.clone(),
-                alts: alts_now,
-                game_data: cache,
-                personal_rating: rating,
-            })
+            loader.read(
+                LoadRequest { path: primary.clone(), alts: alts_now, game_data: cache, personal_rating: rating },
+                read_priority(control.opening, cause),
+            )
         });
         spawn_in(owner.get_value(), async move {
             let result = match reading {
