@@ -355,6 +355,8 @@ pub enum ReparseCause {
     GameDataArrived,
     /// A recording of the same battle was added or taken back out.
     AltPerspective,
+    /// The game's names were rewritten in another language.
+    LanguageChanged,
 }
 
 impl ReparseCause {
@@ -379,7 +381,8 @@ pub enum TabOpening {
 fn read_priority(opening: TabOpening, cause: Option<ReparseCause>) -> ReadPriority {
     match (cause, opening) {
         (None, TabOpening::Asked) | (Some(ReparseCause::AltPerspective), _) => ReadPriority::Asked,
-        (None, TabOpening::Restored) | (Some(ReparseCause::FileRewritten | ReparseCause::GameDataArrived), _) => {
+        (None, TabOpening::Restored)
+        | (Some(ReparseCause::FileRewritten | ReparseCause::GameDataArrived | ReparseCause::LanguageChanged), _) => {
             ReadPriority::Background
         }
     }
@@ -493,6 +496,12 @@ impl PanelControl {
     #[cfg(test)]
     pub fn note_shares_for_test(self, id: crate::tabs::replays::table::RowId) {
         self.share_rows.mark(id, wows_toolkit_replay_data::columns::ReplayColumn::ActualDamage, true);
+    }
+
+    /// Why the replay was last asked to be read again.
+    #[cfg(test)]
+    pub fn asked_reparse_for_test(self) -> Option<ReparseCause> {
+        self.reparse.with_untracked(|asked| asked.map(|(_, cause)| cause))
     }
 }
 

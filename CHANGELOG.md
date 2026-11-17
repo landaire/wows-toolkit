@@ -79,6 +79,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Keep the player table's scroll position, selection and keyboard row when a column filter or the language changes
 - *(zgui)* Keep the player table's other rows and their open tooltips when a rating table, Twitch lookup or stat hide changes one row
 - *(zgui)* Leave a player table row open or closed on a double click on its figures, chips or detail, and selected as it was on a press on a chip or in the detail
+- *(zgui)* Read open replays again after a language change, so their ship names, classes, bot names, builds, achievements and ribbons are in the new language
 - *(zgui)* Draw a replay's icons and tab flag from the build it was read through, and from the newest build only what that build lacks, so old replays keep retired module and skill icons
 - *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
 - *(zgui)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state

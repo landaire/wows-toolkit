@@ -108,6 +108,12 @@ impl GameData {
         self.catalogs.track();
     }
 
+    /// Says the loaded builds' names were rewritten in another language.
+    #[cfg(test)]
+    pub fn note_catalogs_rewritten_for_test(self) {
+        self.catalogs.update(|revision| revision.0 += 1);
+    }
+
     /// Replaces the cache with one over `request`'s install and loads its newest build.
     pub fn adopt(self, request: GameDataRequest) {
         // Kept preview tracks and renderers were read through the cache this replaces.

@@ -395,9 +395,9 @@ fn follow_session(workspace: ReplayWorkspace) {
     });
 }
 
-/// Reads the open replays again when a build loads or a download the reader accepted lands, and
-/// lists the directories again for the latter. Starts the sharing sweep once the settings and game
-/// data are both ready.
+/// Reads the open replays again when a build loads, a download the reader accepted lands or the
+/// game's names change language, and lists the directories again for the download. Starts the
+/// sharing sweep once the settings and game data are both ready.
 fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: GameDataOffer, arrivals: Arrivals) {
     let services = workspace.services;
     let shell = workspace.shell;
@@ -407,6 +407,13 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
             workspace.reparse_all(ReparseCause::GameDataArrived);
         }
         ready
+    });
+    // An open battle holds the names it was read with.
+    let relocalizing = RenderEffect::new(move |seen: Option<()>| {
+        services.game_data.track_catalogs();
+        if seen.is_some() {
+            workspace.reparse_all(ReparseCause::LanguageChanged);
+        }
     });
     let sweeping = RenderEffect::new(move |_| {
         let settled = services.settings.read(|_| ()).is_some();
@@ -450,6 +457,7 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
     });
     on_cleanup_local(move || {
         drop(arriving);
+        drop(relocalizing);
         drop(sweeping);
         drop(warning_empty);
         drop(downloading);

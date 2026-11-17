@@ -35,6 +35,7 @@ use zgui::vocab::Role;
 use super::BUILT;
 use super::arrivals::Arrivals;
 use super::layout;
+use super::panel::ReparseCause;
 use super::sharing::SharingReads;
 use super::workspace::Docked;
 use super::workspace::OpenTarget;
@@ -778,6 +779,23 @@ fn a_battle_held_for_its_results_is_read_again_when_its_grace_lapses() {
     assert!(arrivals.holds(&path), "the battle is held until its deadline");
     window.advance(Duration::from_secs(40));
     assert!(!arrivals.holds(&path), "the battle is read again once its grace lapses");
+}
+
+/// An open battle is read again once the game's names are in the new language, so its ships,
+/// bots, builds and awards are named in it.
+#[test]
+fn the_open_replays_are_read_again_in_a_new_language() {
+    let (mut window, workspace) = open();
+    let path = PathBuf::from("battle.wowsreplay");
+    workspace.open(path.clone(), OpenTarget::ShowingTab);
+    window.advance(Duration::from_millis(32));
+    let control = workspace.control_for_test(&path).expect("the replay is open");
+    assert_eq!(control.asked_reparse_for_test(), None);
+
+    workspace.services.game_data.note_catalogs_rewritten_for_test();
+    window.advance(Duration::from_millis(32));
+
+    assert_eq!(control.asked_reparse_for_test(), Some(ReparseCause::LanguageChanged));
 }
 
 /// A newer write of a held battle is read at once, and the hold for the older one is dropped.
