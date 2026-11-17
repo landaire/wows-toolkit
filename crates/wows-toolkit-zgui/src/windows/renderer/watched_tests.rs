@@ -378,7 +378,7 @@ fn the_watched_window_takes_up_the_saved_defaults_under_the_sessions() {
     take_in(&mut window);
     let saved = SavedRenderOptions { show_timer: false, show_team_rosters: true, ..SavedRenderOptions::default() };
 
-    watch.adopt_defaults(&saved);
+    watch.adopt_defaults(&saved, watch.layer_edits());
 
     assert!(!shows_timer(watch), "the saved defaults leave the timer off");
     assert!(
@@ -393,9 +393,29 @@ fn the_watched_window_takes_up_the_saved_defaults_under_the_sessions() {
         held.repaint_viewport(REPLAY);
     }
     take_in(&mut window);
-    watch.adopt_defaults(&saved);
+    watch.adopt_defaults(&saved, watch.layer_edits());
 
     assert!(shows_timer(watch), "the session's timer stands over the saved defaults");
+}
+
+/// A layer the reader changed here while the saved defaults were being read stays as they set
+/// it: the defaults arriving afterwards are an older choice than theirs.
+#[test]
+fn a_layer_toggled_before_the_saved_defaults_arrive_is_kept() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![timer(), torpedo()]));
+    take_in(&mut window);
+    let asked_at = watch.layer_edits();
+
+    click(&mut window, "watched-playback-layers-toggle");
+    click(&mut window, "renderer-opt-timer");
+    assert!(!shows_timer(watch), "the reader turned the timer off");
+    let saved = SavedRenderOptions { show_timer: true, ..SavedRenderOptions::default() };
+    watch.adopt_defaults(&saved, asked_at);
+
+    assert!(!shows_timer(watch), "and the saved defaults, read before that, leave it off");
 }
 
 /// A watched window in the dark theme with this machine's game data, for review.

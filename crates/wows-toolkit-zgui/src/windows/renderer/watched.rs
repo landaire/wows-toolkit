@@ -158,6 +158,10 @@ impl HostClock {
     }
 }
 
+/// Which of the reader's own layer changes a watch is on. Moves on with each one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayerEdits(u64);
+
 /// One watched window's state, as one `Copy` handle.
 #[derive(Clone, Copy)]
 pub struct WatchSession {
@@ -199,6 +203,8 @@ struct WatchRun {
     range_overrides: Vec<(EntityId, ShipConfigFilter)>,
     /// The versions of the session's display settings this window has taken up.
     display_seen: DisplayVersions,
+    /// The reader's own layer changes made here.
+    layer_edits: LayerEdits,
     /// The version of the session's shapes the last raster drew.
     shapes_seen: SyncVersion,
     /// Where this end's pointer was last said to be.
@@ -254,6 +260,7 @@ impl WatchSession {
                 choices: ShipChoices::new(),
                 range_overrides: Vec::new(),
                 display_seen: DisplayVersions::NONE,
+                layer_edits: LayerEdits(0),
                 shapes_seen: SyncVersion::NONE,
                 cursor: CursorReport::new(),
                 sink: FrameSink::new(),
@@ -350,7 +357,13 @@ impl WatchSession {
 
     /// Takes up what the reader saved as the renderer's defaults, as a renderer opens on them, with
     /// the session's display settings over them where it holds some, as an egui peer does.
-    pub fn adopt_defaults(self, saved: &SavedRenderOptions) {
+    ///
+    /// `since` is which of the reader's own changes the defaults were asked for at. A layer
+    /// toggled here while they were read is the reader's later choice, so they are then dropped.
+    pub fn adopt_defaults(self, saved: &SavedRenderOptions, since: LayerEdits) {
+        if self.layer_edits() != since {
+            return;
+        }
         let mut layers = self.layers.get_untracked();
         adopt_saved_defaults(saved, &mut layers.options, &mut layers.show_dead_ships);
         // A watched frame has no gutter beside the map to draw these in.
@@ -363,12 +376,18 @@ impl WatchSession {
         self.redraw();
     }
 
+    /// Which of the reader's own layer changes this watch is on.
+    pub fn layer_edits(self) -> LayerEdits {
+        self.run.with_value(|run| run.layer_edits)
+    }
+
     /// Changes what is drawn and draws the last frame again, so a toggle shows before the host
     /// sends another.
     pub fn set_layers(self, apply: impl FnOnce(&mut Layers)) {
         let mut layers = self.layers.get_untracked();
         apply(&mut layers);
         self.layers.set(layers);
+        self.run.update_value(|run| run.layer_edits.0 += 1);
         self.redraw();
     }
 
@@ -599,6 +618,7 @@ impl RasterJob {
 pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView {
     let services = Services::current();
     let watch = WatchSession::open(shared, link, services.game_data.cache_untracked());
+    let since = watch.layer_edits();
     spawn_local(async move {
         let saved = match services.settings.pool() {
             Some(pool) => services
@@ -608,7 +628,7 @@ pub fn WatchedPlayback(shared: SharedWindow, link: CollabLink) -> impl IntoView 
             // No store to read: what the renderer itself defaults to, as an unwritten row reads.
             None => SavedRenderOptions::default(),
         };
-        watch.adopt_defaults(&saved);
+        watch.adopt_defaults(&saved, since);
     });
 
     view! { WatchedView(watch = watch) }
