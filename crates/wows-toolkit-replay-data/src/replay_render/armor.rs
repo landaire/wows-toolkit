@@ -18,6 +18,7 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::armor::health_strip::HealthStrip;
+use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::ShellInfo;
 
@@ -129,6 +130,8 @@ pub struct IncomingContext {
     /// A salvo whose shell this build cannot name is left out rather than
     /// simulated with a stand-in.
     pub shells: HashMap<GameParamId, ShellInfo>,
+    /// What the log calls each of those shells, in the reader's language.
+    pub shell_names: HashMap<GameParamId, String>,
 }
 
 /// Which ship an entity was in, by its game param index, what it is called,
@@ -350,8 +353,12 @@ pub fn resolve_incoming_shells(context: &mut IncomingContext, game_data: &GameDa
         if context.shells.contains_key(&salvo.params_id) {
             continue;
         }
-        if let Some(shell) = provider.resolve_shell_from_param_id(salvo.params_id) {
-            context.shells.insert(salvo.params_id, shell);
-        }
+        let Some(shell) = provider.resolve_shell_from_param_id(salvo.params_id) else { continue };
+        // The internal name stands in for a shell the build has no translation for, as egui named it.
+        let key = TranslationKey::new(format!("IDS_{}", shell.name.to_uppercase()));
+        let named = wowsunpack::data::ResourceLoader::localized_name_from_id(provider.as_ref(), &key)
+            .unwrap_or_else(|| shell.name.clone());
+        context.shell_names.insert(salvo.params_id, named);
+        context.shells.insert(salvo.params_id, shell);
     }
 }

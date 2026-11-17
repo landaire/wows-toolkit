@@ -99,8 +99,12 @@ const CSS: &str = css!(
     .wt-armor-incoming__chevron { flex: none; display: flex; align-items: center;
         transition: transform var(--lui-motion-turn) var(--lui-motion-ease); }
     .wt-armor-incoming__pick[data-open] .wt-armor-incoming__chevron { transform: rotate(90deg); }
-    .wt-armor-incoming__who { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; white-space: nowrap;
+    .wt-armor-incoming__head-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .wt-armor-incoming__who { min-width: 0; font-size: 12px; overflow: hidden; white-space: nowrap;
         text-overflow: ellipsis; }
+    .wt-armor-incoming__fired { min-width: 0; font-size: 11px; color: var(--wt-color-text-dim); overflow: hidden;
+        white-space: nowrap; text-overflow: ellipsis; }
+    .wt-armor-incoming__pick[data-selected] .wt-armor-incoming__fired { color: var(--lui-color-text-bright); }
     .wt-armor-incoming__count { flex: none; font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-armor-incoming__count[data-standing=deferred] { color: var(--wt-color-warn); }
     .wt-armor-incoming__count[data-standing=disagrees] { color: var(--wt-color-error); }
@@ -157,6 +161,24 @@ impl IncomingFire {
 fn clock_label(clock: GameClock) -> String {
     let seconds = clock.seconds().max(0.0);
     format!("{}:{:02}", (seconds / 60.0).floor() as i32, (seconds % 60.0) as i32)
+}
+
+/// What a salvo was fired with and from how far: the shell's caliber and name, then the mean range
+/// of its shells. `None` when neither is known.
+fn fired_label(context: &IncomingContext, salvo: &IncomingSalvo) -> Option<String> {
+    let shell = context.shells.get(&salvo.shell).map(|shell| {
+        let name = context.shell_names.get(&salvo.shell).unwrap_or(&shell.name);
+        t!("ui.armor.realtime.salvo_shell", caliber = format!("{:.0}", shell.caliber.value()), shell = name)
+            .into_owned()
+    });
+    let range = salvo
+        .average_range()
+        .map(|range| t!("ui.armor.realtime.salvo_range", km = format!("{:.1}", range.value())).into_owned());
+
+    match (shell, range) {
+        (Some(shell), Some(range)) => Some(format!("{shell}, {range}")),
+        (shell, range) => shell.or(range),
+    }
 }
 
 /// What the server said a shell did.
@@ -403,6 +425,11 @@ fn salvo_block(
         })
     });
     let count = t!("ui.armor.realtime.shells", count = salvo.shells.len()).into_owned();
+    let fired = incoming.with_untracked(|fire| fired_label(&fire.context, salvo)).map(|fired| {
+        AnyView::new(view! {
+            text(class = "wt-armor-incoming__fired", attr:data-testid = format!("armor-incoming-fired-{index}")) {{fired}}
+        })
+    });
 
     let shells: Vec<AnyView> = if open {
         salvo
@@ -459,7 +486,10 @@ fn salvo_block(
                     on:click = move |_| pick_head()
                 ) {
                     {chevron}
-                    text(class = "wt-armor-incoming__who") {{who.clone()}}
+                    column(class = "wt-armor-incoming__head-text") {
+                        text(class = "wt-armor-incoming__who") {{who.clone()}}
+                        {fired}
+                    }
                     text(class = "wt-armor-incoming__count", attr:data-standing = worst.map(|standing| standing_name(standing).to_owned())) {{count}}
                 }
                 Tooltip {
@@ -664,13 +694,31 @@ fn HealthStripView(
 #[cfg(test)]
 mod tests {
     use wows_replays::types::GameClock;
+    use wows_toolkit_armor::viewport::types::Vec3;
 
     use super::clock_label;
+    use super::fired_label;
+    use crate::tabs::armor_viewer::test_fixtures::salvo_on_plate;
 
     #[test]
     fn the_log_prints_minutes_and_seconds() {
         assert_eq!(clock_label(GameClock(0.0)), "0:00");
         assert_eq!(clock_label(GameClock(65.4)), "1:05");
         assert_eq!(clock_label(GameClock(-3.0)), "0:00", "a clock before the battle reads as its start");
+    }
+
+    /// A salvo is headed by its shell's caliber and name and the mean range it was fired from,
+    /// the name in the reader's language where the build has it.
+    #[test]
+    fn a_salvo_says_what_it_was_fired_with_and_from_how_far() {
+        let mut fire = salvo_on_plate(Vec3::zeros(), 2);
+        let salvo = fire.salvos().remove(0);
+        assert_eq!(fired_label(&fire.context, &salvo).as_deref(), Some("406 mm PAPA001, 10.0 km"));
+
+        fire.context.shell_names.insert(salvo.shell, "AP Mk8".to_owned());
+        assert_eq!(fired_label(&fire.context, &salvo).as_deref(), Some("406 mm AP Mk8, 10.0 km"));
+
+        fire.context.shells.clear();
+        assert_eq!(fired_label(&fire.context, &salvo).as_deref(), Some("10.0 km"), "a shell the build cannot name");
     }
 }

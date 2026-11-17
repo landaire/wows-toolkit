@@ -13,6 +13,8 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::ShotId;
+use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_types::ShellHitType;
 use wowsunpack::recognized::Recognized;
 
@@ -42,6 +44,8 @@ pub struct IncomingShell {
     pub clock: GameClock,
     /// What the server said it did.
     pub hit_type: HitType,
+    /// How far it flew, along the ground. `None` when its salvo does not list the shot.
+    pub range: Option<Meters>,
 }
 
 /// One salvo's worth of shells that reached the ship.
@@ -57,6 +61,18 @@ pub struct IncomingSalvo {
     /// When its last one did.
     pub latest_clock: GameClock,
     pub shells: Vec<IncomingShell>,
+}
+
+impl IncomingSalvo {
+    /// The mean range of the shells whose range is known. `None` when none is.
+    pub fn average_range(&self) -> Option<Km> {
+        let ranges: Vec<f32> = self.shells.iter().filter_map(|shell| shell.range).map(Meters::value).collect();
+        if ranges.is_empty() {
+            return None;
+        }
+
+        Some(Meters::new(ranges.iter().sum::<f32>() / ranges.len() as f32).to_km())
+    }
 }
 
 /// Server-authoritative shell outcome (mapped from ShellHitType).
@@ -140,8 +156,13 @@ pub fn group_incoming(
         }
 
         let key = SalvoKey { owner: salvo.owner_id, salvo_id: salvo.salvo_id };
+        let range = salvo
+            .shots
+            .iter()
+            .find(|shot| shot.shot_id == hit.hit.shot_id)
+            .map(|shot| shot.origin.distance_xz(&hit.hit.position));
         let shell_entry =
-            IncomingShell { shot_id: hit.hit.shot_id, clock: taken.clock, hit_type: hit.hit.hit_type.clone() };
+            IncomingShell { shot_id: hit.hit.shot_id, clock: taken.clock, hit_type: hit.hit.hit_type.clone(), range };
 
         let group = groups.entry(key).or_insert_with(|| IncomingSalvo {
             key,
@@ -188,6 +209,7 @@ pub fn attackers(salvos: &[IncomingSalvo]) -> Vec<EntityId> {
 mod tests {
     use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
     use wows_replays::analyzer::decoder::ArtillerySalvo;
+    use wows_replays::analyzer::decoder::ArtilleryShotData;
     use wows_replays::analyzer::decoder::HitType;
     use wows_replays::analyzer::decoder::ShotHit;
     use wows_replays::types::ShotId;
@@ -274,5 +296,45 @@ mod tests {
         assert_eq!(salvos[0].first_clock, GameClock(10.0));
         assert_eq!(salvos[1].shells.len(), 2);
         assert_eq!(salvos[1].latest_clock, GameClock(31.0));
+    }
+
+    /// A salvo reads at the mean distance its listed shots flew, and a shot the salvo does not
+    /// list has no range rather than a range of zero.
+    #[test]
+    fn a_salvos_range_is_the_mean_of_its_listed_shots() {
+        let shot = |id: u32, from_x: f32| ArtilleryShotData {
+            origin: WorldPos::new(from_x, 0.0, 0.0),
+            pitch: 0.0,
+            speed: 0.0,
+            target: WorldPos::default(),
+            shot_id: ShotId::from(id),
+            gun_barrel_id: 0,
+            server_time_left: 0.0,
+            shooter_height: 0.0,
+            hit_distance: 0.0,
+        };
+        let landed = |id: u32| {
+            let mut landed = hit(1, Some(7), 500, 10.0);
+            landed.hit.hit.shot_id = ShotId::from(id);
+            if let Some(salvo) = landed.hit.salvo.as_mut() {
+                // 300 and 400 world units at 30 m to the unit.
+                salvo.shots = vec![shot(1, 300.0), shot(2, 400.0)];
+            }
+            landed
+        };
+        let hits = [landed(1), landed(2), landed(3)];
+        let salvos = group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &HashSet::new());
+
+        let ranges: Vec<Option<f32>> = salvos[0].shells.iter().map(|shell| shell.range.map(Meters::value)).collect();
+        assert_eq!(ranges, [Some(9000.0), Some(12000.0), None]);
+        assert_eq!(salvos[0].average_range(), Some(Km::new(10.5)));
+    }
+
+    /// A salvo none of whose shots are listed has no range to give.
+    #[test]
+    fn a_salvo_with_no_listed_shots_has_no_range() {
+        let hits = [hit(1, Some(7), 500, 10.0)];
+        let salvos = group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &HashSet::new());
+        assert_eq!(salvos[0].average_range(), None);
     }
 }
