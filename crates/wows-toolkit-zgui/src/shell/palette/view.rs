@@ -65,7 +65,6 @@ use zgui_ui::DialogProps;
 use zgui_ui::DialogTitleProps;
 use zgui_ui::InputProps;
 use zgui_ui::Listbox;
-use zgui_ui::ListboxEntry;
 use zgui_ui::SpinnerProps;
 use zgui_ui::prelude::Binding;
 use zgui_ui_icons::IconProps;
@@ -335,13 +334,19 @@ fn ModeList(shell: Shell, mode: PaletteMode, spec: ModeSpec, query: RwSignal<Str
 }
 
 /// Puts the highlight on the first row whenever `rows` changes, as the list's own filter does,
-/// so Enter runs the best match.
+/// so Enter runs the best match, and scrolls the list back to that row.
 #[component]
 fn HighlightFirst(rows: Signal<(), LocalStorage>) -> impl IntoView {
     let Some(listbox) = Listbox::current() else { return };
     let timers = Timers::current();
     let pending = StoredValue::new_local(None::<FrameHandle>);
-    let first = move || listbox.set_active(listbox.choosable().first().map(ListboxEntry::id));
+    let first = move || {
+        if listbox.choosable().is_empty() {
+            listbox.set_active(None);
+        } else {
+            listbox.to_end(false);
+        }
+    };
 
     let following = RenderEffect::new(move |_| {
         rows.track();

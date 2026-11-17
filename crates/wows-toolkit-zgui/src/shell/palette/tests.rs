@@ -359,6 +359,37 @@ fn the_palette_opens_any_ship_on_shiptool() {
     assert_eq!(opened_for_test(), [shiptool::ship_url("PJSB018")], "the ship's ShipTool page is opened");
 }
 
+/// A new query scrolls the list back to its first row, which the highlight moves to.
+#[test]
+fn a_new_query_scrolls_the_list_back_to_its_first_row() {
+    let many = (0..40)
+        .map(|at| {
+            let name = format!("Ship {at:02}");
+            ArmorShipRow::new(ShipParamIndex(format!("PASB{at:03}")), name, "X", "Battleship", "U.S.A.")
+        })
+        .collect();
+    let mut window = open_window(TestModes { ships: Some(many), ..TestModes::default() });
+    let top_of = |window: &HeadlessWindow, id: &str| {
+        let element = window.by_test_id(id).unwrap_or_else(|| panic!("{id} is shown"));
+        window.bounds(element).expect("a shown element has a box").origin.y.0
+    };
+    let list_top = |window: &HeadlessWindow| {
+        let list = window.by_class("zui-command__list").expect("the list is shown");
+        window.bounds(list).expect("the list has a box").origin.y.0
+    };
+
+    shortcut(&mut window, 'k');
+    type_text(&mut window, "open ship");
+    press(&mut window, NamedKey::Enter);
+    let list = window.by_class("zui-command__list").expect("the list is shown");
+    window.wheel(list, 2000.0).expect("the list has a box");
+    settle(&mut window);
+    assert!(top_of(&window, "palette-row-0") < list_top(&window), "the first row is scrolled out of view");
+
+    type_text(&mut window, "ship");
+    assert!(top_of(&window, "palette-row-0") >= list_top(&window), "the first row is back in view");
+}
+
 /// A row marks the letters of its name the query matched, and an empty query marks nothing.
 #[test]
 fn rows_mark_the_letters_the_query_matched() {
