@@ -1207,6 +1207,36 @@ fn an_export_from_a_ship_row_seeds_the_hull_of_that_ship_only() {
     assert_eq!(super::export_seed_hull(viewport, &VehicleParamIndex::new("PJSB018")), None, "another ship does not");
 }
 
+/// The armor zone tree keeps where it was scrolled when a rail search builds it again.
+#[test]
+fn the_zone_tree_keeps_its_scroll_across_a_search() {
+    let mut armor = ArmorWindow::open_tall();
+    let mut scene = two_zone_scene();
+    scene.zone_part_plates = (0..40)
+        .map(|index| ArmorZone {
+            name: format!("Zone {index:02}"),
+            parts: vec![ZonePart { name: format!("Zone_{index:02}_Deck"), plates: vec![250] }],
+        })
+        .collect();
+    armor.install(scene, &[OptionSection::Visibility]);
+    let first_row_offset = |armor: &ArmorWindow| {
+        let port = armor.window.by_test_id("armor-visibility-tree-scroll").expect("the tree is shown");
+        let row = armor.window.by_test_id("armor-vis-zone-row-Zone 00").expect("the first zone is built");
+        let (port, row) = (armor.window.bounds(port).expect("a box"), armor.window.bounds(row).expect("a box"));
+        row.origin.y.0 - port.origin.y.0
+    };
+    let unscrolled = first_row_offset(&armor);
+
+    let port = armor.window.by_test_id("armor-visibility-tree-scroll").expect("the tree is shown");
+    armor.window.wheel(port, 200.0).expect("the tree takes the wheel");
+    armor.settle();
+    let scrolled = first_row_offset(&armor);
+    assert!(scrolled < unscrolled, "the tree scrolled: {unscrolled} then {scrolled}");
+
+    armor.type_into("armor-options-filter", "zone");
+    assert!((first_row_offset(&armor) - scrolled).abs() < 1.0, "the search keeps the scroll");
+}
+
 /// A tab is chosen by a click, by the arrow keys on the strip, and by Ctrl+Tab from the viewer, and
 /// the choice is saved.
 #[test]

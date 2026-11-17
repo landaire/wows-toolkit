@@ -31,14 +31,22 @@ use wowsunpack::export::gltf_export::thickness_to_color;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::Species;
 use zgui::css;
+use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::EventCx;
+use zgui::view::NodeRef;
+use zgui::view::ScrollBehavior;
+use zgui::view::ScrollTarget;
 use zgui::view::ShowProps;
+use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -159,16 +167,38 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
             .collect::<Vec<AnyView>>()
     };
 
+    let port = NodeRef::new();
+    keep_scroll(port, viewport);
+
     Some(AnyView::new(view! {
         column(class = "wt-armor-tree") {
             {thickness}
             {header}
             {field}
-            box(class = "wt-armor-tree__scroll", attr:data-testid = "armor-visibility-tree-scroll") {
+            box(
+                class = "wt-armor-tree__scroll",
+                node_ref = port,
+                on:scroll = move |_: &mut EventCx<'_, events::Scroll>| viewport.set_zone_tree_scroll(port.scroll_offset().y),
+                attr:data-testid = "armor-visibility-tree-scroll"
+            ) {
                 column(class = "wt-armor-tree__rows") {{rows}}
             }
         }
     }))
+}
+
+/// Puts the tree built into `port` back where `viewport`'s pane left it scrolled, as the rail
+/// builds it again on every filter keystroke.
+fn keep_scroll(port: NodeRef, viewport: ArmorViewportState) {
+    let restoring = RenderEffect::new(move |_| {
+        if port.get().is_none() {
+            return;
+        }
+        let offset = port.scroll_offset();
+        let target = Point::new(offset.x, viewport.zone_tree_scroll());
+        port.scroll_to(ScrollTarget::Offset(target), ScrollBehavior::Instant);
+    });
+    on_cleanup_local(move || drop(restoring));
 }
 
 /// What a section says while no scene is open.

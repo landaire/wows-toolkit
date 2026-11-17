@@ -7,6 +7,7 @@ use std::sync::Arc;
 use landaire_ui::MotionPreference;
 use landaire_ui::motion_preference;
 use wows_toolkit_armor::hull_picking::HullMeshIndex;
+use zgui::geom::DevicePx;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -59,6 +60,9 @@ struct Shared {
     screenshots: Vec<ScreenshotReply>,
     /// Whether the surface is drawing right now, which draws whatever a change made meanwhile.
     rendering: bool,
+    /// How far the options rail's armor zone tree is scrolled for this pane. The rail builds the
+    /// tree again on every filter keystroke.
+    zone_tree_scroll: DevicePx,
 }
 
 /// What a change made through [`ArmorViewportState::update`] asks for once the model is no longer
@@ -129,6 +133,7 @@ impl ArmorViewportState {
                 motion: motion_preference(),
                 screenshots: Vec::new(),
                 rendering: false,
+                zone_tree_scroll: DevicePx(0.0),
             }),
         };
         LIVE.with(|live| live.borrow_mut().push(state));
@@ -138,6 +143,16 @@ impl ArmorViewportState {
         });
 
         state
+    }
+
+    /// How far the options rail's armor zone tree is scrolled for this pane. A disposed pane's
+    /// tree is not shown, so it reads as unscrolled.
+    pub fn zone_tree_scroll(self) -> DevicePx {
+        self.shared.try_with_value(|shared| shared.zone_tree_scroll).unwrap_or(DevicePx(0.0))
+    }
+
+    pub fn set_zone_tree_scroll(self, offset: DevicePx) {
+        self.shared.try_update_value(|shared| shared.zone_tree_scroll = offset);
     }
 
     /// Whether `other` is this same viewport.
