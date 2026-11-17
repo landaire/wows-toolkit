@@ -8,8 +8,11 @@
 # included. Third-party targets themselves are never selected; they are built
 # only as dependencies of a first-party target.
 #
-# A target hash does not cover rule implementations, Buck configuration, or the
-# checks' own scripts, so a change to any of those selects everything.
+# A target hash does not cover rule implementations or Buck configuration, so a
+# change to either selects everything. The checks are targets too: a change to
+# the scripts of a check that runs only over affected targets selects
+# everything. A change to the files the flake builds the toolchain from selects
+# everything only when the toolchain store paths change.
 #
 # Writes JSON to --out:
 #   full         every check runs
@@ -19,6 +22,7 @@
 #   graph_tests  whether scripts/test-*.nu run
 
 const FIRST_PARTY = ["root//:" "root//crates/..."]
+const CHECKS = "root//ci/..."
 
 # Paths whose change no target hash reflects.
 const FULL_PREFIXES = [
@@ -29,20 +33,40 @@ const FULL_PREFIXES = [
     "bootstrap."
     "build-support/"
     "bxl/"
-    "ci/"
     "clippy.toml"
-    "flake."
     "platforms/"
     "prelude/"
     "reindeer.toml"
-    "rust-toolchain.toml"
-    "scripts/"
     # Shared fixtures, which tests read at run time without declaring.
     "tests/"
     "toolchains/"
 ]
-const FULL_FILES = ["Cargo.toml" "PACKAGE"]
+# The root Cargo.toml reaches Buck only through the generated BUCK files, which
+# the target hashes cover.
+const FULL_FILES = [
+    "PACKAGE"
+    # Writes .buckconfig.local, which names the toolchain.
+    "scripts/refresh-buck-toolchain.nu"
+    # Prepare the runners the release and Windows builds run on.
+    "scripts/expand-runner-swap.sh"
+    "scripts/prepare-windows-runner.ps1"
+]
 const FULL_SUFFIXES = [".bzl" ".bxl" "/PACKAGE"]
+
+# What the flake builds the Buck toolchain and the CI shell from.
+const TOOLCHAIN_INPUTS = ["flake.nix" "flake.lock" "rust-toolchain.toml"]
+# The flake outputs CI uses, for each host CI builds on: the packages
+# .buckconfig.local names, and the shell that runs buck2 and the nu checks.
+const TOOLCHAIN_PATHS = '
+    flake: let
+      pick = system: [
+        flake.packages.${system}.buck-toolchain.outPath
+        flake.packages.${system}.buck-system-libs.outPath
+        (flake.packages.${system}.macos-sdk.outPath or null)
+        flake.devShells.${system}.default.outPath
+      ];
+    in { x86_64-linux = pick "x86_64-linux"; aarch64-darwin = pick "aarch64-darwin"; }
+'
 
 # The graph tests read these directly, so no target hash covers them.
 const GRAPH_TEST_SUFFIXES = [
@@ -73,12 +97,12 @@ def needs_full [path: string] {
     )
 }
 
-# Label to recursive hash and rule type, for every first-party target in the
-# checkout at `root`.
+# Label to recursive hash and rule type, for every first-party target and check
+# in the checkout at `root`.
 def target_hashes [root: string] {
     let result = (do {
         cd $root
-        (^buck2 targets ...$FIRST_PARTY --json --show-target-hash
+        (^buck2 targets ...$FIRST_PARTY $CHECKS --json --show-target-hash
             --target-hash-recursive=true --target-hash-file-mode=paths_and_contents
             --output-attribute "^(name|buck\\.(type|target_hash|package))$")
     } | complete)
@@ -92,6 +116,33 @@ def target_hashes [root: string] {
             type: ($t."buck.type" | split row ":" | last)
         }
     }
+}
+
+# The toolchain store paths the flake at `rev` gives, or null when it does not
+# evaluate. An empty `rev` reads the working tree. Only TOOLCHAIN_INPUTS are
+# copied, so a flake that reads any other file does not evaluate here.
+def toolchain_paths [rev: string] {
+    let dir = (mktemp -d -t wt-affected-flake.XXXXXX)
+    for file in $TOOLCHAIN_INPUTS {
+        let content = try {
+            if ($rev | is-empty) { open --raw $file } else { ^git show $"($rev):($file)" }
+        } catch {
+            null
+        }
+        if $content == null {
+            rm -rf $dir
+            return null
+        }
+        $content | save -f ($dir | path join $file)
+    }
+    # getFlake of a path that is not locked needs --impure.
+    let expr = $"\(($TOOLCHAIN_PATHS)) \(builtins.getFlake \"path:($dir)\")"
+    let result = (do { ^nix eval --impure --json --expr $expr } | complete)
+    rm -rf $dir
+    if $result.exit_code != 0 {
+        return null
+    }
+    $result.stdout | from json
 }
 
 def select_affected [base: string] {
@@ -112,11 +163,21 @@ def select_affected [base: string] {
     if not ($forcing | is-empty) {
         return (full_result $"($forcing | first) changed")
     }
+    # Evaluated on every run rather than only when TOOLCHAIN_INPUTS change, so a
+    # flake that starts reading another file keeps selecting everything until
+    # TOOLCHAIN_INPUTS lists it.
+    let toolchain_after = (toolchain_paths "")
+    if $toolchain_after == null {
+        return (full_result "the flake does not evaluate from TOOLCHAIN_INPUTS alone")
+    }
+    if (toolchain_paths $base) != $toolchain_after {
+        return (full_result "the toolchain or CI shell the flake gives changed")
+    }
 
     let worktree = (mktemp -d -t wt-affected-base.XXXXXX)
     ^git worktree add --detach --force $worktree $base o+e>| ignore
-    # The base parses under this checkout's toolchain. Any toolchain change is a
-    # flake.* or toolchains/ change, which selected everything above.
+    # The base parses under this checkout's toolchain. Any toolchain change
+    # selected everything above.
     cp .buckconfig.local $worktree
     let before = try { target_hashes $worktree } catch { null }
     do { cd $worktree; ^buck2 kill } | complete | ignore
@@ -132,6 +193,14 @@ def select_affected [base: string] {
     let old = ($before | select label hash | rename label old)
     let affected = ($after | join --left $old label | where {|t| $t.old? != $t.hash })
 
+    # A check that runs only over the affected targets runs over all of them once
+    # its own scripts change. The script tests run in full on every run.
+    let checks = ($affected | where {|t| $t.label | str starts-with "root//ci:" })
+    let widened = ($checks | where {|t| $t.type == "nu_script" and $t.label != "root//ci:graph_tests" })
+    if not ($widened | is-empty) {
+        return (full_result $"($widened | first | get label) changed")
+    }
+
     let aliases = ($affected | where {|t| ($t.label | str starts-with "root//:") and $t.type == "alias" } | get label)
     let crates = ($affected | where {|t| $t.label | str starts-with "root//crates/" })
     # A test can read files from its crate at run time that it never declares,
@@ -144,15 +213,18 @@ def select_affected [base: string] {
     let lint = if ($crates | is-empty) { null } else { $"set\(($crates.label | str join ' ')\)" }
     {
         full: false
-        reason: $"($affected | length) first-party target\(s\) changed since ($base)"
+        reason: $"($affected | length) target\(s\) changed since ($base)"
         aliases: $aliases
         # Seconds to run, and they read manifests no target hash covers.
         tests: ($tests | append "root//ci/...")
         lint: $lint
-        graph_tests: ($changed | any {|path| (
-            ($GRAPH_TEST_SUFFIXES | any {|suffix| $path | str ends-with $suffix })
-            or ($GRAPH_TEST_PREFIXES | any {|prefix| $path | str starts-with $prefix })
-        ) })
+        graph_tests: (
+            ($checks | any {|t| $t.label == "root//ci:graph_tests" })
+            or ($changed | any {|path| (
+                ($GRAPH_TEST_SUFFIXES | any {|suffix| $path | str ends-with $suffix })
+                or ($GRAPH_TEST_PREFIXES | any {|prefix| $path | str starts-with $prefix })
+            ) })
+        )
     }
 }
 

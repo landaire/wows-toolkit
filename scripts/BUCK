@@ -8,6 +8,14 @@
         "check-buck2-pins.py",
         "check-publish-dependencies.py",
         "check-third-party-notices.py",
+        "check-buck-hermetic.nu",
         "lint.nu",
     ]
 ]
+
+# The build-graph tests //ci:graph_tests runs, and the check one of them drives.
+filegroup(
+    name = "graph_tests",
+    srcs = glob(["test-*.nu"]) + ["check-buck-hermetic.nu"],
+    visibility = ["//ci/..."],
+)

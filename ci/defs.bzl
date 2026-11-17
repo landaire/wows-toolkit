@@ -44,5 +44,8 @@ nu_script = rule(
     attrs = {
         "args": attrs.list(attrs.string(), default = []),
         "script": attrs.source(),
+        # The other scripts it runs. The rule does not read them; they are
+        # listed so the target hash covers them, which ci/affected.nu compares.
+        "srcs": attrs.list(attrs.source(), default = []),
     },
 )

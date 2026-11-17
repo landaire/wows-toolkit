@@ -27,12 +27,14 @@ nu_script(
 nu_script(
     name = "hermetic",
     script = "hermetic.nu",
+    srcs = ["//scripts:check-buck-hermetic.nu"],
 )
 
 # The tests of the build graph itself, scripts/test-*.nu.
 nu_script(
     name = "graph_tests",
     script = "graph-tests.nu",
+    srcs = ["//scripts:graph_tests"],
 )
 
 # The first-party targets a change affects; see affected.nu.
