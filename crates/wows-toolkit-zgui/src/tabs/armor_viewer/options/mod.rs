@@ -534,6 +534,15 @@ fn pen_check_body(cx: &SectionCx) -> Option<AnyView> {
     })
 }
 
+/// Translation keys a section also answers to as a heading, so a search for "hull" finds the
+/// hull configuration.
+fn heading_aliases(which: OptionSection) -> &'static [&'static str] {
+    match which {
+        OptionSection::Configuration => &["ui.armor.hull_toggle"],
+        _ => &[],
+    }
+}
+
 /// One section with its folding head. `body` is called only while the section is expanded.
 fn section(
     cx: &SectionCx,
@@ -544,9 +553,11 @@ fn section(
     let filter = &cx.filter;
     let marked = filter.label(title.to_owned());
     let (expanded, content) = if filter.is_active() {
-        let inner = SectionCx { filter: filter.within(title), ..cx.clone() };
+        let alias_kept = filter.keeps_any_key(heading_aliases(which));
+        let inner_filter = if alias_kept { RailFilter::default() } else { filter.within(title) };
+        let inner = SectionCx { filter: inner_filter, ..cx.clone() };
         let content = body(&inner);
-        if content.is_none() && marked.is_none() {
+        if content.is_none() && marked.is_none() && !alias_kept {
             return None;
         }
         (true, content)

@@ -1118,7 +1118,7 @@ fn ctrl_tab_during_a_search_skips_the_dimmed_tabs() {
     armor.install(tabbed_ship_scene(), &[]);
     armor.show_tab(OptionsTab::Analysis);
     armor.type_into("armor-options-filter", "hull");
-    assert!(armor.shown("armor-options-page-Layers"), "Layers holds the first match");
+    assert!(armor.shown("armor-options-page-Ship"), "Ship holds the first match");
     let ctrl_tab = |armor: &mut ArmorWindow| {
         armor.window.press_key(NamedKey::Tab, Modifiers::PRIMARY);
         armor.settle();
@@ -1126,9 +1126,11 @@ fn ctrl_tab_during_a_search_skips_the_dimmed_tabs() {
 
     armor.click("armor-viewport");
     ctrl_tab(&mut armor);
-    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Display, "the next tab holding a match");
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "the next tab holding a match");
     ctrl_tab(&mut armor);
-    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "past Ship and Analysis");
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Display, "past Analysis");
+    ctrl_tab(&mut armor);
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Ship, "wrapping to the first");
 
     // A closed rail's counts can be stale, so Ctrl+Tab only reopens it during a search.
     workspace.toggle_options();
@@ -1136,13 +1138,32 @@ fn ctrl_tab_during_a_search_skips_the_dimmed_tabs() {
     armor.click("armor-viewport");
     ctrl_tab(&mut armor);
     assert!(workspace.options_open.get_untracked(), "Ctrl+Tab reopens the rail");
-    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "without moving off the tab");
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Ship, "without moving off the tab");
 
     armor.erase("hull");
+    armor.show_tab(OptionsTab::Layers);
     armor.type_into("armor-options-filter", "stern");
     armor.click("armor-viewport");
     ctrl_tab(&mut armor);
     assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Layers, "a lone match keeps its tab");
+}
+
+/// "hull" finds the hull configuration.
+#[test]
+fn a_search_for_hull_finds_the_configuration_section() {
+    let mut armor = ArmorWindow::open_tall();
+    let mut scene = two_zone_scene();
+    scene.camo_scheme_infos =
+        vec![camo(0, "Default", CamoOrigin::ShipSpecific), camo(1, "Ocean Wave", CamoOrigin::Universal)].into();
+    armor.install(scene, &[]);
+    armor.show_tab(OptionsTab::Layers);
+
+    let hull = rust_i18n::t!("ui.armor.hull_toggle").into_owned();
+    armor.type_into("armor-options-filter", &hull);
+    armor.show_tab(OptionsTab::Ship);
+
+    assert!(armor.shown("armor-options-body-Configuration"), "the configuration section is kept and open");
+    assert!(!armor.tab_state(OptionsTab::Ship).disabled, "the ship tab holds a match");
 }
 
 /// A tab is chosen by a click, by the arrow keys on the strip, and by Ctrl+Tab from the viewer, and
