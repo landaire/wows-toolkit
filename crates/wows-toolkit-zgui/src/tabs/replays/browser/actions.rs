@@ -17,6 +17,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc;
@@ -201,6 +203,39 @@ struct IndexWrite<T> {
     rated: bool,
 }
 
+/// When a running pass shows the rows it has written so far: every 16 replays written, or half
+/// a second after it last showed them, as the egui app flushes its rows.
+struct SummaryFlush {
+    /// Replays written when the rows were last shown.
+    shown: u64,
+    at: Instant,
+}
+
+impl SummaryFlush {
+    fn new(now: Instant) -> Self {
+        Self { shown: 0, at: now }
+    }
+
+    /// Whether the rows should read the index again at `progress`, noting that they will. A
+    /// progress behind what was shown is the next pass's.
+    fn is_due(&mut self, progress: IndexProgress, now: Instant) -> bool {
+        const BATCH: u64 = 16;
+        const INTERVAL: Duration = Duration::from_millis(500);
+
+        if progress.indexed < self.shown {
+            self.shown = 0;
+        }
+        let unshown = progress.indexed - self.shown;
+        if unshown == 0 || (unshown < BATCH && now.duration_since(self.at) < INTERVAL) {
+            return false;
+        }
+        self.shown = progress.indexed;
+        self.at = now;
+
+        true
+    }
+}
+
 /// The browser's background work, as a `Copy` handle the [`BrowserControl`] holds.
 #[derive(Clone, Copy)]
 pub struct BrowserWork {
@@ -382,9 +417,20 @@ pub fn offer(control: BrowserControl) {
         }
         running
     });
+    // While it runs, the install's rows fill as it writes them.
+    let flush = StoredValue::new_local(SummaryFlush::new(Instant::now()));
+    let during_shell_pass = RenderEffect::new(move |_| {
+        let Some(step) = shell_index.progress() else { return };
+        if flush.try_update_value(|flush| flush.is_due(step, Instant::now())) == Some(true)
+            && let Some(listing) = control.install_listing()
+        {
+            work.spawn(async move { listing.load_summaries() });
+        }
+    });
     on_cleanup_local(move || {
         drop(following);
         drop(after_shell_pass);
+        drop(during_shell_pass);
         if let Some(pass) = work.running.try_update_value(Option::take).flatten() {
             pass.stop();
         }
@@ -1150,8 +1196,15 @@ fn run_next_pass(control: BrowserControl) {
             );
             IndexWrite { outcome, rated: rating.is_some() }
         });
+        let mut flush = SummaryFlush::new(Instant::now());
         let built = follow(walking, steps, |step| {
             job.report(Job { name: name.clone(), progress: Progress::new(step.done, step.total) });
+            // The rows fill as the pass writes them rather than all at its end.
+            if flush.is_due(step, Instant::now())
+                && let Some(listing) = control.listing(id)
+            {
+                listing.load_summaries();
+            }
         })
         .await;
         drop(job);

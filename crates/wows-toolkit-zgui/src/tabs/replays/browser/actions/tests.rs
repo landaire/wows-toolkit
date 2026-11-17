@@ -564,3 +564,19 @@ fn rating_stored_battles_counts_as_an_index_write() {
 
     settle_until(&mut window, "the repair is noted as an index write", |_| control.work.shell_index.writes() != before);
 }
+
+/// A directory's pass shows its rows every 16 replays written or half a second after it last did,
+/// rather than only once it ends, and not while it writes nothing.
+#[test]
+fn a_folder_pass_shows_its_rows_as_it_writes_them() {
+    let start = Instant::now();
+    let mut flush = SummaryFlush::new(start);
+    let written = |indexed| IndexProgress { indexed, ..IndexProgress::default() };
+
+    assert!(!flush.is_due(written(15), start), "fewer than a batch, too soon");
+    assert!(flush.is_due(written(16), start), "a batch is shown at once");
+    assert!(!flush.is_due(written(17), start + Duration::from_millis(499)));
+    assert!(flush.is_due(written(17), start + Duration::from_millis(500)), "a straggler is shown in time");
+    assert!(!flush.is_due(written(17), start + Duration::from_secs(5)), "nothing new is nothing to show");
+    assert!(flush.is_due(written(16), start + Duration::from_secs(5)), "the next pass counts from nothing");
+}
