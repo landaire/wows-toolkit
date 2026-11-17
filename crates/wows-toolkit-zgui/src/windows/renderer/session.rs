@@ -8,6 +8,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use landaire_ui::Notice;
+use landaire_ui::ToastKey;
 use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
@@ -69,6 +71,7 @@ use wows_toolkit_replay_data::replay_render::playback::FRAME_INTERVAL;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
 use wows_toolkit_replay_data::replay_render::playback::Tick;
+use wows_toolkit_replay_data::replay_render::playback::speed_label;
 use wows_toolkit_replay_data::replay_render::raster::Canvas;
 use wows_toolkit_replay_data::replay_render::raster::build_canvas;
 use wows_toolkit_replay_data::replay_render::raster::fit_to_canvas;
@@ -914,8 +917,17 @@ impl RendererSession {
         self.change_playback(|playback| playback.set_speed(speed));
     }
 
-    pub fn step_speed(self, step: i32) {
-        self.change_playback(|playback| playback.step_speed(step));
+    /// Moves the speed one step along the ladder, and says the new speed on `toasts`.
+    pub fn step_speed(self, step: i32, toasts: Option<Toasts>) {
+        // The message a speed step says, which the next step's replaces.
+        const SPEED_TOAST: &str = "replay-renderer-speed";
+
+        if self.change_playback(|playback| playback.step_speed(step))
+            && let Some(toasts) = toasts
+        {
+            let said = speed_label(self.playback.with_untracked(Playback::speed));
+            toasts.show(Notice::info(said).keyed(ToastKey::new(SPEED_TOAST)));
+        }
     }
 
     fn start_ticker(self) {
@@ -1630,8 +1642,8 @@ impl RendererSession {
         self.collab.with_untracked(|link| link.broadcast_frame(broadcast));
     }
 
-    /// The transport's keyboard, saying on `toasts` where an event jump lands. Returns whether the
-    /// key was taken.
+    /// The transport's keyboard, saying on `toasts` the speed a step reaches and where an event
+    /// jump lands. Returns whether the key was taken.
     pub fn key(self, key: &Key, unmodified: &Key, modifiers: Modifiers, toasts: Option<Toasts>) -> bool {
         let ready = self.status.try_with_untracked(|status| matches!(status, Status::Ready(_)));
         if ready != Some(true) {
@@ -1659,8 +1671,8 @@ impl RendererSession {
                 NamedKey::Space | NamedKey::ArrowUp | NamedKey::ArrowDown | NamedKey::ArrowLeft | NamedKey::ArrowRight,
             ) if exporting => return false,
             Key::Named(NamedKey::Space) => self.toggle_playing(),
-            Key::Named(NamedKey::ArrowUp) => self.step_speed(1),
-            Key::Named(NamedKey::ArrowDown) => self.step_speed(-1),
+            Key::Named(NamedKey::ArrowUp) => self.step_speed(1, toasts),
+            Key::Named(NamedKey::ArrowDown) => self.step_speed(-1, toasts),
             Key::Named(NamedKey::ArrowLeft) if !modifiers.shift() => self.seek_by(-SEEK_STEP),
             Key::Named(NamedKey::ArrowRight) if !modifiers.shift() => self.seek_by(SEEK_STEP),
             Key::Named(NamedKey::ArrowLeft) => self.jump_to_previous_event(toasts),

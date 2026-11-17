@@ -67,6 +67,7 @@ use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 
 use crate::services::Services;
+use crate::windows::WindowSurfaceProps;
 use crate::windows::renderer::session::RendererSession;
 use crate::windows::renderer::view::ReplayRendererProps;
 use crate::windows::renderer::watched::WatchedPlaybackProps;
@@ -95,7 +96,8 @@ fn half_second_frames(seconds: usize) -> Vec<f32> {
     (0..seconds * 2).map(|frame| frame as f32 * 0.5).collect()
 }
 
-/// A viewport on `track` in the window's theme and message host, as a secondary window shows one.
+/// A viewport on `track` in the window's theme, message host and surface, as a secondary window
+/// shows one.
 #[component]
 fn Viewport(track: Rc<RefCell<Option<Track>>>, opened: Rc<Cell<Option<RendererSession>>>) -> impl IntoView {
     Services::provide(None);
@@ -107,7 +109,9 @@ fn Viewport(track: Rc<RefCell<Option<Track>>>, opened: Rc<Cell<Option<RendererSe
     view! {
         ThemeRoot(choice = choice) {
             ToastHost {
-                ReplayRenderer(session = session)
+                WindowSurface {
+                    ReplayRenderer(session = session)
+                }
             }
         }
     }
@@ -340,7 +344,9 @@ fn the_pop_out_control_is_withdrawn_once_the_viewport_has_a_window() {
 }
 
 /// The transport's keys reach playback: space plays, the arrows seek ten seconds and walk the
-/// speed ladder, and the speed dropdown follows rather than showing the speed before last.
+/// speed ladder and say the speed they reach, and the speed dropdown follows rather than showing
+/// the speed before last. The message stays off the transport, so the dropdown can be opened
+/// while it is up.
 #[test]
 fn the_keys_drive_the_transport_and_the_speed_dropdown_follows() {
     let (mut window, session) = open_viewport(track(half_second_frames(60)));
@@ -378,13 +384,25 @@ fn the_keys_drive_the_transport_and_the_speed_dropdown_follows() {
     window.press_key(NamedKey::ArrowUp, Modifiers::NONE);
     window.advance(Duration::from_millis(16));
     assert_eq!(session.playback.with_untracked(Playback::speed), 40.0);
+    let said = window.texts_by_class("lui-toasts").concat();
+    assert_eq!(said, speed_label(40.0), "the step says the speed it reached");
+    let messages = window.by_class("zui-toast__region").and_then(|region| window.bounds(region));
+    let transport = window.bounds(find(&window, "replay-renderer-transport"));
+    let (Some(messages), Some(transport)) = (messages, transport) else {
+        panic!("the messages and the transport have boxes: {messages:?} {transport:?}");
+    };
+    let messages_bottom = messages.origin.y.0 + messages.size.height.0;
+    assert!(messages_bottom <= transport.origin.y.0, "the message is above the transport: {messages:?} {transport:?}");
     assert_eq!(shown_speed(&mut window), Some(speed_label(40.0)), "the dropdown follows the keys");
     for _ in 0..8 {
         window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
     }
-    window.advance(Duration::from_millis(16));
+    // Long enough for the replaced messages to leave.
+    window.advance(Duration::from_millis(500));
     assert_eq!(session.playback.with_untracked(Playback::speed), 1.0, "the ladder stops at its bottom");
-    assert_eq!(shown_speed(&mut window), Some(speed_label(1.0)));
+    let said = window.texts_by_class("lui-toasts").concat();
+    assert_eq!(said, speed_label(1.0), "a burst of steps says only the speed it reached");
+    assert_eq!(shown_speed(&mut window), Some(speed_label(1.0)), "with that message up");
 
     window.press_key(NamedKey::Space, Modifiers::NONE);
     window.advance(Duration::from_millis(16));
