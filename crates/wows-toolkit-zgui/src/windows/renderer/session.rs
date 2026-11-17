@@ -999,8 +999,20 @@ impl RendererSession {
         }
     }
 
-    /// The wheel zooms about whatever is under the pointer.
+    /// The wheel turns a ship being placed, and otherwise zooms about whatever is under the pointer.
     pub fn wheel(self, position: WindowPoint, delta_y: f32) {
+        let turned = self
+            .annotator
+            .try_maybe_update(|annotator| {
+                let turned = annotator.turn_ship_in_hand(delta_y);
+                (turned, turned)
+            })
+            .unwrap_or(false);
+        if turned {
+            self.draw();
+            return;
+        }
+
         let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let wheel = self
             .map

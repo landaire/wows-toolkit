@@ -372,6 +372,27 @@ fn a_right_click_puts_the_tool_down() {
     assert_eq!(session.collab.with_untracked(CollabLink::annotation_count), 0, "and the line was not kept");
 }
 
+/// The wheel turns a ship being placed rather than zooming the map, and zooms again once the ship
+/// is put down.
+#[test]
+fn the_wheel_turns_a_ship_being_placed() {
+    let (mut window, session) = open();
+    let whole_map = || session.map.with_untracked(|map| map.view().is_whole_map());
+    let viewport = window.by_test_id("replay-renderer-viewport").expect("the map is drawn");
+    session.take_up(Tool::Ship { species: "Cruiser".to_owned(), friendly: true, yaw: 0.0 });
+
+    window.wheel(viewport, 100.0).expect("the map has a box");
+    settle(&mut window);
+    let Tool::Ship { yaw, .. } = tool(session) else { panic!("the ship is still in hand: {:?}", tool(session)) };
+    assert!((yaw + 0.5).abs() < 1e-4, "a hundred pixels toward the reader turn it half a radian back: {yaw}");
+    assert!(whole_map(), "and the map did not zoom");
+
+    session.take_up(Tool::None);
+    window.wheel(viewport, -100.0).expect("the map has a box");
+    settle(&mut window);
+    assert!(!whole_map(), "with no ship in hand the wheel zooms");
+}
+
 /// Keys typed into a search on the renderer's popovers stay with the search: the undo chord does
 /// not take back a drawing, and a space does not start playback.
 #[test]

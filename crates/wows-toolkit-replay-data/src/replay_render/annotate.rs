@@ -402,6 +402,20 @@ impl Annotator {
         self.drawing.set_color(ink);
     }
 
+    /// Turns the ship in hand by a wheel turn of `delta_y` pixels, as the egui renderer does
+    /// rather than zooming while one is being placed. Returns whether a ship was in hand.
+    pub fn turn_ship_in_hand(&mut self, delta_y: f32) -> bool {
+        // The egui renderer's rate.
+        const RADIANS_PER_PIXEL: f32 = 0.005;
+
+        let Tool::Ship { species, friendly, yaw } = self.drawing.tool() else { return false };
+        let turned =
+            Tool::Ship { species: species.clone(), friendly: *friendly, yaw: yaw + delta_y * RADIANS_PER_PIXEL };
+        self.drawing.set_tool(turned);
+
+        true
+    }
+
     /// Widens or narrows the nib by `step`, within the range the egui board
     /// offers. Returns whether it changed.
     pub fn step_nib(&mut self, step: f32) -> bool {
