@@ -1,7 +1,7 @@
 #!/usr/bin/env nu
 
-# reindeer and rustc come from PATH: reindeer from `mise run install-reindeer`,
-# rustc from the rustup shim. Going through `nix develop` restricted this to
+# reindeer and cargo come from PATH: reindeer from `mise run install-reindeer`,
+# cargo from the rustup shim. Going through `nix develop` restricted this to
 # Linux and macOS, so Windows had to run it under WSL.
 #
 # Nothing is vendored: the generated rules download each crate, checked against
@@ -25,11 +25,3 @@ let flattened = (
     | str join "\n"
 )
 $"($flattened)\n" | save -f third-party/rust/BUCK
-
-let rustc = (^rustc --version | parse -r 'rustc 1\.(?<minor>\d+)\.(?<patch>\d+)' | first)
-$"crate::version::Version {
-    minor: ($rustc.minor),
-    patch: ($rustc.patch),
-    channel: crate::version::Channel::Stable,
-}
-" | save -f third-party/rust/fixups/rustversion/version.expr
