@@ -257,9 +257,10 @@ pub fn km_to_minimap_distance(km: f32, space_size: f32) -> f32 {
     world / space_size * wows_minimap_renderer::MINIMAP_SIZE as f32
 }
 
-/// What a placed ship is tinted, as the egui toolbar tints it.
-const FRIENDLY: [u8; 3] = [76, 232, 170];
-const ENEMY: [u8; 3] = [254, 77, 42];
+/// What a friendly and an enemy placed ship are tinted, as the egui toolbar tints them. Front ends
+/// tint the side pickers and a team's capture zones with the same two.
+pub const FRIENDLY_COLOR: [u8; 3] = [76, 232, 170];
+pub const ENEMY_COLOR: [u8; 3] = [254, 77, 42];
 
 /// How long an arrow's head is, relative to the line's width.
 const ARROW_HEAD_LENGTH: f32 = 6.0;
@@ -294,7 +295,7 @@ pub fn annotation_commands(annotation: &Annotation) -> Vec<DrawCommand> {
                 pos: at(*pos),
                 yaw: *yaw,
                 species: Some(species.clone()),
-                color: Some(if *friendly { FRIENDLY } else { ENEMY }),
+                color: Some(if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }),
                 visibility: ShipVisibility::Visible,
                 opacity: 1.0,
                 is_self: false,

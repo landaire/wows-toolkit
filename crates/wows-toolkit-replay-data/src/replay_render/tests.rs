@@ -58,11 +58,11 @@ use wt_collab_client::peer::LocalAnnotationEvent;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::types::Annotation;
 
+use crate::drawing_style::MAX_NIB;
+use crate::drawing_style::MIN_NIB;
 use crate::load::GameDataCache;
 use crate::replay_render::annotate::Annotator;
 use crate::replay_render::annotate::Click;
-use crate::replay_render::annotate::MAX_NIB;
-use crate::replay_render::annotate::MIN_NIB;
 use crate::replay_render::annotate::PointerDown;
 use crate::replay_render::annotate::PointerUp;
 use crate::replay_render::annotate::ShapeEdit;
@@ -599,6 +599,14 @@ fn the_cheat_sheet_lists_the_chords_that_work() {
             button.label_key
         );
     }
+}
+
+/// A fresh viewport draws in egui's `Color32::YELLOW` at its opening width.
+#[test]
+fn a_fresh_annotator_draws_in_the_egui_default_ink() {
+    let annotator = Annotator::new();
+    assert_eq!(annotator.drawing().color(), [255, 255, 0, 255]);
+    assert_eq!(annotator.drawing().width(), 2.0);
 }
 
 /// A batch says which replay it has reached before it reads it, in order,

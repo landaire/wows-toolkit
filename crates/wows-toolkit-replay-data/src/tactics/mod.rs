@@ -33,6 +33,8 @@ use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_types::WorldPos;
 use wt_collab_client::drawing::Tool;
+use wt_collab_client::geometry::ENEMY_COLOR;
+use wt_collab_client::geometry::FRIENDLY_COLOR;
 use wt_collab_client::protocol::WireCapPoint;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationRangeFilter;
@@ -258,12 +260,8 @@ impl CapSide {
 /// How solid a capture zone's fill is drawn, as the battle draws its own.
 const CAP_FILL_ALPHA: f32 = 0.25;
 
-/// What a team's capture zone is coloured: the reader's own team, the enemy, and one nobody holds.
-///
-/// The same two the renderer paints a friendly and an enemy marker (`wt_collab_client::geometry`),
-/// so one side reads as one colour whether it is a zone or a ship.
-pub const FRIENDLY_COLOR: [u8; 3] = [76, 232, 170];
-pub const ENEMY_COLOR: [u8; 3] = [254, 77, 42];
+/// What a zone nobody holds is coloured. A held zone takes its team's ship tint, so one side reads
+/// as one colour whether it is a zone or a ship.
 pub const NEUTRAL_COLOR: [u8; 3] = [255, 255, 255];
 
 /// The board reads team zero as the reader's own, which is the team a replay records the
@@ -523,25 +521,6 @@ pub const MAX_CAP_RADIUS: f32 = 10.0 * WORLD_UNITS_PER_KM;
 /// world units; the egui board starts one at 150.
 pub const NEW_CAP_RADIUS: f32 = 150.0;
 
-/// What a board draws in until the reader picks otherwise, matching the ink and nib the replay
-/// viewport starts with.
-pub const DEFAULT_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0xff];
-pub const DEFAULT_NIB: f32 = 2.0;
-
-/// The inks the board offers, which are the replay viewport's own, with their translation keys.
-pub const INKS: [([u8; 4], &str); 6] = [
-    ([0xff, 0xd7, 0x3a, 0xff], "ui.tactics.ink_yellow"),
-    ([0xe8, 0x73, 0x7b, 0xff], "ui.tactics.ink_red"),
-    ([0x6f, 0xd9, 0x8a, 0xff], "ui.tactics.ink_green"),
-    ([0x7f, 0xb4, 0xe8, 0xff], "ui.tactics.ink_blue"),
-    ([0xe9, 0xe5, 0xdd, 0xff], "ui.tactics.ink_white"),
-    ([0x1a, 0x1a, 0x18, 0xff], "ui.tactics.ink_black"),
-];
-
-/// How wide the nib can be drawn, which is the span the replay viewport holds its own to.
-pub const MIN_NIB: f32 = 1.0;
-pub const MAX_NIB: f32 = 8.0;
-
 /// A drawing tool the board offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoardTool {
@@ -556,11 +535,11 @@ pub enum BoardTool {
 }
 
 impl BoardTool {
-    /// The tools in the order the egui board takes them up.
+    /// The tools in the order the egui toolbar offers them.
     pub const ALL: [Self; 8] = [
+        Self::Arrow,
         Self::Freehand,
         Self::Line,
-        Self::Arrow,
         Self::Circle,
         Self::Rectangle,
         Self::Triangle,

@@ -6,14 +6,14 @@ use wows_replays::types::TeamId;
 use wows_toolkit_services::collab::CapPointId;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_types::WorldPos2D;
+use wt_collab_client::geometry::ENEMY_COLOR;
+use wt_collab_client::geometry::FRIENDLY_COLOR;
 
 use crate::tactics::BoardCapPoint;
 use crate::tactics::BoardTool;
 use crate::tactics::CapDrag;
-use crate::tactics::ENEMY_COLOR;
 use crate::tactics::ElementPos;
 use crate::tactics::ElementSize;
-use crate::tactics::FRIENDLY_COLOR;
 use crate::tactics::Letterbox;
 use crate::tactics::MapChoice;
 use crate::tactics::MapEntry;
@@ -243,6 +243,14 @@ fn each_tool_has_its_own_chord() {
     assert_eq!(BoardTool::for_shortcut("9"), None);
 }
 
+/// A fresh board draws in egui's `Color32::YELLOW` at its opening width.
+#[test]
+fn a_fresh_board_draws_in_the_egui_default_ink() {
+    let board = drawn_board();
+    assert_eq!(board.ink(), [255, 255, 0, 255]);
+    assert_eq!(board.nib(), 2.0);
+}
+
 /// A board set on a map with no build loaded, shown 768 pixels square in a 768 pixel element.
 fn drawn_board() -> crate::tactics::board::Board {
     let mut board = crate::tactics::board::Board::new(None, wows_replay_insights::cap_layout::CapLayoutDb::default());
@@ -339,11 +347,11 @@ fn the_nib_stays_in_its_range() {
     for _ in 0..20 {
         board.step_nib(1.0);
     }
-    assert_eq!(board.nib(), crate::tactics::MAX_NIB);
+    assert_eq!(board.nib(), crate::drawing_style::MAX_NIB);
     for _ in 0..20 {
         board.step_nib(-1.0);
     }
-    assert_eq!(board.nib(), crate::tactics::MIN_NIB);
+    assert_eq!(board.nib(), crate::drawing_style::MIN_NIB);
 }
 
 /// A board with no map asks for nothing to be shown, and one with a map but no build asks for no

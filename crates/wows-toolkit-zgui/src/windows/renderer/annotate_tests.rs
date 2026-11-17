@@ -13,8 +13,8 @@ use rust_i18n::t;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_replays::types::GameClock;
+use wows_toolkit_replay_data::drawing_style::MAX_NIB;
 use wows_toolkit_replay_data::replay_render::annotate::HANDLE_RADIUS;
-use wows_toolkit_replay_data::replay_render::annotate::MAX_NIB;
 use wows_toolkit_replay_data::replay_render::track::DEFAULT_MAP_ORIGIN;
 use wows_toolkit_replay_data::replay_render::track::Track;
 use wows_toolkit_replay_data::replay_render::view::FrameSize;
@@ -175,11 +175,38 @@ fn choosing_on_the_popover_puts_it_in_hand() {
     click(&mut window, "replay-renderer-tool-select");
     assert_eq!(tool(session), Tool::None, "the selector puts the tool down");
 
+    // egui opens on a yellow that is none of the presets, so no swatch reads as chosen.
+    assert!(window.by_attribute("data-chosen", "true").is_none(), "no swatch is outlined at first");
     click(&mut window, "replay-renderer-ink-red");
     let ink = session.annotator.with_untracked(|annotator| annotator.drawing().color());
     assert_eq!(ink, [230, 50, 50, 255]);
     let red = window.by_test_id("replay-renderer-ink-red").expect("the swatch is drawn");
     assert!(window.by_attribute("data-chosen", "true") == Some(red), "the chosen ink is outlined");
+}
+
+/// The popover lays the selector then egui's tools, and egui's preset inks, out in egui's order.
+/// Its rows wrap, so the order is read row by row.
+#[test]
+fn the_popover_follows_the_egui_order() {
+    let (mut window, _session) = open();
+    click(&mut window, "replay-renderer-tools-toggle");
+    let reading_order = |names: &[&str], prefix: &str| -> Vec<String> {
+        let mut placed: Vec<((f32, f32), String)> = names
+            .iter()
+            .map(|name| {
+                let (x, y) = corner(&window, &format!("{prefix}{name}"));
+                ((y, x), (*name).to_owned())
+            })
+            .collect();
+        placed.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("laid-out positions are numbers"));
+        placed.into_iter().map(|(_, name)| name).collect()
+    };
+
+    let tools = ["select", "arrow", "freehand", "line", "circle", "rectangle", "triangle", "measure", "eraser"];
+    assert_eq!(reading_order(&tools, "replay-renderer-tool-"), tools, "the tools read as egui's do");
+
+    let inks = ["white", "gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"];
+    assert_eq!(reading_order(&inks, "replay-renderer-ink-"), inks, "the inks read as egui's presets do");
 }
 
 /// The circle's button pressed again fills the circle and stays chosen; the next press empties it.

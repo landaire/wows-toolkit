@@ -11,14 +11,14 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
-use wows_toolkit_replay_data::replay_render::annotate::ENEMY_TINT;
-use wows_toolkit_replay_data::replay_render::annotate::FRIENDLY_TINT;
 use wows_toolkit_replay_data::replay_render::annotate::PickedShape;
 use wows_toolkit_replay_data::replay_render::annotate::ShapeEdit;
 use wows_toolkit_replay_data::replay_render::annotate::SizeUnit;
 use wows_toolkit_replay_data::replay_render::annotate::shape_color;
 use wows_toolkit_replay_data::replay_render::annotate::shape_filled;
 use wows_toolkit_replay_data::replay_render::annotate::shape_size;
+use wt_collab_client::geometry::ENEMY_COLOR;
+use wt_collab_client::geometry::FRIENDLY_COLOR;
 use wt_collab_client::types::Annotation;
 use zgui::component;
 use zgui::css;
@@ -239,7 +239,10 @@ fn SideField(session: RendererSession, picked: Memo<Option<PickedShape>>) -> imp
             matches!(picked, Some(PickedShape { annotation: Annotation::Ship { friendly: true, .. }, .. }))
         })
     };
-    let tint = move || Some(format!("#{:06x}", if friendly() { FRIENDLY_TINT } else { ENEMY_TINT }));
+    let tint = move || {
+        let [red, green, blue] = if friendly() { FRIENDLY_COLOR } else { ENEMY_COLOR };
+        Some(Rgb::from_channels(red, green, blue).to_string())
+    };
     let named = move || {
         let key = if friendly() { "ui.tactics.side_friendly" } else { "ui.tactics.side_enemy" };
         t!(key).into_owned()

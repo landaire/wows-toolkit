@@ -34,6 +34,10 @@ use wt_collab_client::geometry::ship_range_commands;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationShipConfig;
 
+use crate::drawing_style::DEFAULT_INK;
+use crate::drawing_style::DEFAULT_NIB;
+use crate::drawing_style::MAX_NIB;
+use crate::drawing_style::MIN_NIB;
 use crate::load::GameDataCache;
 use crate::replay_render::track::Track;
 use crate::replay_render::view::ElementPoint;
@@ -51,37 +55,10 @@ pub const HISTORY_DEPTH: usize = 32;
 pub const HANDLE_RADIUS: f32 = 5.0;
 pub const HANDLE_DISTANCE: f32 = 25.0;
 
-/// What a tool draws with until the reader says otherwise: the white and the
-/// width the egui toolbar opens on.
-pub const DEFAULT_INK: [u8; 4] = [255, 255, 255, 255];
-pub const DEFAULT_NIB: f32 = 2.0;
-
-/// What the bracket keys hold the nib between, as the egui board does.
-pub const MIN_NIB: f32 = 1.0;
-pub const MAX_NIB: f32 = 8.0;
-
 /// The ships that can be placed on the map, as the egui toolbar offers
 /// them: short name, then the species a placed ship carries.
 pub const SPECIES: &[(&str, &str)] =
     &[("DD", "Destroyer"), ("CA", "Cruiser"), ("BB", "Battleship"), ("CV", "AirCarrier"), ("SS", "Submarine")];
-
-/// What a placed ship's button is tinted by which side it is on, as RGB.
-pub const FRIENDLY_TINT: u32 = 0x4CE8AA;
-pub const ENEMY_TINT: u32 = 0xFE4D2A;
-
-/// What a tool draws with, as the egui toolbar offers it: an element id, then
-/// the RGBA ink.
-pub const INKS: &[(&str, [u8; 4])] = &[
-    ("replay-renderer-ink-white", [255, 255, 255, 255]),
-    ("replay-renderer-ink-gray", [160, 160, 160, 255]),
-    ("replay-renderer-ink-red", [230, 50, 50, 255]),
-    ("replay-renderer-ink-orange", [240, 140, 30, 255]),
-    ("replay-renderer-ink-yellow", [240, 230, 50, 255]),
-    ("replay-renderer-ink-green", [50, 200, 50, 255]),
-    ("replay-renderer-ink-blue", [50, 120, 230, 255]),
-    ("replay-renderer-ink-purple", [180, 60, 230, 255]),
-    ("replay-renderer-ink-pink", [255, 130, 180, 255]),
-];
 
 /// One line in the cheat sheet's actions: the chord, and the translation key
 /// of what it does.
@@ -108,7 +85,7 @@ pub struct ToolButton {
 /// The tools the toolbar offers, in the order the egui toolbar offers them.
 ///
 /// Selecting is `Tool::None`: nothing is being drawn, so the pointer goes to
-/// the map as it otherwise would.
+/// the map as it otherwise would. egui has no selector button, so it leads.
 pub const TOOLS: &[ToolButton] = &[
     ToolButton {
         id: "replay-renderer-tool-select",
@@ -130,13 +107,6 @@ pub const TOOLS: &[ToolButton] = &[
         label_key: "ui.renderer.annotations.tool_freehand",
         chord: Some("Ctrl+2"),
         tool: || Tool::Freehand,
-    },
-    ToolButton {
-        id: "replay-renderer-tool-eraser",
-        glyph: Glyph::Eraser,
-        label_key: "ui.renderer.annotations.tool_eraser",
-        chord: Some("Ctrl+3"),
-        tool: || Tool::Eraser,
     },
     ToolButton {
         id: "replay-renderer-tool-line",
@@ -172,6 +142,13 @@ pub const TOOLS: &[ToolButton] = &[
         label_key: "ui.renderer.annotations.tool_measurement",
         chord: Some("Ctrl+M"),
         tool: || Tool::Measurement,
+    },
+    ToolButton {
+        id: "replay-renderer-tool-eraser",
+        glyph: Glyph::Eraser,
+        label_key: "ui.renderer.annotations.tool_eraser",
+        chord: Some("Ctrl+3"),
+        tool: || Tool::Eraser,
     },
 ];
 

@@ -18,12 +18,12 @@ use tokio::runtime::Runtime;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
 use wows_replays::types::GameParamId;
+use wows_toolkit_replay_data::drawing_style::INKS;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::ElementPos;
 use wows_toolkit_replay_data::tactics::ElementSize;
-use wows_toolkit_replay_data::tactics::INKS;
 use wows_toolkit_replay_data::tactics::MapChoice;
 use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
 use wows_toolkit_replay_data::tactics::RangeCircle;
@@ -214,14 +214,50 @@ fn the_chords_take_up_tools() {
     assert!(!board.chosen(&tool_id(BoardTool::Measurement)));
 }
 
-/// An ink pressed is the ink drawn in.
+/// A board opens on egui's yellow, which is none of the presets; an ink pressed is the ink drawn
+/// in.
 #[test]
 fn an_ink_is_chosen() {
     let mut board = BoardWindow::open();
-    assert!(board.chosen("tactics-ink-0"), "yellow is the ink a board starts with");
-    board.press("tactics-ink-3");
-    assert!(board.chosen("tactics-ink-3"));
-    assert!(!board.chosen("tactics-ink-0"));
+    for ink in INKS {
+        assert!(!board.chosen(&format!("tactics-ink-{}", ink.name)), "{} is not chosen at first", ink.name);
+    }
+    board.press("tactics-ink-white");
+    board.press("tactics-ink-blue");
+    assert!(board.chosen("tactics-ink-blue"));
+    assert!(!board.chosen("tactics-ink-white"), "the earlier ink is no longer chosen");
+}
+
+/// The toolbar lays the tools and inks out left to right in the egui toolbar's order.
+#[test]
+fn the_toolbar_follows_the_egui_order() {
+    let board = BoardWindow::open();
+    let left = |test_id: &str| {
+        let element = board.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is drawn"));
+        board.window.bounds(element).unwrap_or_else(|| panic!("{test_id} has a box")).origin.x.0
+    };
+    let in_order = |ids: &[String]| ids.windows(2).all(|pair| left(&pair[0]) < left(&pair[1]));
+
+    let tools: Vec<String> = [
+        BoardTool::Arrow,
+        BoardTool::Freehand,
+        BoardTool::Line,
+        BoardTool::Circle,
+        BoardTool::Rectangle,
+        BoardTool::Triangle,
+        BoardTool::Measurement,
+        BoardTool::Eraser,
+    ]
+    .into_iter()
+    .map(tool_id)
+    .collect();
+    assert!(in_order(&tools), "the tools read left to right as egui's do");
+
+    let inks: Vec<String> = ["white", "gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"]
+        .into_iter()
+        .map(|name| format!("tactics-ink-{name}"))
+        .collect();
+    assert!(in_order(&inks), "the inks read left to right as egui's presets do");
 }
 
 /// The nib steps within its range, and its buttons say when it can go no further.
@@ -359,17 +395,17 @@ fn a_picked_shape_is_edited_from_its_row() {
     assert!(board.has("tactics-shape-edit"), "the circle picked out shows its row");
     assert!(!board.has("tactics-shape-side"), "a circle has no side");
 
-    board.press("tactics-shape-ink-3");
+    board.press("tactics-shape-ink-blue");
     board.press("tactics-shape-filled");
     board.press("tactics-shape-size");
     board.window.press_key(NamedKey::ArrowUp, Modifiers::NONE);
     board.settle();
-    let (ink, _) = INKS[3];
+    let ink = INKS.iter().find(|ink| ink.name == "blue").expect("blue is a preset").rgba;
     assert_eq!(
         picked(&board),
         Some(PickedShape::Outline { color: ink, size: ShapeSize::MapUnits(101.0), filled: true })
     );
-    assert!(board.chosen("tactics-shape-ink-3"), "the ink drawn in reads as chosen");
+    assert!(board.chosen("tactics-shape-ink-blue"), "the ink drawn in reads as chosen");
 
     board.press("tactics-shape-delete");
     assert_eq!(board.model.with_untracked(|board| board.annotation_count()), 0, "the circle is deleted");
@@ -390,7 +426,7 @@ fn a_picked_ship_turns_side_from_its_row() {
 
     let picked = board.model.with_untracked(|board| board.picked_shape());
     assert_eq!(picked, Some(PickedShape::Ship { friendly: false }));
-    assert!(!board.has("tactics-shape-ink-0"), "a ship has no ink of its own");
+    assert!(!board.has("tactics-shape-ink-white"), "a ship has no ink of its own");
 }
 
 /// The picked shape's row and a peer's pointer, in both palettes, for review. Needs no install: the

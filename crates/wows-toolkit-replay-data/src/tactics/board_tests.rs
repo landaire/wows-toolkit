@@ -21,11 +21,11 @@ use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
 use wt_collab_client::types::Annotation;
 
+use crate::drawing_style::INKS;
 use crate::load::GameDataCache;
 use crate::load::LoadedGameData;
 use crate::tactics::ElementPos;
 use crate::tactics::ElementSize;
-use crate::tactics::INKS;
 use crate::tactics::MapChoice;
 use crate::tactics::board::Board;
 use crate::tactics::board::BoardKey;
@@ -307,7 +307,7 @@ fn a_picked_shape_is_edited_through_the_session() {
     draw(&mut board, Tool::Rectangle { filled: false }, corner, ElementPos { x: 400.0, y: 300.0 });
     click(&mut board, corner);
     told_shapes(&sent);
-    let (ink, _) = INKS[3];
+    let ink = INKS[3].rgba;
 
     board.set_picked_color(ink);
     board.set_picked_size(ShapeSize::MapUnits(150.0));

@@ -9,12 +9,11 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::drawing_style::INKS;
+use wows_toolkit_replay_data::drawing_style::Ink;
+use wows_toolkit_replay_data::drawing_style::MAX_NIB;
+use wows_toolkit_replay_data::drawing_style::MIN_NIB;
 use wows_toolkit_replay_data::replay_render::annotate::Annotator;
-use wows_toolkit_replay_data::replay_render::annotate::ENEMY_TINT;
-use wows_toolkit_replay_data::replay_render::annotate::FRIENDLY_TINT;
-use wows_toolkit_replay_data::replay_render::annotate::INKS;
-use wows_toolkit_replay_data::replay_render::annotate::MAX_NIB;
-use wows_toolkit_replay_data::replay_render::annotate::MIN_NIB;
 use wows_toolkit_replay_data::replay_render::annotate::PlaceableShip;
 use wows_toolkit_replay_data::replay_render::annotate::SPECIES;
 use wows_toolkit_replay_data::replay_render::annotate::ShipCatalog;
@@ -26,6 +25,8 @@ use wows_toolkit_replay_data::replay_render::annotate::same_tool;
 use wows_toolkit_replay_data::replay_render::annotate::ship_tool;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_collab_client::geometry::ENEMY_COLOR;
+use wt_collab_client::geometry::FRIENDLY_COLOR;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -152,10 +153,8 @@ fn ToolsPanel(
     };
     let tools: Vec<AnyView> =
         TOOLS.iter().map(|button| AnyView::new(view! { ToolToggle(session = session, button = button) })).collect();
-    let inks: Vec<AnyView> = INKS
-        .iter()
-        .map(|&(id, ink)| AnyView::new(view! { InkSwatch(session = session, id = id, ink = ink) }))
-        .collect();
+    let inks: Vec<AnyView> =
+        INKS.iter().map(|&ink| AnyView::new(view! { InkSwatch(session = session, ink = ink) })).collect();
 
     view! {
         column(class = "wt-renderer-tools") {
@@ -247,7 +246,8 @@ fn ToolToggle(session: RendererSession, button: &'static ToolButton) -> impl Int
 /// A row of ships to place, for one side, tinted by it.
 #[component]
 fn SpeciesRow(session: RendererSession, friendly: bool) -> impl IntoView {
-    let tint = format!("#{:06x}", if friendly { FRIENDLY_TINT } else { ENEMY_TINT });
+    let [red, green, blue] = if friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
+    let tint = format!("#{red:02x}{green:02x}{blue:02x}");
     let side = if friendly { "friendly" } else { "enemy" };
     let ships: Vec<AnyView> = SPECIES
         .iter()
@@ -340,19 +340,20 @@ fn NibStep(
 
 /// One ink a tool can draw with, outlined while it is the one in use.
 #[component]
-fn InkSwatch(session: RendererSession, id: &'static str, ink: [u8; 4]) -> impl IntoView {
-    let [red, green, blue, _] = ink;
+fn InkSwatch(session: RendererSession, ink: Ink) -> impl IntoView {
+    let [red, green, blue, _] = ink.rgba;
     let chosen =
-        move || session.annotator.with(|annotator| annotator.drawing().color() == ink).then(|| "true".to_owned());
+        move || session.annotator.with(|annotator| annotator.drawing().color() == ink.rgba).then(|| "true".to_owned());
 
     view! {
         box(
             class = "wt-renderer-tools__ink",
-            attr:data-testid = id,
+            attr:data-testid = format!("replay-renderer-ink-{}", ink.name),
             attr:data-chosen = chosen,
+            a11y:label = t!(ink.label_key).into_owned(),
             style:background-color = format!("#{red:02x}{green:02x}{blue:02x}"),
             on:click = move |_| {
-                session.annotate(|annotator, _| annotator.set_ink(ink));
+                session.annotate(|annotator, _| annotator.set_ink(ink.rgba));
             }
         )
     }

@@ -13,14 +13,13 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::drawing_style::INKS;
+use wows_toolkit_replay_data::drawing_style::Ink;
+use wows_toolkit_replay_data::drawing_style::MAX_NIB;
+use wows_toolkit_replay_data::drawing_style::MIN_NIB;
 use wows_toolkit_replay_data::tactics::BoardTool;
-use wows_toolkit_replay_data::tactics::ENEMY_COLOR;
-use wows_toolkit_replay_data::tactics::FRIENDLY_COLOR;
-use wows_toolkit_replay_data::tactics::INKS;
 use wows_toolkit_replay_data::tactics::MAX_CAP_RADIUS;
-use wows_toolkit_replay_data::tactics::MAX_NIB;
 use wows_toolkit_replay_data::tactics::MIN_CAP_RADIUS;
-use wows_toolkit_replay_data::tactics::MIN_NIB;
 use wows_toolkit_replay_data::tactics::MapEntry;
 use wows_toolkit_replay_data::tactics::RADIUS_STEP_KM;
 use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
@@ -42,6 +41,8 @@ use wows_toolkit_replay_data::tactics::ships::tier_roman;
 use wows_toolkit_replay_data::tactics::shortcut_modifier_name;
 use wows_toolkit_replay_data::tactics::team_color;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_collab_client::geometry::ENEMY_COLOR;
+use wt_collab_client::geometry::FRIENDLY_COLOR;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -820,21 +821,21 @@ fn ShapeInks(
 
     view! {
         row(class = "wt-tactics-toolbar__group") {
-            for entry in move || INKS.into_iter().enumerate().collect::<Vec<_>>(), key = |entry: &(usize, ([u8; 4], &str))| entry.0 {
-                Tip(tip = t!(entry.1.1).into_owned()) {
+            for ink in move || INKS.to_vec(), key = |ink: &Ink| ink.name {
+                Tip(tip = t!(ink.label_key).into_owned()) {
                     Button(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconSm,
                         disabled = locked,
-                        a11y:label = t!(entry.1.1).into_owned(),
-                        attr:data-chosen = move || (color.get() == Some(entry.1.0)).then(|| format!("tactics-shape-ink-{}", entry.0)),
-                        attr:data-testid = format!("tactics-shape-ink-{}", entry.0),
-                        on:click = move |_| model.update(|board| board.set_picked_color(entry.1.0))
+                        a11y:label = t!(ink.label_key).into_owned(),
+                        attr:data-chosen = move || (color.get() == Some(ink.rgba)).then(|| format!("tactics-shape-ink-{}", ink.name)),
+                        attr:data-testid = format!("tactics-shape-ink-{}", ink.name),
+                        on:click = move |_| model.update(|board| board.set_picked_color(ink.rgba))
                     ) {
                         box(class = "wt-tactics-toolbar__ink") {
                             box(
                                 class = "wt-tactics-toolbar__ink-fill",
-                                style:background-color = format!("rgb({}, {}, {})", entry.1.0[0], entry.1.0[1], entry.1.0[2])
+                                style:background-color = format!("rgb({}, {}, {})", ink.rgba[0], ink.rgba[1], ink.rgba[2])
                             )
                         }
                     }
@@ -1285,8 +1286,8 @@ fn DrawTools(model: BoardModel) -> impl IntoView {
                 ToolButton(model = model, tool = tool, locked = locked)
             }
             Rule()
-            for entry in move || INKS.into_iter().enumerate().collect::<Vec<_>>(), key = |entry: &(usize, ([u8; 4], &str))| entry.0 {
-                InkButton(model = model, index = entry.0, ink = entry.1.0, key = entry.1.1, locked = locked)
+            for ink in move || INKS.to_vec(), key = |ink: &Ink| ink.name {
+                InkButton(model = model, ink = ink, locked = locked)
             }
             Rule()
             row(class = "wt-tactics-toolbar__group") {
@@ -1397,16 +1398,10 @@ fn ToolButton(model: BoardModel, tool: BoardTool, locked: Signal<bool, LocalStor
 
 /// One ink, shown as a swatch.
 #[component]
-fn InkButton(
-    model: BoardModel,
-    index: usize,
-    ink: [u8; 4],
-    key: &'static str,
-    locked: Signal<bool, LocalStorage>,
-) -> impl IntoView {
-    let chosen = Memo::new(move |_| model.with(|board| board.ink() == ink));
-    let fill = format!("rgb({}, {}, {})", ink[0], ink[1], ink[2]);
-    let label = t!(key).into_owned();
+fn InkButton(model: BoardModel, ink: Ink, locked: Signal<bool, LocalStorage>) -> impl IntoView {
+    let chosen = Memo::new(move |_| model.with(|board| board.ink() == ink.rgba));
+    let fill = format!("rgb({}, {}, {})", ink.rgba[0], ink.rgba[1], ink.rgba[2]);
+    let label = t!(ink.label_key).into_owned();
 
     view! {
         Tip(tip = label.clone()) {
@@ -1415,9 +1410,9 @@ fn InkButton(
                 size = ButtonSize::IconSm,
                 disabled = locked,
                 a11y:label = label,
-                attr:data-chosen = move || chosen.get().then(|| format!("tactics-ink-{index}")),
-                attr:data-testid = format!("tactics-ink-{index}"),
-                on:click = move |_| model.update(|board| board.set_ink(ink))
+                attr:data-chosen = move || chosen.get().then(|| format!("tactics-ink-{}", ink.name)),
+                attr:data-testid = format!("tactics-ink-{}", ink.name),
+                on:click = move |_| model.update(|board| board.set_ink(ink.rgba))
             ) {
                 box(class = "wt-tactics-toolbar__ink") {
                     box(class = "wt-tactics-toolbar__ink-fill", style:background-color = fill)

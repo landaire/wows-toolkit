@@ -17,6 +17,7 @@ pub mod cap_layout_store;
 pub mod columns;
 pub mod damage_mix;
 pub mod directory_stats;
+pub mod drawing_style;
 pub mod error;
 pub mod force_reindex;
 pub mod frame;
