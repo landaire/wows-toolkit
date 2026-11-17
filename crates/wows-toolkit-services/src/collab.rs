@@ -34,6 +34,7 @@ use wt_collab_client::protocol::CursorAt;
 use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::protocol::EntityId;
 use wt_collab_client::protocol::ShipConfigFilter;
+use wt_collab_client::types::PlacedShipRanges;
 
 /// Where the web client is served. The session token rides in the fragment.
 const WEB_CLIENT_URL: &str = wt_collab_client::WEB_CLIENT_URL;
@@ -1476,6 +1477,37 @@ impl CollabLink {
                 height: silhouette.height,
             });
         }
+    }
+
+    /// Whether the session takes this end as the one the rest watches, which is when what it
+    /// says about the battle is heard.
+    pub fn is_frame_source(&self) -> bool {
+        let Some(state) = self.state.as_ref().filter(|_| self.is_active()) else { return false };
+        let held = state.lock();
+
+        held.frame_source_id == held.my_user_id
+    }
+
+    /// Tells the session what the ships placed on `replay_id` draw their range circles from, as
+    /// this end read them out of the battle's build. A peer watching it has neither.
+    pub fn send_placed_ship_ranges(&self, replay_id: ReplayId, ranges: PlacedShipRanges) {
+        if let Some(tx) = &self.local_tx {
+            let _ = tx.send(LocalEvent::PlacedShipRanges { replay_id: replay_id.raw(), ranges });
+        }
+    }
+
+    /// Which version of the placed ships' ranges the session holds, so a viewport can tell that
+    /// nothing has changed without copying them.
+    pub fn placed_ship_ranges_version(&self) -> SyncVersion {
+        let Some(state) = self.state.as_ref().filter(|_| self.is_active()) else { return SyncVersion::NONE };
+        SyncVersion(state.lock().placed_ship_ranges_version)
+    }
+
+    /// What the ships placed on `replay_id` draw their range circles from. `None` outside a
+    /// session, or before the end playing it has said.
+    pub fn placed_ship_ranges(&self, replay_id: ReplayId) -> Option<PlacedShipRanges> {
+        let state = self.state.as_ref().filter(|_| self.is_active())?;
+        state.lock().placed_ship_ranges.get(&replay_id.raw()).cloned()
     }
 
     /// A link onto `state` that reports as active with no peer task behind

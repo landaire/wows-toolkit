@@ -276,6 +276,11 @@ pub struct SessionState {
     pub trail_override_version: u64,
     /// Current set of player names whose trails are hidden.
     pub current_trail_hidden: Option<Vec<String>>,
+    /// Monotonically increasing version for placed ship range updates.
+    pub placed_ship_ranges_version: u64,
+    /// What the ships placed on each open replay draw their range circles from, by replay id,
+    /// as the frame source read them.
+    pub placed_ship_ranges: HashMap<u64, wt_collab_protocol::types::PlacedShipRanges>,
     /// Active map pings from peers (rendered as ripple effects).
     pub pings: Vec<PeerPing>,
     /// Per-board tactics session state, keyed by `board_id`.
@@ -339,6 +344,8 @@ impl Default for SessionState {
             current_range_overrides: None,
             trail_override_version: 0,
             current_trail_hidden: None,
+            placed_ship_ranges_version: 0,
+            placed_ship_ranges: HashMap::new(),
             pings: Vec::new(),
             tactics_boards: HashMap::new(),
             tactics_boards_version: 0,
@@ -367,6 +374,8 @@ impl SessionState {
         self.current_range_overrides = None;
         self.trail_override_version = 0;
         self.current_trail_hidden = None;
+        self.placed_ship_ranges_version = 0;
+        self.placed_ship_ranges.clear();
         self.pings.clear();
         self.tactics_boards.clear();
         self.tactics_boards_version = 0;

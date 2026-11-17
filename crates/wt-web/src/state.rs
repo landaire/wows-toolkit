@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use wt_collab_protocol::protocol::CollabRenderOptions;
 use wt_collab_protocol::protocol::CursorScope;
 use wt_collab_protocol::protocol::WireCapPoint;
+use wt_collab_protocol::types::PlacedShipRanges;
 
 use crate::types::Annotation;
 
@@ -52,6 +53,9 @@ pub struct ReplayView {
     pub annotation_ids: Vec<u64>,
     pub annotation_owners: Vec<u64>,
     pub current_frame: Option<FrameState>,
+    /// What the ships placed on this replay draw their range circles from. `None` until the host
+    /// has said.
+    pub placed_ship_ranges: Option<PlacedShipRanges>,
 }
 
 /// Current replay frame data.

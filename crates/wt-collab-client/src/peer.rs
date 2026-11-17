@@ -155,6 +155,11 @@ pub enum LocalEvent {
         width: u32,
         height: u32,
     },
+    /// What the ships placed on a replay draw their range circles from (frame source only).
+    PlacedShipRanges {
+        replay_id: u64,
+        ranges: wt_collab_protocol::types::PlacedShipRanges,
+    },
 }
 
 /// Handle returned from `start_peer_session` for UI interaction.
@@ -581,6 +586,7 @@ async fn host_main(
                                 s.open_replays.retain(|r| r.replay_id != replay_id);
                                 s.current_annotation_sync = None;
                                 s.annotation_sync_version += 1;
+                                s.placed_ship_ranges.remove(&replay_id);
                             }
                             // Broadcast to all peers.
                             let msg = PeerMessage::ReplayClosed { replay_id };
@@ -751,6 +757,12 @@ async fn host_main(
                         }
                         LocalEvent::SelfSilhouette { data, width, height } => {
                             broadcast_to_mesh(&mesh, &PeerMessage::SelfSilhouette { data, width, height });
+                        }
+                        // Held without a version bump, since this end already draws them, so a
+                        // peer joining later is sent them.
+                        LocalEvent::PlacedShipRanges { replay_id, ranges } => {
+                            ui_state.lock().placed_ship_ranges.insert(replay_id, ranges.clone());
+                            broadcast_to_mesh(&mesh, &PeerMessage::PlacedShipRanges { replay_id, ranges });
                         }
                     }
                 }
@@ -985,23 +997,7 @@ async fn host_accept_peer(
             return false;
         }
 
-        // Send ReplayOpened for each open replay so the peer creates views.
-        // (SessionInfo.open_replays carries metadata for the desktop client,
-        // but the web client needs discrete ReplayOpened messages.)
-        let replay_msgs: Vec<_> = {
-            let s = ui_state.lock();
-            s.open_replays
-                .iter()
-                .map(|r| PeerMessage::ReplayOpened {
-                    replay_id: r.replay_id,
-                    replay_name: r.replay_name.clone(),
-                    map_image_png: r.map_image_png.clone(),
-                    game_version: r.game_version.clone(),
-                    map_name: r.map_name.clone(),
-                    display_name: r.display_name.clone(),
-                })
-                .collect()
-        };
+        let replay_msgs = replay_catch_up(&ui_state.lock(), version);
         for msg in replay_msgs {
             if write_peer_message(&mut send, &msg).await.is_err() {
                 return false;
@@ -1201,6 +1197,38 @@ async fn host_accept_peer(
     event_tx.send(SessionEvent::UserLeft { user_id, name: client_name.clone(), timed_out });
     info!("Peer {user_id} ({client_name}) left session");
 }
+
+/// The open replays and their placed ships' ranges, in the form a peer joining on `version`
+/// decodes, so it creates their views and draws what is on them.
+///
+/// `SessionInfo.open_replays` carries the replays for the desktop client, but the web client
+/// needs discrete `ReplayOpened` messages.
+fn replay_catch_up(s: &SessionState, version: WireVersion) -> Vec<PeerMessage> {
+    let opened = s.open_replays.iter().map(|r| PeerMessage::ReplayOpened {
+        replay_id: r.replay_id,
+        replay_name: r.replay_name.clone(),
+        map_image_png: r.map_image_png.clone(),
+        game_version: r.game_version.clone(),
+        map_name: r.map_name.clone(),
+        display_name: r.display_name.clone(),
+    });
+    let ranges = s
+        .placed_ship_ranges
+        .iter()
+        .map(|(&replay_id, ranges)| PeerMessage::PlacedShipRanges { replay_id, ranges: ranges.clone() });
+
+    opened
+        .chain(ranges)
+        .filter_map(|msg| {
+            let rewritten = match msg.for_version(version)? {
+                std::borrow::Cow::Borrowed(_) => None,
+                std::borrow::Cow::Owned(rewritten) => Some(rewritten),
+            };
+            Some(rewritten.unwrap_or(msg))
+        })
+        .collect()
+}
+
 async fn join_main(
     params: JoinParams,
     event_tx: crate::EventSender,
@@ -1557,7 +1585,19 @@ async fn join_main(
                             // Only the host can promote — ignore.
                         }
                         SessionCommand::BecomeFrameSource => {
-                            let uid = mesh.lock().my_user_id;
+                            // The host takes the change up from a co-host and drops it from a
+                            // peer, so only a co-host holds itself as the source, as the host does.
+                            let (uid, taken) = {
+                                let mut m = mesh.lock();
+                                let taken = !m.my_role.is_peer();
+                                if taken {
+                                    m.frame_source_id = m.my_user_id;
+                                }
+                                (m.my_user_id, taken)
+                            };
+                            if taken {
+                                ui_state.lock().frame_source_id = uid;
+                            }
                             let msg = PeerMessage::FrameSourceChanged { source_user_id: uid };
                             let _ = write_peer_message(&mut send, &msg).await;
                         }
@@ -1585,7 +1625,9 @@ async fn join_main(
                     match evt {
                         LocalEvent::CursorPosition(at) => {
                             let msg = move_own_cursor(&ui_state, my_user_id, at);
-                            let _ = write_peer_message(&mut send, &msg.for_version(host_version)).await;
+                            if let Some(msg) = msg.for_version(host_version) {
+                                let _ = write_peer_message(&mut send, &msg).await;
+                            }
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
@@ -1718,6 +1760,12 @@ async fn join_main(
                         }
                         LocalEvent::SelfSilhouette { data, width, height } => {
                             let _ = write_peer_message(&mut send, &PeerMessage::SelfSilhouette { data, width, height }).await;
+                        }
+                        LocalEvent::PlacedShipRanges { replay_id, ranges } => {
+                            let msg = PeerMessage::PlacedShipRanges { replay_id, ranges };
+                            if let Some(msg) = msg.for_version(host_version) {
+                                let _ = write_peer_message(&mut send, &msg).await;
+                            }
                         }
                     }
                 }
@@ -2163,6 +2211,22 @@ fn handle_incoming_message(
             relay_if_host(sender_id, &PeerMessage::SelfSilhouette { data, width, height }, mesh);
         }
 
+        PeerMessage::PlacedShipRanges { replay_id, ref ranges } => {
+            // A client hears everything through the host, which passes on only the frame
+            // source's ranges, and sends its own catch-up from what it holds.
+            if sender_id != frame_source_id && !sender_is_host {
+                debug!("Dropping PlacedShipRanges from {sender_id} (frame source is {frame_source_id})");
+                return;
+            }
+            {
+                let mut s = ui_state.lock();
+                s.placed_ship_ranges.insert(replay_id, ranges.clone());
+                s.placed_ship_ranges_version += 1;
+                s.repaint_viewport(replay_id);
+            }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
         // ── Replay lifecycle (host -> all peers) ────────────────────────
         PeerMessage::ReplayOpened { replay_id, replay_name, map_image_png, game_version, map_name, display_name } => {
             if !sender_is_host {
@@ -2202,6 +2266,7 @@ fn handle_incoming_message(
                 s.open_replays.retain(|r| r.replay_id != replay_id);
                 s.current_annotation_sync = None;
                 s.annotation_sync_version += 1;
+                s.placed_ship_ranges.remove(&replay_id);
             }
             event_tx.send(SessionEvent::ReplayClosed { replay_id });
         }
@@ -2361,27 +2426,36 @@ fn handle_incoming_message(
     ui_state.lock().wake();
 }
 
-/// A message framed for each protocol revision, sharing the bytes where the two agree.
+/// A message framed for each protocol revision, sharing the bytes where they agree. `None` for
+/// a revision that has no form of the message, which is not sent to its peers.
 struct VersionedFrame {
-    scoped: Arc<Vec<u8>>,
-    unscoped: Arc<Vec<u8>>,
+    current: Arc<Vec<u8>>,
+    scoped: Option<Arc<Vec<u8>>>,
+    unscoped: Option<Arc<Vec<u8>>>,
 }
 
 impl VersionedFrame {
     fn new(msg: &PeerMessage) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let scoped = Arc::new(frame_peer_message(msg)?);
-        let unscoped = match msg.for_version(WireVersion::Unscoped) {
-            std::borrow::Cow::Borrowed(_) => Arc::clone(&scoped),
-            std::borrow::Cow::Owned(rewritten) => Arc::new(frame_peer_message(&rewritten)?),
-        };
+        let current = Arc::new(frame_peer_message(msg)?);
+        let framed_for =
+            |version: WireVersion| -> Result<Option<Arc<Vec<u8>>>, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(match msg.for_version(version) {
+                    None => None,
+                    Some(std::borrow::Cow::Borrowed(_)) => Some(Arc::clone(&current)),
+                    Some(std::borrow::Cow::Owned(rewritten)) => Some(Arc::new(frame_peer_message(&rewritten)?)),
+                })
+            };
+        let scoped = framed_for(WireVersion::Scoped)?;
+        let unscoped = framed_for(WireVersion::Unscoped)?;
 
-        Ok(Self { scoped, unscoped })
+        Ok(Self { current, scoped, unscoped })
     }
 
-    fn for_peer(&self, peer: &MeshPeer) -> Arc<Vec<u8>> {
+    fn for_peer(&self, peer: &MeshPeer) -> Option<Arc<Vec<u8>>> {
         match peer.version {
-            WireVersion::Scoped => Arc::clone(&self.scoped),
-            WireVersion::Unscoped => Arc::clone(&self.unscoped),
+            WireVersion::PlacedRanges => Some(Arc::clone(&self.current)),
+            WireVersion::Scoped => self.scoped.clone(),
+            WireVersion::Unscoped => self.unscoped.clone(),
         }
     }
 }
@@ -2397,7 +2471,9 @@ fn broadcast_to_mesh(mesh: &Arc<Mutex<MeshState>>, msg: &PeerMessage) {
     };
     let m = mesh.lock();
     for peer in m.peers.values() {
-        let _ = peer.msg_tx.try_send(framed.for_peer(peer));
+        if let Some(bytes) = framed.for_peer(peer) {
+            let _ = peer.msg_tx.try_send(bytes);
+        }
     }
 }
 
@@ -2417,8 +2493,10 @@ fn relay_if_host(sender_id: u64, msg: &PeerMessage, mesh: &Arc<Mutex<MeshState>>
         }
     };
     for peer in m.peers.values() {
-        if peer.user_id != sender_id {
-            let _ = peer.msg_tx.try_send(framed.for_peer(peer));
+        if peer.user_id != sender_id
+            && let Some(bytes) = framed.for_peer(peer)
+        {
+            let _ = peer.msg_tx.try_send(bytes);
         }
     }
 }
@@ -2491,7 +2569,7 @@ mod tests {
             color: [0; 3],
             role,
             msg_tx: tx,
-            version: WireVersion::Scoped,
+            version: WireVersion::PlacedRanges,
             asset_request_count: 0,
         }
     }
@@ -3035,6 +3113,64 @@ mod tests {
         assert_eq!(frame.frame_index, 5);
     }
 
+    /// Placed ship ranges belong to the battle being sent, so the host takes them only from the
+    /// frame source.
+    #[test]
+    fn the_host_holds_placed_ship_ranges_only_from_the_frame_source() {
+        let h = MessageTestHarness::new(0, PeerRole::Host, vec![(1, PeerRole::CoHost), (2, PeerRole::Peer)], 0)
+            .with_frame_source(1);
+        let ranges = wt_collab_protocol::types::PlacedShipRanges { space_size: 1400.0, hulls: Vec::new() };
+
+        h.dispatch(2, PeerMessage::PlacedShipRanges { replay_id: 1, ranges: ranges.clone() });
+        assert!(h.ui().placed_ship_ranges.is_empty());
+        assert_eq!(h.ui().placed_ship_ranges_version, 0);
+
+        h.dispatch(1, PeerMessage::PlacedShipRanges { replay_id: 1, ranges: ranges.clone() });
+        assert_eq!(h.ui().placed_ship_ranges.get(&1), Some(&ranges));
+        assert_eq!(h.ui().placed_ship_ranges_version, 1);
+    }
+
+    /// A client hears another peer's ranges, and the ranges a late joiner is caught up with,
+    /// from the host rather than from the frame source.
+    #[test]
+    fn a_client_holds_placed_ship_ranges_the_host_passes_on() {
+        let h = MessageTestHarness::as_client().with_frame_source(5);
+        let ranges = wt_collab_protocol::types::PlacedShipRanges { space_size: 1400.0, hulls: Vec::new() };
+
+        h.dispatch(0, PeerMessage::PlacedShipRanges { replay_id: 1, ranges: ranges.clone() });
+
+        assert_eq!(h.ui().placed_ship_ranges.get(&1), Some(&ranges));
+        assert_eq!(h.ui().placed_ship_ranges_version, 1);
+    }
+
+    /// A peer that joins late is caught up with the placed ships' ranges after the replay they
+    /// are on, unless it speaks a revision that cannot decode them.
+    #[test]
+    fn a_late_joiner_is_caught_up_with_placed_ship_ranges_it_decodes() {
+        let mut held = SessionState::default();
+        held.open_replays.push(OpenReplay {
+            replay_id: 1,
+            replay_name: "test.wowsreplay".into(),
+            map_image_png: Vec::new(),
+            game_version: "13.5".into(),
+            map_name: "spaces/01_solomon_islands".into(),
+            display_name: "Solomon Islands".into(),
+        });
+        held.placed_ship_ranges
+            .insert(1, wt_collab_protocol::types::PlacedShipRanges { space_size: 1400.0, hulls: Vec::new() });
+
+        let current = replay_catch_up(&held, WireVersion::PlacedRanges);
+        assert!(matches!(
+            &current[..],
+            [PeerMessage::ReplayOpened { replay_id: 1, .. }, PeerMessage::PlacedShipRanges { replay_id: 1, .. }]
+        ));
+
+        for older in [WireVersion::Scoped, WireVersion::Unscoped] {
+            let caught_up = replay_catch_up(&held, older);
+            assert!(matches!(&caught_up[..], [PeerMessage::ReplayOpened { replay_id: 1, .. }]), "{older:?}");
+        }
+    }
+
     // ─── Replay lifecycle ────────────────────────────────────────────────
 
     #[test]
@@ -3207,6 +3343,27 @@ mod tests {
             received(&mut unscoped),
             PeerMessage::CursorPosition { user_id: 1, pos: Some([100.0, 200.0]) }
         ));
+    }
+
+    /// Placed ship ranges reach a peer that decodes them, and are kept from a peer on an older
+    /// revision, which could not.
+    #[test]
+    fn host_relays_placed_ship_ranges_only_to_peers_that_decode_them() {
+        let h = MessageTestHarness::new(0, PeerRole::Host, vec![], 0).with_frame_source(1);
+        let mut current = peer_speaking(&h, 2, WireVersion::PlacedRanges);
+        let mut scoped = peer_speaking(&h, 3, WireVersion::Scoped);
+        let mut unscoped = peer_speaking(&h, 4, WireVersion::Unscoped);
+        let ranges = wt_collab_protocol::types::PlacedShipRanges { space_size: 1400.0, hulls: Vec::new() };
+
+        h.dispatch(1, PeerMessage::PlacedShipRanges { replay_id: 9, ranges: ranges.clone() });
+
+        let framed = current.try_recv().expect("the ranges are relayed");
+        assert!(matches!(
+            deserialize_message(&framed[4..]).unwrap(),
+            PeerMessage::PlacedShipRanges { replay_id: 9, ranges: seen } if seen == ranges
+        ));
+        assert!(scoped.try_recv().is_err(), "a /3 peer is not sent them");
+        assert!(unscoped.try_recv().is_err(), "a /2 peer is not sent them");
     }
 
     /// A client hears every peer's cursor from the host, each under the id of the peer who moved it.

@@ -9,6 +9,7 @@ use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 
 use crate::types::Annotation;
+use crate::types::PlacedShipRanges;
 
 // Re-export types from external crates used in the protocol.
 pub use wows_minimap_renderer::draw_command::DrawCommand;
@@ -22,11 +23,17 @@ pub use wowsunpack::game_types::EntityId;
 /// variants, changed struct fields, etc.).  Mismatched clients will fail
 /// cleanly at the QUIC handshake instead of hitting rkyv deserialization
 /// errors.
-pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/3";
+pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/4";
+
+/// ALPN of peers that predate [`PeerMessage::PlacedShipRanges`].
+///
+/// Still accepted and offered: it differs from [`COLLAB_ALPN`] only in that variant, which
+/// [`PeerMessage::for_version`] keeps from such a peer.
+pub const COLLAB_ALPN_SCOPED: &[u8] = b"/wows-toolkit-collab/3";
 
 /// ALPN of peers that predate [`PeerMessage::ScopedCursorPosition`].
 ///
-/// Still accepted and offered: the two revisions differ only in that variant,
+/// Still accepted and offered: it differs from [`COLLAB_ALPN_SCOPED`] only in that variant,
 /// which [`PeerMessage::for_version`] rewrites for such a peer.
 pub const COLLAB_ALPN_UNSCOPED: &[u8] = b"/wows-toolkit-collab/2";
 
@@ -35,25 +42,29 @@ pub const COLLAB_ALPN_UNSCOPED: &[u8] = b"/wows-toolkit-collab/2";
 pub enum WireVersion {
     /// [`COLLAB_ALPN_UNSCOPED`]: cursors carry no window.
     Unscoped,
-    /// [`COLLAB_ALPN`].
+    /// [`COLLAB_ALPN_SCOPED`]: no placed ship ranges.
     Scoped,
+    /// [`COLLAB_ALPN`].
+    PlacedRanges,
 }
 
 impl WireVersion {
     /// The ALPNs an endpoint accepts, newest first.
     pub fn alpns() -> Vec<Vec<u8>> {
-        vec![COLLAB_ALPN.to_vec(), COLLAB_ALPN_UNSCOPED.to_vec()]
+        vec![COLLAB_ALPN.to_vec(), COLLAB_ALPN_SCOPED.to_vec(), COLLAB_ALPN_UNSCOPED.to_vec()]
     }
 
     /// What a connection offers beyond [`COLLAB_ALPN`], so it still reaches an older host.
     pub fn connect_options() -> iroh::endpoint::ConnectOptions {
-        iroh::endpoint::ConnectOptions::new().with_additional_alpns(vec![COLLAB_ALPN_UNSCOPED.to_vec()])
+        iroh::endpoint::ConnectOptions::new()
+            .with_additional_alpns(vec![COLLAB_ALPN_SCOPED.to_vec(), COLLAB_ALPN_UNSCOPED.to_vec()])
     }
 
     /// The revision `connection` negotiated, or `None` for an ALPN this build does not speak.
     pub fn of(connection: &iroh::endpoint::Connection) -> Option<Self> {
         match connection.alpn() {
-            alpn if alpn == COLLAB_ALPN => Some(Self::Scoped),
+            alpn if alpn == COLLAB_ALPN => Some(Self::PlacedRanges),
+            alpn if alpn == COLLAB_ALPN_SCOPED => Some(Self::Scoped),
             alpn if alpn == COLLAB_ALPN_UNSCOPED => Some(Self::Unscoped),
             _ => None,
         }
@@ -456,21 +467,31 @@ pub enum PeerMessage {
 
     /// Cursor position over one session window. `None` = cursor left the map area.
     ///
-    /// Last, so the variants before it keep their indices. A peer on
+    /// After the variants an unscoped peer knows, so those keep their indices. A peer on
     /// [`COLLAB_ALPN_UNSCOPED`] cannot decode it and is sent
     /// [`Self::CursorPosition`] instead; one received from such a peer has no
     /// scope and is drawn only while one replay or board is open.
     ScopedCursorPosition { user_id: u64, at: Option<CursorAt> },
+
+    /// The ranges the ships placed on a replay's map draw their circles from, read out of the
+    /// battle's build by the end playing it. Sent again whenever they change.
+    /// Receiver drops if sender is not the current frame source.
+    ///
+    /// Last, so the variants before it keep their indices. A peer on an older revision cannot
+    /// decode it and is not sent it: it draws no placed ship's circles.
+    PlacedShipRanges { replay_id: u64, ranges: PlacedShipRanges },
 }
 
 impl PeerMessage {
-    /// This message as a peer speaking `version` can decode it.
-    pub fn for_version(&self, version: WireVersion) -> Cow<'_, Self> {
+    /// This message as a peer speaking `version` can decode it. `None` for one that peer has no
+    /// form of, which is not sent to it.
+    pub fn for_version(&self, version: WireVersion) -> Option<Cow<'_, Self>> {
         match (self, version) {
             (Self::ScopedCursorPosition { user_id, at }, WireVersion::Unscoped) => {
-                Cow::Owned(Self::CursorPosition { user_id: *user_id, pos: at.map(|at| at.pos) })
+                Some(Cow::Owned(Self::CursorPosition { user_id: *user_id, pos: at.map(|at| at.pos) }))
             }
-            _ => Cow::Borrowed(self),
+            (Self::PlacedShipRanges { .. }, WireVersion::Unscoped | WireVersion::Scoped) => None,
+            _ => Some(Cow::Borrowed(self)),
         }
     }
 
@@ -1089,13 +1110,12 @@ mod tests {
         let at = CursorAt { scope: CursorScope::Board(3), pos: [1.0, 2.0] };
         let msg = PeerMessage::ScopedCursorPosition { user_id: 7, at: Some(at) };
 
-        let sent = round_trip(&msg.for_version(WireVersion::Unscoped));
+        let sent = round_trip(&msg.for_version(WireVersion::Unscoped).expect("an unscoped form"));
 
         assert!(matches!(sent, PeerMessage::CursorPosition { user_id: 7, pos: Some([1.0, 2.0]) }));
-        assert!(matches!(
-            msg.for_version(WireVersion::Scoped),
-            Cow::Borrowed(PeerMessage::ScopedCursorPosition { .. })
-        ));
+        for version in [WireVersion::Scoped, WireVersion::PlacedRanges] {
+            assert!(matches!(msg.for_version(version), Some(Cow::Borrowed(PeerMessage::ScopedCursorPosition { .. }))));
+        }
     }
 
     /// A relayed move keeps the form it arrived in, so an unscoped pointer is not given a window.
@@ -1108,5 +1128,74 @@ mod tests {
         for update in [unscoped, scoped, left] {
             assert_eq!(update.to_message().cursor_update(), Some(update));
         }
+    }
+
+    /// Pins the archived bytes, which a peer on [`COLLAB_ALPN`] must keep decoding.
+    #[test]
+    fn placed_ship_ranges_wire_form() {
+        let msg = PeerMessage::PlacedShipRanges { replay_id: 7, ranges: moskva_ranges() };
+
+        insta::assert_snapshot!(archived_hex(&msg));
+    }
+
+    /// A peer on an older revision cannot decode placed ship ranges, so it is not sent them.
+    #[test]
+    fn placed_ship_ranges_are_kept_from_older_peers() {
+        let msg = PeerMessage::PlacedShipRanges { replay_id: 7, ranges: moskva_ranges() };
+
+        assert!(msg.for_version(WireVersion::Unscoped).is_none());
+        assert!(msg.for_version(WireVersion::Scoped).is_none());
+        assert!(matches!(
+            msg.for_version(WireVersion::PlacedRanges),
+            Some(Cow::Borrowed(PeerMessage::PlacedShipRanges { replay_id: 7, .. }))
+        ));
+    }
+
+    fn moskva_ranges() -> PlacedShipRanges {
+        use crate::types::HullRanges;
+        use wowsunpack::game_params::types::Km;
+        use wowsunpack::game_params::types::Meters;
+        use wowsunpack::game_params::types::ShipRanges;
+        use wowsunpack::game_types::GameParamId;
+
+        PlacedShipRanges {
+            space_size: 1400.0,
+            hulls: vec![HullRanges {
+                param_id: GameParamId::from(4242u32),
+                hull_name: Some("PRUH510_Moskva_1".to_owned()),
+                ranges: ShipRanges {
+                    detection_km: Some(Km::new(14.8)),
+                    main_battery_m: Some(Meters::new(17600.0)),
+                    radar_m: Some(Meters::new(10000.0)),
+                    ..ShipRanges::default()
+                },
+            }],
+        }
+    }
+
+    /// A placed ship's ranges reach the other end of the wire as they were sent.
+    #[test]
+    fn placed_ship_ranges_cross_the_wire() {
+        let sent = moskva_ranges();
+
+        let received = round_trip(&PeerMessage::PlacedShipRanges { replay_id: 7, ranges: sent.clone() });
+
+        let PeerMessage::PlacedShipRanges { replay_id, ranges } = received else {
+            panic!("a placed ship range message, got {received:?}");
+        };
+        assert_eq!((replay_id, ranges), (7, sent));
+    }
+
+    /// A range that is not a number gives a circle no radius to draw at, so it is refused.
+    #[test]
+    fn a_placed_ship_range_that_is_not_a_number_is_refused() {
+        let mut ranges = moskva_ranges();
+        ranges.hulls[0].ranges.radar_m = Some(wowsunpack::game_params::types::Meters::new(f32::NAN));
+
+        assert!(crate::validate_peer_message(&PeerMessage::PlacedShipRanges { replay_id: 7, ranges }).is_err());
+        assert!(
+            crate::validate_peer_message(&PeerMessage::PlacedShipRanges { replay_id: 7, ranges: moskva_ranges() })
+                .is_ok()
+        );
     }
 }

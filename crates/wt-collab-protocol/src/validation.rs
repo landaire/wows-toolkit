@@ -9,6 +9,7 @@ use std::fmt;
 
 use crate::protocol::*;
 use crate::types::Annotation;
+use crate::types::PlacedShipRanges;
 
 /// Validation error with a human-readable description.
 #[derive(Debug)]
@@ -348,6 +349,10 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
                 )));
             }
         }
+
+        PeerMessage::PlacedShipRanges { ranges, .. } => {
+            validate_placed_ship_ranges(ranges)?;
+        }
     }
     Ok(())
 }
@@ -359,6 +364,38 @@ fn validate_wire_cap_point(cp: &WireCapPoint, ctx: &str) -> Result<(), Validatio
     check_finite(cp.radius, &format!("{ctx}.radius"))?;
     if cp.radius <= 0.0 {
         return Err(ValidationError(format!("{ctx}.radius must be positive: {}", cp.radius)));
+    }
+    Ok(())
+}
+
+/// Validate what placed ships draw their range circles from.
+fn validate_placed_ship_ranges(placed: &PlacedShipRanges) -> Result<(), ValidationError> {
+    check_finite(placed.space_size, "PlacedShipRanges.space_size")?;
+    if placed.space_size <= 0.0 {
+        return Err(ValidationError(format!("PlacedShipRanges.space_size must be positive: {}", placed.space_size)));
+    }
+    // Each placed ship is one annotation, so there are never more hulls than annotations.
+    if placed.hulls.len() > MAX_ANNOTATIONS {
+        return Err(ValidationError(format!(
+            "PlacedShipRanges too many hulls: {} > {MAX_ANNOTATIONS}",
+            placed.hulls.len()
+        )));
+    }
+    for hull in &placed.hulls {
+        if let Some(name) = &hull.hull_name {
+            check_string_len(name, MAX_STRING_LEN, "PlacedShipRanges.hull_name")?;
+        }
+        let ranges = &hull.ranges;
+        let kilometres =
+            [ranges.detection_km, ranges.air_detection_km].into_iter().flatten().map(|kilometres| kilometres.value());
+        let metres =
+            [ranges.main_battery_m, ranges.secondary_battery_m, ranges.torpedo_range_m, ranges.radar_m, ranges.hydro_m]
+                .into_iter()
+                .flatten()
+                .map(|metres| metres.value());
+        for value in kilometres.chain(metres) {
+            check_finite(value, "PlacedShipRanges.ranges")?;
+        }
     }
     Ok(())
 }

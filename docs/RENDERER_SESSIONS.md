@@ -13,7 +13,7 @@ participant maintains a direct connection to every other participant.
 
 | Layer | Detail |
 |-------|--------|
-| ALPN | `b"/wows-toolkit-collab/3"`, with `b"/wows-toolkit-collab/2"` still accepted and offered |
+| ALPN | `b"/wows-toolkit-collab/4"`, with `b"/wows-toolkit-collab/3"` and `b"/wows-toolkit-collab/2"` still accepted and offered |
 | Serialization | rkyv, zlib-compressed, length-prefixed (`[u32 compressed_length][zlib(rkyv payload)]`) |
 | Limits | 16 MB max message, 4 MB compressed frame, 32 MB decompressed |
 
@@ -178,6 +178,17 @@ Receivers only accept `Frame` from the current `frame_source_id`. The host is
 the initial frame source; the frame source is changed via `FrameSourceChanged`.
 Draw commands are serialized as part of the `PeerMessage` and compressed at
 the framing layer (all messages are zlib-compressed).
+
+```rust
+PlacedShipRanges { replay_id, ranges }
+```
+
+A ship placed on the map draws range circles read from the battle's own game
+data, which a watcher does not have. The frame source reads them once per ship
+and hull and sends them whenever they change. The host holds the latest per
+replay and sends it to a peer that joins later. Receivers accept it only from
+the current `frame_source_id`. A peer on the `/3` or `/2` ALPN cannot decode it
+and is not sent it, so it draws no placed ship's circles.
 
 ### Replay lifecycle (host → all)
 

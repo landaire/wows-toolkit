@@ -1616,7 +1616,8 @@ pub struct ShipConfigData {
 
 /// Resolved ship range values in real-world units.
 /// Detection is in km, all weapon/consumable ranges are in meters.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct ShipRanges {
     /// Sea detection range in km.
     pub detection_km: Option<Km>,

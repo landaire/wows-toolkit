@@ -32,7 +32,9 @@ use crate::state::UserCursor;
 use crate::types::Annotation;
 use crate::types::AnnotationState;
 use crate::types::PaintTool;
+use crate::types::local_to_wire;
 
+use wt_collab_protocol::geometry::placed_ship_range_commands;
 use wt_collab_protocol::protocol::CursorAt;
 use wt_collab_protocol::protocol::CursorUpdate;
 use wt_collab_protocol::protocol::PeerMessage;
@@ -338,6 +340,7 @@ impl WebApp {
                     annotation_ids: Vec::new(),
                     annotation_owners: Vec::new(),
                     current_frame: None,
+                    placed_ship_ranges: None,
                 });
                 let tab = WebTab::Replay(replay_id);
                 if !self.dock_has_tab(&tab) {
@@ -352,6 +355,12 @@ impl WebApp {
             PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, commands } => {
                 if let Some(view) = self.session.replay_views.get_mut(&replay_id) {
                     view.current_frame = Some(FrameState { clock, frame_index, total_frames, game_duration, commands });
+                }
+            }
+            // The host passes on only the frame source's ranges.
+            PeerMessage::PlacedShipRanges { replay_id, ranges } => {
+                if let Some(view) = self.session.replay_views.get_mut(&replay_id) {
+                    view.placed_ship_ranges = Some(ranges);
                 }
             }
             PeerMessage::TacticsMapOpened {
@@ -699,47 +708,7 @@ impl WebApp {
 
         // Draw replay frame (DrawCommands) — shared code from wt-collab-egui
         if is_replay && let Some(commands) = self.get_active_frame_commands() {
-            use wt_collab_egui::draw_commands::DrawCommandLabelOptions;
-            use wt_collab_egui::draw_commands::DrawCommandTextures;
-            use wt_collab_egui::draw_commands::command_clip_rect;
-            use wt_collab_egui::draw_commands::draw_command_to_shapes;
-            use wt_translations::DefaultTextResolver;
-
-            let textures = DrawCommandTextures {
-                ship_icons: &self.assets.ship_icons,
-                ship_icon_outlines: None,
-                plane_icons: &self.assets.plane_icons,
-                building_icons: None,
-                consumable_icons: Some(&self.assets.consumable_icons),
-                ribbon_icons: Some(&self.assets.ribbon_icons),
-                subribbon_icons: Some(&self.assets.subribbon_icons),
-                death_cause_icons: Some(&self.assets.death_cause_icons),
-                powerup_icons: Some(&self.assets.powerup_icons),
-                silhouette_texture: self.assets.silhouette_texture.as_ref(),
-            };
-            let label_opts = DrawCommandLabelOptions::default();
-            let text_resolver = DefaultTextResolver;
-
-            for cmd in &commands {
-                let is_hud = cmd.is_hud();
-                let cmd_shapes = draw_command_to_shapes(
-                    cmd,
-                    &transform,
-                    &textures,
-                    ctx,
-                    &label_opts,
-                    None,
-                    &text_resolver,
-                    None,
-                    None,
-                );
-                let target_painter = if is_hud { &painter } else { &map_painter };
-                let clipped = command_clip_rect(cmd, &transform).map(|rect| target_painter.with_clip_rect(rect));
-                let target_painter = clipped.as_ref().unwrap_or(target_painter);
-                for shape in cmd_shapes {
-                    target_painter.add(shape);
-                }
-            }
+            self.draw_frame_commands(ctx, &commands, &transform, &painter, &map_painter);
         }
 
         // Draw cap points (tactics boards only)
@@ -762,6 +731,14 @@ impl WebApp {
         let annotations = self.get_active_annotations();
         for ann in &annotations {
             rendering::render_annotation(ann, &transform, Some(&self.assets.ship_icons), &map_painter, map_space_size);
+        }
+        // Placed ships' range circles, over the shapes as the renderer draws them.
+        if let ActiveView::Replay(id) = self.session.active_view
+            && let Some(placed) = self.session.replay_views.get(&id).and_then(|view| view.placed_ship_ranges.as_ref())
+        {
+            let wire: Vec<_> = annotations.iter().map(local_to_wire).collect();
+            let circles = placed_ship_range_commands(&wire, placed);
+            self.draw_frame_commands(ctx, &circles, &transform, &painter, &map_painter);
         }
         for &sel in &self.annotation_state.selected_indices {
             if sel < annotations.len() {
@@ -1098,6 +1075,49 @@ impl WebApp {
             return Some(frame.commands.clone());
         }
         None
+    }
+
+    /// Draws `commands` with the shared egui painter, the HUD on `painter` and the rest on
+    /// `map_painter`.
+    fn draw_frame_commands(
+        &self,
+        ctx: &egui::Context,
+        commands: &[wows_minimap_renderer::DrawCommand],
+        transform: &MapTransform,
+        painter: &egui::Painter,
+        map_painter: &egui::Painter,
+    ) {
+        use wt_collab_egui::draw_commands::DrawCommandLabelOptions;
+        use wt_collab_egui::draw_commands::DrawCommandTextures;
+        use wt_collab_egui::draw_commands::command_clip_rect;
+        use wt_collab_egui::draw_commands::draw_command_to_shapes;
+        use wt_translations::DefaultTextResolver;
+
+        let textures = DrawCommandTextures {
+            ship_icons: &self.assets.ship_icons,
+            ship_icon_outlines: None,
+            plane_icons: &self.assets.plane_icons,
+            building_icons: None,
+            consumable_icons: Some(&self.assets.consumable_icons),
+            ribbon_icons: Some(&self.assets.ribbon_icons),
+            subribbon_icons: Some(&self.assets.subribbon_icons),
+            death_cause_icons: Some(&self.assets.death_cause_icons),
+            powerup_icons: Some(&self.assets.powerup_icons),
+            silhouette_texture: self.assets.silhouette_texture.as_ref(),
+        };
+        let label_opts = DrawCommandLabelOptions::default();
+        let text_resolver = DefaultTextResolver;
+
+        for cmd in commands {
+            let cmd_shapes =
+                draw_command_to_shapes(cmd, transform, &textures, ctx, &label_opts, None, &text_resolver, None, None);
+            let target_painter = if cmd.is_hud() { painter } else { map_painter };
+            let clipped = command_clip_rect(cmd, transform).map(|rect| target_painter.with_clip_rect(rect));
+            let target_painter = clipped.as_ref().unwrap_or(target_painter);
+            for shape in cmd_shapes {
+                target_painter.add(shape);
+            }
+        }
     }
 
     fn get_active_annotations(&self) -> Vec<Annotation> {

@@ -9,6 +9,7 @@
 //! other.
 
 use crate::types::Annotation;
+use crate::types::PlacedShipRanges;
 use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::LabelAnchor;
@@ -536,6 +537,19 @@ pub fn ship_range_commands(
     circles
 }
 
+/// The range circles of every placed ship in `annotations`, drawn from the ranges `placed`
+/// holds for its ship and hull. A ship `placed` holds none for draws none.
+pub fn placed_ship_range_commands(annotations: &[Annotation], placed: &PlacedShipRanges) -> Vec<DrawCommand> {
+    let mut circles = Vec::new();
+    for annotation in annotations {
+        let Annotation::Ship { config: Some(config), .. } = annotation else { continue };
+        let Some(ranges) = placed.ranges_for(config) else { continue };
+        circles.extend(ship_range_commands(annotation, ranges, placed.space_size));
+    }
+
+    circles
+}
+
 /// The three corners of an arrow's head, or `None` for a stroke with no tip
 /// to put one on.
 fn arrow_head(points: &[[f32; 2]], width: f32) -> Option<[[f32; 2]; 3]> {
@@ -882,6 +896,32 @@ mod tests {
     fn a_map_of_no_size_draws_no_ranges() {
         let wanted = crate::types::AnnotationRangeFilter { detection: true, ..Default::default() };
         assert!(ship_range_commands(&placed(wanted, 1.0, 1.0), &ranges(), 0.0).is_empty());
+    }
+
+    /// A placed ship is drawn from the ranges held for its own ship and hull, so a ship on a
+    /// hull nobody read draws nothing rather than another hull's circles.
+    #[test]
+    fn placed_ships_draw_the_ranges_held_for_their_hull() {
+        let wanted = crate::types::AnnotationRangeFilter { detection: true, ..Default::default() };
+        let stock = placed(wanted, 1.0, 1.0);
+        let mut refitted = stock.clone();
+        if let Annotation::Ship { config: Some(config), .. } = &mut refitted {
+            config.hull_name = Some("B".to_string());
+        }
+        let held = PlacedShipRanges {
+            space_size: 1400.0,
+            hulls: vec![crate::types::HullRanges {
+                param_id: GameParamId::from(1u32),
+                hull_name: None,
+                ranges: ranges(),
+            }],
+        };
+
+        let drawn = placed_ship_range_commands(&[stock.clone(), refitted], &held);
+
+        let expected = ship_range_commands(&stock, &ranges(), 1400.0);
+        assert_eq!(expected.len(), 1);
+        assert_eq!(format!("{drawn:?}"), format!("{expected:?}"), "only the stock hull's circle");
     }
 
     /// A ship that has been given a name carries it, which is what the

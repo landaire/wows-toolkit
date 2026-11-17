@@ -3,6 +3,7 @@
 //! These types are serializable with rkyv for wire transport and also used
 //! directly in the annotation/paint UI layer.
 
+use wowsunpack::game_params::types::ShipRanges;
 use wowsunpack::game_types::GameParamId;
 
 use crate::protocol::CursorScope;
@@ -71,6 +72,38 @@ pub struct AnnotationRangeFilter {
     pub torpedo: bool,
     pub radar: bool,
     pub hydro: bool,
+}
+
+/// What the ships placed on one replay's map draw their range circles from, as the end playing
+/// the replay reads them out of the battle's own build. A peer watching it has neither.
+#[derive(Clone, Debug, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct PlacedShipRanges {
+    /// How wide the map is in world units, which turns a range into a distance on the minimap.
+    pub space_size: f32,
+    pub hulls: Vec<HullRanges>,
+}
+
+impl PlacedShipRanges {
+    /// The ranges read for `config`'s ship on its hull. `None` where none were: the battle's
+    /// build has no such ship.
+    pub fn ranges_for(&self, config: &AnnotationShipConfig) -> Option<&ShipRanges> {
+        self.hulls
+            .iter()
+            .find(|hull| hull.param_id == config.param_id && hull.hull_name == config.hull_name)
+            .map(|hull| &hull.ranges)
+    }
+}
+
+/// The ranges of one ship on one hull.
+///
+/// Held by ship and hull rather than by shape, so moving a placed ship or changing which of its
+/// circles show needs nothing new from the end that read them.
+#[derive(Clone, Debug, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct HullRanges {
+    pub param_id: GameParamId,
+    /// `None` is the default hull, as an annotation's own `hull_name` says it.
+    pub hull_name: Option<String>,
+    pub ranges: ShipRanges,
 }
 
 /// Active drawing/placement tool state.

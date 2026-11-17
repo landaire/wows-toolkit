@@ -366,7 +366,9 @@ async fn run_message_loop(
         for cmd in pending_cmds {
             match cmd {
                 ConnectionCommand::Send(msg) => {
-                    if let Err(e) = write_peer_message(&mut send, &msg.for_version(version)).await {
+                    // The host speaks an older revision that has no form of this message.
+                    let Some(msg) = msg.for_version(version) else { continue };
+                    if let Err(e) = write_peer_message(&mut send, &msg).await {
                         if !done.get() {
                             tracing::error!("Failed to send message: {e}");
                             *disconnect_reason.borrow_mut() = Some(format!("Send failed: {e}"));
