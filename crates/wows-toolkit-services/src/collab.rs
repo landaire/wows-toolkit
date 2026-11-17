@@ -56,6 +56,8 @@ pub struct CollabState {
     /// The live session, if one is running. `None` means neither hosting nor
     /// joined, which is the resting state rather than a failure.
     handle: Option<PeerSessionHandle>,
+    /// Where the running session's playback is sent from. `None` with no session.
+    outbound: Option<OutboundFrames>,
     /// What the peer task and this side both read. Held even with no session
     /// so a waker can be installed once and kept.
     pub state: Arc<Mutex<SessionState>>,
@@ -77,6 +79,7 @@ impl Default for CollabState {
     fn default() -> Self {
         Self {
             handle: None,
+            outbound: None,
             state: Arc::new(Mutex::new(SessionState::default())),
             hosting: false,
             display_name: String::new(),
@@ -179,7 +182,7 @@ impl CollabState {
             next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             alone_pings: Arc::default(),
             // Only a host or a co-host has a mesh to send frames into.
-            frames: self.handle.as_ref().filter(|_| self.may_steer()).map(|handle| handle.frame_tx.clone()),
+            frames: self.outbound.as_ref().filter(|_| self.may_steer()).cloned(),
             commands: self.handle.as_ref().map(|handle| handle.command_tx.clone()),
         }
     }
@@ -256,7 +259,9 @@ impl CollabState {
             held.current_annotation_sync = None;
             held.tactics_boards.clear();
         }
-        self.handle = Some(wt_collab_client::peer::start_peer_session(runtime, mode, Arc::clone(&self.state)));
+        let handle = wt_collab_client::peer::start_peer_session(runtime, mode, Arc::clone(&self.state));
+        self.outbound = OutboundFrames::start(handle.frame_tx.clone());
+        self.handle = Some(handle);
     }
 
     /// Leaves or stops the session.
@@ -267,6 +272,9 @@ impl CollabState {
     pub fn leave(&mut self) {
         if let Some(handle) = self.handle.take() {
             let _ = handle.command_tx.send(SessionCommand::Stop);
+        }
+        if let Some(outbound) = self.outbound.take() {
+            outbound.close();
         }
         self.hosting = false;
         self.token_revealed = false;
@@ -309,13 +317,15 @@ impl CollabState {
         let (local_tx, sent) = std::sync::mpsc::channel();
         let (command_tx, _) = std::sync::mpsc::channel();
         let (frame_tx, _) = std::sync::mpsc::sync_channel(1);
-        self.handle = Some(PeerSessionHandle {
+        let handle = PeerSessionHandle {
             event_inbox: wt_collab_client::EventInbox::new(None),
             command_tx,
             frame_tx,
             local_tx,
             state: Arc::clone(&self.state),
-        });
+        };
+        self.outbound = OutboundFrames::start(handle.frame_tx.clone());
+        self.handle = Some(handle);
 
         sent
     }
@@ -403,6 +413,81 @@ impl LatestFrame {
     }
 }
 
+/// Where this end's playback goes for the session to send: the newest moment only.
+///
+/// The session takes frames through a short queue that refuses one when full, so a frame handed
+/// straight to it while the mesh is behind is lost, and that is the newest. A thread of its own
+/// waits on the queue instead, and each moment submitted meanwhile replaces the one waiting, so
+/// the last one submitted is always the next sent.
+#[derive(Clone)]
+struct OutboundFrames {
+    shared: Arc<OutboundShared>,
+}
+
+struct OutboundShared {
+    waiting: Mutex<Outbound>,
+    ready: parking_lot::Condvar,
+}
+
+#[derive(Default)]
+struct Outbound {
+    frame: Option<wt_collab_client::peer::FrameBroadcast>,
+    closed: bool,
+}
+
+impl OutboundFrames {
+    /// Starts the thread that hands moments to `queue`. `None`, said in the log, when the thread
+    /// cannot be started, and then nothing is sent.
+    fn start(queue: std::sync::mpsc::SyncSender<wt_collab_client::peer::FrameBroadcast>) -> Option<Self> {
+        let shared =
+            Arc::new(OutboundShared { waiting: Mutex::new(Outbound::default()), ready: parking_lot::Condvar::new() });
+        let forwarded = Arc::clone(&shared);
+        let started = std::thread::Builder::new().name("collab-frames".to_owned()).spawn(move || {
+            while let Some(frame) = forwarded.next() {
+                // Blocks while the queue is full; the moments submitted meanwhile replace each other.
+                if queue.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
+        match started {
+            Ok(_) => Some(Self { shared }),
+            Err(err) => {
+                tracing::error!("collab: the thread that sends playback could not be started: {err}");
+                None
+            }
+        }
+    }
+
+    /// Puts `frame` up as the next sent, in place of any not yet taken.
+    fn submit(&self, frame: wt_collab_client::peer::FrameBroadcast) {
+        self.shared.waiting.lock().frame = Some(frame);
+        self.shared.ready.notify_one();
+    }
+
+    /// Stops the thread once it has handed over what it holds.
+    fn close(&self) {
+        self.shared.waiting.lock().closed = true;
+        self.shared.ready.notify_one();
+    }
+}
+
+impl OutboundShared {
+    /// The next moment to send, waiting for one. `None` once closed.
+    fn next(&self) -> Option<wt_collab_client::peer::FrameBroadcast> {
+        let mut waiting = self.waiting.lock();
+        loop {
+            if let Some(frame) = waiting.frame.take() {
+                return Some(frame);
+            }
+            if waiting.closed {
+                return None;
+            }
+            self.ready.wait(&mut waiting);
+        }
+    }
+}
+
 /// One participant, as the roster shows them.
 pub struct ConnectedPeer {
     pub user_id: u64,
@@ -415,6 +500,36 @@ pub struct ConnectedPeer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A moment of playback at `clock`.
+    fn moment(clock: f32) -> wt_collab_client::peer::FrameBroadcast {
+        wt_collab_client::peer::FrameBroadcast {
+            replay_id: 1,
+            clock,
+            frame_index: 0,
+            total_frames: 10,
+            game_duration: 1200.0,
+            commands: Vec::new(),
+        }
+    }
+
+    /// Moments submitted while the session's queue is full replace each other rather than being
+    /// refused, so the last one submitted is sent after those already queued.
+    #[test]
+    fn the_last_moment_submitted_is_sent() {
+        let (queue, sent) = std::sync::mpsc::sync_channel(1);
+        let outbound = OutboundFrames::start(queue).expect("the thread starts");
+
+        for clock in 1..=6 {
+            outbound.submit(moment(clock as f32));
+        }
+        outbound.close();
+
+        // Nothing reads the queue until now, so it filled after the first moment or two.
+        let clocks: Vec<f32> = sent.iter().map(|frame| frame.clock).collect();
+        assert_eq!(clocks.last(), Some(&6.0), "the newest moment is sent: {clocks:?}");
+        assert!(clocks.windows(2).all(|pair| pair[0] < pair[1]), "in the order submitted: {clocks:?}");
+    }
 
     #[test]
     fn a_session_that_has_not_started_is_not_active() {
@@ -602,7 +717,7 @@ pub struct CollabLink {
     alone_pings: Arc<Mutex<Vec<MapPing>>>,
     /// Where a frame of playback goes for the rest of the session to watch.
     /// `None` for a peer, which is sent frames rather than sending them.
-    frames: Option<std::sync::mpsc::SyncSender<wt_collab_client::peer::FrameBroadcast>>,
+    frames: Option<OutboundFrames>,
     /// Where a message about the session itself goes: which replays are open,
     /// and which end is the one being watched.
     commands: Option<std::sync::mpsc::Sender<wt_collab_client::SessionCommand>>,
@@ -1251,13 +1366,12 @@ impl CollabLink {
     /// Puts one frame of playback in front of the session.
     ///
     /// Draw commands rather than pixels, so each peer draws the battle with its
-    /// own art at its own size. Dropped rather than queued when the mesh is
-    /// behind: a frame nobody has read yet is already stale, and a reader
-    /// scrubbing would otherwise build a backlog the session plays out
-    /// afterwards.
+    /// own art at its own size. While the mesh is behind, each frame replaces the one waiting
+    /// rather than queueing behind it: a frame nobody has sent yet is already stale, and a reader
+    /// scrubbing would otherwise build a backlog the session plays out afterwards.
     pub fn broadcast_frame(&self, frame: wt_collab_client::peer::FrameBroadcast) {
         if let Some(frames) = &self.frames {
-            let _ = frames.try_send(frame);
+            frames.submit(frame);
         }
     }
 
