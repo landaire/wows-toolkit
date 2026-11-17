@@ -295,6 +295,19 @@ pub enum Click {
     Ignored,
 }
 
+/// What the pointer over the map says a press would do, as the egui renderer's cursor does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerLook {
+    /// Nothing drawn wants the press, so the map has it.
+    Map,
+    /// The tool in hand draws, places or rubs out.
+    Aiming,
+    /// What is picked out can be taken hold of.
+    Grab,
+    /// What is picked out is being moved or turned.
+    Grabbing,
+}
+
 /// The tool in hand, what is picked out, and what this end can undo.
 pub struct Annotator {
     drawing: Drawing,
@@ -364,6 +377,25 @@ impl Annotator {
     /// pointer.
     pub fn has_tool(&self) -> bool {
         *self.drawing.tool() != Tool::None
+    }
+
+    /// What a press on the map would go to, for the pointer to show. While the drawing is locked
+    /// every press goes to the map.
+    pub fn pointer_look(&self, link: &CollabLink) -> PointerLook {
+        if link.annotations_locked() {
+            return PointerLook::Map;
+        }
+        if self.has_tool() {
+            return PointerLook::Aiming;
+        }
+        if self.moving.is_some() || self.turning.is_some() {
+            return PointerLook::Grabbing;
+        }
+        if self.picked.is_empty() {
+            return PointerLook::Map;
+        }
+
+        PointerLook::Grab
     }
 
     /// Takes up `tool`, dropping whatever was half-drawn.

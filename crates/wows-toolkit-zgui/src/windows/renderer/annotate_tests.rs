@@ -31,6 +31,7 @@ use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Rect;
+use zgui::platform::CursorStyle;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
@@ -373,6 +374,45 @@ fn escape_puts_the_tool_down_then_the_pick() {
     settle(&mut window);
     assert!(picked().is_empty(), "the second puts down the pick");
     assert!(window.by_test_id("replay-renderer-shape-edit").is_none(), "and its popup with it");
+}
+
+/// The pointer over the map says what a press would do: a crosshair with a tool in hand, an open
+/// hand over a pick it would move, and a closed one while it moves it.
+#[test]
+fn the_pointer_shows_what_a_press_would_do() {
+    let (mut window, session) = open();
+    session.collab.with_untracked(|link| {
+        link.add_annotation(Annotation::Circle {
+            center: [300.0, 400.0],
+            radius: 20.0,
+            color: [255; 4],
+            width: 2.0,
+            filled: false,
+        });
+    });
+    let on_circle = window_point(session, (320.0, 400.0));
+    window.hover_at(on_circle);
+    settle(&mut window);
+    assert_ne!(window.cursor(), Some(CursorStyle::Crosshair), "nothing in hand, nothing picked");
+    assert_ne!(window.cursor(), Some(CursorStyle::Grab));
+
+    session.take_up(Tool::Line);
+    settle(&mut window);
+    assert_eq!(window.cursor(), Some(CursorStyle::Crosshair), "a tool in hand aims");
+
+    session.take_up(Tool::None);
+    window.click_at(on_circle);
+    settle(&mut window);
+    assert_eq!(window.cursor(), Some(CursorStyle::Grab), "a pick can be taken hold of");
+
+    window.press_at(on_circle);
+    // Down and to the left, clear of the edit popup on the circle's right.
+    window.hover_at(window_point(session, (300.0, 420.0)));
+    settle(&mut window);
+    assert_eq!(window.cursor(), Some(CursorStyle::Grabbing), "and is held while it moves");
+    window.release();
+    settle(&mut window);
+    assert_eq!(window.cursor(), Some(CursorStyle::Grab), "and let go after");
 }
 
 /// A right-click with a tool in hand puts it down and drops the shape half-drawn with it.

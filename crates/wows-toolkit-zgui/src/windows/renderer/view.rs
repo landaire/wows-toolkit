@@ -10,6 +10,7 @@ use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::replay_render::annotate::PointerLook;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
@@ -85,6 +86,9 @@ const CSS: &str = css!(
     .wt-renderer__body { position: relative; display: flex; flex: 1; min-height: 0; }
     .wt-renderer__map { position: relative; flex: 1; min-width: 0; min-height: 0; }
     .wt-renderer__map[data-zoomed] { cursor: grab; }
+    .wt-renderer__map[data-pointer=\"grab\"] { cursor: grab; }
+    .wt-renderer__map[data-pointer=\"grabbing\"] { cursor: grabbing; }
+    .wt-renderer__map[data-pointer=\"aiming\"] { cursor: crosshair; }
     .wt-renderer__frame { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
     .wt-renderer__state {
         display: flex;
@@ -256,6 +260,17 @@ fn MapArea(session: RendererSession, map: NodeRef, root: NodeRef) -> impl IntoVi
     // The frame playback is on, which a view built again after a pop-out shows without moving.
     session.draw();
     let zoomed = move || session.map.with(|map| !map.view().is_whole_map()).then(|| "true".to_owned());
+    // The host's lock changes under the session, so it is read again as the session redraws.
+    let pointer = move || {
+        let _ = session.collab_frame.get();
+        let look = session.collab.with(|link| session.annotator.with(|annotator| annotator.pointer_look(link)));
+        match look {
+            PointerLook::Map => None,
+            PointerLook::Aiming => Some("aiming".to_owned()),
+            PointerLook::Grab => Some("grab".to_owned()),
+            PointerLook::Grabbing => Some("grabbing".to_owned()),
+        }
+    };
 
     view! {
         box(
@@ -263,6 +278,7 @@ fn MapArea(session: RendererSession, map: NodeRef, root: NodeRef) -> impl IntoVi
             node_ref = map,
             attr:data-testid = "replay-renderer-viewport",
             attr:data-zoomed = zoomed,
+            attr:data-pointer = pointer,
             on:pointer_down = move |ev| {
                 place(session, map);
                 let position = window_point(ev.position);
