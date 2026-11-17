@@ -12,6 +12,7 @@ use wows_replay_insights::battle_report::RibbonResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
 use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::load::Perspectives;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::test_support::base_row;
 use wows_toolkit_replay_data::test_support::named_fire_chance;
@@ -49,8 +50,9 @@ fn the_fire_chance_block_expands_under_the_name_column() {
     let mut row = base_row(1, Relation::new(0), true);
     row.fire_chance = Some(named_fire_chance());
 
-    assert!(has_column_detail(ReplayColumn::Name, &row, &[], false), "the Name column carries it");
-    assert!(!has_column_detail(ReplayColumn::Kills, &row, &[], false), "and the Kills column does not");
+    let own = Perspectives::Own;
+    assert!(has_column_detail(ReplayColumn::Name, &row, &[], false, own), "the Name column carries it");
+    assert!(!has_column_detail(ReplayColumn::Kills, &row, &[], false, own), "and the Kills column does not");
 }
 
 /// Each target ship reads by the build's name for it, with its rate beside the expected rate, and
@@ -231,14 +233,16 @@ fn open_detail(
     columns: Vec<ReplayColumn>,
     debug: bool,
 ) -> (HeadlessWindow, RwSignal<bool, zgui::reactive::LocalStorage>) {
-    open_detail_with(row, columns, debug, Rc::new(std::cell::Cell::new(None)))
+    open_detail_with(row, columns, debug, Perspectives::Own, Rc::new(std::cell::Cell::new(None)))
 }
 
-/// Each of `columns`' parts of `row`'s detail. `art` is handed the art the parts draw from.
+/// Each of `columns`' parts of `row`'s detail, of a battle read from `perspectives`. `art` is
+/// handed the art the parts draw from.
 fn open_detail_with(
     row: PlayerRow,
     columns: Vec<ReplayColumn>,
     debug: bool,
+    perspectives: Perspectives,
     art: Rc<std::cell::Cell<Option<GameArt>>>,
 ) -> (HeadlessWindow, RwSignal<bool, zgui::reactive::LocalStorage>) {
     let alt = Rc::new(std::cell::Cell::new(None));
@@ -261,7 +265,8 @@ fn open_detail_with(
                         rows = Arc::clone(&rows),
                         debug = debug,
                         alt_held = alt_held,
-                        art = shared
+                        art = shared,
+                        perspectives = perspectives
                     )
                 })
             })
@@ -294,18 +299,26 @@ fn achievements_are_tiles_counted_only_above_one() {
     assert!(window.by_attribute("data-count-of", "Kraken").is_none(), "a single award has none");
 }
 
-/// An enemy's build stays hidden unless debug mode lifts it.
+/// An enemy's build stays hidden unless debug mode lifts it or another recording of the battle
+/// merged in shows it.
 #[test]
-fn an_enemy_build_shows_only_in_debug_mode() {
+fn an_enemy_build_shows_only_in_debug_mode_or_once_merged() {
     let mut row = base_row(2, Relation::new(2), false);
     row.skill_hover_text = Some("Captain".to_string());
 
     let (window, _) = open_detail(row.clone(), vec![ReplayColumn::Skills], false);
     assert!(window.by_test_id("replay-build").is_none());
+    assert!(!has_column_detail(ReplayColumn::Skills, &row, &[], false, Perspectives::Own));
 
     drop(window);
-    let (window, _) = open_detail(row, vec![ReplayColumn::Skills], true);
-    assert!(window.by_test_id("replay-build").is_some());
+    let (window, _) = open_detail(row.clone(), vec![ReplayColumn::Skills], true);
+    assert!(window.by_test_id("replay-build").is_some(), "debug mode shows it");
+
+    drop(window);
+    let unread = Rc::new(std::cell::Cell::new(None));
+    let (window, _) = open_detail_with(row.clone(), vec![ReplayColumn::Skills], false, Perspectives::Merged, unread);
+    assert!(window.by_test_id("replay-build").is_some(), "a merged recording shows it");
+    assert!(has_column_detail(ReplayColumn::Skills, &row, &[], false, Perspectives::Merged));
 }
 
 /// A consumable's long name wraps inside its own column rather than running under the counts.
@@ -395,6 +408,7 @@ fn an_open_row_reports_its_shares_while_a_damage_column_is_shown() {
                             debug = false,
                             alt_held = false,
                             art = art,
+                            perspectives = Perspectives::Own,
                             share_rows = share_rows
                         )
                     })
@@ -425,7 +439,7 @@ fn an_achievement_draws_its_icon_once_read() {
         count: 1,
     }];
     let art = Rc::new(std::cell::Cell::new(None));
-    let (mut window, _) = open_detail_with(row, vec![ReplayColumn::Name], false, Rc::clone(&art));
+    let (mut window, _) = open_detail_with(row, vec![ReplayColumn::Name], false, Perspectives::Own, Rc::clone(&art));
     assert!(window.by_class("wt-xr-icon").is_none(), "the name stands in until the icon is read");
 
     let art: GameArt = art.get().expect("the view was built");

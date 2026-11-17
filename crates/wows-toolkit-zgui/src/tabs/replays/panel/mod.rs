@@ -42,6 +42,7 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
 use wows_toolkit_replay_data::load::ParsedReplay;
+use wows_toolkit_replay_data::load::Perspectives;
 use wows_toolkit_replay_data::loader::LoadRequest;
 use wows_toolkit_replay_data::loader::ReadPriority;
 use wows_toolkit_replay_data::minimap_preview;
@@ -572,6 +573,8 @@ struct Loaded {
     export_stem: String,
     /// The recording player's game, as the session stats count it.
     session_game: Option<PerGameStat>,
+    /// Whose recordings the battle was read from.
+    perspectives: Perspectives,
 }
 
 #[derive(Clone)]
@@ -885,9 +888,10 @@ pub fn ReplayPanel(
                 });
                 let model: Signal<Rc<ReplayReportModel>, LocalStorage> = Signal::derive_local(move || shown.get());
                 let alt_held = Signal::derive_local(move || shell.held_modifiers().alt());
+                let perspectives = loaded.perspectives;
                 let detail: PlayerDetail = Rc::new(move |cx: PlayerDetailCx| {
                     let PlayerDetailCx { id, row, rows, column, art } = cx;
-                    if !has_column_detail(column, &row, &rows, debug.get()) {
+                    if !has_column_detail(column, &row, &rows, debug.get(), perspectives) {
                         return None;
                     }
                     Some(AnyView::new(view! {
@@ -899,6 +903,7 @@ pub fn ReplayPanel(
                             debug = debug,
                             alt_held = alt_held,
                             art = art,
+                            perspectives = perspectives,
                             share_rows = control.share_rows
                         )
                     }))
@@ -1042,6 +1047,7 @@ fn loaded_state(parsed: ParsedReplay, columns: Vec<ReplayColumn>, rating: Option
         mut model,
         export,
         export_stem,
+        perspectives,
         raw_metadata_json,
         raw_results_json,
         mapped_results_json,
@@ -1063,6 +1069,7 @@ fn loaded_state(parsed: ParsedReplay, columns: Vec<ReplayColumn>, rating: Option
         model,
         export,
         export_stem,
+        perspectives,
         DebugPayloads {
             raw_metadata: raw_metadata_json,
             raw_results: raw_results_json,
@@ -1083,6 +1090,7 @@ fn loaded_from_model(
     mut model: ReplayReportModel,
     export: ExportedMatch,
     export_stem: String,
+    perspectives: Perspectives,
     payloads: DebugPayloads,
     session_game: Option<PerGameStat>,
 ) -> Loaded {
@@ -1103,6 +1111,7 @@ fn loaded_from_model(
         export,
         export_stem,
         session_game,
+        perspectives,
     }
 }
 

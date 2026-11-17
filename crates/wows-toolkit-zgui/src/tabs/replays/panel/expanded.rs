@@ -24,6 +24,7 @@ use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
 use wows_toolkit_replay_data::fire_chance::FireChance;
 use wows_toolkit_replay_data::fire_chance::FireChanceNames;
+use wows_toolkit_replay_data::load::Perspectives;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
@@ -281,7 +282,14 @@ impl Default for ShareRows {
 }
 
 /// Whether `column` has detail to draw for `row`, so a table knows which cells grow.
-pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRow], debug: bool) -> bool {
+/// `perspectives` says whose recordings the battle was read from.
+pub fn has_column_detail(
+    column: ReplayColumn,
+    row: &PlayerRow,
+    rows: &[PlayerRow],
+    debug: bool,
+    perspectives: Perspectives,
+) -> bool {
     let hidden = row.should_hide_stats() && !debug;
     match column {
         ReplayColumn::Name => {
@@ -290,7 +298,7 @@ pub fn has_column_detail(column: ReplayColumn, row: &PlayerRow, rows: &[PlayerRo
                 || has_damage_events(row)
                 || row.fire_chance.is_some()
         }
-        ReplayColumn::Skills => build_has_content(row, debug),
+        ReplayColumn::Skills => build_has_content(row, debug, perspectives),
         ReplayColumn::ActualDamage => {
             hidden || row.actual_damage_by_type.is_some() || row.damage_interactions.is_some()
         }
@@ -319,6 +327,8 @@ pub fn ColumnDetail(
     #[prop(into)] debug: Signal<bool, LocalStorage>,
     #[prop(into)] alt_held: Signal<bool, LocalStorage>,
     art: GameArt,
+    /// Whose recordings the battle was read from.
+    perspectives: Perspectives,
     #[prop(optional)] share_rows: Option<ShareRows>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
@@ -343,7 +353,7 @@ pub fn ColumnDetail(
         let hidden = row.should_hide_stats() && !debug;
         match column {
             ReplayColumn::Name => name_section(&row, debug, shell, art),
-            ReplayColumn::Skills => build_section(&row, debug, art),
+            ReplayColumn::Skills => build_section(&row, debug, perspectives, art),
             ReplayColumn::ActualDamage | ReplayColumn::ReceivedDamage if hidden => Some(nda_text()),
             ReplayColumn::ActualDamage => damage_section(&row, &rows, DamageDirection::Dealt, alt_held),
             ReplayColumn::ReceivedDamage => damage_section(&row, &rows, DamageDirection::Received, alt_held),
@@ -695,17 +705,18 @@ fn ribbon_tile(ribbon: &RibbonResult, art: GameArt) -> AnyView {
     with_tip(tile, icon_tip(ribbon.display_name.clone(), ribbon.description.as_deref(), Some((art, icon))))
 }
 
-/// Whether Skills has anything to draw: never for an enemy, unless `debug`.
-fn build_has_content(row: &PlayerRow, debug: bool) -> bool {
-    if row.relation.is_enemy() && !debug {
+/// Whether Skills has anything to draw. Never for an enemy, unless `debug` or another recording of
+/// the battle merged in shows it, as the egui app does.
+fn build_has_content(row: &PlayerRow, debug: bool, perspectives: Perspectives) -> bool {
+    if row.relation.is_enemy() && !debug && perspectives == Perspectives::Own {
         return false;
     }
     row.skill_hover_text.is_some() || row.translated_build.is_some() || !row.consumables.is_empty()
 }
 
 /// Skills' detail: the skill-tier text, the build the replay observed, then the consumables.
-fn build_section(row: &PlayerRow, debug: bool, art: GameArt) -> Option<AnyView> {
-    if !build_has_content(row, debug) {
+fn build_section(row: &PlayerRow, debug: bool, perspectives: Perspectives, art: GameArt) -> Option<AnyView> {
+    if !build_has_content(row, debug, perspectives) {
         return None;
     }
 

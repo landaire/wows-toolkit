@@ -1106,6 +1106,16 @@ fn merge_decode_constants(loaded: &LoadedGameData, constants_json: &Value, versi
     constants
 }
 
+/// Whose recordings a battle was read from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Perspectives {
+    /// Its own recording alone.
+    Own,
+    /// Its own and other recordings of the same battle, which carry what their players' clients
+    /// saw, an enemy's build among it.
+    Merged,
+}
+
 /// One parsed replay: the presentation model, plus the [`LoadedGameData`] it
 /// was parsed against. Callers that need to resolve icon bytes for the
 /// model's rows (ship-class, achievement, ribbon, captain-skill, consumable,
@@ -1124,6 +1134,8 @@ pub struct ParsedReplay {
     /// contributes, taken while the report was still open.
     pub shareable: Shareable,
     pub game_data: Arc<LoadedGameData>,
+    /// Whether other recordings of the battle were read with this one.
+    pub perspectives: Perspectives,
     /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
     /// for the debug-mode raw-metadata viewer (mirrors the egui app's
     /// `ui.replay.debug.raw_metadata` button, `ui/replay_parser/mod.rs`
@@ -1392,6 +1404,7 @@ fn read_replay_with_alts(
         shareable,
         export,
         game_data: loaded,
+        perspectives: if alts.is_empty() { Perspectives::Own } else { Perspectives::Merged },
         raw_metadata_json,
         raw_results_json,
         mapped_results_json,

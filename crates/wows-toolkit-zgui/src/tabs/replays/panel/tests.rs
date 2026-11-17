@@ -128,7 +128,14 @@ fn loaded(model: ReplayReportModel, results: bool) -> Loaded {
         raw_results: results.then(|| "{}".to_string()),
         mapped_results: None,
     };
-    loaded_from_model(model, export, "battle".to_string(), payloads, None)
+    loaded_from_model(
+        model,
+        export,
+        "battle".to_string(),
+        wows_toolkit_replay_data::load::Perspectives::Own,
+        payloads,
+        None,
+    )
 }
 
 /// Has the next panel built on this thread show `model` rather than read its replay.
@@ -267,7 +274,10 @@ fn the_player_table_slot_draws_the_table_and_opens_a_rows_detail() {
     let with_detail = rows
         .iter()
         .find(|row| {
-            ReplayColumn::ALL.into_iter().any(|column| super::expanded::has_column_detail(column, row, &rows, false))
+            let own = wows_toolkit_replay_data::load::Perspectives::Own;
+            ReplayColumn::ALL
+                .into_iter()
+                .any(|column| super::expanded::has_column_detail(column, row, &rows, false, own))
         })
         .expect("a sample row has detail");
     let Opened { mut window } =
