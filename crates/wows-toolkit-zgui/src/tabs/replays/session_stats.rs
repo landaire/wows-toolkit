@@ -113,16 +113,29 @@ impl SessionReads {
     /// A watched directory gained or rewrote `path`. Only the install's replays directory holds
     /// the reader's own battles, so a replay elsewhere is left alone. The battle counts under the
     /// scope in force as it landed, not the one in force once it is read.
-    pub fn landed(self, path: PathBuf) {
+    ///
+    /// What the landing's read of the battle hands to [`Self::landed_read`]. `None` when the
+    /// session takes nothing from that read: the replay is elsewhere, or it landed before there
+    /// was game data to read it with and is read here once there is.
+    pub fn landed(self, path: PathBuf) -> Option<SessionLanding> {
         if !self.control.install_holds(&path) {
-            return;
+            return None;
         }
         let scope = self.workspace.services.session.scope_untracked();
         if self.workspace.services.game_data.cache_untracked().is_none() {
             self.waiting.update_value(|waiting| waiting.push((path, scope)));
-            return;
+            return None;
         }
-        self.read(path, ReadCause::Played { scope });
+
+        Some(SessionLanding { scope, generation: self.begin(&path) })
+    }
+
+    /// Takes what the landing's read of `path` found.
+    pub fn landed_read(self, path: &Path, landing: SessionLanding, read: GameRead) {
+        #[cfg(test)]
+        let read = simulated::game(path).map_or(read, GameRead::Game);
+
+        self.take(path, landing.generation, ReadCause::Played { scope: landing.scope }, read);
     }
 
     /// Once game data is ready, reads the battles that landed before it was. While the session is
@@ -156,45 +169,65 @@ impl SessionReads {
     fn read(self, path: PathBuf, cause: ReadCause) {
         let services = self.workspace.services;
         let Some(game_data) = services.game_data.cache_untracked() else { return };
-        self.seen.update_value(|seen| {
-            seen.insert(path.clone());
-        });
-        let generation = self
-            .latest
-            .try_update_value(|latest| {
-                let generation = latest.entry(path.clone()).or_default();
-                *generation += 1;
-                *generation
-            })
-            .unwrap_or_default();
+        let generation = self.begin(&path);
 
         self.workspace.under_tab(|| {
             spawn_local(async move {
                 let named = path.clone();
                 let read = long_job(move || read_played_game(&path, &game_data)).await;
-                if self.latest.with_value(|latest| latest.get(&named) != Some(&generation)) {
-                    return;
-                }
-                match read {
-                    GameRead::Game(game) => match cause {
-                        ReadCause::Played { scope } => services.session.played(game, scope),
-                        ReadCause::Listed => services.session.listed(game),
-                    },
-                    // Read again when the game writes the results into the file.
-                    GameRead::NoResults => {
-                        tracing::debug!(path = %named.display(), "session stats: the battle has no results yet");
-                    }
-                    // Tried again once the listing is looked through again, as after a download.
-                    GameRead::MissingBuild | GameRead::Unreadable => {
-                        tracing::warn!(path = %named.display(), "session stats: the battle could not be read");
-                        self.seen.update_value(|seen| {
-                            seen.remove(&named);
-                        });
-                    }
-                }
+                self.take(&named, generation, cause, read);
             });
         });
     }
+
+    /// Marks `path` as read this run, returning which read of it this is.
+    fn begin(self, path: &Path) -> u64 {
+        self.seen.update_value(|seen| {
+            seen.insert(path.to_path_buf());
+        });
+
+        self.latest
+            .try_update_value(|latest| {
+                let generation = latest.entry(path.to_path_buf()).or_default();
+                *generation += 1;
+                *generation
+            })
+            .unwrap_or_default()
+    }
+
+    /// Puts what read `generation` of `path` found in the session, unless a later read of it
+    /// started since.
+    fn take(self, path: &Path, generation: u64, cause: ReadCause, read: GameRead) {
+        if self.latest.with_value(|latest| latest.get(path) != Some(&generation)) {
+            return;
+        }
+        let services = self.workspace.services;
+        match read {
+            GameRead::Game(game) => match cause {
+                ReadCause::Played { scope } => services.session.played(game, scope),
+                ReadCause::Listed => services.session.listed(game),
+            },
+            // Read again when the game writes the results into the file.
+            GameRead::NoResults => {
+                tracing::debug!(path = %path.display(), "session stats: the battle has no results yet");
+            }
+            // Tried again once the listing is looked through again, as after a download.
+            GameRead::MissingBuild | GameRead::Unreadable => {
+                tracing::warn!(path = %path.display(), "session stats: the battle could not be read");
+                self.seen.update_value(|seen| {
+                    seen.remove(path);
+                });
+            }
+        }
+    }
+}
+
+/// A battle the game wrote, which the session takes once the landing's read of it ends.
+#[derive(Clone, Copy, Debug)]
+pub struct SessionLanding {
+    scope: SessionScope,
+    /// Which read of the replay the landing's is, so an older one finishing last is dropped.
+    generation: u64,
 }
 
 /// Counts a replay of the install's replays directory the reader opened from its listing, `game`

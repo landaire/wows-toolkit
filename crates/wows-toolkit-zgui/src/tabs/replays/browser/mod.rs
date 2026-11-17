@@ -32,9 +32,13 @@ use zgui::view::IntoView;
 
 use crate::tabs::replays::browser::listing::Listing;
 
+pub(crate) use crate::tabs::replays::browser::actions::LandingIndex;
 pub(crate) use crate::tabs::replays::browser::actions::cache_base;
+pub(crate) use crate::tabs::replays::browser::actions::landed_indexed;
+pub(crate) use crate::tabs::replays::browser::actions::landing_index;
 pub(crate) use crate::tabs::replays::browser::actions::proxy_url;
 pub use crate::tabs::replays::browser::folders::BrowserControl;
+pub(crate) use crate::tabs::replays::browser::folders::FolderId;
 
 /// What the reader asked of the listed replays, for the replays tab to carry out.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,16 +55,20 @@ pub enum ReplayBrowserEvent {
         paths: Vec<PathBuf>,
         replace: bool,
     },
-    /// A watched directory gained a replay. `battle` is its "Ship - Map"; `followed` says whether
-    /// it landed in the install's directory or in the folder on screen, which is what autoloading
-    /// and the announcement follow.
+    /// A watched directory gained a replay, in the directory tab `folder`. `battle` is its
+    /// "Ship - Map"; `followed` says whether it landed in the install's directory or in the folder
+    /// on screen, which is what autoloading and the announcement follow.
     ReplayAppeared {
         path: PathBuf,
         battle: String,
         followed: bool,
+        folder: FolderId,
     },
-    /// A listed replay was written again.
-    ReplayChanged(PathBuf),
+    /// A listed replay of directory tab `folder` was written again.
+    ReplayChanged {
+        path: PathBuf,
+        folder: FolderId,
+    },
     ReplayRemoved(PathBuf),
     /// The listed replays need builds nothing here can read.
     BuildsMissing(Vec<MissingBuild>),

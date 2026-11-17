@@ -1000,14 +1000,13 @@ impl BrowserControl {
                 // reader away from the one they are looking at.
                 let followed = id == FolderId::INSTALL || self.selected.get_untracked() == id;
                 self.note_unseen(id, path.clone(), true, motion);
-                actions::replay_landed(self, id, &path);
-                events.send(ReplayBrowserEvent::ReplayAppeared { path, battle, followed });
+                events.send(ReplayBrowserEvent::ReplayAppeared { path, battle, followed, folder: id });
             }
+            // Results the game wrote after the battle reach the row, its group and search once the
+            // replays tab reads the file again.
             ListingEvent::Changed(path) => {
                 self.note_unseen(id, path.clone(), false, motion);
-                // Results the game wrote after the battle reach the row, its group and search.
-                actions::replay_landed(self, id, &path);
-                events.send(ReplayBrowserEvent::ReplayChanged(path));
+                events.send(ReplayBrowserEvent::ReplayChanged { path, folder: id });
             }
             ListingEvent::Stale(paths) => actions::reindex_stale(self, id, paths),
             ListingEvent::Removed(path) => {

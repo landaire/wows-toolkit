@@ -11,6 +11,7 @@ use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_replay_data::force_reindex::version_said;
+use wows_toolkit_replay_data::parse_count;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;
@@ -21,6 +22,7 @@ use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
+use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wowsunpack::game_types::ArenaId;
 use zgui::vocab::Modifiers;
 
@@ -527,6 +529,69 @@ fn the_startup_catch_up_runs_once_a_busy_pass_ends() {
 fn add_after_startup(install: &tempfile::TempDir, name: &str) {
     let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
     std::fs::copy(fixture(name), replays.join(name)).expect("the replay is copied");
+}
+
+/// Has every battle that lands exported to `exports` and its builds shared, and none opened, as
+/// unsaved settings over the install's.
+fn export_and_share_landings(control: BrowserControl, install: &tempfile::TempDir, exports: &Path) {
+    let (pool, runtime) = index(control);
+    let mut settings = runtime.block_on(StartupSettings::load(&pool));
+    let wows = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows");
+    settings.wows_dir = wows.display().to_string();
+    settings.replay.auto_export_data = true;
+    settings.replay.auto_export_path = exports.display().to_string();
+    settings.data_sharing = DataSharingMode::BuildData;
+    settings.auto_load_latest_replay = false;
+    control.shell().services().settings.adopt_unsaved(settings);
+}
+
+/// A battle that lands is parsed once for its index rows, its export, its contribution and the
+/// session, however many of them want it.
+#[test]
+fn a_landed_battle_is_parsed_once_for_everything_that_wants_it() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[]);
+    let exports = tempfile::tempdir().expect("a temporary directory can be made");
+    export_and_share_landings(control, &install, exports.path());
+    settle_in_real_time(&mut window);
+    let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
+
+    let landed = replays.join(FIXTURES[1]);
+    std::fs::copy(fixture(FIXTURES[1]), &landed).expect("the replay is copied");
+    simulated_watch::report(&replays, DirChange::Appeared(landed.clone()));
+    settle_until(&mut window, "the battle is read", |_| parse_count::parses_of(&landed) > 0);
+    settle_in_real_time(&mut window);
+
+    assert_eq!(parse_count::parses_of(&landed), 1, "one read serves the index, the export, sharing and the session");
+}
+
+/// A battle that will not read as it lands, as one the game is still writing, is read again after
+/// a wait, up to three reads, and then left for a later write of the file.
+#[test]
+fn a_landed_battle_that_will_not_read_is_read_again() {
+    let (mut window, control) = open();
+    own_index(control);
+    let install = adopt_install(control, &[]);
+    let exports = tempfile::tempdir().expect("a temporary directory can be made");
+    export_and_share_landings(control, &install, exports.path());
+    settle_in_real_time(&mut window);
+    let replays = std::fs::canonicalize(install.path()).expect("the directory resolves").join("wows").join("replays");
+
+    // The header reads, so the battle is listed; the packets it cuts off do not.
+    let landed = replays.join(FIXTURES[2]);
+    let whole = std::fs::read(fixture(FIXTURES[2])).expect("the replay reads");
+    std::fs::write(&landed, &whole[..whole.len() / 2]).expect("the cut replay is written");
+    simulated_watch::report(&replays, DirChange::Appeared(landed.clone()));
+    settle_until(&mut window, "the battle is read", |_| parse_count::parses_of(&landed) > 0);
+    settle_until(&mut window, "the battle is read again", |_| parse_count::parses_of(&landed) == 2);
+    settle_until(&mut window, "the battle is read a third time", |_| parse_count::parses_of(&landed) == 3);
+
+    for _ in 0..3 {
+        window.advance(Duration::from_secs(10));
+        settle_in_real_time(&mut window);
+    }
+    assert_eq!(parse_count::parses_of(&landed), 3, "the battle is left for a later write");
 }
 
 /// A listed battle whose file changed after the index read it, as when its results arrived while

@@ -62,6 +62,30 @@ pub enum GameRead {
     Unreadable,
 }
 
+impl GameRead {
+    /// The game a parsed battle holds, from whether its results are still to come and the
+    /// recording player's game. A battle whose results never arrived is one the session does not
+    /// record either.
+    pub fn of_battle(results_pending: bool, session_stat: Option<PerGameStat>) -> Self {
+        if results_pending {
+            return Self::NoResults;
+        }
+
+        match session_stat {
+            Some(game) => Self::Game(game),
+            None => Self::NoResults,
+        }
+    }
+
+    /// What a parse that failed with `err` leaves of the game.
+    pub fn of_failure(err: &ReplayLoadError) -> Self {
+        match err {
+            ReplayLoadError::UnsupportedVersion { .. } => Self::MissingBuild,
+            _ => Self::Unreadable,
+        }
+    }
+}
+
 /// The replays of one build, and the version their headers name.
 struct BuildGroup {
     version: String,
@@ -246,23 +270,16 @@ fn read_header_version(path: &Path) -> Option<Version> {
 
 /// Parses one replay and reads the recording player's game off it.
 pub fn read_game(path: &Path, game_data: &GameDataCache) -> GameRead {
-    let parsed = match crate::load::parse_replay(path, game_data, None) {
-        Ok(parsed) => parsed,
-        Err(ReplayLoadError::UnsupportedVersion { .. }) => return GameRead::MissingBuild,
+    match crate::load::parse_replay(path, game_data, None) {
+        Ok(parsed) => GameRead::of_battle(parsed.indexable.results_pending, parsed.session_stat),
         Err(err) => {
-            tracing::warn!("directory stats: skipping {}: {err}", path.display());
-            return GameRead::Unreadable;
-        }
-    };
-    // A battle whose results never arrived is one the session does not
-    // record either.
-    if parsed.indexable.results_pending {
-        return GameRead::NoResults;
-    }
+            let read = GameRead::of_failure(&err);
+            if matches!(read, GameRead::Unreadable) {
+                tracing::warn!("directory stats: skipping {}: {err}", path.display());
+            }
 
-    match parsed.session_stat {
-        Some(game) => GameRead::Game(game),
-        None => GameRead::NoResults,
+            read
+        }
     }
 }
 

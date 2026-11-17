@@ -36,6 +36,7 @@ use super::BUILT;
 use super::arrivals::Arrivals;
 use super::layout;
 use super::panel::ReparseCause;
+use super::session_stats::SessionReads;
 use super::sharing::SharingReads;
 use super::workspace::Docked;
 use super::workspace::OpenTarget;
@@ -49,6 +50,7 @@ use crate::interaction_tests::settle_in_real_time;
 use crate::shell::ReplayRequest;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
+use crate::tabs::replays::browser::FolderId;
 use crate::tabs::replays::panel::expanded::SHARE_MODE;
 use crate::windows::renderer::session::RenderRequest;
 use crate::windows::renderer::view::SHORTCUTS_MODE;
@@ -67,6 +69,11 @@ fn open() -> (HeadlessWindow, ReplayWorkspace) {
 fn sorted(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths.sort();
     paths
+}
+
+fn new_arrivals(workspace: ReplayWorkspace) -> Arrivals {
+    workspace
+        .under_tab(|| Arrivals::new(workspace, SharingReads::new(), SessionReads::new(workspace, workspace.browser())))
 }
 
 fn bounds_of(window: &HeadlessWindow, id: &str) -> zgui::geom::Rect<DevicePx, Device> {
@@ -770,7 +777,7 @@ fn the_replays_tab_renders_in_dark_and_light() {
 #[test]
 fn a_battle_held_for_its_results_is_read_again_when_its_grace_lapses() {
     let (mut window, workspace) = open();
-    let arrivals = workspace.under_tab(|| Arrivals::new(workspace, SharingReads::new()));
+    let arrivals = new_arrivals(workspace);
     let path = PathBuf::from("held.wowsreplay");
     let deadline = RawUploadDeadline(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(60));
 
@@ -802,14 +809,14 @@ fn the_open_replays_are_read_again_in_a_new_language() {
 #[test]
 fn a_rewrite_of_a_held_battle_releases_its_hold() {
     let (mut window, workspace) = open();
-    let arrivals = workspace.under_tab(|| Arrivals::new(workspace, SharingReads::new()));
+    let arrivals = new_arrivals(workspace);
     let path = PathBuf::from("rewritten.wowsreplay");
     let deadline = RawUploadDeadline(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(60));
 
     arrivals.hold(workspace, path.clone(), deadline);
     window.advance(Duration::from_millis(32));
     assert!(arrivals.holds(&path));
-    arrivals.changed(workspace, path.clone());
+    arrivals.changed(workspace, path.clone(), FolderId::INSTALL);
     assert!(!arrivals.holds(&path), "the rewrite is read now rather than at the old deadline");
 }
 
@@ -840,7 +847,7 @@ fn a_game_directory_set_later_is_swept_in_turn() {
     let (_window, workspace) = open();
     let services = workspace.services;
     services.settings.use_private_database_for_test();
-    let arrivals = workspace.under_tab(|| Arrivals::new(workspace, SharingReads::new()));
+    let arrivals = new_arrivals(workspace);
     let set_wows_dir = |dir: &str| {
         services.settings.edit(wows_toolkit_viewmodel::settings::keys::WOWS_DIR, |settings| {
             settings.wows_dir = dir.to_owned();

@@ -39,12 +39,11 @@ pub enum ReplayLoadError {
 }
 
 impl ReplayLoadError {
-    /// Whether the file itself is what failed, and so is worth recording as
-    /// unreadable until it changes.
+    /// Whether the file itself is what failed: one the game may still be writing, or one that
+    /// will not read until it changes.
     ///
-    /// Missing or broken game data is this machine's state, not the file's:
-    /// recording it would have later passes skip a good replay. A reader fault
-    /// is this build's, and a later build may read the file.
+    /// Missing or broken game data is this machine's state, not the file's, and a reader fault
+    /// is this build's.
     pub fn is_unreadable_file(&self) -> bool {
         match self {
             Self::Io(_) | Self::VersionParse | Self::Parse(_) => true,

@@ -198,8 +198,9 @@ pub enum IndexOneError {
 
 impl IndexOneError {
     /// Whether the file itself is what failed, and so is worth recording as
-    /// unreadable until it changes. A database that would not take the rows is
-    /// this machine's state, not the file's.
+    /// unreadable until it changes. See [`crate::error::ReplayLoadError::is_unreadable_file`];
+    /// a database that would not take the rows is this machine's state too,
+    /// and recording it would have later passes skip a good replay.
     pub fn is_unreadable_file(&self) -> bool {
         match self {
             Self::Parse(err) => err.is_unreadable_file(),

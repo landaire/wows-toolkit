@@ -1261,7 +1261,7 @@ fn a_battle_landing_in_the_folder_on_screen_is_announced_and_one_elsewhere_is_on
     let appeared: Vec<(PathBuf, String, bool)> = sent()
         .into_iter()
         .filter_map(|event| match event {
-            super::ReplayBrowserEvent::ReplayAppeared { path, battle, followed } => Some((path, battle, followed)),
+            super::ReplayBrowserEvent::ReplayAppeared { path, battle, followed, .. } => Some((path, battle, followed)),
             _ => None,
         })
         .collect();

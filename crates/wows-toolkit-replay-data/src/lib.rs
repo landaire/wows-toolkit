@@ -30,6 +30,8 @@ pub mod load;
 pub mod loader;
 pub mod minimap_preview;
 pub mod model;
+#[cfg(any(test, feature = "test-support"))]
+pub mod parse_count;
 pub mod paths;
 pub mod recording;
 pub mod render_defaults;

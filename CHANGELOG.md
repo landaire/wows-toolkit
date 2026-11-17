@@ -86,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Fade a landed battle's row glow once from its arrival, rather than glowing again when the row is built again before the glow is over
 - *(zgui)* List, index and watch the replays in the subfolders of an opened or dropped replay folder
 - *(zgui)* Index the battles played while the app was closed as it starts, and export those with results when auto-export is on, rather than waiting for a manual index build
+- *(zgui)* Read a battle that lands once for its index rows, export, data-sharing contribution and session stats rather than once for each, and read it again after a wait when the game is still writing it
 - *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
 - *(zgui)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state
 - *(zgui)* Finish a renderer video export when its viewport or window is closed, and say where the video was saved or that it was copied

@@ -191,6 +191,11 @@ impl ReplayWorkspace {
         self.owner.with_value(|owner| owner.with(make))
     }
 
+    /// The listings the tab shows beside the dock.
+    pub fn browser(self) -> BrowserControl {
+        self.browser
+    }
+
     fn register(self) {
         let dock = self.dock;
         dock.register(

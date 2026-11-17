@@ -23,6 +23,7 @@ use wows_toolkit_services::upload::LedgerUse;
 use wows_toolkit_services::upload::Outcome;
 use wows_toolkit_services::upload::Sender;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wows_toolkit_viewmodel::upload::Shareable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
@@ -115,11 +116,36 @@ impl Contributor {
             }
         };
 
+        self.send(path, &other_paths, parsed.shareable, ledger).await
+    }
+
+    /// Sends what the setting asks for of `shareable`, which the caller read from `path`.
+    pub async fn contribute_read(
+        &self,
+        path: PathBuf,
+        shareable: Shareable,
+        ledger: LedgerUse,
+    ) -> Result<Outcome, ContributeError> {
+        let other_paths = self.other_paths(&path).await;
+        if ledger == LedgerUse::Consult && self.ledger_has(other_paths.clone()).await {
+            return Ok(Outcome::AlreadySent);
+        }
+
+        self.send(path, &other_paths, shareable, ledger).await
+    }
+
+    async fn send(
+        &self,
+        path: PathBuf,
+        other_paths: &[PathBuf],
+        shareable: Shareable,
+        ledger: LedgerUse,
+    ) -> Result<Outcome, ContributeError> {
         // The anchor both apps keep, recorded on the first sight of this replay: the grace window
         // for its results runs from there.
-        let first_seen = self.first_seen(&path, &other_paths).await.map_err(ContributeError::NoAnchor)?;
+        let first_seen = self.first_seen(&path, other_paths).await.map_err(ContributeError::NoAnchor)?;
         let Some(mode) = self.mode() else { return Ok(Outcome::Skipped) };
-        let candidate = Candidate { path, shareable: parsed.shareable, first_seen };
+        let candidate = Candidate { path, shareable, first_seen };
         let (pool, proxy) = (self.pool.clone(), self.proxy.clone());
         self.services
             .on_tokio(async move {

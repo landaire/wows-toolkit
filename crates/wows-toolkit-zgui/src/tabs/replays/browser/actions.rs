@@ -25,6 +25,7 @@ use futures::channel::mpsc;
 use futures::channel::oneshot;
 use landaire_ui::Notice;
 use rust_i18n::t;
+use sqlx::sqlite::SqlitePool;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_toolkit_config::index::query::record_paths_in_source;
 use wows_toolkit_config::index::query_text::print_query;
@@ -40,6 +41,7 @@ use wows_toolkit_replay_data::force_reindex::ReindexScope;
 use wows_toolkit_replay_data::force_reindex::ReindexSummary;
 use wows_toolkit_replay_data::force_reindex::Release;
 use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::IndexableBattle;
 use wows_toolkit_replay_data::paths::folder_name;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexOneError;
@@ -49,6 +51,7 @@ use wows_toolkit_replay_data::replay_index::ScopedReplay;
 use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_replay_data::replay_index::build_index;
 use wows_toolkit_replay_data::replay_index::index_one;
+use wows_toolkit_replay_data::replay_index::index_parsed;
 use wows_toolkit_replay_data::replay_index::reindex_replays;
 use wows_toolkit_replay_data::replay_index::repair_missing_pr;
 use wows_toolkit_services::game_data_cache;
@@ -355,6 +358,35 @@ impl BrowserWork {
     /// Whether tab `id`'s replays are still being added to its source, subscribing to it.
     pub fn is_indexing(self, id: FolderId) -> bool {
         self.passes.with(|passes| passes.contains_key(&id))
+    }
+}
+
+/// Where a battle that landed in a tab is indexed: the tab's source, and what writing to it needs.
+/// Taken on the UI thread, and written to from the worker that reads the battle.
+pub struct LandingIndex {
+    pool: SqlitePool,
+    runtime: Arc<tokio::runtime::Runtime>,
+    scope: SourceScope,
+    /// Roots the Live source when this battle is the first thing it holds.
+    live_root: PathBuf,
+    proxy: String,
+}
+
+impl LandingIndex {
+    /// The tab's source, made if this battle is the first thing it holds. Blocking.
+    pub fn source(&self) -> Result<SourceId, ScopeSourceError> {
+        self.runtime.block_on(self.scope.ensure(&self.pool, &self.live_root, jiff::Timestamp::now()))
+    }
+
+    /// Writes `battle`, read from `path`, under `source`, returning whether a rating table rated
+    /// it. Blocking: a stale table is downloaded again first.
+    pub fn write(&self, source: SourceId, path: &Path, battle: IndexableBattle) -> Result<bool, IndexOneError> {
+        let rating = owner_rating(&self.runtime, &self.proxy);
+        let now = jiff::Timestamp::now();
+        let mode = IndexWriteMode::Incremental;
+        index_parsed(&self.runtime, &self.pool, path, battle, rating.as_ref(), source, now, mode)?;
+
+        Ok(rating.is_some())
     }
 }
 
@@ -1418,34 +1450,15 @@ pub fn folder_closed(control: BrowserControl, id: FolderId) {
     });
 }
 
-/// Puts a replay that landed in a watched directory into the index, under that directory's
-/// source, so the index fills as the reader plays. Its own parse: it runs whether or not the
-/// replay is opened.
-pub fn replay_landed(control: BrowserControl, id: FolderId, path: &Path) {
+/// Where a replay that landed in tab `id` is indexed, under that tab's source, so the index fills
+/// as the reader plays. `None` while the index or the tab is not there to write to.
+pub fn landing_index(control: BrowserControl, id: FolderId, path: &Path) -> Option<LandingIndex> {
     let services = control.shell().services();
-    let Some(game_data) = services.game_data.cache_untracked() else { return };
-    let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else { return };
-    let Some(listing) = control.listing(id) else { return };
-    // Roots the Live source when this battle is the first thing it holds.
-    let Some(live_root) = path.parent().map(Path::to_path_buf) else { return };
-    let Some(scope) = listing.index_scope() else { return };
-    let path = path.to_path_buf();
-    let proxy = proxy_url(services);
+    let (pool, runtime) = (services.settings.pool()?, services.runtime()?);
+    let scope = control.listing(id)?.index_scope()?;
+    let live_root = path.parent()?.to_path_buf();
 
-    control.work.spawn(async move {
-        let indexed = long_job(move || -> Result<bool, IndexOneError> {
-            let now = jiff::Timestamp::now();
-            let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
-            let rating = owner_rating(&runtime, &proxy);
-            index_one(&runtime, &pool, &path, &game_data, rating.as_ref(), source, now, IndexWriteMode::Incremental)?;
-            Ok(rating.is_some())
-        })
-        .await;
-        match indexed {
-            Ok(rated) => landed_indexed(control, id, rated),
-            Err(err) => tracing::warn!("replay index: the battle that just landed was not indexed: {err}"),
-        }
-    });
+    Some(LandingIndex { pool, runtime, scope, live_root, proxy: proxy_url(services) })
 }
 
 /// Indexes again the replays of tab `id` the game wrote after the index read them, one after
@@ -1483,7 +1496,7 @@ pub fn reindex_stale(control: BrowserControl, id: FolderId, paths: Vec<PathBuf>)
 
 /// Shows what the index learned of a battle that landed in tab `id`, whose row is listed already
 /// but reads its chips from the summaries.
-fn landed_indexed(control: BrowserControl, id: FolderId, rated: bool) {
+pub fn landed_indexed(control: BrowserControl, id: FolderId, rated: bool) {
     if let Some(listing) = control.listing(id) {
         listing.load_summaries();
     }

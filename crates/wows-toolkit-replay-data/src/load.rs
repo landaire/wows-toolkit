@@ -1247,6 +1247,9 @@ pub fn parse_replay_with_alts(
     game_data: &GameDataCache,
     personal_rating: Option<&PersonalRatingData>,
 ) -> Result<ParsedReplay, ReplayLoadError> {
+    #[cfg(any(test, feature = "test-support"))]
+    crate::parse_count::note(path);
+
     let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         #[cfg(any(test, feature = "test-support"))]
         crate::simulated_panic::panic_if_asked(path);
