@@ -62,6 +62,7 @@ All notable changes to this project will be documented in this file.
 
 - *(zgui)* Add the folder picked for an install, a game or a Proton build after the launcher popover or drawer that asked has closed
 - *(zgui)* Stop a popped-out replay renderer, the tactics board and other secondary windows from reading the main window's closed state while the app exits
+- *(zgui)* Undo, redo and open the options rail with Ctrl+Z, Ctrl+Shift+Z and Ctrl+S from anywhere in the armor viewer, as in egui, and leave Ctrl+Z to a focused text field
 - *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
 - *(zgui)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state
 - *(zgui)* Finish a renderer video export when its viewport or window is closed, and say where the video was saved or that it was copied

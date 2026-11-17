@@ -47,13 +47,10 @@ pub(super) enum ClickAction {
     Nothing,
 }
 
-/// What a key press asked of the pane rather than of the viewport.
+/// Whether the viewport took a key press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum KeyOutcome {
-    /// The viewport took the key.
     Handled,
-    /// Ctrl+S: open or close the pane's options rail.
-    ToggleOptions,
     /// The key means nothing here.
     Ignored,
 }
@@ -66,14 +63,6 @@ pub(super) enum ViewKey<'a> {
     Down,
     Left,
     Right,
-}
-
-/// Which modifiers were held with a key.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct KeyModifiers {
-    /// Ctrl, or Cmd on macOS.
-    pub(super) primary: bool,
-    pub(super) shift: bool,
 }
 
 /// The primary press before this one, so the next can be told a double-click.
@@ -384,34 +373,14 @@ impl ViewportModel {
         cx.emit(ViewportChange::Camera);
     }
 
-    /// Ctrl+S opens and closes the options rail. Ctrl+Z undoes; Ctrl+Shift+Z or Ctrl+R redoes.
-    /// Otherwise WASD moves the camera target, the arrows move it vertically and orbit, and
-    /// Shift+arrows pan, for as long as the key is held.
-    pub(super) fn key_down(
-        &mut self,
-        key: ViewKey<'_>,
-        modifiers: KeyModifiers,
-        repeat: bool,
-        cx: &mut ViewCx,
-    ) -> KeyOutcome {
+    /// WASD moves the camera target, the arrows move it vertically and orbit, and Shift+arrows pan,
+    /// for as long as the key is held.
+    pub(super) fn key_down(&mut self, key: ViewKey<'_>, shift: bool) -> KeyOutcome {
         if !self.is_gpu_ready() {
             return KeyOutcome::Ignored;
         }
-        if !repeat && modifiers.primary {
-            match key {
-                ViewKey::Character("s") => return KeyOutcome::ToggleOptions,
-                ViewKey::Character("z") if !modifiers.shift => {
-                    self.undo_visibility(cx);
-                    return KeyOutcome::Handled;
-                }
-                ViewKey::Character("r") | ViewKey::Character("z") => {
-                    self.redo_visibility(cx);
-                    return KeyOutcome::Handled;
-                }
-                _ => {}
-            }
-        }
-        let Some(key) = MoveKey::from_key(key, modifiers.shift) else { return KeyOutcome::Ignored };
+
+        let Some(key) = MoveKey::from_key(key, shift) else { return KeyOutcome::Ignored };
         if self.held_keys.insert(key) {
             // The first frame of the motion is drawn by the renderer, which keeps asking for
             // frames while a key is held.
@@ -517,7 +486,6 @@ mod tests {
 
     use super::ClickAction;
     use super::HeldMotion;
-    use super::KeyModifiers;
     use super::KeyOutcome;
     use super::ViewKey;
     use super::click_action;
@@ -639,8 +607,7 @@ mod tests {
     #[test]
     fn keys_need_a_device() {
         let mut model = ViewportModel::new();
-        let mut cx = ViewCx::for_test();
-        let outcome = model.key_down(ViewKey::Character("w"), KeyModifiers::default(), false, &mut cx);
+        let outcome = model.key_down(ViewKey::Character("w"), false);
         assert_eq!(outcome, KeyOutcome::Ignored);
         assert!(model.held_keys.is_empty());
     }

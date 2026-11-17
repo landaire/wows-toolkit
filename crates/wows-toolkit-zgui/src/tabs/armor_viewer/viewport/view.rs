@@ -69,10 +69,10 @@ use crate::i18n::Locale;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::ModifierKey;
+use crate::tabs::armor_viewer::shortcut::ViewerShortcut;
 
 use super::casts::CastMiss;
 use super::host::ViewportRenderer;
-use super::input::KeyModifiers;
 use super::input::KeyOutcome;
 use super::input::ViewKey;
 use super::model::GpuState;
@@ -347,6 +347,19 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
     };
     let on_key_down = move |ev: &mut EventCx<'_, events::KeyDown>| {
         hold_shift(ev.modifiers.shift() || matches!(ev.key_without_modifiers, Key::Named(NamedKey::Shift)));
+        // The chord acts on this pane, which a middle press focuses without making it active.
+        if let Some(shortcut) = ViewerShortcut::from_key(&ev.key_without_modifiers, ev.modifiers) {
+            if !ev.repeat {
+                shortcut.run(state, || {
+                    if let Some(menu) = state.pane_menu() {
+                        menu.toggle_options.run(());
+                    }
+                });
+            }
+            ev.prevent_default();
+            ev.stop_propagation();
+            return;
+        }
         let lowered;
         let key = match &ev.key_without_modifiers {
             Key::Named(NamedKey::ArrowUp) => ViewKey::Up,
@@ -359,19 +372,10 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
             }
             _ => return,
         };
-        let modifiers = KeyModifiers { primary: ev.modifiers.primary(), shift: ev.modifiers.shift() };
-        let repeat = ev.repeat;
-        let outcome =
-            state.update(|model, cx| model.key_down(key, modifiers, repeat, cx)).unwrap_or(KeyOutcome::Ignored);
-        match outcome {
-            KeyOutcome::Handled => ev.prevent_default(),
-            KeyOutcome::ToggleOptions => {
-                if let Some(menu) = state.pane_menu() {
-                    menu.toggle_options.run(());
-                }
-                ev.prevent_default();
-            }
-            KeyOutcome::Ignored => {}
+        let shift = ev.modifiers.shift();
+        let outcome = state.update(|model, _| model.key_down(key, shift)).unwrap_or(KeyOutcome::Ignored);
+        if outcome == KeyOutcome::Handled {
+            ev.prevent_default();
         }
     };
     let on_key_up = move |ev: &mut EventCx<'_, events::KeyUp>| {

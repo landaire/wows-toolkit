@@ -564,6 +564,14 @@ impl ArmorViewportState {
         self.update(|this, cx| this.show_all_plates(cx));
     }
 
+    pub fn undo_visibility(self) {
+        self.update(|this, cx| this.undo_visibility(cx));
+    }
+
+    pub fn redo_visibility(self) {
+        self.update(|this, cx| this.redo_visibility(cx));
+    }
+
     pub fn disable_material(self, zone: &str, material: &str) {
         self.update(|this, cx| this.disable_material(zone, material, cx));
     }

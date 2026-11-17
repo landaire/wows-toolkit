@@ -10,6 +10,7 @@ mod dock;
 pub mod library;
 pub mod options;
 pub mod panels;
+mod shortcut;
 pub mod sidebar;
 #[cfg(test)]
 mod test_fixtures;
@@ -67,6 +68,7 @@ use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::armor_viewer::options::OptionsRailProps;
 use crate::tabs::armor_viewer::panels::export::ExportRequest;
 use crate::tabs::armor_viewer::panels::legend::ArmorLegendProps;
+use crate::tabs::armor_viewer::shortcut::take_viewer_shortcut;
 use crate::tabs::armor_viewer::sidebar::ArmorSidebarProps;
 use crate::tabs::armor_viewer::sidebar::ModelsSource;
 use crate::tabs::armor_viewer::sidebar::SidebarCatalog;
@@ -146,7 +148,14 @@ pub fn ArmorViewerTab() -> impl IntoView {
     };
 
     view! {
-        column(class = "wt-armor", attr:data-testid = "armor-viewer-tab", on:key_down = move |ev| cycle_options_tab(workspace, ev)) {
+        column(
+            class = "wt-armor",
+            attr:data-testid = "armor-viewer-tab",
+            on:key_down = move |ev| {
+                cycle_options_tab(workspace, ev);
+                take_viewer_shortcut(workspace, ev);
+            }
+        ) {
             SideSplit(
                 open = workspace.sidebar_open,
                 width = sidebar_width,

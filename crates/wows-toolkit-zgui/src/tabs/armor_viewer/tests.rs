@@ -1272,6 +1272,74 @@ fn a_primary_click_on_a_zone_box_solos_the_zone() {
     assert!(shown("Stern", "Stern_Deck") && !shown("Bow", "Bow_Belt"), "solo moves to the clicked zone");
 }
 
+/// The viewer's chords work from a rail control, not only from the viewport.
+#[test]
+fn undo_and_redo_reach_the_active_pane_from_a_rail_control() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(two_zone_scene(), &[OptionSection::Visibility]);
+    let viewport = armor.workspace.active_untracked();
+    viewport.adopt_for_test(Arc::new(two_zone_scene()));
+    let bow_shown = || {
+        viewport
+            .read_untracked(|model| model.part_visibility.get(&("Bow".to_owned(), "Bow_Belt".to_owned())).copied())
+            .flatten()
+            .unwrap_or(true)
+    };
+
+    armor.click("armor-vis-zone-Bow");
+    assert!(!bow_shown(), "the box turns the zone off");
+
+    armor.window.press_character('z', Modifiers::PRIMARY);
+    armor.settle();
+    assert!(bow_shown(), "Ctrl+Z on the focused box undoes the change");
+
+    armor.window.press_character('z', Modifiers::PRIMARY | Modifiers::SHIFT);
+    armor.settle();
+    assert!(!bow_shown(), "Ctrl+Shift+Z redoes it");
+}
+
+/// Ctrl+Z in a text field is the field's own: it does not undo a visibility change.
+#[test]
+fn undo_in_the_rail_filter_leaves_the_visibility_alone() {
+    let mut armor = ArmorWindow::open_tall();
+    armor.install(two_zone_scene(), &[OptionSection::Visibility]);
+    let viewport = armor.workspace.active_untracked();
+    viewport.adopt_for_test(Arc::new(two_zone_scene()));
+    let bow_shown = || {
+        viewport
+            .read_untracked(|model| model.part_visibility.get(&("Bow".to_owned(), "Bow_Belt".to_owned())).copied())
+            .flatten()
+            .unwrap_or(true)
+    };
+    armor.click("armor-vis-zone-Bow");
+    assert!(!bow_shown(), "the box turns the zone off");
+
+    armor.type_into("armor-options-filter", "bow");
+    armor.window.press_character('z', Modifiers::PRIMARY);
+    armor.settle();
+    assert!(!bow_shown(), "the zone stays off");
+}
+
+/// Ctrl+S opens and closes the rail from a rail control as from the viewport, once per press.
+#[test]
+fn ctrl_s_toggles_the_rail_from_a_rail_control_and_from_the_viewport() {
+    let mut armor = ArmorWindow::open_tall();
+    let workspace = armor.workspace;
+    armor.install(two_zone_scene(), &[OptionSection::Visibility]);
+    workspace.active_untracked().adopt_for_test(Arc::new(two_zone_scene()));
+    assert!(workspace.options_open.get_untracked(), "the rail opens up");
+
+    armor.click("armor-vis-zone-Bow");
+    armor.window.press_character('s', Modifiers::PRIMARY);
+    armor.settle();
+    assert!(!workspace.options_open.get_untracked(), "Ctrl+S on a rail control closes the rail");
+
+    armor.click("armor-viewport");
+    armor.window.press_character('s', Modifiers::PRIMARY);
+    armor.settle();
+    assert!(workspace.options_open.get_untracked(), "Ctrl+S on the viewport opens the rail once");
+}
+
 /// A row under a switch that is off is no match for the rail's filter, so the group holding it is
 /// dropped; turning the switch on while the filter stands finds it.
 #[test]
