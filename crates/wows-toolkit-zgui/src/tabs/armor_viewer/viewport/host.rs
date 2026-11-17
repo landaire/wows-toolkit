@@ -197,11 +197,14 @@ pub(super) struct ViewportRenderer {
     /// The device this viewport draws on, held for it: the viewport's model holds it weakly.
     device: Option<Rc<SceneDevice>>,
     attachments: Option<Attachments>,
+    /// The texture the scene was last drawn into. Its pixels stand until the scene changes, so an
+    /// animation the overlay draws alone does not draw the scene again.
+    drawn_into: Option<wgpu::Texture>,
 }
 
 impl ViewportRenderer {
     pub(super) fn new(state: ArmorViewportState) -> Self {
-        Self { state, device: None, attachments: None }
+        Self { state, device: None, attachments: None, drawn_into: None }
     }
 }
 
@@ -272,6 +275,7 @@ impl ViewportRenderer {
         let scene = self.state.read_untracked(ViewportModel::scene).flatten().filter(|_| shown);
         let size = TargetSize::new(cx.size.width, cx.size.height);
         let (Some(scene), Some(size)) = (scene, size) else {
+            self.drawn_into = None;
             clear(cx, &view);
             return None;
         };
@@ -286,10 +290,18 @@ impl ViewportRenderer {
                 Some(Attachments { device: Rc::downgrade(&scene), attachments: scene.attachments(size) });
         }
         let attachments = &self.attachments.as_ref()?.attachments;
+        let fresh = stale || self.drawn_into.as_ref() != Some(cx.texture);
         self.state.update(|model, _| {
-            scene.render(&model.viewport, attachments, &view);
-            model.viewport.clear_dirty();
-        })
+            if fresh || model.viewport.is_dirty() {
+                scene.render(&model.viewport, attachments, &view);
+                model.viewport.clear_dirty();
+                #[cfg(test)]
+                self.state.count_scene_draw();
+            }
+        })?;
+        self.drawn_into = Some(cx.texture.clone());
+
+        Some(())
     }
 }
 

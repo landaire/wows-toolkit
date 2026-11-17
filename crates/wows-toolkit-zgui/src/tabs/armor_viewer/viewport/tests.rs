@@ -334,6 +334,26 @@ fn dragging_the_viewport_turns_the_camera() {
     assert!(frame_before != frame_after, "the scene is drawn again from the new angle");
 }
 
+/// A frame asked for while the scene is unchanged, as each frame of a hit ring the overlay draws
+/// is, keeps the drawn scene; a change draws it again.
+#[test]
+fn a_frame_with_the_scene_unchanged_does_not_draw_it_again() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, armored_model_scene(turret()));
+    let before = state.scene_draws();
+    let invalidator = state.invalidator().expect("the state is alive");
+
+    for _ in 0..3 {
+        invalidator.invalidate();
+        window.advance(Duration::from_millis(16));
+    }
+    assert_eq!(state.scene_draws(), before, "nothing changed");
+
+    state.update(|model, _| model.viewport.mark_dirty());
+    window.advance(Duration::from_millis(16));
+    assert_eq!(state.scene_draws(), before + 1, "a change draws the scene");
+}
+
 #[test]
 fn the_plate_under_the_pointer_is_picked_and_named() {
     let Some(ship) = real_ship() else {

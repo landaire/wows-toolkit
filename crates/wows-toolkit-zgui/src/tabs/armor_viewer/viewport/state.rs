@@ -63,6 +63,9 @@ struct Shared {
     /// How far the options rail's armor zone tree is scrolled for this pane. The rail builds the
     /// tree again on every filter keystroke.
     zone_tree_scroll: DevicePx,
+    /// How many times the scene has been drawn.
+    #[cfg(test)]
+    scene_draws: usize,
 }
 
 /// What a change made through [`ArmorViewportState::update`] asks for once the model is no longer
@@ -134,6 +137,8 @@ impl ArmorViewportState {
                 screenshots: Vec::new(),
                 rendering: false,
                 zone_tree_scroll: DevicePx(0.0),
+                #[cfg(test)]
+                scene_draws: 0,
             }),
         };
         LIVE.with(|live| live.borrow_mut().push(state));
@@ -255,6 +260,18 @@ impl ArmorViewportState {
 
     pub(super) fn take_screenshots(self) -> Vec<ScreenshotReply> {
         self.shared.try_update_value(|shared| std::mem::take(&mut shared.screenshots)).unwrap_or_default()
+    }
+
+    /// Counts a draw of the scene.
+    #[cfg(test)]
+    pub(super) fn count_scene_draw(self) {
+        self.shared.try_update_value(|shared| shared.scene_draws += 1);
+    }
+
+    /// How many times the scene has been drawn.
+    #[cfg(test)]
+    pub(super) fn scene_draws(self) -> usize {
+        self.shared.try_with_value(|shared| shared.scene_draws).unwrap_or_default()
     }
 
     /// Moves the overlay without touching the model: a frame of an animation it draws.
