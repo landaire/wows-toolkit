@@ -90,6 +90,7 @@ use crate::tabs::armor_viewer::BUILT;
 use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::armor_viewer::options::TextureFocus;
+use crate::tabs::armor_viewer::sidebar::art::SidebarArt;
 use crate::tabs::armor_viewer::test_fixtures::add_cast_arc;
 use crate::tabs::armor_viewer::test_fixtures::iowa_ap;
 use crate::tabs::armor_viewer::test_fixtures::plated_scene;
@@ -250,7 +251,11 @@ fn bundle() -> ArmorBundle {
     let metadata = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
     let assets = ShipAssets::from_parts(&vfs, Arc::new(metadata), Arc::new(Vec::new()));
 
-    ArmorBundle { assets: Arc::new(assets), catalog: Arc::new(ShipCatalog { nations: Vec::new(), hidden: Vec::new() }) }
+    ArmorBundle {
+        assets: Arc::new(assets),
+        catalog: Arc::new(ShipCatalog { nations: Vec::new(), hidden: Vec::new() }),
+        sidebar_art: Arc::new(SidebarArt::default()),
+    }
 }
 
 /// A model with two armor zones and two hull part groups.

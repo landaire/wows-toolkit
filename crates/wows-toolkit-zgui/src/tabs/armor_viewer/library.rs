@@ -42,11 +42,13 @@ use crate::services::Services;
 use crate::shell::palette::ShipParamIndex;
 use crate::shell::palette::modes::ArmorShipRow;
 use crate::shell::palette::modes::ShipList;
+use crate::tabs::armor_viewer::sidebar::art::SidebarArt;
 
 /// One build's ship data, as every pane reads it.
 pub struct ArmorBundle {
     pub assets: Arc<ShipAssets>,
     pub catalog: Arc<ShipCatalog>,
+    pub sidebar_art: Arc<SidebarArt>,
 }
 
 /// Where the ship data load stands.
@@ -228,9 +230,11 @@ impl ArmorLibrary {
             let read = long_job(move || {
                 let assets = load_ship_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider())?;
                 let catalog = ShipCatalog::build(loaded.provider());
+                let sidebar_art = SidebarArt::read(assets.vfs(), &catalog);
                 Ok::<_, wows_toolkit_armor::assets::ArmorAssetsError>(ArmorBundle {
                     assets: Arc::new(assets),
                     catalog: Arc::new(catalog),
+                    sidebar_art: Arc::new(sidebar_art),
                 })
             })
             .await;

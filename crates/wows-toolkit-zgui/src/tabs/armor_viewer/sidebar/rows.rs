@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use landaire_ui::MarkedTextProps;
 use landaire_ui::MenuItems;
@@ -20,7 +21,6 @@ use wows_toolkit_armor::sidebar_tree::RowNote;
 use wows_toolkit_armor::sidebar_tree::row_tooltip;
 use wowsunpack::export::model_catalog::ModelPath;
 use zgui::reactive::LocalStorage;
-use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
@@ -53,7 +53,7 @@ use crate::text_marks::marks_within;
 #[derive(Clone, Copy)]
 pub struct RowSources {
     pub state: SidebarState,
-    pub art: RwSignal<Rc<SidebarArt>, LocalStorage>,
+    pub art: Signal<Option<Arc<SidebarArt>>, LocalStorage>,
     pub hardpoints: Signal<Rc<HashSet<HardpointTarget>>, LocalStorage>,
     pub services: Services,
 }
@@ -135,14 +135,16 @@ fn row_icon(sources: RowSources, kind: &RowKind) -> Option<AnyView> {
         RowKind::ModelNation { flag } => flag.as_deref(),
         _ => None,
     };
-    if let Some(src) = flag.and_then(|nation| sources.art.with(|art| art.flag(nation).map(|bytes| bytes.url()))) {
+    if let Some(src) =
+        flag.and_then(|nation| sources.art.with(|art| art.as_ref()?.flag(nation).map(|bytes| bytes.url())))
+    {
         return Some(AnyView::new(view! { image(class = "wt-armor-row__flag", src = src, a11y:hidden = true) }));
     }
 
     let RowKind::Class(species) = kind else {
         return None;
     };
-    let svg = sources.art.with(|art| art.class_icon(*species))?;
+    let svg = sources.art.with(|art| art.as_ref()?.class_icon(*species))?;
 
     Some(AnyView::new(view! {
         vector(class = "wt-armor-row__class", prop:svg = PropValue::from(svg.to_string()), a11y:hidden = true)

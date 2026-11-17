@@ -10,7 +10,7 @@
 //! its ship, building or model, a ship row's menu offers a comparison pane and an export, and a
 //! model or part row's menu offers to open, export or copy the path of its model.
 
-mod art;
+pub mod art;
 mod header;
 mod rows;
 mod state;
@@ -50,14 +50,12 @@ use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
-use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::With;
-use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::EventCx;
@@ -70,7 +68,6 @@ use zgui_ui::InputProps;
 use zgui_ui::prelude::Binding;
 
 use crate::icons::AppIconProps;
-use crate::long_job::long_job;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::armor_viewer::sidebar::art::SidebarArt;
@@ -143,6 +140,7 @@ const CSS: &str = css!(
 pub struct SidebarCatalog {
     pub assets: Arc<ShipAssets>,
     pub catalog: Arc<ShipCatalog>,
+    pub art: Arc<SidebarArt>,
 }
 
 /// Where the model library behind the Models section stands.
@@ -239,23 +237,11 @@ pub fn ArmorSidebar(
     let state = SidebarState::new(services, on_event);
     #[cfg(test)]
     BUILT.with(|built| built.set(Some(state)));
-    let art = RwSignal::new_local(Rc::new(SidebarArt::default()));
+    // The art is read with the catalog, so the rows show their icons from the first frame.
+    let art =
+        Signal::derive_local(move || catalog.with(|catalog| catalog.as_ref().map(|catalog| Arc::clone(&catalog.art))));
 
-    let following = RenderEffect::new(move |_| {
-        let catalog = catalog.get();
-        state.set_catalog(catalog.clone());
-        let Some(catalog) = catalog else {
-            art.set(Rc::new(SidebarArt::default()));
-            return;
-        };
-        spawn_local(async move {
-            let read = Arc::clone(&catalog);
-            let loaded = long_job(move || SidebarArt::read(read.assets.vfs(), &read.catalog)).await;
-            if state.catalog_untracked().is_some_and(|current| Arc::ptr_eq(&current, &catalog)) {
-                art.set(Rc::new(loaded));
-            }
-        });
-    });
+    let following = RenderEffect::new(move |_| state.set_catalog(catalog.get()));
     let models_following = RenderEffect::new(move |_| state.set_models_source(models.get()));
     let open_following = RenderEffect::new(move |_| state.set_open(open.get()));
     // The listing's labels are translated as it is built.

@@ -58,6 +58,7 @@ use super::ModelsSource;
 use super::ShipChoice;
 use super::SidebarCatalog;
 use super::SidebarEvent;
+use super::art::SidebarArt;
 use super::built_state;
 use super::rows::row_test_id;
 use super::state::SidebarState;
@@ -70,6 +71,7 @@ use crate::shell::ShellHarnessProps;
 struct Inputs {
     open: RwSignal<Option<OpenTarget>, LocalStorage>,
     hardpoints: RwSignal<Rc<HashSet<HardpointTarget>>, LocalStorage>,
+    catalog: RwSignal<Option<Arc<SidebarCatalog>>, LocalStorage>,
 }
 
 struct Sidebar {
@@ -88,7 +90,10 @@ fn catalog_over(vfs: VfsPath) -> Arc<SidebarCatalog> {
     let metadata = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
     let assets = ShipAssets::from_parts(&vfs, Arc::new(metadata), Arc::new(Vec::new()));
 
-    Arc::new(SidebarCatalog { assets: Arc::new(assets), catalog: Arc::new(fixture::ships()) })
+    let catalog = fixture::ships();
+    let art = SidebarArt::read(&vfs, &catalog);
+
+    Arc::new(SidebarCatalog { assets: Arc::new(assets), catalog: Arc::new(catalog), art: Arc::new(art) })
 }
 
 fn index(buildings: ModelBuildings) -> ModelTreeIndex {
@@ -129,17 +134,19 @@ impl Sidebar {
         let caught: Rc<Cell<Option<Inputs>>> = Rc::new(Cell::new(None));
         let (recorder, inner) = (Rc::clone(&events), Rc::clone(&caught));
         let mut window = HeadlessWindow::open(options, move || {
-            let inputs =
-                Inputs { open: RwSignal::new_local(None), hardpoints: RwSignal::new_local(Rc::new(HashSet::new())) };
+            let inputs = Inputs {
+                open: RwSignal::new_local(None),
+                hardpoints: RwSignal::new_local(Rc::new(HashSet::new())),
+                catalog: RwSignal::new_local(Some(Arc::clone(&loaded))),
+            };
             inner.set(Some(inputs));
             let recorder = Rc::clone(&recorder);
             let on_event = UnsyncCallback::new(move |event: SidebarEvent| recorder.borrow_mut().push(event));
-            let loaded = Some(Arc::clone(&loaded));
             let models = models.clone();
             view! {
                 ShellHarness(theme = theme) {
                     ArmorSidebar(
-                        catalog = Signal::stored_local(loaded),
+                        catalog = Signal::from(inputs.catalog),
                         models = Signal::stored_local(models),
                         common = Signal::stored_local(CommonPaneSettings::default()),
                         open = Signal::from(inputs.open),
@@ -632,6 +639,27 @@ fn a_class_icon_points_right() {
     game_art::testing::assert_points_right(&mut sidebar.window, "wt-armor-row__class");
 }
 
+/// The flags and class icons arrive with the catalog, so the first frame listing a class row
+/// draws its icon.
+#[test]
+fn the_class_icons_are_drawn_with_the_first_listing() {
+    rust_i18n::set_locale("en");
+    let loaded = catalog_over(game_art::testing::upright_class_icon(Species::Battleship));
+    let options = HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 });
+    let mut sidebar = Sidebar::mount(options, ThemeChoice::Dark, Arc::clone(&loaded), ModelsSource::Loading);
+    sidebar.inputs.catalog.set(None);
+    sidebar.settle();
+    sidebar.state.open_folders(&["armor-nation-USA"]);
+    sidebar.settle();
+    assert!(sidebar.window.by_class("wt-armor-row__class").is_none(), "nothing is listed without a catalog");
+
+    sidebar.inputs.catalog.set(Some(loaded));
+    sidebar.window.advance(Duration::ZERO);
+
+    assert!(sidebar.listed(&RowId::from("armor-class-USA-Battleship")), "the class row is listed");
+    assert!(sidebar.window.by_class("wt-armor-row__class").is_some(), "with its icon in the same frame");
+}
+
 /// The catalogue and model library of the install named by `WT_WOWS_DIR`.
 fn real_catalog() -> (Arc<SidebarCatalog>, ModelsSource) {
     let Some(dir) = std::env::var_os("WT_WOWS_DIR").map(std::path::PathBuf::from) else {
@@ -644,7 +672,8 @@ fn real_catalog() -> (Arc<SidebarCatalog>, ModelsSource) {
             .expect("the ship assets load");
     let models = wows_toolkit_armor::assets::ModelAssets::build(&assets).expect("the model library builds");
     let catalog = wows_toolkit_armor::catalog::ShipCatalog::build(assets.metadata());
-    let loaded = SidebarCatalog { assets: Arc::new(assets), catalog: Arc::new(catalog) };
+    let art = SidebarArt::read(assets.vfs(), &catalog);
+    let loaded = SidebarCatalog { assets: Arc::new(assets), catalog: Arc::new(catalog), art: Arc::new(art) };
 
     (Arc::new(loaded), ModelsSource::Ready(models.library))
 }

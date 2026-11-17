@@ -166,10 +166,6 @@ impl SidebarState {
         self.catalog.get()
     }
 
-    pub fn catalog_untracked(self) -> Option<Arc<SidebarCatalog>> {
-        self.catalog.get_untracked()
-    }
-
     fn emit(self, event: SidebarEvent) {
         self.on_event.get_value().run(event);
     }

@@ -122,7 +122,11 @@ pub fn ArmorViewerTab() -> impl IntoView {
         Signal::derive_local(move || {
             built.get()?;
             library.ready_untracked().map(|bundle| {
-                Arc::new(SidebarCatalog { assets: Arc::clone(&bundle.assets), catalog: Arc::clone(&bundle.catalog) })
+                Arc::new(SidebarCatalog {
+                    assets: Arc::clone(&bundle.assets),
+                    catalog: Arc::clone(&bundle.catalog),
+                    art: Arc::clone(&bundle.sidebar_art),
+                })
             })
         })
     };
