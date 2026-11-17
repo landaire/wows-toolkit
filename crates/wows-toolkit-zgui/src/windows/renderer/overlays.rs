@@ -126,14 +126,14 @@ fn RotationHandle(session: RendererSession) -> impl IntoView {
     }
 }
 
-/// Where the peers' pointers are and the pings they dropped, read again each time a running
-/// session redraws.
+/// Where the peers' pointers are and the pings dropped, this end's own included, read again each
+/// time the session or a ping redraws.
 #[component]
 fn PeerMarks(session: RendererSession) -> impl IntoView {
     let marks = move || {
         let _ = session.collab_frame.get();
         let origin = session.map_origin.get();
-        let (cursors, pings) = session.collab.with(|link| (link.peer_cursors(), link.peer_pings()));
+        let (cursors, pings) = session.collab.with(|link| (link.peer_cursors(), link.pings()));
 
         session.map.with(|map| {
             let mut marks: Vec<AnyView> = Vec::new();
@@ -161,10 +161,14 @@ fn PeerMarks(session: RendererSession) -> impl IntoView {
                 let [red, green, blue] = ping.color;
                 let alpha = (ring.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
                 let diameter = format!("{}px", ring.radius * 2.0);
+                let test_id = match ping.by {
+                    Some(user) => format!("replay-renderer-peer-ping-{}", user.raw()),
+                    None => "replay-renderer-ping-alone".to_owned(),
+                };
                 marks.push(AnyView::new(view! {
                     box(
                         class = "wt-renderer-annotations__ping",
-                        attr:data-testid = format!("replay-renderer-peer-ping-{}", ping.user_id),
+                        attr:data-testid = test_id,
                         style:left = format!("{}px", at.x - ring.radius),
                         style:top = format!("{}px", at.y - ring.radius),
                         style:width = diameter.clone(),

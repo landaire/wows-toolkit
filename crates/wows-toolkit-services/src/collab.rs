@@ -177,6 +177,7 @@ impl CollabState {
             board: None,
             alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
             next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            alone_pings: Arc::default(),
             // Only a host or a co-host has a mesh to send frames into.
             frames: self.handle.as_ref().filter(|_| self.may_steer()).map(|handle| handle.frame_tx.clone()),
             commands: self.handle.as_ref().map(|handle| handle.command_tx.clone()),
@@ -521,6 +522,49 @@ mod tests {
         assert!(held.current_annotation_sync.is_some(), "still readable for the viewport that draws it");
         assert!(held.tactics_boards.contains_key(&42), "and so is the board's own");
     }
+
+    /// A ping dropped alone is held here, since there is no session to hold it, and goes once its
+    /// ripple has run out.
+    #[test]
+    fn a_ping_alone_is_held_here() {
+        let link = CollabLink::default();
+        link.send_ping([10.0, 20.0]);
+
+        let pings = link.pings();
+        assert_eq!(pings.len(), 1);
+        assert!(pings[0].by.is_none(), "nobody has an id alone");
+        assert_eq!(pings[0].pos, [10.0, 20.0]);
+        assert!(link.has_pings());
+
+        link.drop_stale_pings(std::time::Duration::ZERO);
+        assert!(!link.has_pings(), "shed once it has run out");
+    }
+
+    /// The session does not send a ping back to the end that dropped it, so that end holds its
+    /// own, in its own colour, as well as telling the session.
+    #[test]
+    fn a_ping_in_a_session_is_held_here_and_sent() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        {
+            let mut held = state.lock();
+            held.my_user_id = 3;
+            held.cursors.push(UserCursor {
+                user_id: 3,
+                name: "Me".to_owned(),
+                color: [1, 2, 3],
+                pos: None,
+                last_update: std::time::Instant::now(),
+            });
+        }
+        let (link, sent) = CollabLink::for_test(Arc::clone(&state));
+        link.send_ping([5.0, 6.0]);
+
+        let pings = link.pings();
+        assert_eq!(pings.len(), 1);
+        assert_eq!(pings[0].by, Some(UserId(3)));
+        assert_eq!(pings[0].color, [1, 2, 3]);
+        assert!(matches!(sent.try_recv(), Ok(LocalEvent::Ping(pos)) if pos == [5.0, 6.0]), "the session is told");
+    }
 }
 
 /// A viewport's end of a collab session.
@@ -543,6 +587,8 @@ pub struct CollabLink {
     /// Ids for the shapes added while alone. They only have to tell this end's
     /// own shapes apart; a session assigns its own.
     next_alone_id: Arc<std::sync::atomic::AtomicU64>,
+    /// The pings this end dropped while there is no session to hold them.
+    alone_pings: Arc<Mutex<Vec<MapPing>>>,
     /// Where a frame of playback goes for the rest of the session to watch.
     /// `None` for a peer, which is sent frames rather than sending them.
     frames: Option<std::sync::mpsc::SyncSender<wt_collab_client::peer::FrameBroadcast>>,
@@ -591,6 +637,7 @@ impl CollabLink {
             board: Some(board_id.raw()),
             alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
             next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            alone_pings: Arc::default(),
             // A board draws no battle, so it sends no frames.
             frames: None,
             commands: self.commands.clone(),
@@ -676,10 +723,24 @@ impl CollabLink {
         }
     }
 
-    /// The pings peers have dropped on the map recently.
-    pub fn peer_pings(&self) -> Vec<PeerPing> {
-        let Some(state) = &self.state else { return Vec::new() };
-        state.lock().pings.clone()
+    /// The pings dropped on the map recently, this end's own included.
+    pub fn pings(&self) -> Vec<MapPing> {
+        let held = self.state.as_ref().filter(|_| self.is_active());
+        let Some(state) = held else { return self.alone_pings.lock().clone() };
+        state
+            .lock()
+            .pings
+            .iter()
+            .map(|ping| MapPing { by: Some(UserId(ping.user_id)), color: ping.color, pos: ping.pos, time: ping.time })
+            .collect()
+    }
+
+    /// Whether any ping is still on the map.
+    pub fn has_pings(&self) -> bool {
+        match self.state.as_ref().filter(|_| self.is_active()) {
+            Some(state) => !state.lock().pings.is_empty(),
+            None => !self.alone_pings.lock().is_empty(),
+        }
     }
 
     /// Says where this app's pointer is, or that it has left the map.
@@ -689,11 +750,26 @@ impl CollabLink {
         }
     }
 
-    /// Drops a ping on the map for everyone in the session.
+    /// Drops a ping on the map, for everyone in the session where there is one. The session does
+    /// not send a ping back to the end that dropped it, so it is held here too.
     pub fn send_ping(&self, pos: [f32; 2]) {
-        if let Some(tx) = &self.local_tx {
-            let _ = tx.send(LocalEvent::Ping(pos));
+        let time = web_time::Instant::now();
+        let (Some(tx), Some(state)) = (&self.local_tx, &self.state) else {
+            // White: alone, there is no user colour to draw it in.
+            self.alone_pings.lock().push(MapPing { by: None, color: [255, 255, 255], pos, time });
+            return;
+        };
+        {
+            let mut held = state.lock();
+            let mine = held.my_user_id;
+            let color = held
+                .cursors
+                .iter()
+                .find(|cursor| cursor.user_id == mine)
+                .map_or([255, 255, 255], |cursor| cursor.color);
+            held.pings.push(PeerPing { user_id: mine, color, pos, time });
         }
+        let _ = tx.send(LocalEvent::Ping(pos));
     }
 
     /// What everyone in the session has drawn on the map.
@@ -1170,6 +1246,7 @@ impl CollabLink {
     /// session left running carries every ping anyone has dropped in it. The
     /// egui renderer sheds them in the same place, as it draws.
     pub fn drop_stale_pings(&self, life: std::time::Duration) {
+        self.alone_pings.lock().retain(|ping| ping.time.elapsed() < life);
         let Some(state) = &self.state else { return };
         state.lock().pings.retain(|ping| ping.time.elapsed() < life);
     }
@@ -1272,12 +1349,23 @@ impl CollabLink {
                 board: None,
                 alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
                 next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                alone_pings: Arc::default(),
                 frames: None,
                 commands: None,
             },
             rx,
         )
     }
+}
+
+/// A ping on the map, and who dropped it.
+#[derive(Clone, Debug)]
+pub struct MapPing {
+    /// `None` for a ping dropped with no session, where nobody has an id.
+    pub by: Option<UserId>,
+    pub color: [u8; 3],
+    pub pos: [f32; 2],
+    pub time: web_time::Instant,
 }
 
 /// Who someone is in a session. Assigned by the server, so a reader alone has

@@ -1058,11 +1058,12 @@ impl RendererSession {
         .flatten()
     }
 
-    /// Drops a ping where the pointer is, for everyone in the session.
+    /// Drops a ping where the pointer is, shown here and to everyone in the session.
     pub fn ping(self, position: WindowPoint) {
         let origin = self.map_origin.get_untracked();
         let Some((x, y)) = self.map.with_untracked(|map| map.map_point(position, origin)) else { return };
         self.collab.with_untracked(|link| link.send_ping([x, y]));
+        self.follow_collab();
     }
 
     /// Changes whose trails and ranges are drawn, and redraws. A session is told whichever
@@ -1148,8 +1149,9 @@ impl RendererSession {
         self.draw();
     }
 
-    /// Starts or stops the redraw a running session needs: a peer's pointer and pings move without
-    /// anything here touching them, and the session's display settings change under it.
+    /// Starts or stops the redraw a running session or a ping needs: a peer's pointer and a ping's
+    /// ripple move without anything here touching them, and the session's display settings change
+    /// under it.
     fn follow_collab(self) {
         let link = self.collab.get_untracked();
         if link.is_active() {
@@ -1157,7 +1159,7 @@ impl RendererSession {
             self.follow_session_display();
         }
         self.run.update_value(|run| {
-            if !link.is_active() {
+            if !link.is_active() && !link.has_pings() {
                 run.collab_ticker = None;
                 return;
             }
@@ -1166,12 +1168,17 @@ impl RendererSession {
             }
             run.collab_ticker = run.timers.as_ref().map(|timers| {
                 timers.set_interval(COLLAB_TICK, move || {
-                    let active = self.collab.with_untracked(|link| {
+                    let (active, pinged) = self.collab.with_untracked(|link| {
+                        // Read before the shedding, so the redraw that takes the last ripple off
+                        // still happens.
+                        let pinged = link.has_pings();
                         link.drop_stale_pings(std::time::Duration::from_secs_f32(PING_SECONDS));
-                        link.is_active()
+                        (link.is_active(), pinged)
                     });
                     if active {
                         self.follow_session_display();
+                    }
+                    if active || pinged {
                         self.collab_frame.update(|frame| *frame = frame.wrapping_add(1));
                     } else {
                         self.run.update_value(|run| run.collab_ticker = None);
