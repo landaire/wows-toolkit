@@ -362,27 +362,18 @@ async fn save_sent_replays(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), s
     save_sent_replay_ledger(pool, ctx.sent_replays.as_ref()).await
 }
 
+/// Adds what this app has sent to the ledger. Rows are never replaced: the
+/// other front end writes the same table, and a row it added since this app
+/// loaded the ledger must survive this save.
 async fn save_sent_replay_ledger(pool: &SqlitePool, sent_replays: &RwLock<HashSet<String>>) -> Result<(), sqlx::Error> {
-    save_sent_replay_ledger_with_hook(pool, sent_replays, || {}).await
-}
-
-async fn save_sent_replay_ledger_with_hook<F>(
-    pool: &SqlitePool,
-    sent_replays: &RwLock<HashSet<String>>,
-    after_snapshot: F,
-) -> Result<(), sqlx::Error>
-where
-    F: FnOnce(),
-{
-    // Reserve the writer before snapshotting so direct upload inserts queue
-    // behind this full replacement instead of being deleted by it.
-    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
     let paths: Vec<String> = sent_replays.read().iter().cloned().collect();
-    after_snapshot();
 
-    sqlx::query("DELETE FROM sent_replays").execute(&mut *transaction).await?;
+    let mut transaction = pool.begin().await?;
     for path in &paths {
-        sqlx::query("INSERT INTO sent_replays (replay_path) VALUES (?1)").bind(path).execute(&mut *transaction).await?;
+        sqlx::query("INSERT OR IGNORE INTO sent_replays (replay_path) VALUES (?1)")
+            .bind(path)
+            .execute(&mut *transaction)
+            .await?;
     }
     transaction.commit().await?;
 
@@ -506,69 +497,27 @@ async fn save_mod_manager(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sq
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::sync::Arc;
-    use std::sync::mpsc;
-    use std::time::Duration;
 
     use parking_lot::RwLock;
-    use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::*;
 
+    /// A row another writer added after this app loaded the ledger survives this app's save.
     #[test]
-    fn a_concurrent_upload_insert_survives_a_full_ledger_save() {
+    fn a_row_another_writer_added_survives_a_ledger_save() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let directory = tempfile::tempdir().unwrap();
-        let options = SqliteConnectOptions::new()
-            .filename(directory.path().join("ledger.sqlite"))
-            .create_if_missing(true)
-            .busy_timeout(Duration::from_secs(5));
-        let pool = runtime.block_on(SqlitePoolOptions::new().max_connections(2).connect_with(options)).unwrap();
+        let pool = runtime.block_on(SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:")).unwrap();
         runtime
             .block_on(sqlx::query("CREATE TABLE sent_replays (replay_path TEXT PRIMARY KEY)").execute(&pool))
             .unwrap();
-        let sent_replays = Arc::new(RwLock::new(HashSet::new()));
-        let (transaction_started_tx, transaction_started_rx) = mpsc::channel();
-        let (continue_save_tx, continue_save_rx) = mpsc::channel();
+        let sent_replays = RwLock::new(HashSet::from(["sent-here.wowsreplay".to_owned()]));
+        runtime.block_on(queries::insert_sent_replay(&pool, "sent-elsewhere.wowsreplay")).unwrap();
 
-        let save_pool = pool.clone();
-        let save_ledger = Arc::clone(&sent_replays);
-        let saver = std::thread::spawn(move || {
-            tokio::runtime::Runtime::new().unwrap().block_on(save_sent_replay_ledger_with_hook(
-                &save_pool,
-                save_ledger.as_ref(),
-                move || {
-                    transaction_started_tx.send(()).unwrap();
-                    continue_save_rx.recv().unwrap();
-                },
-            ))
-        });
-        transaction_started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime.block_on(save_sent_replay_ledger(&pool, &sent_replays)).unwrap();
 
-        let insert_pool = pool.clone();
-        let (insert_started_tx, insert_started_rx) = mpsc::channel();
-        let (insert_finished_tx, insert_finished_rx) = mpsc::channel();
-        let insert = std::thread::spawn(move || {
-            tokio::runtime::Runtime::new().unwrap().block_on(async move {
-                insert_started_tx.send(()).unwrap();
-                let result = queries::insert_sent_replay(&insert_pool, "just-sent.wowsreplay").await;
-                insert_finished_tx.send(()).unwrap();
-                result
-            })
-        });
-        insert_started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(matches!(
-            insert_finished_rx.recv_timeout(Duration::from_millis(500)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ));
-        continue_save_tx.send(()).unwrap();
-
-        saver.join().unwrap().unwrap();
-        insert.join().unwrap().unwrap();
-        assert_eq!(
-            runtime.block_on(queries::get_all_sent_replays(&pool)).unwrap(),
-            vec!["just-sent.wowsreplay".to_owned()]
-        );
+        let mut saved = runtime.block_on(queries::get_all_sent_replays(&pool)).unwrap();
+        saved.sort();
+        assert_eq!(saved, ["sent-elsewhere.wowsreplay", "sent-here.wowsreplay"]);
     }
 }
