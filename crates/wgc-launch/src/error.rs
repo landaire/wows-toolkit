@@ -168,6 +168,18 @@ pub enum KillError {
 }
 
 #[derive(Debug, Error)]
+pub(crate) enum PrefixShutdownError {
+    #[error("the runner has no wineserver for {prefix}")]
+    NoWineserver { prefix: PathBuf },
+    #[error("could not run {program}")]
+    Spawn {
+        program: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug, Error)]
 #[error("{path:?} is not a plain relative path")]
 pub struct RelativePathError {
     pub path: PathBuf,

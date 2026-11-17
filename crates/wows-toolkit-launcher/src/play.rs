@@ -18,6 +18,7 @@ use wgc_launch::GameProcess;
 use wgc_launch::InstallView;
 use wgc_launch::LaunchArgs;
 use wgc_launch::LaunchSpec;
+use wgc_launch::PrefixShutdown;
 use wgc_launch::ResolvedRunner;
 use wgc_launch::RunnerChoice;
 use wgc_launch::RuntimeDirs;
@@ -141,8 +142,8 @@ async fn start(
     #[cfg(all(debug_assertions, target_os = "linux", target_arch = "x86_64"))]
     let (sign_in_trigger, capture) = crate::diagnostics::prepare(launch, &capture_dirs, view.files());
 
-    let (program, serving) = match program {
-        Program::Replay(replay) => (WindowsProgram::replay(&view, &replay), None),
+    let (program, serving, prefix_shutdown) = match program {
+        Program::Replay(replay) => (WindowsProgram::replay(&view, &replay), None, PrefixShutdown::Never),
         Program::SignIn(sign_in) => {
             let Some(relay_exe) = relay_exe else {
                 return Err(LaunchFailure::NoWinePrefix);
@@ -165,12 +166,14 @@ async fn start(
                 env,
                 shared_dirs: Vec::new(),
             };
-            (program, Some(serving))
+            // The relay exits once the game and everything it started have exited.
+            (program, Some(serving), PrefixShutdown::WithRunner)
         }
     };
 
     let spawned = tokio::task::spawn_blocking(move || {
-        wgc_launch::spawn(LaunchSpec { lock, runner: &runner, view: &view, program, args: &args }, prepare)
+        let spec = LaunchSpec { lock, runner: &runner, view: &view, program, args: &args, prefix_shutdown };
+        wgc_launch::spawn(spec, prepare)
     })
     .await;
     let spawned = match spawned {

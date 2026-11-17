@@ -13,6 +13,7 @@ use crate::error::KillError;
 use crate::error::WaitError;
 use crate::lock::SessionLock;
 use crate::overlay::FuseMount;
+use crate::wineserver::PrefixServer;
 
 /// Present in the environment of every process of a toolkit-launched
 /// session. The value names the install (or the prefix setup run).
@@ -70,8 +71,14 @@ pub struct GameProcess {
 }
 
 impl GameProcess {
-    pub(crate) fn new(child: Child, marker: SessionMarker, mount: Option<FuseMount>, lock: SessionLock) -> Self {
-        let handle = GameHandle::from_marker(marker, Some(ProcessId(child.id())));
+    pub(crate) fn new(
+        child: Child,
+        marker: SessionMarker,
+        prefix_server: Option<PrefixServer>,
+        mount: Option<FuseMount>,
+        lock: SessionLock,
+    ) -> Self {
+        let handle = GameHandle::from_marker(marker, Some(ProcessId(child.id())), prefix_server);
         Self { child, handle, mount, lock }
     }
 
@@ -86,7 +93,13 @@ impl GameProcess {
     pub fn wait(self) -> Result<GameExit, WaitError> {
         let GameProcess { mut child, handle, mount, lock } = self;
 
-        let runner_status = child.wait().map_err(WaitError::Runner)?;
+        // Ended on a failed wait as well: the session is over either way, and nothing else
+        // would end the prefix.
+        let runner_status = child.wait();
+        if let Some(server) = &handle.prefix_server {
+            server.end();
+        }
+        let runner_status = runner_status.map_err(WaitError::Runner)?;
         handle.wait_exit();
 
         if let Some(mount) = mount {
@@ -111,12 +124,19 @@ pub struct GameHandle {
     session: Arc<SessionId>,
     install: Option<Arc<Path>>,
     runner: Option<ProcessId>,
+    /// Ends the prefix's Wine processes with the session. `None` for an
+    /// adopted session and for a session that leaves them to Wine.
+    prefix_server: Option<PrefixServer>,
 }
 
 impl GameHandle {
     /// The session this process started with `marker`, through `runner` when it keeps the child.
-    pub(crate) fn from_marker(marker: SessionMarker, runner: Option<ProcessId>) -> GameHandle {
-        GameHandle { session: Arc::new(marker.id), install: marker.install.map(Arc::from), runner }
+    pub(crate) fn from_marker(
+        marker: SessionMarker,
+        runner: Option<ProcessId>,
+        prefix_server: Option<PrefixServer>,
+    ) -> GameHandle {
+        GameHandle { session: Arc::new(marker.id), install: marker.install.map(Arc::from), runner, prefix_server }
     }
 
     /// A session left running by an earlier toolkit process, if any.
@@ -198,10 +218,16 @@ impl GameHandle {
         }
     }
 
-    /// Kills every session process. Wine processes ignore polite requests
-    /// from outside the prefix, so this sends SIGKILL.
+    /// Kills every session process: first the prefix's Wine processes
+    /// through its wineserver, when the session ends them, then the rest
+    /// with SIGKILL. Wine processes ignore polite requests from outside the
+    /// prefix.
     pub fn kill(&self) -> Result<(), KillError> {
         const ATTEMPTS: usize = 20;
+
+        if let Some(server) = &self.prefix_server {
+            server.end();
+        }
 
         for _ in 0..ATTEMPTS {
             let processes = scan::session_processes(Some(&self.session)).map_err(KillError::Scan)?;
@@ -248,7 +274,12 @@ fn adopted(processes: &[SessionProcess]) -> Option<GameHandle> {
     let install =
         processes.iter().filter(|process| process.session == first.session).find_map(|process| process.install.clone());
 
-    Some(GameHandle { session: Arc::new(first.session.clone()), install: install.map(Arc::from), runner: None })
+    Some(GameHandle {
+        session: Arc::new(first.session.clone()),
+        install: install.map(Arc::from),
+        runner: None,
+        prefix_server: None,
+    })
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -426,7 +457,7 @@ mod tests {
             .env(SESSION_INSTALL_ENV, &install)
             .spawn()
             .unwrap();
-        let process = GameProcess::new(child, marker.clone(), None, lock);
+        let process = GameProcess::new(child, marker.clone(), None, None, lock);
         let handle = process.handle();
 
         assert!(handle.is_running().unwrap());

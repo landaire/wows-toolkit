@@ -145,7 +145,7 @@ impl ResolvedRunner {
             let runtime = match proton {
                 Some(proton) => proton.required_runtime(),
                 None => {
-                    if !has_entry_with_prefix(&folders.join("Steam/compatibilitytools.d"), "UMU-Proton") {
+                    if !has_entry_with_prefix(&self.dirs.umu_compat_tools(), "UMU-Proton") {
                         umu_downloads.push(UmuComponent::UmuProton);
                     }
                     Some(SteamRuntime::Sniper)
@@ -184,7 +184,7 @@ impl ResolvedRunner {
             .status()
             .map_err(|source| PrefixInitError::Spawn { program: plan.program().to_path_buf(), source })?;
         // wineserver outlives wineboot. A game started meanwhile would join it under the setup marker.
-        GameHandle::from_marker(marker, None).wait_exit();
+        GameHandle::from_marker(marker, None, None).wait_exit();
         if !status.success() {
             return Err(PrefixInitError::Failed { status });
         }
@@ -221,6 +221,26 @@ impl ResolvedRunner {
             Runner::Native => Vec::new(),
             Runner::SteamProton { .. } => vec![self.dirs.steam_compat_data()],
             Runner::Umu { .. } => vec![self.dirs.umu_prefix(), self.dirs.umu_folders(), self.dirs.umu_cache()],
+        }
+    }
+
+    /// The `wineserver` of the Wine build the runner starts. With no Proton chosen, umu runs the
+    /// newest UMU-Proton it has downloaded. `None` for native launches and before that download.
+    pub(crate) fn wineserver(&self) -> Option<PathBuf> {
+        match &self.runner {
+            Runner::Native => None,
+            Runner::SteamProton { proton, .. } | Runner::Umu { proton: Some(proton), .. } => proton.wineserver(),
+            Runner::Umu { proton: None, .. } => {
+                let entries = std::fs::read_dir(self.dirs.umu_compat_tools()).ok()?;
+                let mut installs: Vec<ProtonInstall> = entries
+                    .flatten()
+                    .filter(|entry| entry.file_name().to_string_lossy().starts_with("UMU-Proton"))
+                    .filter_map(|entry| ProtonInstall::from_dir(&entry.path()))
+                    .collect();
+                installs.sort_by(ProtonInstall::preference);
+
+                installs.first()?.wineserver()
+            }
         }
     }
 }
@@ -338,5 +358,21 @@ mod tests {
         std::fs::create_dir_all(dirs.umu_prefix()).unwrap();
         std::fs::write(dirs.umu_prefix().join("system.reg"), b"").unwrap();
         assert!(resolved.first_run_work().is_empty());
+    }
+
+    #[test]
+    fn umu_without_a_chosen_proton_uses_the_newest_umu_proton_wineserver() {
+        let data = tempfile::tempdir().unwrap();
+        let dirs = RuntimeDirs::new(data.path());
+        let resolved =
+            ResolvedRunner::new(Runner::Umu { umu_run: PathBuf::from("/usr/bin/umu-run"), proton: None }, dirs.clone());
+        assert_eq!(resolved.wineserver(), None);
+
+        for name in ["UMU-Proton-9.0-3", "UMU-Proton-10.0-4"] {
+            let dir = dirs.umu_compat_tools().join(name);
+            executable(&dir.join("proton"));
+            executable(&dir.join("files/bin/wineserver"));
+        }
+        assert_eq!(resolved.wineserver(), Some(dirs.umu_compat_tools().join("UMU-Proton-10.0-4/files/bin/wineserver")));
     }
 }

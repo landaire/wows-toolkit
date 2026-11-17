@@ -515,6 +515,52 @@ mod tests {
         insta::assert_debug_snapshot!(argv);
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_steam_launch_leaves_the_toolkit_prefix_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let fixture = SteamFixture::new(&root, 13533378, AppStateFlags::FULLY_INSTALLED.bits());
+        // A Proton wineserver that records every run.
+        let record = root.join("wineserver-calls");
+        let wineserver = root.join("Proton - Experimental/files/bin/wineserver");
+        std::fs::create_dir_all(wineserver.parent().unwrap()).unwrap();
+        std::fs::write(&wineserver, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", record.display())).unwrap();
+        std::fs::set_permissions(&wineserver, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Stands in for Steam and the client it starts: a process named as the client, from the
+        // install, that outlives the launcher's one-second poll.
+        let client = fixture.install.join("WorldOfWarships64.exe");
+        std::os::unix::fs::symlink("/bin/sh", &client).unwrap();
+        let argv = vec![client.into_os_string(), "-c".into(), "sleep 3; :".into()];
+
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let env =
+            LauncherEnv { runtime_dirs: Some(wgc_launch::RuntimeDirs::new(&root.join("app"))), ..test_env(&runtime) };
+        let (mut launcher, mut events) = Launcher::new();
+        launcher.installs = vec![fixture.game_install()];
+        let launch = launcher.next_launch();
+        launcher.game = GameState::Starting { account: None, install: fixture.install.clone() };
+
+        run_through_steam(
+            launch,
+            argv,
+            fixture.install.clone(),
+            fixture.library.clone(),
+            |_| {},
+            &launcher.sender(&env),
+        );
+        while let Some(crate::launcher::LauncherEvent(event)) = events.try_next() {
+            if let Event::Game(event) = event {
+                launcher.apply_game(event, &env);
+            }
+        }
+
+        assert!(launcher.game_state().is_idle());
+        assert!(!record.exists());
+    }
+
     #[test]
     fn a_launch_refuses_a_build_steam_changed_after_play() {
         let tmp = tempfile::tempdir().unwrap();

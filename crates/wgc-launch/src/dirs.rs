@@ -35,6 +35,11 @@ impl RuntimeDirs {
         self.root.join("umu").join("folders")
     }
 
+    /// Where umu unpacks the UMU-Proton builds it downloads.
+    pub(crate) fn umu_compat_tools(&self) -> PathBuf {
+        self.umu_folders().join("Steam").join("compatibilitytools.d")
+    }
+
     /// `XDG_CACHE_HOME` for umu, which caches its downloads there.
     pub fn umu_cache(&self) -> PathBuf {
         self.root.join("umu").join("cache")

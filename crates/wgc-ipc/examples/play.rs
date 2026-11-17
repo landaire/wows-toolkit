@@ -42,6 +42,7 @@ use wgc_launch::InstallFiles;
 use wgc_launch::InstallView;
 use wgc_launch::LaunchArgs;
 use wgc_launch::LaunchSpec;
+use wgc_launch::PrefixShutdown;
 use wgc_launch::Runner;
 use wgc_launch::RunnerChoice;
 use wgc_launch::RuntimeDirs;
@@ -156,7 +157,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         launch_args.env.push(("PROTON_LOG".into(), "1".into()));
         launch_args.env.push(("PROTON_LOG_DIR".into(), dir.display().to_string()));
     }
-    let spec = LaunchSpec { lock, runner: &runner, view: &view, program, args: &launch_args };
+    let spec = LaunchSpec {
+        lock,
+        runner: &runner,
+        view: &view,
+        program,
+        args: &launch_args,
+        prefix_shutdown: PrefixShutdown::WithRunner,
+    };
     let process = wgc_launch::spawn(spec, |_| {})?;
     let handle = process.handle();
     info!(runner_pid = ?handle.runner_pid(), "game started");

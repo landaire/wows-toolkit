@@ -21,6 +21,7 @@ mod runner;
 mod session;
 mod spawn;
 mod view;
+mod wineserver;
 
 pub use crate::dirs::InstallKey;
 pub use crate::dirs::InstallStateDir;
@@ -67,6 +68,7 @@ pub use crate::view::InstallDirEntry;
 pub use crate::view::InstallFiles;
 pub use crate::view::InstallView;
 pub use crate::view::OverlayView;
+pub use crate::wineserver::PrefixShutdown;
 
 #[derive(Debug, Default, Clone)]
 pub struct LaunchArgs {

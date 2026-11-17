@@ -23,6 +23,8 @@ use crate::session::GameProcess;
 use crate::session::SessionId;
 use crate::session::SessionMarker;
 use crate::view::InstallView;
+use crate::wineserver::PrefixServer;
+use crate::wineserver::PrefixShutdown;
 
 /// WoWs on Steam. Proton and umu select per-game fixes by this id.
 const WOWS_APP_ID: &str = "552990";
@@ -80,6 +82,7 @@ pub struct LaunchSpec<'a> {
     pub program: WindowsProgram,
     /// `extra` follows `program.args`; `env` applies before `program.env`.
     pub args: &'a LaunchArgs,
+    pub prefix_shutdown: PrefixShutdown,
 }
 
 /// Starts the program through the runner inside the view. `prepare`
@@ -133,7 +136,13 @@ pub fn spawn(spec: LaunchSpec<'_>, prepare: impl FnOnce(&mut Command)) -> Result
     prepare(&mut command);
 
     match command.spawn() {
-        Ok(child) => Ok(GameProcess::new(child, marker, mount, spec.lock)),
+        Ok(child) => {
+            let prefix_server = match spec.prefix_shutdown {
+                PrefixShutdown::WithRunner => PrefixServer::new(spec.runner),
+                PrefixShutdown::Never => None,
+            };
+            Ok(GameProcess::new(child, marker, prefix_server, mount, spec.lock))
+        }
         Err(source) => {
             if let Some(mount) = mount
                 && let Err(e) = mount.unmount()

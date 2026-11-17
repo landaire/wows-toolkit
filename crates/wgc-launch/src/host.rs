@@ -162,6 +162,14 @@ impl ProtonInstall {
         self.dir.join("proton")
     }
 
+    /// The build's `wineserver`: under `files/`, or `dist/` in builds older than Proton 5.13.
+    pub(crate) fn wineserver(&self) -> Option<PathBuf> {
+        ["files", "dist"]
+            .into_iter()
+            .map(|dist| self.dir.join(dist).join("bin").join("wineserver"))
+            .find(|path| is_executable(path))
+    }
+
     /// The Steam runtime this build runs in under umu, from `toolmanifest.vdf`.
     pub fn required_runtime(&self) -> Option<SteamRuntime> {
         let manifest = std::fs::read_to_string(self.dir.join("toolmanifest.vdf")).ok()?;
@@ -170,7 +178,7 @@ impl ProtonInstall {
         Some(SteamRuntime::from_app_id(app_id))
     }
 
-    fn preference(a: &Self, b: &Self) -> Ordering {
+    pub(crate) fn preference(a: &Self, b: &Self) -> Ordering {
         fn rank(kind: ProtonKind) -> u8 {
             match kind {
                 ProtonKind::Experimental => 0,
