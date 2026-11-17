@@ -94,6 +94,16 @@ impl ViewerFeed {
     }
 }
 
+/// Held while an export runs; dropping it lets the next one start.
+#[must_use]
+pub struct ExportRunning(ArmorLibrary);
+
+impl Drop for ExportRunning {
+    fn drop(&mut self) {
+        self.0.exporting.try_set_value(false);
+    }
+}
+
 /// The Armor Viewer's data, as one `Copy` handle.
 #[derive(Clone, Copy)]
 pub struct ArmorLibrary {
@@ -107,6 +117,8 @@ pub struct ArmorLibrary {
     generation: StoredValue<u64>,
     feed: RwSignal<Vec<ViewerFeed>, LocalStorage>,
     next_source: StoredValue<u64>,
+    /// Set while a model export is being written. One runs at a time, as in the egui app.
+    exporting: StoredValue<bool>,
 }
 
 impl ArmorLibrary {
@@ -119,7 +131,22 @@ impl ArmorLibrary {
             generation: StoredValue::new(0),
             feed: RwSignal::new_local(Vec::new()),
             next_source: StoredValue::new(0),
+            exporting: StoredValue::new(false),
         }
+    }
+
+    pub fn is_exporting(self) -> bool {
+        self.exporting.try_get_value().unwrap_or(false)
+    }
+
+    /// Marks an export as running until the returned guard drops, or `None` while one already is.
+    pub fn begin_export(self) -> Option<ExportRunning> {
+        if self.is_exporting() {
+            return None;
+        }
+        self.exporting.set_value(true);
+
+        Some(ExportRunning(self))
     }
 
     /// Loads the data once it is wanted and the game data is ready, and again for each newer

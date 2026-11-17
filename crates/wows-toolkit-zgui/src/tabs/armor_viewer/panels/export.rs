@@ -473,6 +473,9 @@ impl ExportDialog {
 /// Opens the export dialog on `request`, seeded with the remembered choices, and writes the model
 /// it confirms.
 pub fn open_export_dialog(shell: Shell, request: ExportRequest, assets: Arc<ShipAssets>) {
+    if refuse_while_exporting(shell) {
+        return;
+    }
     let services = shell.services();
     let pool = services.settings.pool();
     let loading = services.on_tokio(async move {
@@ -877,6 +880,10 @@ pub fn write_glb(
     display_name: String,
     write: impl FnOnce(PathBuf) -> Result<(), ExportGlbError> + Send + 'static,
 ) {
+    let Some(running) = shell.armor.begin_export() else {
+        refuse_while_exporting(shell);
+        return;
+    };
     let asked = wows_toolkit_services::dialog::save_file(
         None,
         &default_export_filename(&display_name),
@@ -886,6 +893,7 @@ pub fn write_glb(
 
     // Detached: the export outlives the dialog that asked for it.
     spawn_detached(async move {
+        let _running = running;
         let Some(path) = shell.chosen_path(asked).await else { return };
         // The services go with the shell, which can be unmounted while the dialog is open; the
         // file is written either way.
@@ -905,6 +913,18 @@ pub fn write_glb(
         .await;
         report_export(shell, written, &display_name);
     });
+}
+
+/// Says an export is already running, and whether one is, so a new one is not started.
+pub fn refuse_while_exporting(shell: Shell) -> bool {
+    if !shell.armor.is_exporting() {
+        return false;
+    }
+    if let Some(toasts) = shell.try_toasts() {
+        toasts.info(t!("ui.armor.export.already_running").into_owned());
+    }
+
+    true
 }
 
 /// Reports a finished export: what was written and how large it is, or why it was not. The

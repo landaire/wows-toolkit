@@ -34,6 +34,7 @@ use crate::tabs::armor_viewer::options::filter::RailFilter;
 use crate::tabs::armor_viewer::options::textures::show_textures_item;
 use crate::tabs::armor_viewer::panels::export::ExportRequest;
 use crate::tabs::armor_viewer::panels::export::open_export_dialog;
+use crate::tabs::armor_viewer::panels::export::refuse_while_exporting;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use crate::tabs::armor_viewer::viewport::SceneFeatures;
 use crate::tabs::armor_viewer::workspace::ArmorWorkspace;
@@ -365,6 +366,9 @@ fn splash_boxes_button(viewport: ArmorViewportState, filter: &RailFilter) -> Opt
 /// Opens the export for the scene `viewport` shows: the confirm panel over the viewport for a ship,
 /// the export dialog for a model, which asks what the file should contain.
 fn open_export(shell: Shell, workspace: ArmorWorkspace, viewport: ArmorViewportState) {
+    if refuse_while_exporting(shell) {
+        return;
+    }
     let Some(request) = viewport.open_export_confirm() else {
         return;
     };

@@ -28,6 +28,8 @@ use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::vfs::MemoryFS;
+use wowsunpack::vfs::VfsPath;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
@@ -349,6 +351,36 @@ fn escape_empties_the_ship_search() {
     window.type_text("y");
     window.advance(Duration::from_millis(100));
     assert_eq!(typed(&mut window), "y", "the search keeps focus");
+}
+
+/// While an export runs, asking for another says so and opens no dialog; once it ends, the next
+/// one opens.
+#[test]
+fn a_second_export_is_refused_while_one_runs() {
+    let (mut window, mounted) = open();
+    let vfs: VfsPath = MemoryFS::new().into();
+    let metadata = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
+    let assets = Arc::new(ShipAssets::from_parts(&vfs, Arc::new(metadata), Arc::new(Vec::new())));
+    let request =
+        || ExportRequest::Ship { param_index: "PASC001".to_owned(), display_name: "Erie".to_owned(), seed_hull: None };
+    let refusal = rust_i18n::t!("ui.armor.export.already_running").into_owned();
+
+    let running = mounted.shell.armor.begin_export().expect("nothing is exporting yet");
+    assert!(mounted.shell.armor.begin_export().is_none(), "a second export does not start");
+    open_export_dialog(mounted.shell, request(), Arc::clone(&assets));
+    settle_in_real_time(&mut window);
+    assert!(window.texts_by_class("lui-toasts").concat().contains(&refusal), "the reader is told why");
+    assert!(!shown(&window, "armor-export-dialog"), "no dialog opens");
+
+    drop(running);
+    open_export_dialog(mounted.shell, request(), assets);
+    for _ in 0..10 {
+        settle_in_real_time(&mut window);
+        if shown(&window, "armor-export-dialog") {
+            break;
+        }
+    }
+    assert!(shown(&window, "armor-export-dialog"), "the dialog opens once the export ends");
 }
 
 /// A shell through two plates, cast with no ship chosen.

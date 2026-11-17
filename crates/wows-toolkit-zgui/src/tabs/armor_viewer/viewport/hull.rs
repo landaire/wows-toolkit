@@ -3,10 +3,8 @@
 //! level of detail and modules a reload is run with, the export and the lighting.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_toolkit_armor::camera_rings;
 use wows_toolkit_armor::camo::build_active_camo;
 use wows_toolkit_armor::gaps;
@@ -21,7 +19,6 @@ use wows_toolkit_armor::load_model::SceneLoadError;
 use wows_toolkit_armor::load_model::SceneProblem;
 use wows_toolkit_armor::load_model::load_model_scene;
 use wows_toolkit_armor::load_ship;
-use wows_toolkit_armor::load_ship::ExportGlbError;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::load_ship_armor_with_options;
 use wows_toolkit_armor::plate_picking;
@@ -38,14 +35,11 @@ use wows_toolkit_armor::visibility;
 use wows_toolkit_armor::visibility::VisibilityFilter;
 use wows_toolkit_armor::water_plane;
 use wows_toolkit_armor::waterline_grid;
-use wows_toolkit_services::dialog;
-use wows_toolkit_viewmodel::formatting::byte_size;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
-use zgui::reactive::spawn_detached;
 use zgui::reactive::spawn_local;
 
 use super::model::CamoTextures;
@@ -59,6 +53,7 @@ use super::types::SceneSource;
 use super::types::ViewportChange;
 use crate::long_job::long_job;
 use crate::shell::Shell;
+use crate::tabs::armor_viewer::panels::export::write_glb;
 
 /// Finds the scheme `old_id` named in `old_infos` in `new_infos`, by name. A `CamoSchemeId` is an
 /// index into one load's scheme list, which a reload rebuilds, so the id alone can point at
@@ -148,33 +143,6 @@ fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, arm
     };
     let (built, uvs) = build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
     CamoDecode { decoded, textures: built, uvs }
-}
-
-/// Reports a finished export: what was written and how large it is, or why it was not. The
-/// destination is logged rather than shown: the reader chose it in the save dialog.
-fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlbError>, ship: &str) {
-    // The window can close while the file is written.
-    let toasts = shell.try_toasts();
-    match written {
-        Ok((path, size)) => {
-            tracing::info!("armor viewer: exported {ship} to {}", path.display());
-            let message = match size {
-                Some(bytes) => {
-                    t!("ui.armor.export.exported_with_size", ship = ship, size = byte_size(bytes)).into_owned()
-                }
-                None => t!("ui.armor.export.exported", ship = ship).into_owned(),
-            };
-            if let Some(toasts) = toasts {
-                toasts.ok(message);
-            }
-        }
-        Err(err) => {
-            tracing::error!("armor viewer: failed to export {ship}: {err}");
-            if let Some(toasts) = toasts {
-                toasts.failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned());
-            }
-        }
-    }
 }
 
 impl ViewportModel {
@@ -593,20 +561,8 @@ impl ViewportModel {
         let options = load_ship::export_options_from_selection(hull_lod, selected_hull, selected_modules);
 
         cx.defer(move |_state| {
-            let asked = dialog::save_file(None, &load_ship::default_export_filename(&display_name), Some(dialog::GLB));
-            // Detached: a file the reader asked for is written whatever becomes of the viewport.
-            spawn_detached(async move {
-                let Some(path) = shell.chosen_path(asked).await else { return };
-                let written = long_job(move || {
-                    let result = load_ship::export_ship_glb(&assets, &param_index, &options, &path);
-                    // The size is only knowable once the file is on disk.
-                    result.map(|()| {
-                        let size = std::fs::metadata(&path).map(|meta| meta.len()).ok();
-                        (path, size)
-                    })
-                })
-                .await;
-                report_export(shell, written, &display_name);
+            write_glb(shell, display_name, move |path| {
+                load_ship::export_ship_glb(&assets, &param_index, &options, &path)
             });
         });
     }
