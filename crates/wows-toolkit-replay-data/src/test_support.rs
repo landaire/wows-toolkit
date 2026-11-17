@@ -22,6 +22,8 @@ use wowsunpack::rating_scope::RatingScope;
 
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
+use crate::fire_chance::FireChance;
+use crate::fire_chance::FireChanceNames;
 use crate::model::PlayerRow;
 
 /// An effective-fire-chance result with enough behind it to state a rate: 3
@@ -48,6 +50,45 @@ pub fn fire_chance_result() -> wows_replay_insights::fire_chance::analysis::Effe
         formula_base: Some(0.12),
         formula: Vec::new(),
     }
+}
+
+/// A target ship's share of a fire chance: 1 fire out of 8 eligible hits, against 2 expected.
+pub fn per_ship_fire_chance(index: &str, name: &str) -> wows_replay_insights::fire_chance::analysis::PerShipFireChance {
+    use std::collections::BTreeMap;
+
+    wows_replay_insights::fire_chance::analysis::PerShipFireChance {
+        victim_ship_index: index.to_owned(),
+        victim_ship_name: name.to_owned(),
+        hits: 8,
+        he_hits_on_a_ship: 8,
+        narrowed: BTreeMap::new(),
+        eligible_hits: 8,
+        exclusions: BTreeMap::new(),
+        not_applicable: 0,
+        fires: 1,
+        expected_fires: Some(2.0),
+    }
+}
+
+/// [`fire_chance_result`] against one Yamato, after one Victor Lima step, with the build's names
+/// for both.
+pub fn named_fire_chance() -> FireChance {
+    use wows_replay_insights::fire_chance::analysis::FormulaOp;
+    use wows_replay_insights::fire_chance::analysis::FormulaStep;
+
+    let mut analysis = fire_chance_result();
+    analysis.formula = vec![FormulaStep {
+        modifier: "burnChanceFactorHighLevel".to_owned(),
+        source: Some("PCEF003_Signal_VictorLima".to_owned()),
+        op: FormulaOp::Add,
+        value: 0.01,
+        result: 0.13,
+    }];
+    analysis.per_ship = vec![per_ship_fire_chance("4181604048", "PJSB018_Yamato_1944")];
+    let names =
+        FireChanceNames::from_lookups(&analysis, |_| Some("Victor Lima".to_owned()), |_| Some("Yamato".to_owned()));
+
+    FireChance { analysis, names }
 }
 
 /// A minimal `PlayerRow` with every field at its "absent/zero" default.

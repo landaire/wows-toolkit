@@ -19,6 +19,7 @@ pub mod damage_mix;
 pub mod directory_stats;
 pub mod drawing_style;
 pub mod error;
+pub mod fire_chance;
 pub mod force_reindex;
 pub mod frame;
 pub mod heap_profile;

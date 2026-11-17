@@ -4,6 +4,7 @@ use std::sync::Arc;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
@@ -13,7 +14,7 @@ use wows_replays::types::Relation;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::test_support::base_row;
-use wows_toolkit_replay_data::test_support::fire_chance_result;
+use wows_toolkit_replay_data::test_support::named_fire_chance;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wowsunpack::game_types::ChargeCount;
@@ -46,10 +47,31 @@ use crate::tabs::replays::table::RowId;
 #[test]
 fn the_fire_chance_block_expands_under_the_name_column() {
     let mut row = base_row(1, Relation::new(0), true);
-    row.fire_chance = Some(fire_chance_result());
+    row.fire_chance = Some(named_fire_chance());
 
     assert!(has_column_detail(ReplayColumn::Name, &row, &[], false), "the Name column carries it");
     assert!(!has_column_detail(ReplayColumn::Kills, &row, &[], false), "and the Kills column does not");
+}
+
+/// Each target ship reads by the build's name for it, with its rate beside the expected rate, and
+/// the copied breakdown names the ship and the formula's sources as the screen does.
+#[test]
+fn the_fire_chance_names_its_ships_and_states_their_rates() {
+    let mut row = base_row(1, Relation::new(0), true);
+    let fire_chance = named_fire_chance();
+    row.fire_chance = Some(fire_chance.clone());
+
+    let (mut window, _) = open_detail(row, vec![ReplayColumn::Name], false);
+
+    assert!(window.by_label("Yamato").is_some(), "the ship reads by its name");
+    assert!(window.by_label("PJSB018_Yamato_1944").is_none(), "not by its id");
+    assert!(window.by_label("12.5%").is_some(), "one fire in eight hits");
+    let expected = format!("{} 25.0%", t!("ui.replay.sections.fire_chance_expected"));
+    assert!(window.by_label(&expected).is_some(), "two expected in eight hits");
+
+    let copied = super::fire_chance_copy_text(&fire_chance);
+    assert!(copied.contains("Yamato") && copied.contains("Victor Lima"), "{copied}");
+    assert!(!copied.contains("PJSB018") && !copied.contains("PCEF003"), "{copied}");
 }
 
 /// The grid draws a line per kind of damage event the battle produced, and none for the rest.

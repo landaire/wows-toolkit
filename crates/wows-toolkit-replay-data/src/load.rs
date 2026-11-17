@@ -60,7 +60,6 @@ use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
 use wows_data_mgr::cas_vfs::BuildCas;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
-use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
@@ -84,6 +83,7 @@ use wowsunpack::vfs::VfsPath;
 
 use crate::error::AltRefusal;
 use crate::error::ReplayLoadError;
+use crate::fire_chance::FireChance;
 use crate::install::installed_version;
 use crate::model::ReplayReportModel;
 
@@ -1143,7 +1143,8 @@ pub struct ParsedReplay {
     /// The recording player's effective fire chance, when the facts behind it
     /// resolve. See
     /// [`wows_replay_insights::fire_chance::sections::compute_fire_chance`].
-    pub fire_chance: Option<EffectiveFireChance>,
+    /// Named here because this is where the replay's build is open.
+    pub fire_chance: Option<FireChance>,
     /// This battle as the Stats tab records it. `None` when the replay names
     /// no recording player.
     pub session_stat: Option<PerGameStat>,
@@ -1324,7 +1325,8 @@ fn read_replay_with_alts(
         loaded.vfs(),
         build,
         cache_dir.as_deref(),
-    );
+    )
+    .map(|analysis| FireChance::named(analysis, loaded.provider.as_ref(), &version));
 
     // What sharing needs, taken here because this is the one place the whole
     // report exists: the payloads are per player, and the report is dropped

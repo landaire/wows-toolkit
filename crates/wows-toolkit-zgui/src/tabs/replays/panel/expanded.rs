@@ -18,11 +18,12 @@ use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
-use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
 use wows_toolkit_replay_data::columns::NDA;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
+use wows_toolkit_replay_data::fire_chance::FireChance;
+use wows_toolkit_replay_data::fire_chance::FireChanceNames;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
@@ -198,8 +199,11 @@ const CSS: &str = css!(
     .wt-xr-tally { display: flex; flex-direction: column; gap: 1px; }
     .wt-xr-tally__row { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; }
     .wt-xr-tally__count { flex: none; width: 44px; text-align: right; }
-    .wt-xr-ship { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+    .wt-xr-ship { display: flex; flex-direction: column; gap: 1px; }
+    .wt-xr-ship__line { display: flex; flex-direction: row; align-items: center; gap: 8px; }
     .wt-xr-ship__name { flex: none; width: 160px; white-space: normal; overflow-wrap: anywhere; }
+    .wt-xr-ship__rate { flex: none; min-width: 44px; text-align: right; }
+    .wt-xr-ship__counts { padding-left: 168px; }
     .wt-xr-tip { display: flex; flex-direction: column; align-items: center; gap: 4px; max-width: 300px; }
     .wt-xr-tip__name { font-weight: 600; }
     .wt-xr-tip__text { text-align: center; white-space: pre-wrap; }"
@@ -918,7 +922,8 @@ fn consumable_row(consumable: &ConsumableResult, art: GameArt) -> AnyView {
 
 /// The effective-fire-chance block. Only the recording player's row carries one.
 fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Option<AnyView> {
-    let fire_chance = row.fire_chance.as_ref()?;
+    let shown = row.fire_chance.as_ref()?;
+    let FireChance { analysis: fire_chance, names } = shown;
 
     let mut parts = vec![heading(t!("ui.replay.sections.fire_chance").into_owned())];
     if row.should_hide_stats() && !debug {
@@ -934,7 +939,7 @@ fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Op
     // Observed and expected sit together: comparing them is the point of the statistic.
     let counts = fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits);
     let expected = fire_chance::expected_fires_text(fire_chance);
-    let copy = copy_breakdown_button(fire_chance, shell);
+    let copy = copy_breakdown_button(fire_chance_copy_text(shown), shell);
     parts.push(AnyView::new(view! {
         row(class = "wt-xr-fire__headline", attr:data-testid = "replay-fire-chance") {
             row(class = "wt-xr-fire__counts") {
@@ -948,7 +953,7 @@ fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Op
     parts.push(classed_text("wt-xr-dim", fire_chance::ships_text(fire_chance).into_owned()));
 
     // Monospace, because the formula's columns are padded to line up.
-    let formula = fire_chance::fire_chance_formula_lines(fire_chance, &raw_source);
+    let formula = fire_chance::fire_chance_formula_lines(fire_chance, &|source| names.source(source));
     if !formula.is_empty() {
         let lines: Vec<AnyView> = formula.into_iter().map(text).collect();
         parts.push(separator());
@@ -968,14 +973,7 @@ fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Op
         parts.push(separator());
         parts.push(heading(t!("ui.replay.sections.fire_chance_per_ship").into_owned()));
         for ship in ships {
-            let name = ship.victim_ship_name.clone();
-            let counts = fire_chance::counts_text(ship.fires, ship.eligible_hits);
-            parts.push(AnyView::new(view! {
-                row(class = "wt-xr-ship", attr:data-testid = "replay-fire-chance-ship") {
-                    text(class = "wt-xr-ship__name") {{name}}
-                    text(class = "wt-xr-dim") {{counts}}
-                }
-            }));
+            parts.push(per_ship_line(ship, names));
         }
         if let Some(line) = fire_chance::no_target_ship_line(fire_chance) {
             parts.push(classed_text("wt-xr-faint", line));
@@ -983,6 +981,37 @@ fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Op
     }
 
     Some(fire_column(parts))
+}
+
+/// One target ship's line: its name, its rate and the expected rate, with the counts behind the
+/// rate under it.
+fn per_ship_line(ship: &PerShipFireChance, names: &FireChanceNames) -> AnyView {
+    let name = names.ship(ship);
+    let rate = match ship.rate() {
+        Some(rate) => format!("{:.1}%", rate * 100.0),
+        None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
+    };
+    let expected = ship.expected_rate().map(|expected| {
+        let label = t!("ui.replay.sections.fire_chance_expected");
+        let text = format!("{label} {:.1}%", expected * 100.0);
+        AnyView::new(view! { text(class = "wt-xr-dim") {{text}} })
+    });
+    // Without a rate there is nothing for the counts to explain.
+    let counts = ship.rate().map(|_| {
+        let counts = fire_chance::counts_text(ship.fires, ship.eligible_hits);
+        AnyView::new(view! { text(class = "wt-xr-dim wt-xr-ship__counts") {{counts}} })
+    });
+
+    AnyView::new(view! {
+        column(class = "wt-xr-ship", attr:data-testid = "replay-fire-chance-ship") {
+            row(class = "wt-xr-ship__line") {
+                text(class = "wt-xr-ship__name") {{name}}
+                text(class = "wt-xr-ship__rate") {{rate}}
+                {expected}
+            }
+            {counts}
+        }
+    })
 }
 
 fn fire_column(parts: Vec<AnyView>) -> AnyView {
@@ -1009,9 +1038,16 @@ fn tally_block(rows: &[fire_chance::TallyRow]) -> AnyView {
     AnyView::new(view! { column(class = "wt-xr-tally") {{lines}} })
 }
 
-/// Puts the whole breakdown on the clipboard, which is what the egui headline does when clicked.
-fn copy_breakdown_button(fire_chance: &EffectiveFireChance, shell: Option<Shell>) -> AnyView {
-    let copied = fire_chance::copy_text(fire_chance, &raw_source, &raw_ship_name);
+/// The whole breakdown as plain text, with the build's names in it, which is what the egui
+/// headline copies when clicked.
+fn fire_chance_copy_text(fire_chance: &FireChance) -> String {
+    let names = &fire_chance.names;
+
+    fire_chance::copy_text(&fire_chance.analysis, &|source| names.source(source), &|ship| names.ship(ship))
+}
+
+/// Puts `copied` on the clipboard.
+fn copy_breakdown_button(copied: String, shell: Option<Shell>) -> AnyView {
     let tip = t!("ui.replay.sections.fire_chance_click_to_copy").into_owned();
     let button = AnyView::new(view! {
         Button(
@@ -1030,16 +1066,6 @@ fn copy_breakdown_button(fire_chance: &EffectiveFireChance, shell: Option<Shell>
         }
     });
     with_tip(button, move || text(tip.clone()))
-}
-
-/// A modifier's raw source identifier. Resolving it needs the metadata provider, which the
-/// detail is not handed, so it is shown raw.
-fn raw_source(source: &str) -> String {
-    source.to_owned()
-}
-
-fn raw_ship_name(ship: &PerShipFireChance) -> String {
-    ship.victim_ship_name.clone()
 }
 
 /// A player as a share tooltip names them: by player and ship, as two rows can be in the same
