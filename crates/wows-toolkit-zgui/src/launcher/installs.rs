@@ -29,6 +29,7 @@ use crate::launcher::display::InstallView;
 use crate::launcher::download::DownloadStatusProps;
 use crate::launcher::games::GamesListProps;
 use crate::launcher::model::LauncherModel;
+use crate::launcher::play::SafeModeCheckProps;
 use crate::launcher::steam_login::WgcLoginControlProps;
 use crate::services::Services;
 use crate::shell::Shell;
@@ -65,6 +66,7 @@ pub fn InstallsControl(model: LauncherModel, shell: Shell) -> impl IntoView {
                     Spinner(attr:data-testid = "launcher-discovering")
                 }
             }
+            SafeModeCheck(model = model, test_id = "launcher-safe-mode")
             if move || installs.get().is_empty() && !discovering.get() {
                 text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-installs") {{locale.text("ui.launcher.no_installs")}}
             }

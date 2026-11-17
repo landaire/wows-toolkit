@@ -981,7 +981,7 @@ fn a_new_default_keeps_a_waiting_play_for_a_chosen_account() {
 
     // "Play as" for the account that is the default when pressed.
     store.close();
-    crate::launcher::play::play(launcher.shell, launcher.model, eu(), false, PlayOrigin::Chosen);
+    crate::launcher::play::play(launcher.shell, launcher.model, eu(), PlayOrigin::Chosen);
     launcher.model.edit_settings(|settings| {
         settings.set_default_account(na());
     });
@@ -1000,6 +1000,57 @@ fn forgetting_the_account_drops_a_waiting_play() {
     launcher.settle();
     assert_eq!(launcher.model.pending_play(), None, "nothing waits on the forgotten account");
     store.open();
+}
+
+#[test]
+fn the_safe_mode_box_applies_to_the_play_button() {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+    open_installs(&mut launcher);
+    launcher.press("launcher-safe-mode");
+    launcher.shell.settings_drawer.close();
+    launcher.settle();
+
+    store.close();
+    launcher.press("launcher-play");
+    let pending = launcher.model.pending_play();
+    store.open();
+
+    assert_eq!(pending.map(|pending| pending.safe_mode), Some(true));
+}
+
+#[test]
+fn the_safe_mode_box_applies_to_play_as() {
+    let mut launcher = LauncherWindow::open();
+    let store = testing::store();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab"), (na(), "Ishmael")]);
+    launcher.adopt(settings);
+    launcher.found(up_to_date());
+    open_installs(&mut launcher);
+    launcher.press("launcher-safe-mode");
+
+    store.close();
+    crate::launcher::play::play(launcher.shell, launcher.model, na(), PlayOrigin::Chosen);
+    let pending = launcher.model.pending_play();
+    store.open();
+
+    assert_eq!(pending.map(|pending| pending.safe_mode), Some(true));
+}
+
+#[test]
+fn the_popover_and_the_drawer_share_the_safe_mode_box() {
+    let mut launcher = ready();
+    launcher.press("launcher-play-menu");
+    launcher.press("launcher-play-safe-mode");
+    launcher.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    launcher.settle();
+
+    open_installs(&mut launcher);
+
+    assert_eq!(switch_state(&mut launcher, "launcher-safe-mode").0, Some(Toggled::True));
 }
 
 #[test]

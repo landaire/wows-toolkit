@@ -31,15 +31,20 @@ use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
+use zgui_ui::CheckboxProps;
+use zgui_ui::Checked;
+use zgui_ui::LabelProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
 use zgui_ui::SpinnerProps;
+use zgui_ui::prelude::Binding;
 use zgui_ui_primitives::Align;
 use zgui_ui_primitives::Placement;
 use zgui_ui_primitives::Side;
@@ -58,6 +63,7 @@ use crate::launcher::palette::LauncherOffersProps;
 use crate::launcher::popover::AccountPopoverProps;
 use crate::launcher::realm::RealmGlyphProps;
 use crate::launcher::setup;
+use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
@@ -158,7 +164,7 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
             model.clear_pending_play();
         } else if !reading {
             model.clear_pending_play();
-            play(shell, model, pending.account, pending.safe_mode, pending.origin);
+            launch(shell, model, pending.account, pending.safe_mode, pending.origin);
         }
     });
     on_cleanup_local(move || drop(resuming));
@@ -308,7 +314,7 @@ fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal
         PlayState::SignInAgain(account) => open_sign_in(shell, model, LoginTarget::Reauthenticate(account.key)),
         PlayState::Update { install, .. } => start_update(shell, model, install),
         PlayState::Updating { .. } | PlayState::Paused { .. } => popover.set(true),
-        PlayState::Play(account) => play(shell, model, account.key, false, PlayOrigin::Default),
+        PlayState::Play(account) => play(shell, model, account.key, PlayOrigin::Default),
         PlayState::PlayThroughSteam { install } => play_through_steam(shell, model, install),
         PlayState::InBattle { .. } => shell.select(TabKey::App(AppTab::PlayerTracker)),
         // Nothing to do until the state moves on.
@@ -316,8 +322,14 @@ fn press(shell: Shell, model: LauncherModel, state: PlayState, popover: RwSignal
     }
 }
 
-/// Starts the game for `account`, saying in a message why it could not.
-pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool, origin: PlayOrigin) {
+/// Starts the game for `account`, in safe mode when the safe mode box is ticked, saying in a
+/// message why it could not.
+pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, origin: PlayOrigin) {
+    launch(shell, model, account, model.safe_mode_untracked(), origin);
+}
+
+/// [`play`] with safe mode as it was when the press was made.
+fn launch(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool, origin: PlayOrigin) {
     // An unread session is read first. The press waits on it beside the keyring hint, and the
     // Play control plays once the read answers.
     let unread = model.with_untracked(|state| {
@@ -351,14 +363,38 @@ pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: 
 
 /// Hands the Steam install at `install` to Steam.
 fn play_through_steam(shell: Shell, model: LauncherModel, install: PathBuf) {
+    let safe_mode = model.safe_mode_untracked();
     let played = model.run(move |launcher, settings, env| {
-        let played = launcher.play_through_steam(&install, false, settings, env, |command| {
+        let played = launcher.play_through_steam(&install, safe_mode, settings, env, |command| {
             wows_toolkit_services::child_process::prepare(command);
         });
         (played, false)
     });
     if let Some(Err(err)) = played {
         shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+    }
+}
+
+/// The safe mode box. Every way to Play reads it, so the popover and the drawer share it.
+#[component]
+pub fn SafeModeCheck(model: LauncherModel, test_id: &'static str) -> impl IntoView {
+    let locale = Services::current().locale;
+    let name = NodeRef::new();
+    let control = NodeRef::new();
+    let checked = Signal::derive_local(move || Checked::from(model.safe_mode()));
+
+    view! {
+        row(class = "wt-launcher__row wt-launcher__row--tight") {
+            Checkbox(
+                checked = Binding::controlled(checked, move |on: Checked| model.set_safe_mode(on.is_checked())),
+                node_ref = control,
+                labelled_by = name,
+                attr:data-testid = test_id
+            )
+            Label(node_ref = name, control = control, on:click = move |_| model.set_safe_mode(!model.safe_mode_untracked())) {
+                {locale.text("ui.launcher.popover.play_safe_mode")}
+            }
+        }
     }
 }
 

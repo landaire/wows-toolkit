@@ -15,6 +15,7 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::SetValue;
@@ -77,6 +78,8 @@ pub struct LauncherModel {
     /// Whether discovery and the catalog checks have been started.
     working: StoredValue<bool>,
     pending_play: RwSignal<Option<PendingPlay>, LocalStorage>,
+    /// Whether every Play starts the game in safe mode, until unticked. Not saved.
+    safe_mode: RwSignal<bool, LocalStorage>,
     services: Services,
 }
 
@@ -89,6 +92,7 @@ impl LauncherModel {
             proxy: StoredValue::new(None),
             working: StoredValue::new(false),
             pending_play: RwSignal::new_local(None),
+            safe_mode: RwSignal::new_local(false),
             services,
         };
 
@@ -122,6 +126,20 @@ impl LauncherModel {
 
     pub fn clear_pending_play(self) {
         self.pending_play.set(None);
+    }
+
+    /// Whether Play starts the game in safe mode, subscribing to changes.
+    pub fn safe_mode(self) -> bool {
+        self.safe_mode.get()
+    }
+
+    /// [`Self::safe_mode`] without subscribing.
+    pub fn safe_mode_untracked(self) -> bool {
+        self.safe_mode.get_untracked()
+    }
+
+    pub fn set_safe_mode(self, on: bool) {
+        self.safe_mode.set(on);
     }
 
     /// The app's game directory, which an account's [`InstallChoice::Toolkit`] plays. Subscribes

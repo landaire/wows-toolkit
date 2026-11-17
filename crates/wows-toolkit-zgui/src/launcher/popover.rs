@@ -56,6 +56,7 @@ use crate::launcher::download::DownloadStatusProps;
 use crate::launcher::installs::add_install;
 use crate::launcher::model::LauncherModel;
 use crate::launcher::model::PlayOrigin;
+use crate::launcher::play::SafeModeCheckProps;
 use crate::launcher::play::play;
 use crate::launcher::realm::RealmGlyphProps;
 use crate::launcher::replay;
@@ -139,7 +140,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
     });
     on_cleanup_local(move || drop(reading));
 
-    let extra_play = move || {
+    let play_anyway = move || {
         match state.get() {
         PlayState::Update { account, .. } => Some(
             view! {
@@ -148,23 +149,9 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                     size = ButtonSize::Sm,
                     class = "wt-account-popover__link",
                     attr:data-testid = "launcher-play-anyway",
-                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, false, PlayOrigin::Default)))
+                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, PlayOrigin::Default)))
                 ) {
                     {t!("ui.launcher.popover.play_anyway").into_owned()}
-                }
-            }
-            .into_view(),
-        ),
-        PlayState::Play(account) => Some(
-            view! {
-                Button(
-                    variant = ButtonVariant::Ghost,
-                    size = ButtonSize::Sm,
-                    class = "wt-account-popover__link",
-                    attr:data-testid = "launcher-play-safe-mode",
-                    on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, true, PlayOrigin::Default)))
-                ) {
-                    {t!("ui.launcher.popover.play_safe_mode").into_owned()}
                 }
             }
             .into_view(),
@@ -189,7 +176,8 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                 AccountRowView(shell = shell, model = model, row = row, running = running, open = open)
             }
             Separator()
-            column(class = "wt-launcher__column") {{extra_play}}
+            column(class = "wt-launcher__column") {{play_anyway}}
+            SafeModeCheck(model = model, test_id = "launcher-play-safe-mode")
             Button(
                 variant = ButtonVariant::Ghost,
                 size = ButtonSize::Sm,

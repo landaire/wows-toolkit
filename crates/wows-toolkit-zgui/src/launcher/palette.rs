@@ -81,7 +81,7 @@ fn PlayAsOffer(shell: Shell, model: LauncherModel, account: AccountLabel) -> imp
         RootCommand::Launcher(LauncherCommand::PlayAs(key)),
         label,
         Some(glyph),
-        PaletteRun::action(move || play(shell, model, key, false, PlayOrigin::Chosen)),
+        PaletteRun::action(move || play(shell, model, key, PlayOrigin::Chosen)),
     );
 }
 
