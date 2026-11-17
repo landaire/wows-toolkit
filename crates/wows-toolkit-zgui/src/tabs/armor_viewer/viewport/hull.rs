@@ -182,18 +182,7 @@ impl ViewportModel {
             && let Some((mode, trajectory)) =
                 armor.camera_trajectories.iter().find(|(name, _)| Some(name) == self.camera_rings.mode.as_ref())
         {
-            let request = camera_rings::RingRequest {
-                mode,
-                trajectory,
-                fov: self.camera_rings.fov,
-                height: self.camera_rings.height,
-                zoom_path: self.camera_rings.zoom_path,
-                zoom_path_at_fov: self.camera_rings.zoom_path_at_fov,
-                zoom_path_at_max_fov: self.camera_rings.zoom_path_at_max_fov,
-                // The orbits sit at the height the trajectory states: the armor carries no
-                // waterline offset.
-                waterline_dy: 0.0,
-            };
+            let request = self.camera_rings.ring_request(mode, trajectory);
             let (vertices, indices, hovers) = camera_rings::build_camera_rings(&request);
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);

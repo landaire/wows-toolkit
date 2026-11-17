@@ -7,6 +7,7 @@ use std::sync::Arc;
 use rust_i18n::t;
 use wows_replays::types::ShotId;
 use wows_toolkit_armor::assets::ModelAssets;
+use wows_toolkit_armor::camera_rings::RingRequest;
 use wows_toolkit_armor::load_model::ModelLoadRequest;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::load_ship::PlateKey;
@@ -28,6 +29,7 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
@@ -39,7 +41,7 @@ use crate::shell::tabs::ModifierKey;
 ///
 /// `mode` is `None` until a ship names one, and is corrected whenever the loaded ship changes: a
 /// mode name belongs to a ship's own GameParams, so carrying one across ships would draw nothing.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CameraRingSettings {
     pub shown: bool,
     pub mode: Option<String>,
@@ -50,6 +52,39 @@ pub struct CameraRingSettings {
     pub zoom_path: bool,
     pub zoom_path_at_fov: bool,
     pub zoom_path_at_max_fov: bool,
+}
+
+impl Default for CameraRingSettings {
+    /// The zoom path traces at the selected field of view, so turning it on draws something.
+    fn default() -> Self {
+        Self {
+            shown: false,
+            mode: None,
+            fov: 0.0,
+            height: 0.0,
+            zoom_path: false,
+            zoom_path_at_fov: true,
+            zoom_path_at_max_fov: false,
+        }
+    }
+}
+
+impl CameraRingSettings {
+    /// What to draw for `mode` under these settings.
+    pub(super) fn ring_request<'a>(&self, mode: &'a str, trajectory: &'a CameraTrajectory) -> RingRequest<'a> {
+        RingRequest {
+            mode,
+            trajectory,
+            fov: self.fov,
+            height: self.height,
+            zoom_path: self.zoom_path,
+            zoom_path_at_fov: self.zoom_path_at_fov,
+            zoom_path_at_max_fov: self.zoom_path_at_max_fov,
+            // The orbits sit at the height the trajectory states: the armor carries no waterline
+            // offset.
+            waterline_dy: 0.0,
+        }
+    }
 }
 
 /// The camera locked onto one of the ship's own orbits, looking the way the game's camera looks
@@ -397,5 +432,46 @@ pub fn agreement(verdict: &ComparisonVerdict) -> SimAgreement {
                 .into_owned(),
             standing: Agreement::Disagrees,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_toolkit_armor::camera_rings::build_camera_rings;
+    use wowsunpack::game_params::types::TrajectoryGeometry;
+    use wowsunpack::game_types::Vec2;
+    use wowsunpack::game_types::Vec3;
+
+    use super::*;
+
+    /// Turning the zoom path on with nothing else changed traces it.
+    #[test]
+    fn the_zoom_path_draws_when_first_turned_on() {
+        let orbit = |radius: f32| {
+            (
+                [Vec3::new(0.0, 2.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
+                [Vec2::new(radius, radius * 1.5), Vec2::new(radius * 2.0, radius * 3.0)],
+            )
+        };
+        let (inner_center, inner_axes) = orbit(6.0);
+        let (outer_center, outer_axes) = orbit(12.0);
+        let trajectory = CameraTrajectory {
+            pos_center: inner_center,
+            semi_axes: inner_axes,
+            tags: String::new(),
+            ignore_height_multiplier: true,
+            outer: Some(TrajectoryGeometry {
+                pos_center: outer_center,
+                semi_axes: outer_axes,
+                ignore_height_multiplier: true,
+            }),
+        };
+        let off = CameraRingSettings::default();
+        let on = CameraRingSettings { zoom_path: true, ..CameraRingSettings::default() };
+
+        let (_, without, _) = build_camera_rings(&off.ring_request("Default", &trajectory));
+        let (_, with, _) = build_camera_rings(&on.ring_request("Default", &trajectory));
+
+        assert!(with.len() > without.len(), "the zoom path adds spokes");
     }
 }
