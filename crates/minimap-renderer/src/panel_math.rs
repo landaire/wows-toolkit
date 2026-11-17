@@ -124,62 +124,68 @@ mod tests {
 
 /// Stable display order for stats-panel ribbons so icons hold fixed positions
 /// across the match and only counts change. Sorts by the `RIBBON_*` key
-/// ascending, then groups torpedo-protection (`RIBBON_BULGE`) with the main
-/// battery by moving it immediately after the last `RIBBON_MAIN_CALIBER*` key,
-/// mirroring the replay inspector's grouping.
+/// ascending, then moves torpedo protection (`RIBBON_BULGE`) to directly after
+/// `RIBBON_MAIN_CALIBER`, as the replay inspector does. Without the main
+/// battery ribbon the sorted order stands.
 pub fn order_ribbon_keys(keys: &mut Vec<String>) {
     keys.sort();
-    if let Some(bulge) = keys.iter().position(|k| k == "RIBBON_BULGE")
-        && let Some(last_mc) = keys.iter().rposition(|k| k.starts_with("RIBBON_MAIN_CALIBER"))
-    {
-        let bulge_key = keys.remove(bulge);
-        // After alphabetical sort BULGE precedes the main-caliber cluster, so
-        // removing it shifts the cluster's last index down by one; inserting at
-        // that index lands BULGE just past the cluster.
-        let insert_at = if bulge <= last_mc { last_mc } else { last_mc + 1 };
-        keys.insert(insert_at, bulge_key);
-    }
+
+    let Some(main_caliber) = keys.iter().position(|k| k == "RIBBON_MAIN_CALIBER") else {
+        return;
+    };
+    let Some(bulge) = keys.iter().position(|k| k == "RIBBON_BULGE") else {
+        return;
+    };
+
+    let bulge_key = keys.remove(bulge);
+    // Removing an earlier BULGE shifts the main battery ribbon down by one.
+    let insert_at = if bulge < main_caliber { main_caliber } else { main_caliber + 1 };
+    keys.insert(insert_at, bulge_key);
 }
 
 #[cfg(test)]
 mod ribbon_order_tests {
     use super::*;
 
-    #[test]
-    fn bulge_moves_after_main_caliber_cluster() {
-        let mut keys = vec![
-            "RIBBON_BULGE".to_string(),
-            "RIBBON_CITADEL".to_string(),
-            "RIBBON_MAIN_CALIBER_NO_PENETRATION".to_string(),
-            "RIBBON_MAIN_CALIBER_PENETRATION".to_string(),
-            "RIBBON_MAIN_CALIBER_RICOCHET".to_string(),
-            "RIBBON_TORPEDO".to_string(),
-        ];
+    fn ordered(keys: &[&str]) -> Vec<String> {
+        let mut keys: Vec<String> = keys.iter().map(|key| (*key).to_owned()).collect();
         order_ribbon_keys(&mut keys);
+        keys
+    }
+
+    #[test]
+    fn bulge_follows_the_main_battery_ribbon_ahead_of_its_hit_ribbons() {
+        let keys = ordered(&[
+            "RIBBON_TORPEDO",
+            "RIBBON_MAIN_CALIBER_RICOCHET",
+            "RIBBON_MAIN_CALIBER",
+            "RIBBON_CITADEL",
+            "RIBBON_MAIN_CALIBER_PENETRATION",
+            "RIBBON_BULGE",
+            "RIBBON_MAIN_CALIBER_NO_PENETRATION",
+        ]);
         assert_eq!(
             keys,
             vec![
                 "RIBBON_CITADEL",
+                "RIBBON_MAIN_CALIBER",
+                "RIBBON_BULGE",
                 "RIBBON_MAIN_CALIBER_NO_PENETRATION",
                 "RIBBON_MAIN_CALIBER_PENETRATION",
                 "RIBBON_MAIN_CALIBER_RICOCHET",
-                "RIBBON_BULGE",
                 "RIBBON_TORPEDO",
             ]
         );
     }
 
     #[test]
-    fn plain_alpha_sort_without_special_keys() {
-        let mut keys = vec!["RIBBON_TORPEDO".to_string(), "RIBBON_CITADEL".to_string()];
-        order_ribbon_keys(&mut keys);
-        assert_eq!(keys, vec!["RIBBON_CITADEL", "RIBBON_TORPEDO"]);
+    fn bulge_stays_sorted_without_the_main_battery_ribbon() {
+        let keys = ordered(&["RIBBON_MAIN_CALIBER_PENETRATION", "RIBBON_CITADEL", "RIBBON_BULGE"]);
+        assert_eq!(keys, vec!["RIBBON_BULGE", "RIBBON_CITADEL", "RIBBON_MAIN_CALIBER_PENETRATION"]);
     }
 
     #[test]
-    fn bulge_without_main_caliber_just_sorts() {
-        let mut keys = vec!["RIBBON_CITADEL".to_string(), "RIBBON_BULGE".to_string()];
-        order_ribbon_keys(&mut keys);
-        assert_eq!(keys, vec!["RIBBON_BULGE", "RIBBON_CITADEL"]);
+    fn plain_alpha_sort_without_special_keys() {
+        assert_eq!(ordered(&["RIBBON_TORPEDO", "RIBBON_CITADEL"]), vec!["RIBBON_CITADEL", "RIBBON_TORPEDO"]);
     }
 }
