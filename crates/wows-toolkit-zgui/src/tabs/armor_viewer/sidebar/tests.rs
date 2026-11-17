@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -21,8 +22,11 @@ use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_armor::model_tree::ModelBuildings;
 use wows_toolkit_armor::model_tree::ModelTreeIndex;
+use wows_toolkit_armor::sidebar_tree::ModelSection;
 use wows_toolkit_armor::sidebar_tree::RowId;
 use wows_toolkit_armor::sidebar_tree::SEPARATOR_ID;
+use wows_toolkit_armor::sidebar_tree::SearchMatches;
+use wows_toolkit_armor::sidebar_tree::TreeSources;
 use wows_toolkit_armor::sidebar_tree::building_row_id;
 use wows_toolkit_armor::sidebar_tree::fixture;
 use wows_toolkit_armor::sidebar_tree::model_building_row_id;
@@ -575,6 +579,53 @@ fn typing_a_search_filters_ships_and_models() {
     sidebar.settle();
     assert_eq!(sidebar.state.search_text.get_untracked(), "", "Escape empties the search");
     assert!(!sidebar.state.query.get_untracked().is_active(), "and the listing is no longer searched");
+}
+
+/// Escape in the search clears it, and the list is whole again.
+#[test]
+fn escape_in_the_search_clears_it_and_lists_everything() {
+    let mut sidebar = Sidebar::open();
+    let japan = RowId::from("armor-nation-Japan");
+    sidebar.click("armor-sidebar-search");
+    sidebar.window.type_text("iowa");
+    sidebar.settle();
+    assert!(!sidebar.listed(&japan), "the search hides a nation with nothing matching");
+
+    sidebar.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    sidebar.settle();
+
+    assert_eq!(sidebar.state.search_text.get_untracked(), "", "Escape clears the search");
+    assert!(sidebar.listed(&japan), "and the nation is listed again");
+}
+
+/// A folder opened during a search lists from the matches the search found, rather than matching
+/// the query again.
+#[test]
+fn opening_a_folder_during_a_search_lists_from_the_matches_already_found() {
+    let mut sidebar = Sidebar::open();
+    let yamato = fixture::path("content/gameplay/japan/ship/battleship/JSB018_Yamato_1944/JSB018_Yamato_1944.model");
+    sidebar.search("agm034");
+
+    // Matches for another query stand in for the stored ones, so a rebuild that matched "agm034"
+    // again would list the turret.
+    let ships = fixture::ships();
+    let catalog = fixture::catalog();
+    let ship_parts = fixture::ship_parts(&catalog, &fixture::references(&ships));
+    let models = index(ModelBuildings::default());
+    let sources = TreeSources {
+        ships: &ships,
+        ship_parts: &ship_parts,
+        models: ModelSection::Ready(&models),
+        fortifications: &[],
+        hidden: &HashMap::new(),
+    };
+    let stand_in = SearchMatches::from_query(&sources, &FilterQuery::new("yamato"), TierRange::ALL);
+    sidebar.state.replace_search_matches(stand_in.expect("an active query matches"));
+    let japan = "model-folder/nation-japan";
+    sidebar.browse(&[japan, &format!("{japan}/Ship"), &format!("{japan}/Ship/Battleship")]);
+
+    assert!(sidebar.listed(&model_row_id(&yamato)), "the stored matches are listed");
+    assert!(!sidebar.listed(&model_row_id(&turret())), "the query is not matched again");
 }
 
 #[test]

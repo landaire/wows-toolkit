@@ -488,6 +488,12 @@ impl SidebarState {
         self.set_expanded(next);
     }
 
+    /// Puts `matches` in place of the matches the last search found.
+    #[cfg(test)]
+    pub fn replace_search_matches(self, matches: SearchMatches) {
+        self.search.set_value(Some(matches));
+    }
+
     pub fn rebuild(self, rebuild: Rebuild) {
         let Some(catalog) = self.catalog.get_untracked() else {
             self.tree.set(Rc::new(SidebarTree::default()));

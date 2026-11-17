@@ -797,3 +797,79 @@ fn the_cast_hint_renders_in_dark_and_light() {
         println!("{}", path.display());
     }
 }
+
+/// The viewport with room to its right for the pointer to leave it onto.
+fn open_beside_room() -> Option<(HeadlessWindow, ArmorViewportState)> {
+    let place = ViewBox { left: 0.0, top: 0.0, width: VIEW.width - 200.0, height: VIEW.height };
+    let (mut window, state) = open_in(HeadlessOptions::new(VIEW), place)?;
+    show_scene(&mut window, state, known_thickness_scene());
+
+    Some((window, state))
+}
+
+/// A point of the window right of the viewport.
+fn beside_view() -> Point<DevicePx, Device> {
+    Point::new(DevicePx(VIEW.width - 100.0), DevicePx(VIEW.height / 2.0))
+}
+
+fn holds_no_hover(state: ArmorViewportState) -> bool {
+    state
+        .read_untracked(|model| {
+            model.hovered.is_none()
+                && model.hovered_mesh.is_none()
+                && model.hovered_ring.is_none()
+                && model.hovered_hardpoint.is_none()
+                && model.gizmo_hover.is_none()
+                && model.last_pointer.is_none()
+        })
+        .unwrap_or(false)
+}
+
+/// A pointer that moves off the view leaves no hover or tooltip behind: the view hears no further
+/// moves to clear them by.
+#[test]
+fn leaving_the_view_clears_every_hover_and_tooltip() {
+    let Some((mut window, state)) = open_beside_room() else { return };
+    window.hover_at(plate_on_screen(state));
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("armor-plate-tooltip").is_some(), "the plate's tooltip shows over the view");
+
+    window.hover_at(beside_view());
+    window.advance(Duration::from_millis(100));
+
+    assert!(holds_no_hover(state), "no hover is left");
+    assert!(window.by_test_id("armor-plate-tooltip").is_none(), "no tooltip is left beside the view");
+}
+
+/// A key pressed over the view keeps the tooltip of what the pointer rests on.
+#[test]
+fn a_key_press_keeps_the_hover() {
+    let Some((mut window, state)) = open_beside_room() else { return };
+    // A click gives the view the keyboard.
+    window.click_at(empty_on_screen(state));
+    window.hover_at(plate_on_screen(state));
+    window.advance(Duration::from_millis(100));
+    assert!(window.by_test_id("armor-plate-tooltip").is_some(), "the plate's tooltip shows");
+
+    window.press_character('x', Modifiers::NONE);
+    window.advance(Duration::from_millis(100));
+
+    assert!(state.read_untracked(|model| model.hovered.is_some()).unwrap_or(false), "the plate stays hovered");
+    assert!(window.by_test_id("armor-plate-tooltip").is_some(), "and its tooltip stays");
+}
+
+/// An orbit dragged off the view keeps going until the button is let go, wherever that is.
+#[test]
+fn a_drag_carried_off_the_view_ends_at_its_release() {
+    let Some((mut window, state)) = open_beside_room() else { return };
+    let dragging = |state: ArmorViewportState| state.read_untracked(|model| model.drag.is_some()).unwrap_or(false);
+
+    window.press_at(empty_on_screen(state));
+    window.hover_at(beside_view());
+    window.advance(Duration::from_millis(100));
+    assert!(dragging(state), "the drag outlives the pointer leaving");
+
+    window.release();
+    window.advance(Duration::from_millis(100));
+    assert!(!dragging(state), "the release beside the view ends the drag");
+}
