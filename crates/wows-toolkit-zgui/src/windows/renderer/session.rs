@@ -854,15 +854,25 @@ impl RendererSession {
     /// Moves playback on by `elapsed` of real time at its speed, and draws where it got to.
     fn tick(self, elapsed: Duration) {
         let Some(track) = self.track_untracked() else { return };
+        // The events either side of a moment, which the event controls are refused by.
+        let neighbours = |at: f32| {
+            self.events.with_untracked(|events| {
+                (events.previous(at).map(|event| event.clock.0), events.next(at).map(|event| event.clock.0))
+            })
+        };
+        let before = self.playback.with_untracked(|playback| playback.elapsed(&track));
         let tick = self
             .playback
             .try_maybe_update(|playback| {
-                let second = playback.elapsed(&track).floor();
                 let tick = playback.advance(&track, elapsed);
                 // What reads playback (the scrubber, the clock, the event controls) changes with
-                // the frame or the second shown, not with every draw between two frames.
+                // the frame or the second shown, or as an event is passed, not with every draw
+                // between two frames.
                 let told = match tick {
-                    Tick::Moved => playback.elapsed(&track).floor() != second,
+                    Tick::Moved => {
+                        let now = playback.elapsed(&track);
+                        now.floor() != before.floor() || neighbours(now) != neighbours(before)
+                    }
                     Tick::Advanced | Tick::Finished => true,
                     Tick::Idle => false,
                 };

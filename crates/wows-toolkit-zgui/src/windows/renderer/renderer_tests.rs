@@ -306,6 +306,22 @@ fn shift_arrows_walk_the_events_and_say_where() {
     assert!(said.contains("at 10"), "is said: {said:?}");
 }
 
+/// Playback passing an event between two stored frames, within one second, refuses the Next
+/// control once there is nothing after it, rather than when the next second is reached.
+#[test]
+fn the_event_controls_follow_playback_past_an_event() {
+    let (mut window, session) = open_viewport(track(vec![0.0, 10.0]));
+    session.events.set(events_at(&[0.3]));
+    session.set_speed(1.0);
+    window.advance(Duration::from_millis(16));
+    assert!(!is_disabled(&mut window, "replay-renderer-next-event"), "the event is ahead");
+
+    session.toggle_playing();
+    window.advance(Duration::from_millis(600));
+    assert!(clock(session) < 1.0, "still within the first second: {}", clock(session));
+    assert!(is_disabled(&mut window, "replay-renderer-next-event"), "nothing is left ahead");
+}
+
 /// The pop-out control is offered while the viewport is in a tab and withdrawn once it has a
 /// window of its own, so a popped-out viewport cannot be popped out again.
 #[test]
