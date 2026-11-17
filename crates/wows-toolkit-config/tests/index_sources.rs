@@ -720,6 +720,72 @@ async fn ensure_source_resolves_an_existing_live_source_at_a_different_root() {
     assert_eq!(query::live_source_id(&pool).await.unwrap(), Some(first), "the original Live source must be untouched");
 }
 
+/// A real directory `real/install/replays` and a link `link` to `real`.
+#[cfg(unix)]
+fn linked_install() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let tmp = tempfile::tempdir().expect("a temporary directory");
+    let real = tmp.path().join("real");
+    std::fs::create_dir_all(real.join("install/replays")).expect("the install is made");
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("the link is made");
+
+    (tmp, real, link)
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn ensure_source_reuses_the_source_of_a_linked_spelling() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (_tmp, real, link) = linked_install();
+    let stored = real.join("install/replays");
+    let existing = query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, &stored, now).await.unwrap();
+
+    let linked = link.join("install/replays");
+    let again = query::ensure_source(&pool, "Linked", SourceKind::ImportedDir, &linked, now).await.unwrap();
+
+    assert_eq!(again, existing, "the linked spelling reuses the existing source");
+    assert_eq!(row_count_for_root(&pool, &linked.to_string_lossy()).await, 0, "no row is made at the linked spelling");
+    let found = query::source_at_root(&pool, &linked).await.unwrap().expect("the linked spelling finds the source");
+    assert_eq!(found.id, existing);
+    assert_eq!(found.root_path.as_deref(), Some(stored.as_path()), "the source keeps its spelling");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unresolved_root_matches_only_as_written() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (tmp, real, _link) = linked_install();
+    query::ensure_source(&pool, "Dump", SourceKind::ImportedDir, &real.join("install/replays"), now).await.unwrap();
+    let unmounted = tmp.path().join("unmounted/replays");
+
+    assert!(query::source_at_root(&pool, &unmounted).await.unwrap().is_none());
+    let made = query::ensure_source(&pool, "Unmounted", SourceKind::ImportedDir, &unmounted, now).await.unwrap();
+    let found = query::source_at_root(&pool, &unmounted).await.unwrap().expect("the source is made");
+    assert_eq!(found.id, made);
+    assert_eq!(found.root_path.as_deref(), Some(unmounted.as_path()), "the given spelling is kept");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_linked_install_takes_the_live_source_spelling() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let (tmp, real, link) = linked_install();
+    let linked = link.join("install");
+    assert_eq!(query::live_install_spelling(&pool, &linked).await.unwrap(), linked, "no Live source keeps it");
+
+    query::ensure_default_source(&pool, &real.join("install/replays"), now).await.unwrap();
+
+    assert_eq!(query::live_install_spelling(&pool, &linked).await.unwrap(), real.join("install"));
+    let unmounted = tmp.path().join("unmounted/install");
+    assert_eq!(query::live_install_spelling(&pool, &unmounted).await.unwrap(), unmounted, "an unresolved one is kept");
+    let other = tmp.path().join("other");
+    std::fs::create_dir(&other).expect("the other directory is made");
+    assert_eq!(query::live_install_spelling(&pool, &other).await.unwrap(), other, "another directory is kept");
+}
+
 #[tokio::test]
 async fn relocate_source_rewrites_matching_prefixes_only() {
     let pool = mem_pool().await;

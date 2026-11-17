@@ -853,6 +853,38 @@ fn a_late_startup_check_leaves_a_later_refusal_marked() {
     assert!(shell().settings_drawer.wows_dir_invalid.get_untracked(), "the refused directory stays marked");
 }
 
+/// A game directory picked through a symbolic link is saved as the replay index's Live source
+/// spells it, so the replays indexed under that spelling still match.
+#[cfg(unix)]
+#[test]
+fn a_linked_game_directory_is_saved_under_the_indexed_spelling() {
+    let runtime = Arc::new(wows_toolkit_services::runtime::build().expect("a tokio runtime starts"));
+    let mut window = open(Some(Arc::clone(&runtime)), None, HeadlessOptions::new(REVIEW_SIZE));
+    let loaded = wait(&mut window, |_| shell().services().settings.pool().is_some());
+    assert!(loaded, "the settings load");
+    // The game directory and the Live source this writes would otherwise reach every other window.
+    shell().services().settings.use_private_database_for_test();
+
+    let tmp = tempfile::tempdir().expect("a temporary directory can be made");
+    let real = tmp.path().join("real");
+    std::fs::create_dir_all(real.join("install/bin")).expect("the install can be made");
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("the link can be made");
+    let pool = shell().services().settings.pool().expect("the settings database is open");
+    let indexed = real.join("install/replays");
+    runtime
+        .block_on(wows_toolkit_config::index::query::ensure_default_source(&pool, &indexed, jiff::Timestamp::now()))
+        .expect("the live source is made");
+
+    shell().apply_wows_dir(link.join("install").to_string_lossy().into_owned());
+
+    let stored = real.join("install").to_string_lossy().into_owned();
+    let saved = wait(&mut window, |_| {
+        shell().services().settings.read_untracked(|settings| settings.wows_dir.clone()) == Some(stored.clone())
+    });
+    assert!(saved, "the directory is saved as {stored}");
+}
+
 /// Advances the window in real time until `done` holds, for work on the tokio runtime.
 fn wait(window: &mut HeadlessWindow, mut done: impl FnMut(&HeadlessWindow) -> bool) -> bool {
     for _ in 0..80 {

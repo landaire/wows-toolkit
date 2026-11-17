@@ -1759,6 +1759,9 @@ impl TabState {
         };
     }
 
+    /// Loads the game data from `wows_directory` off the UI thread. The directory is first spelled
+    /// as the replay index's Live source has it, and the load reports it under that spelling, so
+    /// the setting it is saved to keeps the install's replays matching their records.
     #[must_use]
     pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
         let (tx, rx) = crate::task::completion_channel();
@@ -1767,10 +1770,15 @@ impl TabState {
         let auto_dump = settings.settings.game.auto_dump_game_data;
         let cache_dir = settings.settings.game.game_data_cache_dir.clone();
         drop(settings);
+        let index = self.db_pool.clone().zip(self.tokio_runtime.clone());
         let fallback_constants: serde_json::Value =
             serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/constants.json")))
                 .expect("failed to parse embedded constants JSON");
         let _join_handle = crate::util::thread::spawn_logged("load-game-data", move || {
+            let wows_directory = match &index {
+                Some((pool, runtime)) => indexed_install_spelling(pool, runtime, wows_directory),
+                None => wows_directory,
+            };
             let _ = tx.send(crate::task::load_wows_files(
                 wows_directory,
                 locale.as_str(),
@@ -1867,10 +1875,58 @@ impl TabState {
     }
 }
 
+/// `wows_dir` spelled as the replay index's Live source has it when both name one directory. As
+/// given when the index cannot be read: the load then reads the directory the user named.
+fn indexed_install_spelling(pool: &sqlx::SqlitePool, runtime: &tokio::runtime::Runtime, wows_dir: PathBuf) -> PathBuf {
+    match runtime.block_on(crate::db::index::query::live_install_spelling(pool, &wows_dir)) {
+        Ok(respelled) => respelled,
+        Err(err) => {
+            warn!("the replay index could not be read for the game directory's spelling: {err}");
+            wows_dir
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// A game directory picked through a symbolic link loads under the Live source's spelling, so
+    /// the setting saved from the load keeps matching the index.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_game_directory_takes_the_indexed_spelling() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
+        let pool = runtime.block_on(async {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("an in-memory sqlite pool");
+            sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool).await.expect("migrations apply");
+            pool
+        });
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("install/replays")).expect("the install is made");
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("the link is made");
+        let unmounted = tmp.path().join("unmounted/install");
+
+        assert_eq!(indexed_install_spelling(&pool, &runtime, link.join("install")), link.join("install"));
+
+        runtime
+            .block_on(crate::db::index::query::ensure_default_source(
+                &pool,
+                &real.join("install/replays"),
+                jiff::Timestamp::now(),
+            ))
+            .expect("the live source is made");
+
+        assert_eq!(indexed_install_spelling(&pool, &runtime, link.join("install")), real.join("install"));
+        assert_eq!(indexed_install_spelling(&pool, &runtime, unmounted.clone()), unmounted);
+    }
 
     fn insert_listed_paths<'a>(workspace: &mut ReplayWorkspace, paths: impl IntoIterator<Item = &'a PathBuf>) {
         workspace.set_replay_files(Some(paths.into_iter().map(|path| (path.clone(), listed_replay())).collect()));

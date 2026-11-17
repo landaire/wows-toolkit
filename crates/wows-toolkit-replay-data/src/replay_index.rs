@@ -80,16 +80,15 @@ impl SourceScope {
 
     /// The scope's source, or `None` while nothing has created it. Readers
     /// call this rather than [`Self::ensure`]. A folder never reads the Live
-    /// source, for the reason [`Self::ensure`] never writes it.
+    /// source, for the reason [`Self::ensure`] never writes it. A folder finds
+    /// its source under any spelling of its directory, as [`Self::ensure`] does.
     pub async fn existing(&self, pool: &SqlitePool) -> Result<Option<SourceId>, IndexError> {
         let Self::Folder(root) = self else {
             return query::live_source_id(pool).await;
         };
 
-        let sources = query::list_sources(pool).await?;
-        Ok(sources
-            .into_iter()
-            .find(|source| source.root_path.as_deref() == Some(root))
+        Ok(query::source_at_root(pool, root)
+            .await?
             .filter(|source| source.kind != SourceKind::Live)
             .map(|source| source.id))
     }

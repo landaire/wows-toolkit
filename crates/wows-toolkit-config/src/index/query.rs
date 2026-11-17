@@ -19,6 +19,7 @@ use wows_core::rating_scope::RatingScope;
 use super::query_ast::MatchExpr;
 use super::query_sql::CompileCtx;
 use super::query_sql::push_match_expr;
+use super::root_spelling;
 use super::rows::ClanCorrection;
 use super::rows::DivisionMate;
 use super::rows::DivisionMateEncounter;
@@ -192,6 +193,9 @@ pub async fn live_source_id(pool: &SqlitePool) -> Result<Option<SourceId>, Index
 /// intentional: a directory has exactly one source, whatever kind it was
 /// first registered as. Callers that need a specific kind must check the
 /// returned source's kind themselves.
+///
+/// A source whose root names the same directory under another spelling, through a symbolic link
+/// or a bind mount, is that directory's source too, so it is reused rather than a second created.
 pub async fn ensure_source(
     pool: &SqlitePool,
     name: &str,
@@ -199,6 +203,17 @@ pub async fn ensure_source(
     root_path: &Path,
     now: Timestamp,
 ) -> Result<SourceId, IndexError> {
+    // Immediate, so two spellings of one directory written at once still land on one source.
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+
+    // A root written exactly so goes through the insert below, which is what keeps racing writers
+    // on one row.
+    let owner = source_at_root(&mut *tx, root_path).await?;
+    if let Some(respelled) = owner.filter(|owner| owner.root_path.as_deref() != Some(root_path)) {
+        tx.commit().await?;
+        return Ok(respelled.id);
+    }
+
     let root = root_path.to_string_lossy().to_string();
 
     sqlx::query(
@@ -209,13 +224,14 @@ pub async fn ensure_source(
     .bind(kind.as_db_str())
     .bind(&root)
     .bind(now.as_second())
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
     let row: Option<(i64,)> = sqlx::query_as("SELECT source_id FROM index_source WHERE root_path = ?1")
         .bind(&root)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
+    tx.commit().await?;
 
     match row {
         Some((id,)) => Ok(SourceId(id)),
@@ -227,6 +243,43 @@ pub async fn ensure_source(
         }
         None => Err(IndexError::SourceCreationFailed { root_path: root_path.to_path_buf() }),
     }
+}
+
+/// The source rooted at `root_path` under any spelling: written exactly so first, else the one
+/// whose root resolves to the same directory. A root that does not resolve, as on a drive not
+/// mounted, matches only as written.
+pub async fn source_at_root<'e, E>(executor: E, root_path: &Path) -> Result<Option<IndexSource>, IndexError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let mut sources = list_sources(executor).await?;
+    if let Some(exact) = sources.iter().position(|source| source.root_path.as_deref() == Some(root_path)) {
+        return Ok(Some(sources.swap_remove(exact)));
+    }
+
+    let Ok(resolved) = std::fs::canonicalize(root_path) else {
+        return Ok(None);
+    };
+
+    Ok(sources.into_iter().find(|source| {
+        source.root_path.as_deref().is_some_and(|root| std::fs::canonicalize(root).is_ok_and(|root| root == resolved))
+    }))
+}
+
+/// `install` spelled as the Live source's root spells it, when that root is in `install` reached
+/// under another spelling, so the install's replays keep matching the records stored for them.
+/// `install` as given without a Live source, or when the two do not resolve to one directory.
+pub async fn live_install_spelling(pool: &SqlitePool, install: &Path) -> Result<PathBuf, IndexError> {
+    let live_root: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT root_path FROM index_source WHERE kind = ?1 ORDER BY source_id LIMIT 1")
+            .bind(SourceKind::Live.as_db_str())
+            .fetch_optional(pool)
+            .await?;
+    let Some((Some(live_root),)) = live_root else {
+        return Ok(install.to_path_buf());
+    };
+
+    Ok(root_spelling::spelling_within(install, Path::new(&live_root)).unwrap_or_else(|| install.to_path_buf()))
 }
 
 /// Return the id of the source that owns `root_path`, creating a `Live` source
@@ -246,10 +299,13 @@ pub async fn ensure_default_source(
 }
 
 /// List every group, newest first.
-pub async fn list_sources(pool: &SqlitePool) -> Result<Vec<IndexSource>, IndexError> {
+pub async fn list_sources<'e, E>(executor: E) -> Result<Vec<IndexSource>, IndexError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     let rows: Vec<(i64, String, String, Option<String>)> =
         sqlx::query_as("SELECT source_id, name, kind, root_path FROM index_source ORDER BY added_at DESC")
-            .fetch_all(pool)
+            .fetch_all(executor)
             .await?;
     Ok(rows
         .into_iter()
