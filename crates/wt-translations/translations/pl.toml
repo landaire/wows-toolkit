@@ -1970,9 +1970,12 @@ nothing_listed = "Lista nie zawiera powtórek do ponownego indeksowania."
 nothing_readable = "Żadnej z tych powtórek nie można ponownie zindeksować: brak dostępnych danych gry (pominięto: %{count})."
 no_game_data = "Powtórek nie można odczytać, dopóki nie zostanie ustawiony katalog gry."
 busy_index = "Indeksowanie już trwa."
+busy_cache = "Zadanie danych gry już trwa. Spróbuj ponownie po jego zakończeniu."
 planning = "Sprawdzanie dostępnych danych gry..."
 no_index = "Indeks powtórek nie jest otwarty, więc nic nie zostało ponownie zindeksowane."
 done = "Ponownie zindeksowano powtórki: %{indexed}; pominięto: %{skipped}, nie udało się odczytać: %{failed}"
+stopped = "Ponowne indeksowanie zatrzymane: zindeksowano %{indexed}, pominięto %{skipped}, nie udało się odczytać %{failed}"
+stopped_before_reading = "Ponowne indeksowanie zatrzymano przed odczytaniem jakiejkolwiek powtórki."
 
 [ui.index_folder]
 tooltip = "Zindeksuj wszystkie powtórki z tej listy, których indeks powtórek jeszcze nie zawiera"
@@ -1985,6 +1988,8 @@ nothing_listed = "Ta lista nie zawiera powtórek do zindeksowania."
 nothing_missing = "Wszystkie powtórki z tej listy są już zindeksowane."
 unreadable_index = "Nie można odczytać indeksu powtórek."
 done = "Zindeksowano powtórki: %{indexed}; pominięto %{skipped}, nie można odczytać %{failed}"
+stopped = "Indeksowanie zatrzymane: zindeksowano %{indexed}, pominięto %{skipped}, nie można odczytać %{failed}"
+stopped_before_reading = "Indeksowanie zatrzymano przed odczytaniem jakiejkolwiek powtórki."
 
 [ui.replay_folders]
 install = "Gra"

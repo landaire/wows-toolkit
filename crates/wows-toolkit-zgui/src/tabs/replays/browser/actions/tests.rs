@@ -580,3 +580,118 @@ fn a_folder_pass_shows_its_rows_as_it_writes_them() {
     assert!(!flush.is_due(written(17), start + Duration::from_secs(5)), "nothing new is nothing to show");
     assert!(flush.is_due(written(16), start + Duration::from_secs(5)), "the next pass counts from nothing");
 }
+
+/// The kept replays' candidates once the install's directory is listed.
+fn listed_candidates(window: &mut HeadlessWindow, control: BrowserControl) -> Vec<ReindexCandidate> {
+    control.install_listing().expect("the install has a listing").relist();
+    settle_until(window, "the install's replay is listed", |_| !kept_candidates(control).is_empty());
+
+    kept_candidates(control)
+}
+
+/// Stop ends a forced re-index before it reads anything, and the index controls say so. The
+/// builds its summary put to the reader count as offered, so the walk after it does not offer
+/// them again.
+#[test]
+fn a_forced_reindex_stopped_before_reading_says_so() {
+    let (mut window, control) = open();
+    own_index(control);
+    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let candidates = listed_candidates(&mut window, control);
+    let build = force_reindex::builds(&candidates)[0].release.build.0;
+    // Nothing local and nothing to fetch, so every replay's build is one nothing can supply.
+    let summary = force_reindex::summarize(&candidates, &BTreeSet::new(), &Fetchable::Releases(BTreeSet::new()));
+    let game_data = control.shell().services().game_data.cache_untracked().expect("the game data is adopted");
+    let index = control.work.shell_index;
+
+    run(control, summary, IndexPurpose::Refresh, game_data);
+    assert!(index.is_indexing(), "the Settings drawer shows the pass");
+    index.stop();
+    settle_until(&mut window, "the pass ends", |_| !control.work.reindexing.get_untracked());
+
+    assert_eq!(index.outcome(), Some(t!("ui.reindex.stopped_before_reading").into_owned()));
+    assert!(!index.is_indexing(), "and no longer shows it running");
+    let offer = control.work.offer.get_value().expect("the tab handed over its offer");
+    assert!(offer.was_offered(build), "the summary's build is not offered again");
+}
+
+/// A forced re-index whose replays need game data fetched does not fetch while another job holds
+/// the cache: it says why, leaves those replays out, and leaves the cache to the job holding it.
+#[test]
+fn a_forced_reindex_does_not_fetch_while_the_cache_is_busy() {
+    let (mut window, control) = open();
+    own_index(control);
+    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let candidates = listed_candidates(&mut window, control);
+    let releases: BTreeSet<Release> = force_reindex::builds(&candidates).into_iter().map(|need| need.release).collect();
+    let summary = force_reindex::summarize(&candidates, &BTreeSet::new(), &Fetchable::Releases(releases));
+    assert!(!summary.downloads.is_empty(), "the replay waits on a download");
+    let game_data = control.shell().services().game_data.cache_untracked().expect("the game data is adopted");
+    let held = control.shell().hold_cache_for_downloads().expect("no other job holds the cache");
+
+    run(control, summary, IndexPurpose::Refresh, game_data);
+    settle_until(&mut window, "the pass ends", |_| !control.work.reindexing.get_untracked());
+
+    let toasts = window.texts_by_class("lui-toasts").concat();
+    assert!(toasts.contains(t!("ui.reindex.busy_cache").as_ref()), "{toasts:?}");
+    let read_nothing = t!("ui.reindex.done", indexed = 0, failed = 0, skipped = 1).into_owned();
+    assert_eq!(control.work.shell_index.outcome(), Some(read_nothing), "the replay was left out");
+    assert!(control.shell().cache.busy_untracked(), "the cache is still the other job's");
+    drop(held);
+}
+
+/// A forced re-index's downloads hold the cache until the worker fetching a build exits, even once
+/// the replays tab that asked stops waiting for them: nothing else may validate, prune or fetch
+/// into a build that is still being written.
+#[test]
+fn downloads_hold_the_cache_until_their_worker_exits() {
+    let (mut window, control) = open();
+    own_index(control);
+    let _install = adopt_install(control, &[FIXTURES[0]]);
+    let candidates = listed_candidates(&mut window, control);
+    let release = force_reindex::builds(&candidates)[0].release;
+
+    // A proxy that takes the connection and does not answer until stopped keeps the worker in its
+    // request.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port is free");
+    let address = listener.local_addr().expect("the port is bound");
+    let (stop_proxy, stopped) = std::sync::mpsc::channel::<()>();
+    let proxy = std::thread::spawn(move || {
+        let taken = listener.accept();
+        let _ = stopped.recv();
+        drop(taken);
+    });
+    let services = control.shell().services();
+    let (pool, runtime) = index(control);
+    let mut settings = runtime.block_on(StartupSettings::load(&pool));
+    settings.proxy_url = format!("http://{address}");
+    services.settings.adopt_unsaved(settings);
+    let cache = tempfile::tempdir().expect("a temporary directory can be made");
+    let shell = control.shell();
+    let held = shell.hold_cache_for_downloads().expect("no other job holds the cache");
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let answered = download(shell, cache.path().to_path_buf(), held, vec![release], Arc::clone(&cancel));
+    let downloading = t!("ui.app.status_cache_downloading").into_owned();
+    settle_until(&mut window, "the download starts", |_| {
+        services.jobs.running().iter().any(|job| job.name == downloading)
+    });
+    // What closing the replays tab does to its downloads.
+    drop(answered);
+    cancel.store(true, Ordering::Relaxed);
+    for _ in 0..5 {
+        window.advance(Duration::from_millis(100));
+    }
+    assert!(shell.cache.busy_untracked(), "the cache is held while the worker still writes");
+
+    // Stopped, the proxy ends the worker's request and closes, so its retries are refused.
+    let _ = stop_proxy.send(());
+    drop(proxy);
+    // The repository client backs off between retries in real time.
+    let deadline = std::time::Instant::now() + Duration::from_secs(90);
+    while shell.cache.busy_untracked() && std::time::Instant::now() < deadline {
+        window.advance(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!shell.cache.busy_untracked(), "the cache is released once the worker exits");
+}

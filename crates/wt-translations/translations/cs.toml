@@ -1970,9 +1970,12 @@ nothing_listed = "Seznam neobsahuje žádné záznamy k novému indexování."
 nothing_readable = "Žádný z těchto záznamů nelze znovu indexovat: nejsou pro ně k dispozici herní data (%{count} přeskočeno)."
 no_game_data = "Záznamy nelze číst, dokud není nastaven adresář hry."
 busy_index = "Indexování již probíhá."
+busy_cache = "Úloha herních dat již probíhá. Zkuste to znovu po jejím dokončení."
 planning = "Zjišťování dostupných herních dat..."
 no_index = "Index záznamů není otevřen, nic nebylo znovu indexováno."
 done = "Znovu indexováno %{indexed} záznam(ů); %{skipped} přeskočeno, %{failed} nelze přečíst"
+stopped = "Nové indexování zastaveno: %{indexed} znovu indexováno, %{skipped} přeskočeno, %{failed} nelze přečíst"
+stopped_before_reading = "Nové indexování bylo zastaveno dříve, než byl přečten jakýkoli záznam."
 
 [ui.index_folder]
 tooltip = "Indexovat všechny záznamy v tomto seznamu, které index záznamů ještě neobsahuje"
@@ -1985,6 +1988,8 @@ nothing_listed = "Tento seznam neobsahuje žádné záznamy k indexování."
 nothing_missing = "Všechny záznamy v tomto seznamu jsou již indexovány."
 unreadable_index = "Index záznamů nelze načíst."
 done = "Indexováno záznamů: %{indexed}; přeskočeno %{skipped}, nelze načíst %{failed}"
+stopped = "Indexování zastaveno: indexováno %{indexed}, přeskočeno %{skipped}, nelze načíst %{failed}"
+stopped_before_reading = "Indexování bylo zastaveno dříve, než byl načten jakýkoli záznam."
 
 [ui.replay_folders]
 install = "Hra"

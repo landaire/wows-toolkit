@@ -70,15 +70,25 @@ impl IndexChanges {
     }
 }
 
-/// The running build, how far it has got, and what the last one said.
+/// Where the replays tab's forced re-index stands, as the Settings drawer shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForcedPass {
+    /// Asking for or fetching the game data its replays are read through.
+    Fetching,
+    Reading(IndexProgress),
+}
+
+/// The running build or forced re-index, how far it has got, and what the last one said.
 #[derive(Clone, Copy)]
 pub struct ReplayIndexJobs {
     /// How far the running build has got. `None` while none runs.
     progress: RwSignal<Option<IndexProgress>, LocalStorage>,
-    /// What the last build said when it stopped. Cleared when the next starts.
+    /// What the last build or forced re-index said when it stopped. Cleared when the next starts.
     outcome: RwSignal<Option<String>, LocalStorage>,
-    /// The Stop flag the running build checks.
+    /// The Stop flag the running build or forced re-index checks.
     cancel: StoredValue<Option<Arc<AtomicBool>>>,
+    /// The replays tab's forced re-index. `None` while none runs.
+    forced: RwSignal<Option<ForcedPass>, LocalStorage>,
     /// Whether a pass the replays tab started is reading replays.
     folder_pass: RwSignal<bool, LocalStorage>,
     /// Whether the last build stored its rows without a rating table, until the replays tab
@@ -111,6 +121,7 @@ impl ReplayIndexJobs {
             progress: RwSignal::new_local(None),
             outcome: RwSignal::new_local(None),
             cancel: StoredValue::new(None),
+            forced: RwSignal::new_local(None),
             folder_pass: RwSignal::new_local(false),
             wrote_unrated: StoredValue::new(false),
             writes: RwSignal::new_local(IndexWrites::default()),
@@ -130,11 +141,26 @@ impl ReplayIndexJobs {
         self.progress.get()
     }
 
+    /// Whether the build or a forced re-index is running, for the Settings drawer's controls.
+    pub fn is_indexing(self) -> bool {
+        self.is_running() || self.forced.with(Option::is_some)
+    }
+
+    /// How far the build or the forced re-index reading replays has got.
+    pub fn shown_progress(self) -> Option<IndexProgress> {
+        let forced = self.forced.with(|forced| match forced {
+            Some(ForcedPass::Reading(progress)) => Some(*progress),
+            Some(ForcedPass::Fetching) | None => None,
+        });
+
+        self.progress().or(forced)
+    }
+
     pub fn outcome(self) -> Option<String> {
         self.outcome.get()
     }
 
-    /// Asks the running build to stop after the replay it is reading.
+    /// Asks the running build or forced re-index to stop after the replay or download under way.
     pub fn stop(self) {
         if let Some(cancel) = self.cancel.get_value() {
             cancel.store(true, Ordering::Relaxed);
@@ -149,9 +175,36 @@ impl ReplayIndexJobs {
         }
     }
 
-    /// Forgets the replays tab's pass, as the tab goes. `try_`, since the shell may be going too.
+    /// Forgets the replays tab's passes, as the tab goes. `try_`, since the shell may be going too.
     pub fn clear_folder_pass(self) {
         let _ = self.folder_pass.try_set(false);
+        if self.forced.try_get_untracked().flatten().is_some() {
+            let _ = self.forced.try_set(None);
+            let _ = self.cancel.try_set_value(None);
+        }
+    }
+
+    /// Shows the replays tab's forced re-index under the Settings drawer's index controls, whose
+    /// Stop sets `cancel`.
+    pub fn begin_forced(self, cancel: Arc<AtomicBool>) {
+        self.cancel.set_value(Some(cancel));
+        self.outcome.set(None);
+        self.forced.set(Some(ForcedPass::Fetching));
+    }
+
+    /// How far the forced re-index has got. `try_`, as the shell may be gone by the time it reports.
+    pub fn report_forced(self, pass: ForcedPass) {
+        let _ = self.forced.try_set(Some(pass));
+    }
+
+    /// Ends the forced re-index with what it said. `try_`, as for [`Self::report_forced`].
+    pub fn finish_forced(self, said: String) {
+        if self.forced.try_with_untracked(|_| ()).is_none() {
+            return;
+        }
+        self.forced.set(None);
+        self.cancel.set_value(None);
+        self.outcome.set(Some(said));
     }
 
     /// Whether the last build stored its rows unrated, clearing it.

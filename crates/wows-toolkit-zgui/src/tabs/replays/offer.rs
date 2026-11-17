@@ -98,6 +98,17 @@ impl GameDataOffer {
         self.offer(shell, missing);
     }
 
+    /// Notes `builds` as put to the reader another way, as a forced re-index's summary puts them,
+    /// so the walk after its download does not offer them again.
+    pub fn mark_offered(self, builds: impl IntoIterator<Item = u32>) {
+        self.offered.update_value(|offered| offered.extend(builds));
+    }
+
+    #[cfg(test)]
+    pub fn was_offered(self, build: u32) -> bool {
+        self.offered.with_value(|offered| offered.contains(&build))
+    }
+
     /// Offers to fetch `missing`, leaving out builds already put to the reader this session: a
     /// walk after a download reports what it still cannot read, and offering that again would be
     /// a loop rather than a question.

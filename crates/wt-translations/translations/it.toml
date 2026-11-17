@@ -2016,9 +2016,12 @@ nothing_listed = "L'elenco non contiene replay da reindicizzare."
 nothing_readable = "Nessuno di questi replay può essere reindicizzato: non sono disponibili dati di gioco (%{count} saltati)."
 no_game_data = "I replay non possono essere letti finché non è impostata la cartella del gioco."
 busy_index = "È già in corso un'indicizzazione."
+busy_cache = "È già in corso un'operazione sui dati di gioco. Riprova al termine."
 planning = "Verifica dei dati di gioco disponibili..."
 no_index = "L'indice dei replay non è aperto, quindi non è stato reindicizzato nulla."
 done = "%{indexed} replay reindicizzati; %{skipped} saltati, %{failed} non leggibili"
+stopped = "Reindicizzazione interrotta: %{indexed} reindicizzati, %{skipped} saltati, %{failed} non leggibili"
+stopped_before_reading = "Reindicizzazione interrotta prima di leggere qualsiasi replay."
 
 [ui.index_folder]
 tooltip = "Indicizza tutti i replay di questo elenco non ancora presenti nell'indice dei replay"
@@ -2031,6 +2034,8 @@ nothing_listed = "Questo elenco non contiene replay da indicizzare."
 nothing_missing = "Tutti i replay di questo elenco sono già indicizzati."
 unreadable_index = "Impossibile leggere l'indice dei replay."
 done = "%{indexed} replay indicizzati; %{skipped} saltati, %{failed} non leggibili"
+stopped = "Indicizzazione interrotta: %{indexed} indicizzati, %{skipped} saltati, %{failed} non leggibili"
+stopped_before_reading = "Indicizzazione interrotta prima della lettura di qualsiasi replay."
 
 [ui.replay_folders]
 install = "Gioco"

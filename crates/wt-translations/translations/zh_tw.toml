@@ -2016,9 +2016,12 @@ nothing_listed = "清單中沒有需要重建索引的回放。"
 nothing_readable = "這些回放皆無法重建索引：沒有可用的遊戲資料（略過 %{count} 個）。"
 no_game_data = "設定遊戲目錄之前無法讀取回放。"
 busy_index = "索引作業已在執行。"
+busy_cache = "遊戲資料作業已在執行。請在其完成後重試。"
 planning = "正在檢查可用的遊戲資料..."
 no_index = "回放索引未開啟，因此未重建任何索引。"
 done = "已為 %{indexed} 個回放重建索引；略過 %{skipped} 個，%{failed} 個無法讀取"
+stopped = "重建索引已停止：已重建 %{indexed} 個，略過 %{skipped} 個，%{failed} 個無法讀取"
+stopped_before_reading = "在讀取任何回放之前已停止重建索引。"
 
 [ui.index_folder]
 tooltip = "為此清單中回放索引尚未包含的所有回放建立索引"
@@ -2031,6 +2034,8 @@ nothing_listed = "此清單中沒有可建立索引的回放。"
 nothing_missing = "此清單中的所有回放均已建立索引。"
 unreadable_index = "無法讀取回放索引。"
 done = "已為 %{indexed} 個回放建立索引；略過 %{skipped} 個，%{failed} 個無法讀取"
+stopped = "索引已停止：已索引 %{indexed} 個，略過 %{skipped} 個，%{failed} 個無法讀取"
+stopped_before_reading = "索引在讀取任何回放之前已停止。"
 
 [ui.replay_folders]
 install = "遊戲"

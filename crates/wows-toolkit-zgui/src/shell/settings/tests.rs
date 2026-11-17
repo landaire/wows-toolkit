@@ -899,6 +899,47 @@ fn wait(window: &mut HeadlessWindow, mut done: impl FnMut(&HeadlessWindow) -> bo
     done(window)
 }
 
+/// The drawer at the index controls, with the replays tab's forced re-index two replays into
+/// five. Answers its Stop flag.
+fn forced_reindex_shown(options: HeadlessOptions) -> (HeadlessWindow, Arc<std::sync::atomic::AtomicBool>) {
+    use wows_toolkit_replay_data::replay_index::IndexProgress;
+
+    use crate::shell::replay_index::ForcedPass;
+
+    let mut window = open(None, Some(test_settings()), options);
+    let index = shell().replay_index;
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    index.begin_forced(Arc::clone(&cancel));
+    index.report_forced(ForcedPass::Reading(IndexProgress { done: 2, total: 5, ..IndexProgress::default() }));
+    shell().settings_drawer.open_at(Setting::ReplayIndex);
+    settle(&mut window);
+    settle(&mut window);
+
+    (window, cancel)
+}
+
+/// A forced re-index the replays tab runs shows under the index controls as a build does: how far
+/// it has got, and a Stop that stops it. Building is refused beside it, and what it said when it
+/// ended replaces the progress.
+#[test]
+fn a_forced_reindex_shows_and_stops_under_the_index_controls() {
+    let (mut window, cancel) = forced_reindex_shown(HeadlessOptions::new(REVIEW_SIZE));
+
+    let progress = t!("ui.settings.index.progress", done = 2, total = 5, failed = 0).into_owned();
+    assert!(window.texts_by_class("wt-settings__line").contains(&progress), "the progress is shown");
+    let build = find(&window, "index-build");
+    assert!(window.a11y(build).is_some_and(|state| state.disabled), "building is refused beside it");
+    click(&mut window, "index-stop");
+    assert!(cancel.load(std::sync::atomic::Ordering::Relaxed), "Stop stops the forced re-index");
+
+    let said = t!("ui.reindex.stopped_before_reading").into_owned();
+    shell().replay_index.finish_forced(said.clone());
+    settle(&mut window);
+    let lines = window.texts_by_class("wt-settings__line");
+    assert!(lines.contains(&said) && !lines.contains(&progress), "what it said replaces the progress: {lines:?}");
+    assert!(window.by_test_id("index-stop").is_none(), "and Stop goes");
+}
+
 /// What a shot of the drawer shows.
 #[derive(Clone, Copy)]
 enum Shot {

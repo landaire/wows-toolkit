@@ -1970,9 +1970,12 @@ nothing_listed = "Listede yeniden indekslenecek tekrar yok."
 nothing_readable = "Bu tekrarların hiçbiri yeniden indekslenemiyor: bunlar için oyun verisi yok (%{count} atlandı)."
 no_game_data = "Oyun dizini ayarlanana kadar tekrarlar okunamaz."
 busy_index = "Bir indeksleme işlemi zaten çalışıyor."
+busy_cache = "Bir oyun verisi işi zaten çalışıyor. Bittiğinde tekrar deneyin."
 planning = "Hangi oyun verilerinin mevcut olduğu kontrol ediliyor..."
 no_index = "Tekrar indeksi açık değil, bu yüzden hiçbir şey yeniden indekslenmedi."
 done = "%{indexed} tekrar yeniden indekslendi; %{skipped} atlandı, %{failed} okunamadı"
+stopped = "Yeniden indeksleme durduruldu: %{indexed} yeniden indekslendi, %{skipped} atlandı, %{failed} okunamadı"
+stopped_before_reading = "Yeniden indeksleme, hiçbir tekrar okunmadan durduruldu."
 
 [ui.index_folder]
 tooltip = "Bu listede tekrar indeksinde henüz bulunmayan tüm tekrarları indeksle"
@@ -1985,6 +1988,8 @@ nothing_listed = "Bu listede indekslenecek tekrar yok."
 nothing_missing = "Bu listedeki tüm tekrarlar zaten indekslenmiş."
 unreadable_index = "Tekrar indeksi okunamadı."
 done = "%{indexed} tekrar indekslendi; %{skipped} atlandı, %{failed} okunamadı"
+stopped = "İndeksleme durduruldu: %{indexed} indekslendi, %{skipped} atlandı, %{failed} okunamadı"
+stopped_before_reading = "İndeksleme, hiçbir tekrar okunmadan durduruldu."
 
 [ui.replay_folders]
 install = "Oyun"

@@ -1970,9 +1970,12 @@ nothing_listed = "La lista no contiene repeticiones que reindexar."
 nothing_readable = "Ninguna de estas repeticiones se puede reindexar: no hay datos del juego disponibles para ellas (%{count} omitidas)."
 no_game_data = "No se pueden leer repeticiones hasta que se configure el directorio del juego."
 busy_index = "Ya hay una indexación en curso."
+busy_cache = "Ya hay una tarea de datos del juego en curso. Inténtalo de nuevo cuando termine."
 planning = "Comprobando qué datos del juego están disponibles..."
 no_index = "El índice de repeticiones no está abierto, así que no se reindexó nada."
 done = "%{indexed} repetición(es) reindexadas; %{skipped} omitidas, %{failed} no se pudieron leer"
+stopped = "Reindexado detenido: %{indexed} reindexadas, %{skipped} omitidas, %{failed} no se pudieron leer"
+stopped_before_reading = "El reindexado se detuvo antes de leer ninguna repetición."
 
 [ui.index_folder]
 tooltip = "Indexar todas las repeticiones de esta lista que el índice de repeticiones aún no contiene"
@@ -1985,6 +1988,8 @@ nothing_listed = "Esta lista no contiene repeticiones que indexar."
 nothing_missing = "Todas las repeticiones de esta lista ya están indexadas."
 unreadable_index = "No se pudo leer el índice de repeticiones."
 done = "%{indexed} repetición(es) indexada(s); %{skipped} omitida(s), %{failed} no se pudieron leer"
+stopped = "Indexado detenido: %{indexed} indexadas, %{skipped} omitidas, %{failed} no se pudieron leer"
+stopped_before_reading = "El indexado se detuvo antes de leer ninguna repetición."
 
 [ui.replay_folders]
 install = "Juego"

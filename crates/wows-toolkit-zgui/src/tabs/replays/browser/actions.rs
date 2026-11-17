@@ -22,6 +22,7 @@ use std::time::Instant;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc;
+use futures::channel::oneshot;
 use landaire_ui::Notice;
 use rust_i18n::t;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
@@ -31,7 +32,6 @@ use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::IndexWriteMode;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_replay_data::force_reindex;
-use wows_toolkit_replay_data::force_reindex::BuildNeed;
 use wows_toolkit_replay_data::force_reindex::Confirm;
 use wows_toolkit_replay_data::force_reindex::Fetchable;
 use wows_toolkit_replay_data::force_reindex::IndexPurpose;
@@ -80,6 +80,7 @@ use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::blocking;
+use zgui::task::spawn_detached;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
@@ -99,11 +100,14 @@ use crate::services::Job;
 use crate::services::Progress;
 use crate::services::Services;
 use crate::services::TokioError;
+use crate::shell::Shell;
+use crate::shell::game_data_cache::CacheDownloads;
 use crate::shell::palette::PaletteRun;
 use crate::shell::palette::RootCommand;
 use crate::shell::palette::TabRequest;
 use crate::shell::palette::chosen;
 use crate::shell::palette::modes;
+use crate::shell::replay_index::ForcedPass;
 use crate::shell::replay_index::ReplayIndexJobs;
 use crate::shell::replay_index::cached_rateable_mc;
 use crate::shell::replay_index::owner_rating;
@@ -115,6 +119,7 @@ use crate::tabs::replays::browser::folders::BrowserControl;
 use crate::tabs::replays::browser::folders::FolderId;
 use crate::tabs::replays::browser::folders::FolderSource;
 use crate::tabs::replays::browser::folders::FolderState;
+use crate::tabs::replays::offer::GameDataOffer;
 use crate::tabs::replays::sharing::Contributor;
 use crate::tabs::replays::sharing::SharingReads;
 
@@ -236,6 +241,28 @@ impl SummaryFlush {
     }
 }
 
+/// How a forced pass ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PassEnd {
+    /// Stopped while it fetched game data.
+    BeforeReading,
+    /// Stopped part-way through reading, at this progress.
+    Stopped(IndexProgress),
+    Done(IndexProgress),
+}
+
+/// What a forced pass said when it ended, and whether that warns.
+struct PassReport {
+    said: String,
+    warns: bool,
+}
+
+impl PassReport {
+    fn notice(&self) -> Notice {
+        if self.warns { Notice::warn(self.said.clone()) } else { Notice::ok(self.said.clone()) }
+    }
+}
+
 /// The browser's background work, as a `Copy` handle the [`BrowserControl`] holds.
 #[derive(Clone, Copy)]
 pub struct BrowserWork {
@@ -244,6 +271,11 @@ pub struct BrowserWork {
     running: StoredValue<Option<FolderPass>, LocalStorage>,
     /// A forced re-index is reading replays, or fetching the game data it reads them through.
     reindexing: RwSignal<bool, LocalStorage>,
+    /// The Stop flag the forced re-index checks between downloads and between replays.
+    reindex_cancel: StoredValue<Option<Arc<AtomicBool>>, LocalStorage>,
+    /// The offer to fetch missing game data, told of the builds a forced re-index put to the
+    /// reader.
+    offer: StoredValue<Option<GameDataOffer>, LocalStorage>,
     contributing: RwSignal<bool, LocalStorage>,
     /// Where the browser's events go, once the panel is up.
     events: StoredValue<Option<BrowserEvents>, LocalStorage>,
@@ -265,6 +297,8 @@ impl BrowserWork {
             passes: RwSignal::new_local(HashMap::new()),
             running: StoredValue::new_local(None),
             reindexing: RwSignal::new_local(false),
+            reindex_cancel: StoredValue::new_local(None),
+            offer: StoredValue::new_local(None),
             contributing: RwSignal::new_local(false),
             events: StoredValue::new_local(None),
             personal_rating: StoredValue::new_local(None),
@@ -297,8 +331,19 @@ impl BrowserWork {
         self.shell_index.set_folder_pass(self.is_own_pass_running());
     }
 
-    fn set_reindexing(self, running: bool) {
-        self.reindexing.set(running);
+    /// Starts a forced re-index, which the Settings drawer shows and stops through `cancel`.
+    fn begin_reindex(self, cancel: Arc<AtomicBool>) {
+        self.reindexing.set(true);
+        self.reindex_cancel.set_value(Some(Arc::clone(&cancel)));
+        self.shell_index.begin_forced(cancel);
+        self.publish_busy();
+    }
+
+    /// Ends the forced re-index, with what it says under the Settings drawer's index controls.
+    fn end_reindex(self, said: String) {
+        self.reindexing.set(false);
+        self.reindex_cancel.set_value(None);
+        self.shell_index.finish_forced(said);
         self.publish_busy();
     }
 
@@ -433,6 +478,10 @@ pub fn offer(control: BrowserControl) {
         drop(during_shell_pass);
         if let Some(pass) = work.running.try_update_value(Option::take).flatten() {
             pass.stop();
+        }
+        // A forced re-index's worker reads on until it checks this.
+        if let Some(cancel) = work.reindex_cancel.try_update_value(Option::take).flatten() {
+            cancel.store(true, Ordering::Relaxed);
         }
         // The tab is gone, so nothing here holds the shell's build back.
         shell_index.clear_folder_pass();
@@ -703,6 +752,11 @@ fn prepare(control: BrowserControl, candidates: Vec<ReindexCandidate>, confirm: 
         } else {
             match cache_base(services) {
                 None => Fetchable::NoCacheDirectory,
+                // The plan would be stale by the time the job running against the cache ends.
+                Some(_) if control.shell().cache.busy_untracked() => {
+                    control.shell().toasts().warn(t!("ui.reindex.busy_cache").into_owned());
+                    return;
+                }
                 Some(base) => match ask_repository(control, base, &missing).await {
                     Some(fetchable) => Fetchable::Releases(fetchable),
                     None => return,
@@ -813,46 +867,121 @@ fn confirm_run(
 }
 
 /// Fetches what the summary needs, then reads its replays again. Holds the pass from the start,
-/// downloads included, so no other pass starts beside it.
+/// downloads included, so no other pass starts beside it and the Settings drawer's Stop ends it.
 fn run(control: BrowserControl, summary: ReindexSummary, purpose: IndexPurpose, game_data: GameDataCache) {
     let work = control.work;
-    let services = control.shell().services();
+    let shell = control.shell();
     if work.is_busy() {
-        control.shell().toasts().warn(t!("ui.reindex.busy_index").into_owned());
+        shell.toasts().warn(t!("ui.reindex.busy_index").into_owned());
         return;
     }
-    work.set_reindexing(true);
+    let cancel = Arc::new(AtomicBool::new(false));
+    work.begin_reindex(Arc::clone(&cancel));
+    // These builds have been put to the reader; the relist after a download would otherwise offer
+    // the ones still missing a second time.
+    if let Some(offer) = work.offer.get_value() {
+        offer.mark_offered(summary.downloads.iter().chain(&summary.unobtainable).map(|need| need.release.build.0));
+    }
 
     let requested: BTreeSet<Release> = summary.downloads.iter().map(|need| need.release).collect();
-    let base = if requested.is_empty() { None } else { cache_base(services) };
+    let base = if requested.is_empty() { None } else { cache_base(shell.services()) };
+    // Without a cache directory, or with the cache held by another job, the replays waiting on a
+    // download are left out.
+    let held = match base {
+        Some(base) => match shell.hold_cache_for_downloads() {
+            Some(held) => Some((base, held)),
+            None => {
+                shell.toasts().warn(t!("ui.reindex.busy_cache").into_owned());
+                None
+            }
+        },
+        None => None,
+    };
+    let fetching = held.map(|(base, held)| {
+        let releases = summary.downloads.iter().map(|need| need.release).collect();
+        download(shell, base, held, releases, Arc::clone(&cancel))
+    });
     work.spawn(async move {
-        // Without a cache directory the replays waiting on a download are left out.
-        let unavailable = match base {
-            Some(base) => download(control, base, &summary.downloads).await,
+        let unavailable = match fetching {
+            // A fetch that never answers was stopped with the app, and fetched nothing usable.
+            Some(fetching) => match fetching.await {
+                Ok(Fetched { unfetched, fetched }) => {
+                    // Which rows have a preview and which builds are missing are both decided as
+                    // a directory is walked.
+                    if fetched > 0 {
+                        relist_listed(control);
+                    }
+                    unfetched
+                }
+                Err(oneshot::Canceled) => requested,
+            },
             None => requested,
         };
+        if cancel.load(Ordering::Relaxed) {
+            let report = pass_report(&purpose, PassEnd::BeforeReading, 0);
+            shell.toasts().show(report.notice());
+            work.end_reindex(report.said);
+            return;
+        }
         let (replays, dropped) = summary.readable_after(&unavailable);
-        read_again(control, replays, summary.skipped() + dropped, purpose, game_data).await;
+        read_again(control, replays, summary.skipped() + dropped, purpose, game_data, cancel).await;
     });
 }
 
-/// Fetches each release `downloads` names, newest first, one at a time. Answers the releases that
-/// could not be fetched.
-async fn download(control: BrowserControl, base: PathBuf, downloads: &[BuildNeed]) -> BTreeSet<Release> {
-    let shell = control.shell();
+/// What a run of downloads fetched.
+struct Fetched {
+    /// The releases that were not fetched.
+    unfetched: BTreeSet<Release>,
+    /// How many builds were.
+    fetched: usize,
+}
+
+/// Fetches `releases`, newest first, one at a time, through the cache `held` for them, until
+/// `cancel` is set, and answers what was fetched.
+///
+/// The downloads run in a task of their own, which holds the cache until the worker fetching the
+/// last build has exited: a replays tab closed meanwhile only sets `cancel`, and nothing else may
+/// validate, prune or fetch into a build that is still being written.
+fn download(
+    shell: Shell,
+    base: PathBuf,
+    held: CacheDownloads,
+    releases: Vec<Release>,
+    cancel: Arc<AtomicBool>,
+) -> oneshot::Receiver<Fetched> {
+    let (answer, answered) = oneshot::channel();
+    spawn_detached(async move {
+        let fetched = download_held(shell, base, held, &releases, &cancel).await;
+        let _ = answer.send(fetched);
+    });
+
+    answered
+}
+
+async fn download_held(
+    shell: Shell,
+    base: PathBuf,
+    held: CacheDownloads,
+    releases: &[Release],
+    cancel: &AtomicBool,
+) -> Fetched {
     let services = shell.services();
-    let mut failed = BTreeSet::new();
+    let mut unfetched: BTreeSet<Release> = releases.iter().copied().collect();
     let Some(runtime) = services.runtime() else {
-        shell.toasts().failed(t!("ui.messages.game_data_download_failed").into_owned());
-        return downloads.iter().map(|need| need.release).collect();
+        let failed = releases.iter().map(|release| release.build.0).collect();
+        held.finish(0, failed);
+        return Fetched { unfetched, fetched: 0 };
     };
     let name = t!("ui.app.status_cache_downloading").into_owned();
     let job = services.jobs.start(Job { name: name.clone(), progress: None });
     let proxy = proxy_url(services);
 
     let mut fetched = 0;
-    for need in downloads {
-        let release = need.release;
+    let mut failed = Vec::new();
+    for &release in releases {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
         let build = BuildUpdateStatus { build: release.build.0, version: release.version_said() };
         let (base, proxy, runtime) = (base.clone(), proxy.clone(), Arc::clone(&runtime));
         let (reports, steps) = mpsc::unbounded::<game_data_cache::Progress>();
@@ -872,38 +1001,32 @@ async fn download(control: BrowserControl, base: PathBuf, downloads: &[BuildNeed
         });
         let outcome = follow(fetching, steps, |step| {
             job.report(Job { name: name.clone(), progress: Progress::new(step.done, step.total) });
+            held.report(step);
         })
         .await;
         match outcome {
-            CacheOutcome::Downloaded { fetched: count, failed: builds } => {
+            CacheOutcome::Downloaded { fetched: count, failed: builds } if builds.is_empty() => {
                 fetched += count;
-                if !builds.is_empty() {
-                    failed.insert(release);
-                }
+                unfetched.remove(&release);
+            }
+            CacheOutcome::Downloaded { fetched: count, .. } => {
+                fetched += count;
+                failed.push(release.build.0);
             }
             CacheOutcome::Failed(reason) => {
                 tracing::warn!(build = release.build.0, "force re-index: the game data was not fetched: {reason}");
-                failed.insert(release);
+                failed.push(release.build.0);
             }
             CacheOutcome::Checked { .. } | CacheOutcome::Validated { .. } | CacheOutcome::Planned { .. } => {
-                failed.insert(release);
+                failed.push(release.build.0);
             }
         }
     }
     drop(job);
 
-    if failed.is_empty() {
-        shell.toasts().ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned());
-    } else {
-        shell.toasts().failed(t!("ui.messages.game_data_download_failed").into_owned());
-    }
-    // Which rows have a preview and which builds are missing are both decided as a directory is
-    // walked.
-    if fetched > 0 {
-        relist_listed(control);
-    }
+    held.finish(fetched, failed);
 
-    failed
+    Fetched { unfetched, fetched }
 }
 
 /// Reads every listed directory again.
@@ -935,40 +1058,50 @@ impl BrowserControl {
     pub fn sharing_reads(self) -> SharingReads {
         self.work.sharing_reads
     }
+
+    /// Takes the replays tab's offer to fetch missing game data, which a forced re-index tells of
+    /// the builds its summary put to the reader.
+    pub fn adopt_offer(self, offer: GameDataOffer) {
+        self.work.offer.set_value(Some(offer));
+    }
 }
 
-/// Reads `replays` again through the status bar's progress line. `skipped` is what the run left
-/// out before this, for what is said at the end.
+/// Reads `replays` again through the status bar's and the Settings drawer's progress lines, until
+/// `cancel` is set. `skipped` is what the run left out before this, for what is said at the end.
 async fn read_again(
     control: BrowserControl,
     replays: Vec<ScopedReplay>,
     skipped: usize,
     purpose: IndexPurpose,
     game_data: GameDataCache,
+    cancel: Arc<AtomicBool>,
 ) {
     let work = control.work;
     let shell = control.shell();
     let services = shell.services();
     let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else {
-        work.set_reindexing(false);
-        shell.toasts().failed(t!("ui.reindex.no_index").into_owned());
+        let said = t!("ui.reindex.no_index").into_owned();
+        shell.toasts().failed(said.clone());
+        work.end_reindex(said);
         return;
     };
     // Checked as the run was prepared; the setting can be cleared while a download runs.
     let Some(live_root) = install_replays_root(services) else {
-        work.set_reindexing(false);
-        shell.toasts().failed(t!("ui.reindex.no_game_data").into_owned());
+        let said = t!("ui.reindex.no_game_data").into_owned();
+        shell.toasts().failed(said.clone());
+        work.end_reindex(said);
         return;
     };
 
     let name = t!("ui.app.status_indexing").into_owned();
     let job = services.jobs.start(Job { name: name.clone(), progress: Progress::new(0, replays.len() as u64) });
+    work.shell_index
+        .report_forced(ForcedPass::Reading(IndexProgress { total: replays.len() as u64, ..IndexProgress::default() }));
     let write_mode = purpose.write_mode();
     let (reports, steps) = mpsc::unbounded::<IndexProgress>();
     let proxy = proxy_url(services);
+    let stop = Arc::clone(&cancel);
     let reading = long_job(move || {
-        // Nothing here stops a forced pass part-way; this is the flag the pass checks.
-        let cancel = AtomicBool::new(false);
         let rating = owner_rating(&runtime, &proxy);
         let report = |step| {
             let _ = reports.unbounded_send(step);
@@ -981,27 +1114,33 @@ async fn read_again(
             write_mode,
             &game_data,
             rating.as_ref(),
-            &cancel,
+            &stop,
             report,
         );
         IndexWrite { outcome, rated: rating.is_some() }
     });
     let IndexWrite { outcome: ran, rated } = follow(reading, steps, |step| {
         job.report(Job { name: name.clone(), progress: Progress::new(step.done, step.total) });
+        work.shell_index.report_forced(ForcedPass::Reading(step));
     })
     .await;
     drop(job);
-    work.set_reindexing(false);
 
-    match ran {
+    let said = match ran {
         Ok(progress) => {
             work.shell_index.note_written(progress.indexed);
-            shell.toasts().show(pass_notice(&purpose, progress, skipped));
+            let end = if cancel.load(Ordering::Relaxed) { PassEnd::Stopped(progress) } else { PassEnd::Done(progress) };
+            let report = pass_report(&purpose, end, skipped);
+            shell.toasts().show(report.notice());
+            report.said
         }
         Err(err) => {
-            shell.say_failure(err.to_string());
+            let said = err.to_string();
+            shell.say_failure(said.clone());
+            said
         }
-    }
+    };
+    work.end_reindex(said);
     // The rows read what the index held before the pass.
     for listing in control.all_listings() {
         listing.load_summaries();
@@ -1010,18 +1149,38 @@ async fn read_again(
     run_next_pass(control);
 }
 
-/// What a finished pass says. A pass that did not reach every replay counts the rest as skipped,
-/// so the three figures add up to what was asked for.
-fn pass_notice(purpose: &IndexPurpose, progress: IndexProgress, skipped: usize) -> Notice {
+/// What a pass for `purpose` says when it ends as `end`. A pass that did not reach every replay
+/// counts the rest as skipped, so the three figures add up to what was asked for. `skipped` is
+/// what the run left out before reading.
+fn pass_report(purpose: &IndexPurpose, end: PassEnd, skipped: usize) -> PassReport {
+    let (progress, stopped) = match end {
+        PassEnd::BeforeReading => {
+            let said = match purpose {
+                IndexPurpose::Refresh => t!("ui.reindex.stopped_before_reading"),
+                IndexPurpose::Fill(_) => t!("ui.index_folder.stopped_before_reading"),
+            };
+            return PassReport { said: said.into_owned(), warns: true };
+        }
+        PassEnd::Stopped(progress) => (progress, true),
+        PassEnd::Done(progress) => (progress, false),
+    };
     let skipped = skipped as u64 + progress.total.saturating_sub(progress.done);
     let (indexed, failed) = (progress.indexed, progress.failed);
-    let said = match purpose {
-        IndexPurpose::Refresh => t!("ui.reindex.done", indexed = indexed, failed = failed, skipped = skipped),
-        IndexPurpose::Fill(_) => t!("ui.index_folder.done", indexed = indexed, failed = failed, skipped = skipped),
+    let said = match (purpose, stopped) {
+        (IndexPurpose::Refresh, false) => t!("ui.reindex.done", indexed = indexed, failed = failed, skipped = skipped),
+        (IndexPurpose::Refresh, true) => {
+            t!("ui.reindex.stopped", indexed = indexed, failed = failed, skipped = skipped)
+        }
+        (IndexPurpose::Fill(_), false) => {
+            t!("ui.index_folder.done", indexed = indexed, failed = failed, skipped = skipped)
+        }
+        (IndexPurpose::Fill(_), true) => {
+            t!("ui.index_folder.stopped", indexed = indexed, failed = failed, skipped = skipped)
+        }
     }
     .into_owned();
 
-    if failed > 0 || skipped > 0 { Notice::warn(said) } else { Notice::ok(said) }
+    PassReport { said, warns: stopped || failed > 0 || skipped > 0 }
 }
 
 /// Awaits `work`, handing each step it reports to `on_step` as it arrives. The steps end when

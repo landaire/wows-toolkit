@@ -13,7 +13,7 @@ mod dialogs;
 mod drop;
 mod file_dialog;
 mod first_run;
-mod game_data_cache;
+pub mod game_data_cache;
 pub mod mcp;
 mod menu;
 mod notices;

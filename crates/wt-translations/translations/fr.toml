@@ -2016,9 +2016,12 @@ nothing_listed = "La liste ne contient aucun replay à réindexer."
 nothing_readable = "Aucun de ces replays ne peut être réindexé : aucune donnée de jeu n'est disponible (%{count} ignorés)."
 no_game_data = "Les replays ne peuvent pas être lus tant que le dossier du jeu n'est pas défini."
 busy_index = "Une indexation est déjà en cours."
+busy_cache = "Une tâche de données de jeu est déjà en cours. Réessayez lorsqu'elle sera terminée."
 planning = "Vérification des données de jeu disponibles..."
 no_index = "L'index des replays n'est pas ouvert, rien n'a été réindexé."
 done = "%{indexed} replay(s) réindexé(s) ; %{skipped} ignoré(s), %{failed} illisible(s)"
+stopped = "Réindexation arrêtée : %{indexed} réindexé(s), %{skipped} ignoré(s), %{failed} illisible(s)"
+stopped_before_reading = "Réindexation arrêtée avant la lecture du moindre replay."
 
 [ui.index_folder]
 tooltip = "Indexer tous les replays de cette liste qui ne figurent pas encore dans l'index des replays"
@@ -2031,6 +2034,8 @@ nothing_listed = "Cette liste ne contient aucun replay à indexer."
 nothing_missing = "Tous les replays de cette liste sont déjà indexés."
 unreadable_index = "Impossible de lire l'index des replays."
 done = "%{indexed} replay(s) indexé(s) ; %{skipped} ignoré(s), %{failed} illisible(s)"
+stopped = "Indexation arrêtée : %{indexed} indexé(s), %{skipped} ignoré(s), %{failed} illisible(s)"
+stopped_before_reading = "L'indexation a été arrêtée avant la lecture du moindre replay."
 
 [ui.replay_folders]
 install = "Jeu"

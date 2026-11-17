@@ -1101,16 +1101,16 @@ fn ZoomRow(shell: Shell) -> impl IntoView {
     }
 }
 
-/// Building the replay index, and how far a build has got. Refused without a game directory, since
-/// the replays are under it.
+/// Building the replay index, and how far a build or the replays tab's forced re-index has got.
+/// Refused without a game directory, since the replays are under it.
 #[component]
 fn ReplayIndexControl(shell: Shell) -> impl IntoView {
     let settings = shell.services().settings;
     let index = shell.replay_index;
     let has_dir = move || settings.read(|settings| !settings.wows_dir.is_empty()) == Some(true);
-    let refused = Signal::derive_local(move || !has_dir() || index.is_running());
+    let refused = Signal::derive_local(move || !has_dir() || index.is_indexing());
     let progress = move || {
-        index.progress().map(|step| {
+        index.shown_progress().map(|step| {
             if step.skipped > 0 {
                 t!(
                     "ui.settings.index.progress_skipped",
@@ -1155,7 +1155,7 @@ fn ReplayIndexControl(shell: Shell) -> impl IntoView {
                     }
                     TooltipContent {{t!("ui.settings.index.rebuild_hint").into_owned()}}
                 }
-                if move || index.is_running() {
+                if move || index.is_indexing() {
                     Spinner(label = t!("ui.app.status_indexing").into_owned())
                     Button(
                         variant = ButtonVariant::Outline,

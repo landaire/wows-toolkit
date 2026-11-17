@@ -1970,9 +1970,12 @@ nothing_listed = "A lista não contém replays para reindexar."
 nothing_readable = "Nenhum destes replays pode ser reindexado: não há dados do jogo disponíveis (%{count} ignorados)."
 no_game_data = "Os replays só podem ser lidos depois de definir a pasta do jogo."
 busy_index = "Já está a decorrer uma indexação."
+busy_cache = "Já está a decorrer uma tarefa de dados do jogo. Tente novamente quando terminar."
 planning = "A verificar que dados do jogo estão disponíveis..."
 no_index = "O índice de replays não está aberto, pelo que nada foi reindexado."
 done = "%{indexed} replay(s) reindexados; %{skipped} ignorados, %{failed} não puderam ser lidos"
+stopped = "Reindexação parada: %{indexed} reindexados, %{skipped} ignorados, %{failed} não puderam ser lidos"
+stopped_before_reading = "Reindexação parada antes de qualquer replay ser lido."
 
 [ui.index_folder]
 tooltip = "Indexar todos os replays desta lista que o índice de replays ainda não contém"
@@ -1985,6 +1988,8 @@ nothing_listed = "Esta lista não contém replays para indexar."
 nothing_missing = "Todos os replays desta lista já estão indexados."
 unreadable_index = "Não foi possível ler o índice de replays."
 done = "%{indexed} replay(s) indexado(s); %{skipped} ignorado(s), %{failed} não puderam ser lidos"
+stopped = "Indexação parada: %{indexed} indexados, %{skipped} ignorados, %{failed} não puderam ser lidos"
+stopped_before_reading = "A indexação parou antes de qualquer replay ser lido."
 
 [ui.replay_folders]
 install = "Jogo"

@@ -99,7 +99,56 @@ impl Default for GameDataCacheJobs {
     }
 }
 
+/// The cache held for downloads its caller drives one build at a time, as the replays tab's forced
+/// re-index fetches what its replays need. While held, the cache controls are refused as for any
+/// other job.
+pub struct CacheDownloads {
+    shell: Shell,
+    finished: bool,
+}
+
+impl CacheDownloads {
+    /// How far the build being fetched has got.
+    pub fn report(&self, step: CacheProgress) {
+        let _ = self.shell.cache.state.try_update(|state| state.progress = Some(step));
+    }
+
+    /// Releases the cache, saying what the downloads fetched as a download from the drawer does.
+    /// Downloads that fetched and failed nothing, as when stopped before the first, say nothing.
+    pub fn finish(mut self, fetched: usize, failed: Vec<u32>) {
+        self.finished = true;
+        let said = fetched > 0 || !failed.is_empty();
+        let outcome = CacheOutcome::Downloaded { fetched, failed };
+        if said {
+            self.shell.cache_job_finished(outcome);
+        } else {
+            self.shell.cache.state.update(|state| state.finish(&outcome));
+        }
+    }
+}
+
+impl Drop for CacheDownloads {
+    /// Downloads abandoned before they finish, as when the app exits, release the cache. The
+    /// replays tab hands its downloads to a task that outlives it, so its closing does not.
+    fn drop(&mut self) {
+        if !self.finished {
+            let outcome = CacheOutcome::Downloaded { fetched: 0, failed: Vec::new() };
+            let _ = self.shell.cache.state.try_update(|state| state.finish(&outcome));
+        }
+    }
+}
+
 impl Shell {
+    /// Holds the cache for downloads the caller drives. `None` while another job holds it.
+    pub fn hold_cache_for_downloads(self) -> Option<CacheDownloads> {
+        if self.cache.busy_untracked() {
+            return None;
+        }
+        self.cache.state.update(|state| state.start(CacheJob::Downloading));
+
+        Some(CacheDownloads { shell: self, finished: false })
+    }
+
     /// Asks the repository which cached builds have newer data.
     pub fn check_cache_for_updates(self, base: PathBuf) {
         let known_tip = self.services().settings.read_untracked(|settings| settings.game_data_repo_commit.clone());

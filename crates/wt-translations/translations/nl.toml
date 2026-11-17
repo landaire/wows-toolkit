@@ -2016,9 +2016,12 @@ nothing_listed = "De lijst bevat geen replays om opnieuw te indexeren."
 nothing_readable = "Geen van deze replays kan opnieuw worden geïndexeerd: er zijn geen spelgegevens beschikbaar (%{count} overgeslagen)."
 no_game_data = "Replays kunnen pas worden gelezen als de spelmap is ingesteld."
 busy_index = "Er loopt al een indexering."
+busy_cache = "Er loopt al een taak voor spelgegevens. Probeer het opnieuw wanneer deze klaar is."
 planning = "Controleren welke spelgegevens beschikbaar zijn..."
 no_index = "De replay-index is niet geopend, dus er is niets opnieuw geïndexeerd."
 done = "%{indexed} replay(s) opnieuw geïndexeerd; %{skipped} overgeslagen, %{failed} konden niet worden gelezen"
+stopped = "Opnieuw indexeren gestopt: %{indexed} opnieuw geïndexeerd, %{skipped} overgeslagen, %{failed} konden niet worden gelezen"
+stopped_before_reading = "Opnieuw indexeren gestopt voordat er een replay was gelezen."
 
 [ui.index_folder]
 tooltip = "Alle replays in deze lijst indexeren die nog niet in de replay-index staan"
@@ -2031,6 +2034,8 @@ nothing_listed = "Deze lijst bevat geen replays om te indexeren."
 nothing_missing = "Alle replays in deze lijst zijn al geïndexeerd."
 unreadable_index = "De replay-index kon niet worden gelezen."
 done = "%{indexed} replay(s) geïndexeerd; %{skipped} overgeslagen, %{failed} konden niet worden gelezen"
+stopped = "Indexeren gestopt: %{indexed} geïndexeerd, %{skipped} overgeslagen, %{failed} konden niet worden gelezen"
+stopped_before_reading = "Het indexeren is gestopt voordat er een replay werd gelezen."
 
 [ui.replay_folders]
 install = "Spel"

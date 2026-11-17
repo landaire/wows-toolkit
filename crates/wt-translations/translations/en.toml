@@ -2311,9 +2311,12 @@ nothing_listed = "The listing holds no replays to re-index."
 nothing_readable = "None of these replays can be re-indexed: no game data is available for them (%{count} skipped)."
 no_game_data = "Replays cannot be read until the game directory is set."
 busy_index = "An index pass is already running."
+busy_cache = "A game data job is already running. Try again when it finishes."
 planning = "Checking which game data is available..."
 no_index = "The replay index is not open, so nothing was re-indexed."
 done = "Re-indexed %{indexed} replay(s); %{skipped} skipped, %{failed} could not be read"
+stopped = "Re-indexing stopped: %{indexed} re-indexed, %{skipped} skipped, %{failed} could not be read"
+stopped_before_reading = "Re-indexing stopped before any replay was read."
 
 [ui.index_folder]
 tooltip = "Index every replay in this list that the replay index does not hold yet"
@@ -2326,6 +2329,8 @@ nothing_listed = "This list holds no replays to index."
 nothing_missing = "Every replay in this list is already indexed."
 unreadable_index = "The replay index could not be read."
 done = "Indexed %{indexed} replay(s); %{skipped} skipped, %{failed} could not be read"
+stopped = "Indexing stopped: %{indexed} indexed, %{skipped} skipped, %{failed} could not be read"
+stopped_before_reading = "Indexing stopped before any replay was read."
 
 [ui.replay_folders]
 install = "Game"

@@ -2016,9 +2016,12 @@ nothing_listed = "목록에 재색인할 리플레이가 없습니다."
 nothing_readable = "이 리플레이들은 재색인할 수 없습니다: 사용 가능한 게임 데이터가 없습니다 (%{count}개 건너뜀)."
 no_game_data = "게임 디렉터리를 설정해야 리플레이를 읽을 수 있습니다."
 busy_index = "색인 작업이 이미 실행 중입니다."
+busy_cache = "게임 데이터 작업이 이미 실행 중입니다. 완료된 후 다시 시도하십시오."
 planning = "사용 가능한 게임 데이터를 확인하는 중..."
 no_index = "리플레이 색인이 열려 있지 않아 재색인하지 않았습니다."
 done = "리플레이 %{indexed}개 재색인; %{skipped}개 건너뜀, %{failed}개 읽을 수 없음"
+stopped = "재색인 중지: %{indexed}개 재색인, %{skipped}개 건너뜀, %{failed}개 읽을 수 없음"
+stopped_before_reading = "리플레이를 읽기 전에 재색인이 중지되었습니다."
 
 [ui.index_folder]
 tooltip = "이 목록에서 리플레이 색인에 아직 없는 모든 리플레이를 색인합니다"
@@ -2031,6 +2034,8 @@ nothing_listed = "이 목록에는 색인할 리플레이가 없습니다."
 nothing_missing = "이 목록의 모든 리플레이가 이미 색인되어 있습니다."
 unreadable_index = "리플레이 색인을 읽을 수 없습니다."
 done = "리플레이 %{indexed}개 색인됨; %{skipped}개 건너뜀, %{failed}개 읽을 수 없음"
+stopped = "색인 중지됨: %{indexed}개 색인됨, %{skipped}개 건너뜀, %{failed}개 읽을 수 없음"
+stopped_before_reading = "리플레이를 읽기 전에 색인이 중지되었습니다."
 
 [ui.replay_folders]
 install = "게임"

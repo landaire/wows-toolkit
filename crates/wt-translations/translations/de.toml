@@ -2016,9 +2016,12 @@ nothing_listed = "Die Liste enthält keine Replays zum Neuindexieren."
 nothing_readable = "Keines dieser Replays kann neu indexiert werden: Für sie sind keine Spieldaten verfügbar (%{count} übersprungen)."
 no_game_data = "Replays können erst gelesen werden, wenn das Spielverzeichnis festgelegt ist."
 busy_index = "Ein Indexdurchlauf läuft bereits."
+busy_cache = "Ein Spieldaten-Auftrag läuft bereits. Versuchen Sie es erneut, wenn er beendet ist."
 planning = "Prüfe, welche Spieldaten verfügbar sind..."
 no_index = "Der Replay-Index ist nicht geöffnet, daher wurde nichts neu indexiert."
 done = "%{indexed} Replay(s) neu indexiert; %{skipped} übersprungen, %{failed} konnten nicht gelesen werden"
+stopped = "Neuindexierung angehalten: %{indexed} neu indexiert, %{skipped} übersprungen, %{failed} konnten nicht gelesen werden"
+stopped_before_reading = "Neuindexierung angehalten, bevor ein Replay gelesen wurde."
 
 [ui.index_folder]
 tooltip = "Alle Replays in dieser Liste indexieren, die noch nicht im Replay-Index enthalten sind"
@@ -2031,6 +2034,8 @@ nothing_listed = "Diese Liste enthält keine Replays zum Indexieren."
 nothing_missing = "Alle Replays in dieser Liste sind bereits indexiert."
 unreadable_index = "Der Replay-Index konnte nicht gelesen werden."
 done = "%{indexed} Replay(s) indexiert; %{skipped} übersprungen, %{failed} konnten nicht gelesen werden"
+stopped = "Indexierung angehalten: %{indexed} indexiert, %{skipped} übersprungen, %{failed} konnten nicht gelesen werden"
+stopped_before_reading = "Die Indexierung wurde angehalten, bevor ein Replay gelesen wurde."
 
 [ui.replay_folders]
 install = "Spiel"
