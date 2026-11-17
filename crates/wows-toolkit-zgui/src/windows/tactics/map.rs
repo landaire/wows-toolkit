@@ -89,6 +89,28 @@ const CSS: &str = css!(
         width: 1px;
         background-color: rgb(255, 255, 100);
         pointer-events: none;
+    }
+    .wt-tactics-map__cursor {
+        position: absolute;
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
+        white-space: nowrap;
+        pointer-events: none;
+    }
+    .wt-tactics-map__cursor-dot {
+        flex: none;
+        box-sizing: border-box;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        border: 1px solid rgb(0, 0, 0);
+    }
+    .wt-tactics-map__cursor-name {
+        padding: 0 2px;
+        border-radius: 2px;
+        font-size: 11px;
+        background-color: rgba(0, 0, 0, 0.5);
     }"
 );
 
@@ -227,6 +249,7 @@ fn MapSurface(model: BoardModel) -> impl IntoView {
                     FrameView(sink = sink)
                     box(class = "wt-tactics-map__overlay") {
                         {move || rotation_handle(model)}
+                        {move || peer_cursors(model)}
                     }
                 }
             }
@@ -252,6 +275,32 @@ fn rotation_handle(model: BoardModel) -> Option<AnyView> {
         box(class = "wt-tactics-map__stem", style:left = stem_left, style:top = stem_top, style:height = stem_height)
         box(class = "wt-tactics-map__handle", attr:data-testid = "tactics-rotation-handle", style:left = left, style:top = top)
     }))
+}
+
+/// Where the peers' pointers are on the map, each in that peer's color with their name.
+fn peer_cursors(model: BoardModel) -> Vec<AnyView> {
+    model
+        .with(|board| board.peer_cursors())
+        .into_iter()
+        .map(|cursor| {
+            let [red, green, blue] = cursor.color;
+            let color = format!("rgb({red}, {green}, {blue})");
+            // Half the dot's width, so the dot is centered on the pointer.
+            let left = format!("{}px", cursor.at.x - 4.0);
+            let top = format!("{}px", cursor.at.y - 4.0);
+            AnyView::new(view! {
+                row(
+                    class = "wt-tactics-map__cursor",
+                    attr:data-testid = format!("tactics-peer-cursor-{}", cursor.user_id.raw()),
+                    style:left = left,
+                    style:top = top
+                ) {
+                    box(class = "wt-tactics-map__cursor-dot", style:background-color = color.clone())
+                    text(class = "wt-tactics-map__cursor-name", style:color = color) {{cursor.name}}
+                }
+            })
+        })
+        .collect()
 }
 
 /// The map's menu: the view, the tools, the selected capture point and the history.

@@ -660,10 +660,20 @@ impl CollabLink {
     ///
     /// Our own is left out: the reader can already see their own pointer.
     pub fn peer_cursors(&self) -> Vec<UserCursor> {
-        let Some(state) = &self.state else { return Vec::new() };
+        let mut cursors = Vec::new();
+        self.for_each_peer_cursor(|cursor| cursors.push(cursor.clone()));
+
+        cursors
+    }
+
+    /// [`Self::peer_cursors`] without copying them, for a reader that only compares.
+    pub fn for_each_peer_cursor(&self, mut visit: impl FnMut(&UserCursor)) {
+        let Some(state) = &self.state else { return };
         let state = state.lock();
         let mine = state.my_user_id;
-        state.cursors.iter().filter(|cursor| cursor.user_id != mine && cursor.pos.is_some()).cloned().collect()
+        for cursor in state.cursors.iter().filter(|cursor| cursor.user_id != mine && cursor.pos.is_some()) {
+            visit(cursor);
+        }
     }
 
     /// The pings peers have dropped on the map recently.

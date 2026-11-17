@@ -44,6 +44,7 @@ use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::recognized::Recognized;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
+use wt_collab_client::UserCursor;
 use wt_collab_client::peer::LocalAnnotationEvent;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::types::Annotation;
@@ -277,6 +278,54 @@ fn escape_empties_the_ship_search() {
     board.window.press_key(NamedKey::Escape, Modifiers::NONE);
     board.settle();
     assert_eq!(typed(&mut board.window), "", "Escape empties the search");
+}
+
+/// The board's map at the minimap's own size, so an element point is the same map point.
+fn show_at_minimap_size(board: &mut BoardWindow) {
+    board.model.update(|board| {
+        board.set_element(ElementSize { width: 768.0, height: 768.0 });
+        board.drawn(Some((768.0, 768.0)));
+    });
+    board.settle();
+}
+
+/// A peer's pointer is drawn over the map where it points, and follows it as the session is
+/// followed.
+#[test]
+fn a_peers_pointer_is_drawn_where_it_points() {
+    let mut board = BoardWindow::open();
+    board.set_map();
+    show_at_minimap_size(&mut board);
+    let state = Arc::default();
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    board.model.update(|board| board.set_collab(link));
+    let cursor = |at: [f32; 2]| UserCursor {
+        user_id: 9,
+        name: "Peer".to_owned(),
+        color: [0, 200, 255],
+        pos: Some(at),
+        last_update: std::time::Instant::now(),
+    };
+    let offset = |board: &BoardWindow| {
+        let map = board.window.by_test_id("tactics-map").and_then(|map| board.window.bounds(map)).expect("a map");
+        let mark = board
+            .window
+            .by_test_id("tactics-peer-cursor-9")
+            .and_then(|mark| board.window.bounds(mark))
+            .expect("a mark");
+        (mark.origin.x.0 - map.origin.x.0, mark.origin.y.0 - map.origin.y.0)
+    };
+    let near = |(x, y): (f32, f32), to: (f32, f32)| (x - to.0).abs() < 1.0 && (y - to.1).abs() < 1.0;
+
+    state.lock().cursors.push(cursor([300.0, 400.0]));
+    board.settle();
+    let at = offset(&board);
+    assert!(near(at, (296.0, 396.0)), "the dot is centered on the pointer, at {at:?}");
+
+    state.lock().cursors[0] = cursor([500.0, 100.0]);
+    board.settle();
+    let at = offset(&board);
+    assert!(near(at, (496.0, 96.0)), "and follows it, to {at:?}");
 }
 
 /// The board's window from a real install, set on a map with a capture point added and a line

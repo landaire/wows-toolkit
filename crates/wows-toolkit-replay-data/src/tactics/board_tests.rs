@@ -6,6 +6,7 @@ use std::sync::mpsc::Receiver;
 use parking_lot::Mutex;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_toolkit_services::collab::CollabLink;
+use wows_toolkit_services::collab::UserId;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
@@ -13,6 +14,7 @@ use wt_collab_client::PeerRole;
 use wt_collab_client::SessionState;
 use wt_collab_client::TacticsBoardSessionState;
 use wt_collab_client::TacticsMapInfo;
+use wt_collab_client::UserCursor;
 use wt_collab_client::drawing::Tool;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
@@ -204,4 +206,67 @@ fn escape_puts_the_tool_down_then_the_selection() {
     board.key(BoardKey::Escape, Modifiers::default());
     assert!(board.rotation_handle().is_none(), "the pick is put down");
     assert!(!board.adding(), "and so is placing a capture point");
+}
+
+/// The positions the session has been told of the reader's pointer since the last look.
+fn told_cursor(sent: &Receiver<LocalEvent>) -> Vec<Option<[f32; 2]>> {
+    sent.try_iter()
+        .filter_map(|event| match event {
+            LocalEvent::CursorPosition(at) => Some(at),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The reader's pointer is told to the session once a tick, at the last place it moved to, and
+/// at once when it leaves the map.
+#[test]
+fn the_pointer_is_told_to_the_session_once_a_tick() {
+    let (_state, link, sent) = session(PeerRole::Peer);
+    let mut board = board_at_minimap_size();
+    board.set_collab(link);
+
+    for x in [100.0, 200.0, 300.0] {
+        board.pointer_move(ElementPos { x, y: 400.0 }, false);
+    }
+    assert_eq!(told_cursor(&sent), Vec::<Option<[f32; 2]>>::new(), "nothing is said between ticks");
+
+    board.tick();
+    board.tick();
+    assert_eq!(told_cursor(&sent), [Some([300.0, 400.0])], "one tick says the last place, once");
+
+    board.pointer_left();
+    assert_eq!(told_cursor(&sent), [None], "leaving is said at once");
+}
+
+/// A peer's pointer is placed on the board where it is on the map once the session is followed,
+/// and goes when the session ends.
+#[test]
+fn a_peers_pointer_is_placed_on_the_map() {
+    let (state, link, _sent) = session(PeerRole::Peer);
+    let mut board = board_at_minimap_size();
+    board.set_collab(link);
+    state.lock().cursors.push(UserCursor {
+        user_id: PEER,
+        name: "Peer".to_owned(),
+        color: [0, 200, 255],
+        pos: Some([300.0, 400.0]),
+        last_update: std::time::Instant::now(),
+    });
+    assert!(board.peer_cursors().is_empty(), "nothing is shown before the session is followed");
+
+    board.tick();
+    let [cursor] = &board.peer_cursors()[..] else { panic!("one pointer is shown") };
+    assert_eq!(cursor.user_id, UserId::new(PEER));
+    assert_eq!(cursor.name, "Peer");
+    assert_eq!(cursor.at, ElementPos { x: 300.0, y: 400.0 });
+    let revision = board.revision();
+    board.tick();
+    assert_eq!(board.revision(), revision, "a pointer that has not moved changes nothing");
+    state.lock().cursors[0].pos = Some([310.0, 400.0]);
+    board.tick();
+    assert_ne!(board.revision(), revision, "one that has moved does");
+
+    board.set_collab(CollabLink::default());
+    assert!(board.peer_cursors().is_empty(), "a session that ended shows no one");
 }

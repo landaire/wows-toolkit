@@ -31,6 +31,7 @@ use wowsunpack::game_params::types::GameParamProvider as _;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::GameParamId;
 use wowsunpack::game_types::WorldPos2D;
+use wt_collab_client::UserCursor;
 use wt_collab_client::drawing::Drawing;
 use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Held;
@@ -43,6 +44,7 @@ use wt_collab_client::types::AnnotationRangeFilter;
 use wt_collab_client::types::AnnotationShipConfig;
 
 use crate::load::GameDataCache;
+use crate::replay_render::collab::CursorReport;
 use crate::tactics::BoardCapPoint;
 use crate::tactics::CapDrag;
 use crate::tactics::DEFAULT_INK;
@@ -181,6 +183,34 @@ pub struct Modifiers {
     pub shift: bool,
 }
 
+/// A peer's pointer over the board, where it falls in the element.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PeerCursor {
+    pub user_id: UserId,
+    pub name: String,
+    pub color: [u8; 3],
+    pub at: ElementPos,
+}
+
+/// A peer's pointer as the session last held it, in map units.
+#[derive(Clone, Debug, PartialEq)]
+struct SeenCursor {
+    user_id: UserId,
+    name: String,
+    color: [u8; 3],
+    pos: [f32; 2],
+}
+
+impl SeenCursor {
+    /// Whether `cursor` is this pointer where it was last seen.
+    fn is(&self, cursor: &UserCursor) -> bool {
+        self.user_id.raw() == cursor.user_id
+            && cursor.pos == Some(self.pos)
+            && self.color == cursor.color
+            && self.name == cursor.name
+    }
+}
+
 /// The board itself.
 pub struct Board {
     game_data: Option<GameDataCache>,
@@ -277,6 +307,10 @@ pub struct Board {
     notices: Vec<BoardNotice>,
     /// Counts changes, so a view can tell the board moved without comparing it.
     revision: u64,
+    /// Where this reader's pointer was last said to be on the map.
+    cursor: CursorReport,
+    /// The peers' pointers over the map, as last read from the session.
+    peer_cursors: Vec<SeenCursor>,
 }
 
 /// Whether this board may steer the session, and whether its annotations are locked.
@@ -336,6 +370,8 @@ impl Board {
             redraw: false,
             notices: Vec::new(),
             revision: 0,
+            cursor: CursorReport::new(),
+            peer_cursors: Vec::new(),
         }
     }
 
@@ -1035,6 +1071,8 @@ impl Board {
             }
             self.collab = CollabLink::default().on_board(self.board_id);
             self.collab.adopt(carried);
+            self.cursor = CursorReport::new();
+            self.peer_cursors.clear();
             self.redraw();
             return;
         }
@@ -1184,14 +1222,61 @@ impl Board {
         self.announced = false;
     }
 
-    /// Follows the session once: opens a peer's board where the reader has chosen none, and takes
-    /// what the session holds that this board has not drawn yet.
+    /// Follows the session once: opens a peer's board where the reader has chosen none, takes
+    /// what the session holds that this board has not drawn yet, and says where the reader's
+    /// pointer is.
     pub fn tick(&mut self) {
         if !self.in_session() {
             return;
         }
+        // Said here rather than as the pointer moves, so a session hears at most one position a
+        // tick however fast the pointer reports.
+        self.cursor.report(self.joining.as_ref().unwrap_or(&self.collab), self.pointer_at);
         self.adopt_a_peers_board();
         self.follow_session();
+        self.follow_peer_cursors();
+    }
+
+    /// Takes where the peers' pointers are now, which moves them on the board.
+    fn follow_peer_cursors(&mut self) {
+        let session = self.joining.as_ref().unwrap_or(&self.collab);
+        // Compared in place first: this runs every tick, and most ticks nobody has moved.
+        let mut count = 0;
+        let mut same = true;
+        session.for_each_peer_cursor(|cursor| {
+            same &= self.peer_cursors.get(count).is_some_and(|seen| seen.is(cursor));
+            count += 1;
+        });
+        if same && count == self.peer_cursors.len() {
+            return;
+        }
+
+        self.peer_cursors.clear();
+        session.for_each_peer_cursor(|cursor| {
+            let Some(pos) = cursor.pos else { return };
+            self.peer_cursors.push(SeenCursor {
+                user_id: UserId::new(cursor.user_id),
+                name: cursor.name.clone(),
+                color: cursor.color,
+                pos,
+            });
+        });
+        self.changed();
+    }
+
+    /// The peers' pointers that fall in the part of the map on screen.
+    pub fn peer_cursors(&self) -> Vec<PeerCursor> {
+        self.peer_cursors
+            .iter()
+            .filter_map(|cursor| {
+                Some(PeerCursor {
+                    user_id: cursor.user_id,
+                    name: cursor.name.clone(),
+                    color: cursor.color,
+                    at: self.element_point((cursor.pos[0], cursor.pos[1]))?,
+                })
+            })
+            .collect()
     }
 
     /// Opens this board on a peer's, where the reader has not chosen a map.
@@ -1789,6 +1874,7 @@ impl Board {
 
     /// The pointer left the map: the part-drawn shape stops following it.
     pub fn pointer_left(&mut self) {
+        self.cursor.report(self.joining.as_ref().unwrap_or(&self.collab), None);
         if self.pointer_at.take().is_some() && self.drawing.is_drawing() {
             self.redraw();
         }

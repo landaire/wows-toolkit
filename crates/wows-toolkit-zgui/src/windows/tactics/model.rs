@@ -29,8 +29,9 @@ use crate::long_job::long_job;
 use crate::services::Services;
 use crate::windows::tactics::TacticsHost;
 
-/// How often a board looks at what its session holds.
-pub const COLLAB_TICK: Duration = Duration::from_millis(200);
+/// How often a board looks at what its session holds, which is also what moves a peer's pointer
+/// across it.
+pub const COLLAB_TICK: Duration = Duration::from_millis(33);
 
 /// The board, the frame it is drawn into, and where its messages go. A `Copy` handle.
 #[derive(Clone, Copy)]

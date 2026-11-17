@@ -36,6 +36,7 @@ use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::spawn_local;
 use zgui::view;
+use zgui::view::IntervalHandle;
 use zgui::view::IntoView;
 use zgui::view::NodeRef;
 use zgui::view::ShowProps;
@@ -200,15 +201,21 @@ fn TacticsWindow(host: TacticsHost) -> impl IntoView {
     tests::mounted(model);
 
     follow_services(model, services, host);
-    let ticking = Timers::current().map(|timers| {
-        timers.set_interval(COLLAB_TICK, move || {
-            if model.with_untracked(|board| board.in_session()) {
-                model.update(|board| board.tick());
-            }
-        })
+    // A tick only while a session runs: outside one there is nothing to follow, and the tick is
+    // quick enough to move a peer's pointer smoothly.
+    let timers = Timers::current();
+    let in_session = Memo::new(move |_| model.with(|board| board.in_session()));
+    let ticking = StoredValue::new_local(None::<IntervalHandle>);
+    let following = RenderEffect::new(move |_| {
+        let ticker = timers
+            .as_ref()
+            .filter(|_| in_session.get())
+            .map(|timers| timers.set_interval(COLLAB_TICK, move || model.update(|board| board.tick())));
+        ticking.set_value(ticker);
     });
     on_cleanup_local(move || {
-        drop(ticking);
+        drop(following);
+        ticking.set_value(None);
         model.update(|board| board.close());
     });
 
