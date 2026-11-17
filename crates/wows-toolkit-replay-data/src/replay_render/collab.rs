@@ -15,6 +15,7 @@ use wows_toolkit_services::collab::SharedReplay;
 use wows_toolkit_services::collab::Silhouette;
 use wt_collab_client::peer::FrameBroadcast;
 use wt_collab_client::protocol::CursorAt;
+use wt_collab_client::types::PlacedShipRanges;
 
 use crate::load::GameDataCache;
 use crate::replay_render::motion::FrameMotion;
@@ -78,6 +79,53 @@ impl CursorReport {
         }
         self.reported = at;
         link.report_cursor(at);
+    }
+}
+
+/// What the ships placed on this end's playback draw their range circles from, and what the
+/// session was last told of them.
+///
+/// The session hears them only from the frame source, so they are told only while this end is
+/// it, and told again once it becomes it: what was sent before then was dropped.
+#[derive(Clone, Debug)]
+pub struct PlacedRangesReport {
+    /// The newest ranges read. `None` before the first draw.
+    held: Option<PlacedShipRanges>,
+    /// What the session was told while this end was the frame source.
+    told: Option<PlacedShipRanges>,
+}
+
+impl PlacedRangesReport {
+    pub fn new() -> Self {
+        Self { held: None, told: None }
+    }
+
+    /// Holds `placed` as the newest ranges and tells the session of them where needed.
+    pub fn hold(&mut self, link: &CollabLink, replay_id: ReplayId, placed: PlacedShipRanges) {
+        self.held = Some(placed);
+        self.report(link, replay_id);
+    }
+
+    /// Tells the session the ranges held, where this end is the frame source and has not told it
+    /// them since it became so.
+    pub fn report(&mut self, link: &CollabLink, replay_id: ReplayId) {
+        if !link.is_frame_source() {
+            self.told = None;
+            return;
+        }
+        let Some(held) = &self.held else { return };
+        if self.told.as_ref() == Some(held) {
+            return;
+        }
+
+        self.told = Some(held.clone());
+        link.send_placed_ship_ranges(replay_id, held.clone());
+    }
+}
+
+impl Default for PlacedRangesReport {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

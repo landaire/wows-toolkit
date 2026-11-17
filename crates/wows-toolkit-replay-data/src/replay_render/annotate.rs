@@ -27,9 +27,11 @@ use wt_collab_client::geometry::annotation_commands;
 use wt_collab_client::geometry::km_to_minimap_distance;
 use wt_collab_client::geometry::measurement_commands;
 use wt_collab_client::geometry::minimap_distance_to_km;
-use wt_collab_client::geometry::ship_range_commands;
+use wt_collab_client::geometry::placed_ship_range_commands;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationShipConfig;
+use wt_collab_client::types::HullRanges;
+use wt_collab_client::types::PlacedShipRanges;
 
 use crate::drawing_style::DEFAULT_INK;
 use crate::drawing_style::DEFAULT_NIB;
@@ -852,10 +854,11 @@ impl Annotator {
     }
 
     /// What is drawn over the battle: every shape in the session with a
-    /// measurement's distance marks, the range circles of every placed ship,
-    /// and the shape under the pointer drawn the way the finished one will be,
-    /// so what a reader sees while dragging is what they get.
-    pub fn overlay_commands(&self, link: &CollabLink, track: &Track, game_data: &GameDataCache) -> Vec<DrawCommand> {
+    /// measurement's distance marks, the range circles of every placed ship
+    /// from the ranges `placed` holds for it, and the shape under the pointer
+    /// drawn the way the finished one will be, so what a reader sees while
+    /// dragging is what they get.
+    pub fn overlay_commands(&self, link: &CollabLink, track: &Track, placed: &PlacedShipRanges) -> Vec<DrawCommand> {
         let space_size = Some(track.space_size);
         let drawn = |annotation: &Annotation| {
             let mut commands = annotation_commands(annotation);
@@ -865,7 +868,7 @@ impl Annotator {
 
         let annotations = link.annotations();
         let mut drawn_on: Vec<DrawCommand> = annotations.iter().flat_map(drawn).collect();
-        drawn_on.extend(placed_ship_ranges(&annotations, track, game_data));
+        drawn_on.extend(placed_ship_range_commands(&annotations, placed));
         if let Some(at) = self.pointer_at
             && let Some(part_drawn) = self.drawing.in_progress(at)
         {
@@ -896,30 +899,41 @@ impl Default for Annotator {
     }
 }
 
-/// The range circles every placed ship asks for.
+/// The ranges every placed ship's circles are drawn from, one entry per ship
+/// and hull.
 ///
-/// Resolved here rather than in the shared collab layer because a range is
-/// read out of the ship's own game data, which only this end has. Nothing is
-/// drawn until a ship has been chosen for the annotation, since there is no
-/// ship to read the ranges of.
-pub fn placed_ship_ranges(annotations: &[Annotation], track: &Track, game_data: &GameDataCache) -> Vec<DrawCommand> {
-    if annotations.is_empty() {
-        return Vec::new();
+/// Read here rather than in the shared collab layer because a range is read
+/// out of the ship's own game data, which only this end has; a peer watching
+/// is sent what is read here. A ship with none chosen for it has no ranges to
+/// read, and one this build does not know is left out.
+pub fn resolve_placed_ships(annotations: &[Annotation], track: &Track, game_data: &GameDataCache) -> PlacedShipRanges {
+    let mut placed = PlacedShipRanges { space_size: track.space_size, hulls: Vec::new() };
+    let mut configs = annotations
+        .iter()
+        .filter_map(|annotation| match annotation {
+            Annotation::Ship { config: Some(config), .. } => Some(config),
+            _ => None,
+        })
+        .peekable();
+    // Most battles have no ship placed on them, and then there is no game data to open.
+    if configs.peek().is_none() {
+        return placed;
     }
-    let Some(loaded) = game_data.newest_loaded() else { return Vec::new() };
+
+    let Some(loaded) = game_data.newest_loaded() else { return placed };
     let provider = loaded.provider();
 
-    let mut circles = Vec::new();
-    for annotation in annotations {
-        let Annotation::Ship { config: Some(config), .. } = annotation else { continue };
+    for config in configs {
+        if placed.ranges_for(config).is_some() {
+            continue;
+        }
         let Some(param) = provider.game_param_by_id(config.param_id) else { continue };
         let Some(vehicle) = param.vehicle() else { continue };
-        let hull = config.hull_name.as_deref();
-        let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, track.version);
-        circles.extend(ship_range_commands(annotation, &ranges, track.space_size));
+        let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), config.hull_name.as_deref(), track.version);
+        placed.hulls.push(HullRanges { param_id: config.param_id, hull_name: config.hull_name.clone(), ranges });
     }
 
-    circles
+    placed
 }
 
 /// The tool a key takes up with ctrl held, in the order the egui board numbers

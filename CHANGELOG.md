@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Choose a placed ship's hull, Concealment Expert and range mods, and its own range circles on the tactics board when it is picked alone
 - *(zgui)* Follow the collab host's layers, per-ship ranges and hidden trails in the renderer and the watched window, tell the session of layer and per-ship changes made here, and send web peers the recording player's silhouette and watchers the host's trails. A peer locked out of the settings keeps the host's layers, and a peer that joins late is sent what the host shows now
 - *(zgui)* Choose which layers a watched collab playback draws from its own display toggles
+- *(zgui)* Draw a placed ship's range circles in a watched collab playback and in the web client. The host sends the ranges it reads from the battle's game data, which a watcher does not have
 - *(zgui)* Draw trails in the replay renderer and exported videos from every recorded position, as the egui renderer does, rather than from the frames the bake kept
 - *(zgui)* Offer the stats panel in the replay renderer, drawn with the recording player's ship silhouette, and film it in exports. A merged replay opens on the team rosters, as in egui
 - *(zgui)* Open a Match Timeline window from the replay panel's Actions menu, with event filters, search, copy and save to file

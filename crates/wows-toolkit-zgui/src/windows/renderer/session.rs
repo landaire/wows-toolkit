@@ -32,6 +32,7 @@ use wows_toolkit_replay_data::replay_render::annotate::Click;
 use wows_toolkit_replay_data::replay_render::annotate::PointerDown;
 use wows_toolkit_replay_data::replay_render::annotate::PointerMove;
 use wows_toolkit_replay_data::replay_render::annotate::PointerUp;
+use wows_toolkit_replay_data::replay_render::annotate::resolve_placed_ships;
 use wows_toolkit_replay_data::replay_render::annotate::tool_for_key;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollow;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
@@ -39,6 +40,7 @@ use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_replay_data::replay_render::collab::COLLAB_TICK;
 use wows_toolkit_replay_data::replay_render::collab::CursorReport;
 use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
+use wows_toolkit_replay_data::replay_render::collab::PlacedRangesReport;
 use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
 use wows_toolkit_replay_data::replay_render::collab::moment_broadcast;
@@ -101,6 +103,7 @@ use wt_collab_client::drawing::Tool;
 use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::CursorAt;
 use wt_collab_client::protocol::CursorScope;
+use wt_collab_client::types::PlacedShipRanges;
 use zgui::prelude::WindowHandle;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -291,6 +294,9 @@ struct Run {
     shared: bool,
     /// Moved on when the link changes, so an announcement prepared for the old link is not made.
     share_generation: Generation,
+    /// What the ships placed on the map draw their range circles from, and what the session was
+    /// told of them.
+    placed: PlacedRangesReport,
     cursor: CursorReport,
     /// The versions of the session's display settings this viewport has taken up.
     display_seen: DisplayVersions,
@@ -368,6 +374,7 @@ impl RendererSession {
                 replay_id: ReplayId::fresh(),
                 shared: false,
                 share_generation: Generation::default(),
+                placed: PlacedRangesReport::new(),
                 cursor: CursorReport::new(),
                 display_seen: DisplayVersions::NONE,
                 armor: None,
@@ -1260,6 +1267,7 @@ impl RendererSession {
                 run.cursor = CursorReport::new();
                 // A new session counts its versions afresh.
                 run.display_seen = DisplayVersions::NONE;
+                run.placed = PlacedRangesReport::new();
                 std::mem::take(&mut run.shared).then_some(run.replay_id)
             })
             .flatten();
@@ -1302,6 +1310,7 @@ impl RendererSession {
                     });
                     if active {
                         self.follow_session_display();
+                        self.report_placed_ranges();
                     }
                     if active || pinged {
                         self.collab_frame.update(|frame| *frame = frame.wrapping_add(1));
@@ -1561,9 +1570,10 @@ impl RendererSession {
             return;
         };
         let link = self.collab.get_untracked();
+        let placed = resolve_placed_ships(&link.annotations(), &track, &game_data);
         let drawn_on = self.annotator.with_untracked(|annotator| {
             let mut drawn_on = annotator.picked_halos(&link);
-            drawn_on.extend(annotator.overlay_commands(&link, &track, &game_data));
+            drawn_on.extend(annotator.overlay_commands(&link, &track, &placed));
             drawn_on
         });
         let shown = self.layers.with_untracked(|layers| {
@@ -1572,7 +1582,7 @@ impl RendererSession {
                 raster_commands(&track, &motion, clock, &options, layers.show_dead_ships, choices, drawn_on)
             })
         });
-        self.broadcast(&track, &motion, clock);
+        self.broadcast(&track, &motion, clock, placed);
 
         let (view, scale) = self.map.with_untracked(|map| (map.shaped_view(), map.render_scale()));
         let drawing = Arc::clone(&renderer);
@@ -1639,15 +1649,28 @@ impl RendererSession {
     }
 
     /// Puts the moment at `clock` in front of the session, where this end is the one the rest
-    /// watches.
-    fn broadcast(self, track: &Track, motion: &FrameMotion, clock: GameClock) {
+    /// watches, with what the ships placed on the map draw their range circles from.
+    fn broadcast(self, track: &Track, motion: &FrameMotion, clock: GameClock, placed: PlacedShipRanges) {
         let Some((shared, replay_id)) = self.run.try_with_value(|run| (run.shared, run.replay_id)) else { return };
         if !shared {
             return;
         }
         let broadcast =
             self.layers.with_untracked(|layers| moment_broadcast(replay_id, track, motion, clock, &layers.options));
-        self.collab.with_untracked(|link| link.broadcast_frame(broadcast));
+        let link = self.collab.get_untracked();
+        link.broadcast_frame(broadcast);
+        self.run.update_value(|run| run.placed.hold(&link, replay_id, placed));
+    }
+
+    /// Tells the session the placed ships' ranges once this end has become the frame source, which
+    /// may be after the draw that read them.
+    fn report_placed_ranges(self) {
+        let link = self.collab.get_untracked();
+        self.run.try_update_value(|run| {
+            if run.shared {
+                run.placed.report(&link, run.replay_id);
+            }
+        });
     }
 
     /// The transport's keyboard, saying on `toasts` the speed a step reaches and where an event
@@ -1727,7 +1750,8 @@ impl RendererSession {
         };
         let drawn_on = match game_data {
             Some(game_data) => {
-                self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &game_data))
+                let placed = resolve_placed_ships(&link.annotations(), &track, &game_data);
+                self.annotator.with_untracked(|annotator| annotator.overlay_commands(&link, &track, &placed))
             }
             None => Vec::new(),
         };

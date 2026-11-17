@@ -60,6 +60,7 @@ use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::collab::SyncVersion;
 use wt_collab_client::geometry::annotation_commands;
 use wt_collab_client::geometry::measurement_commands;
+use wt_collab_client::geometry::placed_ship_range_commands;
 use wt_collab_client::protocol::CursorAt;
 use wt_collab_client::protocol::CursorScope;
 use zgui::component;
@@ -214,6 +215,8 @@ struct WatchRun {
     layer_edits: LayerEdits,
     /// The version of the session's shapes the last raster drew.
     shapes_seen: SyncVersion,
+    /// The version of the placed ships' ranges the last raster drew.
+    placed_seen: SyncVersion,
     /// Where this end's pointer was last said to be.
     cursor: CursorReport,
     sink: FrameSink,
@@ -276,6 +279,7 @@ impl WatchSession {
                 display_seen: DisplayVersions::NONE,
                 layer_edits: LayerEdits(0),
                 shapes_seen: SyncVersion::NONE,
+                placed_seen: SyncVersion::NONE,
                 cursor: CursorReport::new(),
                 sink: FrameSink::new(),
                 rasterising: false,
@@ -316,12 +320,15 @@ impl WatchSession {
         self.take_frames();
     }
 
-    /// Draws again when the session's shapes have changed.
+    /// Draws again when the session's shapes, or the ranges its placed ships are drawn from, have
+    /// changed.
     fn follow_shapes(self) {
         let changed = self.run.try_update_value(|run| {
-            let version = run.link.annotations_version();
-            let changed = version != run.shapes_seen;
-            run.shapes_seen = version;
+            let shapes = run.link.annotations_version();
+            let placed = run.link.placed_ship_ranges_version();
+            let changed = shapes != run.shapes_seen || placed != run.placed_seen;
+            run.shapes_seen = shapes;
+            run.placed_seen = placed;
 
             changed
         });
@@ -363,11 +370,15 @@ impl WatchSession {
                     shown_commands(latest.iter().cloned(), &layers.options, layers.show_dead_ships, &choices)
                 });
                 // Not filtered, and over the battle, as the renderer draws them, measurements with
-                // their distance marks. A placed ship's range circles are not: they are read from
-                // the battle's own build, which a watcher does not have.
-                for annotation in run.link.annotations() {
-                    shown.extend(annotation_commands(&annotation));
-                    shown.extend(measurement_commands(&annotation, run.space_size));
+                // their distance marks and placed ships with their range circles, read from the
+                // battle's build by the end playing it.
+                let annotations = run.link.annotations();
+                for annotation in &annotations {
+                    shown.extend(annotation_commands(annotation));
+                    shown.extend(measurement_commands(annotation, run.space_size));
+                }
+                if let Some(placed) = run.link.placed_ship_ranges(run.replay_id) {
+                    shown.extend(placed_ship_range_commands(&annotations, &placed));
                 }
                 Some(shown)
             })

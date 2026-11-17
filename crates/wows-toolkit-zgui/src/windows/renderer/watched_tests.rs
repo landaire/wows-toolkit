@@ -21,16 +21,21 @@ use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::replay_render::view::FrameSize;
 use wows_toolkit_replay_data::replay_render::view::MapView;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::collab::push_ping_aged;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Meters;
+use wowsunpack::game_params::types::ShipRanges;
 use wt_collab_client::AnnotationSyncState;
 use wt_collab_client::OpenReplay;
 use wt_collab_client::PlaybackFrame;
@@ -40,6 +45,10 @@ use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::protocol::DisplayOptionField;
 use wt_collab_client::types::Annotation;
+use wt_collab_client::types::AnnotationRangeFilter;
+use wt_collab_client::types::AnnotationShipConfig;
+use wt_collab_client::types::HullRanges;
+use wt_collab_client::types::PlacedShipRanges;
 use zgui::component;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
@@ -403,6 +412,87 @@ fn a_measurement_is_drawn_with_its_distance() {
     assert!(figures > 0, "the distance is figured beside the line");
 }
 
+/// A Moskva placed at `(x, y)` showing its detection and main battery circles.
+fn placed_moskva(x: f32, y: f32) -> Annotation {
+    Annotation::Ship {
+        pos: [x, y],
+        yaw: 0.8,
+        species: "Cruiser".to_owned(),
+        friendly: true,
+        config: Some(AnnotationShipConfig {
+            range_filter: AnnotationRangeFilter { detection: true, main_battery: true, ..Default::default() },
+            ..AnnotationShipConfig::new(GameParamId::from(4242u32), "Moskva".to_owned())
+        }),
+    }
+}
+
+/// The ranges the host read for the Moskva's default hull, on a map `space_size` wide.
+fn moskva_ranges(space_size: f32) -> PlacedShipRanges {
+    PlacedShipRanges {
+        space_size,
+        hulls: vec![HullRanges {
+            param_id: GameParamId::from(4242u32),
+            hull_name: None,
+            ranges: ShipRanges {
+                detection_km: Some(Km::new(14.8)),
+                main_battery_m: Some(Meters::new(17600.0)),
+                radar_m: Some(Meters::new(10000.0)),
+                ..ShipRanges::default()
+            },
+        }],
+    }
+}
+
+/// A placed ship's range circles are drawn over the watched battle once the host has said what
+/// its ranges are, and only those its build asks for.
+#[test]
+fn a_placed_ships_range_circles_are_drawn() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    {
+        let mut held = state.lock();
+        held.push_frame(REPLAY, frame(vec![torpedo()]));
+        held.current_annotation_sync =
+            Some(AnnotationSyncState { annotations: vec![placed_moskva(300.0, 300.0)], owners: vec![1], ids: vec![5] });
+        held.annotation_sync_version = 1;
+        held.repaint_viewport(REPLAY);
+    }
+    take_in(&mut window);
+    let circles = |watch: WatchSession| -> Vec<(ShipConfigCircleKind, Option<String>)> {
+        watch
+            .shown()
+            .expect("a frame has arrived")
+            .into_iter()
+            .filter_map(|command| match command {
+                DrawCommand::ShipConfigCircle { kind, label, .. } => Some((kind, label)),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(circles(watch).is_empty(), "no circles before the host has said what the ranges are");
+
+    let redraws = watch.redraws_asked();
+    {
+        let mut held = state.lock();
+        held.placed_ship_ranges.insert(REPLAY, moskva_ranges(1400.0));
+        held.placed_ship_ranges_version = 1;
+        // What the peer task does as the host's ranges land.
+        held.repaint_viewport(REPLAY);
+    }
+    take_in(&mut window);
+
+    assert!(watch.redraws_asked() > redraws, "the ranges arriving draw the battle again");
+    assert_eq!(
+        circles(watch),
+        [
+            (ShipConfigCircleKind::Detection, Some("14.8 km".to_owned())),
+            (ShipConfigCircleKind::MainBattery, Some("17.6 km".to_owned())),
+        ],
+        "the circles the ship asks for, at the host's ranges"
+    );
+}
+
 /// The watched window takes up what the reader saved as the renderer's defaults, less the gutter
 /// layers it has no room for, and the session's display settings, where it holds some, stand over
 /// them.
@@ -500,8 +590,9 @@ fn reviewed_ship(entity: u32, species: &str, friendly: bool, x: f32, y: f32) -> 
     }
 }
 
-/// A watched battle with its HUD, a peer's pointer, a ping and a drawing over it, drawn on the
-/// graphics device for review. Reads the game data dump, or `WT_WOWS_DIR`'s install.
+/// A watched battle with its HUD, a peer's pointer, a ping, a drawing and a placed ship with its
+/// range circles over it, drawn on the graphics device for review. Reads the game data dump, or
+/// `WT_WOWS_DIR`'s install.
 #[test]
 #[ignore = "draws on the graphics device with real game data; run by hand to review the watched view"]
 fn the_watched_view_draws_the_hud_peers_and_drawings() {
@@ -565,17 +656,22 @@ fn the_watched_view_draws_the_hud_peers_and_drawings() {
             ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255])
         });
         held.current_annotation_sync = Some(AnnotationSyncState {
-            annotations: vec![Annotation::Circle {
-                center: [470.0, 300.0],
-                radius: 60.0,
-                color: [255, 220, 0, 255],
-                width: 3.0,
-                filled: false,
-            }],
-            owners: vec![9],
-            ids: vec![1],
+            annotations: vec![
+                Annotation::Circle {
+                    center: [470.0, 300.0],
+                    radius: 60.0,
+                    color: [255, 220, 0, 255],
+                    width: 3.0,
+                    filled: false,
+                },
+                placed_moskva(330.0, 450.0),
+            ],
+            owners: vec![9, 1],
+            ids: vec![1, 2],
         });
         held.annotation_sync_version = 1;
+        held.placed_ship_ranges.insert(REPLAY, moskva_ranges(1200.0));
+        held.placed_ship_ranges_version = 1;
         held.repaint_viewport(REPLAY);
     }
     let started = std::time::Instant::now();

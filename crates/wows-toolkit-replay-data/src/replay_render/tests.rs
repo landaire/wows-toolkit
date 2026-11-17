@@ -57,6 +57,7 @@ use wt_collab_client::drawing::Tool;
 use wt_collab_client::peer::LocalAnnotationEvent;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::types::Annotation;
+use wt_collab_client::types::PlacedShipRanges;
 
 use crate::drawing_style::MAX_NIB;
 use crate::drawing_style::MIN_NIB;
@@ -68,6 +69,7 @@ use crate::replay_render::annotate::PointerUp;
 use crate::replay_render::annotate::ShapeEdit;
 use crate::replay_render::annotate::SizeUnit;
 use crate::replay_render::annotate::TOOLS;
+use crate::replay_render::annotate::resolve_placed_ships;
 use crate::replay_render::annotate::tool_for_key;
 use crate::replay_render::armor::Advance;
 use crate::replay_render::armor::ArmorFollow;
@@ -75,6 +77,7 @@ use crate::replay_render::armor::ArmorFollowed;
 use crate::replay_render::armor::RealtimeArmorFeed;
 use crate::replay_render::armor::has_armor_to_show;
 use crate::replay_render::collab::PING_SECONDS;
+use crate::replay_render::collab::PlacedRangesReport;
 use crate::replay_render::collab::adopt_range_overrides;
 use crate::replay_render::collab::adopt_trail_overrides;
 use crate::replay_render::collab::cursor_opacity;
@@ -1825,7 +1828,8 @@ fn what_a_session_has_drawn_is_put_on_the_frame() {
     let track = track(vec![0.0, 30.0]);
     let annotator = Annotator::new();
 
-    let drawn = annotator.overlay_commands(&link, &track, &GameDataCache::without_install());
+    let placed = resolve_placed_ships(&link.annotations(), &track, &GameDataCache::without_install());
+    let drawn = annotator.overlay_commands(&link, &track, &placed);
     assert_eq!(drawn.len(), 1, "the circle became one command");
 
     // No display option hides what a reader drew deliberately.
@@ -1849,7 +1853,8 @@ fn a_measurement_reaches_the_frame_with_its_distance() {
         width: 2.0,
     });
 
-    let drawn = Annotator::new().overlay_commands(&link, &track, &GameDataCache::without_install());
+    let placed = resolve_placed_ships(&link.annotations(), &track, &GameDataCache::without_install());
+    let drawn = Annotator::new().overlay_commands(&link, &track, &placed);
     let figures: Vec<&str> = drawn
         .iter()
         .filter_map(|command| match command {
@@ -1875,8 +1880,8 @@ fn a_picked_shape_is_drawn_with_a_halo() {
         filled: true,
     });
     let mut annotator = Annotator::new();
-    let exported =
-        |annotator: &Annotator| annotator.overlay_commands(&link, &track, &GameDataCache::without_install()).len();
+    let placed = resolve_placed_ships(&link.annotations(), &track, &GameDataCache::without_install());
+    let exported = |annotator: &Annotator| annotator.overlay_commands(&link, &track, &placed).len();
     let unpicked = exported(&annotator);
     assert!(annotator.picked_halos(&link).is_empty(), "nothing is picked");
 
@@ -2554,4 +2559,35 @@ fn health_follows_where_playback_reached() {
 
     feed.advance_to(GameClock(5.0));
     assert_eq!(feed.health(), Some(15400.0), "and it follows a scrub backwards too");
+}
+
+/// The session hears placed ship ranges only from the frame source, so ranges read while another
+/// end is the source are held back and told once this end takes over, and told once only.
+#[test]
+fn placed_ranges_are_told_once_this_end_is_the_frame_source() {
+    let (state, link, sent) = session();
+    let replay_id = ReplayId::fresh();
+    let told = |sent: &std::sync::mpsc::Receiver<LocalEvent>| {
+        sent.try_iter().filter(|event| matches!(event, LocalEvent::PlacedShipRanges { .. })).count()
+    };
+    {
+        let mut held = state.lock();
+        held.my_user_id = 1;
+        held.frame_source_id = 5;
+    }
+    let mut report = PlacedRangesReport::new();
+
+    report.hold(&link, replay_id, PlacedShipRanges { space_size: 1400.0, hulls: Vec::new() });
+    assert_eq!(told(&sent), 0, "another end is the frame source");
+
+    state.lock().frame_source_id = 1;
+    report.report(&link, replay_id);
+    report.report(&link, replay_id);
+    assert_eq!(told(&sent), 1, "told once on taking over");
+
+    state.lock().frame_source_id = 5;
+    report.report(&link, replay_id);
+    state.lock().frame_source_id = 1;
+    report.report(&link, replay_id);
+    assert_eq!(told(&sent), 1, "and again on taking over once more");
 }
