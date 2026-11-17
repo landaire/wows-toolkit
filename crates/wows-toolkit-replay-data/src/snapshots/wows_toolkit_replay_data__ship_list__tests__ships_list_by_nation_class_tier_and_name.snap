@@ -1,0 +1,12 @@
+---
+source: crates/wows-toolkit-replay-data/src/ship_list.rs
+expression: labels
+---
+[
+    "II Umikaze",
+    "X Shimakaze",
+    "X Shikishima",
+    "X Yamato",
+    "X Gearing",
+    "II Chester",
+]

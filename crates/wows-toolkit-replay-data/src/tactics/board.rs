@@ -52,6 +52,8 @@ use crate::drawing_style::MIN_NIB;
 use crate::load::GameDataCache;
 use crate::replay_render::collab::CursorReport;
 use crate::replay_render::view::ZOOM_PER_PIXEL;
+use crate::ship_list::ShipChoice;
+use crate::ship_list::ShipList;
 use crate::tactics::BoardCapPoint;
 use crate::tactics::CapDrag;
 use crate::tactics::ElementPos;
@@ -80,8 +82,6 @@ use crate::tactics::render::BoardArt;
 use crate::tactics::render::FrameRequest;
 use crate::tactics::scan::ScanJob;
 use crate::tactics::scan::ScanOutcome;
-use crate::tactics::ships::ShipChoice;
-use crate::tactics::ships::ShipList;
 use crate::tactics::unique_map_for_space;
 
 pub use self::edit::MAX_SHAPE_KM;

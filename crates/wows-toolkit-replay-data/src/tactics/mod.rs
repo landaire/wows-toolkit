@@ -12,7 +12,6 @@ pub mod board;
 mod board_tests;
 pub mod render;
 pub mod scan;
-pub mod ships;
 #[cfg(test)]
 mod tests;
 

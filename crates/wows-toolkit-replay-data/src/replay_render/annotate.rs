@@ -10,12 +10,8 @@ use std::ops::RangeInclusive;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::collab::CollabLink;
-use wows_toolkit_viewmodel::text_filter::FilterKey;
-use wows_toolkit_viewmodel::text_filter::FilterQuery;
-use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
-use wowsunpack::game_params::types::tier_roman;
 use wt_collab_client::drawing::Drawing;
 use wt_collab_client::drawing::Drawn;
 use wt_collab_client::drawing::Held;
@@ -44,9 +40,6 @@ use crate::replay_render::track::Track;
 use crate::replay_render::view::ElementPoint;
 use crate::replay_render::view::MapView;
 use crate::replay_render::view::WindowPoint;
-
-/// How many ships a search offers at once.
-pub const SHIP_MATCHES: usize = 10;
 
 /// How many changes back an undo can reach.
 pub const HISTORY_DEPTH: usize = 32;
@@ -963,76 +956,5 @@ fn apply_edit(annotation: &mut Annotation, edit: ShapeEdit) {
         (Annotation::Ship { friendly, .. }, ShapeEdit::Friendly(side)) => *friendly = side,
         // The popup offers no such edit for this shape.
         _ => {}
-    }
-}
-
-/// A ship the loaded build knows, as the chooser for a placed ship offers it.
-#[derive(Clone, Debug)]
-pub struct PlaceableShip {
-    pub species: Species,
-    /// The game param index [`Annotator::name_picked_ship`] resolves.
-    pub param_index: String,
-    pub display_name: String,
-    pub tier: u32,
-    key: FilterKey,
-}
-
-impl PlaceableShip {
-    /// What the chooser's row says: the tier in roman numerals, then the name.
-    pub fn label(&self) -> String {
-        format!("{} {}", tier_roman(self.tier), self.display_name)
-    }
-}
-
-/// Every ship a placed ship can be given, as the egui chooser lists them: playable species only,
-/// clan rentals left out since they duplicate a real ship.
-pub struct ShipCatalog {
-    ships: Vec<PlaceableShip>,
-}
-
-impl ShipCatalog {
-    pub fn build(metadata: &GameMetadataProvider) -> Self {
-        let mut ships: Vec<PlaceableShip> = metadata
-            .params()
-            .iter()
-            .filter_map(|param| {
-                let species = *param.species()?.known().filter(|species| Species::SHIP_CLASSES.contains(species))?;
-                let vehicle = param.vehicle()?;
-                if vehicle.group() == "clan" {
-                    return None;
-                }
-                // A ship the build has no name for is still one that can be chosen, by its param name.
-                let display_name = wowsunpack::data::ResourceLoader::localized_name_from_param(metadata, param)
-                    .unwrap_or_else(|| param.name().to_owned());
-
-                Some(PlaceableShip {
-                    species,
-                    param_index: param.index().to_owned(),
-                    key: FilterKey::new(&display_name),
-                    display_name,
-                    tier: vehicle.level(),
-                })
-            })
-            .collect();
-        ships.sort_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.display_name.cmp(&b.display_name)));
-
-        Self { ships }
-    }
-
-    /// The ships of the newest build `game_data` has loaded, or `None` before one has.
-    pub fn from_game_data(game_data: &GameDataCache) -> Option<Self> {
-        let loaded = game_data.newest_loaded()?;
-
-        Some(Self::build(loaded.provider()))
-    }
-
-    /// The ships whose names match `query`, best first and at most [`SHIP_MATCHES`] of them.
-    /// Empty for a query with nothing in it, since every ship at once is not a choice.
-    pub fn matching(&self, query: &FilterQuery) -> Vec<&PlaceableShip> {
-        if !query.is_active() {
-            return Vec::new();
-        }
-
-        query.rank(&self.ships, |ship| &ship.key).into_iter().take(SHIP_MATCHES).collect()
     }
 }

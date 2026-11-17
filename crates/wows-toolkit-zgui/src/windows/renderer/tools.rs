@@ -14,15 +14,15 @@ use wows_toolkit_replay_data::drawing_style::Ink;
 use wows_toolkit_replay_data::drawing_style::MAX_NIB;
 use wows_toolkit_replay_data::drawing_style::MIN_NIB;
 use wows_toolkit_replay_data::replay_render::annotate::Annotator;
-use wows_toolkit_replay_data::replay_render::annotate::PlaceableShip;
 use wows_toolkit_replay_data::replay_render::annotate::SPECIES;
-use wows_toolkit_replay_data::replay_render::annotate::ShipCatalog;
 use wows_toolkit_replay_data::replay_render::annotate::TOOLS;
 use wows_toolkit_replay_data::replay_render::annotate::ToolButton;
 use wows_toolkit_replay_data::replay_render::annotate::is_fillable;
 use wows_toolkit_replay_data::replay_render::annotate::places_ship;
 use wows_toolkit_replay_data::replay_render::annotate::same_tool;
 use wows_toolkit_replay_data::replay_render::annotate::ship_tool;
+use wows_toolkit_replay_data::ship_list::ShipChoice;
+use wows_toolkit_replay_data::ship_list::ShipList;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wt_collab_client::geometry::ENEMY_COLOR;
@@ -85,7 +85,7 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
         session.collab.with(CollabLink::annotations_locked)
     });
     // Kept with the transport, so the catalogue is read once rather than each time the popover opens.
-    let catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage> = StoredValue::new_local(None);
+    let catalog: StoredValue<Option<Rc<ShipList>>, LocalStorage> = StoredValue::new_local(None);
     // The ship chooser's search, held here so Escape in it empties it before it closes the popover.
     let query = RwSignal::new_local(String::new());
     let escape = EscapeClears::new(query);
@@ -128,7 +128,7 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
 #[component]
 fn ToolsPanel(
     session: RendererSession,
-    catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage>,
+    catalog: StoredValue<Option<Rc<ShipList>>, LocalStorage>,
     query: RwSignal<String, LocalStorage>,
     escape: EscapeClears,
 ) -> impl IntoView {
@@ -365,23 +365,23 @@ fn InkSwatch(session: RendererSession, ink: Ink) -> impl IntoView {
 fn ShipChooser(
     session: RendererSession,
     named: Option<String>,
-    catalog: StoredValue<Option<Rc<ShipCatalog>>, LocalStorage>,
+    catalog: StoredValue<Option<Rc<ShipList>>, LocalStorage>,
     query: RwSignal<String, LocalStorage>,
     escape: EscapeClears,
 ) -> impl IntoView {
     // Each chooser starts empty, as the ship it names may have changed.
     query.set(String::new());
     // Built the first time something is typed, and again after that only while no build is loaded.
-    let ships = move || -> Option<Rc<ShipCatalog>> {
+    let ships = move || -> Option<Rc<ShipList>> {
         if let Some(built) = catalog.with_value(Option::clone) {
             return Some(built);
         }
-        let built = Rc::new(ShipCatalog::from_game_data(&session.game_data()?)?);
+        let built = Rc::new(ShipList::from_game_data(&session.game_data()?)?);
         catalog.update_value(|held| *held = Some(Rc::clone(&built)));
 
         Some(built)
     };
-    let choose = move |ship: &PlaceableShip| {
+    let choose = move |ship: &ShipChoice| {
         let Some(game_data) = session.game_data() else { return };
         let (species, param_index, display_name) = (ship.species, ship.param_index.clone(), ship.display_name.clone());
         session.annotate(|annotator, link| {
@@ -396,7 +396,6 @@ fn ShipChooser(
             .matching(&typed)
             .into_iter()
             .map(|ship| {
-                let ship = ship.clone();
                 let test_id = format!("replay-renderer-ship-{}", ship.param_index);
                 let label = ship.label();
                 let marks = marks_within(&typed, &label, &ship.display_name);

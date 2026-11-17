@@ -17,6 +17,7 @@ use wows_toolkit_replay_data::drawing_style::INKS;
 use wows_toolkit_replay_data::drawing_style::Ink;
 use wows_toolkit_replay_data::drawing_style::MAX_NIB;
 use wows_toolkit_replay_data::drawing_style::MIN_NIB;
+use wows_toolkit_replay_data::ship_list::ShipChoice;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::MAX_CAP_RADIUS;
 use wows_toolkit_replay_data::tactics::MIN_CAP_RADIUS;
@@ -36,11 +37,9 @@ use wows_toolkit_replay_data::tactics::board::ShapeSize;
 use wows_toolkit_replay_data::tactics::map_entries;
 use wows_toolkit_replay_data::tactics::mode_value;
 use wows_toolkit_replay_data::tactics::radius_km;
-use wows_toolkit_replay_data::tactics::ships::ShipChoice;
 use wows_toolkit_replay_data::tactics::shortcut_modifier_name;
 use wows_toolkit_replay_data::tactics::team_color;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
-use wowsunpack::game_params::types::tier_roman;
 use wt_collab_client::geometry::ENEMY_COLOR;
 use wt_collab_client::geometry::FRIENDLY_COLOR;
 use zgui::component;
@@ -509,7 +508,7 @@ fn ship_match(
     locked: Signal<bool, LocalStorage>,
     pick: impl Fn(ShipChoice) + Copy + 'static,
 ) -> AnyView {
-    let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
+    let label = ship.label();
     let name = ship.display_name.clone();
     AnyView::new(view! {
         Button(
