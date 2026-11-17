@@ -1768,24 +1768,24 @@ fn handle_incoming_message(
         // ── Always accept ───────────────────────────────────────────────
         PeerMessage::CursorPosition { .. } | PeerMessage::ScopedCursorPosition { .. } => {
             let Some(update) = msg.cursor_update() else { return };
-            // Use sender_id from the connection context (not the message's user_id)
-            // to prevent peers from spoofing other users' cursors.
-            let update = CursorUpdate { user_id: sender_id, ..update };
+            // Only the host may speak for another user's cursor: it relays every peer's under that
+            // peer's id. Anyone else's message is taken as their own, so they cannot move another
+            // user's cursor.
+            let user_id = if sender_is_host { update.user_id } else { sender_id };
+            let update = CursorUpdate { user_id, ..update };
             {
                 let mut s = ui_state.lock();
-                let known = s.cursors.iter().position(|c| c.user_id == sender_id);
+                let known = s.cursors.iter().position(|c| c.user_id == user_id);
                 let index = match known {
                     Some(index) => index,
                     None => {
                         // Unknown peer cursor: it may have been announced via UserJoined.
-                        let m = mesh.lock();
-                        let (name, color) = if let Some(p) = m.peers.get(&sender_id) {
-                            (p.name.clone(), p.color)
-                        } else {
-                            (format!("Peer {sender_id}"), [200, 200, 200])
-                        };
-                        drop(m);
-                        s.cursors.push(UserCursor::new(sender_id, name, color));
+                        let joined =
+                            s.connected_users.iter().find(|u| u.id == user_id).map(|u| (u.name.clone(), u.color));
+                        let identity =
+                            joined.or_else(|| mesh.lock().peers.get(&user_id).map(|p| (p.name.clone(), p.color)));
+                        let (name, color) = identity.unwrap_or_else(|| (format!("Peer {user_id}"), [200, 200, 200]));
+                        s.cursors.push(UserCursor::new(user_id, name, color));
                         s.cursors.len() - 1
                     }
                 };
@@ -3207,6 +3207,30 @@ mod tests {
             received(&mut unscoped),
             PeerMessage::CursorPosition { user_id: 1, pos: Some([100.0, 200.0]) }
         ));
+    }
+
+    /// A client hears every peer's cursor from the host, each under the id of the peer who moved it.
+    #[test]
+    fn relayed_cursor_moves_the_peer_who_sent_it() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [1, 2, 3] });
+
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 5, pos: Some([100.0, 200.0]) });
+
+        let s = h.ui();
+        let [cursor] = &s.cursors[..] else { panic!("one cursor, not one for the host as well") };
+        assert_eq!((cursor.user_id, cursor.name.as_str()), (5, "Eve"));
+    }
+
+    /// A peer that is not the host cannot move another user's cursor.
+    #[test]
+    fn peer_cannot_move_another_users_cursor() {
+        let h = MessageTestHarness::new(0, PeerRole::Host, vec![(2, PeerRole::Peer)], 0);
+
+        h.dispatch(2, PeerMessage::CursorPosition { user_id: 3, pos: Some([100.0, 200.0]) });
+
+        let s = h.ui();
+        assert_eq!(s.cursors.iter().map(|c| c.user_id).collect::<Vec<_>>(), [2]);
     }
 
     // ─── Ping handling ───────────────────────────────────────────────────
