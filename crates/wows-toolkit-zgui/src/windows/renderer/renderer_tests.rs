@@ -705,6 +705,23 @@ fn a_rebake_keeps_the_battle_on_screen() {
     assert!(window.by_test_id("replay-renderer-failed").is_none());
 }
 
+/// The export controls are withdrawn while a session runs: an export stops the playback the rest
+/// of the session watches.
+#[test]
+fn the_export_controls_are_withdrawn_in_a_session() {
+    let (mut window, session) = open_viewport(track(vec![0.0, 30.0]));
+    let (link, _sent) = CollabLink::for_test(Arc::new(Default::default()));
+    session.set_collab(link);
+    window.advance(Duration::from_millis(16));
+    assert!(window.by_test_id("replay-renderer-export").is_none());
+    assert!(window.by_test_id("replay-renderer-clipboard").is_none());
+
+    session.set_collab(CollabLink::default());
+    window.advance(Duration::from_millis(16));
+    assert!(window.by_test_id("replay-renderer-export").is_some(), "offered again once the session has gone");
+    assert!(window.by_test_id("replay-renderer-clipboard").is_some());
+}
+
 /// Game data with nothing in it, which reads no replay the tests name.
 fn empty_game_data() -> wows_toolkit_replay_data::load::GameDataCache {
     let provider = wowsunpack::game_params::provider::GameMetadataProvider::from_params_no_specs(Vec::new())

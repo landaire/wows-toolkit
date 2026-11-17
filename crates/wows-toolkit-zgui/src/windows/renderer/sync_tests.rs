@@ -138,6 +138,8 @@ fn a_toggle_tells_the_session_what_changed() {
     let (link, sent) = CollabLink::for_test(Arc::clone(&state));
     state.lock().role = PeerRole::Host;
     session.set_collab(link);
+    // A session withdraws the export controls, which moves the rest of the transport.
+    tick(&mut window);
 
     click(&mut window, "replay-renderer-settings-toggle");
     click(&mut window, "renderer-opt-timer");

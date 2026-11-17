@@ -20,6 +20,7 @@ use wows_toolkit_replay_data::replay_render::track::FrameIndex;
 use wows_toolkit_replay_data::replay_render::view::ElementBounds;
 use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
+use wows_toolkit_services::collab::CollabLink;
 use zgui::component;
 use zgui::css;
 use zgui::elements::Focus;
@@ -505,9 +506,13 @@ fn Transport(session: RendererSession) -> impl IntoView {
                     }
                 }
                 box(class = "wt-renderer__rule")
-                TransportButton(glyph = Glyph::Download, label_key = "ui.replay.renderer.export_video",
-                    test_id = "replay-renderer-export", disabled = refused,
-                    on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::File)))
+                // Withdrawn while a session runs: an export stops playback, and the rest of the
+                // session watches this end's.
+                Show(when = move || !session.collab.with(CollabLink::is_active)) {
+                    TransportButton(glyph = Glyph::Download, label_key = "ui.replay.renderer.export_video",
+                        test_id = "replay-renderer-export", disabled = refused,
+                        on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::File)))
+                }
                 ToolsPopover(session = session)
                 OptionsPopover(session = session)
                 TimelinePopover(session = session)
@@ -518,9 +523,11 @@ fn Transport(session: RendererSession) -> impl IntoView {
                             crate::windows::renderer::pop_out(session);
                         }))
                 }
-                TransportButton(glyph = Glyph::Clipboard, label_key = "ui.replay.renderer.export_clipboard",
-                    test_id = "replay-renderer-clipboard", disabled = refused,
-                    on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::Clipboard)))
+                Show(when = move || !session.collab.with(CollabLink::is_active)) {
+                    TransportButton(glyph = Glyph::Clipboard, label_key = "ui.replay.renderer.export_clipboard",
+                        test_id = "replay-renderer-clipboard", disabled = refused,
+                        on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::Clipboard)))
+                }
             }
         }
     }
