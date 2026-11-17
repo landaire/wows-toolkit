@@ -11,7 +11,7 @@ use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
-use zgui::task::spawn_local;
+use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
@@ -187,8 +187,12 @@ pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
 /// Asks for a Proton build's folder and plays through it with Steam.
 fn choose_proton(model: LauncherModel, shell: Shell) {
     let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.runner.choose"));
-    spawn_local(async move {
+    // Detached: the drawer or setup step that asked can close before the reader answers.
+    spawn_detached(async move {
         let Some(proton_dir) = shell.chosen_path(asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
         model.set_runner(RunnerChoice::SteamProton { proton_dir });
     });
 }

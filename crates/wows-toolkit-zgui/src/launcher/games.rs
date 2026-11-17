@@ -7,7 +7,7 @@ use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
-use zgui::task::spawn_local;
+use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
@@ -113,8 +113,12 @@ fn install_game(model: LauncherModel, shell: Shell, game: &'static KnownGame) {
         &t!("ui.launcher.install_title"),
         &wgc_download::default_install_dir(),
     );
-    spawn_local(async move {
+    // Detached: the drawer or setup step that asked can close before the reader answers.
+    spawn_detached(async move {
         let Some(dest) = shell.chosen_path(asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
         let started = model.run(move |launcher, _, env| (launcher.install_known_game(game, dest, env), false));
         if let Some(Err(err)) = started {
             shell.toasts().failed(err.to_string());

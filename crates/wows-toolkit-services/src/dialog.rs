@@ -125,6 +125,21 @@ use native::ask;
 enum Scripted {
     Refuse,
     Pick(PathBuf),
+    Hold(futures::channel::oneshot::Receiver<PathBuf>),
+}
+
+/// A dialog a test keeps open until it answers through [`Self::pick`]. Dropped, the dialog is
+/// dismissed.
+#[cfg(feature = "test-support")]
+pub struct HeldDialog(futures::channel::oneshot::Sender<PathBuf>);
+
+#[cfg(feature = "test-support")]
+impl HeldDialog {
+    /// Answers the dialog with `path`.
+    pub fn pick(self, path: PathBuf) {
+        // The asker may have stopped waiting, which a test asserts on through what it did.
+        let _ = self.0.send(path);
+    }
 }
 
 #[cfg(feature = "test-support")]
@@ -151,15 +166,28 @@ pub fn pick_next(path: PathBuf) {
     NEXT.set(Some(Scripted::Pick(path)));
 }
 
-/// Records the dialog and answers it as dismissed, or as [`refuse_next`] or
-/// [`pick_next`] asked, instead of opening it.
+/// Keeps the next dialog asked for on this thread open until the test answers it.
+#[cfg(feature = "test-support")]
+pub fn hold_next() -> HeldDialog {
+    let (answer, held) = futures::channel::oneshot::channel();
+    NEXT.set(Some(Scripted::Hold(held)));
+
+    HeldDialog(answer)
+}
+
+/// Records the dialog and answers it as dismissed, or as [`refuse_next`],
+/// [`pick_next`] or [`hold_next`] asked, instead of opening it.
 #[cfg(feature = "test-support")]
 fn ask(request: Request) -> impl Future<Output = Answer> + use<> {
     ASKED.with_borrow_mut(|asked| asked.push(request.asked));
-    let answer = match NEXT.take() {
-        None => Ok(None),
-        Some(Scripted::Refuse) => Err(DialogError::Refused),
-        Some(Scripted::Pick(path)) => Ok(Some(path)),
-    };
-    std::future::ready(answer)
+    let next = NEXT.take();
+
+    async move {
+        match next {
+            None => Ok(None),
+            Some(Scripted::Refuse) => Err(DialogError::Refused),
+            Some(Scripted::Pick(path)) => Ok(Some(path)),
+            Some(Scripted::Hold(held)) => Ok(held.await.ok()),
+        }
+    }
 }

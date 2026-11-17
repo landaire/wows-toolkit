@@ -11,7 +11,7 @@ use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetValue;
-use zgui::task::spawn_local;
+use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
@@ -244,8 +244,12 @@ fn CatalogStatus(catalog: Memo<CatalogView>) -> impl IntoView {
 /// Asks for an install directory, adds it, and looks for installs again.
 pub(crate) fn add_install(model: LauncherModel, shell: Shell) {
     let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
-    spawn_local(async move {
+    // Detached: the popover that asked can close before the reader answers.
+    spawn_detached(async move {
         let Some(dir) = shell.chosen_path(asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
         model.op(move |launcher, settings, env| {
             settings.manual_installs.push(dir);
             launcher.start_install_discovery(settings, env);
@@ -263,8 +267,12 @@ fn download(model: LauncherModel, shell: Shell, install: PathBuf, has_content: b
     }
     let start = wgc_download::default_install_dir();
     let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &start);
-    spawn_local(async move {
+    // Detached: the popover that asked can close before the reader answers.
+    spawn_detached(async move {
         let Some(dest) = shell.chosen_path(asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
         let started = model.run(move |launcher, _, env| (launcher.start_download(install, dest, env), false));
         if let Some(Err(err)) = started {
             shell.toasts().failed(err.to_string());

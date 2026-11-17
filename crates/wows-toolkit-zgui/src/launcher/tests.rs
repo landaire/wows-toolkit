@@ -734,6 +734,31 @@ fn without_an_install_the_popover_adds_a_folder() {
     assert_eq!(manual, [folder]);
 }
 
+/// The popover shuts while the folder picker is up, and the folder picked after it shut is still
+/// added.
+#[test]
+fn a_folder_picked_after_the_popover_shuts_is_added() {
+    let mut launcher = LauncherWindow::open();
+    let mut settings = launcher.enabled_settings(&[]);
+    settings.accounts.clear();
+    launcher.adopt(settings);
+    launcher.model.apply(test_support::installs_found(Vec::new()));
+    launcher.settle();
+    launcher.press("launcher-play-menu");
+
+    let folder = launcher.install.path().to_path_buf();
+    let held = wows_toolkit_services::dialog::hold_next();
+    launcher.press("launcher-install-add");
+    launcher.window.press_key(NamedKey::Escape, Modifiers::NONE);
+    launcher.settle();
+    assert!(!launcher.has("launcher-install-add"), "the popover has shut");
+    held.pick(folder.clone());
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+
+    let manual = launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().manual_installs.clone());
+    assert_eq!(manual, [folder]);
+}
+
 #[test]
 fn each_account_row_marks_its_realm_with_a_regional_globe() {
     let mut launcher = LauncherWindow::open();
