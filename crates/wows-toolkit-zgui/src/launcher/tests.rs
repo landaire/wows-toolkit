@@ -552,7 +552,8 @@ fn crowded(launcher: &mut LauncherWindow) -> Vec<String> {
     launcher.adopt(settings);
     launcher.found(up_to_date());
     launcher.set_session(eu(), TestSession::SignedIn(long.into()));
-    launcher.set_session(ready, TestSession::SignedIn("Ishmael".into()));
+    let left = Duration::from_secs(((13 * 24 + 22) * 60 + 30) * 60);
+    launcher.set_session(ready, TestSession::SignedInUntil("Ishmael".into(), std::time::SystemTime::now() + left));
     launcher.set_session(unencrypted, TestSession::SignedInUnencrypted("Starbuck".into()));
     launcher.set_session(expired, TestSession::Expired);
     launcher.set_session(locked, TestSession::KeyringLocked);
@@ -617,6 +618,48 @@ fn the_account_menu_makes_an_account_the_default_and_removes_one() {
     launcher.press("launcher-account-eu-697769785-forget");
     let saved = launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().accounts.clone());
     assert_eq!(saved.iter().map(|account| account.key).collect::<Vec<_>>(), [na()]);
+}
+
+#[test]
+fn signing_out_keeps_the_account_listed() {
+    let mut launcher = ready();
+    launcher.press("launcher-play-menu");
+
+    launcher.press("launcher-account-eu-697769785-actions");
+    launcher.press("launcher-account-eu-697769785-sign-out");
+
+    let saved = launcher.model.with_untracked(|state| state.settings.as_ref().unwrap().accounts.clone());
+    assert_eq!(saved.iter().map(|account| account.key).collect::<Vec<_>>(), [eu(), na()]);
+    let status = launcher.model.with_untracked(|state| state.launcher.account_status(eu()));
+    assert_eq!(status, wows_toolkit_launcher::AccountStatus::SignedOut);
+    assert!(launcher.has("launcher-account-eu-697769785-sign-in"), "the row offers to sign in again");
+}
+
+#[test]
+fn each_signed_in_row_says_when_its_session_ends() {
+    let mut launcher = ready();
+    let left = Duration::from_secs(((3 * 24 + 4) * 60 + 30) * 60);
+    launcher.set_session(eu(), TestSession::SignedInUntil("Captain_Ahab".into(), std::time::SystemTime::now() + left));
+    launcher.set_session(na(), TestSession::SignedInUntil("Ishmael".into(), std::time::SystemTime::UNIX_EPOCH));
+    launcher.press("launcher-play-menu");
+
+    assert_eq!(launcher.window.texts_by_class("wt-account-row__expiry"), ["Expires in 3d 4h", "Session expired"]);
+}
+
+#[test]
+fn an_open_row_turns_expired_when_the_deadline_passes() {
+    let mut launcher = ready();
+    let left = Duration::from_secs(3);
+    launcher.set_session(eu(), TestSession::SignedInUntil("Captain_Ahab".into(), std::time::SystemTime::now() + left));
+    launcher.press("launcher-play-menu");
+    let before = launcher.window.texts_by_class("wt-account-row__expiry");
+
+    std::thread::sleep(left + Duration::from_millis(200));
+    launcher.window.advance(Duration::from_secs(60));
+
+    assert_eq!(before, ["Expires in less than a minute", "Expiry unknown"]);
+    assert_eq!(launcher.window.texts_by_class("wt-account-row__expiry"), ["Session expired", "Expiry unknown"]);
+    assert!(launcher.window.texts_by_class("wt-launcher__warn").contains(&"Session expired".to_owned()));
 }
 
 #[test]

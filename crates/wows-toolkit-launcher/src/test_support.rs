@@ -58,6 +58,13 @@ pub fn set_session(launcher: &mut Launcher, key: AccountKey, state: TestSession)
         TestSession::SignedIn(nickname) => {
             AccountSession::SignedIn { session: Arc::new(session(key, &nickname)), storage: SessionStorage::Keyring }
         }
+        TestSession::SignedInUntil(nickname, expires_at) => AccountSession::SignedIn {
+            session: Arc::new(wgc_auth::StoredSession {
+                expiry: wgc_auth::TokenExpiry::KnownAt(expires_at),
+                ..session(key, &nickname)
+            }),
+            storage: SessionStorage::Keyring,
+        },
         TestSession::SignedInUnencrypted(nickname) => AccountSession::SignedIn {
             session: Arc::new(session(key, &nickname)),
             storage: SessionStorage::PlaintextFile,
@@ -73,6 +80,8 @@ pub fn set_session(launcher: &mut Launcher, key: AccountKey, state: TestSession)
 pub enum TestSession {
     Restoring,
     SignedIn(String),
+    /// Signed in, with the session known to expire at the time given.
+    SignedInUntil(String, std::time::SystemTime),
     /// Signed in, with the session saved unencrypted because there is no secret store.
     SignedInUnencrypted(String),
     Expired,

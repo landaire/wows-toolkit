@@ -2,11 +2,14 @@
 //! sessions, and the ways to the rarer launcher tasks.
 
 use std::path::PathBuf;
+use std::time::Duration;
+use std::time::SystemTime;
 
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wgc_auth::TokenExpiry;
 use wows_toolkit_launcher::AccountKey;
 use wows_toolkit_launcher::AccountStatus;
 use wows_toolkit_launcher::LoginTarget;
@@ -28,6 +31,7 @@ use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::view::ShowProps;
+use zgui::view::set_interval;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
@@ -58,6 +62,9 @@ use crate::launcher::replay;
 use crate::launcher::setup;
 use crate::launcher::steam_login::WgcLoginControlProps;
 use crate::shell::Shell;
+
+/// How often an account row reads the time again for its session expiry.
+const EXPIRY_TICK: Duration = Duration::from_secs(60);
 
 const POPOVER_CSS: &str = zgui::css!(
     ".wt-account-popover__body {
@@ -348,7 +355,7 @@ fn AccountRowView(
     open: RwSignal<bool, LocalStorage>,
 ) -> impl IntoView {
     let locale = shell.services().locale;
-    let AccountRow { label, is_default, status, other_install } = row;
+    let AccountRow { label, is_default, status, expiry, other_install } = row;
     let key = label.key;
     let id = format!("launcher-account-{}-{}", label.realm.to_lowercase(), key.account_id.get());
     let not_saved_id = format!("{id}-not-saved");
@@ -357,7 +364,9 @@ fn AccountRowView(
     let status_id = format!("{id}-status");
     let actions_id = format!("{id}-actions");
     let make_default_id = format!("{id}-make-default");
+    let sign_out_id = format!("{id}-sign-out");
     let forget_id = format!("{id}-forget");
+    let signed_in = matches!(status, AccountStatus::Ready(_));
     let status_view = match status {
         AccountStatus::Ready(SessionStorage::Keyring) if is_default => {
             AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.default")}} })
@@ -409,6 +418,25 @@ fn AccountRowView(
     let install_note = other_install.map(|path| {
         view! { text(class = "wt-launcher__dim wt-launcher__truncate") {{path.display().to_string()}} }
     });
+    let expiry_note = expiry.map(|expiry| {
+        // The duration counts down in minutes, and a deadline that passes while the row is up
+        // turns it into the expired warning.
+        let now = RwSignal::new_local(SystemTime::now());
+        let ticking = matches!(expiry, TokenExpiry::KnownAt(_))
+            .then(|| set_interval(EXPIRY_TICK, move || now.set(SystemTime::now())));
+        on_cleanup_local(move || drop(ticking));
+        let lapsed = move || matches!(expiry, TokenExpiry::KnownAt(at) if at <= now.get());
+        view! {
+            text(
+                class = "wt-launcher__truncate wt-account-row__expiry",
+                class:wt-launcher__dim = move || !lapsed(),
+                class:wt-launcher__warn = lapsed
+            ) {{move || {
+                locale.track();
+                expiry_text(expiry, now.get())
+            }}}
+        }
+    });
 
     view! {
         row(
@@ -431,6 +459,7 @@ fn AccountRowView(
                     text(class = "wt-launcher__truncate") {{label.nickname.clone()}}
                 }
                 {install_note}
+                {expiry_note}
             }
             box(class = "wt-account-row__status", attr:data-testid = status_id) {{status_view}}
             DropdownMenu {
@@ -452,6 +481,16 @@ fn AccountRowView(
                         {locale.text("ui.launcher.popover.make_default")}
                     }
                     MenuItem(
+                        disabled = Signal::derive_local(move || running.get() || !signed_in),
+                        attr:data-testid = sign_out_id.clone(),
+                        on_select = UnsyncCallback::new(move |()| model.op(move |launcher, settings, env| {
+                            launcher.sign_out(key, settings, env);
+                            false
+                        }))
+                    ) {
+                        {locale.text("ui.launcher.popover.sign_out")}
+                    }
+                    MenuItem(
                         disabled = Signal::derive_local(move || running.get()),
                         attr:data-testid = forget_id.clone(),
                         on_select = UnsyncCallback::new(move |()| model.op(move |launcher, settings, env| launcher.forget(key, settings, env)))
@@ -468,4 +507,18 @@ fn make_default(model: LauncherModel, key: AccountKey) {
     model.edit_settings(|settings| {
         settings.set_default_account(key);
     });
+}
+
+/// How long the session `expiry` has left at `now`.
+fn expiry_text(expiry: TokenExpiry, now: SystemTime) -> String {
+    match expiry {
+        TokenExpiry::KnownAt(at) => match at.duration_since(now) {
+            Ok(remaining) => {
+                t!("ui.launcher.popover.expires_in", duration = wows_toolkit_launcher::format_duration(remaining))
+            }
+            Err(_) => t!("ui.launcher.popover.expired"),
+        },
+        TokenExpiry::Unknown => t!("ui.launcher.popover.expiry_unknown"),
+    }
+    .into_owned()
 }

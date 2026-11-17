@@ -86,7 +86,7 @@ pub struct TokenPair {
 /// otherwise only detectable via a failing authenticated call. `Unknown`
 /// models "no `expires_in` observed yet / not verified this run" -- never a
 /// sentinel timestamp like zero.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenExpiry {
     Unknown,
     KnownAt(SystemTime),

@@ -204,6 +204,8 @@ pub struct AccountRow {
     pub label: AccountLabel,
     pub is_default: bool,
     pub status: AccountStatus,
+    /// When the signed-in session ends; `None` while not signed in.
+    pub expiry: Option<wgc_auth::TokenExpiry>,
     /// The install the account plays, when it is not the app's game directory.
     pub other_install: Option<PathBuf>,
 }
@@ -219,6 +221,7 @@ impl AccountRow {
                 label: AccountLabel::of(account),
                 is_default: settings.default_account == Some(account.key),
                 status: state.launcher.account_status(account.key),
+                expiry: state.launcher.session(account.key).map(|session| session.expiry),
                 other_install: match &account.install {
                     InstallChoice::Toolkit => None,
                     InstallChoice::Path(path) => Some(path.clone()),
