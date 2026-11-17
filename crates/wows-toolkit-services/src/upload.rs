@@ -44,7 +44,8 @@ pub enum Outcome {
     /// Nothing sent yet: the battle has no results and the grace has not lapsed.
     /// A read at `deadline` sends it whether or not the results have arrived.
     Waiting { deadline: RawUploadDeadline },
-    /// The service could not be reached. Not recorded, so it is tried again.
+    /// The service could not be reached or did not accept it. Not recorded, so
+    /// it is tried again.
     Failed(String),
 }
 
@@ -77,6 +78,14 @@ pub struct Sender<'a> {
     /// The saved proxy setting, empty for the machine's own configuration.
     pub proxy: &'a str,
 }
+
+/// Where each kind of payload is posted.
+struct Endpoints<'a> {
+    builds: &'a str,
+    raw_replays: &'a str,
+}
+
+const SHIP_BUILDS: Endpoints<'static> = Endpoints { builds: SHIP_BUILDS_URL, raw_replays: RAW_REPLAYS_URL };
 
 /// When this replay was first seen, which is what the grace window is measured
 /// from.
@@ -114,6 +123,16 @@ pub async fn already_contributed(pool: &SqlitePool, path: &Path) -> bool {
 
 /// Sends what `mode` asks for, if anything, and records what was sent.
 pub async fn send(candidate: Candidate, mode: DataSharingMode, ledger: LedgerUse, sender: Sender<'_>) -> Outcome {
+    send_to(candidate, mode, ledger, sender, SHIP_BUILDS).await
+}
+
+async fn send_to(
+    candidate: Candidate,
+    mode: DataSharingMode,
+    ledger: LedgerUse,
+    sender: Sender<'_>,
+    endpoints: Endpoints<'_>,
+) -> Outcome {
     let path = candidate.path.clone();
     let recorded = path.to_string_lossy().into_owned();
 
@@ -158,8 +177,8 @@ pub async fn send(candidate: Candidate, mode: DataSharingMode, ledger: LedgerUse
                 return Outcome::Skipped;
             }
             for payload in &shareable.builds {
-                if let Err(err) = client.post(SHIP_BUILDS_URL).json(payload).send().await {
-                    return Outcome::Failed(err.to_string());
+                if let Err(err) = deliver(client.post(endpoints.builds).json(payload)).await {
+                    return Outcome::Failed(err);
                 }
             }
             record(sender.pool, &recorded).await
@@ -169,18 +188,29 @@ pub async fn send(candidate: Candidate, mode: DataSharingMode, ledger: LedgerUse
                 Ok(bytes) => bytes,
                 Err(err) => return Outcome::Failed(err.to_string()),
             };
-            let sent = client
-                .post(RAW_REPLAYS_URL)
+            let request = client
+                .post(endpoints.raw_replays)
                 .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                .body(bytes)
-                .send()
-                .await;
-            match sent {
-                Ok(_) => record(sender.pool, &recorded).await,
-                Err(err) => Outcome::Failed(err.to_string()),
+                .body(bytes);
+            match deliver(request).await {
+                Ok(()) => record(sender.pool, &recorded).await,
+                Err(err) => Outcome::Failed(err),
             }
         }
     }
+}
+
+/// Posts one request. Only a success status counts as delivered: a rejection
+/// or a redirect leaves the replay unrecorded, so a later read tries again.
+async fn deliver(request: reqwest::RequestBuilder) -> Result<(), String> {
+    let response = request.send().await.map_err(|err| err.to_string())?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("ShipBuilds answered {status}"));
+    }
+
+    Ok(())
 }
 
 /// Records the replay as contributed, so nothing sends it twice.
@@ -190,5 +220,84 @@ async fn record(pool: &SqlitePool, path: &str) -> Outcome {
         // Sent but not recorded: say so, because the next read will send it
         // again and the service will see it twice.
         Err(err) => Outcome::Failed(format!("sent, but the ledger was not written: {err}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+    use std::io::Write;
+    use std::net::TcpListener;
+
+    use wows_toolkit_viewmodel::upload::ResultsScan;
+
+    use super::*;
+
+    const AGENT: UserAgent = UserAgent::new("wows-toolkit-services-test");
+
+    /// A server answering one request with each of `statuses` in turn.
+    fn status_server(statuses: &[u16]) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let statuses = statuses.to_vec();
+        let handle = std::thread::spawn(move || {
+            for status in statuses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).unwrap();
+                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                write!(stream, "HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            }
+        });
+
+        (format!("http://{address}"), handle)
+    }
+
+    /// Sends a finished random battle as a raw replay to a server answering
+    /// `status`, and returns the outcome and whether the ledger recorded it.
+    async fn send_raw_against(status: u16) -> (Outcome, bool) {
+        let pool = wows_toolkit_config::test_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("20261116_120000_PASB110-Yamato_19_OC_prey.wowsreplay");
+        std::fs::write(&path, b"replay").unwrap();
+        let candidate = Candidate {
+            path: path.clone(),
+            shareable: Shareable {
+                game_type: "RandomBattle".to_owned(),
+                // The game type alone decides eligibility.
+                version: Default::default(),
+                self_confirmed_non_test: true,
+                results: ResultsScan::Present,
+                builds: Vec::new(),
+            },
+            first_seen: jiff::Timestamp::now(),
+        };
+        let (url, server) = status_server(&[status]);
+        let endpoints = Endpoints { builds: &url, raw_replays: &url };
+        let sender = Sender { pool: &pool, agent: AGENT, proxy: "" };
+
+        let outcome = send_to(candidate, DataSharingMode::Replays, LedgerUse::Consult, sender, endpoints).await;
+
+        server.join().unwrap();
+        let recorded = wows_toolkit_config::queries::sent_replay_exists(&pool, &path.to_string_lossy()).await.unwrap();
+
+        (outcome, recorded)
+    }
+
+    #[tokio::test]
+    async fn a_success_status_is_recorded_as_sent() {
+        for status in [200, 204] {
+            assert_eq!(send_raw_against(status).await, (Outcome::Sent, true), "HTTP {status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn any_other_status_is_a_failure_that_is_not_recorded() {
+        for status in [302, 400, 500] {
+            let (outcome, recorded) = send_raw_against(status).await;
+
+            assert!(matches!(outcome, Outcome::Failed(_)), "HTTP {status}: {outcome:?}");
+            assert!(!recorded, "HTTP {status}");
+        }
     }
 }

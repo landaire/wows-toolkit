@@ -65,6 +65,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Add the folder picked for an install, a game or a Proton build after the launcher popover or drawer that asked has closed
 - *(zgui)* Stop a popped-out replay renderer, the tactics board and other secondary windows from reading the main window's closed state while the app exits
 - *(zgui)* Undo, redo and open the options rail with Ctrl+Z, Ctrl+Shift+Z and Ctrl+S from anywhere in the armor viewer, as in egui, and leave Ctrl+Z to a focused text field
+- *(zgui)* Record a shared replay as sent only when ShipBuilds accepts it, so a refused or failed upload is sent again later, as in egui
 - *(collab)* Show a peer's pointer only on the replay or tactics board it is over, in the desktop apps and the web client
 - *(collab)* Show another peer's pointer under that peer's name in a desktop app that joined a session, rather than as the host's pointer
 - Keep the replay index matching when the install folder is picked through another path to the same directory, such as a symlinked mount point
