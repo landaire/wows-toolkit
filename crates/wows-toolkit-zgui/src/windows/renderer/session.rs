@@ -1616,7 +1616,8 @@ impl RendererSession {
         if ready != Some(true) {
             return false;
         }
-        let has_tool = self.annotator.with_untracked(Annotator::has_tool);
+        let (has_tool, has_picked) =
+            self.annotator.with_untracked(|annotator| (annotator.has_tool(), !annotator.picked().is_empty()));
         if modifiers.primary()
             && let Key::Character(text) = unmodified
         {
@@ -1643,8 +1644,10 @@ impl RendererSession {
             Key::Named(NamedKey::ArrowRight) if !modifiers.shift() => self.seek_by(SEEK_STEP),
             Key::Named(NamedKey::ArrowLeft) => self.jump_to_previous_event(toasts),
             Key::Named(NamedKey::ArrowRight) => self.jump_to_next_event(toasts),
-            // Puts the tool down and drops what was half-drawn.
-            Key::Named(NamedKey::Escape) if has_tool => self.take_up(Tool::None),
+            // Puts the tool down and drops what was half-drawn, or with no tool puts down the pick.
+            Key::Named(NamedKey::Escape) if has_tool || has_picked => {
+                self.annotate(|annotator, _| annotator.escape());
+            }
             Key::Named(NamedKey::Delete | NamedKey::Backspace) => {
                 self.annotate(|annotator, link| annotator.erase_picked(link));
             }

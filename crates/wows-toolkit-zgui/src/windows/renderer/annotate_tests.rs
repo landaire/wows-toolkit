@@ -325,6 +325,36 @@ fn the_undo_chord_takes_back_what_was_drawn() {
     assert!(state.lock().current_annotation_sync.as_ref().is_none_or(|sync| sync.annotations.is_empty()));
 }
 
+/// Escape puts down the tool in hand, and with no tool in hand puts down what is picked out.
+#[test]
+fn escape_puts_the_tool_down_then_the_pick() {
+    let (mut window, session) = open();
+    session.collab.with_untracked(|link| {
+        link.add_annotation(Annotation::Circle {
+            center: [300.0, 400.0],
+            radius: 20.0,
+            color: [255; 4],
+            width: 2.0,
+            filled: false,
+        });
+    });
+    let picked = || session.annotator.with_untracked(|annotator| annotator.picked().picked().to_vec());
+    window.click_at(window_point(session, (320.0, 400.0)));
+    settle(&mut window);
+    assert_eq!(picked(), [0], "the circle is picked");
+
+    session.take_up(Tool::Line);
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert_eq!(tool(session), Tool::None, "the first Escape puts the tool down");
+    assert_eq!(picked(), [0], "and leaves the pick");
+
+    window.press_key(NamedKey::Escape, Modifiers::NONE);
+    settle(&mut window);
+    assert!(picked().is_empty(), "the second puts down the pick");
+    assert!(window.by_test_id("replay-renderer-shape-edit").is_none(), "and its popup with it");
+}
+
 /// Keys typed into a search on the renderer's popovers stay with the search: the undo chord does
 /// not take back a drawing, and a space does not start playback.
 #[test]

@@ -383,6 +383,21 @@ impl Annotator {
         self.take_up(chosen);
     }
 
+    /// Puts down the tool in hand, or with none in hand what is picked out, as the egui
+    /// renderer's Escape does. Returns whether there was either.
+    pub fn escape(&mut self) -> bool {
+        if self.has_tool() {
+            self.take_up(Tool::None);
+            return true;
+        }
+        if self.picked.is_empty() {
+            return false;
+        }
+        self.picked.clear();
+
+        true
+    }
+
     pub fn set_ink(&mut self, ink: [u8; 4]) {
         self.drawing.set_color(ink);
     }
