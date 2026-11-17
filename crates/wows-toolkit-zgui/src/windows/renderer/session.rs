@@ -254,8 +254,10 @@ struct Run {
     /// renderer back.
     pending_export: Option<ExportTarget>,
     regions: Vec<DrawnRegion>,
-    /// Set when the session closes, so an encode in flight stops.
-    cancel: Arc<AtomicBool>,
+    /// Where the window showing the viewport puts its messages.
+    messages: Option<Toasts>,
+    /// The main window's messages, which say how an export ended once its viewport has closed.
+    app_messages: Option<Toasts>,
     /// The bake in flight. A newer one cancels it and drops whatever it produces.
     bake_generation: Generation,
     bake_cancel: Arc<AtomicBool>,
@@ -334,7 +336,8 @@ impl RendererSession {
                 redraw_wanted: None,
                 pending_export: None,
                 regions: Vec::new(),
-                cancel: Arc::new(AtomicBool::new(false)),
+                messages: None,
+                app_messages: Toasts::current(),
                 bake_generation: Generation::default(),
                 bake_cancel: Arc::new(AtomicBool::new(false)),
                 event_generation: Generation::default(),
@@ -370,10 +373,23 @@ impl RendererSession {
         session
     }
 
-    /// Stops everything this session started and disposes of its state.
+    /// Gives the session `game_data` to read the battle and build canvases with, as an opened
+    /// session has.
+    #[cfg(test)]
+    pub fn hold_game_data_for_test(self, game_data: GameDataCache) {
+        self.with_run(|run| run.game_data = Some(game_data));
+    }
+
+    /// Reads the battle's events, as an opened session does.
+    #[cfg(test)]
+    pub fn scan_events_for_test(self) {
+        self.start_event_scan();
+    }
+
+    /// Stops everything this session started and disposes of its state. An export in flight runs
+    /// to the end.
     pub fn close(self) {
         let owner = self.run.try_update_value(|run| {
-            run.cancel.store(true, Ordering::Relaxed);
             run.bake_cancel.store(true, Ordering::Relaxed);
             run.ticker = None;
             run.collab_ticker = None;
@@ -1576,7 +1592,7 @@ impl RendererSession {
             self.playback.update(Playback::stop);
             return;
         };
-        let Some((services, cancel)) = self.run.try_with_value(|run| (run.services, Arc::clone(&run.cancel))) else {
+        let Some((services, app_messages)) = self.run.try_with_value(|run| (run.services, run.app_messages)) else {
             return;
         };
         let total = frames.len() as u64;
@@ -1588,7 +1604,9 @@ impl RendererSession {
             export.progress = Some(ExportProgress { done: 0, total, stage: ExportStage::Encoding });
         });
 
-        self.spawn(async move {
+        // Detached, and every write to the session tried: an export runs to the end even when the
+        // viewport that asked for it closes, since the file was asked for.
+        zgui::task::spawn_detached(async move {
             let output = match target {
                 ExportTarget::File => {
                     let title = t!("ui.replay.renderer.export_video").into_owned();
@@ -1602,7 +1620,7 @@ impl RendererSession {
                         Ok(chosen) => chosen,
                         Err(err) => {
                             self.give_back(generation, renderer);
-                            self.export.update(|export| {
+                            self.export.try_update(|export| {
                                 export.progress = None;
                                 export.failure = Some(err.to_string());
                             });
@@ -1616,7 +1634,7 @@ impl RendererSession {
             };
             let Some(output) = output else {
                 self.give_back(generation, renderer);
-                self.export.update(|export| export.progress = None);
+                self.export.try_update(|export| export.progress = None);
                 self.after_renderer_returned();
                 return;
             };
@@ -1624,9 +1642,9 @@ impl RendererSession {
             let job = services.jobs.start(Job { name: export_job_name(ExportStage::Encoding), progress: None });
             let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<ExportProgress>();
             let written = output.clone();
-            // Dropping this task leaves the encode running, so closing the session stops it
-            // through `cancel`.
             let encode = long_job(move || {
+                // Nothing stops an export once it has started.
+                let cancel = AtomicBool::new(false);
                 let outcome = encode_track(&renderer, frames, &written, settings, &cancel, |step| {
                     let _ = progress_tx.unbounded_send(step);
                 });
@@ -1639,24 +1657,48 @@ impl RendererSession {
                         name: export_job_name(step.stage),
                         progress: Progress::new(step.done, step.total),
                     });
-                    self.export.update(|export| export.progress = Some(step));
+                    self.export.try_update(|export| export.progress = Some(step));
                 }
             };
             let ((renderer, outcome), ()) = futures::join!(encode, follow);
             drop(job);
 
             self.give_back(generation, renderer);
-            let failure = match outcome {
-                Ok(()) if target == ExportTarget::Clipboard => copy_file_to_clipboard(output).err(),
-                Ok(()) => None,
-                Err(err) => Some(err.to_string()),
+            let outcome = match outcome {
+                Ok(()) if target == ExportTarget::Clipboard => {
+                    copy_file_to_clipboard(output).map(|()| ExportDone::Copied)
+                }
+                Ok(()) => Ok(ExportDone::Saved(output)),
+                Err(err) => Err(err.to_string()),
             };
-            self.export.update(|export| {
+            let shown = self.export.try_update(|export| {
                 export.progress = None;
-                export.failure = failure;
+                export.failure = outcome.as_ref().err().cloned();
             });
+            // The window that asked, or the main window once the viewport has closed.
+            let messages = self.run.try_with_value(|run| run.messages).flatten().or(app_messages);
+            if let Some(messages) = messages {
+                match outcome {
+                    Ok(ExportDone::Saved(path)) => {
+                        messages.ok(t!("ui.replay.renderer.export_saved", path = path.display()).into_owned());
+                    }
+                    Ok(ExportDone::Copied) => {
+                        messages.ok(t!("ui.replay.renderer.export_copied").into_owned());
+                    }
+                    // An open viewport says why above its scrubber.
+                    Err(reason) if shown.is_none() => {
+                        messages.failed(t!("ui.replay.renderer.export_not_written", reason = reason).into_owned());
+                    }
+                    Err(_) => {}
+                }
+            }
             self.after_renderer_returned();
         });
+    }
+
+    /// Says on `messages` how this viewport's exports end, while it is shown in their window.
+    pub fn show_messages_on(self, messages: Option<Toasts>) {
+        self.with_run(|run| run.messages = messages);
     }
 
     /// Where a renderer's window was last, once that has been read.
@@ -1717,6 +1759,12 @@ struct BakeStart {
     cancel: Arc<AtomicBool>,
     generation: Generation,
     names: NameDisplay,
+}
+
+/// Where a finished export went.
+enum ExportDone {
+    Saved(PathBuf),
+    Copied,
 }
 
 /// A frame rasterised off the UI thread, and where its pieces landed on the canvas.

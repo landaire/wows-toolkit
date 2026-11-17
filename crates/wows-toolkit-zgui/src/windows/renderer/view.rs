@@ -161,6 +161,7 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     let root = NodeRef::new();
     // The window this view is in: a pop-out moves the session, and its messages go with the view.
     let toasts = Toasts::current();
+    session.show_messages_on(toasts);
 
     // The frame's placement follows the element's size and the frame's. Observed once: each call
     // makes another observer.
