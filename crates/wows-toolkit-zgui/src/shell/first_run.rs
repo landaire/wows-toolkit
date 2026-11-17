@@ -252,7 +252,89 @@ fn ask_language(shell: Shell, detected: LanguageCode) {
 
 #[cfg(test)]
 mod tests {
+    use landaire_ui::test_support::HeadlessOptions;
+    use landaire_ui::test_support::WindowSize;
+
     use super::*;
+    use crate::interaction_tests::open_shell;
+    use crate::interaction_tests::settle_in_real_time;
+    use crate::interaction_tests::shell;
+    use crate::services::saved_for_test;
+
+    /// What pressing one answer did.
+    struct Pressed {
+        saved: Vec<(&'static str, String)>,
+        mode_before: Option<DataSharingMode>,
+        mode_after: Option<DataSharingMode>,
+    }
+
+    /// Opens the shell, puts the question `ask` asks and presses `button`.
+    fn press(ask: fn(Shell), button: &str) -> Pressed {
+        let mut window = open_shell(HeadlessOptions::new(WindowSize { width: 1200.0, height: 800.0 }));
+        let shell = shell();
+        let settings = shell.services().settings;
+        settings.use_private_database_for_test();
+        let before = saved_for_test().len();
+        let mode_before = settings.read_untracked(|settings| settings.data_sharing);
+
+        ask(shell);
+        settle_in_real_time(&mut window);
+        let pressed = window.by_test_id(button).unwrap_or_else(|| panic!("the question offers {button}"));
+        window.click(pressed).expect("the button has a box");
+        settle_in_real_time(&mut window);
+
+        Pressed {
+            saved: saved_for_test().split_off(before),
+            mode_before,
+            mode_after: settings.read_untracked(|settings| settings.data_sharing),
+        }
+    }
+
+    /// Each answer to the first-run question saves the mode, the older bool the egui app reconciles
+    /// against, and both questions as asked.
+    #[test]
+    fn each_build_consent_answer_saves_its_mode_and_both_questions() {
+        let answers = [
+            ("first-run-consent-replays", DataSharingMode::Replays, "\"replays\"", "true"),
+            ("first-run-consent-builds", DataSharingMode::BuildData, "\"build_data\"", "true"),
+            ("first-run-consent-nothing", DataSharingMode::Off, "\"off\"", "false"),
+        ];
+        for (button, mode, mode_json, sends) in answers {
+            let pressed = press(ask_build_consent, button);
+
+            assert_eq!(
+                pressed.saved,
+                [
+                    (keys::DATA_SHARING_MODE, mode_json.to_owned()),
+                    (keys::SEND_REPLAY_DATA, sends.to_owned()),
+                    (keys::BUILD_CONSENT_SHOWN, "true".to_owned()),
+                    (keys::REPLAY_CONSENT_SHOWN, "true".to_owned()),
+                ],
+                "{button}"
+            );
+            assert_eq!(pressed.mode_after, Some(mode), "{button}");
+        }
+    }
+
+    /// Switching to whole replays saves the mode and its older bool. Keeping the setting saves only
+    /// that the question was asked.
+    #[test]
+    fn each_replay_migration_answer_saves_what_it_chose() {
+        let switched = press(ask_replay_migration, "first-run-migration-switch");
+        assert_eq!(
+            switched.saved,
+            [
+                (keys::DATA_SHARING_MODE, "\"replays\"".to_owned()),
+                (keys::SEND_REPLAY_DATA, "true".to_owned()),
+                (keys::REPLAY_CONSENT_SHOWN, "true".to_owned()),
+            ]
+        );
+        assert_eq!(switched.mode_after, Some(DataSharingMode::Replays));
+
+        let kept = press(ask_replay_migration, "first-run-migration-keep");
+        assert_eq!(kept.saved, [(keys::REPLAY_CONSENT_SHOWN, "true".to_owned())]);
+        assert_eq!(kept.mode_after, kept.mode_before, "the setting stands");
+    }
 
     #[test]
     fn the_questions_come_in_the_egui_apps_order() {

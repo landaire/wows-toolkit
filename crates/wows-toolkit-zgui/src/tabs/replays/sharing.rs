@@ -501,6 +501,52 @@ mod tests {
         assert!(matches!(outcome, Ok(Outcome::Skipped)), "{outcome:?}");
     }
 
+    /// A battle the ledger holds under another spelling of the install counts as contributed,
+    /// both for the palette's check and for a send: the install named through a link and by its
+    /// resolved path are one install. A battle under neither spelling does not.
+    #[cfg(unix)]
+    #[test]
+    fn a_battle_sent_under_another_spelling_of_the_install_is_not_sent_again() {
+        let tmp = tempfile::tempdir().expect("a temporary directory can be made");
+        let base = std::fs::canonicalize(tmp.path()).expect("the directory resolves");
+        let real = base.join("real/install/replays");
+        std::fs::create_dir_all(&real).expect("the install is made");
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).expect("the link is made");
+        let install = base.join("link/install");
+        let linked = install.join("replays");
+        for name in ["resolved.wowsreplay", "named.wowsreplay", "unsent.wowsreplay"] {
+            std::fs::write(real.join(name), name.as_bytes()).expect("the file is written");
+        }
+        let (mut window, contributor, pool) = sharing(Some(&install));
+        let recorded = [real.join("resolved.wowsreplay"), linked.join("named.wowsreplay")];
+        let insert = shell().services().on_tokio(async move {
+            for path in recorded {
+                wows_toolkit_config::queries::insert_sent_replay(&pool, &path.to_string_lossy()).await?;
+            }
+            Ok::<_, sqlx::Error>(())
+        });
+        finish(&mut window, insert).expect("the runtime is up").expect("the ledger is written");
+
+        let asking = contributor.clone();
+        let (resolved, named, unsent) =
+            (linked.join("resolved.wowsreplay"), real.join("named.wowsreplay"), linked.join("unsent.wowsreplay"));
+        let answers = finish(&mut window, async move {
+            [
+                asking.already_contributed(&resolved).await,
+                asking.already_contributed(&named).await,
+                asking.already_contributed(&unsent).await,
+            ]
+        });
+        assert_eq!(answers, [true, true, false], "resolved, named, unsent");
+
+        // A read would fail on these contents rather than find the ledger's row.
+        for path in [linked.join("resolved.wowsreplay"), real.join("named.wowsreplay")] {
+            let sending = contributor.clone();
+            let outcome = finish(&mut window, async move { sending.contribute(path, LedgerUse::Consult).await });
+            assert!(matches!(outcome, Ok(Outcome::AlreadySent)), "{outcome:?}");
+        }
+    }
+
     /// A directory holding a file per name, each with its name as its contents.
     fn dir_with(names: &[&str]) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("a temporary directory can be made");
