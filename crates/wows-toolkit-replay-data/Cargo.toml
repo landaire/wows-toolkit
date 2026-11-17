@@ -45,8 +45,9 @@ sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # A clipboard export renders to a temporary file that outlives the process.
 tempfile = "3"
 thiserror = { workspace = true }
-# The index pass runs its store writes on the runtime the front end owns.
-tokio = { version = "1", features = ["rt"] }
+# The index pass runs its store writes on the runtime the front end owns, and
+# announces each battle it records on a watch channel.
+tokio = { version = "1", features = ["rt", "sync"] }
 tracing = { workspace = true }
 walkdir = { workspace = true }
 # An install the launcher runs from an overlay is read through its file view.

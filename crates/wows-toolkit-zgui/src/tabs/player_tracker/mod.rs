@@ -71,6 +71,7 @@ use zgui_ui::prelude::Binding;
 use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::shell::replay_index::IndexChanges;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
@@ -298,6 +299,22 @@ pub fn PlayerTrackerTab() -> impl IntoView {
         }
     }));
 
+    // A battle recorded while the tab is open changes who was met; a pass's battles are read
+    // once, as it ends.
+    let index = shell.replay_index;
+    keep(RenderEffect::new(move |seen: Option<IndexChanges>| {
+        let changes = index.changes();
+        let Some(seen) = seen else { return changes };
+        if changes.is_newer_than(seen)
+            && started.get_untracked()
+            && let Some(pool) = services.settings.pool()
+        {
+            model.reread(pool);
+        }
+
+        changes.settled(seen)
+    }));
+
     let dock = tracker_dock(model);
     #[cfg(test)]
     BUILT_DOCK.with(|built| built.set(Some(dock)));
@@ -431,7 +448,10 @@ fn dock_toggles(dock: DockState, chrome: Option<TabChrome>) {
 }
 
 /// Keeps `effect` running until the calling scope is cleaned up.
-fn keep(effect: RenderEffect<()>) {
+fn keep<T>(effect: RenderEffect<T>)
+where
+    T: 'static,
+{
     on_cleanup_local(move || drop(effect));
 }
 

@@ -26,6 +26,7 @@ use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::VehicleRelation;
 use wows_toolkit_config::queries;
 use wows_toolkit_replay_data::live_match::ARENA_INFO_FILE;
+use wows_toolkit_replay_data::recording;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
@@ -54,11 +55,13 @@ use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::interaction_tests::shell;
 use crate::services::GameDataRequest;
+use crate::shell::replay_index::follow_recordings_in_this_test;
 use crate::tabs::player_tracker::built_dock;
 use crate::tabs::player_tracker::built_model;
 use crate::tabs::player_tracker::layout::DOCK_LAYOUT_KEY;
 use crate::tabs::player_tracker::layout::allow_persistence;
 use crate::tabs::player_tracker::live::take_stats_lookups;
+use crate::tabs::player_tracker::model::LoadState;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::roster::sniper_hover_text;
 
@@ -275,6 +278,38 @@ fn the_chip_hover_names_each_login_and_its_sightings() {
     ]);
     assert!(hover.contains("harvey635") && hover.contains("harvey_635"), "every login is named: {hover}");
     assert!(hover.contains("-1, 5") && hover.contains('3'), "with the minutes each was seen: {hover}");
+}
+
+/// A battle recorded while the tab is open reads the tables again, keeping the rows on screen
+/// meanwhile. One recorded during a pass waits for the pass to end.
+#[test]
+fn a_battle_recorded_while_the_tab_is_open_reads_the_tables_again() {
+    follow_recordings_in_this_test();
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let seeded = |model: TrackerModel| {
+        model.players.with_untracked(|players| {
+            let accounts: Vec<AccountId> = players.iter().map(|facet| facet.account_id).collect();
+            accounts == [AccountId(7), AccountId(8)]
+        })
+    };
+    let index = shell().replay_index;
+
+    tracker.seed_two_players();
+    index.set_folder_pass(true);
+    recording::announce_for_test();
+    settle_in_real_time(&mut tracker.window);
+    assert!(seeded(tracker.model), "a running pass holds the read back");
+
+    index.set_folder_pass(false);
+    tracker.window.advance(Duration::from_millis(16));
+    assert_eq!(tracker.model.load.get_untracked(), LoadState::Loaded, "the rows stay while the read runs");
+    settle_in_real_time(&mut tracker.window);
+    assert!(!seeded(tracker.model), "the pass ending reads the index again");
+
+    tracker.seed_two_players();
+    recording::announce_for_test();
+    settle_in_real_time(&mut tracker.window);
+    assert!(!seeded(tracker.model), "a battle recorded outside a pass reads the index again");
 }
 
 #[test]

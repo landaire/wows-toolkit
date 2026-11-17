@@ -34,6 +34,7 @@ use wows_toolkit_viewmodel::player_tracker::store as tracker_store;
 use crate::load::GameDataCache;
 use crate::load::IndexableBattle;
 use crate::load::parse_replay;
+use crate::recording;
 use crate::replay_folder::ReplayFolder;
 
 /// The extension the game records replays under.
@@ -314,6 +315,8 @@ async fn store_battle(
     if let Err(err) = tracker_store::record_battle(pool, &roster).await {
         tracing::warn!("replay index: {} was indexed but its players were not tracked: {err}", stored.path.display());
     }
+    // After the tracker write, so a view woken by it reads the players this battle met.
+    recording::note_recorded();
 
     Ok(())
 }

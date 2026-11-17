@@ -12,6 +12,8 @@ use std::sync::atomic::Ordering;
 use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_replay_data::recording;
+use wows_toolkit_replay_data::recording::RecordingRevision;
 use wows_toolkit_replay_data::replay_folder::ReplayFolder;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
@@ -45,6 +47,29 @@ use crate::shell::Shell;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IndexWrites(u64);
 
+/// A reading of [`ReplayIndexJobs::changes`], against which a view that read the index tells
+/// whether it has changed since.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexChanges {
+    writes: IndexWrites,
+    recorded: RecordingRevision,
+    /// Whether a pass is writing rows. Its battles count once, as it ends.
+    busy: bool,
+}
+
+impl IndexChanges {
+    /// Whether the index holds rows it did not at `seen`, the reading the view last read it at.
+    pub fn is_newer_than(self, seen: Self) -> bool {
+        !self.busy && (self.writes != seen.writes || self.recorded != seen.recorded)
+    }
+
+    /// The reading to remember in place of `seen`. A pass's battles leave `seen` standing, so
+    /// they still differ from it when the pass ends.
+    pub fn settled(self, seen: Self) -> Self {
+        if self.busy { seen } else { self }
+    }
+}
+
 /// The running build, how far it has got, and what the last one said.
 #[derive(Clone, Copy)]
 pub struct ReplayIndexJobs {
@@ -61,10 +86,27 @@ pub struct ReplayIndexJobs {
     wrote_unrated: StoredValue<bool>,
     /// Passes of this build or the replays tab's that wrote rows.
     writes: RwSignal<IndexWrites, LocalStorage>,
+    /// The battles written to the index by any path, one at a time.
+    recorded: RwSignal<RecordingRevision, LocalStorage>,
 }
 
 impl ReplayIndexJobs {
+    /// Called from a component's body: the task following the index's recordings lives as long as
+    /// the calling scope.
     pub fn new() -> Self {
+        let mut announcements = recording::subscribe();
+        let recorded = RwSignal::new_local(*announcements.borrow_and_update());
+        if follows_recordings() {
+            spawn_local(async move {
+                while announcements.changed().await.is_ok() {
+                    let revision = *announcements.borrow_and_update();
+                    if recorded.try_set(revision).is_some() {
+                        break;
+                    }
+                }
+            });
+        }
+
         Self {
             progress: RwSignal::new_local(None),
             outcome: RwSignal::new_local(None),
@@ -72,6 +114,7 @@ impl ReplayIndexJobs {
             folder_pass: RwSignal::new_local(false),
             wrote_unrated: StoredValue::new(false),
             writes: RwSignal::new_local(IndexWrites::default()),
+            recorded,
         }
     }
 
@@ -117,8 +160,19 @@ impl ReplayIndexJobs {
     }
 
     /// The passes that wrote rows so far, subscribing to the next.
+    #[cfg(test)]
     pub fn writes(self) -> IndexWrites {
         self.writes.get()
+    }
+
+    /// What the index has learned so far, subscribing to the next pass that wrote rows, to each
+    /// battle recorded, and to a pass starting or ending.
+    pub fn changes(self) -> IndexChanges {
+        IndexChanges {
+            writes: self.writes.get(),
+            recorded: self.recorded.get(),
+            busy: self.progress.with(Option::is_some) || self.folder_pass.get(),
+        }
     }
 
     /// Notes a finished pass that wrote `indexed` replays' rows. `try_`, since the shell may be
@@ -282,6 +336,30 @@ impl Shell {
             }
         });
     }
+}
+
+/// Whether a shell built on this thread follows the battles the index records.
+#[cfg(not(test))]
+fn follows_recordings() -> bool {
+    true
+}
+
+// The announcements are process-wide, and a test's index writes would otherwise reload the views
+// another test seeded.
+#[cfg(test)]
+thread_local! {
+    static FOLLOWS_RECORDINGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn follows_recordings() -> bool {
+    FOLLOWS_RECORDINGS.with(std::cell::Cell::get)
+}
+
+/// Has the shells this test thread builds follow the battles the index records.
+#[cfg(test)]
+pub fn follow_recordings_in_this_test() {
+    FOLLOWS_RECORDINGS.with(|follows| follows.set(true));
 }
 
 /// The expected-values table each indexed row's owner rating is computed from, read from the

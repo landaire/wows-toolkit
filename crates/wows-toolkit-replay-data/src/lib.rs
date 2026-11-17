@@ -30,6 +30,7 @@ pub mod loader;
 pub mod minimap_preview;
 pub mod model;
 pub mod paths;
+pub mod recording;
 pub mod render_defaults;
 pub mod replay_dir;
 pub mod replay_folder;

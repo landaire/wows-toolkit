@@ -24,6 +24,7 @@ use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::rows::VehicleRelation;
+use wows_toolkit_replay_data::recording;
 use wows_toolkit_viewmodel::query_bar::seed;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
@@ -40,6 +41,7 @@ use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::interaction_tests::shell;
+use crate::shell::replay_index::follow_recordings_in_this_test;
 use crate::tabs::search::model::Search;
 use crate::tabs::search::model::Status;
 
@@ -186,6 +188,36 @@ fn a_pass_that_wrote_rows_runs_the_query_again() {
     settle_in_real_time(&mut window);
     assert_eq!(search.status.get_untracked(), Status::Done);
     assert_ne!(search.results.get_untracked().generation, first, "the query ran again");
+}
+
+/// A battle recorded outside a pass, as one landing in a watched folder is, runs the query again.
+/// One recorded while a pass runs waits for the pass to end.
+#[test]
+fn a_battle_recorded_outside_a_pass_runs_the_query_again() {
+    follow_recordings_in_this_test();
+    let mut window = open_search(HeadlessOptions::new(REVIEW_SIZE));
+    let search = built();
+    search.set_query_text("map:ocean".to_owned());
+    settle_in_real_time(&mut window);
+    assert_eq!(search.status.get_untracked(), Status::Done);
+    let first = search.results.get_untracked().generation;
+
+    recording::announce_for_test();
+    settle_in_real_time(&mut window);
+    assert_eq!(search.status.get_untracked(), Status::Done);
+    let landed = search.results.get_untracked().generation;
+    assert_ne!(landed, first, "the query ran again");
+
+    let index = shell().replay_index;
+    index.set_folder_pass(true);
+    recording::announce_for_test();
+    settle_in_real_time(&mut window);
+    assert_eq!(search.results.get_untracked().generation, landed, "a running pass holds the query back");
+
+    index.set_folder_pass(false);
+    settle_in_real_time(&mut window);
+    assert_eq!(search.status.get_untracked(), Status::Done);
+    assert_ne!(search.results.get_untracked().generation, landed, "the pass ending runs it");
 }
 
 /// A count of matches without a game mode asked for while another is being taken is taken again

@@ -94,7 +94,7 @@ use crate::services::SettingsState;
 use crate::shell::ReplayRequest;
 use crate::shell::Shell;
 use crate::shell::palette::TabRequest;
-use crate::shell::replay_index::IndexWrites;
+use crate::shell::replay_index::IndexChanges;
 use crate::shell::tabs::AppTab;
 use crate::tabs::replays::browser::files::copy_replay_files;
 use crate::tabs::search::bar::QueryBarProps;
@@ -241,15 +241,16 @@ pub fn SearchTab() -> impl IntoView {
             }
         });
     });
-    // A pass that wrote rows leaves the results on screen stale.
+    // A pass that wrote rows, or a battle that landed, leaves the results on screen stale.
     let index = shell.replay_index;
-    let reindexed = RenderEffect::new(move |seen: Option<IndexWrites>| {
-        let writes = index.writes();
-        if seen.is_some_and(|seen| seen != writes) {
+    let reindexed = RenderEffect::new(move |seen: Option<IndexChanges>| {
+        let changes = index.changes();
+        let Some(seen) = seen else { return changes };
+        if changes.is_newer_than(seen) {
             search.index_written();
         }
 
-        writes
+        changes.settled(seen)
     });
     let requests = RenderEffect::new(move |_| {
         for request in shell.palette.take_requests(AppTab::Search) {

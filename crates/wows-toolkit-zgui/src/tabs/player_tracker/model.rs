@@ -69,6 +69,14 @@ pub enum LoadState {
     Loaded,
 }
 
+/// Whether a read of the index shows the tables as loading, or keeps their rows on screen until
+/// the answer lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reading {
+    Shown,
+    Behind,
+}
+
 /// Bumped per index query, so a slower earlier answer cannot overwrite a later one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Generation(u64);
@@ -284,11 +292,13 @@ impl TrackerModel {
 
     /// Reads the notes and view modes the front ends share. The first read of the session also
     /// marks the index's division encounters, which a tracker recorded before they were marked
-    /// lacks.
-    fn load_tracked(self, pool: SqlitePool) {
+    /// lacks. A read that a later `generation` overtook is dropped, as it may predate a battle
+    /// the later one saw.
+    fn load_tracked(self, pool: SqlitePool, generation: Generation) {
         let services = self.services;
         let sync_divisions = !self.division_synced.get_value();
         self.division_synced.set_value(true);
+        let again = pool.clone();
         self.spawn(async move {
             let read = services
                 .on_tokio(async move {
@@ -304,6 +314,15 @@ impl TrackerModel {
                     Ok::<_, sqlx::Error>((players, modes))
                 })
                 .await;
+            let current = self.generation.get_value();
+            if current != generation {
+                // The read that overtook this one skipped the division sync this one ran, and may
+                // have read the rows before it finished.
+                if sync_divisions {
+                    self.load_tracked(again, current);
+                }
+                return;
+            }
             match read {
                 Ok(Ok((players, modes))) => {
                     self.tracked.set(players);
@@ -329,10 +348,28 @@ impl TrackerModel {
 
     /// Reads the players met in the period, and the notes, again.
     pub fn refresh(self, pool: SqlitePool) {
+        self.read_index(pool, Reading::Shown);
+    }
+
+    /// Reads the tables again with their rows left on screen, for a change the reader did not ask
+    /// for, such as a battle recorded.
+    pub fn reread(self, pool: SqlitePool) {
+        self.read_index(pool, Reading::Behind);
+    }
+
+    fn read_index(self, pool: SqlitePool, reading: Reading) {
         let generation = self.next_generation();
-        self.load.set(LoadState::Loading);
-        self.clan_load.set(LoadState::Idle);
-        self.load_tracked(pool.clone());
+        // A clans table with rows reads its inputs again at once; one not yet shown waits until
+        // it is.
+        let clans_loaded = self.clan_load.with_untracked(|state| *state == LoadState::Loaded);
+        match reading {
+            Reading::Behind if clans_loaded => self.read_clan_inputs(pool.clone(), generation, reading),
+            Reading::Behind | Reading::Shown => self.clan_load.set(LoadState::Idle),
+        }
+        if reading == Reading::Shown {
+            self.load.set(LoadState::Loading);
+        }
+        self.load_tracked(pool.clone(), generation);
 
         let filter = self.period.get_untracked().match_filter(Timestamp::now());
         let services = self.services;
@@ -392,8 +429,13 @@ impl TrackerModel {
             return;
         }
         let Some(pool) = self.pool() else { return };
-        let generation = self.generation.get_value();
-        self.clan_load.set(LoadState::Loading);
+        self.read_clan_inputs(pool, self.generation.get_value(), Reading::Shown);
+    }
+
+    fn read_clan_inputs(self, pool: SqlitePool, generation: Generation, reading: Reading) {
+        if reading == Reading::Shown {
+            self.clan_load.set(LoadState::Loading);
+        }
         let services = self.services;
         self.spawn(async move {
             let found = services
