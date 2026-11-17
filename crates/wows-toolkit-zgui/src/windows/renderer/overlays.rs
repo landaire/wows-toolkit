@@ -94,6 +94,23 @@ pub fn AnnotationOverlay(session: RendererSession) -> impl IntoView {
     }
 }
 
+/// The peers' pointers and pings alone over a frame, for a view with no drawing tools of its own.
+#[component]
+pub(super) fn PeerOverlay(
+    #[prop(into)] map: Signal<MapView, LocalStorage>,
+    #[prop(into)] origin: Signal<(f32, f32), LocalStorage>,
+    #[prop(into)] link: Signal<CollabLink, LocalStorage>,
+    #[prop(into)] tick: Signal<u64, LocalStorage>,
+) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
+
+    view! {
+        box(class = "wt-renderer-annotations") {
+            PeerMarks(map = map, origin = origin, link = link, tick = tick)
+        }
+    }
+}
+
 /// The handle a single picked shape is turned by: a control rather than something drawn on the
 /// map, so it keeps its size at every zoom.
 #[component]

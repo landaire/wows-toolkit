@@ -1272,6 +1272,13 @@ impl CollabLink {
         state.lock().pings.retain(|ping| ping.time.elapsed() < life);
     }
 
+    /// Which version of the replay's shapes the session holds, so a viewport that only shows them
+    /// can tell that nothing has changed without copying them.
+    pub fn annotations_version(&self) -> SyncVersion {
+        let Some(state) = self.state.as_ref().filter(|_| self.is_active()) else { return SyncVersion::NONE };
+        SyncVersion(state.lock().annotation_sync_version)
+    }
+
     /// Which version of each display setting the session holds, so a viewport can tell that
     /// nothing has changed without copying the settings.
     pub fn display_versions(&self) -> DisplayVersions {

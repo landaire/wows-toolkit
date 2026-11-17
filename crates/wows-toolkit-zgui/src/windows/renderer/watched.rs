@@ -9,6 +9,7 @@
 //! that end has reached rather than offering a transport of its own.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::channel::mpsc::UnboundedReceiver;
 use landaire_ui::LoadingPace;
@@ -31,6 +32,9 @@ use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::minimap_preview::layout_for;
 use wows_toolkit_replay_data::minimap_preview::render_battle;
 use wows_toolkit_replay_data::minimap_preview::render_battle_art;
+use wows_toolkit_replay_data::replay_render::collab::COLLAB_TICK;
+use wows_toolkit_replay_data::replay_render::collab::CursorReport;
+use wows_toolkit_replay_data::replay_render::collab::PING_SECONDS;
 use wows_toolkit_replay_data::replay_render::collab::adopt_range_overrides;
 use wows_toolkit_replay_data::replay_render::collab::adopt_trail_overrides;
 use wows_toolkit_replay_data::replay_render::collab::ranges_by_player;
@@ -50,12 +54,15 @@ use wows_toolkit_services::collab::DisplayVersions;
 use wows_toolkit_services::collab::LatestFrame;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedWindow;
+use wows_toolkit_services::collab::SyncVersion;
+use wt_collab_client::geometry::annotation_commands;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
@@ -76,6 +83,7 @@ use zgui::view::IntoView;
 use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
+use zgui::view::set_interval;
 use zgui::vocab::PointerButton;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
@@ -92,6 +100,7 @@ use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::windows::renderer::options;
 use crate::windows::renderer::options::LayerListProps;
+use crate::windows::renderer::overlays::PeerOverlayProps;
 use crate::windows::renderer::session::Layers;
 use crate::windows::renderer::view::element_bounds;
 use crate::windows::renderer::view::window_point;
@@ -160,6 +169,8 @@ pub struct WatchSession {
     pub map: RwSignal<MapView, LocalStorage>,
     /// The size of the frame on screen, `None` until the first one lands.
     pub frame_size: RwSignal<Option<FrameSize>, LocalStorage>,
+    /// Moves on with each look at the session, which is what moves the peers' pointers and pings.
+    pub marks_frame: RwSignal<u64, LocalStorage>,
     run: StoredValue<WatchRun, LocalStorage>,
 }
 
@@ -186,6 +197,10 @@ struct WatchRun {
     range_overrides: Vec<(EntityId, ShipConfigFilter)>,
     /// The versions of the session's display settings this window has taken up.
     display_seen: DisplayVersions,
+    /// The version of the session's shapes the last raster drew.
+    shapes_seen: SyncVersion,
+    /// Where this end's pointer was last said to be.
+    cursor: CursorReport,
     sink: FrameSink,
     /// One raster at a time: frames arrive faster than a map-sized image is drawn on a fast
     /// playback. A frame that arrives during one is drawn when it finishes.
@@ -222,6 +237,7 @@ impl WatchSession {
             layers: RwSignal::new_local(Layers { options: playback_options_hidden(), show_dead_ships: true }),
             map: RwSignal::new_local(MapView::new()),
             frame_size: RwSignal::new_local(None),
+            marks_frame: RwSignal::new_local(0),
             run: StoredValue::new_local(WatchRun {
                 replay_id,
                 space: shared.map_name,
@@ -233,6 +249,8 @@ impl WatchSession {
                 choices: ShipChoices::new(),
                 range_overrides: Vec::new(),
                 display_seen: DisplayVersions::NONE,
+                shapes_seen: SyncVersion::NONE,
+                cursor: CursorReport::new(),
                 sink: FrameSink::new(),
                 rasterising: false,
                 stale: false,
@@ -246,15 +264,36 @@ impl WatchSession {
         self.run.with_value(|run| run.sink.clone())
     }
 
+    /// This end of the session, which the peers' pointers and pings are read from.
+    pub fn link(self) -> CollabLink {
+        self.run.with_value(|run| run.link.clone())
+    }
+
     /// The session's nudges, for the view to follow. `None` once taken.
     pub fn take_wakes(self) -> Option<UnboundedReceiver<()>> {
         self.run.try_update_value(|run| run.wakes.take()).flatten()
     }
 
-    /// Takes up what the session has changed: the host's newest frame and its display settings.
+    /// Takes up what the session has changed: the host's newest frame, its display settings and
+    /// the shapes drawn on the map.
     pub fn follow_session(self) {
         self.follow_session_display();
+        self.follow_shapes();
         self.take_frames();
+    }
+
+    /// Draws again when the session's shapes have changed.
+    fn follow_shapes(self) {
+        let changed = self.run.try_update_value(|run| {
+            let version = run.link.annotations_version();
+            let changed = version != run.shapes_seen;
+            run.shapes_seen = version;
+
+            changed
+        });
+        if changed == Some(true) {
+            self.redraw();
+        }
     }
 
     /// Takes the newest frame the host has sent. The ones before it are moments the host has
@@ -277,8 +316,8 @@ impl WatchSession {
         self.run.try_with_value(|run| run.link.stop_watching(run.replay_id));
     }
 
-    /// The commands the next raster draws: the last frame, less what the layers leave out. `None`
-    /// until a frame has arrived.
+    /// The commands the next raster draws: the last frame, less what the layers leave out, with
+    /// what the session has drawn on the map over it. `None` until a frame has arrived.
     pub fn shown(self) -> Option<Vec<DrawCommand>> {
         self.run
             .try_with_value(|run| {
@@ -286,9 +325,11 @@ impl WatchSession {
                 let mut choices = run.choices.clone();
                 let names = ship_names(std::slice::from_ref(latest));
                 choices.replace_ranges(ranges_by_player(&run.range_overrides, &names));
-                let shown = self.layers.with_untracked(|layers| {
+                let mut shown = self.layers.with_untracked(|layers| {
                     shown_commands(latest.iter().cloned(), &layers.options, layers.show_dead_ships, &choices)
                 });
+                // Not filtered, and over the battle, as the renderer draws them.
+                shown.extend(run.link.annotations().iter().flat_map(annotation_commands));
                 Some(shown)
             })
             .flatten()
@@ -389,6 +430,8 @@ impl WatchSession {
 
     /// The pointer moved. `held` is whether the primary button is down.
     pub fn pointer_move(self, position: WindowPoint, held: bool) {
+        let at = self.map.with_untracked(|map| map.map_point(position, DEFAULT_MAP_ORIGIN)).map(|(x, y)| [x, y]);
+        self.run.update_value(|run| run.cursor.report(&run.link, at));
         if self.change_map(|map| map.pan_to(position, held)) {
             self.redraw();
         }
@@ -400,6 +443,18 @@ impl WatchSession {
             map.end_pan();
             panning
         });
+    }
+
+    /// The pointer left the map: a drag ends, and the session is told this end's pointer is gone.
+    pub fn pointer_left(self) {
+        self.pointer_up();
+        self.run.update_value(|run| run.cursor.report(&run.link, None));
+    }
+
+    /// Drops a ping where the pointer is, for everyone in the session.
+    pub fn ping(self, position: WindowPoint) {
+        let Some((x, y)) = self.map.with_untracked(|map| map.map_point(position, DEFAULT_MAP_ORIGIN)) else { return };
+        self.run.with_value(|run| run.link.send_ping([x, y]));
     }
 
     /// Puts the whole map back, as a double click does in the renderer.
@@ -525,7 +580,20 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
             }
         });
     }
-    on_cleanup_local(move || watch.stop());
+    // The peers' pointers fade and their pings ripple without the session saying so, so a running
+    // session is looked at on the renderer's tick as well as on its nudges.
+    let link = watch.link();
+    let ticking = link.is_active().then(|| {
+        set_interval(COLLAB_TICK, move || {
+            watch.link().drop_stale_pings(Duration::from_secs_f32(PING_SECONDS));
+            watch.follow_session();
+            watch.marks_frame.update(|frame| *frame = frame.wrapping_add(1));
+        })
+    });
+    on_cleanup_local(move || {
+        drop(ticking);
+        watch.stop();
+    });
     let sink = watch.sink();
     let body = NodeRef::new();
     // The frame's placement follows the element's size and the frame's. Observed once: each call
@@ -551,9 +619,15 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                 attr:data-zoomed = zoomed,
                 on:pointer_down = move |ev| {
                     place(watch, body);
-                    if ev.button == Some(PointerButton::Primary) {
-                        pressed.set_value(true);
-                        watch.pointer_down(window_point(ev.position));
+                    let position = window_point(ev.position);
+                    match ev.button {
+                        Some(PointerButton::Primary) => {
+                            pressed.set_value(true);
+                            watch.pointer_down(position);
+                        }
+                        // The renderer's ping button, so a watcher points things out the same way.
+                        Some(PointerButton::Middle) => watch.ping(position),
+                        _ => {}
                     }
                 },
                 on:pointer_move = move |ev| watch.pointer_move(window_point(ev.position), pressed.get_value()),
@@ -569,7 +643,7 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                 },
                 on:pointer_leave = move |_| {
                     pressed.set_value(false);
-                    watch.pointer_up();
+                    watch.pointer_left();
                 },
                 on:double_click = move |_| watch.reset_view(),
                 on:wheel = move |ev| {
@@ -591,6 +665,12 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                         attr:data-testid = "watched-playback-waiting"
                     )
                 }
+                PeerOverlay(
+                    map = watch.map,
+                    origin = Signal::stored_local(DEFAULT_MAP_ORIGIN),
+                    link = Signal::stored_local(link),
+                    tick = watch.marks_frame
+                )
             }
         }
     }

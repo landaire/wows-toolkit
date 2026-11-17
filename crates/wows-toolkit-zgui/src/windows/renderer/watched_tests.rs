@@ -21,10 +21,14 @@ use wows_toolkit_replay_data::replay_render::view::FrameSize;
 use wows_toolkit_replay_data::replay_render::view::MapView;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::SharedWindow;
+use wows_toolkit_services::collab::push_ping_aged;
+use wt_collab_client::AnnotationSyncState;
 use wt_collab_client::PlaybackFrame;
+use wt_collab_client::UserCursor;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::DisplayOptionField;
+use wt_collab_client::types::Annotation;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -230,4 +234,81 @@ fn the_watched_map_zooms_pans_and_resets() {
     window.double_click(viewport).expect("the map takes a double click");
     take_in(&mut window);
     assert!(watch.map.with_untracked(|map| map.view().is_whole_map()), "a double click shows the whole map");
+}
+
+/// The peers' pointers and pings are drawn over the watched battle and a pointer that has stood
+/// still is taken down, as in the renderer; the watcher's own pointer and pings reach the session.
+#[test]
+fn peers_are_drawn_over_the_watched_battle_and_the_watcher_is_heard() {
+    let state = Arc::new(Default::default());
+    let (link, sent) = CollabLink::for_test(Arc::clone(&state));
+    state.lock().cursors.push(UserCursor {
+        user_id: 9,
+        name: "Peer".to_owned(),
+        color: [0, 200, 255],
+        pos: Some([400.0, 400.0]),
+        last_update: std::time::Instant::now(),
+    });
+    let (mut window, watch) = open(link);
+    watch.frame_size.set(Some(FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }));
+    // After the window opens: a ripple lasts a second of real time.
+    push_ping_aged(&state, [300.0, 300.0], Duration::ZERO);
+    take_in(&mut window);
+
+    assert!(window.by_test_id("replay-renderer-peer-cursor-9").is_some(), "the peer's pointer is drawn");
+    assert!(window.by_test_id("replay-renderer-peer-ping-7").is_some(), "and its ping");
+    state.lock().cursors[0].last_update = std::time::Instant::now() - Duration::from_secs(6);
+    take_in(&mut window);
+    assert!(window.by_test_id("replay-renderer-peer-cursor-9").is_none(), "a pointer still for six seconds is gone");
+
+    let viewport = window.by_test_id("watched-playback-viewport").expect("the map is drawn");
+    window.hover(viewport).expect("the map has a box");
+    window.middle_click(viewport).expect("the map has a box");
+    take_in(&mut window);
+    let said: Vec<LocalEvent> = sent.try_iter().collect();
+    assert!(
+        said.iter().any(|event| matches!(event, LocalEvent::CursorPosition(Some(_)))),
+        "the watcher's pointer is told to the session"
+    );
+    assert!(said.iter().any(|event| matches!(event, LocalEvent::Ping(_))), "and so is its ping");
+}
+
+/// What the session has drawn on the map is drawn over the watched battle.
+#[test]
+fn the_sessions_shapes_are_drawn_over_the_watched_battle() {
+    let state = Arc::new(Default::default());
+    let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+    let (mut window, watch) = open(link);
+    state.lock().push_frame(REPLAY, frame(vec![torpedo()]));
+    take_in(&mut window);
+    let shapes = |watch: WatchSession| {
+        watch
+            .shown()
+            .expect("a frame has arrived")
+            .into_iter()
+            .filter(|command| matches!(command, DrawCommand::Annotation { .. }))
+            .count()
+    };
+    assert_eq!(shapes(watch), 0, "nothing is drawn on the map yet");
+
+    {
+        let mut held = state.lock();
+        held.current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![Annotation::Circle {
+                center: [300.0, 300.0],
+                radius: 40.0,
+                color: [255, 0, 0, 255],
+                width: 3.0,
+                filled: false,
+            }],
+            owners: vec![1],
+            ids: vec![5],
+        });
+        held.annotation_sync_version = 1;
+        // What the peer task does as the host's shape lands.
+        held.repaint_viewport(REPLAY);
+    }
+    take_in(&mut window);
+
+    assert_eq!(shapes(watch), 1, "the host's circle is drawn over the battle");
 }
