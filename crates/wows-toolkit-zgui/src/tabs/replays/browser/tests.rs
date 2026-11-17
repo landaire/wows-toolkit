@@ -882,7 +882,7 @@ fn sent() -> Vec<super::ReplayBrowserEvent> {
 }
 
 /// Opens `target`'s menu and picks the item labelled `label`.
-fn pick(window: &mut HeadlessWindow, target: landaire_ui::test_support::Element, label: &str) {
+pub(super) fn pick(window: &mut HeadlessWindow, target: landaire_ui::test_support::Element, label: &str) {
     window.right_click(target).expect("the row has a box");
     window.advance(Duration::from_millis(300));
     let item = window.by_role_and_label(Role::MenuItem, label).unwrap_or_else(|| panic!("the menu offers {label}"));

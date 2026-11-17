@@ -306,6 +306,8 @@ pub enum TabRequest {
     ViewArmor { param_index: ShipParamIndex, display_name: String },
     /// Shows generated games in the Stats tab, or the recorded ones again.
     ShowStats(StatsSource),
+    /// Shows the recorded session in the Stats tab with its Overview panel in front.
+    ShowSessionOverview,
     /// Shows a file of the packages in the Resource Unpacker, by its VFS path.
     RevealInUnpacker { path: String },
 }
@@ -323,7 +325,7 @@ impl TabRequest {
         match self {
             Self::Search(_) => AppTab::Search,
             Self::ViewArmor { .. } => AppTab::ArmorViewer,
-            Self::ShowStats(_) => AppTab::Stats,
+            Self::ShowStats(_) | Self::ShowSessionOverview => AppTab::Stats,
             Self::RevealInUnpacker { .. } => AppTab::Unpacker,
         }
     }

@@ -27,6 +27,7 @@ use super::tests::folder_id;
 use super::tests::game_data_ready;
 use super::tests::land;
 use super::tests::open;
+use super::tests::pick;
 use super::tests::replay_dir;
 use super::tests::row;
 use super::tests::workspace;
@@ -36,6 +37,8 @@ use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::services::saved_for_test;
 use crate::shell::ReplayRequest;
+use crate::shell::tabs::AppTab;
+use crate::shell::tabs::TabKey;
 use crate::tabs::replays::session_stats::simulated;
 
 /// When each fixture's battle started, as its header and file name give it.
@@ -261,6 +264,40 @@ fn a_replay_opened_from_the_install_in_a_session_since_the_app_opened_is_not_sav
         [STARTED[1]],
         "only the battle that started after the app opened is in the session since then"
     );
+}
+
+fn dock_tab_selected(window: &mut HeadlessWindow, label: &str) -> Option<bool> {
+    let tab = window.by_role_and_label(Role::Tab, label)?;
+    window.a11y(tab).and_then(|state| state.selected)
+}
+
+#[test]
+fn set_as_session_stats_brings_the_stats_tab_forward_on_its_overview() {
+    let (mut window, control, _replays, _dir) = open_install(open(), 1);
+    let shell = control.shell();
+    shell.services().session.restart_for_test(opened(), vec![game(STARTED[2])]);
+    let overview = t!("ui.stats.overview").into_owned();
+    let ships = t!("ui.stats.ships").into_owned();
+
+    shell.select(TabKey::App(AppTab::Stats));
+    settle_in_real_time(&mut window);
+    let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
+    window.click(tab).expect("the Ships tab is clicked");
+    window.advance(Duration::from_millis(300));
+    assert_eq!(dock_tab_selected(&mut window, &ships), Some(true), "the Ships panel is in front");
+
+    shell.select(TabKey::App(AppTab::ReplayInspector));
+    settle_in_real_time(&mut window);
+    let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
+    pick(&mut window, header, &t!("ui.replay.context.set_session_stats_one"));
+    let yes = window.by_role_and_label(Role::Button, &t!("ui.buttons.yes")).expect("Set asks first");
+    window.click(yes).expect("the confirmation has a box");
+    settle_in_real_time(&mut window);
+
+    assert_eq!(shell.selected_untracked(), Some(TabKey::App(AppTab::Stats)), "the Stats tab comes forward");
+    assert_eq!(dock_tab_selected(&mut window, &overview), Some(true), "on its Overview");
+    assert_eq!(dock_tab_selected(&mut window, &ships), Some(false));
+    assert_eq!(session_times(control, SessionScope::Manual), [STARTED[0]], "the set replay is the session");
 }
 
 #[test]

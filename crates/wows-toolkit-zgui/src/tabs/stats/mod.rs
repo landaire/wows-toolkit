@@ -256,14 +256,19 @@ pub struct SessionStats {
     pub filters: RwSignal<StatsFilters>,
     /// Whether the reader changed a filter, which then wins over the saved ones a late load reads.
     pub filters_edited: StoredValue<bool>,
+    /// Set while the Overview panel is to come forward, as when the session is set from replays.
+    pub overview_asked: RwSignal<bool>,
 }
 
 /// The Stats tab over the session, whose saved filters are read once the config database is open.
 #[component]
 pub fn StatsTab() -> impl IntoView {
     let services = Services::current();
-    let session =
-        SessionStats { filters: RwSignal::new(StatsFilters::default()), filters_edited: StoredValue::new(false) };
+    let session = SessionStats {
+        filters: RwSignal::new(StatsFilters::default()),
+        filters_edited: StoredValue::new(false),
+        overview_asked: RwSignal::new(false),
+    };
     let personal_rating = RwSignal::new(None::<Arc<PersonalRatingData>>);
     let load_started = StoredValue::new(false);
     let saved_filters = RwSignal::new(None::<StatsFilters>);
@@ -322,11 +327,18 @@ pub fn StatsTab() -> impl IntoView {
     if let Some(shell) = use_local_context::<Shell>() {
         effect(move |_| {
             for request in shell.palette.take_requests(AppTab::Stats) {
-                let TabRequest::ShowStats(source) = request else { continue };
-                sample.set(match source {
-                    StatsSource::Sample => Some(sample_games(services, personal_rating.get_untracked().as_deref())),
-                    StatsSource::Recorded => None,
-                });
+                match request {
+                    TabRequest::ShowStats(StatsSource::Sample) => {
+                        sample.set(Some(sample_games(services, personal_rating.get_untracked().as_deref())));
+                    }
+                    TabRequest::ShowStats(StatsSource::Recorded) => sample.set(None),
+                    TabRequest::ShowSessionOverview => {
+                        sample.set(None);
+                        session.overview_asked.set(true);
+                    }
+                    // Taken by the other tabs.
+                    TabRequest::Search(_) | TabRequest::ViewArmor { .. } | TabRequest::RevealInUnpacker { .. } => {}
+                }
             }
         });
     }
@@ -504,6 +516,7 @@ pub fn StatsBody(
         saved_layout: StoredValue::new(None),
         failed_saves: StoredValue::new(BTreeSet::new()),
         error: charts_error,
+        overview_owed: StoredValue::new(false),
     };
 
     // A chart whose tab was closed is let go, and is not reopened by the next load.
@@ -549,6 +562,19 @@ pub fn StatsBody(
             save_chart_row(services, persistence, ChartRow::Layout, &layout);
         });
         load_charts(services, dock, charts, slot_owner, next_chart_id, persistence, open_chart);
+        if let Some(session) = session {
+            effect(move |_| {
+                if !session.overview_asked.get() {
+                    return;
+                }
+                session.overview_asked.set(false);
+                show_overview(dock);
+                // The saved layout, once read, would put its own panel in front.
+                if !persistence.enabled.get_value() {
+                    persistence.overview_owed.set_value(true);
+                }
+            });
+        }
     }
 
     publish_toggles(dock);
@@ -972,6 +998,8 @@ struct ChartPersistence {
     failed_saves: StoredValue<BTreeSet<ChartRow>>,
     /// Why the saved charts could not be read or written, shown in the filter bar.
     error: RwSignal<Option<ChartsError>>,
+    /// Whether the Overview was asked to come forward before the saved layout was read.
+    overview_owed: StoredValue<bool>,
 }
 
 /// Reopens the charts and dock arrangement the session was left with.
@@ -1016,6 +1044,10 @@ fn load_charts(
             }
             persistence.restoring.set_value(true);
             restore_charts(dock, charts, slot_owner, next_chart_id, saved, layout, open_chart);
+            if persistence.overview_owed.get_value() {
+                persistence.overview_owed.set_value(false);
+                show_overview(dock);
+            }
             persistence.saved_layout.set_value(Some(dock.dump_untracked()));
             persistence.restoring.set_value(false);
             persistence.enabled.set_value(true);
@@ -1026,6 +1058,12 @@ fn load_charts(
 fn fail_load(charts_error: RwSignal<Option<ChartsError>>, reason: String) {
     tracing::warn!("stats: {reason}");
     charts_error.set(Some(ChartsError { reason, on_save: false }));
+}
+
+fn show_overview(dock: DockState) {
+    if let Err(err) = dock.activate(&PanelId::new(OVERVIEW_ID)) {
+        tracing::warn!("stats: the Overview panel was not brought forward: {err}");
+    }
 }
 
 /// Puts `saved` charts in `layout` back. Without a layout the first saved chart replaces the

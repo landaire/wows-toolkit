@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use wows_toolkit_replay_data::directory_stats::GameRead;
 use wows_toolkit_replay_data::directory_stats::read_game;
 use wows_toolkit_replay_data::load::GameDataCache;
-use wows_toolkit_replay_data::load::parse_replay;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use zgui::reactive::LocalStorage;
@@ -24,12 +23,14 @@ use zgui::task::spawn_local;
 use crate::long_job::long_job;
 use crate::services::GameDataState;
 use crate::services::Session;
+use crate::shell::palette::TabRequest;
 use crate::tabs::replays::browser::BrowserControl;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
 /// Records `paths` in the saved session, each read as opening it would: a session row's figures
 /// come from the battle results, which are only in the file. A replay that will not read is
-/// skipped. `replace` forgets what is recorded first.
+/// skipped. `replace` forgets what is recorded first, and brings the Stats tab forward on its
+/// Overview, as the egui app does.
 pub fn record(workspace: ReplayWorkspace, paths: Vec<PathBuf>, replace: bool) {
     let services = workspace.services;
     let Some(game_data) = services.game_data.cache_untracked() else {
@@ -37,6 +38,10 @@ pub fn record(workspace: ReplayWorkspace, paths: Vec<PathBuf>, replace: bool) {
         return;
     };
     let session = services.session;
+    if replace {
+        let shell = workspace.shell;
+        shell.palette.send(shell, TabRequest::ShowSessionOverview);
+    }
 
     workspace.under_tab(|| {
         spawn_local(async move {
@@ -47,16 +52,16 @@ pub fn record(workspace: ReplayWorkspace, paths: Vec<PathBuf>, replace: bool) {
 
             for path in paths {
                 let (reading, cache) = (path.clone(), game_data.clone());
-                let stat = match long_job(move || parse_replay(&reading, &cache, None)).await {
-                    Ok(parsed) => parsed.session_stat,
-                    Err(err) => {
-                        tracing::warn!(path = %path.display(), "session stats: the replay would not parse: {err}");
+                let stat = match long_job(move || read_played_game(&reading, &cache)).await {
+                    GameRead::Game(stat) => stat,
+                    GameRead::NoResults => {
+                        tracing::warn!(path = %path.display(), "session stats: the replay holds no results to record");
                         continue;
                     }
-                };
-                let Some(stat) = stat else {
-                    tracing::warn!(path = %path.display(), "session stats: the replay names no recording player");
-                    continue;
+                    GameRead::MissingBuild | GameRead::Unreadable => {
+                        tracing::warn!(path = %path.display(), "session stats: the replay could not be read");
+                        continue;
+                    }
                 };
                 if let Err(err) = session.save(stat).await {
                     tracing::warn!("session stats: the battle could not be recorded: {err}");
