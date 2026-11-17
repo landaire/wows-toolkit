@@ -13,6 +13,7 @@ use zgui::component;
 use zgui::elements::Focus;
 use zgui::geom::Css;
 use zgui::geom::CssPx;
+use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::Callable;
@@ -21,11 +22,14 @@ use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
 use zgui::reactive::prelude::Track;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
@@ -78,6 +82,7 @@ use crate::tooltip::TooltipTriggerProps;
 use crate::tree::flat::FlatRow;
 use crate::tree::flat::FlatRows;
 use crate::tree::keys::Command;
+use crate::tree::state::KeptPlace;
 use crate::tree::state::TreeState;
 
 pub use crate::tree::flat::NodeKind;
@@ -256,6 +261,42 @@ impl<K: 'static> Clone for TreeHandle<K> {
 
 impl<K: 'static> Copy for TreeHandle<K> {}
 
+/// What a [`Tree`] leaves for the next tree given the same memory: the keyboard cursor, the shift
+/// anchor and the scroll offset. An application that builds the tree again over the same nodes,
+/// as when it shows something else for a while, keeps one outside the tree so the new tree is
+/// where the reader left the old one.
+pub struct TreeMemory<K: 'static> {
+    cursor: RwSignal<Option<K>, LocalStorage>,
+    anchor: RwSignal<Option<K>, LocalStorage>,
+    /// The offset the last tree was scrolled to, once it was laid out.
+    offset: StoredValue<Option<Point<DevicePx, Device>>, LocalStorage>,
+}
+
+impl<K: 'static> TreeMemory<K> {
+    /// Memory of no tree yet, belonging to the current reactive scope.
+    pub fn new() -> Self {
+        Self {
+            cursor: RwSignal::new_local(None),
+            anchor: RwSignal::new_local(None),
+            offset: StoredValue::new_local(None),
+        }
+    }
+}
+
+impl<K: 'static> Default for TreeMemory<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: 'static> Clone for TreeMemory<K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K: 'static> Copy for TreeMemory<K> {}
+
 /// A tree of fixed-height rows over an application's [`TreeModel`]. Only the rows in view are
 /// built, so a tree of any size costs about as much as its scrollport.
 ///
@@ -308,6 +349,10 @@ pub fn Tree<M, V, F>(
     #[prop(optional)] context_menu: Option<TreeMenu<M::Key>>,
     #[prop(optional)] tooltip: Option<TreeTooltip<M::Key>>,
     #[prop(optional)] handle: Option<TreeHandle<M::Key>>,
+    /// Where the cursor, the anchor and the scroll offset are kept, so a tree built again over
+    /// the same nodes keeps them. The tree's own otherwise.
+    #[prop(optional)]
+    memory: Option<TreeMemory<M::Key>>,
     /// What the tree is called, for a screen reader.
     #[prop(into, optional)]
     label: Option<String>,
@@ -322,15 +367,18 @@ where
     install_stylesheet(surface::SHEET, surface::CSS);
     install_stylesheet(style::SHEET, style::CSS);
 
-    let state = TreeState::new(model, expanded, selection, selection_mode);
+    let kept = memory.map(|memory| KeptPlace { cursor: memory.cursor, anchor: memory.anchor });
+    let state = TreeState::new(model, expanded, selection, selection_mode, kept);
     let port = NodeRef::new();
     let following = follow_model(state);
     let revealing = handle.map(|handle| follow_handle(state, handle, port, row_height));
     let landing = handle.map(|handle| follow_landing(state, handle, port, row_height));
+    let remembering = memory.map(|memory| follow_scroll(memory, port));
     on_cleanup_local(move || {
         drop(following);
         drop(revealing);
         drop(landing);
+        drop(remembering);
     });
 
     let menu_shown: RwSignal<Option<MenuItems>, LocalStorage> = RwSignal::new_local(None);
@@ -935,6 +983,33 @@ fn follow_landing<M: TreeModel>(
         if focus {
             port.focus();
         }
+    })
+}
+
+/// Scrolls the tree to the offset `memory` holds once its rows are laid out, then keeps the offset
+/// the reader scrolls to in `memory`.
+fn follow_scroll<K: 'static>(memory: TreeMemory<K>, port: NodeRef) -> RenderEffect<()> {
+    let scroll = port.observe_scroll();
+    let restoring = StoredValue::new_local(memory.offset.get_value());
+
+    RenderEffect::new(move |_| {
+        let position = scroll.get();
+        // Not laid out yet, or the observation was given back as the tree goes.
+        if position.content_size.height.0 <= 0.0 {
+            return;
+        }
+
+        if let Some(target) = restoring.get_value() {
+            let reachable = position.content_size.height.0 - position.scrollport.height.0;
+            let arrived = (position.offset.y.0 - target.y.0).abs() < 1.0;
+            // Rows taken away since leave the offset past the end; the end is as near as it gets.
+            if !arrived && reachable >= target.y.0 {
+                port.scroll_to(ScrollTarget::Offset(target), ScrollBehavior::Instant);
+                return;
+            }
+            restoring.set_value(None);
+        }
+        memory.offset.set_value(Some(position.offset));
     })
 }
 

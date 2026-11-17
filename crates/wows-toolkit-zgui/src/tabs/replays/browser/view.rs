@@ -244,6 +244,18 @@ const CSS: &str = css!(
 /// The row height: the theme font size of 12.5px times 2.8.
 const ROW_HEIGHT: RowHeight = RowHeight(35.0);
 
+/// What a listing shows: its rows, or what it is doing until it has them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Shown {
+    Scan,
+    NoInstall,
+    Empty(PathBuf),
+    /// The install's rows wait on the game data that names their ships, of the version the
+    /// install says, when it says one.
+    GameData(Option<String>),
+    Rows,
+}
+
 /// One listing: its rows once it has some, what it is doing until then.
 #[component]
 pub fn ListingView(listing: Listing, events: BrowserEvents) -> impl IntoView {
@@ -253,39 +265,46 @@ pub fn ListingView(listing: Listing, events: BrowserEvents) -> impl IntoView {
     let thumbnails = Thumbnails::new();
     follow_thumbnails(listing, thumbnails, services);
 
-    let body = move || {
-        let status = listing.status.get();
-        let waiting_on_names = matches!(services.game_data.state(), GameDataState::Loading { .. })
-            && listing.source.with(|source| *source == ListingSource::Install);
-        match status {
-            ScanStatus::Loading => AnyView::new(view! { ScanLoading(listing = listing) }),
-            ScanStatus::NoInstall => AnyView::new(view! {
-                box(class = "wt-listing__state", attr:data-testid = "replay-listing-no-install") {
-                    // Not in the catalog: the other front end says it in English as well.
-                    text(class = "wt-listing__state-hint") {"World of Warships directory is not set"}
-                }
-            }),
-            ScanStatus::Empty(dir) => AnyView::new(view! {
-                column(class = "wt-listing__state", attr:data-testid = "replay-listing-empty") {
-                    text {{t!("ui.replay.no_replays_in", folder = shown_path(&dir)).into_owned()}}
-                    text(class = "wt-listing__state-hint") {{t!("ui.replay.drop_folder_hint").into_owned()}}
-                }
-            }),
-            ScanStatus::Loaded if waiting_on_names => {
-                let said = match services.game_data.state() {
-                    GameDataState::Loading { version: Some(version) } => {
-                        t!("ui.replay.loading_game_data_version", version = version).into_owned()
-                    }
-                    _ => t!("ui.replay.loading_game_data").into_owned(),
-                };
-                AnyView::new(view! {
-                    Loading(label = said, placement = LoadingPlacement::Top, attr:data-testid = "replay-listing-loading")
-                })
-            }
-            ScanStatus::Loaded => AnyView::new(view! {
-                ListingRows(listing = listing, events = events.clone(), preview = preview, thumbnails = thumbnails)
-            }),
+    // Only a change of what is shown builds the body again, so the rows stay as they are while
+    // replays land and the game data changes under them.
+    let shown = Memo::new(move |_| {
+        let install = listing.source.with(|source| *source == ListingSource::Install);
+        match listing.status.get() {
+            ScanStatus::Loading => Shown::Scan,
+            ScanStatus::NoInstall => Shown::NoInstall,
+            ScanStatus::Empty(dir) => Shown::Empty(dir),
+            ScanStatus::Loaded => match services.game_data.state() {
+                GameDataState::Loading { version } if install => Shown::GameData(version),
+                _ => Shown::Rows,
+            },
         }
+    });
+    let body = move || match shown.get() {
+        Shown::Scan => AnyView::new(view! { ScanLoading(listing = listing) }),
+        Shown::NoInstall => AnyView::new(view! {
+            box(class = "wt-listing__state", attr:data-testid = "replay-listing-no-install") {
+                // Not in the catalog: the other front end says it in English as well.
+                text(class = "wt-listing__state-hint") {"World of Warships directory is not set"}
+            }
+        }),
+        Shown::Empty(dir) => AnyView::new(view! {
+            column(class = "wt-listing__state", attr:data-testid = "replay-listing-empty") {
+                text {{t!("ui.replay.no_replays_in", folder = shown_path(&dir)).into_owned()}}
+                text(class = "wt-listing__state-hint") {{t!("ui.replay.drop_folder_hint").into_owned()}}
+            }
+        }),
+        Shown::GameData(version) => {
+            let said = match version {
+                Some(version) => t!("ui.replay.loading_game_data_version", version = version).into_owned(),
+                None => t!("ui.replay.loading_game_data").into_owned(),
+            };
+            AnyView::new(view! {
+                Loading(label = said, placement = LoadingPlacement::Top, attr:data-testid = "replay-listing-loading")
+            })
+        }
+        Shown::Rows => AnyView::new(view! {
+            ListingRows(listing = listing, events = events.clone(), preview = preview, thumbnails = thumbnails)
+        }),
     };
     let facts = move || {
         let path = preview.watched()?;
@@ -392,6 +411,7 @@ fn ListingRows(
             row_height = ROW_HEIGHT,
             expanded = listing.expanded,
             selection = listing.selection,
+            memory = listing.kept,
             branch_click = BranchClick::SelectAndToggle,
             stripes = TreeStripes::Leaves,
             leaf_lead = LeafLead::Nothing,

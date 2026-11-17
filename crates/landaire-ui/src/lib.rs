@@ -243,6 +243,7 @@ pub use crate::tree::NodeKind;
 pub use crate::tree::SelectionMode;
 pub use crate::tree::Tree;
 pub use crate::tree::TreeHandle;
+pub use crate::tree::TreeMemory;
 pub use crate::tree::TreeMenu;
 pub use crate::tree::TreeModel;
 pub use crate::tree::TreeProps;

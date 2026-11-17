@@ -18,6 +18,7 @@ use std::time::Instant;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use futures::channel::oneshot;
+use landaire_ui::TreeMemory;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -151,6 +152,9 @@ pub struct Listing {
     pub tree: RwSignal<Rc<BrowserTree>, LocalStorage>,
     pub selection: RwSignal<HashSet<NodeKey>, LocalStorage>,
     pub expanded: RwSignal<HashSet<NodeKey>, LocalStorage>,
+    /// The rows' cursor, shift anchor and scroll offset, kept while a scan or a wait shows in
+    /// their place.
+    pub kept: TreeMemory<NodeKey>,
     /// Replays the watch added since the reader last looked and not opened since: they carry the
     /// New tag.
     pub arrivals: RwSignal<HashSet<PathBuf>, LocalStorage>,
@@ -210,6 +214,7 @@ impl Listing {
             tree: RwSignal::new_local(Rc::new(BrowserTree::default())),
             selection: RwSignal::new_local(HashSet::new()),
             expanded: RwSignal::new_local(HashSet::new()),
+            kept: TreeMemory::new(),
             arrivals: RwSignal::new_local(HashSet::new()),
             glowing: RwSignal::new_local(HashSet::new()),
             work: StoredValue::new_local(Work {
@@ -391,6 +396,14 @@ impl Listing {
         }
     }
 
+    /// Says what the listing has to show. Written only when it changes, since every write wakes
+    /// whatever reads it, as each landing battle would.
+    fn set_status(self, status: ScanStatus) {
+        if self.status.with_untracked(|shown| *shown != status) {
+            self.status.set(status);
+        }
+    }
+
     /// Names another directory, as when a chosen directory turns out to be another path. The
     /// caller relists once the directory is known to be there.
     pub fn set_source(self, source: ListingSource) {
@@ -445,11 +458,11 @@ impl Listing {
             self.work.with_value(|work| work.services.settings.read_untracked(|settings| settings.wows_dir.clone()));
         if source == ListingSource::Install && wows_dir.as_deref().is_none_or(str::is_empty) {
             self.end_watch();
-            self.status.set(ScanStatus::NoInstall);
+            self.set_status(ScanStatus::NoInstall);
             return;
         }
 
-        self.status.set(ScanStatus::Loading);
+        self.set_status(ScanStatus::Loading);
         self.progress.set(Some(ScanProgress::default()));
         let task = self.spawn(async move {
             let folder = match source {
@@ -488,7 +501,7 @@ impl Listing {
             self.progress.set(None);
             let status = if scanned.files.is_empty() { ScanStatus::Empty(dir.clone()) } else { ScanStatus::Loaded };
             self.files.set(scanned.files);
-            self.status.set(status);
+            self.set_status(status);
             self.watch_dir(folder, plan, generation, scanned.walked);
             self.report_missing_builds();
         });
@@ -534,7 +547,7 @@ impl Listing {
         self.work.update_value(|work| work.dropped_scopes = scopes);
         self.files.set(read.files);
         self.unreadable.set(read.unreadable);
-        self.status.set(ScanStatus::Loaded);
+        self.set_status(ScanStatus::Loaded);
         self.summaries.set(HashMap::new());
         self.load_summaries();
         self.report_missing_builds();
@@ -847,7 +860,7 @@ impl Listing {
                 arrivals.insert(path.clone());
             });
             self.glow(path.clone());
-            self.status.set(ScanStatus::Loaded);
+            self.set_status(ScanStatus::Loaded);
             self.say(ListingEvent::Appeared(path));
         }
         self.report_missing_builds();

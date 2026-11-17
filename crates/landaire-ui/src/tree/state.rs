@@ -111,6 +111,12 @@ where
     }
 }
 
+/// The cursor and the anchor of a tree, held where they outlive it.
+pub(crate) struct KeptPlace<K: 'static> {
+    pub cursor: RwSignal<Option<K>, LocalStorage>,
+    pub anchor: RwSignal<Option<K>, LocalStorage>,
+}
+
 /// Everything a tree's rows and handlers share.
 pub(crate) struct TreeState<M: TreeModel> {
     pub model: Signal<M, LocalStorage>,
@@ -134,20 +140,27 @@ impl<M: TreeModel> Clone for TreeState<M> {
 impl<M: TreeModel> Copy for TreeState<M> {}
 
 impl<M: TreeModel> TreeState<M> {
+    /// `kept` holds the cursor and the anchor when they outlive the tree.
     pub fn new(
         model: Signal<M, LocalStorage>,
         expanded: Binding<HashSet<M::Key>>,
         selection: Binding<HashSet<M::Key>>,
         mode: SelectionMode,
+        kept: Option<KeptPlace<M::Key>>,
     ) -> Self {
+        let (cursor, anchor) = match kept {
+            Some(KeptPlace { cursor, anchor }) => (cursor, anchor),
+            None => (RwSignal::new_local(None), RwSignal::new_local(None)),
+        };
+
         Self {
             model,
             rows: RwSignal::new_local(FlatRows::new()),
             expanded: KeySet::from_binding(expanded),
             selection: KeySet::from_binding(selection),
             mode,
-            cursor: RwSignal::new_local(None),
-            anchor: RwSignal::new_local(None),
+            cursor,
+            anchor,
         }
     }
 

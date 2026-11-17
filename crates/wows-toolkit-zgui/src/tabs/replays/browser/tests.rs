@@ -635,6 +635,79 @@ fn a_watched_change_reaches_only_its_own_folder() {
     assert!(!listing(control, &other).holds(&landed), "the other folder's listing is untouched");
 }
 
+/// Whether the keyboard cursor is on `path`'s row.
+fn cursor_on(window: &HeadlessWindow, path: &Path) -> bool {
+    let Some(cursor) = window.by_attribute("data-cursor", "true").and_then(|cursor| window.bounds(cursor)) else {
+        return false;
+    };
+    let Some(shown) = window.by_test_id(&format!("replay-row-{}", path.display())).and_then(|row| window.bounds(row))
+    else {
+        return false;
+    };
+    let middle = shown.origin.y.0 + shown.size.height.0 / 2.0;
+
+    cursor.origin.y.0 <= middle && middle <= cursor.origin.y.0 + cursor.size.height.0
+}
+
+/// A battle landing, and the watch reading the folder again, leave the rows scrolled where they
+/// were with the keyboard cursor on its row.
+#[test]
+fn the_rows_keep_their_scroll_and_cursor_as_battles_land_and_the_folder_is_read_again() {
+    let (mut window, control) = open();
+    set_autoload(&mut window, control, false);
+    control.adopt_pinned_folders(PinnedFolders::default());
+    control.grouping.set(ReplayGrouping::None);
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+    for copy in 0..40 {
+        let name = FIXTURES[copy % FIXTURES.len()];
+        std::fs::copy(fixture(name), root.join(format!("{copy:02}-{name}"))).expect("the replay is copied");
+    }
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    control.pin_folder(folder_id(control, &root), true);
+    settle_in_real_time(&mut window);
+
+    let numbered = |number: usize| root.join(format!("{number:02}-{}", FIXTURES[number % FIXTURES.len()]));
+    let rows = window.by_test_id("replay-listing-rows").expect("the folder's rows are shown");
+    window.wheel(rows, 400.0).expect("the rows have a box");
+    window.advance(Duration::from_millis(300));
+    assert!(!has_row(&window, &numbered(39)), "the newest rows are scrolled away");
+    window.click(row(&window, &numbered(25))).expect("the row is scrolled into view");
+    window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
+    window.advance(Duration::from_millis(50));
+    let cursor = numbered(24);
+    assert!(cursor_on(&window, &cursor), "the arrow moves the cursor one row down");
+    let top = window.bounds(row(&window, &cursor)).expect("the row has a box").origin.y;
+
+    // Named to sort last, so it lands below every row on screen.
+    let landed = root.join(format!("!landed-{}", FIXTURES[1]));
+    std::fs::copy(fixture(FIXTURES[1]), &landed).expect("the replay is copied");
+    simulated_watch::report(&root, DirChange::Appeared(landed.clone()));
+    settle_in_real_time(&mut window);
+    assert!(listing(control, &root).holds(&landed), "the watch lists the battle");
+    assert_eq!(window.bounds(row(&window, &cursor)).map(|shown| shown.origin.y), Some(top), "the rows stay put");
+    assert!(cursor_on(&window, &cursor), "and the cursor on its row");
+
+    simulated_watch::overflow(&root);
+    settle_in_real_time(&mut window);
+    assert_eq!(
+        window.bounds(row(&window, &cursor)).map(|shown| shown.origin.y),
+        Some(top),
+        "a folder read again comes back scrolled where it was"
+    );
+    assert!(cursor_on(&window, &cursor), "with the cursor on its row");
+
+    // The arrow made the cursor's row the anchor.
+    window.click_with(row(&window, &numbered(22)), Modifiers::SHIFT).expect("the row has a box");
+    window.advance(Duration::from_millis(50));
+    assert_eq!(
+        listing(control, &root).selected_paths(),
+        vec![numbered(22), numbered(23), cursor],
+        "a shift run starts from the anchor set before the read"
+    );
+}
+
 #[test]
 fn a_missing_pinned_folder_keeps_its_tab_and_can_be_unpinned() {
     let (mut window, control) = open();
