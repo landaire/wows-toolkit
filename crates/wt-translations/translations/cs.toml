@@ -1856,6 +1856,7 @@ paused = "Stahování pozastaveno; připravené soubory zůstávají zachovány.
 installed = "Nainstalováno"
 installed_skipped = "Nainstalováno (přeskočené rozdílové části: %{count}; zatím nepodporováno, staženo, ale nepoužito)"
 download_failed = "Stahování selhalo: %{error}"
+update_in_place = "Aktualizace se instaluje do složky dané instalace. Pro aktualizaci zvolte %{path}."
 cancelled = "Stahování zrušeno."
 launch_failed = "Spuštění selhalo: %{error}"
 use_for_toolkit = "Použít pro toolkit"

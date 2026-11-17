@@ -1902,6 +1902,7 @@ paused = "다운로드가 일시 정지되었습니다. 받은 파일은 유지�
 installed = "설치됨"
 installed_skipped = "설치됨 (델타 부분 %{count}개 건너뜀: 아직 지원되지 않아 다운로드만 하고 적용하지 않음)"
 download_failed = "다운로드 실패: %{error}"
+update_in_place = "업데이트는 해당 설치 폴더에 설치됩니다. 업데이트하려면 %{path}을(를) 선택하세요."
 cancelled = "다운로드가 취소되었습니다."
 launch_failed = "실행 실패: %{error}"
 use_for_toolkit = "Toolkit에서 사용"

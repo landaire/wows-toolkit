@@ -1902,6 +1902,7 @@ paused = "ダウンロードを一時停止しました。ダウンロード済�
 installed = "インストール済み"
 installed_skipped = "インストール済み (%{count} 個の差分パーツをスキップ: 未対応のため、ダウンロード済みですが未適用)"
 download_failed = "ダウンロードに失敗しました: %{error}"
+update_in_place = "アップデートはそのインストール自体のフォルダーに入ります。更新するには %{path} を選択してください。"
 cancelled = "ダウンロードをキャンセルしました。"
 launch_failed = "起動に失敗しました: %{error}"
 use_for_toolkit = "ツールキットで使用"

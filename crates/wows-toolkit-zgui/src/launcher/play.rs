@@ -1,6 +1,7 @@
 //! The Play split button at the end of the tab strip: the main part does what the launcher's
 //! state calls for, and the chevron opens the account popover.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use landaire_ui::TooltipContentProps;
@@ -26,6 +27,7 @@ use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::With;
+use zgui::task::spawn_detached;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
@@ -379,11 +381,33 @@ pub fn report_launch_failure(shell: Shell, failure: &LaunchFailure) {
     }
 }
 
-/// Updates the install at `install` in place.
+/// Asks to confirm an update of the install at `install` with a folder picker opened at the
+/// install, and updates it in place once the install's own folder is chosen. The update is a
+/// delta against that install's files, so no other folder can take it.
 pub fn start_update(shell: Shell, model: LauncherModel, install: PathBuf) {
-    let dest = install.clone();
-    let started = model.run(move |launcher, _, env| (launcher.start_download(install, dest, env), false));
-    if let Some(Err(err)) = started {
-        shell.toasts().failed(t!("ui.launcher.download_failed", error = err.to_string()).into_owned());
+    let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &install);
+    // Detached: the popover or palette that asked has closed before the picker answers.
+    spawn_detached(async move {
+        let Some(dest) = shell.chosen_path(asked).await else { return };
+        if shell.is_unmounted() {
+            return;
+        }
+        if !same_folder(&dest, &install) {
+            let path = install.display().to_string();
+            shell.toasts().failed(t!("ui.launcher.update_in_place", path = path).into_owned());
+            return;
+        }
+        let started = model.run(move |launcher, _, env| (launcher.start_download(install, dest, env), false));
+        if let Some(Err(err)) = started {
+            shell.toasts().failed(t!("ui.launcher.download_failed", error = err.to_string()).into_owned());
+        }
+    });
+}
+
+/// Whether `a` and `b` name the same folder. A folder that cannot be resolved is no match.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }

@@ -249,7 +249,7 @@ pub(crate) fn update_available() -> CatalogCheckState {
         version_to: BuildVersion::new("15.11.0.13600000".into()),
         info_hash: serde_json::from_value(serde_json::json!("00".repeat(20))).expect("a hash"),
         torrent_urls: vec!["https://example.invalid/client.torrent".into()],
-        web_seed_base: None,
+        web_seed_base: Some("https://example.invalid/".into()),
         files: vec![FileEntry { name: "client.pkg".into(), size: 2_100_000_000, unpacked_size: 2_100_000_000 }],
     }];
 
@@ -381,6 +381,41 @@ fn turning_the_launcher_on_again_looks_for_installs_again() {
     launcher.model.enable();
 
     assert!(launcher.model.with_untracked(|state| state.launcher.is_discovering()));
+}
+
+#[test]
+fn update_asks_where_the_build_goes_before_downloading() {
+    let mut launcher = LauncherWindow::open();
+    let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
+    launcher.adopt(settings);
+    launcher.found(update_available());
+    launcher.set_session(eu(), TestSession::SignedIn("Captain_Ahab".into()));
+    assert_eq!(launcher.play_state(), "update");
+    let install = launcher.install.path().to_path_buf();
+    let downloading = |launcher: &LauncherWindow| {
+        launcher.model.with_untracked(|state| state.launcher.download_state(&install).is_some())
+    };
+    wows_toolkit_services::dialog::take_asked();
+
+    launcher.press("launcher-play");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert_eq!(wows_toolkit_services::dialog::take_asked(), [wows_toolkit_services::dialog::Asked::Folder]);
+    assert!(!downloading(&launcher), "a dismissed picker starts nothing");
+
+    let elsewhere = tempfile::tempdir().expect("a temporary folder");
+    wows_toolkit_services::dialog::pick_next(elsewhere.path().to_path_buf());
+    launcher.press("launcher-play");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(!downloading(&launcher), "another folder cannot take the install's update");
+    let toasts = launcher.window.texts_by_class("lui-toasts").concat();
+    let said = rust_i18n::t!("ui.launcher.update_in_place", path = install.display().to_string()).into_owned();
+    assert!(toasts.contains(&said), "the message says where the update goes: {toasts:?}");
+
+    // The same folder spelled another way is still the install.
+    wows_toolkit_services::dialog::pick_next(install.join("."));
+    launcher.press("launcher-play");
+    crate::interaction_tests::settle_in_real_time(&mut launcher.window);
+    assert!(downloading(&launcher), "the install's own folder takes the update");
 }
 
 #[test]

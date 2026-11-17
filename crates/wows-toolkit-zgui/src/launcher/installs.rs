@@ -252,8 +252,8 @@ pub(crate) fn add_install(model: LauncherModel, shell: Shell) {
     });
 }
 
-/// Updates an install with content in place; for one without, asks where to put the newest build
-/// and downloads it there.
+/// Asks where to put the newest build and downloads it there: for an install with content the
+/// picker starts at the install, for one without at the default install directory.
 fn download(model: LauncherModel, shell: Shell, install: PathBuf, has_content: bool) {
     if has_content {
         crate::launcher::play::start_update(shell, model, install);
