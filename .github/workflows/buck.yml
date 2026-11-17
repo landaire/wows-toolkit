@@ -59,11 +59,15 @@ jobs:
           retention-days: 1
 
   # The two phases overlap instead of adding their wall clock. Each starts from
-  # a cold buck-out, which is still cheaper in wall clock than a serial run.
+  # a cold buck-out and reads what it can from the action cache.
   linux:
     name: Linux x86_64 (${{ matrix.phase }})
     needs: select
     runs-on: ubuntu-latest
+    # Joining the tailnet to reach the action cache; see landaire/build-cache.
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +98,11 @@ jobs:
       # bin/buck2 first on PATH, so the scripts behind //ci run the same Buck2.
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
+
+      - uses: landaire/build-cache/.github/actions/buck-cache@e09a7ffe91cd628fc96f7fa169040d97cf0c5d47
+        with:
+          client-id: ${{ vars.TS_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
 
       - name: Build the affected aliases
         if: matrix.phase == 'checks'
@@ -148,6 +157,9 @@ jobs:
     name: macOS arm64
     needs: select
     runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -164,6 +176,11 @@ jobs:
 
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
+
+      - uses: landaire/build-cache/.github/actions/buck-cache@e09a7ffe91cd628fc96f7fa169040d97cf0c5d47
+        with:
+          client-id: ${{ vars.TS_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
 
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
       # graph itself is already covered there in both modes. The wasm sites are
@@ -183,6 +200,9 @@ jobs:
     name: Windows x86_64
     needs: select
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: C:\w
@@ -200,6 +220,12 @@ jobs:
           path: C:\w
 
       - uses: ./.github/actions/provision-windows-toolchain
+
+      - uses: landaire/build-cache/.github/actions/buck-cache@e09a7ffe91cd628fc96f7fa169040d97cf0c5d47
+        with:
+          client-id: ${{ vars.TS_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
+          buckconfig: C:/w/.buckconfig.local
 
       - name: Build the affected aliases
         shell: pwsh

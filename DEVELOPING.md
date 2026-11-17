@@ -182,7 +182,7 @@ the workspace version and stages it under the installed executable name.
 
 ### Remote action cache
 
-Actions can read and write a remote action cache, which is off unless one is configured. `root//platforms:default` turns it on only when `[buck2_re_client]` names an engine address, because CI has no cache and enabling it without one fails every action rather than falling back to local execution. Point it at a cache by writing the section into `~/.buckconfig.d/`:
+Actions can read and write a remote action cache, which is off unless one is configured. `root//platforms:default` turns it on only when `[buck2_re_client]` names an engine address, because enabling it without a cache fails every action rather than falling back to local execution. Point it at a cache by writing the section into `~/.buckconfig.d/`:
 
 ```ini
 [buck2_re_client]
@@ -196,6 +196,8 @@ default_allow_cache_upload = true
 ```
 
 Buck reads every file in that directory, so renaming one does not disable it; move it out instead. There is no remote execution, only the cache: the platform sets `remote_enabled = False`.
+
+CI uses the shared cache from [landaire/build-cache](https://github.com/landaire/build-cache). On pushes and manual runs, each Linux, macOS and Windows job joins the tailnet for its duration and points Buck2 at the cache. The repository variables `TS_CLIENT_ID` and `TS_AUDIENCE` name the Tailscale identity it joins with. Any job that joins can write to the cache, so pull requests build without it. So does a job that cannot reach the cache. The hermetic toolchain is what makes the hits valid: an action's key names the toolchain by its store path.
 
 ### Hermeticity
 

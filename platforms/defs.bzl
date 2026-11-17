@@ -93,7 +93,8 @@ def remote_cache_configured() -> bool:
     """Whether this checkout has an action cache to talk to.
 
     Enabling the cache without one is fatal, not a fallback to local: every
-    action fails with "No engine address". CI has no [buck2_re_client] section,
-    so it must build with the cache off.
+    action fails with "No engine address". A checkout without a
+    [buck2_re_client] section, such as a CI job that could not reach the
+    cache, builds with the cache off.
     """
     return read_root_config("buck2_re_client", "engine_address") != None
