@@ -1272,6 +1272,12 @@ loading_named_ship = "%{ship} yükleniyor..."
 rendering = "Oluşturuluyor..."
 options = "Seçenekler"
 
+[ui.armor.compass]
+north = "K"
+east = "D"
+south = "G"
+west = "B"
+
 [ui.armor.realtime]
 loading = "Gemi zırhı yükleniyor..."
 waiting = "Gemi verileri bekleniyor..."

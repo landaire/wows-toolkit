@@ -1272,6 +1272,12 @@ loading_named_ship = "Wczytywanie %{ship}..."
 rendering = "Renderowanie..."
 options = "Opcje"
 
+[ui.armor.compass]
+north = "N"
+east = "E"
+south = "S"
+west = "W"
+
 [ui.armor.realtime]
 loading = "Wczytywanie pancerza okrętu..."
 waiting = "Oczekiwanie na dane okrętu..."

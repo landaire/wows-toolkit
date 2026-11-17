@@ -1316,6 +1316,12 @@ loading_named_ship = "%{ship} laden..."
 rendering = "Renderen..."
 options = "Opties"
 
+[ui.armor.compass]
+north = "N"
+east = "O"
+south = "Z"
+west = "W"
+
 [ui.armor.realtime]
 loading = "Scheepspantser laden..."
 waiting = "Wachten op scheepsgegevens..."

@@ -650,6 +650,28 @@ fn the_health_is_shown_when_a_replay_opens_the_viewer() {
     assert!(readout.contains("75"), "with the health where playback is: {readout}");
 }
 
+/// A ship a replay opened is followed before anything has hit it or its health is known, and is
+/// not once the reader opens something else.
+#[test]
+fn a_ship_a_replay_opened_is_followed_before_its_first_hit() {
+    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    workspace.library.adopt_for_test(Arc::new(bundle()), None);
+    let source = workspace.library.new_source();
+    let viewport = workspace.active_untracked();
+
+    let target =
+        ArmorTarget { param_index: "PASB028".to_string(), display_name: "Iowa".to_string(), hull_upgrade: None };
+    let shown = ShowArmor { target, hits: Vec::new(), health: None, incoming: Box::new(IncomingContext::default()) };
+    workspace.show_with_hits(source, shown, None);
+    let generation = workspace.pending_load_for_test().expect("the ship is loading");
+    workspace.land_ship_for_test(generation, &bundle(), Ok(FirstStage { scene: ship_scene(), rest: Vec::new() }));
+    assert!(viewport.follows_a_replay(), "the replay's ship is followed with nothing on it yet");
+
+    workspace.open_model(turret(), None);
+    assert!(!viewport.follows_a_replay(), "a model opened from the catalogue is not");
+}
+
 /// A replay's playback moves the hits of the pane it was shown in, whichever pane is active, and
 /// none once that pane is closed.
 #[test]
@@ -2134,6 +2156,40 @@ fn the_incoming_detail_renders_in_dark_and_light() {
         armor.click("armor-incoming-salvo-0");
         armor.click("armor-incoming-shell-0-0");
         assert!(armor.shown("armor-incoming-detail"), "the picked shell's detail is shown");
+        settle_in_real_time(&mut armor.window);
+
+        let path = save_shot(&mut armor.window, name);
+        println!("{}", path.display());
+    }
+}
+
+/// A replay's ship with the incoming fire log beside it: the compass over the hull, the health
+/// strip with its ends labelled, and each salvo headed by its shell and range, in dark and light.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the incoming fire log"]
+fn the_incoming_log_renders_in_dark_and_light() {
+    for (appearance, name) in
+        [(Appearance::Dark, "armor-incoming-log-dark"), (Appearance::Light, "armor-incoming-log-light")]
+    {
+        let mut armor = tall_review_window(appearance);
+        armor.install(plated_ship_scene(), &[OptionSection::PenCheck]);
+        let viewport = armor.workspace.active_untracked();
+        armor.settle_until(|| viewport.read_untracked(|model| model.current_armor.is_some()).unwrap_or(false));
+        let center = viewport
+            .read_untracked(|model| model.current_armor.as_ref().map(|armor| armor.center()))
+            .flatten()
+            .expect("the scene is uploaded");
+        let mut fire = salvo_on_plate(center, 2);
+        let shells: Vec<_> = fire.context.shells.keys().copied().collect();
+        for shell in shells {
+            fire.context.shell_names.insert(shell, "AP Mk8".to_owned());
+        }
+        viewport.set_hit_health(Some(42_000.0));
+        viewport.compare_incoming(&fire.context.taken, &fire.context.shells);
+        armor.workspace.incoming.set(fire);
+        armor.workspace.playback_at.set(Some(GameClock(300.0)));
+        armor.settle();
+        assert!(armor.shown("armor-incoming-fired-0"), "the salvo names its shell");
         settle_in_real_time(&mut armor.window);
 
         let path = save_shot(&mut armor.window, name);

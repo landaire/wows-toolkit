@@ -1316,6 +1316,12 @@ loading_named_ship = "正在載入 %{ship}..."
 rendering = "渲染中..."
 options = "選項"
 
+[ui.armor.compass]
+north = "北"
+east = "東"
+south = "南"
+west = "西"
+
 [ui.armor.realtime]
 loading = "正在載入艦船裝甲..."
 waiting = "正在等待艦船資料..."

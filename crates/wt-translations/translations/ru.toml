@@ -1272,6 +1272,12 @@ loading_named_ship = "Загрузка %{ship}..."
 rendering = "Отрисовка..."
 options = "Параметры"
 
+[ui.armor.compass]
+north = "С"
+east = "В"
+south = "Ю"
+west = "З"
+
 [ui.armor.realtime]
 loading = "Загрузка брони корабля..."
 waiting = "Ожидание данных корабля..."

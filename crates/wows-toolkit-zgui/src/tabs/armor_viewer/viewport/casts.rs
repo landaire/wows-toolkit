@@ -440,6 +440,20 @@ impl ViewportModel {
         Some(t!("ui.armor.realtime_readout", health = format!("{health:.0}"), hits = self.hits.len()).into_owned())
     }
 
+    /// Whether a replay is following this ship.
+    pub(super) fn follows_a_replay(&self) -> bool {
+        self.follows_replay
+    }
+
+    /// Says whether a replay is following this ship, which may not have been hit yet.
+    pub(super) fn set_follows_replay(&mut self, on: bool, cx: &mut ViewCx) {
+        if self.follows_replay == on {
+            return;
+        }
+        self.follows_replay = on;
+        cx.notify();
+    }
+
     /// The shown model's overall length and beam, while the length marks are.
     pub(super) fn length_readout(&self) -> Option<String> {
         let marks = self.length_marks.as_ref().filter(|_| self.display_settings.show_length_marks)?.marks();
@@ -1095,6 +1109,10 @@ impl ArmorViewportState {
         self.update(|this, cx| this.set_hit_health(health, cx));
     }
 
+    pub fn set_follows_replay(self, on: bool) {
+        self.update(|this, cx| this.set_follows_replay(on, cx));
+    }
+
     /// Compares each landed shell with this app's own ballistics.
     pub fn compare_incoming(self, taken: &[PreExtractedHit], shells: &HashMap<GameParamId, ShellInfo>) {
         self.update(|this, cx| this.compare_incoming(taken, shells, cx));
@@ -1134,6 +1152,11 @@ impl ArmorViewportState {
     #[cfg(test)]
     pub fn hit_readout(self) -> Option<String> {
         self.read(|this| this.hit_readout()).flatten()
+    }
+
+    #[cfg(test)]
+    pub fn follows_a_replay(self) -> bool {
+        self.read(|this| this.follows_a_replay()).unwrap_or_default()
     }
 
     pub fn gaps(self) -> GapState {

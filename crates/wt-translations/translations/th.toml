@@ -1316,6 +1316,12 @@ loading_named_ship = "กำลังโหลด %{ship}..."
 rendering = "กำลังเรนเดอร์..."
 options = "ตัวเลือก"
 
+[ui.armor.compass]
+north = "เหนือ"
+east = "ออก"
+south = "ใต้"
+west = "ตก"
+
 [ui.armor.realtime]
 loading = "กำลังโหลดเกราะเรือ..."
 waiting = "กำลังรอข้อมูลเรือ..."

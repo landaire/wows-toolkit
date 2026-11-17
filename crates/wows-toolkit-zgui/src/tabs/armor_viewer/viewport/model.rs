@@ -369,6 +369,8 @@ pub struct ViewportModel {
     pub(super) incoming_selection: Option<IncomingSelection>,
     /// The ship's health at the moment shown, while a replay drives this viewer.
     pub(super) hit_health: Option<f32>,
+    /// Whether a replay is following this ship, which places it on the battle map.
+    pub(super) follows_replay: bool,
     /// The camera orbits drawn, so a pointer resting on one can be told which it is.
     pub(super) ring_hovers: Vec<camera_rings::RingHover>,
     /// What the orbit under the pointer reads as, and where to anchor it.
@@ -499,6 +501,7 @@ impl ViewportModel {
             compared: None,
             incoming_selection: None,
             hit_health: None,
+            follows_replay: false,
             ring_hovers: Vec::new(),
             hovered_ring: None,
             hover_highlight: None,

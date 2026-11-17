@@ -860,6 +860,9 @@ impl ArmorWorkspace {
     /// Puts the incoming-fire log away: a ship opened from the catalogue is not the one the replay
     /// was firing at.
     fn forget_incoming(self) {
+        if let Some(viewport) = self.following.get_value().and_then(|following| self.pane_untracked(following.pane)) {
+            viewport.set_follows_replay(false);
+        }
         self.incoming.set(IncomingFire::default());
         self.pending_hits.set_value(None);
         self.following.set_value(None);
@@ -1046,6 +1049,7 @@ impl ArmorWorkspace {
         if let Some(Some(held)) = held {
             target.show_hits(held.hits);
             target.set_hit_health(held.health);
+            target.set_follows_replay(true);
         }
         if comparing {
             self.incoming
@@ -1070,6 +1074,7 @@ impl ArmorWorkspace {
             // Already showing it, so only what it has taken has changed.
             active.show_hits(hits);
             active.set_hit_health(health);
+            active.set_follows_replay(true);
             self.incoming
                 .with_untracked(|incoming| active.compare_incoming(&incoming.context.taken, &incoming.context.shells));
             return;
@@ -1123,6 +1128,7 @@ impl ArmorWorkspace {
         }
         self.playback_at.set(Some(at));
         viewport.set_hit_health(health);
+        viewport.set_follows_replay(true);
         if let Some(hits) = hits {
             viewport.follow_hits(hits);
         }

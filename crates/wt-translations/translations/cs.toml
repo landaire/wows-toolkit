@@ -1272,6 +1272,12 @@ loading_named_ship = "Načítání %{ship}..."
 rendering = "Vykreslování..."
 options = "Možnosti"
 
+[ui.armor.compass]
+north = "S"
+east = "V"
+south = "J"
+west = "Z"
+
 [ui.armor.realtime]
 loading = "Načítání pancíře lodi..."
 waiting = "Čekání na data lodi..."

@@ -1316,6 +1316,12 @@ loading_named_ship = "%{ship} 로딩 중..."
 rendering = "렌더링 중..."
 options = "옵션"
 
+[ui.armor.compass]
+north = "북"
+east = "동"
+south = "남"
+west = "서"
+
 [ui.armor.realtime]
 loading = "함선 장갑 로딩 중..."
 waiting = "함선 데이터 대기 중..."

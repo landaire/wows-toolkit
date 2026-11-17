@@ -900,6 +900,7 @@ impl ViewportModel {
         self.selected_arc = None;
         self.hits.clear();
         self.hit_health = None;
+        self.follows_replay = false;
         self.sim_verdicts.clear();
         self.sim_unchecked = 0;
         self.compared = None;

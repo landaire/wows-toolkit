@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use rust_i18n::t;
 use wows_toolkit_armor::length_marks::MarkLabels;
 use wows_toolkit_armor::trajectory;
 use wows_toolkit_armor::trajectory::ArcColor;
@@ -60,6 +61,10 @@ const LABEL_LINE: f32 = 13.0;
 
 /// The size of a gizmo axis letter, and how far above its ball centre the letter's box starts.
 const AXIS_LABEL_SIZE: f32 = 10.0;
+
+/// The compass rose's arm length, and how far its centre sits in from the viewport's corner.
+const COMPASS_RADIUS: f32 = 30.0;
+const COMPASS_INSET: f32 = 12.0;
 
 /// Shaped labels kept between paints, keyed by text and device size. Cleared rather than evicted
 /// when it grows past this.
@@ -117,6 +122,42 @@ pub(super) struct GizmoPaint {
     pub(super) hover: Option<(Axis, bool)>,
 }
 
+/// A direction on the battle map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Cardinal {
+    North,
+    East,
+    South,
+    West,
+}
+
+impl Cardinal {
+    fn label(self) -> String {
+        let key = match self {
+            Cardinal::North => "ui.armor.compass.north",
+            Cardinal::East => "ui.armor.compass.east",
+            Cardinal::South => "ui.armor.compass.south",
+            Cardinal::West => "ui.armor.compass.west",
+        };
+        t!(key).into_owned()
+    }
+}
+
+/// One arm of the compass rose: the way it points on screen, as a unit vector with y down.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct CompassArm {
+    pub(super) cardinal: Cardinal,
+    pub(super) toward: Vec2,
+    pub(super) label: String,
+}
+
+/// The compass rose in the viewport's bottom right corner.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct CompassPaint {
+    pub(super) center: Vec2,
+    pub(super) arms: Vec<CompassArm>,
+}
+
 /// Everything the overlay draws, in the viewport's CSS pixels.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct OverlayScene {
@@ -124,6 +165,7 @@ pub(super) struct OverlayScene {
     pub(super) arcs: Vec<ArcPaint>,
     pub(super) pulses: Vec<PulsePaint>,
     pub(super) gizmo: Option<GizmoPaint>,
+    pub(super) compass: Option<CompassPaint>,
 }
 
 impl ViewportModel {
@@ -211,6 +253,19 @@ impl ViewportModel {
             scene.gizmo = Some(GizmoPaint { center, balls, hover: self.gizmo_hover });
         }
 
+        // The map's directions only mean something for a ship a replay placed on the map.
+        if self.scene_is_shown() && self.follows_a_replay() {
+            let center = Vec2::new(
+                rect.right() - COMPASS_RADIUS - COMPASS_INSET,
+                rect.bottom() - COMPASS_RADIUS - COMPASS_INSET,
+            );
+            let arms = compass_arms(camera.azimuth)
+                .into_iter()
+                .map(|(cardinal, toward)| CompassArm { cardinal, toward, label: cardinal.label() })
+                .collect();
+            scene.compass = Some(CompassPaint { center, arms });
+        }
+
         scene
     }
 
@@ -221,6 +276,26 @@ impl ViewportModel {
             self.length_marks = Some(MarkLabels::new(*written.marks()));
         }
     }
+}
+
+/// Where each map direction points on screen, as a unit vector with y down, for a camera turned
+/// `azimuth` radians about the vertical. The camera's elevation and the ship's heading are left
+/// out, as the egui viewer's compass leaves them.
+fn compass_arms(azimuth: f32) -> [(Cardinal, Vec2); 4] {
+    let (sin, cos) = azimuth.sin_cos();
+    // A BigWorld direction (+X east, +Z north) is the model's (-z, -x), turned by the camera.
+    let project = |east: f32, north: f32| {
+        let (model_x, model_z) = (-north, -east);
+        let right = model_x * cos - model_z * sin;
+        let up = -(model_x * sin + model_z * cos);
+        Vec2::new(right, -up).normalize()
+    };
+    let north = project(0.0, 1.0);
+    let east = project(1.0, 0.0);
+
+    // The egui rose labels the projected east arm W: the model's frame is mirrored on that axis
+    // by the exporter's Z negation.
+    [(Cardinal::North, north), (Cardinal::West, east), (Cardinal::South, -north), (Cardinal::East, -east)]
 }
 
 /// One cast shell as it lands on the screen: each line broken where it passes behind the camera,
@@ -357,6 +432,9 @@ impl CustomElement for OverlayElement {
         }
         if let Some(gizmo) = &scene.gizmo {
             canvas.gizmo(gizmo);
+        }
+        if let Some(compass) = &scene.compass {
+            canvas.compass(compass);
         }
     }
 }
@@ -521,6 +599,24 @@ impl Canvas<'_, '_> {
             }
         }
     }
+
+    /// The compass rose: a dark disc, an arm toward each map direction with its letter past the
+    /// tip, north in red and heavier.
+    fn compass(&mut self, compass: &CompassPaint) {
+        let disc = COMPASS_RADIUS + 4.0;
+        self.disc(compass.center, disc, black(140.0 / 255.0), Some((1.0, Color::srgb(0.706, 0.706, 0.706, 0.39))));
+        for arm in &compass.arms {
+            let north = arm.cardinal == Cardinal::North;
+            let color = if north { Color::srgb(1.0, 0.314, 0.314, 1.0) } else { Color::srgb(0.706, 0.706, 0.706, 1.0) };
+            let tip = compass.center + arm.toward * COMPASS_RADIUS;
+            self.polyline(&[compass.center, tip], if north { 2.0 } else { 1.0 }, color);
+
+            let size = if north { 12.0 } else { 10.0 };
+            let at = compass.center + arm.toward * (COMPASS_RADIUS + 10.0);
+            let width = self.measure(&arm.label, size);
+            self.text(&arm.label, size, at.x - width * 0.5, at.y - size * 0.5, size, color);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -528,6 +624,8 @@ mod tests {
     use wows_toolkit_armor::viewport::types::Vec2;
     use wows_toolkit_armor::viewport::types::Vec3;
 
+    use super::Cardinal;
+    use super::compass_arms;
     use super::visible_runs;
 
     #[test]
@@ -545,5 +643,23 @@ mod tests {
         let points = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0)];
         let project = |at: Vec3| (at.x == 0.0).then(|| Vec2::new(0.0, 0.0));
         assert!(visible_runs(&points, &project).is_empty());
+    }
+
+    /// The rose points where the egui viewer's did: at the opening azimuth of zero north is to the
+    /// left and east down the screen, and a quarter turn of the camera brings north up.
+    #[test]
+    fn the_compass_points_as_the_egui_viewer_did() {
+        let ways = |azimuth: f32| {
+            compass_arms(azimuth).map(|(cardinal, toward)| (cardinal, toward.x.round() as i32, toward.y.round() as i32))
+        };
+
+        assert_eq!(
+            ways(0.0),
+            [(Cardinal::North, -1, 0), (Cardinal::West, 0, -1), (Cardinal::South, 1, 0), (Cardinal::East, 0, 1),]
+        );
+        assert_eq!(
+            ways(std::f32::consts::FRAC_PI_2),
+            [(Cardinal::North, 0, -1), (Cardinal::West, 1, 0), (Cardinal::South, 0, 1), (Cardinal::East, -1, 0),]
+        );
     }
 }

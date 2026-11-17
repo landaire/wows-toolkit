@@ -786,6 +786,22 @@ fn the_health_strip_is_labelled_with_its_first_and_last_moments() {
     assert_eq!(window.texts_by_class("wt-armor-incoming__strip-time"), ["0:00", "20:00"]);
 }
 
+/// The compass rose is drawn over a ship a replay placed, and not over one from the catalogue,
+/// which has no place on a map.
+#[test]
+fn the_compass_is_drawn_over_a_ship_a_replay_placed() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, known_thickness_scene());
+    let compass = |state: ArmorViewportState| {
+        state.read_untracked(|model| model.overlay_scene(std::time::Instant::now()).compass.is_some())
+    };
+    assert_eq!(compass(state), Some(false), "a catalogue ship has no compass");
+
+    // Followed before its first hit, with no health said yet.
+    state.set_follows_replay(true);
+    assert_eq!(compass(state), Some(true), "a replay's ship has one");
+}
+
 /// Whether a ricochet is followed changes what each shell did, so every reading in the log is
 /// taken again rather than only the picked shell's.
 #[test]

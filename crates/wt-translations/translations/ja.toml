@@ -1316,6 +1316,12 @@ loading_named_ship = "%{ship} を読み込み中..."
 rendering = "レンダリング中..."
 options = "オプション"
 
+[ui.armor.compass]
+north = "北"
+east = "東"
+south = "南"
+west = "西"
+
 [ui.armor.realtime]
 loading = "艦船の装甲を読み込み中..."
 waiting = "艦船データを待機中..."
