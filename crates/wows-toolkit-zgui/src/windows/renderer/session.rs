@@ -1116,8 +1116,13 @@ impl RendererSession {
         }
     }
 
-    /// Opens the per-ship menu on whatever was right-clicked.
-    pub fn open_ship_menu(self, position: WindowPoint) {
+    /// A secondary press on the map: puts down the tool in hand and drops what was half-drawn, as
+    /// the egui renderer does, or with no tool opens the per-ship menu on whatever was pressed.
+    pub fn secondary_press(self, position: WindowPoint) {
+        if self.annotator.with_untracked(Annotator::has_tool) {
+            self.take_up(Tool::None);
+            return;
+        }
         let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let Some(at) = self.map.with_untracked(|map| map.map_point(position, origin)) else { return };
         let picked = self.frame_commands().and_then(|commands| ship_at(&commands, at));

@@ -275,7 +275,7 @@ fn MapArea(session: RendererSession, map: NodeRef, root: NodeRef) -> impl IntoVi
                         session.pointer_down(position);
                     }
                     Some(PointerButton::Middle) => session.ping(position),
-                    Some(PointerButton::Secondary) => session.open_ship_menu(position),
+                    Some(PointerButton::Secondary) => session.secondary_press(position),
                     _ => {}
                 }
             },

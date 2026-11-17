@@ -355,6 +355,23 @@ fn escape_puts_the_tool_down_then_the_pick() {
     assert!(window.by_test_id("replay-renderer-shape-edit").is_none(), "and its popup with it");
 }
 
+/// A right-click with a tool in hand puts it down and drops the shape half-drawn with it.
+#[test]
+fn a_right_click_puts_the_tool_down() {
+    let (mut window, session) = open();
+    session.take_up(Tool::Line);
+    window.press_at(window_point(session, (200.0, 200.0)));
+    window.hover_at(window_point(session, (320.0, 260.0)));
+    settle(&mut window);
+
+    let viewport = window.by_test_id("replay-renderer-viewport").expect("the map is drawn");
+    window.right_click(viewport).expect("the map has a box");
+    window.release();
+    settle(&mut window);
+    assert_eq!(tool(session), Tool::None, "the tool is put down");
+    assert_eq!(session.collab.with_untracked(CollabLink::annotation_count), 0, "and the line was not kept");
+}
+
 /// Keys typed into a search on the renderer's popovers stay with the search: the undo chord does
 /// not take back a drawing, and a space does not start playback.
 #[test]
