@@ -22,9 +22,12 @@ pub mod map_data;
 pub mod panel_math;
 #[cfg(feature = "rendering")]
 pub mod preview;
+pub mod render_scale;
 #[cfg(feature = "rendering")]
 pub mod renderer;
 pub mod saved_options;
+#[cfg(feature = "rendering")]
+mod surface;
 pub mod toggles;
 #[cfg(feature = "track-file")]
 pub mod track_file;
@@ -77,6 +80,7 @@ pub use encoder::EncoderStatus;
 pub use encoder::check_encoder;
 pub use map_data::MapInfo;
 pub use map_data::MinimapPos;
+pub use render_scale::RenderScale;
 #[cfg(feature = "rendering")]
 pub use renderer::MinimapRenderer;
 pub use saved_options::SavedRenderOptions;

@@ -9,6 +9,7 @@
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
+use wows_minimap_renderer::RenderScale;
 use wows_minimap_renderer::viewport::MapViewport;
 
 /// How much of a zoom one pixel of wheel travel is. The egui renderer's own
@@ -37,25 +38,34 @@ pub struct ElementPoint {
     pub y: f32,
 }
 
+/// How many screen pixels one logical window pixel covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PixelDensity(pub f32);
+
 /// Where the frame's element sits in the window.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ElementBounds {
     pub origin: WindowPoint,
     pub width: f32,
     pub height: f32,
+    /// The screen's pixels per logical pixel where the element is shown.
+    pub density: PixelDensity,
 }
 
-/// The size of a rasterised frame, in its own pixels.
+/// The size of a frame's canvas, in the canvas pixels map points are in.
+///
+/// A frame may be drawn at more pixels than this, to be sharp on a large or
+/// dense screen; its layout is still this size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FrameSize {
     pub width: u32,
     pub height: u32,
 }
 
-/// Where a frame was painted: the element it fills, and the frame's own size.
+/// Where a frame was painted: the element it fills, and the frame's canvas.
 ///
 /// The frame is drawn to fit inside its element without being stretched, so
-/// the two together say where every frame pixel landed.
+/// the two together say where every canvas pixel landed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     pub bounds: ElementBounds,
@@ -126,7 +136,7 @@ impl MapView {
         self.placement = placement;
     }
 
-    /// How many screen pixels one pixel of the drawn frame covers.
+    /// How many element pixels one canvas pixel of the drawn frame covers.
     ///
     /// `None` before the frame has been painted once, which is the only time
     /// nothing knows where it is.
@@ -154,6 +164,19 @@ impl MapView {
         let top = (placement.bounds.height - drawn_height) / 2.0;
 
         Some(HudStrip { left, top, height: HUD_STRIP_HEIGHT * scale })
+    }
+
+    /// How many pixels a frame is drawn at per canvas pixel, so that it lands
+    /// one to one on the screen pixels its element covers.
+    ///
+    /// One before the frame has been painted once: there is nothing yet to
+    /// measure, and the first frame is the canvas's own size. A screen that
+    /// reports no usable density is drawn on the same way.
+    pub fn render_scale(&self) -> RenderScale {
+        let Some(placement) = self.placement else { return RenderScale::ONE };
+        let Some(drawn) = self.drawn_scale() else { return RenderScale::ONE };
+
+        RenderScale::new(drawn * placement.bounds.density.0).unwrap_or(RenderScale::ONE)
     }
 
     /// The window as it is drawn: stretched toward the shape of the element

@@ -9,6 +9,7 @@ use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::EncoderKind;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::RenderScale;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
@@ -122,6 +123,7 @@ use crate::replay_render::track::Track;
 use crate::replay_render::view::ElementBounds;
 use crate::replay_render::view::FrameSize;
 use crate::replay_render::view::MapView;
+use crate::replay_render::view::PixelDensity;
 use crate::replay_render::view::Placement;
 use crate::replay_render::view::Wheel;
 use crate::replay_render::view::WindowPoint;
@@ -228,6 +230,7 @@ fn painted() -> MapView {
             origin: WindowPoint { x: 0.0, y: 0.0 },
             width: MINIMAP_SIZE as f32,
             height: CANVAS_HEIGHT as f32,
+            density: PixelDensity(1.0),
         },
         frame: FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT },
     }));
@@ -1521,6 +1524,28 @@ fn a_point_outside_the_view_is_not_placed() {
     assert!(view.element_point((10.0, 10.0), DEFAULT_MAP_ORIGIN).is_none());
 }
 
+/// A frame is drawn at the screen pixels its element covers, and a pointer
+/// still names the same map point however many pixels that is.
+#[test]
+fn a_frame_is_drawn_at_the_pixels_its_element_covers() {
+    let mut view = painted();
+    view.set_view(MapViewport::new(2.0, (40.0, 90.0)));
+    let at = WindowPoint { x: 300.0, y: 200.0 + DEFAULT_MAP_ORIGIN.1 };
+    let on_map = view.map_point(at, DEFAULT_MAP_ORIGIN);
+    assert_eq!(view.render_scale(), RenderScale::ONE, "the canvas's own size fills its own size");
+
+    // The element twice the canvas's size, on a screen of one and a quarter
+    // pixels to the logical pixel, and the pointer at the same place in it.
+    let (width, height) = (MINIMAP_SIZE as f32 * 2.0, CANVAS_HEIGHT as f32 * 2.0);
+    view.set_placement(Some(Placement {
+        bounds: ElementBounds { origin: WindowPoint { x: 0.0, y: 0.0 }, width, height, density: PixelDensity(1.25) },
+        frame: FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT },
+    }));
+
+    assert_eq!(view.render_scale(), RenderScale::new(2.5).expect("a drawable scale"), "the screen pixels it covers");
+    assert_eq!(view.map_point(WindowPoint { x: at.x * 2.0, y: at.y * 2.0 }, DEFAULT_MAP_ORIGIN), on_map);
+}
+
 /// Right-clicking a ship picks it at any zoom.
 ///
 /// A pointer position and a ship's position have to be compared in the same
@@ -2361,7 +2386,12 @@ fn a_wide_viewport_fills_its_sides_as_the_map_is_zoomed() {
     // A viewport twice as wide as the canvas is tall.
     let (w, h) = (MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
     view.set_placement(Some(Placement {
-        bounds: ElementBounds { origin: WindowPoint { x: 0.0, y: 0.0 }, width: w * 2.0, height: h },
+        bounds: ElementBounds {
+            origin: WindowPoint { x: 0.0, y: 0.0 },
+            width: w * 2.0,
+            height: h,
+            density: PixelDensity(1.0),
+        },
         frame: FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT },
     }));
 

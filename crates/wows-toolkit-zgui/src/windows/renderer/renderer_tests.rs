@@ -16,6 +16,8 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_minimap_renderer::CANVAS_HEIGHT;
+use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::map_data::MinimapPos;
@@ -41,6 +43,7 @@ use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
 use wows_toolkit_replay_data::replay_render::track::DEFAULT_MAP_ORIGIN;
 use wows_toolkit_replay_data::replay_render::track::FrameIndex;
 use wows_toolkit_replay_data::replay_render::track::Track;
+use wows_toolkit_replay_data::replay_render::view::FrameSize;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::collab::push_ping_aged;
@@ -591,6 +594,59 @@ fn the_zoom_control_and_reset_agree_with_the_view() {
     click(&mut window, "replay-renderer-zoom-reset");
     assert_eq!(session.map.with_untracked(|map| map.view()), MapViewport::default());
     assert!(is_disabled(&mut window, "replay-renderer-zoom-reset"));
+}
+
+/// A viewport on `track` that fills the window, so a resize resizes the map.
+fn open_filling_viewport(track: Track) -> (HeadlessWindow, RendererSession) {
+    let opened = Rc::new(Cell::new(None));
+    let mounted = Rc::clone(&opened);
+    let mut track = Some(track);
+    let window = HeadlessWindow::open(HeadlessOptions::new(VIEWPORT), move || {
+        Services::provide(None);
+        let session = RendererSession::ready_for_test(track.take().expect("the viewport is built once"));
+        mounted.set(Some(session));
+        view! {
+            column(style = "width: 100%; height: 100%") {
+                ReplayRenderer(session = session)
+            }
+        }
+    })
+    .expect("the viewport opens headlessly");
+    let session = opened.get().expect("the viewport was built");
+
+    (window, session)
+}
+
+/// A resize while paused asks for a frame drawn for the new size, rather than leaving the old one
+/// enlarged until playback next moves: a larger map needs more pixels, and a zoomed view takes the
+/// map's new shape.
+#[test]
+fn a_resize_while_paused_draws_the_frame_again() {
+    let (mut window, session) = open_filling_viewport(track(vec![0.0, 0.5]));
+    session.frame_size.set(Some(FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }));
+    session.set_view(MapViewport::new(3.0, (100.0, 100.0)));
+    window.advance(Duration::from_millis(50));
+    assert!(!session.playback.with_untracked(Playback::is_playing), "playback is paused");
+    let suited = |session: RendererSession| session.map.with_untracked(|map| (map.render_scale(), map.shaped_view()));
+    let (scale, shape) = suited(session);
+
+    let asked = session.frames_asked();
+    window.resize(WindowSize { width: VIEWPORT.width * 2.0, height: VIEWPORT.height * 2.0 }).expect("it resizes");
+    window.advance(Duration::from_millis(50));
+    let (larger_scale, _) = suited(session);
+    assert!(larger_scale > scale, "a larger map is drawn at more pixels: {larger_scale:?} from {scale:?}");
+    assert!(session.frames_asked() > asked, "the larger map asked for a frame");
+
+    let asked = session.frames_asked();
+    window.resize(WindowSize { width: VIEWPORT.width * 4.0, height: VIEWPORT.height * 2.0 }).expect("it resizes");
+    window.advance(Duration::from_millis(50));
+    let (_, wider_shape) = suited(session);
+    assert_ne!(wider_shape, shape, "a wider map shows more of the zoomed map beside it");
+    assert!(session.frames_asked() > asked, "the wider map asked for a frame");
+
+    let asked = session.frames_asked();
+    window.advance(Duration::from_millis(200));
+    assert_eq!(session.frames_asked(), asked, "a window left alone asks for nothing more");
 }
 
 /// An export says how far it has got over the video, and the transport refuses while it runs:

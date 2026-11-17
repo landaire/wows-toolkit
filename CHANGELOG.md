@@ -71,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Build the replay renderer's roster and stats canvas off the UI thread
 - *(zgui)* Bring forward a popped-out replay renderer when its replay is rendered again, rather than baking it a second time
 - *(zgui)* Withdraw the replay renderer's export buttons during a collab session, as in egui
+- *(zgui)* Draw the replay renderer's frame at the screen's own pixels, so its text, lines and shapes stay sharp in a large window or on a HiDPI screen, and draw it again when the window is resized while paused
 - *(zgui)* Play replays in the renderer at thirty frames a second at every speed, with ships, planes, shells, torpedoes, smoke and capture progress moved between the stored frames, and keep 1x at real time on long battles. Seeks and event jumps land on the exact time, so Next event moves on from an event between stored frames. Exported videos move the same things between frames
 - *(zgui)* Pace the hover preview by the window's clock, so it no longer falls behind 15 frames a second
 - *(zgui)* Record the players in every replay put in the index in the Player Tracker, mark division mates, and make the tracker's Populate button fill it from the replay index

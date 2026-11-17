@@ -31,6 +31,8 @@ use crate::activity_feed::FlowLayout;
 use crate::activity_feed::PlacedContent;
 use crate::activity_feed::RowExtent;
 use crate::assets::GameFonts;
+use crate::render_scale::RenderScale;
+use crate::surface::Surface;
 
 use crate::SHIP_ICON_OUTLINE_THICKNESS;
 
@@ -155,17 +157,22 @@ fn color_paint(color: [u8; 3], alpha: f32) -> Paint<'static> {
 
 // ── Text rendering directly onto Pixmap ────────────────────────────────────
 
-/// Draw anti-aliased text onto a Pixmap at (x, y) with the given color.
+/// Draw anti-aliased text onto a surface at (x, y) with the given color.
 ///
 /// Uses ab_glyph's per-pixel coverage callback for proper anti-aliasing.
-/// Coordinates are in pixel space (x = left edge, y = top edge of text).
-fn draw_text(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+/// Coordinates are in canvas pixels (x = left edge, y = top edge of text); the
+/// glyphs are outlined at the surface's scale, so they stay sharp on a larger
+/// frame rather than being enlarged.
+fn draw_text(pm: &mut Surface, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+    let factor = pm.scale().factor();
+    let scale = PxScale { x: scale.x * factor, y: scale.y * factor };
     let scaled = font.as_scaled(scale);
-    let mut cursor_x = x as f32;
-    let baseline_y = y as f32 + scaled.ascent();
-    let w = pm.width() as i32;
-    let h = pm.height() as i32;
-    let data = pm.data_mut();
+    let mut cursor_x = x as f32 * factor;
+    let baseline_y = y as f32 * factor + scaled.ascent();
+    let pixels = pm.pixels_mut();
+    let w = pixels.width() as i32;
+    let h = pixels.height() as i32;
+    let data = pixels.data_mut();
 
     let mut last_glyph_id = None;
     for c in text.chars() {
@@ -228,14 +235,14 @@ fn text_size(scale: PxScale, font: &impl Font, text: &str) -> (u32, u32) {
 }
 
 /// Draw text with a shadow (black offset by +1,+1).
-fn draw_text_shadow(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+fn draw_text_shadow(pm: &mut Surface, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
     draw_text(pm, [0, 0, 0], x + 1, y + 1, scale, font, text);
     draw_text(pm, color, x, y, scale, font, text);
 }
 
 /// Draw text ringed in black or white, whichever stands out from `color`, as
 /// the egui renderer outlines a measurement's figures.
-fn draw_outlined_text(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
+fn draw_outlined_text(pm: &mut Surface, color: [u8; 3], x: i32, y: i32, scale: PxScale, font: &impl Font, text: &str) {
     let luma = 0.299 * f32::from(color[0]) + 0.587 * f32::from(color[1]) + 0.114 * f32::from(color[2]);
     let outline = if luma > 128.0 { [0, 0, 0] } else { [255, 255, 255] };
     let reach = (scale.y * 0.1).clamp(1.0, 3.0).round() as i32;
@@ -248,14 +255,14 @@ fn draw_outlined_text(pm: &mut Pixmap, color: [u8; 3], x: i32, y: i32, scale: Px
 // ── Drawing primitives ─────────────────────────────────────────────────────
 
 /// Draw an anti-aliased line.
-fn draw_line(pm: &mut Pixmap, x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3], alpha: f32, width: f32) {
+fn draw_line(pm: &mut Surface, x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3], alpha: f32, width: f32) {
     let mut pb = PathBuilder::new();
     pb.move_to(x1, y1);
     pb.line_to(x2, y2);
     let Some(path) = pb.finish() else { return };
     let paint = color_paint(color, alpha);
     let stroke = Stroke { width, line_cap: LineCap::Round, line_join: LineJoin::Round, miter_limit: 4.0, dash: None };
-    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity());
 }
 
 /// Stroke or fill a run of points, closing it first when it is a polygon.
@@ -263,7 +270,7 @@ fn draw_line(pm: &mut Pixmap, x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3]
 /// A width in map space rather than on screen: a reader drew the line over
 /// the map, so it belongs to the map and thickens with it, unlike the
 /// renderer's own strokes.
-fn draw_run(pm: &mut Pixmap, points: &[(f32, f32)], closed: bool, filled: bool, color: [u8; 4], width: f32) {
+fn draw_run(pm: &mut Surface, points: &[(f32, f32)], closed: bool, filled: bool, color: [u8; 4], width: f32) {
     if points.len() < 2 {
         return;
     }
@@ -281,7 +288,7 @@ fn draw_run(pm: &mut Pixmap, points: &[(f32, f32)], closed: bool, filled: bool, 
     let alpha = color[3] as f32 / 255.0;
     let paint = color_paint(rgb, alpha);
     if filled {
-        pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity());
         return;
     }
     let stroke = Stroke {
@@ -291,30 +298,30 @@ fn draw_run(pm: &mut Pixmap, points: &[(f32, f32)], closed: bool, filled: bool, 
         miter_limit: 4.0,
         dash: None,
     };
-    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity());
 }
 
 /// Draw an anti-aliased filled circle.
-fn draw_filled_circle(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32) {
+fn draw_filled_circle(pm: &mut Surface, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32) {
     let Some(path) = PathBuilder::from_circle(cx, cy, radius) else {
         return;
     };
     let paint = color_paint(color, alpha);
-    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity());
 }
 
 /// Draw an anti-aliased circle outline.
-fn draw_circle_outline(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32, width: f32) {
+fn draw_circle_outline(pm: &mut Surface, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32, width: f32) {
     let Some(path) = PathBuilder::from_circle(cx, cy, radius) else {
         return;
     };
     let paint = color_paint(color, alpha);
     let stroke = Stroke { width, line_cap: LineCap::Butt, line_join: LineJoin::Miter, miter_limit: 4.0, dash: None };
-    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity());
 }
 
 /// Draw an anti-aliased dashed circle outline.
-fn draw_dashed_circle(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32, width: f32) {
+fn draw_dashed_circle(pm: &mut Surface, cx: f32, cy: f32, radius: f32, color: [u8; 3], alpha: f32, width: f32) {
     let Some(path) = PathBuilder::from_circle(cx, cy, radius) else {
         return;
     };
@@ -322,19 +329,19 @@ fn draw_dashed_circle(pm: &mut Pixmap, cx: f32, cy: f32, radius: f32, color: [u8
     // Dash pattern: 8px on, 8px off
     let dash = StrokeDash::new(vec![8.0, 8.0], 0.0);
     let stroke = Stroke { width, line_cap: LineCap::Butt, line_join: LineJoin::Miter, miter_limit: 4.0, dash };
-    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity());
 }
 
 /// Draw a filled rectangle.
-fn draw_filled_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, color: [u8; 3], alpha: f32) {
+fn draw_filled_rect(pm: &mut Surface, x: f32, y: f32, w: f32, h: f32, color: [u8; 3], alpha: f32) {
     let Some(rect) = tiny_skia::Rect::from_xywh(x, y, w, h) else {
         return;
     };
     let paint = color_paint(color, alpha);
-    pm.fill_rect(rect, &paint, Transform::identity(), None);
+    pm.fill_rect(rect, &paint, Transform::identity());
 }
 
-fn draw_rounded_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, radius: f32, color: [u8; 3], alpha: f32) {
+fn draw_rounded_rect(pm: &mut Surface, x: f32, y: f32, w: f32, h: f32, radius: f32, color: [u8; 3], alpha: f32) {
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -354,14 +361,14 @@ fn draw_rounded_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, radius: f3
         return;
     };
     let paint = color_paint(color, alpha);
-    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity());
 }
 
 // ── Composite drawing functions ────────────────────────────────────────────
 
 /// Draw a capture point zone: filled circle + progress pie + outline + label.
 fn draw_capture_point(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     x: f32,
     y: f32,
     radius: f32,
@@ -406,7 +413,7 @@ fn draw_capture_point(
 
         if let Some(path) = pb.finish() {
             let paint = color_paint(inv_color, fill_alpha);
-            pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+            pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity());
         }
     }
 
@@ -434,7 +441,7 @@ fn draw_capture_point(
 
 /// Draw player name and/or ship name labels centered above a ship icon.
 fn draw_ship_labels(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     x: f32,
     y: f32,
     player_name: Option<&str>,
@@ -478,7 +485,7 @@ fn draw_ship_labels(
 
 /// Draw a health bar below a ship icon.
 fn draw_health_bar(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     x: f32,
     y: f32,
     fraction: f32,
@@ -510,7 +517,7 @@ fn draw_health_bar(
 /// and sub-pixel placement.
 #[allow(clippy::too_many_arguments)]
 fn draw_ship_icon(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     icon: &RgbaImage,
     x: f32,
     y: f32,
@@ -563,7 +570,7 @@ fn draw_ship_icon(
 
     let paint = PixmapPaint { opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
 
-    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform);
 }
 
 /// Build a padded outline image for a ship icon: the icon's silhouette dilated
@@ -616,14 +623,14 @@ fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alph
 }
 
 /// Draw a plane/consumable icon (pre-colored RGBA, no rotation).
-fn draw_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, scale: f32) {
+fn draw_icon(pm: &mut Surface, icon: &RgbaImage, x: f32, y: f32, scale: f32) {
     let iw = icon.width();
     let ih = icon.height();
     let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
     let transform =
         Transform::from_scale(scale, scale).post_translate(x - iw as f32 * scale / 2.0, y - ih as f32 * scale / 2.0);
     let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
-    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform);
 }
 
 /// Draw the team score bar at the top of the frame.
@@ -632,7 +639,7 @@ fn draw_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, scale: f32) {
 /// progress toward 1000 points. Team 0 (friendly) grows left→center,
 /// team 1 (enemy) grows right→center.
 fn draw_score_bar(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     team0_score: i32,
     team1_score: i32,
     team0_color: [u8; 3],
@@ -776,7 +783,7 @@ fn draw_score_bar(
 }
 
 /// Draw the game timer.
-fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedClock, fonts: &GameFonts, map_width: u32) {
+fn draw_timer(pm: &mut Surface, time_remaining: Option<i64>, elapsed: ElapsedClock, fonts: &GameFonts, map_width: u32) {
     let font = &fonts.primary;
     let center_x = map_width as i32 / 2;
     let main_scale = fonts.scale(16.0);
@@ -810,7 +817,7 @@ fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedCloc
 }
 
 fn draw_pre_battle_countdown(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     seconds: i64,
     fonts: &GameFonts,
     resolver: &dyn TextResolver,
@@ -852,7 +859,7 @@ fn death_cause_icon_key(
 /// Layout per line (right-aligned):
 /// `KILLER_NAME [icon] ship_name  [cause]  VICTIM_NAME [icon] ship_name`
 fn draw_kill_feed(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     entries: &[KillFeedEntry],
     fonts: &GameFonts,
     ship_icons: &HashMap<String, ShipIcon>,
@@ -986,7 +993,7 @@ fn draw_kill_feed(
 
 /// Draw a small ship icon for the kill feed, tinted with team color.
 /// If `flip` is true, the icon faces left (horizontally mirrored).
-fn draw_kill_feed_icon(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32, size: i32, color: [u8; 3], flip: bool) {
+fn draw_kill_feed_icon(pm: &mut Surface, icon: &RgbaImage, x: i32, y: i32, size: i32, color: [u8; 3], flip: bool) {
     let iw = icon.width();
     let ih = icon.height();
     let scale = size as f32 / iw.max(ih) as f32;
@@ -1030,7 +1037,7 @@ fn draw_kill_feed_icon(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32, size: 
 
     let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
 
-    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform);
 }
 
 /// Word-wrap text to fit within `max_width` pixels, breaking on word boundaries.
@@ -1189,7 +1196,7 @@ impl<'a> FeedAssets<'a> {
         FeedRowLayout { header, message }
     }
 
-    fn draw_row(&self, pm: &mut Pixmap, layout: &FeedRowLayout<'_, '_>, shade: RowShade, top: f32, width: f32) {
+    fn draw_row(&self, pm: &mut Surface, layout: &FeedRowLayout<'_, '_>, shade: RowShade, top: f32, width: f32) {
         if shade == RowShade::Banded {
             draw_filled_rect(
                 pm,
@@ -1253,7 +1260,7 @@ impl<'a> FeedAssets<'a> {
 
 /// Draw the stats panel's merged kill and chat feed.
 fn draw_activity_feed(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     x: i32,
     y: i32,
     width: i32,
@@ -1299,15 +1306,15 @@ fn draw_activity_feed(
         // row would.
         let layer_top = top.floor();
         let layer_h = (top - layer_top + layout.height()).ceil() as u32 + 1;
-        let Some(mut layer) = Pixmap::new(width as u32, layer_h) else { continue };
+        let Some(mut layer) = Surface::new(width as u32, layer_h, pm.scale()) else { continue };
         assets.draw_row(&mut layer, layout, entry.shade, top - layer_top, width as f32);
         let paint =
             PixmapPaint { opacity: row.opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
-        panel.draw_pixmap(0, layer_top as i32, layer.as_ref(), &paint, Transform::identity(), None);
+        panel.draw_surface(0, layer_top as i32, &layer, &paint);
     }
 
     let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::Source, quality: FilterQuality::Nearest };
-    pm.draw_pixmap(panel_rect.x(), panel_rect.y(), panel.as_ref(), &paint, Transform::identity(), None);
+    pm.draw_surface(panel_rect.x(), panel_rect.y(), &panel, &paint);
 }
 
 /// Draw the chat overlay on the left side of the minimap.
@@ -1318,7 +1325,7 @@ fn draw_activity_feed(
 ///   Line 3+: message text, word-wrapped
 /// The whole thing sits in a semi-translucent dark box.
 fn draw_chat_overlay(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     entries: &[ChatEntry],
     fonts: &GameFonts,
     ship_icons: &HashMap<String, ShipIcon>,
@@ -1500,7 +1507,7 @@ fn draw_chat_overlay(
 /// Lines and labels sit in map space, so they move and grow with the map when
 /// it is zoomed; the stroke does not, which is what keeps a line one pixel
 /// wide at every zoom. The egui renderer's grid behaves the same way.
-fn draw_grid(pm: &mut Pixmap, viewport: MapViewport, fonts: &GameFonts) {
+fn draw_grid(pm: &mut Surface, viewport: MapViewport, fonts: &GameFonts) {
     let font = &fonts.primary;
     let cell = MINIMAP_SIZE as f32 / 10.0;
     let grid_color = [180, 180, 180];
@@ -1546,17 +1553,18 @@ fn draw_grid(pm: &mut Pixmap, viewport: MapViewport, fonts: &GameFonts) {
     }
 }
 
-/// The drawn map at `viewport`: the art resampled to the window, with the
-/// grid over it.
+/// The drawn map at `viewport` and `scale`: the art resampled to the window,
+/// with the grid over it.
 ///
 /// Sampled through the viewport rather than cropped and resized, because the
 /// window's edges do not fall on whole source pixels and a crop would have to
 /// round them.
-fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> Pixmap {
+fn build_map_base(map: &RgbImage, viewport: MapViewport, scale: RenderScale, fonts: &GameFonts) -> Surface {
     let size = MINIMAP_SIZE;
     let width = drawn_map_width(viewport);
-    let mut art = RgbImage::from_pixel(width, size, Rgb([30, 40, 60]));
-    if viewport.is_whole_map() {
+    let (pixel_width, pixel_height) = (scale.pixels(width), scale.pixels(size));
+    let mut art = RgbImage::from_pixel(pixel_width, pixel_height, Rgb([30, 40, 60]));
+    if viewport.is_whole_map() && scale == RenderScale::ONE {
         // The art is already drawn at the map's own size, so the whole map is
         // a copy. Resampling it would land on the same pixels at four times
         // the cost, and every preview and every exported frame pays this.
@@ -1566,14 +1574,18 @@ fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> P
             }
         }
     } else if map.width() > 0 && map.height() > 0 {
-        for y in 0..size {
-            for x in 0..width {
-                let (sx, sy) = viewport.to_map(x as f32, y as f32);
+        // An output pixel's centre, in the canvas pixels `to_map` takes,
+        // where a whole number is the centre of a canvas pixel.
+        let factor = scale.factor();
+        let canvas = |pixel: u32| (pixel as f32 + 0.5) / factor - 0.5;
+        for y in 0..pixel_height {
+            for x in 0..pixel_width {
+                let (sx, sy) = viewport.to_map(canvas(x), canvas(y));
                 art.put_pixel(x, y, sample_bilinear(map, sx, sy));
             }
         }
     }
-    let mut base = rgb_to_pixmap(&art);
+    let mut base = Surface::from_pixels(rgb_to_pixmap(&art), width, size, scale);
     draw_grid(&mut base, viewport, fonts);
     base
 }
@@ -1623,7 +1635,7 @@ fn sample_bilinear(image: &RgbImage, x: f32, y: f32) -> Rgb<u8> {
 /// The glow is created by drawing the text multiple times at increasing offsets
 /// with decreasing opacity in the glow color, creating a soft halo effect.
 fn draw_battle_result_overlay(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     text: &str,
     subtitle: Option<&str>,
     glow_color: [u8; 3],
@@ -1720,9 +1732,9 @@ fn hp_bar_color_lerp(fraction: f32) -> [u8; 3] {
 }
 
 /// Draw an RGBA image at a non-centered position (top-left corner).
-fn draw_icon_at(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32) {
+fn draw_icon_at(pm: &mut Surface, icon: &RgbaImage, x: i32, y: i32) {
     let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
-    pm.draw_pixmap(x, y, icon_pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    pm.draw_pixmap(x, y, icon_pm.as_ref(), &PixmapPaint::default(), Transform::identity());
 }
 
 /// Format a number with thousands separators (e.g. 12345 → "12,345").
@@ -1765,7 +1777,7 @@ fn damage_label_color_rgb(label: &str) -> [u8; 3] {
 
 #[allow(clippy::too_many_arguments)]
 fn draw_team_roster(
-    pm: &mut Pixmap,
+    pm: &mut Surface,
     side: crate::draw_command::RosterSide,
     x: i32,
     y: i32,
@@ -2120,22 +2132,25 @@ pub type ShipIcon = RgbaImage;
 ///
 /// Owns the map image, font, ship icons, plane icons, and consumable icons.
 /// Implements `RenderTarget` by dispatching `DrawCommand`s to tiny-skia primitives.
+///
+/// Commands, regions and the map origin are all in canvas pixels; the frame
+/// itself is drawn at the target's [`RenderScale`].
 pub struct ImageTarget {
-    canvas: Pixmap,
+    canvas: Surface,
     /// The map art, kept so the drawn map can be rebuilt when the viewport
     /// moves.
     map_art: RgbImage,
     /// Which part of the map frames show.
     viewport: MapViewport,
-    /// The drawn map with its grid, at the current viewport. Cloned at the
-    /// start of each frame.
-    map_base: Pixmap,
+    /// The drawn map with its grid, at the current viewport and scale. Cloned
+    /// at the start of each frame.
+    map_base: Surface,
     /// What map-space commands draw on this frame.
     ///
     /// A layer of its own rather than the canvas, because it is exactly the
     /// map's rectangle: a zoomed-in ship near an edge is clipped by the layer
     /// instead of being painted over the score bar.
-    map_layer: Pixmap,
+    map_layer: Surface,
     /// Whether the layer holds anything not yet composited onto the canvas.
     map_dirty: bool,
     /// Width of the minimap area (excludes side panels). Always `MINIMAP_SIZE`.
@@ -2255,7 +2270,7 @@ impl ImageTarget {
         };
 
         let viewport = MapViewport::default();
-        let map_base = build_map_base(&map, viewport, &fonts);
+        let map_base = build_map_base(&map, viewport, RenderScale::ONE, &fonts);
 
         let ship_icon_outlines = ship_icons
             .iter()
@@ -2263,7 +2278,7 @@ impl ImageTarget {
             .collect();
 
         Self {
-            canvas: Pixmap::new(canvas_width, CANVAS_HEIGHT).unwrap(),
+            canvas: Surface::new(canvas_width, CANVAS_HEIGHT, RenderScale::ONE).unwrap(),
             map_layer: map_base.clone(),
             map_base,
             map_art: map,
@@ -2322,7 +2337,7 @@ impl ImageTarget {
             return;
         }
         self.viewport = viewport;
-        self.map_base = build_map_base(&self.map_art, viewport, &self.fonts);
+        self.map_base = build_map_base(&self.map_art, viewport, self.canvas.scale(), &self.fonts);
         // A wider window needs a wider canvas to put it on. Only where there
         // is room for one: the gutters a side panel takes are already spoken
         // for, so a viewport showing them keeps its shape.
@@ -2331,11 +2346,24 @@ impl ImageTarget {
             _ => self.canvas.width(),
         };
         if wanted != self.canvas.width()
-            && let Some(canvas) = Pixmap::new(wanted, CANVAS_HEIGHT)
+            && let Some(canvas) = Surface::new(wanted, CANVAS_HEIGHT, self.canvas.scale())
         {
             self.canvas = canvas;
             self.hud_width = wanted;
         }
+    }
+
+    /// Draws frames at `scale` from the next frame on.
+    ///
+    /// Like a viewport, a scale that has not changed is left alone: a new one
+    /// costs a resample of the map art.
+    pub fn set_render_scale(&mut self, scale: RenderScale) {
+        if scale == self.canvas.scale() {
+            return;
+        }
+        let Some(canvas) = Surface::new(self.canvas.width(), CANVAS_HEIGHT, scale) else { return };
+        self.canvas = canvas;
+        self.map_base = build_map_base(&self.map_art, self.viewport, scale, &self.fonts);
     }
 
     /// Puts what the map layer holds onto the canvas.
@@ -2349,32 +2377,31 @@ impl ImageTarget {
             return;
         }
         let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
-        self.canvas.draw_pixmap(
-            self.map_x_offset as i32,
-            HUD_HEIGHT as i32,
-            self.map_layer.as_ref(),
-            &paint,
-            Transform::identity(),
-            None,
-        );
-        self.map_layer.data_mut().fill(0);
+        self.canvas.draw_surface(self.map_x_offset as i32, HUD_HEIGHT as i32, &self.map_layer, &paint);
+        self.map_layer.clear();
         self.map_dirty = false;
     }
 
     /// Access the current frame as an RGB image (converted from Pixmap).
     pub fn frame(&self) -> RgbImage {
-        pixmap_to_rgb(&self.canvas)
+        pixmap_to_rgb(self.canvas.pixels())
     }
 
     /// Writes the current frame over `out` as tightly packed opaque BGRA rows, the layout a
     /// texture takes, with the same colours [`Self::frame`] has.
     pub fn write_bgra(&self, out: &mut Vec<u8>) {
-        pixmap_to_bgra(&self.canvas, out);
+        pixmap_to_bgra(self.canvas.pixels(), out);
     }
 
-    /// Canvas dimensions.
+    /// Canvas dimensions, in the canvas pixels commands and regions are in.
     pub fn canvas_size(&self) -> (u32, u32) {
         (self.canvas.width(), self.canvas.height())
+    }
+
+    /// The frame's own dimensions, which are the canvas's at the render scale.
+    pub fn frame_size(&self) -> (u32, u32) {
+        let pixels = self.canvas.pixels();
+        (pixels.width(), pixels.height())
     }
 }
 
@@ -3565,7 +3592,8 @@ mod tests {
 
         let frame = target.frame();
         let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) < 24);
-        let around: Vec<(u32, [u8; 3])> = (380..460)
+        // From just right of the grid line at the middle of the map, which is not the label's.
+        let around: Vec<(u32, [u8; 3])> = (387..460)
             .flat_map(|x| (390 + HUD_HEIGHT..410 + HUD_HEIGHT).map(move |y| (x, y)))
             .map(|(x, y)| (x, pixel(&frame, x, y)))
             .collect();
@@ -3640,6 +3668,52 @@ mod tests {
         let past_bow = pixel(&frame, x + half_icon + 2, y);
         assert!(past_bow[0] > past_bow[2], "the red wedge shows past the bow: {past_bow:?}");
     }
+
+    /// A frame drawn at scale two is twice the size and carries the same
+    /// picture, with a shape's edge on the doubled pixel, while the canvas it
+    /// lays out stays the size commands are in.
+    #[test]
+    fn a_frame_at_twice_the_scale_is_the_same_picture_twice_the_size() {
+        let (Some(mut plain), Some(mut doubled)) = (target(), target()) else { return };
+        let square = DrawCommand::Annotation {
+            shape: AnnotationShape::Polygon {
+                points: vec![
+                    MinimapPos { x: 100.0, y: 100.0 },
+                    MinimapPos { x: 200.0, y: 100.0 },
+                    MinimapPos { x: 200.0, y: 200.0 },
+                    MinimapPos { x: 100.0, y: 200.0 },
+                ],
+                filled: true,
+            },
+            color: [255, 0, 0, 255],
+            width: 1.0,
+        };
+        let scale = RenderScale::new(2.0).expect("a drawable scale");
+        doubled.set_render_scale(scale);
+        for target in [&mut plain, &mut doubled] {
+            target.begin_frame();
+            target.draw(&square);
+            target.end_frame();
+        }
+
+        let (width, height) = plain.canvas_size();
+        assert_eq!(doubled.canvas_size(), (width, height), "the layout is the same canvas");
+        assert_eq!(doubled.frame_size(), (width * 2, height * 2));
+
+        let (plain, doubled) = (plain.frame(), doubled.frame());
+        let (doubled_width, doubled_height) = doubled.dimensions();
+        assert_eq!((doubled_width, doubled_height), (width * 2, height * 2), "the frame is the frame size");
+        let red = [255, 0, 0];
+        let map = [30, 40, 60];
+        let top = HUD_HEIGHT;
+        assert_eq!(pixel(&plain, 100, 100 + top), red);
+        assert_eq!(pixel(&plain, 99, 100 + top), map);
+        assert_eq!(pixel(&doubled, 200, 200 + 2 * top), red, "the left edge lands on the doubled pixel");
+        assert_eq!(pixel(&doubled, 199, 200 + 2 * top), map);
+        assert_eq!(pixel(&doubled, 399, 399 + 2 * top), red, "the far corner lands on the doubled pixel");
+        assert_eq!(pixel(&doubled, 400, 399 + 2 * top), map);
+        assert_eq!(pixel(&doubled, 400, 4), pixel(&plain, 200, 2), "the HUD strip is doubled with the map");
+    }
 }
 
 #[cfg(test)]
@@ -3700,7 +3774,7 @@ mod region_tests {
     #[test]
     fn a_roster_records_where_its_consumable_icons_landed() {
         let Some(fonts) = crate::assets::test_fonts() else { return };
-        let mut canvas = Pixmap::new(400, 400).expect("a canvas");
+        let mut canvas = Surface::new(400, 400, RenderScale::ONE).expect("a canvas");
         let mut regions = Vec::new();
 
         draw_team_roster(
@@ -3737,7 +3811,7 @@ mod region_tests {
     #[test]
     fn a_row_with_no_consumables_records_nothing() {
         let Some(fonts) = crate::assets::test_fonts() else { return };
-        let mut canvas = Pixmap::new(400, 400).expect("a canvas");
+        let mut canvas = Surface::new(400, 400, RenderScale::ONE).expect("a canvas");
         let mut regions = Vec::new();
 
         draw_team_roster(

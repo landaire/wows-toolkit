@@ -797,7 +797,8 @@ fn battle_frame(
     commands: &[DrawCommand],
 ) -> BgraFrame {
     let mut bgra = Vec::new();
-    let ((width, height), _) = renderer.render_regions_bgra(view, commands, &mut bgra);
+    let drawn = renderer.render_regions_bgra(view, wows_minimap_renderer::RenderScale::ONE, commands, &mut bgra);
+    let (width, height) = drawn.pixels;
 
     BgraFrame::from_bgra(width, height, bgra)
 }

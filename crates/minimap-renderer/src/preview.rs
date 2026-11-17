@@ -17,7 +17,9 @@ use wowsunpack::vfs::VfsPath;
 use crate::assets;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::RenderTarget;
+use crate::drawing::DrawnRegion;
 use crate::drawing::ImageTarget;
+use crate::render_scale::RenderScale;
 use crate::viewport::MapViewport;
 use wowsunpack::data::Version;
 
@@ -44,6 +46,17 @@ impl std::error::Error for PreviewRenderError {}
 /// A renderer bound to one build's assets and one map.
 pub struct PreviewRenderer {
     target: ImageTarget,
+}
+
+/// A frame written into a caller's buffer, and what it drew.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawnFrame {
+    /// The canvas the frame lays out, in the canvas pixels map points and regions are in.
+    pub canvas: (u32, u32),
+    /// The frame's own width and height, in the pixels written.
+    pub pixels: (u32, u32),
+    /// What the frame drew that a pointer can rest on.
+    pub regions: Vec<DrawnRegion>,
 }
 
 impl PreviewRenderer {
@@ -105,7 +118,7 @@ impl PreviewRenderer {
         Self { target }
     }
 
-    /// The pixel size of every frame this renderer produces.
+    /// The size of every frame this renderer produces, in canvas pixels.
     pub fn canvas_size(&self) -> (u32, u32) {
         self.target.canvas_size()
     }
@@ -121,7 +134,7 @@ impl PreviewRenderer {
     /// Takes any sequence of borrowed commands, so a caller showing a subset
     /// of a track filters it here rather than cloning the commands it keeps.
     pub fn render<'a>(&mut self, commands: impl IntoIterator<Item = &'a DrawCommand>) -> RgbImage {
-        self.draw(MapViewport::default(), commands);
+        self.draw(MapViewport::default(), RenderScale::ONE, commands);
         self.target.frame()
     }
 
@@ -132,30 +145,41 @@ impl PreviewRenderer {
     /// is shared by every preview of a map: one that remembered a zoom would
     /// zoom the others with it.
     pub fn render_at(&mut self, viewport: MapViewport, commands: &[DrawCommand]) -> RgbImage {
-        self.draw(viewport, commands);
+        self.draw(viewport, RenderScale::ONE, commands);
         self.target.frame()
     }
 
-    /// The same, written over `out` as tightly packed opaque BGRA rows, the layout a texture takes,
-    /// with what the frame drew that a pointer can rest on. Returns the frame's width and height.
+    /// One frame of `commands` at `scale`, written over `out` as tightly packed opaque BGRA rows,
+    /// the layout a texture takes.
     ///
     /// The regions are handed back with the frame rather than kept: one renderer is shared by
     /// every preview of a map, so regions left on it would belong to whichever frame was drawn
-    /// last.
+    /// last. The scale is given per frame for the same reason.
     pub fn render_regions_bgra(
         &mut self,
         viewport: MapViewport,
+        scale: RenderScale,
         commands: &[DrawCommand],
         out: &mut Vec<u8>,
-    ) -> ((u32, u32), Vec<crate::drawing::DrawnRegion>) {
-        self.draw(viewport, commands);
+    ) -> DrawnFrame {
+        self.draw(viewport, scale, commands);
         self.target.write_bgra(out);
 
-        (self.target.canvas_size(), self.target.drawn_regions().to_vec())
+        DrawnFrame {
+            canvas: self.target.canvas_size(),
+            pixels: self.target.frame_size(),
+            regions: self.target.drawn_regions().to_vec(),
+        }
     }
 
-    fn draw<'a>(&mut self, viewport: MapViewport, commands: impl IntoIterator<Item = &'a DrawCommand>) {
+    fn draw<'a>(
+        &mut self,
+        viewport: MapViewport,
+        scale: RenderScale,
+        commands: impl IntoIterator<Item = &'a DrawCommand>,
+    ) {
         self.target.set_map_viewport(viewport);
+        self.target.set_render_scale(scale);
         self.target.begin_frame();
         for command in commands {
             self.target.draw(command);

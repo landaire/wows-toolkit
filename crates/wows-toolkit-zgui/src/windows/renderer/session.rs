@@ -222,7 +222,7 @@ pub struct RendererSession {
     /// Counts the redraws a running session asks for, which move peers' cursors and pings.
     pub collab_frame: RwSignal<u64, LocalStorage>,
     pub hovered: RwSignal<Option<HoveredConsumable>, LocalStorage>,
-    /// The size of the frame on screen, `None` until the first one lands.
+    /// The canvas of the frame on screen, `None` until the first one lands.
     pub frame_size: RwSignal<Option<FrameSize>, LocalStorage>,
     /// Whether the primary modifier is held, which puts the shortcut sheet up.
     pub ctrl_held: RwSignal<bool, LocalStorage>,
@@ -981,13 +981,21 @@ impl RendererSession {
     }
 
     /// Records where the frame sits on screen, which every pointer position is read against.
+    ///
+    /// Draws again when the frame on screen no longer suits the element, paused or not: a resize
+    /// reshapes a zoomed view, and changes how many pixels a sharp frame needs.
     pub fn place(self, bounds: ElementBounds) {
         let frame = self.frame_size.get_untracked();
         let placement = frame.map(|frame| Placement { bounds, frame });
-        if self.map.with_untracked(|map| map.placement() == placement) {
+        let suited = |map: &MapView| (map.shaped_view(), map.render_scale());
+        let Some(before) = self.map.with_untracked(|map| (map.placement() != placement).then(|| suited(map))) else {
             return;
-        }
+        };
         self.map.update(|map| map.set_placement(placement));
+
+        if self.map.with_untracked(suited) != before {
+            self.ask_frame();
+        }
     }
 
     /// The wheel zooms about whatever is under the pointer.
@@ -1514,15 +1522,16 @@ impl RendererSession {
         });
         self.broadcast(&track, &motion, clock);
 
-        let view = self.map.with_untracked(MapView::shaped_view);
+        let (view, scale) = self.map.with_untracked(|map| (map.shaped_view(), map.render_scale()));
         let drawing = Arc::clone(&renderer);
         self.spawn(async move {
             let drawn = blocking(move || {
                 let mut drawing = drawing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let mut bgra = Vec::new();
-                let ((width, height), regions) = drawing.render_regions_bgra(view, &shown, &mut bgra);
-                let size = FrameSize { width, height };
-                RasterOutput { frame: BgraFrame::from_bgra(width, height, bgra), size, regions }
+                let drawn = drawing.render_regions_bgra(view, scale, &shown, &mut bgra);
+                let (width, height) = drawn.pixels;
+                let size = FrameSize { width: drawn.canvas.0, height: drawn.canvas.1 };
+                RasterOutput { frame: BgraFrame::from_bgra(width, height, bgra), size, regions: drawn.regions }
             })
             .await;
             self.finish_draw(generation, renderer, drawn);

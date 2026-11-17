@@ -18,6 +18,7 @@ use wows_toolkit_replay_data::replay_render::playback::speed_index;
 use wows_toolkit_replay_data::replay_render::playback::speed_label;
 use wows_toolkit_replay_data::replay_render::track::FrameIndex;
 use wows_toolkit_replay_data::replay_render::view::ElementBounds;
+use wows_toolkit_replay_data::replay_render::view::PixelDensity;
 use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
 use wows_toolkit_services::collab::CollabLink;
@@ -222,7 +223,7 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     }
 }
 
-/// Records where the map element sits.
+/// Records where the map element sits, in the window's CSS pixels, and how dense its pixels are.
 fn place(session: RendererSession, map: NodeRef) {
     if let Some(bounds) = element_bounds(map) {
         session.place(bounds);
@@ -238,6 +239,7 @@ pub(super) fn element_bounds(element: NodeRef) -> Option<ElementBounds> {
         origin: WindowPoint { x: rect.origin.x.0 / scale, y: rect.origin.y.0 / scale },
         width: rect.size.width.0 / scale,
         height: rect.size.height.0 / scale,
+        density: PixelDensity(scale),
     })
 }
 
