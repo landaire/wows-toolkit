@@ -149,6 +149,8 @@ pub struct ShowArmor {
     pub target: ArmorTarget,
     /// What the ship had taken by where playback is.
     pub hits: Vec<PreExtractedHit>,
+    /// The ship's health where playback is, so the readout shows from the start.
+    pub health: Option<f32>,
     /// Who was shooting at that ship, so the viewer can say which salvo a
     /// hit came from and offer one attacker at a time.
     pub incoming: Box<IncomingContext>,
@@ -218,7 +220,8 @@ impl ArmorFollow {
         incoming.health = feed.health_strip();
         incoming.at = Some(clock);
 
-        let shown = ShowArmor { target, hits: feed.taken().to_vec(), incoming: Box::new(incoming) };
+        let shown =
+            ShowArmor { target, hits: feed.taken().to_vec(), health: feed.health(), incoming: Box::new(incoming) };
         Some((Self { entity_id, feed }, shown))
     }
 

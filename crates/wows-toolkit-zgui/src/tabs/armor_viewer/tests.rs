@@ -45,6 +45,9 @@ use wows_toolkit_armor::viewport::renderer::HighlightDepth;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
+use wows_toolkit_replay_data::replay_render::armor::ArmorTarget;
+use wows_toolkit_replay_data::replay_render::armor::IncomingContext;
+use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wows_toolkit_services::dialog::Asked;
 use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
 use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
@@ -619,6 +622,32 @@ fn playback_moving_during_a_load_is_shown_when_the_ship_lands() {
     assert_eq!(viewport.hits_drawn(), 3, "the latest hits are shown");
     let readout = viewport.hit_readout().expect("the ship's health is shown");
     assert!(readout.contains("60"), "with the latest health: {readout}");
+}
+
+/// A replay opening the viewer puts the ship's health up as soon as the ship lands, not on the
+/// first move of playback.
+#[test]
+fn the_health_is_shown_when_a_replay_opens_the_viewer() {
+    let armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let workspace = armor.workspace;
+    workspace.library.adopt_for_test(Arc::new(bundle()), None);
+    let source = workspace.library.new_source();
+    let viewport = workspace.active_untracked();
+
+    let target =
+        ArmorTarget { param_index: "PASB028".to_string(), display_name: "Iowa".to_string(), hull_upgrade: None };
+    let shown = ShowArmor {
+        target,
+        hits: vec![landed_at(1.0)],
+        health: Some(75.0),
+        incoming: Box::new(IncomingContext::default()),
+    };
+    workspace.show_with_hits(source, shown, None);
+    let generation = workspace.pending_load_for_test().expect("the ship is loading");
+    workspace.land_ship_for_test(generation, &bundle(), Ok(FirstStage { scene: ship_scene(), rest: Vec::new() }));
+
+    let readout = viewport.hit_readout().expect("the ship's health is shown");
+    assert!(readout.contains("75"), "with the health where playback is: {readout}");
 }
 
 /// A replay's playback moves the hits of the pane it was shown in, whichever pane is active, and

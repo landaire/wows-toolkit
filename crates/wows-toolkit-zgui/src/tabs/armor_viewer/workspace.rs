@@ -1056,7 +1056,7 @@ impl ArmorWorkspace {
     /// Shows a ship with the hits it had taken, for the replay viewport `source`, which the viewer
     /// follows from then on. The hits are held until the load that will show them lands.
     pub fn show_with_hits(self, source: FeedSource, shown: ShowArmor, seek: Option<UnsyncCallback<GameClock>>) {
-        let ShowArmor { target, hits, incoming } = shown;
+        let ShowArmor { target, hits, health, incoming } = shown;
         self.following.set_value(Some(Following { source, pane: self.active.get_untracked() }));
         self.seek.set_value(seek);
         self.playback_at.set(incoming.at);
@@ -1069,12 +1069,13 @@ impl ArmorWorkspace {
             active.cancel_load();
             // Already showing it, so only what it has taken has changed.
             active.show_hits(hits);
+            active.set_hit_health(health);
             self.incoming
                 .with_untracked(|incoming| active.compare_incoming(&incoming.context.taken, &incoming.context.shells));
             return;
         }
         let started = self.start_ship_load(param_index.clone(), target.display_name, target.hull_upgrade);
-        self.pending_hits.set_value(started.map(|load| PendingHits { param_index, load, hits, health: None }));
+        self.pending_hits.set_value(started.map(|load| PendingHits { param_index, load, hits, health }));
     }
 
     /// Takes the attackers' names from a bake of `source`'s battle that named its players again,
@@ -1143,6 +1144,12 @@ impl ArmorWorkspace {
     #[cfg(test)]
     pub fn holds_hits_for_test(self) -> bool {
         self.pending_hits.with_value(Option::is_some)
+    }
+
+    /// The load the held replay hits wait on.
+    #[cfg(test)]
+    pub fn pending_load_for_test(self) -> Option<LoadGeneration> {
+        self.pending_hits.with_value(|pending| pending.as_ref().map(|pending| pending.load.generation))
     }
 
     #[cfg(test)]
