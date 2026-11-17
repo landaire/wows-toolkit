@@ -1,6 +1,8 @@
-//! The session as the replays tab fills it: battles the game writes and, for a session since the
-//! app opened, the replays the install already lists.
+//! The session as the replays tab fills it: battles the game writes, replays opened from the
+//! install's listing and, for a session since the app opened, the replays the install already
+//! lists.
 
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -26,11 +28,14 @@ use super::tests::game_data_ready;
 use super::tests::land;
 use super::tests::open;
 use super::tests::replay_dir;
+use super::tests::row;
+use super::tests::workspace;
 use crate::interaction_tests::open_shell;
 use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::services::saved_for_test;
+use crate::shell::ReplayRequest;
 use crate::tabs::replays::session_stats::simulated;
 
 /// When each fixture's battle started, as its header and file name give it.
@@ -195,6 +200,67 @@ fn set_and_add_say_why_they_are_off_in_a_session_since_the_app_opened() {
         assert_eq!(window.a11y(item).map(|state| state.disabled), Some(true), "{key} is off");
     }
     assert!(window.by_test_id("replay-session-unavailable").is_some(), "the menu says why");
+}
+
+/// Double-clicks `path`'s row in the listing on screen, and lets the tab read it.
+fn open_row(window: &mut HeadlessWindow, path: &Path) {
+    let target = row(window, path);
+    window.double_click(target).expect("the row has a box");
+    settle_in_real_time(window);
+}
+
+#[test]
+fn a_replay_opened_from_the_install_joins_the_saved_session() {
+    let (mut window, control, replays, _dir) = open_install(open(), 2);
+
+    open_row(&mut window, &replays.join(FIXTURES[0]));
+
+    assert_eq!(
+        session_times(control, SessionScope::Manual),
+        [STARTED[0]],
+        "the opened battle is saved, though it started before the app opened"
+    );
+    assert!(session_times(control, SessionScope::SinceAppOpened).is_empty());
+}
+
+#[test]
+fn a_replay_opened_from_elsewhere_or_not_from_a_listing_leaves_the_session_alone() {
+    let (mut window, control, replays, _dir) = open_install(open(), 2);
+    let (_other_dir, other) = replay_dir(1);
+    let elsewhere = other.join(FIXTURES[0]);
+    simulated::stand_in(elsewhere.clone(), game(STARTED[0]));
+    control.open_folder(other.clone());
+    settle_in_real_time(&mut window);
+
+    open_row(&mut window, &elsewhere);
+    assert!(workspace().open_replays().contains(&elsewhere), "the other folder's replay opens");
+
+    // An open the listing did not ask for, as a drop or the palette asks: the egui app counts
+    // neither.
+    let asked = replays.join(FIXTURES[1]);
+    control.shell().request_replay(ReplayRequest::OpenReplay(asked.clone()));
+    settle_in_real_time(&mut window);
+    assert!(workspace().open_replays().contains(&asked), "the install's replay opens");
+
+    assert!(session_times(control, SessionScope::Manual).is_empty(), "neither open is saved");
+}
+
+#[test]
+fn a_replay_opened_from_the_install_in_a_session_since_the_app_opened_is_not_saved() {
+    let (mut window, control, replays, _dir) = open_install(open(), 2);
+    choose_since_opened_in_the_listing(&mut window);
+    window.press_key(zgui::vocab::NamedKey::Escape, zgui::vocab::Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+
+    open_row(&mut window, &replays.join(FIXTURES[0]));
+    open_row(&mut window, &replays.join(FIXTURES[1]));
+
+    assert!(session_times(control, SessionScope::Manual).is_empty(), "the saved session is left alone");
+    assert_eq!(
+        session_times(control, SessionScope::SinceAppOpened),
+        [STARTED[1]],
+        "only the battle that started after the app opened is in the session since then"
+    );
 }
 
 #[test]

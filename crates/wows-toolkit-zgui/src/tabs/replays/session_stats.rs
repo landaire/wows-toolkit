@@ -1,6 +1,6 @@
 //! Putting listed battles in the session: the replays the reader sets or adds, the battles the game
-//! writes to its replays directory, and, for a session since the app opened, the replays that
-//! directory already lists from this run.
+//! writes to its replays directory, the replays the reader opens from it, and, for a session since
+//! the app opened, the replays that directory already lists from this run.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -11,6 +11,7 @@ use wows_toolkit_replay_data::directory_stats::GameRead;
 use wows_toolkit_replay_data::directory_stats::read_game;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::parse_replay;
+use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
@@ -22,6 +23,7 @@ use zgui::task::spawn_local;
 
 use crate::long_job::long_job;
 use crate::services::GameDataState;
+use crate::services::Session;
 use crate::tabs::replays::browser::BrowserControl;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 
@@ -188,6 +190,22 @@ impl SessionReads {
             });
         });
     }
+}
+
+/// Counts a replay of the install's replays directory the reader opened from its listing, `game`
+/// being what its tab read. It counts as a battle the game wrote does, under the scope in force as
+/// the read landed.
+pub fn count_opened(session: Session, path: &Path, game: Option<PerGameStat>) {
+    // A test stands in a game for the replay: the test fixtures name builds no test has game data
+    // for.
+    #[cfg(test)]
+    let game = simulated::game(path).or(game);
+    let Some(game) = game else {
+        tracing::debug!(path = %path.display(), "session stats: the opened replay names no game to count");
+        return;
+    };
+
+    session.played(game, session.scope_untracked());
 }
 
 /// Reads `path`'s game, or the one a test stands in for it: the test fixtures name builds no test

@@ -286,12 +286,8 @@ fn on_browser_event(
 ) {
     let shell = workspace.shell;
     match event {
-        ReplayBrowserEvent::Open(path) => {
-            workspace.open(path, OpenTarget::ShowingTab);
-        }
-        ReplayBrowserEvent::OpenInNewTab(path) => {
-            workspace.open(path, OpenTarget::NewTab);
-        }
+        ReplayBrowserEvent::Open(path) => workspace.open_listed(path, OpenTarget::ShowingTab),
+        ReplayBrowserEvent::OpenInNewTab(path) => workspace.open_listed(path, OpenTarget::NewTab),
         ReplayBrowserEvent::RenderReplay(path) => workspace.render(RenderRequest { path, alts: Vec::new() }),
         ReplayBrowserEvent::RenderManyToVideo(paths) => batch::render_many(workspace, paths, BatchTarget::Directory),
         ReplayBrowserEvent::RenderManyToClipboard(paths) => {

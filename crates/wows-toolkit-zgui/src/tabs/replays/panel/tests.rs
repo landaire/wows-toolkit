@@ -122,7 +122,7 @@ fn loaded(model: ReplayReportModel, results: bool) -> Loaded {
         raw_results: results.then(|| "{}".to_string()),
         mapped_results: None,
     };
-    loaded_from_model(model, export, "battle".to_string(), payloads)
+    loaded_from_model(model, export, "battle".to_string(), payloads, None)
 }
 
 /// Has the next panel built on this thread show `model` rather than read its replay.

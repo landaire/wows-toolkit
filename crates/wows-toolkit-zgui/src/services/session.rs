@@ -149,9 +149,10 @@ impl Session {
         Ok(())
     }
 
-    /// A battle the game wrote to its replays directory this run, landing under `scope`. It joins
-    /// the session since the app opened when it started after the app did, and under Manual it is
-    /// written to the saved session, which shows it once the write has gone through.
+    /// A battle of the game's replays directory, written there this run or opened from its listing,
+    /// landing under `scope`. It joins the session since the app opened when it started after the
+    /// app did, and under Manual it is written to the saved session, which shows it once the write
+    /// has gone through.
     pub fn played(self, game: PerGameStat, scope: SessionScope) {
         self.listed(game.clone());
         if scope != SessionScope::Manual {

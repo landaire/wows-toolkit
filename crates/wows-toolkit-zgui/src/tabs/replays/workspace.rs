@@ -47,9 +47,11 @@ use crate::tabs::replays::panel::PanelControl;
 use crate::tabs::replays::panel::PanelEvents;
 use crate::tabs::replays::panel::PanelSetup;
 use crate::tabs::replays::panel::PanelTitle;
+use crate::tabs::replays::panel::ReadGame;
 use crate::tabs::replays::panel::ReparseCause;
 use crate::tabs::replays::panel::ReplayPanelProps;
 use crate::tabs::replays::player_table_slot;
+use crate::tabs::replays::session_stats;
 use crate::tabs::replays::title::ReplayTabTitleProps;
 use crate::windows::renderer::session::ArmorRequest;
 use crate::windows::renderer::session::RenderRequest;
@@ -144,6 +146,9 @@ pub struct ReplayWorkspace {
     pub mappings: ResultMappings,
     /// The listings, whose New tag comes off a replay once it is opened.
     browser: BrowserControl,
+    /// Replays opened from the install's listing whose tab has yet to read them; each counts toward
+    /// the session once it has.
+    uncounted: StoredValue<HashSet<PathBuf>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
     pub shell: Shell,
     pub services: Services,
@@ -164,6 +169,7 @@ impl ReplayWorkspace {
             personal_rating: RwSignal::new_local(None),
             mappings: ResultMappings::new(),
             browser,
+            uncounted: StoredValue::new_local(HashSet::new()),
             owner: StoredValue::new_local(Owner::current().expect("the workspace is made inside a component")),
             shell: Shell::current(),
             services: Services::current(),
@@ -244,7 +250,7 @@ impl ReplayWorkspace {
             return AnyView::new(());
         };
         let setup = PanelSetup {
-            path,
+            path: path.clone(),
             columns: self.columns.get_untracked(),
             personal_rating: self.personal_rating.get_untracked(),
         };
@@ -257,6 +263,11 @@ impl ReplayWorkspace {
                     self.mappings.recover(self, mismatch.build, mismatch.version);
                 },
             )),
+            on_read: Some(UnsyncCallback::new(move |()| {
+                if self.uncounted.try_update_value(|uncounted| uncounted.remove(&path)) == Some(true) {
+                    self.count_read(path.clone());
+                }
+            })),
         };
         let columns = self.columns;
         let rating: Signal<Option<Arc<PersonalRatingData>>, LocalStorage> = self.personal_rating.into();
@@ -369,6 +380,26 @@ impl ReplayWorkspace {
         self.current.set_value(Some(path));
 
         Some(TabShown::Opened)
+    }
+
+    /// Opens `path` from a listing. A replay of the install's replays directory counts toward the
+    /// session once its tab has read it, as a listing's open does in the egui app.
+    pub fn open_listed(self, path: PathBuf, target: OpenTarget) {
+        let counts = self.browser.install_holds(&path);
+        if self.open(path.clone(), target).is_some() && counts {
+            self.count_read(path);
+        }
+    }
+
+    /// Counts the game the tab open on `path` read, or waits for its read to land.
+    fn count_read(self, path: PathBuf) {
+        let Some(control) = self.replays.with_untracked(|replays| replays.get(&path).copied()) else { return };
+        match control.read_game() {
+            ReadGame::Reading => self.uncounted.update_value(|uncounted| {
+                uncounted.insert(path);
+            }),
+            ReadGame::Landed(game) => session_stats::count_opened(self.services.session, &path, game),
+        }
     }
 
     /// The replay a plain open replaces: one showing in its tab group. The one last opened or
@@ -501,6 +532,9 @@ impl ReplayWorkspace {
                 control.release();
             }
         }
+        self.replays.with_untracked(|replays| {
+            self.uncounted.update_value(|uncounted| uncounted.retain(|path| replays.contains_key(path)));
+        });
         let closed: Vec<RendererSession> = self.renderers.with_untracked(|renderers| {
             renderers
                 .iter()

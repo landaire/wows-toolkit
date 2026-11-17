@@ -110,7 +110,7 @@ fn listed(listing: Listing) -> Vec<PathBuf> {
     paths
 }
 
-fn row(window: &HeadlessWindow, path: &Path) -> landaire_ui::test_support::Element {
+pub(super) fn row(window: &HeadlessWindow, path: &Path) -> landaire_ui::test_support::Element {
     window.by_test_id(&format!("replay-row-{}", path.display())).expect("the replay has a row")
 }
 
@@ -147,7 +147,7 @@ fn opening_a_folder_adds_or_selects_one_tab_and_the_install_stays_first() {
     assert_eq!(control.pinned_folders(), PinnedFolders::default(), "and it is not pinned");
 }
 
-fn workspace() -> ReplayWorkspace {
+pub(super) fn workspace() -> ReplayWorkspace {
     BUILT.with(std::cell::Cell::get).expect("the replays tab made its workspace")
 }
 

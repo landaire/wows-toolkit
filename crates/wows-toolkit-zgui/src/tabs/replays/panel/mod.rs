@@ -53,6 +53,7 @@ use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
+use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::twitch;
 use wowsunpack::game_params::types::Species;
 use zgui::component;
@@ -430,6 +431,15 @@ impl PanelControl {
         })
     }
 
+    /// The recording player's game as the latest read found it. Untracked.
+    pub fn read_game(self) -> ReadGame {
+        self.state.with_untracked(|state| match state {
+            LoadState::Loading => ReadGame::Reading,
+            LoadState::Loaded(loaded) => ReadGame::Landed(loaded.session_game.clone()),
+            LoadState::Failed(_) => ReadGame::Landed(None),
+        })
+    }
+
     /// The held-key mode the panel's open rows offer. Reactive.
     pub fn mode(self) -> Option<ModeHint> {
         self.share_rows.any().then_some(SHARE_MODE)
@@ -475,6 +485,15 @@ pub enum PanelTitle {
     Failed,
 }
 
+/// What a panel's reads found of the recording player's game.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReadGame {
+    /// No read has landed yet.
+    Reading,
+    /// The latest read's game; `None` when the read failed or found no game to count.
+    Landed(Option<PerGameStat>),
+}
+
 /// The recording player's ship, as its tab marks it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TitleShip {
@@ -502,6 +521,8 @@ pub struct PanelEvents {
     /// The Actions menu's "Render replay". The item is left out without it.
     pub on_render: Option<UnsyncCallback<RenderRequest>>,
     pub on_constants_mismatched: Option<UnsyncCallback<ConstantsMismatched>>,
+    /// A read landed, which [`PanelControl::read_game`] then answers with.
+    pub on_read: Option<UnsyncCallback<()>>,
 }
 
 /// A read battle and what its panels show. Owned by no scope, so it outlives the view that read it.
@@ -518,6 +539,8 @@ struct Loaded {
     own_figures: Option<OwnFigures>,
     export: ExportedMatch,
     export_stem: String,
+    /// The recording player's game, as the session stats count it.
+    session_game: Option<PerGameStat>,
 }
 
 #[derive(Clone)]
@@ -941,6 +964,7 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> O
                 shell.toasts().info(t!("ui.replay.results_arrived", battle = loaded.title.clone()).into_owned());
             }
             state.set(LoadState::Loaded(Rc::new(loaded)));
+            announce_read(events);
             None
         }
         Err(err) => {
@@ -958,8 +982,15 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> O
             }
             shell.toasts().failed(t!("ui.messages.replay_load_failed").into_owned());
             state.set(LoadState::Failed(err.to_string()));
+            announce_read(events);
             None
         }
+    }
+}
+
+fn announce_read(events: StoredValue<PanelEvents, LocalStorage>) {
+    if let Some(on_read) = events.with_value(|events| events.on_read) {
+        on_read.run(());
     }
 }
 
@@ -973,8 +1004,13 @@ fn loaded_state(parsed: ParsedReplay, columns: Vec<ReplayColumn>, rating: Option
         raw_results_json,
         mapped_results_json,
         fire_chance,
+        session_stat,
+        indexable,
         ..
     } = parsed;
+    // A battle whose results have not arrived is not one the session records, as egui's
+    // `PerGameStat::from_replay` refuses it. The game writes the file again once they do.
+    let session_stat = session_stat.filter(|_| !indexable.results_pending);
     model.columns = columns;
     model.set_fire_chance(fire_chance);
     // The table may have arrived while this replay was parsing.
@@ -990,6 +1026,7 @@ fn loaded_state(parsed: ParsedReplay, columns: Vec<ReplayColumn>, rating: Option
             raw_results: raw_results_json,
             mapped_results: mapped_results_json,
         },
+        session_stat,
     )
 }
 
@@ -1005,6 +1042,7 @@ fn loaded_from_model(
     export: ExportedMatch,
     export_stem: String,
     payloads: DebugPayloads,
+    session_game: Option<PerGameStat>,
 ) -> Loaded {
     let own = model.rows.iter().find(|row| row.is_self);
     let title = battle_title(own.map(|row| row.ship_name.as_str()).unwrap_or_default(), &model.map);
@@ -1022,6 +1060,7 @@ fn loaded_from_model(
         mapped_results: payloads.mapped_results.map(Rc::from),
         export,
         export_stem,
+        session_game,
     }
 }
 
