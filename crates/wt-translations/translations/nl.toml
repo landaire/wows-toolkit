@@ -1871,6 +1871,12 @@ concealment_expert = "Camouflage-expert"
 gun_range_mod = "Mod. kanonbereik"
 secondary_range_mod = "Mod. secundair bereik"
 ship_ranges = "Bereikcirkels"
+shape = "Vorm"
+shape_size = "Grootte"
+shape_size_km = "Grootte (km)"
+shape_filled = "Gevuld"
+shape_smaller = "Vorm verkleinen"
+shape_larger = "Vorm vergroten"
 
 [ui.launcher]
 rescan = "Opnieuw scannen"

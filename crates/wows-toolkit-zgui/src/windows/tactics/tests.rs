@@ -23,12 +23,15 @@ use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::ElementPos;
 use wows_toolkit_replay_data::tactics::ElementSize;
+use wows_toolkit_replay_data::tactics::INKS;
 use wows_toolkit_replay_data::tactics::MapChoice;
 use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
 use wows_toolkit_replay_data::tactics::RangeCircle;
 use wows_toolkit_replay_data::tactics::ShipModifier;
 use wows_toolkit_replay_data::tactics::board::BoardKey;
 use wows_toolkit_replay_data::tactics::board::Modifiers as BoardModifiers;
+use wows_toolkit_replay_data::tactics::board::PickedShape;
+use wows_toolkit_replay_data::tactics::board::ShapeSize;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::data::Version;
@@ -45,6 +48,7 @@ use wowsunpack::recognized::Recognized;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
 use wt_collab_client::UserCursor;
+use wt_collab_client::drawing::Tool;
 use wt_collab_client::peer::LocalAnnotationEvent;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::types::Annotation;
@@ -326,6 +330,94 @@ fn a_peers_pointer_is_drawn_where_it_points() {
     board.settle();
     let at = offset(&board);
     assert!(near(at, (496.0, 96.0)), "and follows it, to {at:?}");
+}
+
+/// Drags `tool` from `from` to `to`, puts it down, then presses `pick` to pick out what is there.
+fn draw_and_pick(board: &mut BoardWindow, tool: Tool, from: ElementPos, to: ElementPos, pick: ElementPos) {
+    board.model.update(|board| {
+        board.set_tool(tool.clone());
+        board.pointer_down(from, BoardModifiers::default());
+        board.pointer_move(to, true);
+        board.pointer_up(to);
+        board.set_tool(tool);
+        board.pointer_down(pick, BoardModifiers::default());
+        board.pointer_up(pick);
+    });
+    board.settle();
+}
+
+/// A shape picked out alone gets a row of its own: its ink, fill and size change through it, and
+/// its delete takes it off the board.
+#[test]
+fn a_picked_shape_is_edited_from_its_row() {
+    let mut board = BoardWindow::open();
+    board.set_map();
+    show_at_minimap_size(&mut board);
+    let picked = |board: &BoardWindow| board.model.with_untracked(|board| board.picked_shape());
+    let edge = ElementPos { x: 400.0, y: 300.0 };
+    draw_and_pick(&mut board, Tool::Circle { filled: false }, ElementPos { x: 300.0, y: 300.0 }, edge, edge);
+    assert!(board.has("tactics-shape-edit"), "the circle picked out shows its row");
+    assert!(!board.has("tactics-shape-side"), "a circle has no side");
+
+    board.press("tactics-shape-ink-3");
+    board.press("tactics-shape-filled");
+    board.press("tactics-shape-size");
+    board.window.press_key(NamedKey::ArrowUp, Modifiers::NONE);
+    board.settle();
+    let (ink, _) = INKS[3];
+    assert_eq!(
+        picked(&board),
+        Some(PickedShape::Outline { color: ink, size: ShapeSize::MapUnits(101.0), filled: true })
+    );
+    assert!(board.chosen("tactics-shape-ink-3"), "the ink drawn in reads as chosen");
+
+    board.press("tactics-shape-delete");
+    assert_eq!(board.model.with_untracked(|board| board.annotation_count()), 0, "the circle is deleted");
+    assert!(!board.has("tactics-shape-edit"), "and its row goes with it");
+}
+
+/// A placed ship picked out alone turns to the other side from its row.
+#[test]
+fn a_picked_ship_turns_side_from_its_row() {
+    let mut board = BoardWindow::open();
+    board.set_map();
+    show_at_minimap_size(&mut board);
+    let at = ElementPos { x: 300.0, y: 300.0 };
+    let ship = Tool::Ship { species: "Destroyer".to_owned(), friendly: true, yaw: 0.0 };
+    draw_and_pick(&mut board, ship, at, at, at);
+
+    board.press("tactics-shape-side");
+
+    let picked = board.model.with_untracked(|board| board.picked_shape());
+    assert_eq!(picked, Some(PickedShape::Ship { friendly: false }));
+    assert!(!board.has("tactics-shape-ink-0"), "a ship has no ink of its own");
+}
+
+/// The picked shape's row and a peer's pointer, in both palettes, for review. Needs no install: the
+/// map is left without art.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the shape row and a peer's pointer"]
+fn the_shape_row_and_a_peers_pointer_render() {
+    for (appearance, name) in [(Appearance::Dark, "tactics-shape-dark"), (Appearance::Light, "tactics-shape-light")] {
+        let mut board = BoardWindow::open_drawn(Drawing::Device, Some(appearance));
+        board.set_map();
+        show_at_minimap_size(&mut board);
+        let state = Arc::default();
+        let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
+        board.model.update(|board| board.set_collab(link));
+        state.lock().cursors.push(UserCursor {
+            user_id: 9,
+            name: "Peer".to_owned(),
+            color: [0, 200, 255],
+            pos: Some([500.0, 200.0]),
+            last_update: std::time::Instant::now(),
+        });
+        let edge = ElementPos { x: 400.0, y: 300.0 };
+        draw_and_pick(&mut board, Tool::Circle { filled: false }, ElementPos { x: 300.0, y: 300.0 }, edge, edge);
+        assert!(board.has("tactics-shape-edit") && board.has("tactics-peer-cursor-9"));
+        let path = crate::interaction_tests::save_shot(&mut board.window, name);
+        println!("{}", path.display());
+    }
 }
 
 /// The board's window from a real install, set on a map with a capture point added and a line

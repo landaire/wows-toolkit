@@ -1856,6 +1856,12 @@ concealment_expert = "Esperto di occultamento"
 gun_range_mod = "Mod. gittata cannoni"
 secondary_range_mod = "Mod. gittata secondaria"
 ship_ranges = "Cerchi di gittata"
+shape = "Forma"
+shape_size = "Dimensione"
+shape_size_km = "Dimensione (km)"
+shape_filled = "Piena"
+shape_smaller = "Riduci la forma"
+shape_larger = "Ingrandisci la forma"
 
 [ui.armor.outcome]
 penetration = "Penetrazione"

@@ -1825,6 +1825,12 @@ concealment_expert = "Expert na maskování"
 gun_range_mod = "Mod. dostřelu hlavní baterie"
 secondary_range_mod = "Mod. dostřelu sekundární baterie"
 ship_ranges = "Kruhy dosahu"
+shape = "Tvar"
+shape_size = "Velikost"
+shape_size_km = "Velikost (km)"
+shape_filled = "Vyplněno"
+shape_smaller = "Zmenšit tvar"
+shape_larger = "Zvětšit tvar"
 
 [ui.launcher]
 rescan = "Znovu vyhledat"

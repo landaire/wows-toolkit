@@ -1856,6 +1856,12 @@ concealment_expert = "Expert en dissimulation"
 gun_range_mod = "Mod. de portée des canons"
 secondary_range_mod = "Mod. de portée secondaire"
 ship_ranges = "Cercles de portée"
+shape = "Forme"
+shape_size = "Taille"
+shape_size_km = "Taille (km)"
+shape_filled = "Remplie"
+shape_smaller = "Réduire la forme"
+shape_larger = "Agrandir la forme"
 
 [ui.armor.outcome]
 penetration = "Pénétration"

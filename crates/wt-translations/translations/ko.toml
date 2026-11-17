@@ -1856,6 +1856,12 @@ concealment_expert = "은폐 전문가"
 gun_range_mod = "주포 사거리 개량"
 secondary_range_mod = "부포 사거리 개량"
 ship_ranges = "사거리 원"
+shape = "도형"
+shape_size = "크기"
+shape_size_km = "크기 (km)"
+shape_filled = "채우기"
+shape_smaller = "도형 축소"
+shape_larger = "도형 확대"
 
 [ui.armor.outcome]
 penetration = "관통"

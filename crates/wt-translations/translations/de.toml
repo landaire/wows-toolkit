@@ -1871,6 +1871,12 @@ concealment_expert = "Tarnungsexperte"
 gun_range_mod = "Mod. Hauptbatterie-Reichweite"
 secondary_range_mod = "Mod. Sekundärbatterie-Reichweite"
 ship_ranges = "Reichweitenkreise"
+shape = "Form"
+shape_size = "Größe"
+shape_size_km = "Größe (km)"
+shape_filled = "Gefüllt"
+shape_smaller = "Form verkleinern"
+shape_larger = "Form vergrößern"
 
 [ui.launcher]
 rescan = "Erneut suchen"

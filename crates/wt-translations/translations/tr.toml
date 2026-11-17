@@ -1810,6 +1810,12 @@ concealment_expert = "Gizlenme Uzmanı"
 gun_range_mod = "Top menzili mod."
 secondary_range_mod = "İkincil menzil mod."
 ship_ranges = "Menzil çemberleri"
+shape = "Şekil"
+shape_size = "Boyut"
+shape_size_km = "Boyut (km)"
+shape_filled = "Dolu"
+shape_smaller = "Şekli küçült"
+shape_larger = "Şekli büyüt"
 
 [ui.armor.outcome]
 penetration = "Delme"

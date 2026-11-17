@@ -1,15 +1,21 @@
 //! The board's toolbar rows: what it is set on, the ship picker, the range circles, the presets
-//! and the scan above; the capture point and drawing tools below; and the picked ship's own hull,
-//! modifiers and circles while one placed ship is picked out alone.
+//! and the scan above; the capture point and drawing tools below; the picked ship's own hull,
+//! modifiers and circles while one placed ship is picked out alone; and the picked shape's ink,
+//! size, fill or side while one shape is picked out alone.
 
+use landaire_ui::Decimals;
 use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
+use landaire_ui::NumberInputProps;
+use landaire_ui::NumberRange;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::tactics::BoardTool;
+use wows_toolkit_replay_data::tactics::ENEMY_COLOR;
+use wows_toolkit_replay_data::tactics::FRIENDLY_COLOR;
 use wows_toolkit_replay_data::tactics::INKS;
 use wows_toolkit_replay_data::tactics::MAX_CAP_RADIUS;
 use wows_toolkit_replay_data::tactics::MAX_NIB;
@@ -21,7 +27,13 @@ use wows_toolkit_replay_data::tactics::RANGE_CIRCLES;
 use wows_toolkit_replay_data::tactics::RangeCircle;
 use wows_toolkit_replay_data::tactics::SHIP_MODIFIERS;
 use wows_toolkit_replay_data::tactics::ShipModifier;
+use wows_toolkit_replay_data::tactics::board::MAX_SHAPE_KM;
+use wows_toolkit_replay_data::tactics::board::MAX_SHAPE_UNITS;
+use wows_toolkit_replay_data::tactics::board::MIN_SHAPE_KM;
+use wows_toolkit_replay_data::tactics::board::MIN_SHAPE_UNITS;
+use wows_toolkit_replay_data::tactics::board::PickedShape;
 use wows_toolkit_replay_data::tactics::board::PickedShip;
+use wows_toolkit_replay_data::tactics::board::ShapeSize;
 use wows_toolkit_replay_data::tactics::map_entries;
 use wows_toolkit_replay_data::tactics::mode_value;
 use wows_toolkit_replay_data::tactics::radius_km;
@@ -122,6 +134,7 @@ const CSS: &str = css!(
         background-color: var(--lui-color-border);
     }
     .wt-tactics-toolbar .zui-button.wt-tactics-toolbar__map { width: 280px; flex: none; justify-content: flex-start; }
+    .wt-tactics-toolbar__typing .wt-tactics-toolbar__size { width: 96px; flex: none; }
     .wt-tactics-toolbar__mode { width: 240px; flex: none; }
     .wt-tactics-toolbar__typing .wt-tactics-toolbar__search { width: 180px; flex: none; }
     .wt-tactics-toolbar__typing .wt-tactics-toolbar__map-search { width: 280px; flex: none; }
@@ -247,6 +260,7 @@ pub fn BoardToolbar(model: BoardModel) -> impl IntoView {
     let may_steer = Memo::new(move |_| model.with(|board| board.may_steer()));
     let has_map = Memo::new(move |_| model.with(|board| board.map().is_some()));
     let ship_picked = Memo::new(move |_| model.with(|board| board.picked_ship().is_some()));
+    let shape_picked = Memo::new(move |_| model.with(|board| board.picked_shape().is_some()));
     let locale = Services::current().locale;
 
     view! {
@@ -282,6 +296,9 @@ pub fn BoardToolbar(model: BoardModel) -> impl IntoView {
             }
             if move || ship_picked.get() {
                 ShipConfig(model = model)
+            } else {}
+            if move || shape_picked.get() {
+                ShapeEdit(model = model)
             } else {}
         }
     }
@@ -717,6 +734,206 @@ fn ShipConfig(model: BoardModel) -> impl IntoView {
                     )
                 }
             }
+        }
+    }
+}
+
+/// The kind of shape picked out, which decides which controls its row has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShapeControls {
+    Ship,
+    /// An outlined shape, and whether its size reads in kilometres.
+    Outline {
+        in_km: bool,
+    },
+    Stroke,
+}
+
+impl ShapeControls {
+    fn of(picked: &PickedShape) -> Self {
+        match picked {
+            PickedShape::Ship { .. } => Self::Ship,
+            PickedShape::Outline { size, .. } => Self::Outline { in_km: matches!(size, ShapeSize::Km(_)) },
+            PickedShape::Stroke { .. } => Self::Stroke,
+        }
+    }
+}
+
+/// The picked shape's own ink, size and fill, or a placed ship's side, and what deletes it.
+#[component]
+fn ShapeEdit(model: BoardModel) -> impl IntoView {
+    let locked = Signal::derive_local(move || model.with(|board| board.annotations_locked()));
+    let picked = Memo::new(move |_| model.with(|board| board.picked_shape()));
+    // Rebuilt only when the kind changes, so a size being typed is not torn down by each change.
+    let controls = Memo::new(move |_| picked.with(|shape| shape.as_ref().map(ShapeControls::of)));
+
+    view! {
+        row(class = "wt-tactics-toolbar__row wt-tactics-toolbar__row--ship", attr:data-testid = "tactics-shape-edit") {
+            text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.shape").into_owned()}}
+            {move || match controls.get() {
+                Some(ShapeControls::Ship) => AnyView::new(view! { ShipSide(model = model, picked = picked, locked = locked) }),
+                Some(ShapeControls::Outline { in_km }) => AnyView::new(view! {
+                    ShapeInks(model = model, picked = picked, locked = locked)
+                    Rule()
+                    ShapeSizeInput(model = model, picked = picked, in_km = in_km, locked = locked)
+                    Rule()
+                    ShipCheck(
+                        checked = Signal::derive_local(move || {
+                            picked.with(|shape| matches!(shape, Some(PickedShape::Outline { filled: true, .. })))
+                        }),
+                        set = UnsyncCallback::new(move |on: bool| model.update(|board| board.set_picked_filled(on))),
+                        key = "ui.tactics.shape_filled",
+                        test_id = "tactics-shape-filled".to_owned(),
+                        locked = locked
+                    )
+                }),
+                Some(ShapeControls::Stroke) => AnyView::new(view! { ShapeInks(model = model, picked = picked, locked = locked) }),
+                None => AnyView::new(()),
+            }}
+            Rule()
+            Button(
+                variant = ButtonVariant::Outline,
+                size = ButtonSize::Xs,
+                disabled = locked,
+                attr:data-testid = "tactics-shape-delete",
+                on:click = move |_| model.update(|board| board.erase_picked())
+            ) {
+                {t!("ui.renderer.annotations.action_delete").into_owned()}
+            }
+        }
+    }
+}
+
+/// The inks the picked shape can be drawn in, the one it is drawn in shown chosen.
+#[component]
+fn ShapeInks(
+    model: BoardModel,
+    picked: Memo<Option<PickedShape>>,
+    locked: Signal<bool, LocalStorage>,
+) -> impl IntoView {
+    let color = Memo::new(move |_| {
+        picked.with(|shape| match shape {
+            Some(PickedShape::Outline { color, .. } | PickedShape::Stroke { color }) => Some(*color),
+            _ => None,
+        })
+    });
+
+    view! {
+        row(class = "wt-tactics-toolbar__group") {
+            for entry in move || INKS.into_iter().enumerate().collect::<Vec<_>>(), key = |entry: &(usize, ([u8; 4], &str))| entry.0 {
+                Tip(tip = t!(entry.1.1).into_owned()) {
+                    Button(
+                        variant = ButtonVariant::Ghost,
+                        size = ButtonSize::IconSm,
+                        disabled = locked,
+                        a11y:label = t!(entry.1.1).into_owned(),
+                        attr:data-chosen = move || (color.get() == Some(entry.1.0)).then(|| format!("tactics-shape-ink-{}", entry.0)),
+                        attr:data-testid = format!("tactics-shape-ink-{}", entry.0),
+                        on:click = move |_| model.update(|board| board.set_picked_color(entry.1.0))
+                    ) {
+                        box(class = "wt-tactics-toolbar__ink") {
+                            box(
+                                class = "wt-tactics-toolbar__ink-fill",
+                                style:background-color = format!("rgb({}, {}, {})", entry.1.0[0], entry.1.0[1], entry.1.0[2])
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The picked outlined shape's size: a circle's radius in kilometres on a map whose measurements
+/// are known, as the egui board shows it, and minimap units otherwise.
+#[component]
+fn ShapeSizeInput(
+    model: BoardModel,
+    picked: Memo<Option<PickedShape>>,
+    in_km: bool,
+    locked: Signal<bool, LocalStorage>,
+) -> impl IntoView {
+    let min = if in_km { f64::from(MIN_SHAPE_KM) } else { f64::from(MIN_SHAPE_UNITS) };
+    // The row mounts for an outline only. Once the pick stops being one, the row shows its last
+    // size until it unmounts; the minimum covers a first run that sees no outline.
+    let size = Memo::new(move |previous: Option<&f64>| {
+        let outline = picked.with(|shape| match shape {
+            Some(PickedShape::Outline { size: ShapeSize::Km(size) | ShapeSize::MapUnits(size), .. }) => {
+                Some(f64::from(*size))
+            }
+            _ => None,
+        });
+        outline.or(previous.copied()).unwrap_or(min)
+    });
+    let size = Signal::derive_local(move || size.get());
+    let set = move |value: f64| {
+        let value = value as f32;
+        let size = if in_km { ShapeSize::Km(value) } else { ShapeSize::MapUnits(value) };
+        model.update(|board| board.set_picked_size(size));
+    };
+    let (range, decimals, label) = if in_km {
+        (
+            NumberRange::new(0.1).with_min(f64::from(MIN_SHAPE_KM)).with_max(f64::from(MAX_SHAPE_KM)),
+            Decimals(1),
+            t!("ui.tactics.shape_size_km").into_owned(),
+        )
+    } else {
+        (
+            NumberRange::new(1.0).with_min(f64::from(MIN_SHAPE_UNITS)).with_max(f64::from(MAX_SHAPE_UNITS)),
+            Decimals(0),
+            t!("ui.tactics.shape_size").into_owned(),
+        )
+    };
+
+    view! {
+        row(class = "wt-tactics-toolbar__group") {
+            text(class = "wt-tactics-toolbar__label") {{label.clone()}}
+            Typing {
+                NumberInput(
+                    value = Binding::controlled(size, set),
+                    range = range,
+                    decimals = decimals,
+                    disabled = locked,
+                    label = label,
+                    decrement_label = t!("ui.tactics.shape_smaller").into_owned(),
+                    increment_label = t!("ui.tactics.shape_larger").into_owned(),
+                    class = "wt-tactics-toolbar__size",
+                    attr:data-testid = "tactics-shape-size"
+                )
+            }
+        }
+    }
+}
+
+/// Which side the picked ship is on, which a press turns to the other.
+#[component]
+fn ShipSide(model: BoardModel, picked: Memo<Option<PickedShape>>, locked: Signal<bool, LocalStorage>) -> impl IntoView {
+    let friendly = Memo::new(move |_| picked.with(|shape| matches!(shape, Some(PickedShape::Ship { friendly: true }))));
+    let side = move || {
+        let (color, key) = if friendly.get() {
+            (FRIENDLY_COLOR, "ui.tactics.side_friendly")
+        } else {
+            (ENEMY_COLOR, "ui.tactics.side_enemy")
+        };
+        let dot = format!("rgb({}, {}, {})", color[0], color[1], color[2]);
+        AnyView::new(view! {
+            box(class = "wt-tactics-toolbar__team-dot", style:background-color = dot)
+            text {{t!(key).into_owned()}}
+        })
+    };
+
+    view! {
+        Button(
+            variant = ButtonVariant::Outline,
+            size = ButtonSize::Xs,
+            disabled = locked,
+            attr:data-testid = "tactics-shape-side",
+            on:click = move |_| {
+                let to = !friendly.get_untracked();
+                model.update(|board| board.set_picked_friendly(to));
+            }
+        ) {
+            {side}
         }
     }
 }

@@ -1968,6 +1968,12 @@ concealment_expert = "Concealment Expert"
 gun_range_mod = "Gun Range Mod"
 secondary_range_mod = "Secondary Range Mod"
 ship_ranges = "Range Circles"
+shape = "Shape"
+shape_size = "Size"
+shape_size_km = "Size (km)"
+shape_filled = "Filled"
+shape_smaller = "Make the shape smaller"
+shape_larger = "Make the shape larger"
 
 [ui.armor.outcome]
 penetration = "Penetration"

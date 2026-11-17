@@ -1820,6 +1820,12 @@ concealment_expert = "Майстер маскування"
 gun_range_mod = "Мод. дальності ГК"
 secondary_range_mod = "Мод. дальності ДК"
 ship_ranges = "Кола дальності"
+shape = "Фігура"
+shape_size = "Розмір"
+shape_size_km = "Розмір (км)"
+shape_filled = "Заливка"
+shape_smaller = "Зменшити фігуру"
+shape_larger = "Збільшити фігуру"
 
 [ui.armor.sim]
 overmatch_rules_out_ricochet = "Оверматч, тому рикошету немає"

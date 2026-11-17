@@ -16,18 +16,23 @@ use wt_collab_client::TacticsBoardSessionState;
 use wt_collab_client::TacticsMapInfo;
 use wt_collab_client::UserCursor;
 use wt_collab_client::drawing::Tool;
+use wt_collab_client::peer::LocalAnnotationEvent;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
+use wt_collab_client::types::Annotation;
 
 use crate::load::GameDataCache;
 use crate::load::LoadedGameData;
 use crate::tactics::ElementPos;
 use crate::tactics::ElementSize;
+use crate::tactics::INKS;
 use crate::tactics::MapChoice;
 use crate::tactics::board::Board;
 use crate::tactics::board::BoardKey;
 use crate::tactics::board::BoardNotice;
 use crate::tactics::board::Modifiers;
+use crate::tactics::board::PickedShape;
+use crate::tactics::board::ShapeSize;
 
 /// This end's user in the session.
 const ME: u64 = 1;
@@ -269,4 +274,75 @@ fn a_peers_pointer_is_placed_on_the_map() {
 
     board.set_collab(CollabLink::default());
     assert!(board.peer_cursors().is_empty(), "a session that ended shows no one");
+}
+
+/// The shapes the session has been told of since the last look.
+fn told_shapes(sent: &Receiver<LocalEvent>) -> Vec<Annotation> {
+    sent.try_iter()
+        .filter_map(|event| match event {
+            LocalEvent::Annotation(LocalAnnotationEvent::Set { annotation, .. }) => Some(annotation),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A board in a session, announced, so what is drawn on it is the session's.
+fn board_in_session(link: CollabLink) -> Board {
+    let mut board = board_at_minimap_size();
+    board.set_game_data(Some(loaded_build()));
+    board.set_collab(link);
+    finish_announcing(&mut board);
+    assert!(board.in_session());
+
+    board
+}
+
+/// The picked shape's ink, size and fill change on the board and reach the session, each as a
+/// step that can be taken back.
+#[test]
+fn a_picked_shape_is_edited_through_the_session() {
+    let (_state, link, sent) = session(PeerRole::Host);
+    let mut board = board_in_session(link);
+    let corner = ElementPos { x: 200.0, y: 200.0 };
+    draw(&mut board, Tool::Rectangle { filled: false }, corner, ElementPos { x: 400.0, y: 300.0 });
+    click(&mut board, corner);
+    told_shapes(&sent);
+    let (ink, _) = INKS[3];
+
+    board.set_picked_color(ink);
+    board.set_picked_size(ShapeSize::MapUnits(150.0));
+    board.set_picked_filled(true);
+
+    let Some(PickedShape::Outline { color, size: ShapeSize::MapUnits(size), filled }) = board.picked_shape() else {
+        panic!("the rectangle is still picked: {:?}", board.picked_shape());
+    };
+    assert_eq!((color, filled), (ink, true));
+    assert!((size - 150.0).abs() < 1e-3, "resized to {size}");
+    let told = told_shapes(&sent);
+    assert_eq!(told.len(), 3, "each change is told");
+    let Some(Annotation::Rectangle { half_size, .. }) = told.last() else { panic!("the rectangle is told") };
+    assert!((half_size[0] / half_size[1] - 2.0).abs() < 1e-3, "it keeps its shape: {half_size:?}");
+
+    board.undo();
+    assert!(matches!(board.shapes()[..], [Annotation::Rectangle { filled: false, .. }]), "the fill is taken back");
+}
+
+/// A placed ship picked out alone changes side, and the session hears of it.
+#[test]
+fn a_picked_ship_changes_side() {
+    let (_state, link, sent) = session(PeerRole::Host);
+    let mut board = board_in_session(link);
+    let at = ElementPos { x: 300.0, y: 300.0 };
+    let ship = Tool::Ship { species: "Destroyer".to_owned(), friendly: true, yaw: 0.0 };
+    board.set_tool(ship.clone());
+    click(&mut board, at);
+    board.set_tool(ship);
+    click(&mut board, at);
+    assert_eq!(board.picked_shape(), Some(PickedShape::Ship { friendly: true }));
+    told_shapes(&sent);
+
+    board.set_picked_friendly(false);
+
+    assert_eq!(board.picked_shape(), Some(PickedShape::Ship { friendly: false }));
+    assert!(matches!(told_shapes(&sent)[..], [Annotation::Ship { friendly: false, .. }]), "the session is told");
 }

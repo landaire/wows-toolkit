@@ -1856,6 +1856,12 @@ concealment_expert = "隱蔽專家"
 gun_range_mod = "主砲射程改裝"
 secondary_range_mod = "副砲射程改裝"
 ship_ranges = "射程圈"
+shape = "形狀"
+shape_size = "大小"
+shape_size_km = "大小 (公里)"
+shape_filled = "填滿"
+shape_smaller = "縮小形狀"
+shape_larger = "放大形狀"
 
 [ui.armor.outcome]
 penetration = "擊穿"

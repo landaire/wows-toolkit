@@ -1825,6 +1825,12 @@ concealment_expert = "Ekspert od kamuflażu"
 gun_range_mod = "Mod. zasięgu dział"
 secondary_range_mod = "Mod. zasięgu artylerii pomocniczej"
 ship_ranges = "Okręgi zasięgu"
+shape = "Kształt"
+shape_size = "Rozmiar"
+shape_size_km = "Rozmiar (km)"
+shape_filled = "Wypełniony"
+shape_smaller = "Zmniejsz kształt"
+shape_larger = "Powiększ kształt"
 
 [ui.launcher]
 rescan = "Skanuj ponownie"

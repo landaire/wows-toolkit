@@ -6,6 +6,8 @@
 //! ([`Board::take_announcement`]), and messages for the reader ([`Board::take_notices`]). The
 //! front end drains them after each change and hands the results back.
 
+mod edit;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -81,6 +83,13 @@ use crate::tactics::scan::ScanOutcome;
 use crate::tactics::ships::ShipChoice;
 use crate::tactics::ships::ShipList;
 use crate::tactics::unique_map_for_space;
+
+pub use self::edit::MAX_SHAPE_KM;
+pub use self::edit::MAX_SHAPE_UNITS;
+pub use self::edit::MIN_SHAPE_KM;
+pub use self::edit::MIN_SHAPE_UNITS;
+pub use self::edit::PickedShape;
+pub use self::edit::ShapeSize;
 
 /// How many changes can be taken back.
 ///

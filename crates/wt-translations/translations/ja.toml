@@ -1856,6 +1856,12 @@ concealment_expert = "隠蔽処理専門家"
 gun_range_mod = "主砲射程改良"
 secondary_range_mod = "副砲射程改良"
 ship_ranges = "射程円"
+shape = "図形"
+shape_size = "サイズ"
+shape_size_km = "サイズ (km)"
+shape_filled = "塗りつぶし"
+shape_smaller = "図形を小さくする"
+shape_larger = "図形を大きくする"
 
 [ui.armor.outcome]
 penetration = "貫通"
