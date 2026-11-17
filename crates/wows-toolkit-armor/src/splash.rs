@@ -9,6 +9,7 @@
 //! viewer and this one answer from the same data.
 
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -162,10 +163,19 @@ pub fn splash_half_extent(caliber: Millimeters) -> ModelUnit {
 /// The game names them `XX_SB_<part>_<index>`; the prefix says nothing to a
 /// reader and the part is an abbreviation.
 pub fn prettify_box_name(box_name: &str) -> String {
-    let stripped = box_name.find("_SB_").map(|at| &box_name[at + 4..]).unwrap_or(box_name);
-    let part: String =
-        stripped.split('_').take_while(|piece| piece.chars().all(char::is_alphabetic)).collect::<Vec<_>>().join("_");
+    let (label, index) = box_part(box_name);
 
+    if index.is_empty() { label } else { format!("{} {}", label, index.join(".")) }
+}
+
+/// A box's part label and the index pieces that tell its boxes apart.
+fn box_part(box_name: &str) -> (String, Vec<&str>) {
+    let stripped = box_name.find("_SB_").map(|at| &box_name[at + 4..]).unwrap_or(box_name);
+    let is_word = |piece: &&str| piece.chars().all(char::is_alphabetic);
+    let words: Vec<&str> = stripped.split('_').take_while(is_word).collect();
+    let index: Vec<&str> = stripped.split('_').skip_while(is_word).collect();
+
+    let part = words.join("_");
     let label = match part.as_str() {
         "gk" => "Turret",
         "engine" => "Engine",
@@ -180,25 +190,18 @@ pub fn prettify_box_name(box_name: &str) -> String {
         other => other,
     };
 
-    let index: Vec<&str> = stripped.split('_').skip_while(|piece| piece.chars().all(char::is_alphabetic)).collect();
-    if index.is_empty() { label.to_string() } else { format!("{} {}", label, index.join(".")) }
+    (label.to_string(), index)
 }
 
 /// Groups the boxes by the part of the ship they belong to, for a list that
-/// can be folded rather than one row per box.
+/// can be folded rather than one row per box. Groups are sorted by label.
 pub fn build_splash_box_groups(boxes: &[SplashBox]) -> Vec<(String, Vec<String>)> {
-    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for shape in boxes {
-        let label = prettify_box_name(&shape.name);
-        // The group is the part, without the index that distinguishes one
-        // turret from another.
-        let group = label.split(' ').next().unwrap_or(&label).to_string();
-        match groups.iter_mut().find(|(name, _)| *name == group) {
-            Some((_, members)) => members.push(shape.name.clone()),
-            None => groups.push((group, vec![shape.name.clone()])),
-        }
+        groups.entry(box_part(&shape.name).0).or_default().push(shape.name.clone());
     }
-    groups
+
+    groups.into_iter().collect()
 }
 
 /// Whether two boxes overlap. Touching faces do not count: a burst that ends
@@ -756,9 +759,23 @@ mod tests {
         let groups = build_splash_box_groups(&boxes);
 
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].0, "Turret");
-        assert_eq!(groups[0].1.len(), 2);
-        assert_eq!(groups[1].0, "Engine");
+        assert_eq!(groups[0].0, "Engine");
+        assert_eq!(groups[1].0, "Turret");
+        assert_eq!(groups[1].1.len(), 2);
+    }
+
+    #[test]
+    fn casemate_boxes_keep_their_own_group_and_groups_sort_by_label() {
+        let boxes = vec![
+            splash_box("CM_SB_ss_1", [0.0; 3], [1.0; 3]),
+            splash_box("CM_SB_ssc_1", [0.0; 3], [1.0; 3]),
+            splash_box("CM_SB_cit_ammo_1", [0.0; 3], [1.0; 3]),
+            splash_box("CM_SB_bow", [0.0; 3], [1.0; 3]),
+        ];
+
+        let labels: Vec<String> = build_splash_box_groups(&boxes).into_iter().map(|(label, _)| label).collect();
+
+        assert_eq!(labels, ["Bow", "Magazine", "Superstructure", "Superstructure (casemate)"]);
     }
 
     #[test]
