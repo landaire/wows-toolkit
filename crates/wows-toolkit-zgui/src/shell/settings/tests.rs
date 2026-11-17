@@ -71,6 +71,7 @@ pub(crate) fn test_settings() -> StartupSettings {
         locale: None,
         current_replay_path: PathBuf::new(),
         replay: ReplaySettings { show_raw_xp: true, show_observed_damage: false, ..ReplaySettings::default() },
+        replay_sort: Default::default(),
         debug_mode: false,
         check_for_updates: true,
         enable_logging: false,

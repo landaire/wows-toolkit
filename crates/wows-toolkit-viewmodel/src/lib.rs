@@ -45,6 +45,7 @@ pub mod query_bar;
 pub mod rating_breakdown;
 pub mod replay_export;
 pub mod replay_folders;
+pub mod replay_sort;
 pub mod search;
 pub mod search_results;
 pub mod search_settings;

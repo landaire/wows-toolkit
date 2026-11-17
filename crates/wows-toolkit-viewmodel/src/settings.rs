@@ -24,6 +24,8 @@ pub mod keys {
     pub const PROXY_URL: &str = "proxy_url";
     pub const LOCALE: &str = "locale";
     pub const REPLAY_SETTINGS: &str = "replay_settings";
+    /// The player table's sort: a [`crate::replay_sort::SortOrder`].
+    pub const REPLAY_SORT: &str = "replay_sort";
     pub const AUTO_LOAD_LATEST_REPLAY: &str = "auto_load_latest_replay";
     /// Where the unpacker writes extracted files. Empty until the user picks
     /// one, which is why the Extract control stays disabled.

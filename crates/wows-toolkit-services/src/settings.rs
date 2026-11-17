@@ -11,6 +11,7 @@ use wows_toolkit_config::queries;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
 use wows_toolkit_viewmodel::mcp::McpSettings;
+use wows_toolkit_viewmodel::replay_sort::SortOrder;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
@@ -38,6 +39,8 @@ pub struct StartupSettings {
     pub locale: Option<String>,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
+    /// The player table's sort, shared by every table and with the egui app.
+    pub replay_sort: SortOrder,
     /// `AppPreferences.debug_mode` in the egui app: unhides NDA-hidden stats
     /// in the Replay Inspector and reveals its raw-metadata/raw-results
     /// viewers. Seed for the inspector's session debug toggle.
@@ -125,6 +128,8 @@ impl StartupSettings {
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, keys::CURRENT_REPLAY_PATH).await.unwrap_or_default();
         let replay = queries::get_setting::<ReplaySettings>(pool, keys::REPLAY_SETTINGS).await.unwrap_or_default();
+        // Never sorted is the egui app's default order.
+        let replay_sort = queries::get_setting::<SortOrder>(pool, keys::REPLAY_SORT).await.unwrap_or_default();
         let debug_mode = queries::get_setting::<bool>(pool, keys::DEBUG_MODE).await.unwrap_or(false);
         let check_for_updates = queries::get_setting::<bool>(pool, keys::CHECK_FOR_UPDATES).await.unwrap_or(true);
         // On, as the egui app defaults it: the log file is what a bug report is
@@ -208,6 +213,7 @@ impl StartupSettings {
             locale,
             current_replay_path,
             replay,
+            replay_sort,
             debug_mode,
             check_for_updates,
             enable_logging,

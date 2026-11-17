@@ -1,12 +1,12 @@
-//! Sort model for the player table. Mirrors `ui/replay_parser/sorting.rs`
-//! (`SortColumn`, `SortOrder`, `SortKey`) and the sort-key tuple built by
-//! `UiReport::sort_players` in `ui/replay_parser/mod.rs:899-975`
-//! (allies-before-enemies, the per-column key, then a stable db_id
-//! tiebreak).
+//! Sorting the player table's rows. Mirrors `SortKey` in `ui/replay_parser/sorting.rs` and the
+//! sort-key tuple built by `UiReport::sort_players` in `ui/replay_parser/mod.rs:899-975`
+//! (allies-before-enemies, the per-column key, then a stable db_id tiebreak).
 
 use std::cmp::Reverse;
 
 use wows_replays::types::TeamId;
+use wows_toolkit_viewmodel::replay_sort::SortColumn;
+use wows_toolkit_viewmodel::replay_sort::SortOrder;
 use wowsunpack::game_params::types::Species;
 
 use crate::model::PlayerRow;
@@ -39,76 +39,6 @@ impl Ord for SortKey {
             (SortKey::F64(a), SortKey::F64(b)) => a.partial_cmp(b).expect("could not compare f64 sort keys"),
             (SortKey::Species(a), SortKey::Species(b)) => a.cmp(b),
             _ => std::cmp::Ordering::Equal,
-        }
-    }
-}
-
-/// Columns the player table can be sorted by. Distinct from `ReplayColumn`:
-/// `Fires`/`Floods`/`Citadels`/`Crits` have no dedicated table column but are
-/// retained here so a persisted `SortOrder` from an older save still
-/// deserializes, matching `sorting.rs::SortColumn`'s comment.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SortColumn {
-    Name,
-    BaseXp,
-    RawXp,
-    ShipName,
-    ShipClass,
-    Kills,
-    ObservedDamage,
-    ActualDamage,
-    SpottingDamage,
-    PotentialDamage,
-    Hits,
-    Heals,
-    TimeLived,
-    Fires,
-    Floods,
-    Citadels,
-    Crits,
-    ReceivedDamage,
-    DistanceTraveled,
-    PersonalRating,
-    MatchContribution,
-}
-
-/// Sort order (ascending or descending) with the column being sorted.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SortOrder {
-    Asc(SortColumn),
-    Desc(SortColumn),
-}
-
-impl Default for SortOrder {
-    fn default() -> Self {
-        SortOrder::Asc(SortColumn::ShipClass)
-    }
-}
-
-impl SortOrder {
-    /// Desc -> Asc(same column) -> default (Asc(ShipClass)) -> Desc(ShipClass) -> ...
-    pub fn toggle(&mut self) {
-        match self {
-            SortOrder::Asc(_) => *self = Default::default(),
-            SortOrder::Desc(column) => *self = SortOrder::Asc(*column),
-        }
-    }
-
-    /// Clicking a column header: switching to a new column starts it
-    /// descending; clicking the active column toggles its order.
-    pub fn update_column(&mut self, new_column: SortColumn) -> SortOrder {
-        match self {
-            SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) if *sort_column == new_column => {
-                self.toggle();
-            }
-            _ => *self = SortOrder::Desc(new_column),
-        }
-        *self
-    }
-
-    pub fn column(&self) -> SortColumn {
-        match self {
-            SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) => *sort_column,
         }
     }
 }
@@ -251,21 +181,5 @@ mod tests {
         // sorts first under Desc.
         sort_rows(&mut rows, self_team, SortOrder::Desc(SortColumn::ActualDamage), true);
         assert_eq!(rows.iter().map(|r| r.db_id.raw()).collect::<Vec<_>>(), vec![1, 2]);
-    }
-
-    #[test]
-    fn default_sort_order_is_ascending_ship_class() {
-        assert_eq!(SortOrder::default(), SortOrder::Asc(SortColumn::ShipClass));
-    }
-
-    #[test]
-    fn update_column_toggles_same_column_and_resets_new_column_to_desc() {
-        let mut order = SortOrder::default();
-        assert_eq!(order.update_column(SortColumn::ActualDamage), SortOrder::Desc(SortColumn::ActualDamage));
-        assert_eq!(order.update_column(SortColumn::ActualDamage), SortOrder::Asc(SortColumn::ActualDamage));
-        // Toggling Asc(same column) again returns to the hardcoded default.
-        assert_eq!(order.update_column(SortColumn::ActualDamage), SortOrder::default());
-        // Switching to a different column starts it descending.
-        assert_eq!(order.update_column(SortColumn::Kills), SortOrder::Desc(SortColumn::Kills));
     }
 }

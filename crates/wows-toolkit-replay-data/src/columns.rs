@@ -10,9 +10,9 @@ use serde::Serialize;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::breakdown;
+use wows_toolkit_viewmodel::replay_sort::SortColumn;
 
 use crate::model::PlayerRow;
-use crate::sort::SortColumn;
 
 /// All displayable columns in the replay player list, in the same
 /// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`) minus

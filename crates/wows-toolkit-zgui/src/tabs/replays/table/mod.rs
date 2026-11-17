@@ -35,7 +35,6 @@ use wows_toolkit_replay_data::columns::StoredArrangement;
 use wows_toolkit_replay_data::columns::cell_value;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
-use wows_toolkit_replay_data::sort::SortOrder;
 use wows_toolkit_replay_data::sort::sort_rows;
 use wows_toolkit_replay_data::team_totals::TeamDamage;
 use wows_toolkit_replay_data::team_totals::TeamShare;
@@ -43,7 +42,9 @@ use wows_toolkit_replay_data::team_totals::TeamSide;
 use wows_toolkit_replay_data::team_totals::TeamTotals;
 use wows_toolkit_replay_data::team_totals::team_runs;
 use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
+use wows_toolkit_viewmodel::replay_sort::SortOrder;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wows_toolkit_viewmodel::settings::keys;
 use zgui::component;
 use zgui::prelude::AnyView;
 use zgui::prelude::ClipboardKind;
@@ -275,7 +276,12 @@ pub fn PlayerTable(
     // A test reads and sets the open rows of the table it built.
     #[cfg(test)]
     tests::EXPANDED.with(|slot| slot.set(Some(expanded)));
-    let sort = RwSignal::new_local(SortOrder::default());
+    // The sort every table shares, kept in the settings the egui app reads. A press before the
+    // settings are read sorts this table alone.
+    let unsaved_sort = RwSignal::new_local(SortOrder::default());
+    let sort = Memo::new(move |_| {
+        services.settings.read(|settings| settings.replay_sort).unwrap_or_else(|| unsaved_sort.get())
+    });
 
     let model_rows = Memo::new(move |_| model.with(|model| ModelRows::of(model)));
     let rows = Memo::new(move |_| {
@@ -341,9 +347,16 @@ pub fn PlayerTable(
         let Some(col) = pressed.and_then(|id| ReplayColumn::from_storage_key(id.as_str())) else { return };
         let Some(sort_column) = col.sort_column() else { return };
 
-        sort.update(|order| {
-            order.update_column(sort_column);
-        });
+        let mut next = sort.get_untracked();
+        next.update_column(sort_column);
+        if services.settings.read_untracked(|_| ()).is_some() {
+            services.settings.edit(keys::REPLAY_SORT, |settings| {
+                settings.replay_sort = next;
+                next
+            });
+        } else {
+            unsaved_sort.set(next);
+        }
     });
 
     let art = GameArt::new();

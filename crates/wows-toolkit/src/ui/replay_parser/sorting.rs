@@ -145,3 +145,45 @@ pub enum SortColumn {
     PersonalRating,
     MatchContribution,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `replay_sort` row this app writes is read by the other front end, and its writes by
+    /// this one.
+    #[test]
+    fn every_sort_reads_back_through_the_shared_settings_type() {
+        use wows_toolkit_viewmodel::replay_sort::SortOrder as SharedSortOrder;
+
+        let columns = [
+            SortColumn::Name,
+            SortColumn::BaseXp,
+            SortColumn::RawXp,
+            SortColumn::ShipName,
+            SortColumn::ShipClass,
+            SortColumn::Kills,
+            SortColumn::ObservedDamage,
+            SortColumn::ActualDamage,
+            SortColumn::SpottingDamage,
+            SortColumn::PotentialDamage,
+            SortColumn::Hits,
+            SortColumn::Heals,
+            SortColumn::TimeLived,
+            SortColumn::Fires,
+            SortColumn::Floods,
+            SortColumn::Citadels,
+            SortColumn::Crits,
+            SortColumn::ReceivedDamage,
+            SortColumn::DistanceTraveled,
+            SortColumn::PersonalRating,
+            SortColumn::MatchContribution,
+        ];
+        for order in columns.into_iter().flat_map(|col| [SortOrder::Asc(col), SortOrder::Desc(col)]) {
+            let written = serde_json::to_string(&order).expect("it writes");
+            let shared: SharedSortOrder = serde_json::from_str(&written).expect("the other front end reads it");
+            let back = serde_json::to_string(&shared).expect("the other front end writes it");
+            assert_eq!(serde_json::from_str::<SortOrder>(&back).expect("this app reads it"), order);
+        }
+    }
+}

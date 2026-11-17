@@ -28,10 +28,10 @@ use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
 use wows_toolkit_replay_data::sample::sample_model;
-use wows_toolkit_replay_data::sort::SortColumn;
 use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
 use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
+use wows_toolkit_viewmodel::replay_sort::SortColumn;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
@@ -52,13 +52,28 @@ const SIZE: WindowSize = WindowSize { width: 1280.0, height: 720.0 };
 thread_local! {
     /// The open rows of the table built last on this thread.
     pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<AccountId>, LocalStorage>>> = const { Cell::new(None) };
+    /// The services of the table built last on this thread.
+    static SERVICES: Cell<Option<Services>> = const { Cell::new(None) };
 }
 
 /// The table over `model`, as the Replays tab holds it. With `with_detail`, each open row's detail
-/// is a box naming the player and the third column drawn.
+/// is a box naming the player and the third column drawn. With `saved_sort`, the settings are
+/// read and hold that sort.
 #[component]
-fn Harness(scheme: Scheme, model: Rc<ReplayReportModel>, with_detail: bool) -> impl IntoView {
-    Services::provide(None);
+fn Harness(
+    scheme: Scheme,
+    model: Rc<ReplayReportModel>,
+    with_detail: bool,
+    #[prop(optional)] saved_sort: Option<SortOrder>,
+) -> impl IntoView {
+    let services = Services::provide(None);
+    if let Some(replay_sort) = saved_sort {
+        services.settings.adopt_unsaved(wows_toolkit_services::settings::StartupSettings {
+            replay_sort,
+            ..crate::shell::settings::tests::test_settings()
+        });
+    }
+    SERVICES.with(|slot| slot.set(Some(services)));
     let model = Signal::stored_local(model);
     let theme = match scheme {
         Scheme::Light => ThemeChoice::Light,
@@ -176,6 +191,38 @@ fn a_press_on_a_header_sorts_by_it_descending_first_then_ascending() {
     window.click(header).expect("the header takes a click");
     window.advance(Duration::from_millis(300));
     assert_eq!(row_order(&window), expected_order(SortOrder::Asc(SortColumn::Kills)));
+}
+
+#[test]
+fn the_sort_opens_as_saved_and_a_press_saves_it_for_every_table() {
+    let model = Rc::new(split_damage(sample_model()));
+    let options = HeadlessOptions { desktop: Some(Appearance::Dark), ..HeadlessOptions::new(SIZE) };
+    let mut window = HeadlessWindow::open(options, move || {
+        view! {
+            Harness(
+                scheme = Scheme::Dark,
+                model = Rc::clone(&model),
+                with_detail = false,
+                saved_sort = SortOrder::Desc(SortColumn::Kills)
+            )
+        }
+    })
+    .expect("the table opens headlessly");
+    window.advance(Duration::from_millis(300));
+    assert_eq!(row_order(&window), expected_order(SortOrder::Desc(SortColumn::Kills)), "the saved sort holds");
+
+    let kills = ReplayColumn::Kills.label();
+    let header = window.by_role_and_label(Role::ColumnHeader, &kills).expect("the Kills header is drawn");
+    window.click(header).expect("the header takes a click");
+    window.advance(Duration::from_millis(300));
+
+    assert_eq!(row_order(&window), expected_order(SortOrder::Asc(SortColumn::Kills)));
+    let saved = saved_for_test();
+    let (_, json) = saved.iter().rev().find(|(key, _)| *key == keys::REPLAY_SORT).expect("the sort is saved");
+    assert_eq!(json, r#"{"Asc":"Kills"}"#, "saved in the form the egui app reads");
+    let services = SERVICES.with(Cell::take).expect("the harness ran");
+    let shared = services.settings.read_untracked(|settings| settings.replay_sort);
+    assert_eq!(shared, Some(SortOrder::Asc(SortColumn::Kills)), "a table opened next starts from it");
 }
 
 /// The Kills cell on player `id`'s line: the Name cell's text keeps a double click to itself, so
