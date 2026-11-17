@@ -454,6 +454,25 @@ impl ViewportModel {
         cx.notify();
     }
 
+    /// The ship's yaw in the frame the hull is drawn in, which is the frame of the hit it was
+    /// read from: the picked shell's, else the newest hit's. `None` until a hit carries the
+    /// ship's pose, since the hull's heading on the map is not known before then.
+    pub(super) fn compass_yaw(&self) -> Option<f32> {
+        let picked = self.incoming_pick().and_then(|pick| {
+            self.hits.iter().rev().find(|taken| {
+                let Some(salvo) = taken.hit.salvo.as_ref() else { return false };
+                let key = SalvoKey { owner: salvo.owner_id, salvo_id: salvo.salvo_id };
+                match pick {
+                    IncomingPick::Salvo(picked) => key == picked,
+                    IncomingPick::Shell { salvo: picked, shot } => key == picked && taken.hit.hit.shot_id == shot,
+                }
+            })
+        });
+        let newest = || self.hits.iter().rev().find(|taken| taken.hit.victim_pose.is_some());
+
+        picked.filter(|taken| taken.hit.victim_pose.is_some()).or_else(newest)?.hit.victim_pose.map(|pose| pose.yaw)
+    }
+
     /// The shown model's overall length and beam, while the length marks are.
     pub(super) fn length_readout(&self) -> Option<String> {
         let marks = self.length_marks.as_ref().filter(|_| self.display_settings.show_length_marks)?.marks();

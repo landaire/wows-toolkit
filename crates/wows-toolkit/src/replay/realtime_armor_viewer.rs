@@ -1258,46 +1258,11 @@ impl RealtimeArmorViewer {
     }
 
     /// Draw a compass rose overlay in the top-left corner of the viewport.
-    /// Shows absolute world cardinal directions based on camera azimuth only
-    /// (independent of ship yaw/roll and camera elevation).
+    /// Shows world cardinal directions based on camera azimuth only, which holds
+    /// while the hull is turned to its heading by `model_yaw`.
     fn draw_compass(&self, painter: &egui::Painter, viewport_rect: egui::Rect) {
         let vp = &self.pane.viewport;
-
-        // The camera azimuth rotates the view around the Y axis. At azimuth=0,
-        // the camera looks along mesh -Z. We need to map BigWorld cardinal
-        // directions to screen (right, up) using only the horizontal camera angle.
-        //
-        // BigWorld: +X = East, +Z = North (from heading conversion: yaw = PI/2 - heading).
-        // Mesh coordinate system (world_to_model's axis remap, then the
-        // exporter's Z negation in hull_impact::into_mesh_space):
-        //   mesh -Z = BigWorld +X (East) direction at yaw=0
-        //   mesh -X = BigWorld +Z (North) direction
-        //
-        // Camera at azimuth=a looks from direction (sin(a), 0, cos(a)).
-        // Screen-right = camera's right vector projected on XZ = (cos(a), 0, -sin(a))
-        // Screen-up projected on XZ = camera's up, but for a top-down compass we use
-        // the forward direction on the ground plane = (-sin(a), 0, -cos(a))
-        //
-        // For a mesh-space direction (mx, 0, mz):
-        //   screen_x = mx * cos(a) + mz * (-sin(a))
-        //   screen_y = mx * (-sin(a)) + mz * (-cos(a))    (up on screen = into the screen on ground)
-        let az = vp.camera.azimuth;
-        let (sa, ca) = az.sin_cos();
-
-        let project_world_dir = |world_x: f32, world_z: f32| -> (f32, f32) {
-            // BigWorld -> mesh: mesh_x = -world_z, mesh_z = -world_x
-            let mx = -world_z;
-            let mz = -world_x;
-            // Project onto screen using camera azimuth
-            let screen_x = mx * ca - mz * sa;
-            let screen_y = -(mx * sa + mz * ca);
-            (screen_x, screen_y)
-        };
-
-        let (nx, ny) = project_world_dir(0.0, 1.0);
-        let (ex, ey) = project_world_dir(1.0, 0.0);
-        let (sx, sy) = (-nx, -ny);
-        let (wx, wy) = (-ex, -ey);
+        let [(nx, ny), (ex, ey), (sx, sy), (wx, wy)] = compass_directions(vp.camera.azimuth);
 
         // Compass center: top-left corner with padding
         let radius = 30.0_f32;
@@ -1313,9 +1278,9 @@ impl RealtimeArmorViewer {
 
         let directions: [(&str, (f32, f32), egui::Color32); 4] = [
             ("N", (nx, ny), egui::Color32::from_rgb(255, 80, 80)),
-            ("W", (ex, ey), egui::Color32::from_rgb(180, 180, 180)),
+            ("E", (ex, ey), egui::Color32::from_rgb(180, 180, 180)),
             ("S", (sx, sy), egui::Color32::from_rgb(180, 180, 180)),
-            ("E", (wx, wy), egui::Color32::from_rgb(180, 180, 180)),
+            ("W", (wx, wy), egui::Color32::from_rgb(180, 180, 180)),
         ];
 
         for &(label, (dx, dy), color) in &directions {
@@ -2342,5 +2307,42 @@ impl RealtimeArmorViewer {
         self.processed_hit_count = 0;
         self.timeline_ingested = false;
         // Next tick() will re-ingest the pre-computed timeline and/or call process_new_shot_hits().
+    }
+}
+
+/// Where north, east, south and west point on screen, as (right, up) in that
+/// order, for a camera at `azimuth` over a hull turned to its heading.
+///
+/// BigWorld has +X east and +Z north. The turned hull's mesh space has the
+/// same directions at mesh -Z (east) and mesh -X (north), after the hull
+/// frame's axis change and the exporter's Z negation. A camera at azimuth `a`
+/// sits toward (sin a, 0, cos a), so its right is (cos a, 0, -sin a) and its
+/// forward along the ground (-sin a, 0, -cos a), which is up on screen.
+fn compass_directions(azimuth: f32) -> [(f32, f32); 4] {
+    let (sa, ca) = azimuth.sin_cos();
+    let project = |world_x: f32, world_z: f32| -> (f32, f32) {
+        let mx = -world_z;
+        let mz = -world_x;
+        (mx * ca - mz * sa, -(mx * sa + mz * ca))
+    };
+
+    [project(0.0, 1.0), project(1.0, 0.0), project(0.0, -1.0), project(-1.0, 0.0)]
+}
+
+#[cfg(test)]
+mod compass_tests {
+    use super::compass_directions;
+
+    /// From astern of the turned hull the camera looks along the heading, so
+    /// at azimuth zero (looking along mesh -Z, east) east is up and north is to
+    /// the left.
+    #[test]
+    fn east_is_ahead_and_north_to_the_left_looking_east() {
+        let [north, east, south, west] = compass_directions(0.0).map(|(x, y)| (x.round() as i32, y.round() as i32));
+
+        assert_eq!(north, (-1, 0));
+        assert_eq!(east, (0, 1));
+        assert_eq!(south, (1, 0));
+        assert_eq!(west, (0, -1));
     }
 }

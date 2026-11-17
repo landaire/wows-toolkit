@@ -786,8 +786,8 @@ fn the_health_strip_is_labelled_with_its_first_and_last_moments() {
     assert_eq!(window.texts_by_class("wt-armor-incoming__strip-time"), ["0:00", "20:00"]);
 }
 
-/// The compass rose is drawn over a ship a replay placed, and not over one from the catalogue,
-/// which has no place on a map.
+/// The compass rose is drawn over a ship a replay placed once a hit has said which way it was
+/// heading, and not over one from the catalogue, which has no place on a map.
 #[test]
 fn the_compass_is_drawn_over_a_ship_a_replay_placed() {
     let Some((mut window, state)) = open(Appearance::Dark) else { return };
@@ -797,9 +797,15 @@ fn the_compass_is_drawn_over_a_ship_a_replay_placed() {
     };
     assert_eq!(compass(state), Some(false), "a catalogue ship has no compass");
 
-    // Followed before its first hit, with no health said yet.
     state.set_follows_replay(true);
-    assert_eq!(compass(state), Some(true), "a replay's ship has one");
+    assert_eq!(compass(state), Some(false), "nor has a replay's ship before a hit gives its heading");
+
+    let center = state
+        .read_untracked(|model| model.current_armor.as_ref().map(|armor| armor.center()))
+        .flatten()
+        .expect("the scene is uploaded");
+    state.follow_hits(salvo_on_plate(center, 1).context.taken);
+    assert_eq!(compass(state), Some(true), "a hit's pose turns the rose to the hull");
 }
 
 /// Whether a ricochet is followed changes what each shell did, so every reading in the log is

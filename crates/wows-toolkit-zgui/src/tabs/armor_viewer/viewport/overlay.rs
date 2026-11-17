@@ -10,6 +10,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use rust_i18n::t;
+use wows_replay_insights::hull_impact::into_hull_frame;
+use wows_replay_insights::hull_impact::into_mesh_space;
+use wows_replay_insights::hull_impact::into_model_axes;
 use wows_toolkit_armor::length_marks::MarkLabels;
 use wows_toolkit_armor::trajectory;
 use wows_toolkit_armor::trajectory::ArcColor;
@@ -253,13 +256,14 @@ impl ViewportModel {
             scene.gizmo = Some(GizmoPaint { center, balls, hover: self.gizmo_hover });
         }
 
-        // The map's directions only mean something for a ship a replay placed on the map.
-        if self.scene_is_shown() && self.follows_a_replay() {
+        // The map's directions only mean something for a ship a replay placed on the map, once a
+        // hit has said which way it was heading.
+        if let Some(yaw) = self.compass_yaw().filter(|_| self.scene_is_shown() && self.follows_a_replay()) {
             let center = Vec2::new(
                 rect.right() - COMPASS_RADIUS - COMPASS_INSET,
                 rect.bottom() - COMPASS_RADIUS - COMPASS_INSET,
             );
-            let arms = compass_arms(camera.azimuth)
+            let arms = compass_arms(camera.azimuth, yaw)
                 .into_iter()
                 .map(|(cardinal, toward)| CompassArm { cardinal, toward, label: cardinal.label() })
                 .collect();
@@ -279,23 +283,26 @@ impl ViewportModel {
 }
 
 /// Where each map direction points on screen, as a unit vector with y down, for a camera turned
-/// `azimuth` radians about the vertical. The camera's elevation and the ship's heading are left
-/// out, as the egui viewer's compass leaves them.
-fn compass_arms(azimuth: f32) -> [(Cardinal, Vec2); 4] {
+/// `azimuth` radians about the vertical over a hull drawn in the frame of a ship at BigWorld
+/// `yaw`. The camera's elevation is left out.
+fn compass_arms(azimuth: f32, yaw: f32) -> [(Cardinal, Vec2); 4] {
     let (sin, cos) = azimuth.sin_cos();
-    // A BigWorld direction (+X east, +Z north) is the model's (-z, -x), turned by the camera.
+    let into_model = into_model_axes() * into_hull_frame(yaw, 0.0, 0.0);
+    // A BigWorld direction (+X east, +Z north) taken into the meshes' space as a hit is, then
+    // onto the camera's right and its forward along the ground.
     let project = |east: f32, north: f32| {
-        let (model_x, model_z) = (-north, -east);
-        let right = model_x * cos - model_z * sin;
-        let up = -(model_x * sin + model_z * cos);
-        Vec2::new(right, -up).normalize()
+        let mesh = into_mesh_space(into_model * Vec3::new(east, 0.0, north));
+        let right = mesh.x * cos - mesh.z * sin;
+        let down = mesh.x * sin + mesh.z * cos;
+        Vec2::new(right, down).normalize()
     };
-    let north = project(0.0, 1.0);
-    let east = project(1.0, 0.0);
 
-    // The egui rose labels the projected east arm W: the model's frame is mirrored on that axis
-    // by the exporter's Z negation.
-    [(Cardinal::North, north), (Cardinal::West, east), (Cardinal::South, -north), (Cardinal::East, -east)]
+    [
+        (Cardinal::North, project(0.0, 1.0)),
+        (Cardinal::East, project(1.0, 0.0)),
+        (Cardinal::South, project(0.0, -1.0)),
+        (Cardinal::West, project(-1.0, 0.0)),
+    ]
 }
 
 /// One cast shell as it lands on the screen: each line broken where it passes behind the camera,
@@ -645,21 +652,43 @@ mod tests {
         assert!(visible_runs(&points, &project).is_empty());
     }
 
-    /// The rose points where the egui viewer's did: at the opening azimuth of zero north is to the
-    /// left and east down the screen, and a quarter turn of the camera brings north up.
+    /// Seen from astern, the arm pointing up the screen names the ship's heading and the arm to
+    /// the right the heading a quarter turn clockwise of it.
     #[test]
-    fn the_compass_points_as_the_egui_viewer_did() {
-        let ways = |azimuth: f32| {
-            compass_arms(azimuth).map(|(cardinal, toward)| (cardinal, toward.x.round() as i32, toward.y.round() as i32))
-        };
+    fn the_compass_reads_the_heading_from_astern() {
+        use std::f32::consts::FRAC_PI_2;
 
-        assert_eq!(
-            ways(0.0),
-            [(Cardinal::North, -1, 0), (Cardinal::West, 0, -1), (Cardinal::South, 1, 0), (Cardinal::East, 0, 1),]
-        );
-        assert_eq!(
-            ways(std::f32::consts::FRAC_PI_2),
-            [(Cardinal::North, 0, -1), (Cardinal::West, 1, 0), (Cardinal::South, 0, 1), (Cardinal::East, -1, 0),]
-        );
+        // The bow is at the meshes' -Z, so a camera at azimuth zero sits astern.
+        const ASTERN: f32 = 0.0;
+        let way = |degrees: f32, toward: Vec2| {
+            let yaw = FRAC_PI_2 - degrees.to_radians();
+            compass_arms(ASTERN, yaw)
+                .into_iter()
+                .find(|(_, arm)| (*arm - toward).norm() < 1e-3)
+                .map(|(cardinal, _)| cardinal)
+        };
+        let up = Vec2::new(0.0, -1.0);
+        let right = Vec2::new(1.0, 0.0);
+
+        assert_eq!(way(0.0, up), Some(Cardinal::North));
+        assert_eq!(way(0.0, right), Some(Cardinal::East));
+        assert_eq!(way(90.0, up), Some(Cardinal::East));
+        assert_eq!(way(90.0, right), Some(Cardinal::South));
+        assert_eq!(way(180.0, up), Some(Cardinal::South));
+        assert_eq!(way(270.0, up), Some(Cardinal::West));
+        assert_eq!(way(270.0, right), Some(Cardinal::North));
+    }
+
+    /// Turning the camera turns the rose against it: from off the starboard beam of a ship heading
+    /// north, looking west, north is to the right.
+    #[test]
+    fn the_compass_turns_with_the_camera() {
+        use std::f32::consts::FRAC_PI_2;
+
+        // The starboard side is the meshes' +X, which a camera at azimuth a quarter turn sits on.
+        let arms = compass_arms(FRAC_PI_2, FRAC_PI_2);
+        let north = arms.iter().find(|(cardinal, _)| *cardinal == Cardinal::North).map(|(_, arm)| *arm);
+
+        assert!(north.is_some_and(|arm| (arm - Vec2::new(1.0, 0.0)).norm() < 1e-3), "north at {north:?}");
     }
 }
