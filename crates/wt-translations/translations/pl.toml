@@ -1683,6 +1683,7 @@ clear_all = "Wyczyść wszystko"
 edit = "Edytuj rysunek"
 size = "Rozmiar"
 color = "Kolor"
+custom_ink = "Własny kolor"
 filled = "Wypełniony"
 locked = "Adnotacje zablokowane przez hosta"
 

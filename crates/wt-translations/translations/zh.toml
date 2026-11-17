@@ -1729,6 +1729,7 @@ clear_all = "全部清除"
 edit = "编辑绘图"
 size = "大小"
 color = "颜色"
+custom_ink = "自定义颜色"
 filled = "填充"
 locked = "主持人已锁定标注"
 

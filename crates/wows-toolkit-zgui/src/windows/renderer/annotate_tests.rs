@@ -209,6 +209,26 @@ fn the_popover_follows_the_egui_order() {
     assert_eq!(reading_order(&inks, "replay-renderer-ink-"), inks, "the inks read as egui's presets do");
 }
 
+/// Besides the swatches, any ink can be chosen on the popover's picker, which opens over the
+/// popover without closing it.
+#[test]
+fn a_custom_ink_is_chosen_on_the_picker() {
+    let (mut window, session) = open();
+    click(&mut window, "replay-renderer-tools-toggle");
+    click(&mut window, "replay-renderer-ink-custom");
+    assert!(window.by_test_id("replay-renderer-tools").is_some(), "the tools stay open under the picker");
+
+    let hex = window.by_label("Hex").expect("the picker takes a hex color");
+    window.click(hex).expect("the hex field has a box");
+    window.press_character('a', Modifiers::PRIMARY);
+    window.type_text("#123456");
+    window.press_key(NamedKey::Enter, Modifiers::NONE);
+    settle(&mut window);
+    let ink = session.annotator.with_untracked(|annotator| annotator.drawing().color());
+    assert_eq!(ink, [0x12, 0x34, 0x56, 0xff], "the typed ink is in hand, opaque");
+    assert!(window.by_attribute("data-chosen", "true").is_none(), "and no swatch is outlined");
+}
+
 /// The circle's button pressed again fills the circle and stays chosen; the next press empties it.
 #[test]
 fn a_second_press_of_a_shape_button_fills_it() {

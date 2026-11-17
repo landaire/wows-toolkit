@@ -1729,6 +1729,7 @@ clear_all = "모두 지우기"
 edit = "그림 편집"
 size = "크기"
 color = "색상"
+custom_ink = "사용자 지정 색상"
 filled = "채우기"
 locked = "호스트가 주석을 잠갔습니다"
 

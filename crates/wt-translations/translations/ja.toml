@@ -1729,6 +1729,7 @@ clear_all = "すべて消去"
 edit = "描画を編集"
 size = "サイズ"
 color = "色"
+custom_ink = "カスタム色"
 filled = "塗りつぶし"
 locked = "ホストが注釈をロックしています"
 

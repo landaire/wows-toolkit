@@ -1683,6 +1683,7 @@ clear_all = "Limpar tudo"
 edit = "Editar desenho"
 size = "Tamanho"
 color = "Cor"
+custom_ink = "Cor personalizada"
 filled = "Preenchido"
 locked = "Anotações bloqueadas pelo anfitrião"
 

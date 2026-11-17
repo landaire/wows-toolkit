@@ -2,8 +2,10 @@
 
 use std::rc::Rc;
 
+use landaire_ui::ColorPickerProps;
 use landaire_ui::EscapeClears;
 use landaire_ui::MarkedTextProps;
+use landaire_ui::Rgb;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -62,7 +64,7 @@ use crate::windows::renderer::session::RendererSession;
 const SHEET: &str = "wt-renderer-tools";
 
 const CSS: &str = css!(
-    ".wt-renderer-tools { display: flex; flex-direction: column; gap: 8px; width: 230px; padding: 8px; }
+    ".wt-renderer-tools { display: flex; flex-direction: column; gap: 8px; width: 250px; padding: 8px; }
     .wt-renderer-tools__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
     .wt-renderer-tools__chooser { display: flex; flex-direction: column; gap: 4px; }
     .wt-renderer-tools__dim { flex: 1; font-size: 12px; color: var(--lui-color-text-dim); }
@@ -153,8 +155,11 @@ fn ToolsPanel(
     };
     let tools: Vec<AnyView> =
         TOOLS.iter().map(|button| AnyView::new(view! { ToolToggle(session = session, button = button) })).collect();
-    let inks: Vec<AnyView> =
-        INKS.iter().map(|&ink| AnyView::new(view! { InkSwatch(session = session, ink = ink) })).collect();
+    // The custom ink leads the swatches, as it does on the egui toolbar.
+    let custom = AnyView::new(view! { CustomInk(session = session) });
+    let inks: Vec<AnyView> = std::iter::once(custom)
+        .chain(INKS.iter().map(|&ink| AnyView::new(view! { InkSwatch(session = session, ink = ink) })))
+        .collect();
 
     view! {
         column(class = "wt-renderer-tools") {
@@ -355,6 +360,26 @@ fn InkSwatch(session: RendererSession, ink: Ink) -> impl IntoView {
             on:click = move |_| {
                 session.annotate(|annotator, _| annotator.set_ink(ink.rgba));
             }
+        )
+    }
+}
+
+/// Any ink besides the swatches, showing the one in use. Opaque, as the egui picker is.
+#[component]
+fn CustomInk(session: RendererSession) -> impl IntoView {
+    let ink = Signal::derive_local(move || {
+        let [red, green, blue, _] = session.annotator.with(|annotator| annotator.drawing().color());
+        Rgb::from_channels(red, green, blue)
+    });
+
+    view! {
+        ColorPicker(
+            value = Binding::controlled(ink, move |chosen: Rgb| {
+                let ink = [chosen.red(), chosen.green(), chosen.blue(), u8::MAX];
+                session.annotate(|annotator, _| annotator.set_ink(ink));
+            }),
+            label = t!("ui.renderer.annotations.custom_ink").into_owned(),
+            attr:data-testid = "replay-renderer-ink-custom"
         )
     }
 }

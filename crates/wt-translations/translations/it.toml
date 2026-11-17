@@ -1729,6 +1729,7 @@ clear_all = "Cancella tutto"
 edit = "Modifica disegno"
 size = "Dimensione"
 color = "Colore"
+custom_ink = "Colore personalizzato"
 filled = "Riempito"
 locked = "Annotazioni bloccate dall'host"
 

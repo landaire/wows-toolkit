@@ -1683,6 +1683,7 @@ clear_all = "Tümünü Temizle"
 edit = "Çizimi düzenle"
 size = "Boyut"
 color = "Renk"
+custom_ink = "Özel renk"
 filled = "Dolgulu"
 locked = "Açıklamalar sunucu tarafından kilitlendi"
 

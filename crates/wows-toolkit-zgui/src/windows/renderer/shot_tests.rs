@@ -179,6 +179,15 @@ fn the_drawing_tools_on_a_real_replay() {
         run_in_real_time(&mut window);
     }
     println!("{}", save_shot(&mut window, "renderer-shape-edit").display());
+
+    // The halo stays under the picked circle while the custom ink picker is open over the tools.
+    session.annotate(|annotator, _| annotator.set_ink([0x12, 0x9a, 0xd0, 0xff]));
+    window.click(toggle).expect("the tools control has a box");
+    run_in_real_time(&mut window);
+    let custom = window.by_test_id("replay-renderer-ink-custom").expect("the custom ink is offered");
+    window.click(custom).expect("the custom ink has a box");
+    run_in_real_time(&mut window);
+    println!("{}", save_shot(&mut window, "renderer-custom-ink").display());
 }
 
 #[test]

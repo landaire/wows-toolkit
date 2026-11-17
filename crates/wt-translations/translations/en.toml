@@ -1480,6 +1480,7 @@ clear_all = "Clear All"
 edit = "Edit drawing"
 size = "Size"
 color = "Color"
+custom_ink = "Custom ink"
 filled = "Filled"
 locked = "Annotations locked by host"
 

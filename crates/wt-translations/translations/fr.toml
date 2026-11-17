@@ -1729,6 +1729,7 @@ clear_all = "Tout effacer"
 edit = "Modifier le dessin"
 size = "Taille"
 color = "Couleur"
+custom_ink = "Couleur personnalisée"
 filled = "Rempli"
 locked = "Annotations verrouillées par l'hôte"
 

@@ -1729,6 +1729,7 @@ clear_all = "Alles wissen"
 edit = "Tekening bewerken"
 size = "Grootte"
 color = "Kleur"
+custom_ink = "Aangepaste kleur"
 filled = "Gevuld"
 locked = "Annotaties vergrendeld door de host"
 

@@ -1729,6 +1729,7 @@ clear_all = "Alles löschen"
 edit = "Zeichnung bearbeiten"
 size = "Größe"
 color = "Farbe"
+custom_ink = "Eigene Farbe"
 filled = "Gefüllt"
 locked = "Anmerkungen vom Host gesperrt"
 
