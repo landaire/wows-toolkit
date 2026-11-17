@@ -2,6 +2,9 @@
 
 use std::collections::HashSet;
 use std::io::Write as _;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
@@ -9,13 +12,19 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use rust_i18n::t;
 use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
+use wowsunpack::vfs::FileSystem;
 use wowsunpack::vfs::MemoryFS;
+use wowsunpack::vfs::SeekAndRead;
+use wowsunpack::vfs::SeekAndWrite;
+use wowsunpack::vfs::VfsMetadata;
 use wowsunpack::vfs::VfsPath;
+use wowsunpack::vfs::VfsResult;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
+use zgui::task::spawn_local;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -31,6 +40,7 @@ use crate::tabs::unpacker::built_model;
 use crate::tabs::unpacker::model::UnpackerModel;
 use crate::tabs::unpacker::pane::BrowserSource;
 use crate::tabs::unpacker::pane::DirKey;
+use crate::tabs::unpacker::pane::PaneState;
 use crate::tabs::unpacker::pane::RowKey;
 
 /// The shell, open on the Unpacker tab.
@@ -49,11 +59,11 @@ impl UnpackerWindow {
         Self { window, model }
     }
 
-    /// The tab with `vfs` in its package browser.
+    /// The tab with `vfs` walked into its package browser.
     fn with_vfs(options: HeadlessOptions, vfs: VfsPath) -> Self {
         let mut this = Self::open(options);
-        this.model.pkg.set_vfs(vfs);
-        this.settle();
+        spawn_local(this.model.adopt_vfs(BrowserSource::Pkg, vfs));
+        settle_in_real_time(&mut this.window);
         this
     }
 
@@ -89,10 +99,127 @@ fn write(root: &VfsPath, path: &str, body: &str) {
 /// kinds of queue control.
 fn fixture() -> VfsPath {
     let root: VfsPath = MemoryFS::new().into();
-    root.join("content/gameplay").unwrap().create_dir_all().unwrap();
-    write(&root, "content/a.xml", "<a/>");
-    write(&root, "content/gameplay/b.xml", "<b/>");
+    fill(&root);
     root
+}
+
+fn fill(root: &VfsPath) {
+    root.join("content/gameplay").unwrap().create_dir_all().unwrap();
+    write(root, "content/a.xml", "<a/>");
+    write(root, "content/gameplay/b.xml", "<b/>");
+}
+
+/// One directory listed, and the thread it was listed on.
+#[derive(Debug)]
+struct Listing {
+    path: String,
+    thread: ThreadId,
+}
+
+/// A file system in memory that notes each directory listed, the thread it was listed on, and
+/// the thread it was freed on.
+#[derive(Debug)]
+struct ListedOn {
+    inner: MemoryFS,
+    listings: Arc<Mutex<Vec<Listing>>>,
+    freed_on: Arc<Mutex<Option<ThreadId>>>,
+}
+
+impl ListedOn {
+    fn new() -> Self {
+        Self { inner: MemoryFS::new(), listings: Arc::default(), freed_on: Arc::default() }
+    }
+}
+
+impl Drop for ListedOn {
+    fn drop(&mut self) {
+        *self.freed_on.lock().unwrap() = Some(std::thread::current().id());
+    }
+}
+
+impl FileSystem for ListedOn {
+    fn read_dir(&self, path: &str) -> VfsResult<Box<dyn Iterator<Item = String> + Send>> {
+        self.listings.lock().unwrap().push(Listing { path: path.to_string(), thread: std::thread::current().id() });
+        self.inner.read_dir(path)
+    }
+
+    fn create_dir(&self, path: &str) -> VfsResult<()> {
+        self.inner.create_dir(path)
+    }
+
+    fn open_file(&self, path: &str) -> VfsResult<Box<dyn SeekAndRead + Send>> {
+        self.inner.open_file(path)
+    }
+
+    fn create_file(&self, path: &str) -> VfsResult<Box<dyn SeekAndWrite + Send>> {
+        self.inner.create_file(path)
+    }
+
+    fn append_file(&self, path: &str) -> VfsResult<Box<dyn SeekAndWrite + Send>> {
+        self.inner.append_file(path)
+    }
+
+    fn metadata(&self, path: &str) -> VfsResult<VfsMetadata> {
+        self.inner.metadata(path)
+    }
+
+    fn exists(&self, path: &str) -> VfsResult<bool> {
+        self.inner.exists(path)
+    }
+
+    fn remove_file(&self, path: &str) -> VfsResult<()> {
+        self.inner.remove_file(path)
+    }
+
+    fn remove_dir(&self, path: &str) -> VfsResult<()> {
+        self.inner.remove_dir(path)
+    }
+}
+
+/// A loaded VFS is walked into the folder tree and the file list on a long-job thread, so a full
+/// install does not hold the UI thread for seconds.
+#[test]
+fn a_loaded_vfs_is_walked_off_the_ui_thread() {
+    let mut tab = UnpackerWindow::open(options());
+    let fs = ListedOn::new();
+    let listings = Arc::clone(&fs.listings);
+    let root = VfsPath::new(fs);
+    fill(&root);
+    listings.lock().unwrap().clear();
+
+    spawn_local(tab.model.adopt_vfs(BrowserSource::Pkg, root));
+    settle_in_real_time(&mut tab.window);
+
+    assert!(tab.model.pkg.state.with_untracked(|state| matches!(state, PaneState::Ready(_))), "the walk was adopted");
+    // The listing reads only the root; a nested directory is read by the walk alone.
+    let ui = std::thread::current().id();
+    let listings = listings.lock().unwrap();
+    let nested: Vec<&Listing> = listings.iter().filter(|listing| listing.path.ends_with("gameplay")).collect();
+    assert!(!nested.is_empty(), "the walk reached the nested directory");
+    assert!(nested.iter().all(|listing| listing.thread != ui), "the walk ran off the UI thread: {nested:?}");
+}
+
+/// A walk that ends after the build changed is freed on a long-job thread, as it was built.
+#[test]
+fn a_superseded_walk_is_freed_off_the_ui_thread() {
+    let mut tab = UnpackerWindow::open(options());
+    let fs = ListedOn::new();
+    let freed_on = Arc::clone(&fs.freed_on);
+    let root = VfsPath::new(fs);
+    fill(&root);
+
+    let walk = tab.model.adopt_vfs(BrowserSource::Pkg, root);
+    // Clearing the WoWs directory supersedes the load the walk belongs to.
+    tab.model.apply_wows_dir(String::new());
+    spawn_local(walk);
+    settle_in_real_time(&mut tab.window);
+
+    assert!(tab.model.pkg.state.with_untracked(|state| matches!(state, PaneState::Empty)), "the walk was not adopted");
+    let freed_on = *freed_on.lock().unwrap();
+    assert!(
+        freed_on.is_some_and(|thread| thread != std::thread::current().id()),
+        "the walk was freed off the UI thread: {freed_on:?}"
+    );
 }
 
 #[test]

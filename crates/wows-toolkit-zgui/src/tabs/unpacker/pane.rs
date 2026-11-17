@@ -87,6 +87,23 @@ pub struct Loaded {
     pub files: Arc<FileList>,
 }
 
+/// A VFS walked into the folder tree and the flat file list. Built on a long-job thread: a full
+/// install is over half a million files and the walk takes seconds.
+pub struct Walked {
+    vfs: VfsPath,
+    tree: FolderTree,
+    files: FileList,
+}
+
+impl Walked {
+    pub fn new(vfs: VfsPath) -> Self {
+        let tree = FolderTree::new(&build_folder_tree(&vfs, ""));
+        let files = build_file_list(&vfs);
+
+        Self { vfs, tree, files }
+    }
+}
+
 /// A directory of the folder tree, by its absolute path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DirKey(pub String);
@@ -359,16 +376,15 @@ impl Pane {
         self.state.set(PaneState::Failed(reason));
     }
 
-    /// Adopts a VFS: walks it into the folder tree and the flat file list, once per load.
+    /// Adopts a walked VFS.
     ///
     /// The filter is cleared with the rest: a filter typed against the old build would otherwise
     /// silently re-apply to the new one.
-    pub fn set_vfs(self, vfs: VfsPath) {
-        let tree = Rc::new(FolderTree::new(&build_folder_tree(&vfs, "")));
-        let files = Arc::new(build_file_list(&vfs));
+    pub fn set_walked(self, walked: Walked) {
+        let Walked { vfs, tree, files } = walked;
         self.reset_view();
-        self.tree.set(tree);
-        self.state.set(PaneState::Ready(Rc::new(Loaded { vfs, files })));
+        self.tree.set(Rc::new(tree));
+        self.state.set(PaneState::Ready(Rc::new(Loaded { vfs, files: Arc::new(files) })));
     }
 
     /// Drops the loaded VFS, e.g. when the WoWs directory is cleared.

@@ -59,11 +59,13 @@ use zgui::task::spawn_local;
 
 use crate::long_job::long_job;
 use crate::services::Job;
+use crate::services::JobHandle;
 use crate::services::Progress;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::unpacker::pane::BrowserSource;
 use crate::tabs::unpacker::pane::Pane;
+use crate::tabs::unpacker::pane::Walked;
 use crate::tabs::unpacker::search::SearchResults;
 use crate::tabs::unpacker::viewer::ViewerDoc;
 
@@ -96,6 +98,9 @@ pub struct UnpackerModel {
     loaded: StoredValue<Option<BuildSource>, LocalStorage>,
     /// Bumped per build load, so a slower earlier load cannot overwrite a later one.
     generation: StoredValue<u64, LocalStorage>,
+    /// The status-bar job of the build load in flight. Replaced with the generation, so a
+    /// superseded load leaves the bar at once rather than when its work ends.
+    load_job: StoredValue<Option<JobHandle>, LocalStorage>,
     /// The package VFS of the loaded build, for the parameters dump.
     pub package_vfs: RwSignal<Option<VfsPath>, LocalStorage>,
     /// What the last parameters dump did, shown beside its button.
@@ -130,6 +135,7 @@ impl UnpackerModel {
             wows_dir: StoredValue::new_local(None),
             loaded: StoredValue::new_local(None),
             generation: StoredValue::new_local(0),
+            load_job: StoredValue::new_local(None),
             package_vfs: RwSignal::new_local(None),
             dump_status: RwSignal::new_local(None),
             pkg: Pane::new(BrowserSource::Pkg),
@@ -225,7 +231,7 @@ impl UnpackerModel {
                 self.selected_build.set(None);
                 self.loaded.set_value(None);
                 self.package_vfs.set(None);
-                self.generation.update_value(|generation| *generation += 1);
+                self.next_generation();
                 self.pkg.clear();
                 self.assets.clear();
             }
@@ -243,40 +249,82 @@ impl UnpackerModel {
         self.selected_build.set(Some(build));
         self.loaded.set_value(Some(source.clone()));
         self.package_vfs.set(None);
-        self.generation.update_value(|generation| *generation += 1);
-        let generation = self.generation.get_value();
+        let generation = self.next_generation();
         let current = move || self.generation.try_get_value() == Some(generation);
 
         self.pkg.set_loading();
         self.assets.set_loading();
-        let services = self.services;
+        let job = self.services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
+        self.load_job.set_value(Some(job));
         self.spawn(async move {
-            let job = services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
-            let loaded = long_job(move || load_package_vfs(&source).map_err(|err| err.to_string())).await;
-            if !current() {
-                return;
-            }
-            let package_vfs = match loaded {
-                Ok(vfs) => vfs,
-                Err(reason) => {
-                    self.pkg.set_failed(reason.clone());
-                    self.assets.set_failed(reason);
+            let loading = async move {
+                let loaded = long_job(move || load_package_vfs(&source).map_err(|err| err.to_string())).await;
+                if !current() {
                     return;
                 }
-            };
-            self.package_vfs.set(Some(package_vfs.clone()));
-            self.pkg.set_vfs(package_vfs.clone());
+                let package_vfs = match loaded {
+                    Ok(vfs) => vfs,
+                    Err(reason) => {
+                        self.pkg.set_failed(reason.clone());
+                        self.assets.set_failed(reason);
+                        return;
+                    }
+                };
+                self.package_vfs.set(Some(package_vfs.clone()));
 
-            job.report(Job { name: t!("ui.unpacker.loading_assets").into_owned(), progress: None });
-            let opened = long_job(move || load_assets_bin(&package_vfs).map_err(|err| err.to_string())).await;
-            if !current() {
-                return;
-            }
-            match opened {
-                Ok(vfs) => self.assets.set_vfs(vfs),
-                Err(reason) => self.assets.set_failed(reason),
+                // The package pane is walked while assets.bin is read.
+                self.load_job.with_value(|job| {
+                    if let Some(job) = job {
+                        job.report(Job { name: t!("ui.unpacker.loading_assets").into_owned(), progress: None });
+                    }
+                });
+                let package = self.adopt_vfs(BrowserSource::Pkg, package_vfs.clone());
+                let assets = async move {
+                    let opened = long_job(move || load_assets_bin(&package_vfs).map_err(|err| err.to_string())).await;
+                    if !current() {
+                        return;
+                    }
+                    match opened {
+                        Ok(vfs) => self.adopt_vfs(BrowserSource::AssetsBin, vfs).await,
+                        Err(reason) => self.assets.set_failed(reason),
+                    }
+                };
+                futures::join!(package, assets);
+            };
+            loading.await;
+
+            if current() {
+                self.load_job.set_value(None);
             }
         });
+    }
+
+    /// Starts a new build load generation, ending the status-bar job of the load it supersedes.
+    fn next_generation(self) -> u64 {
+        self.generation.update_value(|generation| *generation += 1);
+        self.load_job.set_value(None);
+
+        self.generation.get_value()
+    }
+
+    /// Walks `vfs` into `source`'s pane on a long-job thread; the pane shows its loading state
+    /// meanwhile. The walk belongs to the build current at the call, and is dropped when it ends
+    /// after another build was asked for.
+    pub fn adopt_vfs(self, source: BrowserSource, vfs: VfsPath) -> impl Future<Output = ()> {
+        let generation = self.generation.get_value();
+        let pane = self.pane(source);
+        pane.set_loading();
+
+        async move {
+            let walked = long_job(move || Walked::new(vfs)).await;
+            if self.generation.try_get_value() != Some(generation) {
+                // A full install's tree and file list take more than a frame to free.
+                drop(long_job(move || drop(walked)));
+                return;
+            }
+
+            pane.set_walked(walked);
+        }
     }
 
     pub fn queue_path(self, path: VfsPath) {
