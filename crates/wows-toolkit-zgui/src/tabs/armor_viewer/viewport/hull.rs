@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use wows_toolkit_armor::camera_rings;
 use wows_toolkit_armor::camo::build_active_camo;
@@ -661,7 +662,15 @@ impl ViewportModel {
 
     /// Changes the lighting. It is a per-frame uniform, so no mesh is uploaded again.
     pub(super) fn mutate_lighting(&mut self, cx: &mut ViewCx, mutate: impl FnOnce(&mut LightingSettings)) {
+        let before = self.viewport.lighting.clone();
         mutate(&mut self.viewport.lighting);
+        let after = &self.viewport.lighting;
+        if before.enabled != after.enabled
+            || before.azimuth_deg != after.azimuth_deg
+            || before.elevation_deg != after.elevation_deg
+        {
+            self.light_moved_at = Some(Instant::now());
+        }
         self.viewport.mark_dirty();
         cx.emit(ViewportChange::Settings);
         cx.notify();
@@ -671,6 +680,7 @@ impl ViewportModel {
     pub(super) fn set_lighting_preset(&mut self, mut preset: LightingSettings, cx: &mut ViewCx) {
         preset.enabled = self.viewport.lighting.enabled;
         self.viewport.lighting = preset;
+        self.light_moved_at = Some(Instant::now());
         self.viewport.mark_dirty();
         cx.emit(ViewportChange::Settings);
         cx.notify();

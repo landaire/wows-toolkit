@@ -439,7 +439,7 @@ impl ViewportModel {
     }
 
     /// Advances what moves on its own for the frame drawn at `now`: the held keys, a gizmo snap
-    /// in flight and the hit rings. Says whether another frame is wanted.
+    /// in flight, the hit rings and the fading light marker. Says whether another frame is wanted.
     ///
     /// Every frame of a snap is a camera change, so a mirrored pane follows the whole eased move.
     pub(super) fn advance_frame(&mut self, now: Timestamp, cx: &mut ViewCx) -> bool {
@@ -458,7 +458,8 @@ impl ViewportModel {
 
         // A held key moves nothing while the camera is locked, so it asks for no frames then.
         let keys_move = !self.held_keys.is_empty() && self.camera_is_free();
-        let moving = keys_move || self.viewport.camera.animation.is_some() || self.prune_pulses(cx);
+        let fading = self.light_marker_opacity(std::time::Instant::now()).is_some();
+        let moving = keys_move || self.viewport.camera.animation.is_some() || self.prune_pulses(cx) || fading;
         self.last_frame = moving.then_some(now);
         moving
     }

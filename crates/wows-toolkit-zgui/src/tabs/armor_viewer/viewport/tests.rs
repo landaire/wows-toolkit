@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
+use std::time::Instant;
 
 use landaire_ui::Appearance;
 use landaire_ui::HeadlessError;
@@ -943,4 +944,19 @@ fn a_drag_carried_off_the_view_ends_at_its_release() {
     window.release();
     window.advance(Duration::from_millis(100));
     assert!(!dragging(state), "the release beside the view ends the drag");
+}
+
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the light marker and the disclaimer"]
+fn the_light_marker_and_the_disclaimer_render() {
+    let Some((mut window, state)) = open(Appearance::Dark) else { return };
+    show_scene(&mut window, state, known_thickness_scene());
+    state.mutate_lighting(|lighting| lighting.azimuth_deg += 40.0);
+    window.advance(Duration::from_millis(16));
+
+    assert!(window.by_test_id("armor-viewport-disclaimer").is_some());
+    assert!(state.read_untracked(|model| model.overlay_scene(Instant::now()).light.is_some()).unwrap_or(false));
+    let path = shot_path("armor-viewport-light-marker");
+    window.save_png(&path).expect("the window is written to a PNG");
+    println!("{}", path.display());
 }

@@ -68,6 +68,9 @@ const AXIS_LABEL_SIZE: f32 = 10.0;
 /// The compass rose's arm length, and how far its centre sits in from the viewport's corner.
 const COMPASS_RADIUS: f32 = 30.0;
 const COMPASS_INSET: f32 = 12.0;
+/// The height of the ballistic disclaimer line along the viewport's bottom right, which the
+/// compass rose stands above.
+const DISCLAIMER_CLEARANCE: f32 = 20.0;
 
 /// Shaped labels kept between paints, keyed by text and device size. Cleared rather than evicted
 /// when it grows past this.
@@ -161,6 +164,13 @@ pub(super) struct CompassPaint {
     pub(super) arms: Vec<CompassArm>,
 }
 
+/// Where a turned light comes from, fading out.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct LightPaint {
+    pub(super) runs: Vec<Vec<Vec2>>,
+    pub(super) opacity: f32,
+}
+
 /// Everything the overlay draws, in the viewport's CSS pixels.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct OverlayScene {
@@ -169,6 +179,7 @@ pub(super) struct OverlayScene {
     pub(super) pulses: Vec<PulsePaint>,
     pub(super) gizmo: Option<GizmoPaint>,
     pub(super) compass: Option<CompassPaint>,
+    pub(super) light: Option<LightPaint>,
 }
 
 impl ViewportModel {
@@ -239,6 +250,10 @@ impl ViewportModel {
                     now.saturating_duration_since(pulse.started).as_secs_f32() / depth_cues::PULSE.as_secs_f32();
                 scene.pulses.push(PulsePaint { at, progress });
             }
+
+            if let Some(opacity) = self.light_marker_opacity(now) {
+                scene.light = Some(self.light_marker(opacity, |at: Vec3| camera.project_to_screen(at, rect)));
+            }
         }
 
         // The gizmo orients a model; with none loaded there is nothing for it to orient, and the
@@ -262,7 +277,7 @@ impl ViewportModel {
         if let Some(yaw) = self.compass_yaw().filter(|_| self.scene_is_shown() && self.follows_a_replay()) {
             let center = Vec2::new(
                 rect.right() - COMPASS_RADIUS - COMPASS_INSET,
-                rect.bottom() - COMPASS_RADIUS - COMPASS_INSET,
+                rect.bottom() - COMPASS_RADIUS - COMPASS_INSET - DISCLAIMER_CLEARANCE,
             );
             let arms = compass_arms(camera.azimuth, yaw)
                 .into_iter()
@@ -272,6 +287,30 @@ impl ViewportModel {
         }
 
         scene
+    }
+
+    /// How opaque the marker of a turned light is at `now`: `None` once it has faded, or while
+    /// lighting is off.
+    pub(super) fn light_marker_opacity(&self, now: Instant) -> Option<f32> {
+        let moved = self.light_moved_at.filter(|_| self.viewport.lighting.enabled)?;
+        let shown = now.saturating_duration_since(moved).as_secs_f32() / depth_cues::LIGHT_MARKER.as_secs_f32();
+
+        (shown < 1.0).then_some(1.0 - shown)
+    }
+
+    /// A shaft from the world origin toward the light, a little longer than half the ship, with a
+    /// three-axis star at its tip, as the egui viewer drew it.
+    fn light_marker(&self, opacity: f32, project: impl Fn(Vec3) -> Option<Vec2>) -> LightPaint {
+        let [x, y, z] = self.viewport.lighting.light_dir_world();
+        let length = (self.model_extent() * 0.65).max(5.0);
+        let tip = Vec3::new(x, y, z) * length;
+        let star = (length * 0.12).max(0.5);
+        let mut segments = vec![[Vec3::new(0.0, 0.0, 0.0), tip]];
+        for axis in [Vec3::new(star, 0.0, 0.0), Vec3::new(0.0, star, 0.0), Vec3::new(0.0, 0.0, star)] {
+            segments.push([tip - axis, tip + axis]);
+        }
+
+        LightPaint { runs: segments.iter().flat_map(|segment| visible_runs(segment, &project)).collect(), opacity }
     }
 
     /// Writes the length marks' distances again when the language changed since they were
@@ -437,6 +476,12 @@ impl CustomElement for OverlayElement {
         for pulse in &scene.pulses {
             let (radius, opacity) = depth_cues::pulse_ring(pulse.progress);
             canvas.ring(pulse.at, radius, 1.5, hit.with_alpha(opacity));
+        }
+        if let Some(light) = &scene.light {
+            let color = Color::srgb(1.0, 0.85, 0.25, light.opacity);
+            for run in &light.runs {
+                canvas.polyline(run, 2.0, color);
+            }
         }
         if let Some(gizmo) = &scene.gizmo {
             canvas.gizmo(gizmo);
@@ -641,7 +686,9 @@ mod tests {
     use super::Cardinal;
     use super::ViewportModel;
     use super::compass_arms;
+    use super::depth_cues;
     use super::visible_runs;
+    use crate::tabs::armor_viewer::viewport::state::ViewCx;
 
     #[test]
     fn a_line_is_broken_where_it_passes_behind_the_camera() {
@@ -710,5 +757,25 @@ mod tests {
 
         model.perspective.enabled = true;
         assert!(model.overlay_scene(Instant::now()).gizmo.is_none());
+    }
+
+    /// Turning the light shows where it comes from until the marker fades; a change that leaves
+    /// the light where it was shows nothing.
+    #[test]
+    fn turning_the_light_shows_its_marker_until_it_fades() {
+        let mut model = ViewportModel::new();
+        let mut cx = ViewCx::for_test();
+
+        model.mutate_lighting(&mut cx, |lighting| lighting.shininess += 1.0);
+        assert!(model.light_marker_opacity(Instant::now()).is_none(), "the light did not move");
+
+        model.mutate_lighting(&mut cx, |lighting| lighting.azimuth_deg += 30.0);
+        let moved = model.light_moved_at.expect("turning the light is noted");
+        let opacity = model.light_marker_opacity(moved).expect("the marker is shown");
+        assert!((opacity - 1.0).abs() < f32::EPSILON);
+        assert!(model.light_marker_opacity(moved + depth_cues::LIGHT_MARKER).is_none(), "the marker has faded");
+
+        model.mutate_lighting(&mut cx, |lighting| lighting.enabled = false);
+        assert!(model.light_marker_opacity(Instant::now()).is_none(), "no marker while lighting is off");
     }
 }

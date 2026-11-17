@@ -1,4 +1,5 @@
-//! The ring sent out from a hit as it lands while a battle is followed.
+//! The ring sent out from a hit as it lands while a battle is followed, and the marker left where
+//! a turned light comes from.
 
 use std::time::Duration;
 
@@ -6,6 +7,10 @@ use wows_replays::types::GameClock;
 
 /// How long a landing hit's ring takes to spread and fade.
 pub(super) const PULSE: Duration = Duration::from_millis(700);
+
+/// How long the marker showing where the light comes from stays after the light is turned, fading
+/// as it goes.
+pub(super) const LIGHT_MARKER: Duration = Duration::from_secs(5);
 
 /// The radius a ring starts at and spreads to, in CSS pixels.
 pub(super) const PULSE_FROM: f32 = 4.0;

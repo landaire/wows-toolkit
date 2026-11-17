@@ -357,6 +357,8 @@ pub struct ViewportModel {
     pub(super) hits: Vec<PreExtractedHit>,
     /// Rings still spreading from hits that landed as a battle played.
     pub(super) hit_pulses: Vec<HitPulse>,
+    /// When the light was last turned, which shows where it comes from until the marker fades.
+    pub(super) light_moved_at: Option<Instant>,
     /// What this app's own simulation made of each landed shell.
     pub(super) sim_verdicts: HashMap<ShotId, SimAgreement>,
     /// How many armour-piercing shells the comparison could not reach an answer on.
@@ -495,6 +497,7 @@ impl ViewportModel {
             hovered: None,
             hits: Vec::new(),
             hit_pulses: Vec::new(),
+            light_moved_at: None,
             sim_verdicts: HashMap::new(),
             sim_unchecked: 0,
             pending_comparison: None,

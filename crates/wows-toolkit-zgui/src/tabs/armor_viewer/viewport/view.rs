@@ -196,6 +196,16 @@ const CSS: &str = css!(
         flex-direction: row;
         gap: 8px;
     }
+    /* Bottom right, clear of the length readout in the bottom left. */
+    .wt-armor-viewport__disclaimer {
+        position: absolute;
+        right: 8px;
+        bottom: 4px;
+        font-size: 11px;
+        color: var(--wt-color-text-dim);
+        opacity: 0.8;
+        pointer-events: none;
+    }
     .wt-armor-viewport__tooltip {
         padding: 4px 8px;
         pointer-events: none;
@@ -445,6 +455,12 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                         box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--right")
                         box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--top")
                         box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--bottom")
+                        text(class = "wt-armor-viewport__disclaimer", attr:data-testid = "armor-viewport-disclaimer") {{
+                            move || {
+                                locale.track();
+                                t!("ui.armor.ballistic_disclaimer").into_owned()
+                            }
+                        }}
                     }
                     {overlay.class("wt-armor-viewport__overlay")}
                     {move || stand_in(state, locale)}
