@@ -1,6 +1,6 @@
 //! One open replay: its header (the outcome, the match, the recording player's figures counted up
 //! once, the team damage), the player table its owner supplies, and a side panel that slides in
-//! with the chat or, in debug mode, the raw JSON payloads.
+//! with the chat, the battle's timeline or, in debug mode, the raw JSON payloads.
 //!
 //! The panel reads its replay through the replay loader, which reports its work on the status
 //! bar, and again whenever its [`PanelControl`] asks or another recording of the battle is added.
@@ -114,7 +114,10 @@ use crate::tabs::replays::panel::figures::DamageSplitProps;
 use crate::tabs::replays::panel::figures::OwnFigures;
 use crate::tabs::replays::panel::figures::StatTilesProps;
 use crate::tabs::replays::panel::raw_json::RawJsonPanelProps;
+use crate::tabs::replays::panel::timeline::ReadEvents;
+use crate::tabs::replays::panel::timeline::TimelinePanelProps;
 use crate::tabs::replays::panel::timeline::TimelineSource;
+use crate::tabs::replays::panel::timeline::TimelineState;
 use crate::tabs::replays::table::PlayerDetail;
 use crate::tabs::replays::table::PlayerDetailCx;
 
@@ -305,8 +308,8 @@ const SIDE_PANEL_RANGE: landaire_ui::WidthRange =
 /// stream held while the tab is open; a full enemy team is eleven.
 const MAX_ALTS: usize = 11;
 
-/// What the side panel shows. Chat and the debug viewers share it, since only one is useful at a
-/// time.
+/// What the side panel shows. Chat, the timeline and the debug viewers share it, since only one
+/// is useful at a time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidePanel {
     None,
@@ -317,6 +320,8 @@ pub enum SidePanel {
     MappedResults,
     /// One row's metadata, opened from that row's menu.
     RawPlayerMetadata,
+    /// The battle's events, opened from the Actions menu.
+    Timeline,
 }
 
 impl SidePanel {
@@ -328,6 +333,7 @@ impl SidePanel {
             SidePanel::RawResults => Some("ui.replay.debug.raw_results"),
             SidePanel::MappedResults => Some("ui.replay.debug.mapped_results"),
             SidePanel::RawPlayerMetadata => Some("ui.replay.debug.player_metadata"),
+            SidePanel::Timeline => Some("ui.replay.timeline"),
         }
     }
 
@@ -394,6 +400,8 @@ pub struct PanelControl {
     owed: StoredValue<Option<ReparseCause>>,
     /// The open rows that list damage shares, which Alt flips.
     share_rows: ShareRows,
+    /// The timeline's events and filter, kept for when it is opened again.
+    timeline: TimelineState,
 }
 
 impl PanelControl {
@@ -407,6 +415,7 @@ impl PanelControl {
             counted: StoredValue::new(false),
             owed: StoredValue::new(None),
             share_rows: ShareRows::new(),
+            timeline: TimelineState::new(),
         }
     }
 
@@ -423,6 +432,7 @@ impl PanelControl {
         // Untracked: a view still up is going away this turn, and is not built again for it.
         self.state.try_update_untracked(|state| *state = LoadState::Loading);
         self.alts.try_update_untracked(Vec::clear);
+        self.timeline.release();
     }
 
     /// Hands a read the view could not finish to the next view, with the recording it had on
@@ -890,6 +900,7 @@ pub fn ReplayPanel(
                 });
                 Some(table.with_value(|table| table(PanelTable { model, debug, detail, on_view_raw_json })))
             };
+            let timeline = TimelineSlot { state: control.timeline, path, alts };
             AnyView::new(view! {
                 FadeIn(class = "wt-rp-loaded") {
                     HeaderBand(header = header.clone(), run_count = run)
@@ -902,7 +913,13 @@ pub fn ReplayPanel(
                         class = "wt-rp-body"
                     ) {
                         landaire_ui::SidePanel(slot) {
-                            SideContent(kind = shown_side, side = side, loaded = loaded, player_metadata = player_metadata)
+                            SideContent(
+                                kind = shown_side,
+                                side = side,
+                                loaded = loaded,
+                                player_metadata = player_metadata,
+                                timeline = timeline
+                            )
                         }
                         box(class = "wt-rp-table", attr:data-testid = "replay-table-slot") {{table_view}}
                     }
@@ -1469,20 +1486,7 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
     };
     let load_alt = UnsyncCallback::new(move |()| add_alt());
     let game_data = Services::current().game_data;
-    let shell = export.with_value(|export| export.shell);
-    let open_timeline = UnsyncCallback::new(move |()| {
-        let Some(loaded) = loaded.get_untracked() else { return };
-        let Some(cache) = game_data.cache_untracked() else { return };
-        let source = TimelineSource {
-            path: path.get_value(),
-            alts: alts.get_untracked(),
-            map: loaded.model.with_untracked(|model| model.map.clone()),
-        };
-        let read: timeline::ReadEvents = Arc::new(move |source: &TimelineSource| {
-            minimap_preview::extract_merged_timeline(&source.path, &source.alts, &cache).map_err(|err| err.to_string())
-        });
-        timeline::open(shell, source, read);
-    });
+    let open_timeline = UnsyncCallback::new(move |()| side.set(SidePanel::Timeline));
     let no_timeline = Signal::derive_local(move || loaded.with(Option::is_none) || game_data.cache().is_none());
     let debug_items = move || {
         if !debug.get() {
@@ -1546,16 +1550,27 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
     }
 }
 
-/// The side panel's caption over what it shows. A row's metadata is opened from the row's menu,
-/// which opens rather than toggles, so that panel has a close button of its own.
+/// What the side panel's timeline reads its battle through.
+#[derive(Clone, Copy)]
+struct TimelineSlot {
+    state: TimelineState,
+    path: StoredValue<PathBuf>,
+    alts: RwSignal<Vec<PathBuf>, LocalStorage>,
+}
+
+/// The side panel's caption over what it shows. A row's metadata and the timeline are opened from
+/// menus, which open rather than toggle, so those panels have a close button of their own.
 #[component]
 fn SideContent(
     kind: RwSignal<SidePanel, LocalStorage>,
     side: RwSignal<SidePanel, LocalStorage>,
     loaded: Signal<Option<Rc<Loaded>>, LocalStorage>,
     player_metadata: RwSignal<Option<Rc<str>>, LocalStorage>,
+    timeline: TimelineSlot,
 ) -> impl IntoView {
-    let settings = Services::current().settings;
+    let services = Services::current();
+    let settings = services.settings;
+    let game_data = services.game_data;
     let names = Memo::new(move |_| settings.name_display());
     let title = move || kind.get().title_key().map(|key| t!(key).into_owned()).unwrap_or_default();
     let close_label = StoredValue::new(t!("ui.replay.close_side_panel").into_owned());
@@ -1574,14 +1589,29 @@ fn SideContent(
             SidePanel::RawResults => loaded.raw_results.clone().map(raw),
             SidePanel::MappedResults => loaded.mapped_results.clone().map(raw),
             SidePanel::RawPlayerMetadata => player_metadata.get().map(raw),
+            SidePanel::Timeline => {
+                let cache = game_data.cache()?;
+                // Read through the recordings merged now, so adding one reads the events again.
+                let source = TimelineSource {
+                    path: timeline.path.get_value(),
+                    alts: timeline.alts.get(),
+                    map: loaded.model.with_untracked(|model| model.map.clone()),
+                };
+                let read: ReadEvents = Arc::new(move |source: &TimelineSource| {
+                    minimap_preview::extract_merged_timeline(&source.path, &source.alts, &cache)
+                        .map_err(|err| err.to_string())
+                });
+                Some(AnyView::new(view! { TimelinePanel(state = timeline.state, source = source, read = read) }))
+            }
         }
     };
+    let closable = move || matches!(kind.get(), SidePanel::RawPlayerMetadata | SidePanel::Timeline);
 
     view! {
         column(class = "wt-rp-side", attr:data-testid = "replay-side-panel") {
             row(class = "wt-rp-side__head") {
                 text(class = "wt-rp-side__title") {{title}}
-                Show(when = move || kind.get() == SidePanel::RawPlayerMetadata) {
+                Show(when = closable) {
                     Tooltip {
                         TooltipTrigger {
                             Button(

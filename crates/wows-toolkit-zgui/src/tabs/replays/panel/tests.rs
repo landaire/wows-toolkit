@@ -3,6 +3,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use landaire_ui::test_support::Drawing;
@@ -68,6 +70,10 @@ use super::figures::match_contribution_label;
 use super::figures::personal_rating_label;
 use super::land_read;
 use super::loaded_from_model;
+use super::timeline::ReadEvents;
+use super::timeline::TimelinePanelProps;
+use super::timeline::TimelineSource;
+use super::timeline::TimelineState;
 use super::write_export;
 use crate::shell::Shell;
 use crate::shell::ShellHarnessProps;
@@ -565,6 +571,48 @@ fn the_replay_panel_renders_in_dark_and_light() {
     }
 }
 
+/// The panel with its timeline open beside the table, in each appearance.
+#[test]
+#[ignore = "draws on the graphics device; run by hand to review the timeline"]
+fn the_replay_timeline_renders_in_dark_and_light() {
+    for (theme, name) in [(ThemeChoice::Dark, "replay-timeline-dark"), (ThemeChoice::Light, "replay-timeline-light")] {
+        let cache = tempfile::tempdir().expect("a temporary directory");
+        let dir = cache.path().to_string_lossy().into_owned();
+        let mut model = sample_model();
+        model.battle_result = Some(BattleResult::Win(0));
+        let map = model.map.clone();
+        SEED.with(|slot| *slot.borrow_mut() = Some(loaded(model, true)));
+        let options = HeadlessOptions {
+            drawing: Drawing::Device,
+            ..HeadlessOptions::new(WindowSize { width: 1400.0, height: 900.0 })
+        };
+        let mut window = HeadlessWindow::open(options, move || {
+            let path = PathBuf::from("battle.wowsreplay");
+            let control = super::PanelControl::new(super::TabOpening::Asked);
+            let source = TimelineSource { path: path.clone(), alts: Vec::new(), map: map.clone() };
+            let (_, read) = counted_reads();
+            control.timeline.read_for_test(source, read);
+            let setup = PanelSetup { path, columns: ReplayColumn::ALL.to_vec(), personal_rating: None };
+            let dir = dir.clone();
+            view! {
+                ShellHarness(theme = theme) {
+                    CacheAt(dir = dir)
+                    ReplayPanel(setup = setup, table = player_table_slot(), control = control)
+                }
+            }
+        })
+        .expect("the panel opens");
+        window.advance(Duration::from_millis(600));
+        let actions = window.by_test_id("replay-actions").expect("the menu is offered");
+        window.click(actions).expect("clickable");
+        window.advance(Duration::from_millis(300));
+        let open = window.by_test_id("replay-timeline-open").expect("the menu offers the timeline");
+        window.click(open).expect("clickable");
+        crate::interaction_tests::settle_in_real_time(&mut window);
+        println!("{}", crate::interaction_tests::save_shot(&mut window, name).display());
+    }
+}
+
 /// A real replay's panel with the PR and MC columns, then each rating's hover open, written to
 /// `target/zgui-shots`. Reads the replay named by `WT_SHOT_REPLAY`, the game data dumps under
 /// `WT_SHOT_GAME_DATA` and the expected values in `WT_SHOT_EXPECTED_VALUES`.
@@ -753,37 +801,80 @@ fn two_events() -> wows_replay_insights::timeline::TimelineExtractionResult {
     }
 }
 
+/// The timeline of the battle read through `alts`, held in `state`, while `shown`.
+#[component]
+fn TimelineHost(
+    state: TimelineState,
+    read: ReadEvents,
+    shown: RwSignal<bool, LocalStorage>,
+    alts: RwSignal<Vec<PathBuf>, LocalStorage>,
+) -> impl IntoView {
+    move || {
+        shown.get().then(|| {
+            let source =
+                TimelineSource { path: PathBuf::from("battle.wowsreplay"), alts: alts.get(), map: "Ocean".to_owned() };
+            AnyView::new(view! { TimelinePanel(state = state, source = source, read = Arc::clone(&read)) })
+        })
+    }
+}
+
+/// A timeline host and what drives it.
+struct HostedTimeline {
+    window: HeadlessWindow,
+    shown: RwSignal<bool, LocalStorage>,
+    alts: RwSignal<Vec<PathBuf>, LocalStorage>,
+}
+
+fn host_timeline(read: ReadEvents) -> HostedTimeline {
+    let shown = RwSignal::new_local(true);
+    let alts = RwSignal::new_local(Vec::new());
+    let options = HeadlessOptions::new(WindowSize { width: 600.0, height: 700.0 });
+    let window = HeadlessWindow::open(options, move || {
+        let read = Arc::clone(&read);
+        view! {
+            ShellHarness(theme = ThemeChoice::Dark) {
+                TimelineHost(state = TimelineState::new(), read = read, shown = shown, alts = alts)
+            }
+        }
+    })
+    .expect("the harness opens");
+
+    HostedTimeline { window, shown, alts }
+}
+
+/// Counts the reads of a battle, each answering with [`two_events`].
+fn counted_reads() -> (Arc<AtomicUsize>, ReadEvents) {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&reads);
+    let read: ReadEvents = Arc::new(move |_: &TimelineSource| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Ok(two_events())
+    });
+
+    (reads, read)
+}
+
 /// A timeline that failed to read says why and reads again on Retry; a click on an event then
 /// copies it.
 #[test]
-fn the_timeline_window_retries_a_failed_read_and_copies_an_event() {
-    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+fn the_timeline_retries_a_failed_read_and_copies_an_event() {
+    let reads = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&reads);
-    let read: super::timeline::ReadEvents = Arc::new(move |_: &super::timeline::TimelineSource| {
-        match counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
-            0 => Err("not this time".to_owned()),
-            _ => Ok(two_events()),
-        }
+    let read: ReadEvents = Arc::new(move |_: &TimelineSource| match counted.fetch_add(1, Ordering::SeqCst) {
+        0 => Err("not this time".to_owned()),
+        _ => Ok(two_events()),
     });
-    let mut window =
-        crate::interaction_tests::open_shell(HeadlessOptions::new(WindowSize { width: 900.0, height: 700.0 }));
-    let source = super::timeline::TimelineSource {
-        path: PathBuf::from("battle.wowsreplay"),
-        alts: Vec::new(),
-        map: "Ocean".to_owned(),
-    };
-    super::timeline::open(crate::interaction_tests::shell(), source, read);
+    let HostedTimeline { mut window, .. } = host_timeline(read);
     crate::interaction_tests::settle_in_real_time(&mut window);
 
     let failed = window.texts_by_class("wt-replay-timeline__failed").concat();
-    assert!(failed.contains("not this time"), "the window says why it read nothing: {failed:?}");
+    assert!(failed.contains("not this time"), "the timeline says why it read nothing: {failed:?}");
     let retry = window.by_test_id("replay-timeline-retry").expect("a failed read offers to try again");
     window.click(retry).expect("clickable");
     crate::interaction_tests::settle_in_real_time(&mut window);
 
-    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2, "Retry reads the battle again");
-    assert!(window.by_test_id("replay-timeline-row-1").is_some(), "the events are listed");
-    assert!(window.by_test_id("replay-timeline-save").is_some(), "and can be saved");
+    assert_eq!(reads.load(Ordering::SeqCst), 2, "Retry reads the battle again");
+    assert!(window.by_test_id("replay-timeline-save").is_some(), "the events can be saved");
     let row = window.by_test_id("replay-timeline-row-1").expect("the second event is listed");
     window.click(row).expect("clickable");
     window.advance(Duration::from_millis(300));
@@ -796,18 +887,11 @@ fn the_timeline_window_retries_a_failed_read_and_copies_an_event() {
 fn a_filter_set_during_the_read_holds_once_the_events_land() {
     let (release, released) = std::sync::mpsc::channel::<()>();
     let released = std::sync::Mutex::new(released);
-    let read: super::timeline::ReadEvents = Arc::new(move |_: &super::timeline::TimelineSource| {
+    let read: ReadEvents = Arc::new(move |_: &TimelineSource| {
         released.lock().expect("unpoisoned").recv().map_err(|err| err.to_string())?;
         Ok(two_events())
     });
-    let mut window =
-        crate::interaction_tests::open_shell(HeadlessOptions::new(WindowSize { width: 900.0, height: 700.0 }));
-    let source = super::timeline::TimelineSource {
-        path: PathBuf::from("battle.wowsreplay"),
-        alts: Vec::new(),
-        map: "Ocean".to_owned(),
-    };
-    super::timeline::open(crate::interaction_tests::shell(), source, read);
+    let HostedTimeline { mut window, .. } = host_timeline(read);
     window.advance(Duration::from_millis(300));
 
     let none = window.by_test_id("replay-timeline-none").expect("the filter is offered while reading");
@@ -822,16 +906,87 @@ fn a_filter_set_during_the_read_holds_once_the_events_land() {
     assert!(window.by_test_id("replay-timeline-row-0").is_some(), "the events had landed");
 }
 
-/// The Actions menu opens the timeline of the battle it reads.
+/// A timeline opened again shows the events read before, under the filter left on them; another
+/// recording merged in reads them again, still filtered.
 #[test]
-fn the_actions_menu_opens_the_timeline() {
-    let Opened { mut window } =
-        open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
+fn a_reopened_timeline_keeps_its_events_and_filter() {
+    let (reads, read) = counted_reads();
+    let HostedTimeline { mut window, shown, alts } = host_timeline(read);
+    crate::interaction_tests::settle_in_real_time(&mut window);
+    let none = window.by_test_id("replay-timeline-none").expect("the filter is offered");
+    window.click(none).expect("clickable");
+    window.advance(Duration::from_millis(300));
+
+    shown.set(false);
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("replay-timeline").is_none(), "the timeline is closed");
+    shown.set(true);
+    crate::interaction_tests::settle_in_real_time(&mut window);
+
+    assert_eq!(reads.load(Ordering::SeqCst), 1, "the battle is not read again");
+    assert!(window.by_test_id("replay-timeline-row-0").is_none(), "the filter is kept");
+
+    alts.set(vec![PathBuf::from("alt.wowsreplay")]);
+    crate::interaction_tests::settle_in_real_time(&mut window);
+    assert_eq!(reads.load(Ordering::SeqCst), 2, "a merged recording reads the battle again");
+    assert!(window.by_test_id("replay-timeline-row-0").is_none(), "under the same filter");
+    let all = window.by_test_id("replay-timeline-all").expect("offered");
+    window.click(all).expect("clickable");
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("replay-timeline-row-0").is_some(), "the events were read");
+}
+
+/// Points the game data cache at `dir`, with no install, so the panel offers what reads through it.
+#[component]
+fn CacheAt(dir: String) -> impl IntoView {
+    crate::services::Services::current().game_data.adopt(crate::services::GameDataRequest {
+        wows_dir: None,
+        cache_dir: dir,
+        locale: None,
+        auto_dump: false,
+    });
+}
+
+/// The Actions menu opens the timeline beside the table, which stays in use.
+#[test]
+fn the_actions_menu_opens_the_timeline_beside_the_table() {
+    let cache = tempfile::tempdir().expect("a temporary directory");
+    let dir = cache.path().to_string_lossy().into_owned();
+    SEED.with(|slot| *slot.borrow_mut() = Some(loaded(model_at_expected_values(), true)));
+    let options = HeadlessOptions::new(WindowSize { width: 1100.0, height: 700.0 });
+    let mut window = HeadlessWindow::open(options, move || {
+        let setup = PanelSetup {
+            path: PathBuf::from("battle.wowsreplay"),
+            columns: ReplayColumn::ALL.to_vec(),
+            personal_rating: None,
+        };
+        let dir = dir.clone();
+        view! {
+            ShellHarness(theme = ThemeChoice::Dark) {
+                CacheAt(dir = dir)
+                ReplayPanel(setup = setup, table = fake_table())
+            }
+        }
+    })
+    .expect("the panel opens");
+    window.advance(Duration::from_millis(600));
 
     let actions = window.by_test_id("replay-actions").expect("the menu is offered");
     window.click(actions).expect("clickable");
     window.advance(Duration::from_millis(300));
-    assert!(window.by_test_id("replay-timeline-open").is_some(), "the menu offers the timeline");
+    let open = window.by_test_id("replay-timeline-open").expect("the menu offers the timeline");
+    window.click(open).expect("clickable");
+    window.advance(Duration::from_millis(600));
+
+    assert!(window.by_test_id("replay-timeline").is_some(), "the timeline opens in the side panel");
+    let raw = window.by_test_id("fake-raw").expect("the table is still shown");
+    window.click(raw).expect("and takes clicks");
+    window.advance(Duration::from_millis(600));
+    let titles = window.texts_by_class("wt-rp-side__title");
+    assert!(
+        titles.contains(&t!("ui.replay.debug.player_metadata").into_owned()),
+        "the table's row opened its metadata: {titles:?}"
+    );
 }
 
 #[test]
