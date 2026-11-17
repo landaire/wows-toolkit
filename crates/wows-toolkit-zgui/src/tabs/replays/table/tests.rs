@@ -36,6 +36,8 @@ use wows_toolkit_viewmodel::replay_sort::SortColumn;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Species;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -73,6 +75,9 @@ fn Harness(
     with_detail: bool,
     #[prop(optional)] saved_sort: Option<SortOrder>,
     #[prop(optional)] height: Option<f32>,
+    /// The build the battle was read through.
+    #[prop(optional)]
+    battle_build: Option<Arc<LoadedGameData>>,
 ) -> impl IntoView {
     let services = Services::provide(None);
     if let Some(replay_sort) = saved_sort {
@@ -98,7 +103,8 @@ fn Harness(
     // Built inside the theme root, under its context.
     let table = move || {
         if !with_detail {
-            return AnyView::new(view! { PlayerTable(model = model, debug = debug) });
+            let battle_build = battle_build.clone();
+            return AnyView::new(view! { PlayerTable(model = model, debug = debug, battle_build = battle_build) });
         }
         let detail: PlayerDetail = Rc::new(|cx: PlayerDetailCx| {
             if !matches!(cx.column, ReplayColumn::Name | ReplayColumn::Kills) {
@@ -108,12 +114,16 @@ fn Harness(
             let name = cx.row.display_name.clone();
             Some(AnyView::new(view! { box(attr:data-testid = id, style:padding = "8px") {{name}} }))
         });
-        AnyView::new(view! { PlayerTable(model = model, debug = debug, detail = detail) })
+        let battle_build = battle_build.clone();
+        AnyView::new(view! { PlayerTable(model = model, debug = debug, detail = detail, battle_build = battle_build) })
     };
     let held = move || match height {
-        Some(height) => AnyView::new(view! {
-            box(style = format!("display: flex; flex-direction: column; height: {height}px")) {{table}}
-        }),
+        Some(height) => {
+            let table = table.clone();
+            AnyView::new(view! {
+                box(style = format!("display: flex; flex-direction: column; height: {height}px")) {{table}}
+            })
+        }
         None => table(),
     };
 
@@ -211,6 +221,35 @@ fn cell_on_line_of(window: &HeadlessWindow, element: Element, column: ReplayColu
                 .is_some_and(|cell| cell.origin.y.0 <= middle && middle < cell.origin.y.0 + cell.size.height.0)
         })
         .expect("the line has the cell")
+}
+
+/// An old battle's class icons come from the build it was read through, before the newest build
+/// is loaded.
+#[test]
+fn a_battles_class_icons_come_from_the_build_it_was_read_through() {
+    let model = Rc::new(sample_model());
+    let mut species: Vec<Species> = Vec::new();
+    for row in &model.rows {
+        if !species.contains(&row.ship_class) {
+            species.push(row.ship_class);
+        }
+    }
+    let icons: Vec<(Species, &str)> =
+        species.iter().map(|species| (*species, crate::game_art::testing::UPRIGHT)).collect();
+    let provider = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
+    let battle_build = Arc::new(LoadedGameData::for_test(provider, crate::game_art::testing::class_icons(&icons), 1));
+    let options = HeadlessOptions::new(SIZE);
+    let mut window = HeadlessWindow::open(options, move || {
+        let battle_build = Arc::clone(&battle_build);
+        view! {
+            Harness(scheme = Scheme::Dark, model = Rc::clone(&model), with_detail = false, battle_build = battle_build)
+        }
+    })
+    .expect("the table opens headlessly");
+    crate::interaction_tests::settle_in_real_time(&mut window);
+
+    let rows = sample_model().rows.len();
+    assert_eq!(window.all_by_class("wt-pt-class").len(), rows, "every row draws its class icon");
 }
 
 #[test]

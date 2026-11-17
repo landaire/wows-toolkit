@@ -1,7 +1,10 @@
 //! A replay tab's title: a spinner while the battle is read, then the
 //! recording player's flag and ship class, pointing right, beside "{ship} - {map}".
 
+use std::sync::Arc;
+
 use rust_i18n::t;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wowsunpack::vfs::VfsPath;
 use zgui::component;
 use zgui::css;
@@ -39,7 +42,7 @@ const CSS: &str = css!(
     .wt-replay-title__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }"
 );
 
-/// One ship's flag and class icon, as the loaded build draws them.
+/// One ship's flag and class icon, as the battle's build draws them.
 struct ShipArt {
     ship: TitleShip,
     flag: Option<ImageBytes>,
@@ -48,7 +51,12 @@ struct ShipArt {
 }
 
 #[component]
-pub fn ReplayTabTitle(#[prop(into)] title: Signal<PanelTitle, LocalStorage>) -> impl IntoView {
+pub fn ReplayTabTitle(
+    #[prop(into)] title: Signal<PanelTitle, LocalStorage>,
+    /// The build the battle was read through. Its art comes before the newest build's.
+    #[prop(into)]
+    battle_build: Signal<Option<Arc<LoadedGameData>>, LocalStorage>,
+) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
     let title = Memo::new(move |_| title.get());
@@ -57,10 +65,18 @@ pub fn ReplayTabTitle(#[prop(into)] title: Signal<PanelTitle, LocalStorage>) -> 
     // Read again for another ship or another build. A read the next run overtakes ends with it.
     let reading = RenderEffect::new(move |_| {
         let PanelTitle::Read { ship: Some(ship), .. } = title.get() else { return };
-        let GameDataState::Ready(data) = services.game_data.state() else { return };
-        let vfs = data.vfs().clone();
+        let newest = match services.game_data.state() {
+            GameDataState::Ready(data) => Some(data),
+            _ => None,
+        };
+        let builds = battle_build.get().into_iter().chain(newest);
+        let vfses: Vec<VfsPath> = builds.map(|data| data.vfs().clone()).collect();
+        if vfses.is_empty() {
+            return;
+        }
+
         let _read = spawn_local(async move {
-            let read = blocking(move || read_art(&vfs, ship)).await;
+            let read = blocking(move || read_art(&vfses, ship)).await;
             art.set(Some(read));
         });
     });
@@ -111,10 +127,15 @@ fn class_view(art: &ShipArt) -> Option<AnyView> {
     }))
 }
 
-/// `ship`'s flag and white class icon in `vfs`. What the build lacks is left out.
-fn read_art(vfs: &VfsPath, ship: TitleShip) -> ShipArt {
-    let flag = ship.nation.as_deref().and_then(|nation| game_art::nation_flag_png(vfs, nation)).map(ImageBytes::new);
-    let class = game_art::class_icon_svg(vfs, ship.class).ok();
+/// `ship`'s flag and white class icon, each from the first of `vfses` that holds it. What none
+/// holds is left out.
+fn read_art(vfses: &[VfsPath], ship: TitleShip) -> ShipArt {
+    let flag = ship
+        .nation
+        .as_deref()
+        .and_then(|nation| vfses.iter().find_map(|vfs| game_art::nation_flag_png(vfs, nation)))
+        .map(ImageBytes::new);
+    let class = vfses.iter().find_map(|vfs| game_art::class_icon_svg(vfs, ship.class).ok());
 
     ShipArt { ship, flag, class }
 }
@@ -133,6 +154,8 @@ mod tests {
     use wows_toolkit_viewmodel::settings::ThemeChoice;
     use wowsunpack::game_params::provider::GameMetadataProvider;
     use wowsunpack::game_params::types::Species;
+    use wowsunpack::vfs::MemoryFS;
+    use wowsunpack::vfs::VfsPath;
     use zgui::component;
     use zgui::reactive::Signal;
     use zgui::view;
@@ -146,42 +169,78 @@ mod tests {
     use crate::tabs::replays::panel::TitleShip;
     use crate::theme::SemanticTokensProps;
 
-    /// The title of a battle in a battleship, over a build whose only file is the battleship
-    /// class icon, pointing up.
+    /// Where the title's class icon is kept.
+    #[derive(Clone, Copy)]
+    enum IconIn {
+        /// The newest build, the battle naming none of its own.
+        Newest,
+        /// The battle's own build, the newest build lacking it.
+        BattleBuild,
+    }
+
+    /// The title of a battle in a battleship, where the battleship class icon, pointing up, is the
+    /// only file of the build `icon` names.
     #[component]
-    fn TitleRoot() -> impl IntoView {
+    fn TitleRoot(icon: IconIn) -> impl IntoView {
         let services = Services::provide(None);
-        let provider = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
-        let vfs = game_art::testing::upright_class_icon(Species::Battleship);
-        services.game_data.set_ready_for_test(Arc::new(LoadedGameData::for_test(provider, vfs, 1)));
+        let build = |vfs: VfsPath, build: u32| {
+            let provider = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
+            Arc::new(LoadedGameData::for_test(provider, vfs, build))
+        };
+        let with_icon = game_art::testing::upright_class_icon(Species::Battleship);
+        let battle_build = match icon {
+            IconIn::Newest => {
+                services.game_data.set_ready_for_test(build(with_icon, 2));
+                None
+            }
+            IconIn::BattleBuild => {
+                services.game_data.set_ready_for_test(build(MemoryFS::new().into(), 2));
+                Some(build(with_icon, 1))
+            }
+        };
         let ship = TitleShip { nation: None, class: Species::Battleship };
         let title = PanelTitle::Read { title: "Yamato - Ocean".to_owned(), ship: Some(ship) };
 
         view! {
             ThemeRoot {
                 SemanticTokens(choice = ThemeChoice::Dark)
-                ReplayTabTitle(title = Signal::stored_local(title))
+                ReplayTabTitle(title = Signal::stored_local(title), battle_build = Signal::stored_local(battle_build))
             }
         }
     }
 
-    /// The game draws a class icon pointing up; a replay tab's title shows it pointing right.
-    #[test]
-    fn the_class_icon_points_right() {
+    fn open(icon: IconIn) -> Option<HeadlessWindow> {
         let options = HeadlessOptions {
             drawing: Drawing::Device,
             desktop: Some(Appearance::Dark),
             ..HeadlessOptions::new(WindowSize { width: 300.0, height: 60.0 })
         };
-        let mut window = match HeadlessWindow::open(options, || view! { TitleRoot() }) {
+        let mut window = match HeadlessWindow::open(options, move || view! { TitleRoot(icon = icon) }) {
             Ok(window) => window,
             Err(err) if game_art::testing::no_device(&err) => {
                 eprintln!("skipped: no graphics adapter to draw the title on");
-                return;
+                return None;
             }
             Err(err) => panic!("the title opens: {err}"),
         };
         settle_in_real_time(&mut window);
+
+        Some(window)
+    }
+
+    /// The game draws a class icon pointing up; a replay tab's title shows it pointing right.
+    #[test]
+    fn the_class_icon_points_right() {
+        let Some(mut window) = open(IconIn::Newest) else { return };
+
+        game_art::testing::assert_points_right(&mut window, "wt-replay-title__class");
+    }
+
+    /// An old battle's title shows the icon of the build it was read through, which the newest
+    /// build may no longer hold.
+    #[test]
+    fn the_class_icon_comes_from_the_battles_own_build() {
+        let Some(mut window) = open(IconIn::BattleBuild) else { return };
 
         game_art::testing::assert_points_right(&mut window, "wt-replay-title__class");
     }

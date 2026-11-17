@@ -41,6 +41,7 @@ use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::error::ReplayLoadError;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::load::ParsedReplay;
 use wows_toolkit_replay_data::load::Perspectives;
 use wows_toolkit_replay_data::loader::LoadRequest;
@@ -475,6 +476,14 @@ impl PanelControl {
         })
     }
 
+    /// The build the battle on screen was read through. Reactive.
+    pub fn battle_build(self) -> Option<Arc<LoadedGameData>> {
+        self.state.with(|state| match state {
+            LoadState::Loaded(loaded) => loaded.battle_build.clone(),
+            LoadState::Loading | LoadState::Failed(_) => None,
+        })
+    }
+
     /// The held-key mode the panel's open rows offer. Reactive.
     pub fn mode(self) -> Option<ModeHint> {
         self.share_rows.any().then_some(SHARE_MODE)
@@ -539,6 +548,8 @@ pub struct PanelTable {
     pub detail: PlayerDetail,
     /// Shows a row's raw metadata JSON in the side panel.
     pub on_view_raw_json: UnsyncCallback<String>,
+    /// The build the battle was read through.
+    pub battle_build: Option<Arc<LoadedGameData>>,
 }
 
 /// Builds the player table for a loaded battle.
@@ -575,6 +586,8 @@ struct Loaded {
     session_game: Option<PerGameStat>,
     /// Whose recordings the battle was read from.
     perspectives: Perspectives,
+    /// The build the battle was read through. `None` for a battle a test hands the panel.
+    battle_build: Option<Arc<LoadedGameData>>,
 }
 
 #[derive(Clone)]
@@ -908,7 +921,9 @@ pub fn ReplayPanel(
                         )
                     }))
                 });
-                Some(table.with_value(|table| table(PanelTable { model, debug, detail, on_view_raw_json })))
+                let battle_build = loaded.battle_build.clone();
+                let table_cx = PanelTable { model, debug, detail, on_view_raw_json, battle_build };
+                Some(table.with_value(|table| table(table_cx)))
             };
             let timeline = TimelineSlot { state: control.timeline, path, alts };
             AnyView::new(view! {
@@ -1054,6 +1069,7 @@ fn loaded_state(parsed: ParsedReplay, columns: Vec<ReplayColumn>, rating: Option
         fire_chance,
         session_stat,
         indexable,
+        game_data,
         ..
     } = parsed;
     // A battle whose results have not arrived is not one the session records, as egui's
@@ -1070,6 +1086,7 @@ fn loaded_state(parsed: ParsedReplay, columns: Vec<ReplayColumn>, rating: Option
         export,
         export_stem,
         perspectives,
+        Some(game_data),
         DebugPayloads {
             raw_metadata: raw_metadata_json,
             raw_results: raw_results_json,
@@ -1091,6 +1108,7 @@ fn loaded_from_model(
     export: ExportedMatch,
     export_stem: String,
     perspectives: Perspectives,
+    battle_build: Option<Arc<LoadedGameData>>,
     payloads: DebugPayloads,
     session_game: Option<PerGameStat>,
 ) -> Loaded {
@@ -1112,6 +1130,7 @@ fn loaded_from_model(
         export_stem,
         session_game,
         perspectives,
+        battle_build,
     }
 }
 

@@ -128,14 +128,8 @@ fn loaded(model: ReplayReportModel, results: bool) -> Loaded {
         raw_results: results.then(|| "{}".to_string()),
         mapped_results: None,
     };
-    loaded_from_model(
-        model,
-        export,
-        "battle".to_string(),
-        wows_toolkit_replay_data::load::Perspectives::Own,
-        payloads,
-        None,
-    )
+    let own = wows_toolkit_replay_data::load::Perspectives::Own;
+    loaded_from_model(model, export, "battle".to_string(), own, None, payloads, None)
 }
 
 /// Has the next panel built on this thread show `model` rather than read its replay.

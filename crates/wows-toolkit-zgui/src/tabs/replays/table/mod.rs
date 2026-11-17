@@ -33,6 +33,7 @@ use rust_i18n::t;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::StoredArrangement;
 use wows_toolkit_replay_data::columns::cell_value;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::sort::sort_rows;
@@ -299,6 +300,9 @@ pub fn PlayerTable(
     /// Told a row's raw metadata JSON when the reader asks to view it. Offered only in debug mode.
     #[prop(optional)]
     on_view_raw_json: Option<UnsyncCallback<String>>,
+    /// The build the battle was read through, `None` when it was not read from a replay. Its
+    /// pictures come before the newest build's.
+    battle_build: Option<Arc<LoadedGameData>>,
 ) -> impl IntoView {
     install_stylesheet(style::SHEET, style::CSS);
     let services = Services::current();
@@ -396,11 +400,12 @@ pub fn PlayerTable(
 
     let art = GameArt::new();
     let wanting = RenderEffect::new(move |_| {
-        let data = match services.game_data.state() {
+        let newest = match services.game_data.state() {
             GameDataState::Ready(data) => Some(data),
             _ => None,
         };
-        model.with(|model| art.want(data.as_deref(), model.rows.iter().flat_map(art::row_keys)));
+        let builds = battle_build.as_deref().into_iter().chain(newest.as_deref());
+        model.with(|model| art.want(builds, model.rows.iter().flat_map(art::row_keys)));
     });
     on_cleanup_local(move || drop(wanting));
 

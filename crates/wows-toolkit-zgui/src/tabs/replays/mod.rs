@@ -255,9 +255,15 @@ pub fn ReplaysTab() -> impl IntoView {
 /// The slot a [`ReplayPanel`](panel::ReplayPanel) draws its battle's [`PlayerTable`](table::PlayerTable) in.
 pub fn player_table_slot() -> TableSlot {
     Rc::new(|table: PanelTable| {
-        let PanelTable { model, debug, detail, on_view_raw_json } = table;
+        let PanelTable { model, debug, detail, on_view_raw_json, battle_build } = table;
         AnyView::new(view! {
-            PlayerTable(model = model, debug = debug, detail = detail, on_view_raw_json = on_view_raw_json)
+            PlayerTable(
+                model = model,
+                debug = debug,
+                detail = detail,
+                on_view_raw_json = on_view_raw_json,
+                battle_build = battle_build
+            )
         })
     })
 }

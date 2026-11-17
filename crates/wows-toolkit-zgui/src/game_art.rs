@@ -280,16 +280,23 @@ impl Art {
     }
 }
 
-/// The build a picture was read from. A newer build replaces it all.
+/// The build a picture was read from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SourceBuild(u32);
 
-/// What every view has read from the current build, the pictures it lacks included, so a picture
-/// is read once per build however many views draw it.
+/// What one build held under one key, `None` when it held nothing.
+struct BuildRead {
+    source: SourceBuild,
+    key: ArtKey,
+    art: Option<Art>,
+}
+
+/// What every view has read from the builds it drew from last, the pictures they lack included,
+/// so a picture is read once per build however many views draw it.
 #[derive(Default)]
 struct ReadArt {
-    source: Option<SourceBuild>,
-    pictures: HashMap<ArtKey, Option<Art>>,
+    /// The build read from least recently first.
+    builds: Vec<(SourceBuild, HashMap<ArtKey, Option<Art>>)>,
 }
 
 thread_local! {
@@ -298,15 +305,40 @@ thread_local! {
 
 /// What `source` holds for `key`, when it has been read.
 fn already_read(source: SourceBuild, key: &ArtKey) -> Option<Option<Art>> {
-    READ.with_borrow(|read| if read.source == Some(source) { read.pictures.get(key).cloned() } else { None })
+    READ.with_borrow(|read| {
+        let (_, pictures) = read.builds.iter().find(|(build, _)| *build == source)?;
+        pictures.get(key).cloned()
+    })
 }
 
-fn note_read(source: SourceBuild, pictures: &[(ArtKey, Option<Art>)]) {
-    READ.with_borrow_mut(|read| {
-        if read.source != Some(source) {
-            *read = ReadArt { source: Some(source), pictures: HashMap::new() };
+/// What the first of `sources` holding `key` holds for it, when each build before it has been read
+/// and found to lack it.
+fn already_read_from(sources: &[SourceBuild], key: &ArtKey) -> Option<Option<Art>> {
+    for source in sources {
+        if let Some(art) = already_read(*source, key)? {
+            return Some(Some(art));
         }
-        read.pictures.extend(pictures.iter().cloned());
+    }
+
+    Some(None)
+}
+
+fn note_read(reads: &[BuildRead]) {
+    // Old replays are open beside the newest build, so more than one build is kept.
+    const KEPT_BUILDS: usize = 4;
+
+    READ.with_borrow_mut(|cache| {
+        for read in reads {
+            let at = cache.builds.iter().position(|(build, _)| *build == read.source);
+            let mut entry = match at {
+                Some(at) => cache.builds.remove(at),
+                None => (read.source, HashMap::new()),
+            };
+            entry.1.insert(read.key.clone(), read.art.clone());
+            cache.builds.push(entry);
+        }
+        let excess = cache.builds.len().saturating_sub(KEPT_BUILDS);
+        cache.builds.drain(..excess);
     });
 }
 
@@ -319,7 +351,8 @@ pub struct GameArt {
 
 #[derive(Default)]
 struct ArtWork {
-    source: Option<SourceBuild>,
+    /// The builds pictures are read from, a picture coming from the first that holds it.
+    sources: Vec<SourceBuild>,
     asked: HashSet<ArtKey>,
     reads: Vec<Task>,
 }
@@ -334,17 +367,30 @@ impl GameArt {
         self.loaded.with(|loaded| loaded.get(key).cloned())
     }
 
-    /// Reads the pictures in `keys` not asked for yet from `data`. Without a build, drops them all.
-    pub fn want(self, data: Option<&LoadedGameData>, keys: impl IntoIterator<Item = ArtKey>) {
-        let Some(data) = data else {
+    /// Reads the pictures in `keys` not asked for yet, each from the first of `builds` that holds
+    /// it. Without a build, drops them all.
+    pub fn want<'a>(
+        self,
+        builds: impl IntoIterator<Item = &'a LoadedGameData>,
+        keys: impl IntoIterator<Item = ArtKey>,
+    ) {
+        let mut sources = Vec::new();
+        let mut vfses = Vec::new();
+        for data in builds {
+            let source = SourceBuild(data.build());
+            if !sources.contains(&source) {
+                sources.push(source);
+                vfses.push((source, data.vfs().clone()));
+            }
+        }
+        if sources.is_empty() {
             self.release();
             return;
-        };
+        }
 
-        let source = SourceBuild(data.build());
-        if self.work.with_value(|work| work.source) != Some(source) {
+        if self.work.with_value(|work| work.sources != sources) {
             self.release();
-            self.work.update_value(|work| work.source = Some(source));
+            self.work.update_value(|work| work.sources = sources.clone());
         }
 
         let fresh: Vec<ArtKey> = self.work.with_value(|work| {
@@ -359,7 +405,7 @@ impl GameArt {
         let mut known = Vec::new();
         let mut unread = Vec::new();
         for key in fresh {
-            match already_read(source, &key) {
+            match already_read_from(&sources, &key) {
                 Some(Some(art)) => known.push((key, art)),
                 Some(None) => {}
                 None => unread.push(key),
@@ -372,23 +418,28 @@ impl GameArt {
             return;
         }
 
-        let vfs = data.vfs().clone();
         let read = spawn_local(async move {
-            let read: Vec<(ArtKey, Option<Art>)> = blocking(move || {
-                unread
-                    .into_iter()
-                    .map(|key| {
-                        let art = key.read(&vfs);
-                        (key, art)
-                    })
-                    .collect()
+            let reads: Vec<BuildRead> = blocking(move || {
+                let mut reads = Vec::new();
+                for key in unread {
+                    for (source, vfs) in &vfses {
+                        let art = key.read(vfs);
+                        let found = art.is_some();
+                        reads.push(BuildRead { source: *source, key: key.clone(), art });
+                        if found {
+                            break;
+                        }
+                    }
+                }
+                reads
             })
             .await;
-            note_read(source, &read);
-            if self.work.try_with_value(|work| work.source) != Some(Some(source)) {
+            note_read(&reads);
+            if self.work.try_with_value(|work| work.sources == sources) != Some(true) {
                 return;
             }
-            self.loaded.update(|loaded| loaded.extend(read.into_iter().filter_map(|(key, art)| Some((key, art?)))));
+            self.loaded
+                .update(|loaded| loaded.extend(reads.into_iter().filter_map(|read| Some((read.key, read.art?)))));
         });
         self.work.update_value(|work| {
             work.reads.retain(|read| !read.is_finished());
@@ -442,11 +493,21 @@ pub(crate) mod testing {
 
     /// A build whose only file is `species`' class icon, [`UPRIGHT`].
     pub(crate) fn upright_class_icon(species: Species) -> VfsPath {
+        class_icons(&[(species, UPRIGHT)])
+    }
+
+    /// A build whose only files are the class icons in `icons`, each species' given as SVG markup.
+    pub(crate) fn class_icons(icons: &[(Species, &str)]) -> VfsPath {
         let vfs: VfsPath = MemoryFS::new().into();
-        let path = GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }.candidate_paths(None).remove(0);
-        let file = vfs.join(&path).expect("the icon's path is valid");
-        file.parent().create_dir_all().expect("the icon's directory is made");
-        file.create_file().expect("the icon is made").write_all(UPRIGHT.as_bytes()).expect("the icon is written");
+        for (species, svg) in icons {
+            let path = GuiAsset::ShipClassIcon { species: *species, state: ShipIconState::Alive }
+                .candidate_paths(None)
+                .remove(0);
+            let file = vfs.join(&path).expect("the icon's path is valid");
+            file.parent().create_dir_all().expect("the icon's directory is made");
+            file.create_file().expect("the icon is made").write_all(svg.as_bytes()).expect("the icon is written");
+        }
+
         vfs
     }
 
@@ -541,5 +602,70 @@ mod tests {
         let tone = Semantic::DARK.win;
         assert_eq!(decoded.get_pixel(15, 5).0, [tone.red(), tone.green(), tone.blue(), 255]);
         assert_eq!(decoded.get_pixel(4, 5).0[3], 0);
+    }
+}
+
+#[cfg(test)]
+mod read_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use landaire_ui::test_support::HeadlessOptions;
+    use landaire_ui::test_support::HeadlessWindow;
+    use landaire_ui::test_support::WindowSize;
+    use wows_toolkit_replay_data::load::LoadedGameData;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::game_params::types::Species;
+    use wowsunpack::vfs::VfsPath;
+    use zgui::view;
+
+    use super::Art;
+    use super::ArtKey;
+    use super::GameArt;
+    use super::testing::UPRIGHT;
+    use super::testing::class_icons;
+    use crate::interaction_tests::settle_in_real_time;
+
+    /// Upright like [`UPRIGHT`], twice as tall, so it lies 40 wide once turned.
+    const TALL: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 40\">\
+        <rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"white\"/></svg>";
+
+    fn build(vfs: VfsPath, build: u32) -> Arc<LoadedGameData> {
+        let provider = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("an empty provider builds");
+        Arc::new(LoadedGameData::for_test(provider, vfs, build))
+    }
+
+    /// The width a turned class icon was drawn at, which tells [`UPRIGHT`] from [`TALL`].
+    fn width(art: Option<Art>) -> Option<String> {
+        let Some(Art::Vector(svg)) = art else { return None };
+        let start = svg.find("width=\"")? + "width=\"".len();
+        let end = start + svg[start..].find('"')?;
+
+        Some(svg[start..end].to_owned())
+    }
+
+    /// An old battle's pictures come from the build it was read through, and a picture that build
+    /// lacks from the newest one.
+    #[test]
+    fn a_picture_comes_from_the_first_build_that_holds_it() {
+        let battle = build(class_icons(&[(Species::Battleship, UPRIGHT)]), 1);
+        let newest = build(class_icons(&[(Species::Battleship, TALL), (Species::Cruiser, TALL)]), 2);
+        let handed = Rc::new(Cell::new(None));
+        let held = Rc::clone(&handed);
+        let mut window =
+            HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 100.0, height: 100.0 }), move || {
+                let art = GameArt::new();
+                held.set(Some(art));
+                let keys = [ArtKey::ShipClass(Species::Battleship), ArtKey::ShipClass(Species::Cruiser)];
+                art.want([&*battle, &*newest], keys);
+                view! { column() }
+            })
+            .expect("the window opens");
+        settle_in_real_time(&mut window);
+        let art = handed.get().expect("the art is made");
+
+        assert_eq!(width(art.get(&ArtKey::ShipClass(Species::Battleship))).as_deref(), Some("20"), "the battle's own");
+        assert_eq!(width(art.get(&ArtKey::ShipClass(Species::Cruiser))).as_deref(), Some("40"), "the newest build's");
     }
 }
