@@ -53,7 +53,7 @@ use super::model::HitPulse;
 use super::model::IncomingCast;
 use super::model::IncomingPath;
 use super::model::IncomingSelection;
-use super::model::PendingComparison;
+use super::model::LandedLog;
 use super::model::ViewportModel;
 use super::state::ArmorViewportState;
 use super::state::ViewCx;
@@ -170,13 +170,21 @@ impl ViewportModel {
         shells: &HashMap<GameParamId, ShellInfo>,
         cx: &mut ViewCx,
     ) {
-        let had = !self.sim_verdicts.is_empty() || self.sim_unchecked > 0 || self.incoming_selection.is_some();
+        // A pick names a shell of the log being replaced.
+        if self.incoming_selection.take().is_some() {
+            cx.notify();
+        }
+        self.judge_incoming(LandedLog { taken: taken.to_vec(), shells: shells.clone() }, cx);
+    }
+
+    /// Reads every shell of `log` against this hull, replacing every earlier reading.
+    pub(super) fn judge_incoming(&mut self, log: LandedLog, cx: &mut ViewCx) {
+        let had = !self.sim_verdicts.is_empty() || self.sim_unchecked > 0;
         self.sim_verdicts.clear();
         self.sim_unchecked = 0;
-        // A pick names a shell of the log being replaced.
-        self.incoming_selection = None;
+        self.compared = None;
         if !self.is_gpu_ready() || self.current_armor.is_none() {
-            self.pending_comparison = Some(PendingComparison { taken: taken.to_vec(), shells: shells.clone() });
+            self.pending_comparison = Some(log);
             if had {
                 cx.notify();
             }
@@ -185,9 +193,11 @@ impl ViewportModel {
         self.pending_comparison = None;
         if let Some(armor) = self.current_armor.clone() {
             let center = armor.center();
-            for taken in taken {
+            for taken in &log.taken {
                 let hit = &taken.hit;
-                let Some(shell) = hit.salvo.as_ref().and_then(|salvo| shells.get(&salvo.params_id)) else { continue };
+                let Some(shell) = hit.salvo.as_ref().and_then(|salvo| log.shells.get(&salvo.params_id)) else {
+                    continue;
+                };
                 // Only armour-piercing: the plate chain simulates AP, and calling an HE hit a
                 // mismatch would report on the simulation rather than on the shell.
                 if shell.ammo_type != AmmoType::AP {
@@ -203,6 +213,7 @@ impl ViewportModel {
                 }
             }
         }
+        self.compared = Some(log);
         if had || !self.sim_verdicts.is_empty() || self.sim_unchecked > 0 {
             cx.notify();
         }
@@ -655,6 +666,9 @@ impl ViewportModel {
         self.continue_on_ricochet = on;
         self.recast_arcs(cx);
         self.resimulate_incoming();
+        if let Some(log) = self.compared.take() {
+            self.judge_incoming(log, cx);
+        }
     }
 
     /// Casts every arc again at its own range and with its own shell, as the plates under it

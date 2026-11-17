@@ -21,6 +21,7 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use rust_i18n::t;
+use wows_replays::types::ShotId;
 use wows_toolkit_armor::catalog::ShipCatalog;
 use wows_toolkit_armor::load_model::fixtures::armored_model_scene;
 use wows_toolkit_armor::load_ship::ArmorThickness;
@@ -776,6 +777,27 @@ fn a_salvo_picked_in_the_log_opens_and_draws_every_shell() {
     press(&mut window, "armor-incoming-salvo-0");
     assert_eq!(paths_drawn(state), 0, "pressing the picked salvo puts it down");
     assert!(window.by_test_id("armor-incoming-shell-0-0").is_none(), "and folds it");
+}
+
+/// Whether a ricochet is followed changes what each shell did, so every reading in the log is
+/// taken again rather than only the picked shell's.
+#[test]
+fn following_ricochets_reads_the_whole_log_again() {
+    let Some((_window, state)) = open_log(1) else { return };
+    let shot = ShotId::from(1u32);
+    let read = state.read_untracked(|model| model.sim_agreement(shot).cloned()).flatten();
+    assert!(read.is_some(), "the shell is read when the log is handed over");
+
+    // Readings the toggle has to replace, as a stale log would hold them.
+    state.update(|model, _| {
+        model.sim_verdicts.clear();
+        model.sim_unchecked = 5;
+    });
+    state.set_continue_on_ricochet(true);
+
+    assert_eq!(state.sim_unchecked(), 0, "the stale count is replaced");
+    let again = state.read_untracked(|model| model.sim_agreement(shot).cloned()).flatten();
+    assert_eq!(again, read, "and the shell is read again");
 }
 
 #[test]

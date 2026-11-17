@@ -214,9 +214,8 @@ impl CamoTextureCache {
 /// Per-hull-part composited camo textures, keyed as `upload_hull::upload_hull_meshes` expects.
 pub(super) type CamoTextures = wows_toolkit_armor::camo::TexturesByPart;
 
-/// Ships and shells a replay hands over to compare landed hits against, kept so a comparison
-/// asked for before the device was there runs once it is.
-pub(super) struct PendingComparison {
+/// Ships and shells a replay hands over to compare landed hits against.
+pub(super) struct LandedLog {
     pub(super) taken: Vec<PreExtractedHit>,
     pub(super) shells: HashMap<GameParamId, ShellInfo>,
 }
@@ -363,7 +362,9 @@ pub struct ViewportModel {
     /// How many armour-piercing shells the comparison could not reach an answer on.
     pub(super) sim_unchecked: usize,
     /// A comparison asked for while there was no device, run once there is one.
-    pub(super) pending_comparison: Option<PendingComparison>,
+    pub(super) pending_comparison: Option<LandedLog>,
+    /// The log the verdicts were read from, so a change in how shells are followed reads it again.
+    pub(super) compared: Option<LandedLog>,
     /// The landed shells picked in the incoming-fire log.
     pub(super) incoming_selection: Option<IncomingSelection>,
     /// The ship's health at the moment shown, while a replay drives this viewer.
@@ -495,6 +496,7 @@ impl ViewportModel {
             sim_verdicts: HashMap::new(),
             sim_unchecked: 0,
             pending_comparison: None,
+            compared: None,
             incoming_selection: None,
             hit_health: None,
             ring_hovers: Vec::new(),

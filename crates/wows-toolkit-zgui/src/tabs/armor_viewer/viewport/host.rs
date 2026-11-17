@@ -465,7 +465,7 @@ impl ViewportModel {
         }
         // A comparison asked for while there was no device found no hull, and did nothing.
         if let Some(pending) = self.pending_comparison.take() {
-            self.compare_incoming(&pending.taken, &pending.shells, cx);
+            self.judge_incoming(pending, cx);
         }
     }
 }

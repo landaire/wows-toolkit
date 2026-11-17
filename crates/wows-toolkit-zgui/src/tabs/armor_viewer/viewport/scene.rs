@@ -902,6 +902,7 @@ impl ViewportModel {
         self.hit_health = None;
         self.sim_verdicts.clear();
         self.sim_unchecked = 0;
+        self.compared = None;
         self.last_plate = None;
         self.burst = None;
         self.splash_labels.clear();
