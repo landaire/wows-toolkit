@@ -31,6 +31,7 @@ use wows_toolkit_armor::trajectory::ArcId;
 use wows_toolkit_armor::trajectory::TrajectoryHit;
 use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_replay_data::replay_render::armor::IncomingContext;
+use wows_toolkit_viewmodel::armor::health_strip::HealthStrip;
 use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::export::hardpoint::HardpointName;
@@ -158,7 +159,7 @@ pub(crate) fn salvo_on_plate(center: Vec3, shots: usize) -> IncomingFire {
             })
             .collect(),
     };
-    let taken = landings
+    let taken: Vec<PreExtractedHit> = landings
         .iter()
         .enumerate()
         .map(|(index, at)| PreExtractedHit {
@@ -189,9 +190,17 @@ pub(crate) fn salvo_on_plate(center: Vec3, shots: usize) -> IncomingFire {
         })
         .collect();
 
+    // A twenty-minute battle the ship lost most of its health over, the salvo landing a minute in.
+    let health = HealthStrip {
+        first: GameClock(0.0),
+        last: GameClock(1200.0),
+        line: vec![(0.0, 1.0), (0.05, 0.85), (0.5, 0.6), (1.0, 0.4)],
+        hits: taken.iter().map(|hit| hit.clock.seconds() / 1200.0).collect(),
+    };
     let context = IncomingContext {
         attackers: BTreeMap::from([(attacker, "Yamato".to_string())]),
         taken,
+        health: Some(health),
         shells: HashMap::from([(shell, iowa_ap())]),
         ..IncomingContext::default()
     };

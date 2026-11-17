@@ -121,9 +121,13 @@ const CSS: &str = css!(
     .wt-armor-incoming__sim[data-standing=agrees] { color: var(--wt-color-ok); }
     .wt-armor-incoming__sim[data-standing=deferred] { color: var(--wt-color-warn); }
     .wt-armor-incoming__sim[data-standing=disagrees] { color: var(--wt-color-error); }
-    .wt-armor-incoming__strip { width: 100%; height: 60px; cursor: pointer;
+    .wt-armor-incoming__strip { position: relative; width: 100%; height: 60px; cursor: pointer;
         --wt-strip-background: var(--wt-color-text-faint); --wt-strip-hit: var(--wt-color-armor-pen);
-        --wt-strip-line: var(--wt-color-ok); --wt-strip-at: var(--wt-color-text-strong); }"
+        --wt-strip-line: var(--wt-color-ok); --wt-strip-at: var(--wt-color-text-strong); }
+    .wt-armor-incoming__strip-paint { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .wt-armor-incoming__strip-time { position: absolute; top: 1px; font-size: 9px; color: var(--wt-color-text-dim); }
+    .wt-armor-incoming__strip-time--first { left: 2px; }
+    .wt-armor-incoming__strip-time--last { right: 2px; }"
 );
 
 /// What was fired at the ship on screen, and which of it the log shows.
@@ -657,6 +661,7 @@ fn HealthStripView(
 ) -> impl IntoView {
     let area = NodeRef::new();
     let seeking = strip.clone();
+    let (first, last) = (clock_label(strip.first), clock_label(strip.last));
     let (element, handle): (_, CustomHandle<HealthStripElement>) =
         zgui::custom::custom(HealthStripElement { strip, at: at.get_untracked(), colors: None });
     let following = RenderEffect::new(move |_| {
@@ -686,7 +691,9 @@ fn HealthStripView(
                 on_seek(seeking.clock_at(along));
             }
         ) {
-            {element}
+            {element.class("wt-armor-incoming__strip-paint")}
+            text(class = "wt-armor-incoming__strip-time wt-armor-incoming__strip-time--first", attr:data-testid = "armor-incoming-health-first") {{first}}
+            text(class = "wt-armor-incoming__strip-time wt-armor-incoming__strip-time--last", attr:data-testid = "armor-incoming-health-last") {{last}}
         }
     }
 }

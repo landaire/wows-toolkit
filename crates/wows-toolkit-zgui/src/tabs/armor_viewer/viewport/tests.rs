@@ -779,6 +779,13 @@ fn a_salvo_picked_in_the_log_opens_and_draws_every_shell() {
     assert!(window.by_test_id("armor-incoming-shell-0-0").is_none(), "and folds it");
 }
 
+/// The health strip is labelled with the battle clock at each end.
+#[test]
+fn the_health_strip_is_labelled_with_its_first_and_last_moments() {
+    let Some((window, _state)) = open_log(1) else { return };
+    assert_eq!(window.texts_by_class("wt-armor-incoming__strip-time"), ["0:00", "20:00"]);
+}
+
 /// Whether a ricochet is followed changes what each shell did, so every reading in the log is
 /// taken again rather than only the picked shell's.
 #[test]
