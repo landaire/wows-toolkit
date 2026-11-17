@@ -1632,10 +1632,9 @@ impl TabState {
                     // panicking, which runs on notify's own thread and would kill
                     // the watcher for the rest of the session.
                     //
-                    // Modified events defer their repaint: the game appends to
-                    // the live replay all match long, and waking per write
-                    // would keep the backgrounded UI repainting while the user
-                    // plays. Everything else is rare and wakes immediately.
+                    // Modified events defer their repaint so a burst of writes
+                    // to one replay does not wake the UI per write. Everything
+                    // else is rare and wakes immediately.
                     let send_ui = |file_event: NotifyFileEvent| {
                         let deferred = matches!(file_event, NotifyFileEvent::Modified(_));
                         let result = if deferred {
@@ -1681,16 +1680,16 @@ impl TabState {
                                     debug!("Sending preferences changed event");
                                     send_ui(NotifyFileEvent::PreferencesChanged);
                                 }
-                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                // The live battle file is a bare packet stream
+                                // appended all match long, not a replay file;
+                                // neither the UI nor the background parser can
+                                // read it.
+                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                    && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+                                {
                                     send_ui(NotifyFileEvent::Modified(path.clone()));
-                                    // The live battle file is appended all match
-                                    // long; only named replays go to the
-                                    // background parser for indexing and upload.
-                                    if path.file_name().is_some_and(|name| name != "temp.wowsreplay") {
-                                        let _ = background_tx.send(
-                                            crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path),
-                                        );
-                                    }
+                                    let _ = background_tx
+                                        .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
                                 }
                             }
                         }
