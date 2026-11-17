@@ -391,6 +391,17 @@ fn the_keys_drive_the_transport_and_the_speed_dropdown_follows() {
     assert!(!session.playback.with_untracked(Playback::is_playing), "and pauses");
 }
 
+/// The keys reach a viewport as it opens, before anything in it has been clicked.
+#[test]
+fn the_keys_reach_a_viewport_as_it_opens() {
+    let (mut window, session) = open_viewport(track(half_second_frames(60)));
+    window.advance(Duration::from_millis(16));
+
+    window.press_key(NamedKey::ArrowUp, Modifiers::NONE);
+    window.advance(Duration::from_millis(16));
+    assert_eq!(session.playback.with_untracked(Playback::speed), 40.0, "Up reaches the viewport with nothing clicked");
+}
+
 /// Playing walks the track on the window's clock and stops at its end, and the control then
 /// offers to play again.
 #[test]

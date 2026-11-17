@@ -162,6 +162,15 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
     // The window this view is in: a pop-out moves the session, and its messages go with the view.
     let toasts = Toasts::current();
     session.show_messages_on(toasts);
+    // The keys reach the viewport as it opens, and again in its own window after a pop-out.
+    let focusing = RenderEffect::new(move |focused: Option<bool>| {
+        if focused == Some(true) || root.get().is_none() {
+            return false;
+        }
+        root.focus();
+        true
+    });
+    on_cleanup_local(move || drop(focusing));
 
     // The frame's placement follows the element's size and the frame's. Observed once: each call
     // makes another observer.
