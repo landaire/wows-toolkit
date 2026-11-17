@@ -41,6 +41,8 @@ use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::Signal;
 use zgui::reactive::provide_local_context;
+use zgui::vocab::Modifiers;
+use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
 
 use super::*;
@@ -53,19 +55,24 @@ const SIZE: WindowSize = WindowSize { width: 1280.0, height: 720.0 };
 thread_local! {
     /// The open rows of the table built last on this thread.
     pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<RowId>, LocalStorage>>> = const { Cell::new(None) };
+    /// The selected rows of the table built last on this thread.
+    pub(super) static SELECTION: Cell<Option<RwSignal<Selection<RowId>, LocalStorage>>> = const { Cell::new(None) };
     /// The services of the table built last on this thread.
     static SERVICES: Cell<Option<Services>> = const { Cell::new(None) };
+    /// The model of the table built last on this thread.
+    static MODEL: Cell<Option<RwSignal<Rc<ReplayReportModel>, LocalStorage>>> = const { Cell::new(None) };
 }
 
 /// The table over `model`, as the Replays tab holds it. With `with_detail`, each open row's detail
 /// is a box naming the player and the third column drawn. With `saved_sort`, the settings are
-/// read and hold that sort.
+/// read and hold that sort. With `height`, the table is held to that many pixels and scrolls.
 #[component]
 fn Harness(
     scheme: Scheme,
     model: Rc<ReplayReportModel>,
     with_detail: bool,
     #[prop(optional)] saved_sort: Option<SortOrder>,
+    #[prop(optional)] height: Option<f32>,
 ) -> impl IntoView {
     let services = Services::provide(None);
     if let Some(replay_sort) = saved_sort {
@@ -75,7 +82,8 @@ fn Harness(
         });
     }
     SERVICES.with(|slot| slot.set(Some(services)));
-    let model = Signal::stored_local(model);
+    let model = RwSignal::new_local(model);
+    MODEL.with(|slot| slot.set(Some(model)));
     let theme = match scheme {
         Scheme::Light => ThemeChoice::Light,
         _ => ThemeChoice::Dark,
@@ -102,12 +110,18 @@ fn Harness(
         });
         AnyView::new(view! { PlayerTable(model = model, debug = debug, detail = detail) })
     };
+    let held = move || match height {
+        Some(height) => AnyView::new(view! {
+            box(style = format!("display: flex; flex-direction: column; height: {height}px")) {{table}}
+        }),
+        None => table(),
+    };
 
     view! {
         ThemeRoot(choice = Signal::stored_local(landaire_ui::ThemeChoice::Fixed(scheme))) {
             SemanticTokens(choice = Signal::stored_local(theme))
             ToastHost {
-                {table}
+                {held}
             }
         }
     }
@@ -339,6 +353,77 @@ fn the_disclosure_opens_and_closes_a_row_without_selecting_it() {
     let rows = window.by_role(Role::Row);
     let selected = rows.into_iter().filter(|row| window.a11y(*row).and_then(|state| state.selected) == Some(true));
     assert_eq!(selected.count(), 0, "no row is selected");
+}
+
+/// The rows `selection` holds.
+fn selected_rows(selection: RwSignal<Selection<RowId>, LocalStorage>) -> HashSet<RowId> {
+    selection.with_untracked(|selection| selection.keys().copied().collect())
+}
+
+/// The top of player `id`'s name.
+fn name_top(window: &HeadlessWindow, id: i64) -> f32 {
+    let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
+
+    window.bounds(name).expect("the name has a box").origin.y.0
+}
+
+/// A column the filters hide, or a change of language, leaves the table as the reader had it:
+/// scrolled as far, with the same row selected and the keyboard on it.
+#[test]
+fn a_column_filter_or_a_language_change_keeps_the_scroll_and_the_selection() {
+    let model = Rc::new(split_damage(sample_model()));
+    let options = HeadlessOptions { desktop: Some(Appearance::Dark), ..HeadlessOptions::new(SIZE) };
+    let mut window = HeadlessWindow::open(options, move || {
+        view! { Harness(scheme = Scheme::Dark, model = Rc::clone(&model), with_detail = true, height = 300.0) }
+    })
+    .expect("the table opens headlessly");
+    window.advance(Duration::from_millis(300));
+    let model = MODEL.with(Cell::take).expect("the table was built");
+    let services = SERVICES.with(Cell::take).expect("the harness ran");
+    EXPANDED.with(Cell::take);
+    let selection = SELECTION.with(Cell::take).expect("the table was built");
+    let only = |db_id: i64| HashSet::from([sample_row(db_id)]);
+
+    let order = expected_order(SortOrder::default());
+    // The sixth row is in view before and after the scroll.
+    let (watched, next) = (order[5], order[6]);
+    window.click(kills_cell(&window, watched)).expect("the row takes a click");
+    window.advance(Duration::from_millis(300));
+    assert_eq!(selected_rows(selection), only(watched), "a click selects the row");
+    let port = window.by_class("lui-grid__port").expect("the grid scrolls");
+    let unscrolled = name_top(&window, watched);
+    window.wheel(port, 60.0).expect("the grid takes the wheel");
+    window.advance(Duration::from_millis(300));
+    let scrolled = name_top(&window, watched);
+    assert!(scrolled < unscrolled, "the wheel scrolled the rows");
+
+    let hidden = ReplayColumn::BaseXp;
+    let mut filtered = split_damage(sample_model());
+    assert!(filtered.columns.contains(&hidden), "the sample shows the column hidden here");
+    filtered.columns.retain(|col| *col != hidden);
+    model.set(Rc::new(filtered));
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_role_and_label(Role::ColumnHeader, &hidden.label()).is_none(), "the column is hidden");
+    assert_eq!(name_top(&window, watched), scrolled, "a filter change keeps the scroll");
+    assert_eq!(selected_rows(selection), only(watched), "a filter change keeps the selection");
+
+    let locale = services.locale;
+    locale.choose(crate::i18n::LanguageCode::new("de"));
+    window.advance(Duration::from_millis(300));
+    let german = ReplayColumn::Kills.label();
+    let relabelled = window.by_role_and_label(Role::ColumnHeader, &german).is_some();
+    let kept_scroll = name_top(&window, watched);
+    let kept_selection = selected_rows(selection);
+    locale.choose(crate::i18n::LanguageCode::new("en"));
+    window.advance(Duration::from_millis(300));
+    assert_ne!(german, ReplayColumn::Kills.label(), "German names the column differently");
+    assert!(relabelled, "the header follows the language");
+    assert_eq!(kept_scroll, scrolled, "a language change keeps the scroll");
+    assert_eq!(kept_selection, only(watched), "a language change keeps the selection");
+
+    window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
+    window.advance(Duration::from_millis(300));
+    assert_eq!(selected_rows(selection), only(next), "the keyboard moves on from the row it was on");
 }
 
 #[test]

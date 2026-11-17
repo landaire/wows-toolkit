@@ -47,6 +47,7 @@ use crate::grid::header;
 use crate::grid::mode::RowDetail;
 use crate::grid::mode::RowGroups;
 use crate::grid::selection::GridSelectionMode;
+use crate::grid::state::ColumnGeneration;
 use crate::grid::state::GridCx;
 use crate::grid::state::MenuTarget;
 use crate::grid::state::RowHover;
@@ -248,6 +249,7 @@ where
     };
 
     let ids = cx.drawn_ids;
+    let generation = cx.generation;
     let detail_height = cx.measured.map(|_| RwSignal::new_local(0.0));
     let detail = cx
         .detail
@@ -268,8 +270,8 @@ where
             {..own}
         ) {
             {heading}
-            for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
-                {body_cell(Rc::clone(&cx), id, value, line_click(&cx, &key))}
+            for id in move || keyed_ids(ids, generation), key = |id: &(ColumnId, ColumnGeneration)| id.clone() {
+                {body_cell(Rc::clone(&cx), id.0, value, line_click(&cx, &key))}
             }
             box(class = "lui-grid__filler", node_ref = anchor, a11y:hidden = true, on:click = filler_click) {}
             {detail}
@@ -320,7 +322,7 @@ where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
 {
-    let Some(column) = cx.column(&id).cloned() else {
+    let Some((align, cell)) = cx.with_column(&id, |column| (column.align_value(), column.cell_builder())) else {
         return AnyView::new(());
     };
     let position = cx.drawn_ids.with_untracked(|ids| ids.iter().position(|other| *other == id));
@@ -335,7 +337,7 @@ where
         });
     }
     let own = placed(&cx, &id, "lui-grid__cell")
-        .attribute(AttrName::new("data-align"), Some(column.align_value().attribute().to_owned()))
+        .attribute(AttrName::new("data-align"), Some(align.attribute().to_owned()))
         .a11y_from(semantics);
     let shift = shift(&cx, id.clone());
     let mark = row_mark(&cx, id, value);
@@ -343,9 +345,19 @@ where
     AnyView::new(view! {
         box(style:translate = shift, on:click = on_click, {..own}) {
             {mark}
-            {move || value.with(|row| row.as_ref().map(|row| column.cell_view(row)))}
+            {move || value.with(|row| row.as_ref().map(|row| cell(row)))}
         }
     })
+}
+
+/// The drawn columns, each with the generation of the columns it is built from.
+pub(crate) fn keyed_ids(
+    ids: Memo<Vec<ColumnId>>,
+    generation: Memo<ColumnGeneration>,
+) -> Vec<(ColumnId, ColumnGeneration)> {
+    let generation = generation.get();
+
+    ids.with(|ids| ids.iter().map(|id| (id.clone(), generation)).collect())
 }
 
 /// Tells `on_row_click` of a plain click on the row's line. The detail under the line is not part
@@ -578,9 +590,10 @@ where
     });
 
     let ids = cx.drawn_ids;
+    let generation = cx.generation;
     view! {
-        for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
-            {column_part(Rc::clone(&cx), id, value, Rc::clone(&detail), parts, line)}
+        for id in move || keyed_ids(ids, generation), key = |id: &(ColumnId, ColumnGeneration)| id.clone() {
+            {column_part(Rc::clone(&cx), id.0, value, Rc::clone(&detail), parts, line)}
         }
         box(
             class = "lui-grid__detail-cell",

@@ -37,6 +37,7 @@ use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::arrow::ARROW_DOWN;
 use zgui_ui_icons::set::arrow::ARROW_UP;
 
+use crate::grid::body::keyed_ids;
 use crate::grid::column::ColumnAlign;
 use crate::grid::column::ColumnId;
 use crate::grid::column::GridColumn;
@@ -45,6 +46,7 @@ use crate::grid::layout::Placement;
 use crate::grid::layout::Section;
 use crate::grid::sort::SortDirection;
 use crate::grid::state::Carry;
+use crate::grid::state::ColumnGeneration;
 use crate::grid::state::GridCx;
 use crate::grid::state::MenuTarget;
 use crate::grid::state::Resize;
@@ -76,11 +78,12 @@ where
     on_cleanup_local(move || drop(measuring));
 
     let ids = cx.drawn_ids;
+    let generation = cx.generation;
 
     view! {
         box(class = "lui-grid__row", a11y:role = Role::Row) {
-            for id in move || ids.get(), key = |id: &ColumnId| id.clone() {
-                {header_cell(Rc::clone(&cx), id)}
+            for id in move || keyed_ids(ids, generation), key = |id: &(ColumnId, ColumnGeneration)| id.clone() {
+                {header_cell(Rc::clone(&cx), id.0)}
             }
             box(class = "lui-grid__head-filler", node_ref = filler, a11y:hidden = true)
         }
@@ -92,7 +95,7 @@ where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
 {
-    let Some(column) = cx.column(&id).cloned() else {
+    let Some(column) = cx.with_column(&id, GridColumn::clone) else {
         return AnyView::new(());
     };
 
@@ -334,7 +337,7 @@ where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
 {
-    let label = cx.column(&id).map(|column| format!("Resize {}", column.label())).unwrap_or_default();
+    let label = cx.with_column(&id, |column| format!("Resize {}", column.label())).unwrap_or_default();
     let semantics = A11yBinding::new(Role::Splitter).label(label).orientation(zgui::vocab::Orientation::Vertical);
     let resize = cx.resize;
     let active = {
@@ -538,11 +541,13 @@ where
 {
     let pinned = cx.layout.with_untracked(|layout| layout.is_pinned(&id));
     // A column that can never be pinned has no pin item rather than one that is always refused.
-    let offers_pin = pinned || cx.column(&id).is_some_and(GridColumn::is_pinnable);
+    let offers_pin = pinned || cx.with_column(&id, GridColumn::is_pinnable) == Some(true);
     let refused = !pinned && !cx.may_pin(&id);
     let resized = cx.layout.with_untracked(|layout| layout.width(&id).is_some());
-    let pin_label = if pinned { cx.strings.unpin.clone() } else { cx.strings.pin.clone() };
-    let reset_label = cx.strings.reset_width.clone();
+    let (pin_label, reset_label) = cx.strings.with(|strings| {
+        let pin = if pinned { &strings.unpin } else { &strings.pin };
+        (pin.clone(), strings.reset_width.clone())
+    });
 
     let on_pin = {
         let cx = Rc::clone(&cx);
@@ -593,7 +598,7 @@ where
     let Some(Carry::Moving { column, .. }) = cx.carry.get_untracked() else {
         return AnyView::new(());
     };
-    let Some(header) = cx.column(&column).map(|column| column.header_view()) else {
+    let Some(header) = cx.with_column(&column, GridColumn::header_view) else {
         return AnyView::new(());
     };
 

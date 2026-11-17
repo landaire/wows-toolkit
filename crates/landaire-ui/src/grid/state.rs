@@ -197,6 +197,19 @@ pub(crate) struct Resize {
     pub(crate) width: ColumnWidth,
 }
 
+/// How many times a grid's columns have been replaced. Every header and cell is keyed by it with
+/// its column, so a new set of columns builds them anew while the rows and their state stay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ColumnGeneration(u64);
+
+impl ColumnGeneration {
+    pub(crate) const FIRST: Self = Self(0);
+
+    pub(crate) const fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
 /// The pinned columns' offsets from the leading edge, as drawn.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Pins {
@@ -222,7 +235,9 @@ pub(crate) struct GridCx<T: 'static, K: 'static>
 where
     K: Eq + Hash,
 {
-    pub(crate) columns: Rc<[GridColumn<T>]>,
+    /// Read whenever a part of the grid needs a column.
+    pub(crate) columns: Signal<Vec<GridColumn<T>>, LocalStorage>,
+    pub(crate) generation: Memo<ColumnGeneration>,
     pub(crate) row_key: Rc<dyn Fn(&T) -> K>,
     pub(crate) rows: Signal<Vec<T>, LocalStorage>,
     /// Every row's key in row order, and each key's index, held rather than derived so a scroll
@@ -297,7 +312,7 @@ where
     pub(crate) menu_place: Cell<Option<ContextMenuPlace>>,
     pub(crate) on_copy: Option<UnsyncCallback<String>>,
     pub(crate) clipboard: Option<Clipboards>,
-    pub(crate) strings: GridStrings,
+    pub(crate) strings: Signal<GridStrings, LocalStorage>,
 
     pub(crate) port: NodeRef,
     pub(crate) scroll: Signal<ScrollPosition, LocalStorage>,
@@ -315,8 +330,9 @@ where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
 {
-    pub(crate) fn column(&self, id: &ColumnId) -> Option<&GridColumn<T>> {
-        self.columns.iter().find(|column| column.id() == id)
+    /// What `read` gives of the column `id`, without tracking the columns.
+    pub(crate) fn with_column<R>(&self, id: &ColumnId, read: impl FnOnce(&GridColumn<T>) -> R) -> Option<R> {
+        self.columns.with_untracked(|columns| find_column(columns, id).map(read))
     }
 
     /// What builds the items of `key`'s row menu, or `None` when the row has no menu.
@@ -348,16 +364,16 @@ where
             return width;
         }
 
-        let Some(column) = self.column(id) else {
-            return ColumnWidth::MIN.0;
-        };
-        match self.layout.with_untracked(|layout| layout.width(id)) {
+        let resized = self.layout.with_untracked(|layout| layout.width(id));
+        let width = self.with_column(id, |column| match resized {
             Some(width) => column.clamp(width.0).0,
             None => match column.sizing_value() {
                 ColumnSizing::Fixed(width) => column.clamp(width.0).0,
                 ColumnSizing::Fit => column.min_width_value().0,
             },
-        }
+        });
+
+        width.unwrap_or(ColumnWidth::MIN.0)
     }
 
     /// The grid's `grid-template-columns`: one track per column as drawn, then one that takes up
@@ -366,31 +382,33 @@ where
         let resize = self.resize.get();
         let fitted = self.fitted.get();
         let waived = self.waived.get();
-        let mut tracks: Vec<String> = self.drawn.with(|drawn| {
-            drawn
-                .columns()
-                .iter()
-                .filter_map(|state| {
-                    let column = self.column(state.id())?;
-                    let dragged =
-                        resize.as_ref().filter(|resize| resize.column == *state.id()).map(|resize| resize.width);
-                    if let Some(width) = dragged {
-                        return Some(width.css());
-                    }
-
-                    let track = match set_width(column, state.width()) {
-                        Some(width) if waived.contains(state.id()) => width.css(),
-                        // A set column's cells are held out of its measure, so only its open
-                        // parts widen it past the width set.
-                        Some(width) => format!("minmax({}, max-content)", width.css()),
-                        None => {
-                            let least = fitted.get(state.id()).copied().unwrap_or(0.0);
-                            format!("minmax({}, max-content)", column.clamp(least).css())
+        let mut tracks: Vec<String> = self.columns.with(|columns| {
+            self.drawn.with(|drawn| {
+                drawn
+                    .columns()
+                    .iter()
+                    .filter_map(|state| {
+                        let column = find_column(columns, state.id())?;
+                        let dragged =
+                            resize.as_ref().filter(|resize| resize.column == *state.id()).map(|resize| resize.width);
+                        if let Some(width) = dragged {
+                            return Some(width.css());
                         }
-                    };
-                    Some(track)
-                })
-                .collect()
+
+                        let track = match set_width(column, state.width()) {
+                            Some(width) if waived.contains(state.id()) => width.css(),
+                            // A set column's cells are held out of its measure, so only its open
+                            // parts widen it past the width set.
+                            Some(width) => format!("minmax({}, max-content)", width.css()),
+                            None => {
+                                let least = fitted.get(state.id()).copied().unwrap_or(0.0);
+                                format!("minmax({}, max-content)", column.clamp(least).css())
+                            }
+                        };
+                        Some(track)
+                    })
+                    .collect()
+            })
         });
         tracks.push("minmax(0px, 1fr)".to_owned());
 
@@ -399,22 +417,28 @@ where
 
     /// The width `id` is set to as drawn: dragged, resized or sized. `None` for a fitted column.
     pub(crate) fn set_width_of(&self, id: &ColumnId) -> Option<ColumnWidth> {
-        let column = self.column(id)?;
-        let dragged =
-            self.resize.with(|resize| resize.as_ref().filter(|resize| resize.column == *id).map(|resize| resize.width));
+        self.columns.with(|columns| {
+            let column = find_column(columns, id)?;
+            let dragged = self
+                .resize
+                .with(|resize| resize.as_ref().filter(|resize| resize.column == *id).map(|resize| resize.width));
 
-        dragged.or_else(|| self.drawn.with(|drawn| set_width(column, drawn.width(id))))
+            dragged.or_else(|| self.drawn.with(|drawn| set_width(column, drawn.width(id))))
+        })
     }
 
     /// The `data-held` attribute of `id`'s header and cells: present while its width is set rather
     /// than fitted, which holds them out of the column's measure.
     pub(crate) fn held(&self, id: &ColumnId) -> impl Fn() -> Option<String> + 'static {
+        let columns = self.columns;
         let resize = self.resize;
         let drawn = self.drawn;
-        let sized = self.column(id).is_some_and(|column| column.sizing_value() != ColumnSizing::Fit);
         let id = id.clone();
 
         move || {
+            let sized = columns.with(|columns| {
+                find_column(columns, &id).is_some_and(|column| column.sizing_value() != ColumnSizing::Fit)
+            });
             let dragged = resize.with(|resize| resize.as_ref().is_some_and(|resize| resize.column == id));
             let set = sized || dragged || drawn.with(|drawn| drawn.width(&id).is_some());
             set.then(String::new)
@@ -509,7 +533,7 @@ where
             });
         }
 
-        let fits = self.column(id).is_some_and(|column| column.sizing_value() == ColumnSizing::Fit)
+        let fits = self.with_column(id, |column| column.sizing_value() == ColumnSizing::Fit) == Some(true)
             && !self.resize.with_untracked(|resize| resize.as_ref().is_some_and(|resize| resize.column == *id))
             && self.layout.with_untracked(|layout| layout.width(id).is_none());
         let wider = self.fitted.with_untracked(|fitted| fitted.get(id).is_none_or(|known| width > *known));
@@ -523,7 +547,7 @@ where
     /// Whether `id` may be pinned: it allows it, some other column is left to scroll, and the
     /// pinned columns with it leave room in the view to reach the rest of the grid.
     pub(crate) fn may_pin(&self, id: &ColumnId) -> bool {
-        let Some(column) = self.column(id) else {
+        let Some(pinnable) = self.with_column(id, GridColumn::is_pinnable) else {
             return false;
         };
 
@@ -532,7 +556,7 @@ where
             .with_untracked(|layout| layout.columns().iter().any(|state| !state.is_pinned() && state.id() != id));
         let fits = self.pinned_room(id).is_none_or(|room| self.width_of(id) <= room);
 
-        column.is_pinnable() && scrolling_left && fits
+        pinnable && scrolling_left && fits
     }
 
     /// How wide `id` may be as a pinned column: what is left of the share of the view the pinned
@@ -555,11 +579,10 @@ where
     /// `width` as `id` may be resized to: no narrower than its minimum and, while it is pinned, no
     /// wider than [`pinned_room`](Self::pinned_room) leaves it.
     pub(crate) fn resized_width(&self, id: &ColumnId, width: f32) -> Option<ColumnWidth> {
-        let column = self.column(id)?;
         let pinned = self.layout.with_untracked(|layout| layout.is_pinned(id));
         let room = if pinned { self.pinned_room(id) } else { None };
 
-        Some(column.clamp(room.map_or(width, |room| width.min(room))))
+        self.with_column(id, |column| column.clamp(room.map_or(width, |room| width.min(room))))
     }
 
     /// Commits `next` as the reader's layout, sliding the columns from where they are drawn.
@@ -701,12 +724,14 @@ where
     /// The selected rows as tab-separated text, in row order, to the application or the
     /// clipboard.
     pub(crate) fn copy(&self) {
-        let columns: Vec<&GridColumn<T>> =
-            self.drawn_ids.with_untracked(|ids| ids.iter().filter_map(|id| self.column(id)).collect());
-        let text = self.selection.with_untracked(|selection| {
-            self.rows.with_untracked(|rows| {
-                let selected = rows.iter().filter(|row| selection.contains(&(self.row_key)(row)));
-                copy::tsv(selected, &columns)
+        let text = self.columns.with_untracked(|all| {
+            let columns: Vec<&GridColumn<T>> =
+                self.drawn_ids.with_untracked(|ids| ids.iter().filter_map(|id| find_column(all, id)).collect());
+            self.selection.with_untracked(|selection| {
+                self.rows.with_untracked(|rows| {
+                    let selected = rows.iter().filter(|row| selection.contains(&(self.row_key)(row)));
+                    copy::tsv(selected, &columns)
+                })
             })
         });
         if text.is_empty() {
@@ -867,6 +892,11 @@ pub(crate) enum Step {
     Previous,
     Next,
     Last,
+}
+
+/// The column of `columns` named `id`.
+fn find_column<'a, T>(columns: &'a [GridColumn<T>], id: &ColumnId) -> Option<&'a GridColumn<T>> {
+    columns.iter().find(|column| column.id() == id)
 }
 
 /// The width `column` is set to: `resized`, what a reader resized it to, or else the width it is

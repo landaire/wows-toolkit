@@ -26,6 +26,7 @@ use landaire_ui::RowMark;
 use landaire_ui::RowMenu;
 use landaire_ui::RowMenuHandle;
 use landaire_ui::RowMode;
+use landaire_ui::Selection;
 use landaire_ui::SortDirection;
 use landaire_ui::Toasts;
 use rust_i18n::t;
@@ -294,9 +295,13 @@ pub fn PlayerTable(
     let services = Services::current();
     let locale = services.locale;
     let expanded = RwSignal::new_local(HashSet::new());
-    // A test reads and sets the open rows of the table it built.
+    let selection = RwSignal::new_local(Selection::new());
+    // A test reads and sets the open rows and reads the selection of the table it built.
     #[cfg(test)]
-    tests::EXPANDED.with(|slot| slot.set(Some(expanded)));
+    {
+        tests::EXPANDED.with(|slot| slot.set(Some(expanded)));
+        tests::SELECTION.with(|slot| slot.set(Some(selection)));
+    }
     // The sort every table shares, kept in the settings the egui app reads. A press before the
     // settings are read sorts this table alone.
     let unsaved_sort = RwSignal::new_local(SortOrder::default());
@@ -410,75 +415,95 @@ pub fn PlayerTable(
         theme,
         expandable: detail.is_some(),
     };
-    let detail = StoredValue::new_local(detail);
 
-    let grid = move || {
+    let layout =
+        RwSignal::new_local(shown.with_untracked(|shown| columns.with_untracked(|columns| columns.layout(shown))));
+    let grid_columns: RwSignal<Vec<GridColumn<TableRow>>, LocalStorage> = RwSignal::new_local(Vec::new());
+    // A filter or language change hands the grid its new columns and the layout over them at once,
+    // so neither is reconciled against the other's old value. The grid stays, and with it the
+    // scroll position, the selection and the keyboard's row.
+    let offering = RenderEffect::new(move |_| {
         locale.track();
-        let shown = shown.get();
-        let layout = RwSignal::new_local(columns.with_untracked(|columns| columns.layout(&shown)));
-
-        let following = {
-            let shown = shown.clone();
-            RenderEffect::new(move |_| {
-                let wanted = columns.with(|columns| columns.layout(&shown));
-                if layout.with_untracked(|layout| *layout != wanted) {
-                    layout.set(wanted);
-                }
-            })
-        };
-        let keeping = {
-            let shown = shown.clone();
-            RenderEffect::new(move |_| {
-                let next = layout.with(|layout| columns.with_untracked(|columns| columns.with_layout(layout, &shown)));
-                let previous = columns.get_untracked();
-                if next == previous {
-                    return;
-                }
-
-                changed.set_value(true);
-                arrangement::remember(&next);
-                if next.arrangement != previous.arrangement {
-                    services.settings.save(COLUMN_ARRANGEMENT_KEY, &next.arrangement.to_stored());
-                }
-                if next.widths != previous.widths {
-                    services.settings.save(COLUMN_WIDTHS_KEY, &next.stored_widths());
-                }
-                columns.set(next);
-            })
-        };
-        on_cleanup_local(move || {
-            drop(following);
-            drop(keeping);
+        shown.with(|shown| {
+            let wanted = columns.with_untracked(|columns| columns.layout(shown));
+            if layout.with_untracked(|layout| *layout != wanted) {
+                layout.set(wanted);
+            }
+            grid_columns.set(shown.iter().map(|col| grid_column(*col, cx)).collect());
         });
+    });
+    let following = RenderEffect::new(move |_| {
+        let wanted = columns.with(|columns| shown.with_untracked(|shown| columns.layout(shown)));
+        if layout.with_untracked(|layout| *layout != wanted) {
+            layout.set(wanted);
+        }
+    });
+    let keeping = RenderEffect::new(move |_| {
+        let next = layout.with(|layout| {
+            shown.with_untracked(|shown| columns.with_untracked(|columns| columns.with_layout(layout, shown)))
+        });
+        let previous = columns.get_untracked();
+        if next == previous {
+            return;
+        }
 
-        let grid_columns: Vec<GridColumn<TableRow>> = shown.iter().map(|col| grid_column(*col, cx)).collect();
-        let mode = match detail.get_value() {
-            Some(detail) => RowMode::with_column_detail(move |row: &TableRow, id: &ColumnId| {
-                let column = ReplayColumn::from_storage_key(id.as_str())?;
-                detail(PlayerDetailCx {
-                    id: row.id,
-                    row: Arc::clone(&row.row),
-                    rows: model_rows.with_untracked(|rows| Arc::clone(&rows.all)),
-                    column,
-                    art,
-                })
-            }),
-            None => RowMode::natural(),
-        };
-        let mode = mode.grouped(RowGroups::new(
-            |row: &TableRow| row.team.map(|team| team.side),
-            |row: &TableRow| row.team.map(cells::team_heading),
-        ));
-        let strings = GridStrings {
+        changed.set_value(true);
+        arrangement::remember(&next);
+        if next.arrangement != previous.arrangement {
+            services.settings.save(COLUMN_ARRANGEMENT_KEY, &next.arrangement.to_stored());
+        }
+        if next.widths != previous.widths {
+            services.settings.save(COLUMN_WIDTHS_KEY, &next.stored_widths());
+        }
+        columns.set(next);
+    });
+    on_cleanup_local(move || {
+        drop(offering);
+        drop(following);
+        drop(keeping);
+    });
+
+    let mode = match detail {
+        Some(detail) => RowMode::with_column_detail(move |row: &TableRow, id: &ColumnId| {
+            let column = ReplayColumn::from_storage_key(id.as_str())?;
+            detail(PlayerDetailCx {
+                id: row.id,
+                row: Arc::clone(&row.row),
+                rows: model_rows.with_untracked(|rows| Arc::clone(&rows.all)),
+                column,
+                art,
+            })
+        }),
+        None => RowMode::natural(),
+    };
+    let mode = mode.grouped(RowGroups::new(
+        |row: &TableRow| row.team.map(|team| team.side),
+        |row: &TableRow| row.team.map(cells::team_heading),
+    ));
+    let strings = Signal::derive_local(move || {
+        locale.track();
+        GridStrings {
             pin: t!("ui.replay.context.pin_column").into_owned(),
             unpin: t!("ui.replay.context.unpin_column").into_owned(),
             ..GridStrings::new()
-        };
-        let row_menu: RowMenu<RowId> = Rc::new(move |row: RowId| menu::row_menu(row, cx));
-        let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));
-        let label = t!("ui.tabs.replay_parser").into_owned();
+        }
+    });
+    let label = Signal::derive_local(move || {
+        locale.track();
+        t!("ui.tabs.replay_parser").into_owned()
+    });
+    let row_menu: RowMenu<RowId> = Rc::new(move |row: RowId| menu::row_menu(row, cx));
+    let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));
 
-        view! {
+    let noted = cx.noted;
+    let on_press = move |ev: &mut EventCx<'_, events::PointerDown>| {
+        if ev.button == Some(PointerButton::Secondary) {
+            noted.press();
+        }
+    };
+
+    view! {
+        box(class = "wt-pt", on:pointer_down = on_press) {
             Grid(
                 rows = Signal::derive_local(move || rows.get()),
                 columns = grid_columns,
@@ -488,6 +513,7 @@ pub fn PlayerTable(
                 sort = grid_sort,
                 on_sort = on_sort,
                 selection_mode = GridSelectionMode::Multiple,
+                selection = selection,
                 expanded = expanded,
                 row_menu = row_menu,
                 row_mark = row_mark,
@@ -498,16 +524,7 @@ pub fn PlayerTable(
                 attr:data-testid = "player-table"
             )
         }
-    };
-
-    let noted = cx.noted;
-    let on_press = move |ev: &mut EventCx<'_, events::PointerDown>| {
-        if ev.button == Some(PointerButton::Secondary) {
-            noted.press();
-        }
-    };
-
-    view! { box(class = "wt-pt", on:pointer_down = on_press) {{grid}} }
+    }
 }
 
 /// The table's rows for `order`, each with its share of its team's totals.

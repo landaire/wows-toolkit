@@ -307,6 +307,71 @@ fn a_row_whose_key_builds_no_menu_opens_none_and_keeps_the_selection() {
     assert!(window.by_role_and_label(Role::MenuItem, "Open 1").is_some(), "a row beside it still has its menu");
 }
 
+/// What a test that replaces a grid's columns holds of it.
+#[derive(Clone, Copy)]
+struct Replaced {
+    columns: RwSignal<Vec<GridColumn<Item>>, LocalStorage>,
+    selection: RwSignal<Selection<u32>, LocalStorage>,
+    port: NodeRef,
+}
+
+#[test]
+fn new_columns_keep_the_scroll_the_selection_and_the_keyboards_row() {
+    let held: Rc<Cell<Option<Replaced>>> = Rc::new(Cell::new(None));
+    let given = Rc::clone(&held);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let replaced = Replaced {
+            columns: RwSignal::new_local(columns()),
+            selection: RwSignal::new_local(Selection::new()),
+            port: NodeRef::new(),
+        };
+        let Replaced { columns: shown, selection, port } = replaced;
+        given.set(Some(replaced));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(30)),
+                        columns = shown,
+                        row_key = |item: &Item| item.id,
+                        selection_mode = GridSelectionMode::Multiple,
+                        selection = selection,
+                        node_ref = port,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let Replaced { columns: shown, selection, port } = held.take().expect("the view was built");
+
+    window.click(cell(&window, "name-3")).expect("the cell has a box");
+    port.scroll_to(ScrollTarget::Offset(Point::new(DevicePx(0.0), DevicePx(60.0))), ScrollBehavior::Instant);
+    window.advance(Duration::from_millis(50));
+    let scrolled = top(&window, cell(&window, "name-8"));
+
+    let mut fewer = columns();
+    fewer.retain(|column| column.id().as_str() != "third");
+    fewer[0] = GridColumn::new("name", "Title", |item: &Item| {
+        view! { text(attr:data-testid = format!("name-{}", item.id)) {{item.name.clone()}} }
+    })
+    .sizing(ColumnSizing::Fixed(ColumnWidth(100.0)));
+    shown.set(fewer);
+    window.advance(Duration::from_millis(50));
+
+    assert!(window.by_role_and_label(Role::ColumnHeader, "Title").is_some(), "the new header is drawn");
+    assert!(window.by_role_and_label(Role::ColumnHeader, "third").is_none(), "the dropped column is gone");
+    assert_eq!(top(&window, cell(&window, "name-8")), scrolled, "the rows stay scrolled");
+    let selected: Vec<u32> = selection.get_untracked().keys().copied().collect();
+    assert_eq!(selected, [3], "the selection stays");
+
+    window.press_key(NamedKey::ArrowDown, Modifiers::NONE);
+    window.advance(Duration::from_millis(50));
+    let selected: Vec<u32> = selection.get_untracked().keys().copied().collect();
+    assert_eq!(selected, [4], "the keyboard moves on from the row it was on");
+}
+
 #[test]
 fn a_row_menu_handle_opens_a_row_menu_from_code_and_tells_it_is_open() {
     type Given = Option<(RowMenuHandle<u32>, NodeRef)>;

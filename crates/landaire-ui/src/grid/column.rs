@@ -217,8 +217,8 @@ impl<T> GridColumn<T> {
         }
     }
 
-    pub(crate) fn cell_view(&self, row: &T) -> AnyView {
-        (self.cell)(row)
+    pub(crate) fn cell_builder(&self) -> CellView<T> {
+        Rc::clone(&self.cell)
     }
 
     pub(crate) fn cell_text(&self, row: &T) -> Option<String> {

@@ -17,6 +17,7 @@ use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::Track;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::runtime::clipboard::try_use_clipboard;
@@ -54,6 +55,7 @@ use crate::grid::selection::Selection;
 use crate::grid::sort::ColumnSort;
 use crate::grid::state;
 use crate::grid::state::Carry;
+use crate::grid::state::ColumnGeneration;
 use crate::grid::state::GridCx;
 use crate::grid::state::GridStrings;
 use crate::grid::state::MenuTarget;
@@ -72,7 +74,8 @@ use crate::motion::motion_preference;
 /// the rows that come back are shown in the order given.
 ///
 /// A row's cells are built once for its key and again when its value changes, which is why `T`
-/// is compared.
+/// is compared. A new set of columns builds every header and cell again, and keeps the rows'
+/// selection, keyboard place, open details and scroll position.
 ///
 /// # Keyboard
 ///
@@ -90,7 +93,10 @@ pub fn Grid<T, K, F>(
     /// Every row, in the order they are shown.
     #[prop(into)]
     rows: Signal<Vec<T>, LocalStorage>,
-    columns: Vec<GridColumn<T>>,
+    /// Read whenever a part of the grid needs a column, so a signal given here should hold the
+    /// columns rather than build them on each read.
+    #[prop(into)]
+    columns: Signal<Vec<GridColumn<T>>, LocalStorage>,
     /// What identifies a row across changes to the rows.
     row_key: F,
     #[prop(default = RowMode::natural())] mode: RowMode<T>,
@@ -135,10 +141,10 @@ pub fn Grid<T, K, F>(
     /// Told the text a copy produces. Without it the text goes to the clipboard.
     #[prop(optional)]
     on_copy: Option<UnsyncCallback<String>>,
-    #[prop(optional)] strings: Option<GridStrings>,
+    #[prop(into, default = Signal::stored_local(GridStrings::new()))] strings: Signal<GridStrings, LocalStorage>,
     /// Names the grid for a screen reader.
     #[prop(into)]
-    label: String,
+    label: Signal<String, LocalStorage>,
     /// Where to record the scrolling element.
     #[prop(optional)]
     node_ref: Option<NodeRef>,
@@ -152,21 +158,24 @@ where
 {
     install_stylesheet(style::SHEET, style::CSS);
 
-    let known = state::known_ids(&columns);
-    let layout = layout.unwrap_or_else(|| RwSignal::new_local(ColumnLayout::new(known.iter().cloned())));
-    let reconciled = layout.with_untracked(|layout| layout.reconciled(&known));
+    let known = Memo::new(move |_| columns.with(|columns| state::known_ids(columns)));
+    let layout =
+        layout.unwrap_or_else(|| RwSignal::new_local(ColumnLayout::new(known.get_untracked().iter().cloned())));
+    let reconciled = known.with_untracked(|known| layout.with_untracked(|layout| layout.reconciled(known)));
     if layout.with_untracked(|layout| *layout != reconciled) {
         layout.set(reconciled);
     }
 
     let preview: RwSignal<Option<ColumnLayout>, LocalStorage> = RwSignal::new_local(None);
-    let drawn = {
-        let known = std::sync::Arc::clone(&known);
-        Memo::new(move |_| match preview.get() {
-            Some(preview) => preview,
-            None => layout.with(|layout| layout.reconciled(&known)),
-        })
-    };
+    let drawn = Memo::new(move |_| match preview.get() {
+        Some(preview) => preview,
+        None => known.with(|known| layout.with(|layout| layout.reconciled(known))),
+    });
+    // Counts the changes to the columns, each of which notifies once.
+    let generation = Memo::new(move |previous: Option<&ColumnGeneration>| {
+        columns.track();
+        previous.map_or(ColumnGeneration::FIRST, |previous| previous.next())
+    });
     let drawn_ids = Memo::new(move |_| drawn.with(|drawn| drawn.ids().cloned().collect::<Vec<_>>()));
     let widths = RwSignal::new_local(HashMap::new());
     let pins = Memo::new(move |_| {
@@ -220,7 +229,8 @@ where
         Memo::new(move |_| carry.with(|carry: &Option<Carry>| carry.as_ref().and_then(Carry::moving).cloned()));
 
     let cx = Rc::new(GridCx {
-        columns: columns.into(),
+        columns,
+        generation,
         row_key: Rc::clone(&row_key),
         rows,
         order,
@@ -267,7 +277,7 @@ where
         menu_place: Cell::new(None),
         on_copy,
         clipboard: try_use_clipboard(),
-        strings: strings.unwrap_or_default(),
+        strings,
         port,
         scroll: port.observe_scroll(),
         row_cells: RefCell::new(HashMap::new()),
@@ -293,16 +303,13 @@ where
             fitted.set(HashMap::new());
         })
     };
-    // A layout the application sets later may name another set of columns.
-    let reconciling = {
-        let known = std::sync::Arc::clone(&known);
-        RenderEffect::new(move |_| {
-            let reconciled = layout.with(|layout| layout.reconciled(&known));
-            if layout.with_untracked(|layout| *layout != reconciled) {
-                layout.set(reconciled);
-            }
-        })
-    };
+    // A layout the application sets later, or a new set of columns, may name other columns.
+    let reconciling = RenderEffect::new(move |_| {
+        let reconciled = known.with(|known| layout.with(|layout| layout.reconciled(known)));
+        if layout.with_untracked(|layout| *layout != reconciled) {
+            layout.set(reconciled);
+        }
+    });
     let rooming = {
         let cx = Rc::clone(&cx);
         RenderEffect::new(move |_| {
@@ -383,7 +390,8 @@ where
         move || Some(cx.tracks())
     };
     let row_height = fixed.map(|height| format!("{}px", height.0));
-    let column_count = cx.columns.len();
+    let columns = cx.columns;
+    let column_count = move || columns.with(Vec::len);
     let order = cx.order;
     let on_menu_press = {
         let cx = Rc::clone(&cx);
@@ -401,8 +409,9 @@ where
             }
         }
     };
-    let semantics =
-        A11yBinding::new(Role::Grid).label(label).table_size(move || order.with(|order| order.len()) + 1, column_count);
+    let semantics = A11yBinding::new(Role::Grid)
+        .label(move || label.get())
+        .table_size(move || order.with(|order| order.len()) + 1, column_count);
     let own = Attrs::new().a11y_from(semantics);
 
     let on_key_down = {
