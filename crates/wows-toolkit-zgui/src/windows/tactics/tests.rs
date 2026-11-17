@@ -339,12 +339,11 @@ fn a_peers_pointer_is_drawn_where_it_points() {
     let state = Arc::default();
     let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
     board.model.update(|board| board.set_collab(link));
+    let shown = board.model.with_untracked(|board| board.board_id().cursor_scope());
     let cursor = |at: [f32; 2]| UserCursor {
-        user_id: 9,
-        name: "Peer".to_owned(),
-        color: [0, 200, 255],
         pos: Some(at),
-        last_update: std::time::Instant::now(),
+        scope: Some(shown),
+        ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255])
     };
     let offset = |board: &BoardWindow| {
         let map = board.window.by_test_id("tactics-map").and_then(|map| board.window.bounds(map)).expect("a map");
@@ -441,12 +440,11 @@ fn the_shape_row_and_a_peers_pointer_render() {
         let state = Arc::default();
         let (link, _sent) = CollabLink::for_test(Arc::clone(&state));
         board.model.update(|board| board.set_collab(link));
+        let shown = board.model.with_untracked(|board| board.board_id().cursor_scope());
         state.lock().cursors.push(UserCursor {
-            user_id: 9,
-            name: "Peer".to_owned(),
-            color: [0, 200, 255],
             pos: Some([500.0, 200.0]),
-            last_update: std::time::Instant::now(),
+            scope: Some(shown),
+            ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255])
         });
         let edge = ElementPos { x: 400.0, y: 300.0 };
         draw_and_pick(&mut board, Tool::Circle { filled: false }, ElementPos { x: 300.0, y: 300.0 }, edge, edge);

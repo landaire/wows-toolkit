@@ -63,6 +63,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Add the folder picked for an install, a game or a Proton build after the launcher popover or drawer that asked has closed
 - *(zgui)* Stop a popped-out replay renderer, the tactics board and other secondary windows from reading the main window's closed state while the app exits
 - *(zgui)* Undo, redo and open the options rail with Ctrl+Z, Ctrl+Shift+Z and Ctrl+S from anywhere in the armor viewer, as in egui, and leave Ctrl+Z to a focused text field
+- *(collab)* Show a peer's pointer only on the replay or tactics board it is over, in the desktop apps and the web client
 - Keep the replay index matching when the install folder is picked through another path to the same directory, such as a symlinked mount point
 - *(launcher)* End the Wine processes left in the toolkit's prefix when a game signed in through the toolkit exits or is stopped, so the session does not stay running after the game
 - *(zgui)* Read the Player Tracker tables again when a battle is recorded while the tab is open, and run a search again when a battle that lands in a watched folder is indexed. A battle recorded during an indexing pass is read once the pass ends

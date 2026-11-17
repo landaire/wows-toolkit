@@ -14,6 +14,7 @@ use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SharedReplay;
 use wows_toolkit_services::collab::Silhouette;
 use wt_collab_client::peer::FrameBroadcast;
+use wt_collab_client::protocol::CursorAt;
 
 use crate::load::GameDataCache;
 use crate::replay_render::motion::FrameMotion;
@@ -41,11 +42,11 @@ pub struct PingRing {
     pub opacity: f32,
 }
 
-/// Which map point was last told to the session as this end's pointer, so an
-/// unmoved pointer is not sent again.
+/// Where this end's pointer was last told to the session, so an unmoved pointer
+/// is not sent again.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CursorReport {
-    reported: Option<[f32; 2]>,
+    reported: Option<CursorAt>,
 }
 
 impl CursorReport {
@@ -53,18 +54,22 @@ impl CursorReport {
         Self { reported: None }
     }
 
-    /// Tells the session where this end's pointer is on the map, `None` once
-    /// it has left the map.
+    /// Tells the session where this end's pointer is, `None` once it has left
+    /// the map.
     ///
     /// Sent only while a session is running, and only when it has moved to a
-    /// different map point: a pointer crossing a zoomed-in map would otherwise
-    /// send a message per pixel.
-    pub fn report(&mut self, link: &CollabLink, at: Option<[f32; 2]>) {
+    /// different map point or window: a pointer crossing a zoomed-in map would
+    /// otherwise send a message per pixel.
+    pub fn report(&mut self, link: &CollabLink, at: Option<CursorAt>) {
         if !link.is_active() {
             return;
         }
         let moved = match (self.reported, at) {
-            (Some(was), Some(now)) => (was[0] - now[0]).abs() >= 1.0 || (was[1] - now[1]).abs() >= 1.0,
+            (Some(was), Some(now)) => {
+                was.scope != now.scope
+                    || (was.pos[0] - now.pos[0]).abs() >= 1.0
+                    || (was.pos[1] - now.pos[1]).abs() >= 1.0
+            }
             (None, None) => false,
             _ => true,
         };

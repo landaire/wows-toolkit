@@ -99,6 +99,8 @@ use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::SyncVersion;
 use wt_collab_client::drawing::Tool;
 use wt_collab_client::protocol::CollabRenderOptions;
+use wt_collab_client::protocol::CursorAt;
+use wt_collab_client::protocol::CursorScope;
 use zgui::prelude::WindowHandle;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -1430,8 +1432,14 @@ impl RendererSession {
             return;
         }
         let origin = self.map_origin.get_untracked();
-        let at = self.map.with_untracked(|map| map.map_point(position, origin)).map(|(x, y)| [x, y]);
+        let pos = self.map.with_untracked(|map| map.map_point(position, origin)).map(|(x, y)| [x, y]);
+        let at = self.cursor_scope().zip(pos).map(|(scope, pos)| CursorAt { scope, pos });
         self.run.update_value(|run| run.cursor.report(&link, at));
+    }
+
+    /// This playback as the window a pointer is over, by the id the session is told it under.
+    pub fn cursor_scope(self) -> Option<CursorScope> {
+        self.run.try_with_value(|run| run.replay_id.cursor_scope())
     }
 
     /// Reads the roster icon under the pointer.

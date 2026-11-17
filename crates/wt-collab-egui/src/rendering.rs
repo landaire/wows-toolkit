@@ -27,6 +27,7 @@ use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::MapInfo;
 use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::map_data::WorldPos;
+use wt_collab_protocol::protocol::CursorScope;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -320,11 +321,22 @@ pub fn draw_pings(pings: &[MapPing], painter: &egui::Painter, transform: &MapTra
 
 // ─── Remote Cursors ─────────────────────────────────────────────────────────
 
-/// Draw remote peer cursors with name labels. Cursors fade after 3s and disappear after 5s.
-pub fn draw_remote_cursors(cursors: &[UserCursor], my_user_id: u64, painter: &egui::Painter, transform: &MapTransform) {
+/// Draw remote peer cursors over `shown` with name labels. Cursors fade after 3s and disappear
+/// after 5s.
+///
+/// `open_windows` is how many replays and tactics boards the session has open, which places a
+/// pointer that names no window; see [`UserCursor::is_over`].
+pub fn draw_remote_cursors(
+    cursors: &[UserCursor],
+    my_user_id: u64,
+    shown: CursorScope,
+    open_windows: usize,
+    painter: &egui::Painter,
+    transform: &MapTransform,
+) {
     let now = web_time::Instant::now();
     for cursor in cursors {
-        if cursor.user_id == my_user_id {
+        if cursor.user_id == my_user_id || !cursor.is_over(shown, open_windows) {
             continue;
         }
         let Some(pos) = cursor.pos else { continue };

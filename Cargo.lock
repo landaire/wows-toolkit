@@ -14344,6 +14344,7 @@ dependencies = [
  "data-encoding",
  "egui",
  "flate2",
+ "insta",
  "iroh",
  "rand 0.10.3",
  "rkyv",

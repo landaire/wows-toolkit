@@ -13,7 +13,7 @@ participant maintains a direct connection to every other participant.
 
 | Layer | Detail |
 |-------|--------|
-| ALPN | `b"/wows-toolkit-collab/1"` |
+| ALPN | `b"/wows-toolkit-collab/3"`, with `b"/wows-toolkit-collab/2"` still accepted and offered |
 | Serialization | rkyv, zlib-compressed, length-prefixed (`[u32 compressed_length][zlib(rkyv payload)]`) |
 | Limits | 16 MB max message, 4 MB compressed frame, 32 MB decompressed |
 
@@ -139,7 +139,8 @@ via `PromoteToCoHost`. Only the original host user ID (immutable after
 
 | Message | Gated by |
 |---------|----------|
-| `CursorPosition { user_id, pos }` | — |
+| `ScopedCursorPosition { user_id, at }` | - |
+| `CursorPosition { user_id, pos }` | - |
 | `SetAnnotation { board_id, id, annotation, owner }` | `annotations_locked` (unless authority) |
 | `RemoveAnnotation { board_id, id }` | `annotations_locked` (unless authority) |
 | `ClearAnnotations { board_id }` | `annotations_locked` (unless authority) |
@@ -148,6 +149,11 @@ via `PromoteToCoHost`. Only the original host user ID (immutable after
 | `ShipTrailOverrides { hidden }` | `settings_locked` (unless authority) |
 | `Ping { user_id, pos, color }` | — |
 | `Heartbeat` | — |
+
+A cursor names the replay or tactics board it is over, and a view draws only the
+cursors over what it shows. A peer on the `/2` ALPN sends and is sent
+`CursorPosition`, which names no window. Such a cursor is drawn only while the
+session has exactly one replay or board open.
 
 ### Authority messages (host/co-host → all)
 

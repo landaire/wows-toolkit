@@ -20,6 +20,7 @@ web-time = { workspace = true }
 egui = { version = "0.37", optional = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 rand = "0.10"
 
 [features]

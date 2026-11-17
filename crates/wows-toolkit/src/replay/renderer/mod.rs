@@ -46,6 +46,8 @@ use egui_taffy::taffy::prelude::length;
 
 use crate::collab::SessionStatus;
 use crate::collab::peer::FrameBroadcast;
+use crate::collab::protocol::CursorAt;
+use crate::collab::protocol::CursorScope;
 use crate::data::settings::SavedRenderOptions;
 use crate::data::wows_data::SharedBuildData;
 use crate::icons;
@@ -1990,10 +1992,22 @@ impl ReplayRendererViewer {
                     }
 
                     // ─── Render remote cursors (collab session) ──────────
-                    let collab_ss = shared_state.lock().collab_session_state.clone();
-                    if let Some(ref ss_arc) = collab_ss {
+                    let (collab_ss, shown) = {
+                        let state = shared_state.lock();
+                        (state.collab_session_state.clone(), state.collab_replay_id.map(CursorScope::Replay))
+                    };
+                    if let Some(ss_arc) = &collab_ss {
                         let s = ss_arc.lock();
-                        draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
+                        if let Some(shown) = shown {
+                            draw_remote_cursors(
+                                &s.cursors,
+                                s.my_user_id,
+                                shown,
+                                s.open_window_count(),
+                                &map_painter,
+                                &transform,
+                            );
+                        }
 
                         // ─── Render map pings (ripple effects) ──────────────
                         let ping_views: Vec<MapPing> =
@@ -2018,12 +2032,13 @@ impl ReplayRendererViewer {
 
                     // ─── Send local cursor to collab session ────────────────
                     {
-                        let cursor_pos = response.hover_pos().map(|p| {
+                        // A replay the session does not list is no window a peer could see the pointer over.
+                        let cursor_at = shown.zip(response.hover_pos()).map(|(scope, p)| {
                             let mp = transform.screen_to_minimap(p);
-                            [mp.x, mp.y]
+                            CursorAt { scope, pos: [mp.x, mp.y] }
                         });
-                        if let Some(ref tx) = shared_state.lock().collab_local_tx {
-                            let _ = tx.send(crate::collab::peer::LocalEvent::CursorPosition(cursor_pos));
+                        if let Some(tx) = &shared_state.lock().collab_local_tx {
+                            let _ = tx.send(crate::collab::peer::LocalEvent::CursorPosition(cursor_at));
                         }
                     }
                 }

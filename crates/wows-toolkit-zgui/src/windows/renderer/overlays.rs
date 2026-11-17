@@ -12,6 +12,7 @@ use wows_toolkit_replay_data::replay_render::collab::cursor_opacity;
 use wows_toolkit_replay_data::replay_render::collab::ping_ring;
 use wows_toolkit_replay_data::replay_render::view::MapView;
 use wows_toolkit_services::collab::CollabLink;
+use wt_collab_client::protocol::CursorScope;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -86,7 +87,13 @@ pub fn AnnotationOverlay(session: RendererSession) -> impl IntoView {
         box(class = "wt-renderer-annotations") {
             RotationHandle(session = session)
             ShapeEditPopup(session = session)
-            PeerMarks(map = session.map, origin = session.map_origin, link = session.collab, tick = session.collab_frame)
+            PeerMarks(
+                map = session.map,
+                origin = session.map_origin,
+                link = session.collab,
+                shown = Signal::derive_local(move || session.cursor_scope()),
+                tick = session.collab_frame
+            )
             Show(when = move || session.ctrl_held.get()) {
                 ShortcutSheet()
             }
@@ -100,13 +107,14 @@ pub(super) fn PeerOverlay(
     #[prop(into)] map: Signal<MapView, LocalStorage>,
     #[prop(into)] origin: Signal<(f32, f32), LocalStorage>,
     #[prop(into)] link: Signal<CollabLink, LocalStorage>,
+    #[prop(into)] shown: Signal<Option<CursorScope>, LocalStorage>,
     #[prop(into)] tick: Signal<u64, LocalStorage>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
 
     view! {
         box(class = "wt-renderer-annotations") {
-            PeerMarks(map = map, origin = origin, link = link, tick = tick)
+            PeerMarks(map = map, origin = origin, link = link, shown = shown, tick = tick)
         }
     }
 }
@@ -150,19 +158,25 @@ fn RotationHandle(session: RendererSession) -> impl IntoView {
     }
 }
 
-/// Where the peers' pointers are and the pings dropped, this end's own included, on `map`, read
-/// again each time `tick` moves. `origin` is where the map's corner sits in the frame.
+/// Where the peers' pointers over `shown` are and the pings dropped, this end's own included, on
+/// `map`, read again each time `tick` moves. `origin` is where the map's corner sits in the frame.
+/// `shown` is `None` for a view the session does not list, which no peer can point at.
 #[component]
 fn PeerMarks(
     #[prop(into)] map: Signal<MapView, LocalStorage>,
     #[prop(into)] origin: Signal<(f32, f32), LocalStorage>,
     #[prop(into)] link: Signal<CollabLink, LocalStorage>,
+    #[prop(into)] shown: Signal<Option<CursorScope>, LocalStorage>,
     #[prop(into)] tick: Signal<u64, LocalStorage>,
 ) -> impl IntoView {
     let marks = move || {
         let _ = tick.get();
         let origin = origin.get();
-        let (cursors, pings) = link.with(|link| (link.peer_cursors(), link.pings()));
+        let shown = shown.get();
+        let (cursors, pings) = link.with(|link| {
+            let cursors = shown.map(|shown| link.peer_cursors(shown)).unwrap_or_default();
+            (cursors, link.pings())
+        });
 
         map.with(|map| {
             let mut marks: Vec<AnyView> = Vec::new();

@@ -193,6 +193,12 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
             }
         }
 
+        PeerMessage::ScopedCursorPosition { at, .. } => {
+            if let Some(at) = at {
+                check_position(&at.pos, "ScopedCursorPosition")?;
+            }
+        }
+
         PeerMessage::SetAnnotation { annotation, .. } => {
             validate_annotation(annotation)?;
         }

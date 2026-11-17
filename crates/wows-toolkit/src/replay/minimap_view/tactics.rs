@@ -24,6 +24,8 @@ use wowsunpack::game_types::WorldPos;
 use crate::collab;
 use crate::collab::peer::LocalCapPointEvent;
 use crate::collab::peer::LocalEvent;
+use crate::collab::protocol::CursorAt;
+use crate::collab::protocol::CursorScope;
 use crate::collab::protocol::WireCapPoint;
 use crate::data::cap_layout::CapLayout;
 use crate::data::cap_layout::CapLayoutDb;
@@ -1226,18 +1228,19 @@ impl TacticsBoardViewer {
         }
 
         // ── Collab: send cursor position ──
+        let shown = CursorScope::Board(board_id);
         if let Some(tx) = collab_local_tx {
-            let cursor_pos = response.hover_pos().map(|p| {
+            let cursor_at = response.hover_pos().map(|p| {
                 let mp = transform.screen_to_minimap(p);
-                [mp.x, mp.y]
+                CursorAt { scope: shown, pos: [mp.x, mp.y] }
             });
-            let _ = tx.send(LocalEvent::CursorPosition(cursor_pos));
+            let _ = tx.send(LocalEvent::CursorPosition(cursor_at));
         }
 
         // ── Collab: render remote cursors + pings ──
         if let Some(session_state) = collab_session_state {
             let s = session_state.lock();
-            draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
+            draw_remote_cursors(&s.cursors, s.my_user_id, shown, s.open_window_count(), &map_painter, &transform);
             // Collab pings
             let collab_pings: Vec<MapPing> =
                 s.pings.iter().map(|p| MapPing { pos: p.pos, color: p.color, time: p.time }).collect();

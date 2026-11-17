@@ -26,6 +26,7 @@ use wt_collab_client::AnnotationSyncState;
 use wt_collab_client::UserCursor;
 use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
+use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::types::Annotation;
 use zgui::component;
 use zgui::geom::Device;
@@ -548,9 +549,9 @@ fn the_primary_modifier_shows_the_shortcut_sheet() {
     assert!(window.by_test_id("replay-renderer-shortcuts").is_none(), "down once the key is let go");
 }
 
-/// A peer's cursor is drawn where they point on the map, follows them as the session redraws, and
-/// is taken down once it has stood still too long; a fresh ping is drawn and one whose ripple has
-/// run out is not.
+/// A peer's cursor is drawn where they point on this playback, follows them as the session
+/// redraws, is not drawn while over another window, and is taken down once it has stood still too
+/// long; a fresh ping is drawn and one whose ripple has run out is not.
 #[test]
 fn a_peer_cursor_appears_where_it_points() {
     let (mut window, session) = open();
@@ -562,11 +563,9 @@ fn a_peer_cursor_appears_where_it_points() {
     assert!(window.by_test_id("replay-renderer-peer-ping-7").is_some(), "a fresh ping is drawn");
 
     let cursor = |at: [f32; 2]| UserCursor {
-        user_id: 9,
-        name: "Peer".to_owned(),
-        color: [0, 200, 255],
         pos: Some(at),
-        last_update: std::time::Instant::now(),
+        scope: session.cursor_scope(),
+        ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255])
     };
     state.lock().cursors.push(cursor([300.0, 400.0]));
     settle(&mut window);
@@ -580,6 +579,11 @@ fn a_peer_cursor_appears_where_it_points() {
     let (left, top) = corner(&window, "replay-renderer-peer-cursor-9");
     assert!((left - expected.x.0).abs() < 1.5 && (top - expected.y.0).abs() < 1.5, "follows to {expected:?}");
 
+    state.lock().cursors[0].scope = Some(CursorScope::Board(1));
+    settle(&mut window);
+    assert!(window.by_test_id("replay-renderer-peer-cursor-9").is_none(), "a pointer over a board is not drawn here");
+
+    state.lock().cursors[0] = cursor([500.0, 100.0]);
     state.lock().cursors[0].last_update = std::time::Instant::now() - Duration::from_secs(6);
     settle(&mut window);
     assert!(window.by_test_id("replay-renderer-peer-cursor-9").is_none(), "a pointer still for six seconds is gone");

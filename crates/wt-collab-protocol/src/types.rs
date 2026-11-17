@@ -5,6 +5,8 @@
 
 use wowsunpack::game_types::GameParamId;
 
+use crate::protocol::CursorScope;
+
 /// A single annotation placed on the minimap.
 ///
 /// Coordinates are in minimap pixel space (0..760 native, but annotations
@@ -170,7 +172,32 @@ pub struct UserCursor {
     pub name: String,
     pub color: [u8; 3],
     pub pos: Option<[f32; 2]>,
+    /// The window `pos` is over. `None` from a peer that does not say, see
+    /// [`crate::protocol::COLLAB_ALPN_UNSCOPED`].
+    pub scope: Option<CursorScope>,
     pub last_update: web_time::Instant,
+}
+
+impl UserCursor {
+    /// A pointer the session has not yet seen over any map.
+    pub fn new(user_id: u64, name: String, color: [u8; 3]) -> Self {
+        Self { user_id, name, color, pos: None, scope: None, last_update: web_time::Instant::now() }
+    }
+
+    /// Whether this pointer is drawn on the view of `shown`, while
+    /// `open_windows` replays and tactics boards are open in the session.
+    ///
+    /// A pointer with no scope can only be placed when a single window is open.
+    pub fn is_over(&self, shown: CursorScope, open_windows: usize) -> bool {
+        if self.pos.is_none() {
+            return false;
+        }
+
+        match self.scope {
+            Some(scope) => scope == shown,
+            None => open_windows == 1,
+        }
+    }
 }
 
 /// What the host has locked. Enforced by each receiver against the sender's
@@ -179,4 +206,38 @@ pub struct UserCursor {
 pub struct Permissions {
     pub annotations_locked: bool,
     pub settings_locked: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cursor(scope: Option<CursorScope>) -> UserCursor {
+        UserCursor { pos: Some([10.0, 20.0]), scope, ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255]) }
+    }
+
+    #[test]
+    fn scoped_cursor_shows_only_on_its_window() {
+        let on_board = cursor(Some(CursorScope::Board(4)));
+
+        assert!(on_board.is_over(CursorScope::Board(4), 3));
+        assert!(!on_board.is_over(CursorScope::Board(5), 3));
+        assert!(!on_board.is_over(CursorScope::Replay(4), 1), "a replay with the board's id is another window");
+    }
+
+    #[test]
+    fn unscoped_cursor_shows_only_with_one_window_open() {
+        let unscoped = cursor(None);
+
+        assert!(unscoped.is_over(CursorScope::Replay(1), 1));
+        assert!(!unscoped.is_over(CursorScope::Replay(1), 2));
+        assert!(!unscoped.is_over(CursorScope::Replay(1), 0));
+    }
+
+    #[test]
+    fn cursor_off_the_map_shows_nowhere() {
+        let off_map = UserCursor { pos: None, ..cursor(Some(CursorScope::Board(4))) };
+
+        assert!(!off_map.is_over(CursorScope::Board(4), 1));
+    }
 }

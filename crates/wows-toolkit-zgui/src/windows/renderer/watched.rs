@@ -60,6 +60,8 @@ use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::collab::SyncVersion;
 use wt_collab_client::geometry::annotation_commands;
 use wt_collab_client::geometry::measurement_commands;
+use wt_collab_client::protocol::CursorAt;
+use wt_collab_client::protocol::CursorScope;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -503,8 +505,11 @@ impl WatchSession {
 
     /// The pointer moved. `held` is whether the primary button is down.
     pub fn pointer_move(self, position: WindowPoint, held: bool) {
-        let at = self.map.with_untracked(|map| map.map_point(position, DEFAULT_MAP_ORIGIN)).map(|(x, y)| [x, y]);
-        self.run.update_value(|run| run.cursor.report(&run.link, at));
+        let pos = self.map.with_untracked(|map| map.map_point(position, DEFAULT_MAP_ORIGIN)).map(|(x, y)| [x, y]);
+        self.run.update_value(|run| {
+            let at = pos.map(|pos| CursorAt { scope: run.replay_id.cursor_scope(), pos });
+            run.cursor.report(&run.link, at);
+        });
         if self.change_map(|map| map.pan_to(position, held)) {
             self.redraw();
         }
@@ -522,6 +527,11 @@ impl WatchSession {
     pub fn pointer_left(self) {
         self.pointer_up();
         self.run.update_value(|run| run.cursor.report(&run.link, None));
+    }
+
+    /// The watched replay as the window a pointer is over.
+    fn cursor_scope(self) -> Option<CursorScope> {
+        self.run.try_with_value(|run| run.replay_id.cursor_scope())
     }
 
     /// Drops a ping where the pointer is, for everyone in the session.
@@ -670,6 +680,7 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
     // The peers' pointers fade and their pings ripple without the session saying so, so a running
     // session is looked at on the renderer's tick as well as on its nudges.
     let link = watch.link();
+    let shown = watch.cursor_scope();
     let ticking = link.is_active().then(|| {
         set_interval(COLLAB_TICK, move || {
             watch.link().drop_stale_pings(Duration::from_secs_f32(PING_SECONDS));
@@ -756,6 +767,7 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                     map = watch.map,
                     origin = Signal::stored_local(DEFAULT_MAP_ORIGIN),
                     link = Signal::stored_local(link),
+                    shown = Signal::stored_local(shown),
                     tick = watch.marks_frame
                 )
             }

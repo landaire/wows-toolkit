@@ -37,6 +37,7 @@ use wt_collab_client::PlaybackFrame;
 use wt_collab_client::UserCursor;
 use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::protocol::CollabRenderOptions;
+use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::protocol::DisplayOptionField;
 use wt_collab_client::types::Annotation;
 use zgui::component;
@@ -297,11 +298,9 @@ fn peers_are_drawn_over_the_watched_battle_and_the_watcher_is_heard() {
     let state = Arc::new(Default::default());
     let (link, sent) = CollabLink::for_test(Arc::clone(&state));
     state.lock().cursors.push(UserCursor {
-        user_id: 9,
-        name: "Peer".to_owned(),
-        color: [0, 200, 255],
         pos: Some([400.0, 400.0]),
-        last_update: std::time::Instant::now(),
+        scope: Some(CursorScope::Replay(REPLAY)),
+        ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255])
     });
     let (mut window, watch) = open(link);
     watch.frame_size.set(Some(FrameSize { width: MINIMAP_SIZE, height: CANVAS_HEIGHT }));
@@ -321,8 +320,11 @@ fn peers_are_drawn_over_the_watched_battle_and_the_watcher_is_heard() {
     take_in(&mut window);
     let said: Vec<LocalEvent> = sent.try_iter().collect();
     assert!(
-        said.iter().any(|event| matches!(event, LocalEvent::CursorPosition(Some(_)))),
-        "the watcher's pointer is told to the session"
+        said.iter().any(|event| matches!(
+            event,
+            LocalEvent::CursorPosition(Some(at)) if at.scope == CursorScope::Replay(REPLAY)
+        )),
+        "the watcher's pointer is told to the session, over the watched replay"
     );
     assert!(said.iter().any(|event| matches!(event, LocalEvent::Ping(_))), "and so is its ping");
 }
@@ -558,11 +560,9 @@ fn the_watched_view_draws_the_hud_peers_and_drawings() {
         let mut held = state.lock();
         held.push_frame(REPLAY, frame([vec![score, timer()], ships].concat()));
         held.cursors.push(UserCursor {
-            user_id: 9,
-            name: "Peer".to_owned(),
-            color: [0, 200, 255],
             pos: Some([420.0, 360.0]),
-            last_update: std::time::Instant::now(),
+            scope: Some(CursorScope::Replay(REPLAY)),
+            ..UserCursor::new(9, "Peer".to_owned(), [0, 200, 255])
         });
         held.current_annotation_sync = Some(AnnotationSyncState {
             annotations: vec![Annotation::Circle {

@@ -33,6 +33,8 @@ use crate::types::Annotation;
 use crate::types::AnnotationState;
 use crate::types::PaintTool;
 
+use wt_collab_protocol::protocol::CursorAt;
+use wt_collab_protocol::protocol::CursorUpdate;
 use wt_collab_protocol::protocol::PeerMessage;
 
 /// Tab type for the dock layout.
@@ -233,13 +235,7 @@ impl WebApp {
                     self.closed_tabs.clear();
 
                     // Add self cursor.
-                    self.session.cursors.push(UserCursor {
-                        user_id: my_user_id,
-                        name: my_name,
-                        color: my_color,
-                        pos: None,
-                        last_update: web_time::Instant::now(),
-                    });
+                    self.session.cursors.push(UserCursor::new(my_user_id, my_name, my_color));
                 }
                 ConnectionEvent::Message(msg) => {
                     self.handle_message(*msg, ctx);
@@ -302,39 +298,16 @@ impl WebApp {
             PeerMessage::UserJoined { user_id, name, color } => {
                 if !self.session.connected_users.iter().any(|u| u.id == user_id) {
                     self.session.connected_users.push(ConnectedUser { id: user_id, name: name.clone(), color });
-                    self.session.cursors.push(UserCursor {
-                        user_id,
-                        name,
-                        color,
-                        pos: None,
-                        last_update: web_time::Instant::now(),
-                    });
+                    self.session.cursors.push(UserCursor::new(user_id, name, color));
                 }
             }
             PeerMessage::UserLeft { user_id } => {
                 self.session.connected_users.retain(|u| u.id != user_id);
                 self.session.cursors.retain(|c| c.user_id != user_id);
             }
-            PeerMessage::CursorPosition { user_id, pos } => {
-                if let Some(c) = self.session.cursors.iter_mut().find(|c| c.user_id == user_id) {
-                    c.pos = pos;
-                    c.last_update = web_time::Instant::now();
-                } else {
-                    // Create a cursor entry for this user.
-                    let (name, color) = self
-                        .session
-                        .connected_users
-                        .iter()
-                        .find(|u| u.id == user_id)
-                        .map(|u| (u.name.clone(), u.color))
-                        .unwrap_or_else(|| (format!("Peer {user_id}"), [200, 200, 200]));
-                    self.session.cursors.push(UserCursor {
-                        user_id,
-                        name,
-                        color,
-                        pos,
-                        last_update: web_time::Instant::now(),
-                    });
+            PeerMessage::CursorPosition { .. } | PeerMessage::ScopedCursorPosition { .. } => {
+                if let Some(update) = msg.cursor_update() {
+                    self.apply_cursor_update(update);
                 }
             }
             PeerMessage::SetAnnotation { board_id, id, annotation, owner } => {
@@ -439,6 +412,30 @@ impl WebApp {
         // Repaint after every message so cursor moves, pings, annotations,
         // user joins/leaves, etc. are rendered immediately.
         ctx.request_repaint();
+    }
+
+    fn apply_cursor_update(&mut self, update: CursorUpdate) {
+        let CursorUpdate { user_id, pos, scope } = update;
+        let known = self.session.cursors.iter().position(|c| c.user_id == user_id);
+        let index = match known {
+            Some(index) => index,
+            None => {
+                // Create a cursor entry for this user.
+                let (name, color) = self
+                    .session
+                    .connected_users
+                    .iter()
+                    .find(|u| u.id == user_id)
+                    .map(|u| (u.name.clone(), u.color))
+                    .unwrap_or_else(|| (format!("Peer {user_id}"), [200, 200, 200]));
+                self.session.cursors.push(UserCursor::new(user_id, name, color));
+                self.session.cursors.len() - 1
+            }
+        };
+        let cursor = &mut self.session.cursors[index];
+        cursor.pos = pos;
+        cursor.scope = scope;
+        cursor.last_update = web_time::Instant::now();
     }
 
     fn apply_set_annotation(&mut self, board_id: Option<u64>, id: u64, annotation: Annotation, owner: u64) {
@@ -778,20 +775,30 @@ impl WebApp {
             ctx.request_repaint();
         }
 
-        // Draw remote cursors
-        rendering::draw_remote_cursors(&self.session.cursors, self.session.my_user_id, &map_painter, &transform);
+        // Draw remote cursors over the window this view shows.
+        let shown = self.session.shown_scope();
+        if let Some(shown) = shown {
+            rendering::draw_remote_cursors(
+                &self.session.cursors,
+                self.session.my_user_id,
+                shown,
+                self.session.open_window_count(),
+                &map_painter,
+                &transform,
+            );
+        }
 
         // Handle cursor position updates
         if response.hovered() {
-            if let Some(pointer) = response.hover_pos() {
+            if let (Some(scope), Some(pointer)) = (shown, response.hover_pos()) {
                 let minimap_pos = transform.screen_to_minimap(pointer);
-                self.send_message(PeerMessage::CursorPosition {
+                self.send_message(PeerMessage::ScopedCursorPosition {
                     user_id: self.session.my_user_id,
-                    pos: Some([minimap_pos.x, minimap_pos.y]),
+                    at: Some(CursorAt { scope, pos: [minimap_pos.x, minimap_pos.y] }),
                 });
             }
         } else {
-            self.send_message(PeerMessage::CursorPosition { user_id: self.session.my_user_id, pos: None });
+            self.send_message(PeerMessage::ScopedCursorPosition { user_id: self.session.my_user_id, at: None });
         }
 
         // Handle tool interaction (tactics boards only)

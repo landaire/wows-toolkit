@@ -22,6 +22,7 @@ workspace_library(
 workspace_test(
     name = "wt_collab_protocol_test",
     test_deps = [
+        "//third-party/rust:insta",
         "//third-party/rust:rand",
     ],
     crate = "wt_collab_protocol",

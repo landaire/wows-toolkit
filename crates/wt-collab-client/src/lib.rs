@@ -376,6 +376,12 @@ impl SessionState {
         self.permissions = Permissions::default();
     }
 
+    /// How many replays and tactics boards the session has open, which places a
+    /// peer's pointer that names no window; see [`UserCursor::is_over`].
+    pub fn open_window_count(&self) -> usize {
+        self.open_replays.len() + self.tactics_boards.len()
+    }
+
     /// Push a playback frame to the renderer for the given window ID
     /// (replay_id) and request a repaint of that specific viewport.
     /// If no sink is registered yet, buffers the frame so it can be

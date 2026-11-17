@@ -40,6 +40,7 @@ use wt_collab_client::drawing::Held;
 use wt_collab_client::drawing::Selection;
 use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
+use wt_collab_client::protocol::CursorAt;
 use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
 use wt_collab_client::types::Annotation;
 use wt_collab_client::types::AnnotationRangeFilter;
@@ -1246,7 +1247,8 @@ impl Board {
         }
         // Said here rather than as the pointer moves, so a session hears at most one position a
         // tick however fast the pointer reports.
-        self.cursor.report(self.joining.as_ref().unwrap_or(&self.collab), self.pointer_at);
+        let at = self.pointer_at.map(|pos| CursorAt { scope: self.board_id.cursor_scope(), pos });
+        self.cursor.report(self.joining.as_ref().unwrap_or(&self.collab), at);
         self.adopt_a_peers_board();
         self.follow_session();
         self.follow_peer_cursors();
@@ -1255,10 +1257,11 @@ impl Board {
     /// Takes where the peers' pointers are now, which moves them on the board.
     fn follow_peer_cursors(&mut self) {
         let session = self.joining.as_ref().unwrap_or(&self.collab);
+        let shown = self.board_id.cursor_scope();
         // Compared in place first: this runs every tick, and most ticks nobody has moved.
         let mut count = 0;
         let mut same = true;
-        session.for_each_peer_cursor(|cursor| {
+        session.for_each_peer_cursor(shown, |cursor| {
             same &= self.peer_cursors.get(count).is_some_and(|seen| seen.is(cursor));
             count += 1;
         });
@@ -1267,7 +1270,7 @@ impl Board {
         }
 
         self.peer_cursors.clear();
-        session.for_each_peer_cursor(|cursor| {
+        session.for_each_peer_cursor(shown, |cursor| {
             let Some(pos) = cursor.pos else { return };
             self.peer_cursors.push(SeenCursor {
                 user_id: UserId::new(cursor.user_id),

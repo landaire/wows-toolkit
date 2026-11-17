@@ -121,7 +121,8 @@ pub enum LocalCapPointEvent {
 
 /// Unified channel for all UI -> peer task messages.
 pub enum LocalEvent {
-    CursorPosition(Option<[f32; 2]>),
+    /// Where this end's pointer is, or `None` once it has left every map.
+    CursorPosition(Option<CursorAt>),
     Annotation(LocalAnnotationEvent),
     DisplayToggle(DisplayOptionField, bool),
     RangeOverrides(RangeOverrideUpdate),
@@ -224,6 +225,8 @@ struct MeshPeer {
     role: PeerRole,
     /// Channel for sending serialized (length-prefixed) messages to this peer's writer task.
     msg_tx: tokio::sync::mpsc::Sender<Arc<Vec<u8>>>,
+    /// What this peer's connection negotiated, which decides how a cursor is framed for it.
+    version: WireVersion,
     /// How many times this peer has requested assets. Capped at 5.
     asset_request_count: u8,
 }
@@ -290,7 +293,7 @@ async fn host_main(
     let secret_key = SecretKey::from_bytes(&rand::random::<[u8; 32]>());
     let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0)
         .secret_key(secret_key)
-        .alpns(vec![COLLAB_ALPN.to_vec()])
+        .alpns(WireVersion::alpns())
         .bind()
         .await
     {
@@ -334,13 +337,7 @@ async fn host_main(
         s.frame_source_id = my_user_id;
         s.token = Some(token);
         s.status = SessionStatus::Active;
-        s.cursors.push(UserCursor {
-            user_id: my_user_id,
-            name: params.display_name.clone(),
-            color: my_color,
-            pos: None,
-            last_update: Instant::now(),
-        });
+        s.cursors.push(UserCursor::new(my_user_id, params.display_name.clone(), my_color));
         s.connected_users.push(ConnectedUser {
             id: my_user_id,
             name: params.display_name.clone(),
@@ -608,15 +605,9 @@ async fn host_main(
                 // Drain local UI events.
                 while let Ok(evt) = local_rx.try_recv() {
                     match evt {
-                        LocalEvent::CursorPosition(pos) => {
-                            {
-                                let mut s = ui_state.lock();
-                                if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
-                                    c.pos = pos;
-                                    c.last_update = Instant::now();
-                                }
-                            }
-                            broadcast_to_mesh(&mesh, &PeerMessage::CursorPosition { user_id: my_user_id, pos });
+                        LocalEvent::CursorPosition(at) => {
+                            let msg = move_own_cursor(&ui_state, my_user_id, at);
+                            broadcast_to_mesh(&mesh, &msg);
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
@@ -793,6 +784,10 @@ async fn host_accept_peer(
     last_frame_bytes: Arc<Mutex<Option<Arc<Vec<u8>>>>>,
     web_asset_bundle: Option<Vec<u8>>,
 ) {
+    let Some(version) = WireVersion::of(&conn) else {
+        warn!("Peer {user_id} negotiated an unknown ALPN");
+        return;
+    };
     let (mut send, mut recv) = match conn.accept_bi().await {
         Ok(s) => s,
         Err(e) => {
@@ -914,6 +909,7 @@ async fn host_accept_peer(
                 color,
                 role: PeerRole::Peer,
                 msg_tx,
+                version,
                 asset_request_count: 0,
             },
         );
@@ -921,13 +917,7 @@ async fn host_accept_peer(
     {
         let mut s = ui_state.lock();
         s.connected_users.push(user.clone());
-        s.cursors.push(UserCursor {
-            user_id,
-            name: client_name.clone(),
-            color,
-            pos: None,
-            last_update: Instant::now(),
-        });
+        s.cursors.push(UserCursor::new(user_id, client_name.clone(), color));
     }
     event_tx.send(SessionEvent::UserJoined(user));
     info!("Peer {user_id} ({client_name}) joined session");
@@ -1231,7 +1221,7 @@ async fn join_main(
     };
 
     // Create endpoint and connect to host.
-    let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0).alpns(vec![COLLAB_ALPN.to_vec()]).bind().await {
+    let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0).alpns(WireVersion::alpns()).bind().await {
         Ok(ep) => ep,
         Err(e) => {
             let msg = format!("Failed to bind iroh endpoint: {e}");
@@ -1252,8 +1242,14 @@ async fn join_main(
         a
     };
 
-    let conn = match tokio::time::timeout(std::time::Duration::from_secs(15), endpoint.connect(addr, COLLAB_ALPN)).await
-    {
+    let connect = async {
+        let connecting = endpoint
+            .connect_with_opts(addr, COLLAB_ALPN, WireVersion::connect_options())
+            .await
+            .map_err(|e| e.to_string())?;
+        connecting.await.map_err(|e| e.to_string())
+    };
+    let conn = match tokio::time::timeout(std::time::Duration::from_secs(15), connect).await {
         Ok(Ok(c)) => c,
         Ok(Err(e)) => {
             let msg = format!("Failed to connect to host: {e}");
@@ -1267,6 +1263,12 @@ async fn join_main(
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
+    };
+    let Some(host_version) = WireVersion::of(&conn) else {
+        let msg = "Host negotiated an unknown protocol".to_string();
+        event_tx.send(SessionEvent::Error(msg.clone()));
+        set_status(&ui_state, SessionStatus::Error(msg));
+        return;
     };
 
     let (mut send, mut recv) = match conn.open_bi().await {
@@ -1383,6 +1385,7 @@ async fn join_main(
                 color: host_color,
                 role: PeerRole::Host,
                 msg_tx: host_msg_tx,
+                version: host_version,
                 asset_request_count: 0,
             },
         );
@@ -1405,13 +1408,7 @@ async fn join_main(
             role: PeerRole::Host,
             client_type: ClientType::Desktop { toolkit_version: toolkit_version.clone() },
         });
-        s.cursors.push(UserCursor {
-            user_id: my_user_id,
-            name: my_name.clone(),
-            color: my_color,
-            pos: None,
-            last_update: Instant::now(),
-        });
+        s.cursors.push(UserCursor::new(my_user_id, my_name.clone(), my_color));
     }
     event_tx.send(SessionEvent::Started);
     info!("Joined collab session as peer {my_user_id}");
@@ -1586,15 +1583,9 @@ async fn join_main(
                 // Drain local UI events.
                 while let Ok(evt) = local_rx.try_recv() {
                     match evt {
-                        LocalEvent::CursorPosition(pos) => {
-                            {
-                                let mut s = ui_state.lock();
-                                if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
-                                    c.pos = pos;
-                                    c.last_update = Instant::now();
-                                }
-                            }
-                            let _ = write_peer_message(&mut send, &PeerMessage::CursorPosition { user_id: my_user_id, pos }).await;
+                        LocalEvent::CursorPosition(at) => {
+                            let msg = move_own_cursor(&ui_state, my_user_id, at);
+                            let _ = write_peer_message(&mut send, &msg.for_version(host_version)).await;
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
@@ -1775,25 +1766,33 @@ fn handle_incoming_message(
 
     match msg {
         // ── Always accept ───────────────────────────────────────────────
-        PeerMessage::CursorPosition { pos, .. } => {
+        PeerMessage::CursorPosition { .. } | PeerMessage::ScopedCursorPosition { .. } => {
+            let Some(update) = msg.cursor_update() else { return };
             // Use sender_id from the connection context (not the message's user_id)
             // to prevent peers from spoofing other users' cursors.
+            let update = CursorUpdate { user_id: sender_id, ..update };
             {
                 let mut s = ui_state.lock();
-                if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == sender_id) {
-                    c.pos = pos;
-                    c.last_update = Instant::now();
-                } else {
-                    // Unknown peer cursor — might have been announced via UserJoined.
-                    let m = mesh.lock();
-                    let (name, color) = if let Some(p) = m.peers.get(&sender_id) {
-                        (p.name.clone(), p.color)
-                    } else {
-                        (format!("Peer {sender_id}"), [200, 200, 200])
-                    };
-                    drop(m);
-                    s.cursors.push(UserCursor { user_id: sender_id, name, color, pos, last_update: Instant::now() });
-                }
+                let known = s.cursors.iter().position(|c| c.user_id == sender_id);
+                let index = match known {
+                    Some(index) => index,
+                    None => {
+                        // Unknown peer cursor: it may have been announced via UserJoined.
+                        let m = mesh.lock();
+                        let (name, color) = if let Some(p) = m.peers.get(&sender_id) {
+                            (p.name.clone(), p.color)
+                        } else {
+                            (format!("Peer {sender_id}"), [200, 200, 200])
+                        };
+                        drop(m);
+                        s.cursors.push(UserCursor::new(sender_id, name, color));
+                        s.cursors.len() - 1
+                    }
+                };
+                let cursor = &mut s.cursors[index];
+                cursor.pos = update.pos;
+                cursor.scope = update.scope;
+                cursor.last_update = Instant::now();
             }
             // Repaint all viewports that render cursors.
             {
@@ -1803,8 +1802,9 @@ fn handle_incoming_message(
                     s.repaint_viewport(bid);
                 }
             }
-            // Host relays cursor updates to other peers with the real sender_id.
-            relay_if_host(sender_id, &PeerMessage::CursorPosition { user_id: sender_id, pos }, mesh);
+            // Host relays cursor updates to other peers with the real sender_id, in the form they
+            // arrived in so an unscoped pointer is not given a window.
+            relay_if_host(sender_id, &update.to_message(), mesh);
         }
 
         PeerMessage::MeshHello { user_id, name, color } => {
@@ -2360,10 +2360,36 @@ fn handle_incoming_message(
     // Wake whatever is drawing so it picks the session events up.
     ui_state.lock().wake();
 }
+
+/// A message framed for each protocol revision, sharing the bytes where the two agree.
+struct VersionedFrame {
+    scoped: Arc<Vec<u8>>,
+    unscoped: Arc<Vec<u8>>,
+}
+
+impl VersionedFrame {
+    fn new(msg: &PeerMessage) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let scoped = Arc::new(frame_peer_message(msg)?);
+        let unscoped = match msg.for_version(WireVersion::Unscoped) {
+            std::borrow::Cow::Borrowed(_) => Arc::clone(&scoped),
+            std::borrow::Cow::Owned(rewritten) => Arc::new(frame_peer_message(&rewritten)?),
+        };
+
+        Ok(Self { scoped, unscoped })
+    }
+
+    fn for_peer(&self, peer: &MeshPeer) -> Arc<Vec<u8>> {
+        match peer.version {
+            WireVersion::Scoped => Arc::clone(&self.scoped),
+            WireVersion::Unscoped => Arc::clone(&self.unscoped),
+        }
+    }
+}
+
 /// Broadcast a peer message to all connected peers in the mesh.
 fn broadcast_to_mesh(mesh: &Arc<Mutex<MeshState>>, msg: &PeerMessage) {
-    let framed = match frame_peer_message(msg) {
-        Ok(f) => Arc::new(f),
+    let framed = match VersionedFrame::new(msg) {
+        Ok(f) => f,
         Err(e) => {
             warn!("Failed to serialize broadcast: {e}");
             return;
@@ -2371,7 +2397,7 @@ fn broadcast_to_mesh(mesh: &Arc<Mutex<MeshState>>, msg: &PeerMessage) {
     };
     let m = mesh.lock();
     for peer in m.peers.values() {
-        let _ = peer.msg_tx.try_send(Arc::clone(&framed));
+        let _ = peer.msg_tx.try_send(framed.for_peer(peer));
     }
 }
 
@@ -2383,8 +2409,8 @@ fn relay_if_host(sender_id: u64, msg: &PeerMessage, mesh: &Arc<Mutex<MeshState>>
     if !m.my_role.is_host() {
         return;
     }
-    let framed = match frame_peer_message(msg) {
-        Ok(f) => Arc::new(f),
+    let framed = match VersionedFrame::new(msg) {
+        Ok(f) => f,
         Err(e) => {
             warn!("Failed to serialize relay: {e}");
             return;
@@ -2392,9 +2418,23 @@ fn relay_if_host(sender_id: u64, msg: &PeerMessage, mesh: &Arc<Mutex<MeshState>>
     };
     for peer in m.peers.values() {
         if peer.user_id != sender_id {
-            let _ = peer.msg_tx.try_send(Arc::clone(&framed));
+            let _ = peer.msg_tx.try_send(framed.for_peer(peer));
         }
     }
+}
+
+/// Puts this end's own pointer at `at`, and returns the message that tells the peers.
+fn move_own_cursor(ui_state: &Mutex<SessionState>, my_user_id: u64, at: Option<CursorAt>) -> PeerMessage {
+    {
+        let mut s = ui_state.lock();
+        if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
+            c.pos = at.map(|at| at.pos);
+            c.scope = at.map(|at| at.scope);
+            c.last_update = Instant::now();
+        }
+    }
+
+    PeerMessage::ScopedCursorPosition { user_id: my_user_id, at }
 }
 
 /// Serialize a frame broadcast into wire-ready bytes.
@@ -2445,7 +2485,15 @@ mod tests {
 
     fn make_mesh_peer(user_id: u64, role: PeerRole) -> MeshPeer {
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
-        MeshPeer { user_id, name: format!("Peer{user_id}"), color: [0; 3], role, msg_tx: tx, asset_request_count: 0 }
+        MeshPeer {
+            user_id,
+            name: format!("Peer{user_id}"),
+            color: [0; 3],
+            role,
+            msg_tx: tx,
+            version: WireVersion::Scoped,
+            asset_request_count: 0,
+        }
     }
 
     fn make_mesh_state(my_user_id: u64, my_role: PeerRole, peers: Vec<(u64, PeerRole)>) -> MeshState {
@@ -3098,6 +3146,67 @@ mod tests {
         let s = h.ui();
         assert_eq!(s.cursors.len(), 1);
         assert_eq!(s.cursors[0].pos, None);
+    }
+
+    #[test]
+    fn scoped_cursor_keeps_its_window() {
+        let h = MessageTestHarness::as_client();
+        let at = CursorAt { scope: CursorScope::Board(4), pos: [100.0, 200.0] };
+
+        h.dispatch(0, PeerMessage::ScopedCursorPosition { user_id: 0, at: Some(at) });
+
+        let s = h.ui();
+        assert_eq!((s.cursors[0].pos, s.cursors[0].scope), (Some(at.pos), Some(at.scope)));
+    }
+
+    #[test]
+    fn unscoped_cursor_has_no_window() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            0,
+            PeerMessage::ScopedCursorPosition {
+                user_id: 0,
+                at: Some(CursorAt { scope: CursorScope::Board(4), pos: [1.0, 2.0] }),
+            },
+        );
+
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 0, pos: Some([100.0, 200.0]) });
+
+        assert_eq!(h.ui().cursors[0].scope, None);
+    }
+
+    /// Adds a peer to the harness's mesh that speaks `version`, returning what it is sent.
+    fn peer_speaking(
+        h: &MessageTestHarness,
+        user_id: u64,
+        version: WireVersion,
+    ) -> tokio::sync::mpsc::Receiver<Arc<Vec<u8>>> {
+        let (msg_tx, sent) = tokio::sync::mpsc::channel(4);
+        h.mesh.lock().peers.insert(user_id, MeshPeer { msg_tx, version, ..make_mesh_peer(user_id, PeerRole::Peer) });
+
+        sent
+    }
+
+    #[test]
+    fn host_relays_a_cursor_in_the_form_each_peer_decodes() {
+        let h = MessageTestHarness::new(0, PeerRole::Host, vec![], 0);
+        let mut scoped = peer_speaking(&h, 2, WireVersion::Scoped);
+        let mut unscoped = peer_speaking(&h, 3, WireVersion::Unscoped);
+        let at = CursorAt { scope: CursorScope::Replay(9), pos: [100.0, 200.0] };
+
+        h.dispatch(1, PeerMessage::ScopedCursorPosition { user_id: 1, at: Some(at) });
+
+        let received = |sent: &mut tokio::sync::mpsc::Receiver<Arc<Vec<u8>>>| {
+            let framed = sent.try_recv().expect("the cursor is relayed");
+            deserialize_message(&framed[4..]).unwrap()
+        };
+        assert!(
+            matches!(received(&mut scoped), PeerMessage::ScopedCursorPosition { user_id: 1, at: Some(seen) } if seen == at)
+        );
+        assert!(matches!(
+            received(&mut unscoped),
+            PeerMessage::CursorPosition { user_id: 1, pos: Some([100.0, 200.0]) }
+        ));
     }
 
     // ─── Ping handling ───────────────────────────────────────────────────

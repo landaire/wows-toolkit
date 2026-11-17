@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use wt_collab_protocol::protocol::CollabRenderOptions;
+use wt_collab_protocol::protocol::CursorScope;
 use wt_collab_protocol::protocol::WireCapPoint;
 
 use crate::types::Annotation;
@@ -111,5 +112,20 @@ impl SessionState {
     pub fn prune_pings(&mut self) {
         let now = web_time::Instant::now();
         self.pings.retain(|p| now.duration_since(p.time).as_secs_f32() < 1.0);
+    }
+
+    /// The window the active view shows, as a pointer names it. `None` in the lobby.
+    pub fn shown_scope(&self) -> Option<CursorScope> {
+        match self.active_view {
+            ActiveView::Lobby => None,
+            ActiveView::Replay(replay_id) => Some(CursorScope::Replay(replay_id)),
+            ActiveView::TacticsBoard(board_id) => Some(CursorScope::Board(board_id)),
+        }
+    }
+
+    /// How many replays and tactics boards the session has open, which places a
+    /// peer's pointer that names no window; see [`UserCursor::is_over`].
+    pub fn open_window_count(&self) -> usize {
+        self.replay_views.len() + self.tactics_boards.len()
     }
 }

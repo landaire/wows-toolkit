@@ -57,6 +57,14 @@ enum DisconnectReason {
     ConnectionLost(String),
 }
 
+/// The streams to the host and the protocol revision the connection negotiated.
+#[cfg(target_arch = "wasm32")]
+struct HostStreams {
+    send: iroh::endpoint::SendStream,
+    recv: iroh::endpoint::RecvStream,
+    version: WireVersion,
+}
+
 /// Start the connection task. Returns event/command queues for communicating
 /// with the UI thread.
 ///
@@ -97,7 +105,7 @@ async fn run_connection(
     let secret_key = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
     let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::N0)
         .secret_key(secret_key)
-        .alpns(vec![COLLAB_ALPN.to_vec()])
+        .alpns(WireVersion::alpns())
         .bind()
         .await
         .map_err(|e| format!("Failed to bind endpoint: {e}"))?;
@@ -127,8 +135,8 @@ async fn run_connection(
         }
 
         // Connect + handshake with retries.
-        let (send, recv) = match connect_with_retries(&endpoint, &addr, &display_name, &events, &egui_ctx).await {
-            Ok(pair) => pair,
+        let host = match connect_with_retries(&endpoint, &addr, &display_name, &events, &egui_ctx).await {
+            Ok(host) => host,
             Err(e) => {
                 events.borrow_mut().push_back(ConnectionEvent::Error(e));
                 egui_ctx.request_repaint();
@@ -140,7 +148,7 @@ async fn run_connection(
         reconnect_count = 0;
 
         // Run the message loop until disconnect.
-        let reason = run_message_loop(send, recv, &events, &commands, &egui_ctx).await;
+        let reason = run_message_loop(host, &events, &commands, &egui_ctx).await;
 
         match reason {
             DisconnectReason::UserRequested => break,
@@ -180,7 +188,7 @@ async fn connect_with_retries(
     display_name: &str,
     events: &EventQueue,
     ctx: &egui::Context,
-) -> Result<(iroh::endpoint::SendStream, iroh::endpoint::RecvStream), String> {
+) -> Result<HostStreams, String> {
     let mut last_err = String::new();
 
     for attempt in 1..=MAX_CONNECT_RETRIES {
@@ -191,7 +199,7 @@ async fn connect_with_retries(
         }
 
         match try_connect_and_handshake(endpoint, addr, display_name, events, ctx).await {
-            Ok(pair) => return Ok(pair),
+            Ok(host) => return Ok(host),
             Err(ConnectError::Rejected(reason)) => {
                 // Rejection is not retryable.
                 events.borrow_mut().push_back(ConnectionEvent::Rejected(reason));
@@ -215,9 +223,9 @@ enum ConnectError {
     Rejected(String),
 }
 
-/// Single attempt to connect to the host and complete the Join → SessionInfo handshake.
+/// Single attempt to connect to the host and complete the Join and SessionInfo handshake.
 /// On success, pushes `ConnectionEvent::Connected` + `UserJoined` events and returns
-/// the send/recv streams for the message loop.
+/// the streams for the message loop.
 #[cfg(target_arch = "wasm32")]
 async fn try_connect_and_handshake(
     endpoint: &iroh::Endpoint,
@@ -225,11 +233,15 @@ async fn try_connect_and_handshake(
     display_name: &str,
     events: &EventQueue,
     ctx: &egui::Context,
-) -> Result<(iroh::endpoint::SendStream, iroh::endpoint::RecvStream), ConnectError> {
+) -> Result<HostStreams, ConnectError> {
     let conn = endpoint
-        .connect(addr.clone(), COLLAB_ALPN)
+        .connect_with_opts(addr.clone(), COLLAB_ALPN, WireVersion::connect_options())
+        .await
+        .map_err(|e| ConnectError::Transient(format!("Failed to connect: {e}")))?
         .await
         .map_err(|e| ConnectError::Transient(format!("Failed to connect: {e}")))?;
+    let version = WireVersion::of(&conn)
+        .ok_or_else(|| ConnectError::Transient("Host negotiated an unknown protocol".to_string()))?;
 
     let (mut send, mut recv) =
         conn.open_bi().await.map_err(|e| ConnectError::Transient(format!("Failed to open bi stream: {e}")))?;
@@ -270,7 +282,7 @@ async fn try_connect_and_handshake(
             }
 
             ctx.request_repaint();
-            Ok((send, recv))
+            Ok(HostStreams { send, recv, version })
         }
         PeerMessage::Rejected { reason } => Err(ConnectError::Rejected(reason)),
         other => Err(ConnectError::Transient(format!("Expected SessionInfo, got: {other:?}"))),
@@ -282,12 +294,12 @@ async fn try_connect_and_handshake(
 /// Returns the reason the loop exited.
 #[cfg(target_arch = "wasm32")]
 async fn run_message_loop(
-    mut send: iroh::endpoint::SendStream,
-    mut recv: iroh::endpoint::RecvStream,
+    host: HostStreams,
     events: &EventQueue,
     commands: &CommandQueue,
     egui_ctx: &egui::Context,
 ) -> DisconnectReason {
+    let HostStreams { mut send, mut recv, version } = host;
     let done = Rc::new(Cell::new(false));
     let disconnect_reason: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let last_received = Rc::new(Cell::new(web_time::Instant::now()));
@@ -354,7 +366,7 @@ async fn run_message_loop(
         for cmd in pending_cmds {
             match cmd {
                 ConnectionCommand::Send(msg) => {
-                    if let Err(e) = write_peer_message(&mut send, &msg).await {
+                    if let Err(e) = write_peer_message(&mut send, &msg.for_version(version)).await {
                         if !done.get() {
                             tracing::error!("Failed to send message: {e}");
                             *disconnect_reason.borrow_mut() = Some(format!("Send failed: {e}"));

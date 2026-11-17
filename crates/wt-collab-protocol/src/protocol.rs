@@ -3,6 +3,8 @@
 //! All messages are serialized with rkyv, zlib-compressed, and framed as
 //! `[u32 compressed_length][zlib(rkyv payload)]` on a QUIC bidirectional stream.
 
+use std::borrow::Cow;
+
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 
@@ -20,7 +22,43 @@ pub use wowsunpack::game_types::EntityId;
 /// variants, changed struct fields, etc.).  Mismatched clients will fail
 /// cleanly at the QUIC handshake instead of hitting rkyv deserialization
 /// errors.
-pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/2";
+pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/3";
+
+/// ALPN of peers that predate [`PeerMessage::ScopedCursorPosition`].
+///
+/// Still accepted and offered: the two revisions differ only in that variant,
+/// which [`PeerMessage::for_version`] rewrites for such a peer.
+pub const COLLAB_ALPN_UNSCOPED: &[u8] = b"/wows-toolkit-collab/2";
+
+/// Which protocol revision a connection negotiated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireVersion {
+    /// [`COLLAB_ALPN_UNSCOPED`]: cursors carry no window.
+    Unscoped,
+    /// [`COLLAB_ALPN`].
+    Scoped,
+}
+
+impl WireVersion {
+    /// The ALPNs an endpoint accepts, newest first.
+    pub fn alpns() -> Vec<Vec<u8>> {
+        vec![COLLAB_ALPN.to_vec(), COLLAB_ALPN_UNSCOPED.to_vec()]
+    }
+
+    /// What a connection offers beyond [`COLLAB_ALPN`], so it still reaches an older host.
+    pub fn connect_options() -> iroh::endpoint::ConnectOptions {
+        iroh::endpoint::ConnectOptions::new().with_additional_alpns(vec![COLLAB_ALPN_UNSCOPED.to_vec()])
+    }
+
+    /// The revision `connection` negotiated, or `None` for an ALPN this build does not speak.
+    pub fn of(connection: &iroh::endpoint::Connection) -> Option<Self> {
+        match connection.alpn() {
+            alpn if alpn == COLLAB_ALPN => Some(Self::Scoped),
+            alpn if alpn == COLLAB_ALPN_UNSCOPED => Some(Self::Unscoped),
+            _ => None,
+        }
+    }
+}
 
 /// Maximum total message size (16 MB — generous for SessionInfo with map PNG).
 pub const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -160,6 +198,47 @@ pub struct ReplayInfo {
     pub display_name: String,
 }
 
+/// The session window a pointer is over, by the id the session lists it under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum CursorScope {
+    /// A replay, by `replay_id`.
+    Replay(u64),
+    /// A tactics board, by `board_id`.
+    Board(u64),
+}
+
+/// Where a pointer is: a minimap point over one session window.
+#[derive(Debug, Clone, Copy, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct CursorAt {
+    pub scope: CursorScope,
+    pub pos: [f32; 2],
+}
+
+/// A pointer move as either cursor variant states it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorUpdate {
+    pub user_id: u64,
+    /// `None` once the pointer has left the map.
+    pub pos: Option<[f32; 2]>,
+    /// `None` from a peer on [`COLLAB_ALPN_UNSCOPED`], which does not say which window.
+    pub scope: Option<CursorScope>,
+}
+
+impl CursorUpdate {
+    /// The message that states this move, in the form it was received.
+    pub fn to_message(self) -> PeerMessage {
+        let Self { user_id, pos, scope } = self;
+
+        match (pos, scope) {
+            (Some(pos), Some(scope)) => {
+                PeerMessage::ScopedCursorPosition { user_id, at: Some(CursorAt { scope, pos }) }
+            }
+            (None, _) => PeerMessage::ScopedCursorPosition { user_id, at: None },
+            (Some(pos), None) => PeerMessage::CursorPosition { user_id, pos: Some(pos) },
+        }
+    }
+}
+
 // ─── Unified peer message ──────────────────────────────────────────────────
 
 /// Messages exchanged between any two peers in the mesh.
@@ -197,6 +276,10 @@ pub enum PeerMessage {
 
     // ── Regular messages (any peer → all peers) ────────────────────────
     /// Cursor position on the minimap. None = cursor left the map area.
+    ///
+    /// The form a peer on [`COLLAB_ALPN_UNSCOPED`] sends. Its index and layout
+    /// are fixed so those peers' messages still decode; see
+    /// [`Self::ScopedCursorPosition`].
     CursorPosition { user_id: u64, pos: Option<[f32; 2]> },
 
     /// Upsert an annotation (add new or update existing) by unique ID.
@@ -370,6 +453,37 @@ pub enum PeerMessage {
     // ── Connection keepalive ──────────────────────────────────────────
     /// Heartbeat keepalive. Sent every 10s; NOT relayed between peers.
     Heartbeat,
+
+    /// Cursor position over one session window. `None` = cursor left the map area.
+    ///
+    /// Last, so the variants before it keep their indices. A peer on
+    /// [`COLLAB_ALPN_UNSCOPED`] cannot decode it and is sent
+    /// [`Self::CursorPosition`] instead; one received from such a peer has no
+    /// scope and is drawn only while one replay or board is open.
+    ScopedCursorPosition { user_id: u64, at: Option<CursorAt> },
+}
+
+impl PeerMessage {
+    /// This message as a peer speaking `version` can decode it.
+    pub fn for_version(&self, version: WireVersion) -> Cow<'_, Self> {
+        match (self, version) {
+            (Self::ScopedCursorPosition { user_id, at }, WireVersion::Unscoped) => {
+                Cow::Owned(Self::CursorPosition { user_id: *user_id, pos: at.map(|at| at.pos) })
+            }
+            _ => Cow::Borrowed(self),
+        }
+    }
+
+    /// The pointer move this message states, for either cursor variant.
+    pub fn cursor_update(&self) -> Option<CursorUpdate> {
+        match *self {
+            Self::CursorPosition { user_id, pos } => Some(CursorUpdate { user_id, pos, scope: None }),
+            Self::ScopedCursorPosition { user_id, at } => {
+                Some(CursorUpdate { user_id, pos: at.map(|at| at.pos), scope: at.map(|at| at.scope) })
+            }
+            _ => None,
+        }
+    }
 }
 
 // ─── Display option field enum ──────────────────────────────────────────────
@@ -910,5 +1024,89 @@ mod tests {
             .diff(&CollabRenderOptions::from_render_options(&now, true));
 
         assert_eq!(changes, vec![(DisplayOptionField::ShowTimer, now.show_timer)]);
+    }
+
+    /// The archived bytes of `msg`, sixteen to a line, as they cross the wire before compression.
+    fn archived_hex(msg: &PeerMessage) -> String {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(msg).unwrap();
+
+        bytes
+            .chunks(16)
+            .map(|line| line.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// What a peer without cursor scopes sends.
+    #[test]
+    fn unscoped_cursor_wire_form() {
+        let msg = PeerMessage::CursorPosition { user_id: 7, pos: Some([100.0, 200.0]) };
+
+        insta::assert_snapshot!(archived_hex(&msg));
+    }
+
+    #[test]
+    fn scoped_cursor_wire_form() {
+        let msg = PeerMessage::ScopedCursorPosition {
+            user_id: 7,
+            at: Some(CursorAt { scope: CursorScope::Board(0x0102_0304), pos: [100.0, 200.0] }),
+        };
+
+        insta::assert_snapshot!(archived_hex(&msg));
+    }
+
+    /// Decodes what [`serialize_message`] framed, as a reader does after the length prefix.
+    fn round_trip(msg: &PeerMessage) -> PeerMessage {
+        let framed = serialize_message(msg).unwrap();
+
+        deserialize_message(&framed[4..]).unwrap()
+    }
+
+    #[test]
+    fn scoped_cursor_round_trips_with_its_window() {
+        let at = CursorAt { scope: CursorScope::Replay(42), pos: [100.0, 200.0] };
+
+        let update = round_trip(&PeerMessage::ScopedCursorPosition { user_id: 7, at: Some(at) }).cursor_update();
+
+        assert_eq!(update, Some(CursorUpdate { user_id: 7, pos: Some(at.pos), scope: Some(at.scope) }));
+    }
+
+    /// A pointer from a peer on the unscoped protocol, in the bytes it sends, names no window.
+    #[test]
+    fn unscoped_peer_cursor_decodes_without_a_window() {
+        let mut sent = rkyv::util::AlignedVec::<16>::new();
+        sent.extend_from_slice(&[5, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0]);
+        sent.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0xc8, 0x42, 0, 0, 0x48, 0x43]);
+        sent.resize(128, 0);
+
+        let msg = rkyv::from_bytes::<PeerMessage, rkyv::rancor::Error>(&sent).unwrap();
+
+        assert_eq!(msg.cursor_update(), Some(CursorUpdate { user_id: 7, pos: Some([100.0, 200.0]), scope: None }));
+    }
+
+    #[test]
+    fn scoped_cursor_goes_unscoped_to_an_unscoped_peer() {
+        let at = CursorAt { scope: CursorScope::Board(3), pos: [1.0, 2.0] };
+        let msg = PeerMessage::ScopedCursorPosition { user_id: 7, at: Some(at) };
+
+        let sent = round_trip(&msg.for_version(WireVersion::Unscoped));
+
+        assert!(matches!(sent, PeerMessage::CursorPosition { user_id: 7, pos: Some([1.0, 2.0]) }));
+        assert!(matches!(
+            msg.for_version(WireVersion::Scoped),
+            Cow::Borrowed(PeerMessage::ScopedCursorPosition { .. })
+        ));
+    }
+
+    /// A relayed move keeps the form it arrived in, so an unscoped pointer is not given a window.
+    #[test]
+    fn relayed_cursor_keeps_its_form() {
+        let unscoped = CursorUpdate { user_id: 7, pos: Some([1.0, 2.0]), scope: None };
+        let scoped = CursorUpdate { scope: Some(CursorScope::Board(3)), ..unscoped };
+        let left = CursorUpdate { pos: None, ..unscoped };
+
+        for update in [unscoped, scoped, left] {
+            assert_eq!(update.to_message().cursor_update(), Some(update));
+        }
     }
 }

@@ -10,6 +10,7 @@ use wows_toolkit_services::collab::UserId;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
+use wt_collab_client::OpenReplay;
 use wt_collab_client::PeerRole;
 use wt_collab_client::SessionState;
 use wt_collab_client::TacticsBoardSessionState;
@@ -18,6 +19,8 @@ use wt_collab_client::UserCursor;
 use wt_collab_client::drawing::Tool;
 use wt_collab_client::peer::LocalAnnotationEvent;
 use wt_collab_client::peer::LocalEvent;
+use wt_collab_client::protocol::CursorAt;
+use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::protocol::MAX_TACTICS_BOARDS;
 use wt_collab_client::types::Annotation;
 
@@ -213,8 +216,8 @@ fn escape_puts_the_tool_down_then_the_selection() {
     assert!(!board.adding(), "and so is placing a capture point");
 }
 
-/// The positions the session has been told of the reader's pointer since the last look.
-fn told_cursor(sent: &Receiver<LocalEvent>) -> Vec<Option<[f32; 2]>> {
+/// Where the session has been told the reader's pointer is since the last look.
+fn told_cursor(sent: &Receiver<LocalEvent>) -> Vec<Option<CursorAt>> {
     sent.try_iter()
         .filter_map(|event| match event {
             LocalEvent::CursorPosition(at) => Some(at),
@@ -223,8 +226,8 @@ fn told_cursor(sent: &Receiver<LocalEvent>) -> Vec<Option<[f32; 2]>> {
         .collect()
 }
 
-/// The reader's pointer is told to the session once a tick, at the last place it moved to, and
-/// at once when it leaves the map.
+/// The reader's pointer is told to the session once a tick, at the last place it moved to and
+/// over this board, and at once when it leaves the map.
 #[test]
 fn the_pointer_is_told_to_the_session_once_a_tick() {
     let (_state, link, sent) = session(PeerRole::Peer);
@@ -234,14 +237,20 @@ fn the_pointer_is_told_to_the_session_once_a_tick() {
     for x in [100.0, 200.0, 300.0] {
         board.pointer_move(ElementPos { x, y: 400.0 }, false);
     }
-    assert_eq!(told_cursor(&sent), Vec::<Option<[f32; 2]>>::new(), "nothing is said between ticks");
+    assert_eq!(told_cursor(&sent), Vec::<Option<CursorAt>>::new(), "nothing is said between ticks");
 
     board.tick();
     board.tick();
-    assert_eq!(told_cursor(&sent), [Some([300.0, 400.0])], "one tick says the last place, once");
+    let over_board = CursorAt { scope: board.board_id().cursor_scope(), pos: [300.0, 400.0] };
+    assert_eq!(told_cursor(&sent), [Some(over_board)], "one tick says the last place, once");
 
     board.pointer_left();
     assert_eq!(told_cursor(&sent), [None], "leaving is said at once");
+}
+
+/// A peer's pointer as the session holds it, over `scope`.
+fn peer_cursor(scope: Option<CursorScope>) -> UserCursor {
+    UserCursor { pos: Some([300.0, 400.0]), scope, ..UserCursor::new(PEER, "Peer".to_owned(), [0, 200, 255]) }
 }
 
 /// A peer's pointer is placed on the board where it is on the map once the session is followed,
@@ -251,13 +260,7 @@ fn a_peers_pointer_is_placed_on_the_map() {
     let (state, link, _sent) = session(PeerRole::Peer);
     let mut board = board_at_minimap_size();
     board.set_collab(link);
-    state.lock().cursors.push(UserCursor {
-        user_id: PEER,
-        name: "Peer".to_owned(),
-        color: [0, 200, 255],
-        pos: Some([300.0, 400.0]),
-        last_update: std::time::Instant::now(),
-    });
+    state.lock().cursors.push(peer_cursor(Some(board.board_id().cursor_scope())));
     assert!(board.peer_cursors().is_empty(), "nothing is shown before the session is followed");
 
     board.tick();
@@ -274,6 +277,48 @@ fn a_peers_pointer_is_placed_on_the_map() {
 
     board.set_collab(CollabLink::default());
     assert!(board.peer_cursors().is_empty(), "a session that ended shows no one");
+}
+
+/// A peer's pointer over another window of the session is not placed on this board.
+#[test]
+fn a_pointer_over_another_window_is_not_placed() {
+    let (state, link, _sent) = session(PeerRole::Peer);
+    let mut board = board_at_minimap_size();
+    board.set_collab(link);
+    let elsewhere = CursorScope::Board(board.board_id().raw().wrapping_add(1));
+    state.lock().cursors.push(peer_cursor(Some(elsewhere)));
+
+    board.tick();
+
+    assert!(board.peer_cursors().is_empty());
+}
+
+/// A pointer from a peer that names no window is placed only while the session has one open.
+#[test]
+fn an_unscoped_pointer_is_placed_only_with_one_window_open() {
+    let (state, link, _sent) = session(PeerRole::Peer);
+    let mut board = board_at_minimap_size();
+    board.set_collab(link);
+    let replay = |replay_id| OpenReplay {
+        replay_id,
+        replay_name: String::new(),
+        map_image_png: Vec::new(),
+        game_version: String::new(),
+        map_name: String::new(),
+        display_name: String::new(),
+    };
+    {
+        let mut held = state.lock();
+        held.cursors.push(peer_cursor(None));
+        held.open_replays.push(replay(1));
+    }
+
+    board.tick();
+    assert_eq!(board.peer_cursors().len(), 1, "one window open: the pointer can only be over it");
+
+    state.lock().open_replays.push(replay(2));
+    board.tick();
+    assert!(board.peer_cursors().is_empty(), "two open: it could be over either");
 }
 
 /// The shapes the session has been told of since the last look.

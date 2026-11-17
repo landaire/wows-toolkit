@@ -30,6 +30,8 @@ use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::peer::PeerMode;
 use wt_collab_client::peer::PeerSessionHandle;
 use wt_collab_client::protocol::CollabRenderOptions;
+use wt_collab_client::protocol::CursorAt;
+use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::protocol::EntityId;
 use wt_collab_client::protocol::ShipConfigFilter;
 
@@ -674,13 +676,7 @@ mod tests {
         {
             let mut held = state.lock();
             held.my_user_id = 3;
-            held.cursors.push(UserCursor {
-                user_id: 3,
-                name: "Me".to_owned(),
-                color: [1, 2, 3],
-                pos: None,
-                last_update: std::time::Instant::now(),
-            });
+            held.cursors.push(UserCursor::new(3, "Me".to_owned(), [1, 2, 3]));
         }
         let (link, sent) = CollabLink::for_test(Arc::clone(&state));
         link.send_ping([5.0, 6.0]);
@@ -829,22 +825,25 @@ impl CollabLink {
         self.sync_of(&held).cloned().unwrap_or_default()
     }
 
-    /// Where every other peer's pointer is, in minimap space.
+    /// Where every other peer's pointer over `shown` is, in minimap space.
     ///
     /// Our own is left out: the reader can already see their own pointer.
-    pub fn peer_cursors(&self) -> Vec<UserCursor> {
+    pub fn peer_cursors(&self, shown: CursorScope) -> Vec<UserCursor> {
         let mut cursors = Vec::new();
-        self.for_each_peer_cursor(|cursor| cursors.push(cursor.clone()));
+        self.for_each_peer_cursor(shown, |cursor| cursors.push(cursor.clone()));
 
         cursors
     }
 
     /// [`Self::peer_cursors`] without copying them, for a reader that only compares.
-    pub fn for_each_peer_cursor(&self, mut visit: impl FnMut(&UserCursor)) {
+    pub fn for_each_peer_cursor(&self, shown: CursorScope, mut visit: impl FnMut(&UserCursor)) {
         let Some(state) = &self.state else { return };
         let state = state.lock();
         let mine = state.my_user_id;
-        for cursor in state.cursors.iter().filter(|cursor| cursor.user_id != mine && cursor.pos.is_some()) {
+        let open_windows = state.open_window_count();
+        for cursor in
+            state.cursors.iter().filter(|cursor| cursor.user_id != mine && cursor.is_over(shown, open_windows))
+        {
             visit(cursor);
         }
     }
@@ -870,9 +869,9 @@ impl CollabLink {
     }
 
     /// Says where this app's pointer is, or that it has left the map.
-    pub fn report_cursor(&self, pos: Option<[f32; 2]>) {
+    pub fn report_cursor(&self, at: Option<CursorAt>) {
         if let Some(tx) = &self.local_tx {
-            let _ = tx.send(LocalEvent::CursorPosition(pos));
+            let _ = tx.send(LocalEvent::CursorPosition(at));
         }
     }
 
@@ -1542,6 +1541,11 @@ impl BoardId {
     pub fn fresh() -> Self {
         Self(wt_collab_client::peer::fresh_id())
     }
+
+    /// This board as the window a pointer is over.
+    pub fn cursor_scope(self) -> CursorScope {
+        CursorScope::Board(self.0)
+    }
 }
 
 /// What a replay window is called in a session.
@@ -1561,6 +1565,11 @@ impl ReplayId {
     /// A name nothing else in the session holds.
     pub fn fresh() -> Self {
         Self(wt_collab_client::peer::fresh_id())
+    }
+
+    /// This replay as the window a pointer is over.
+    pub fn cursor_scope(self) -> CursorScope {
+        CursorScope::Replay(self.0)
     }
 }
 
