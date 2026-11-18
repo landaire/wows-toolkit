@@ -17,8 +17,9 @@
 //!    order somewhere, and a list that keeps its order cannot rank that away.
 //!
 //! The matched letters map back to whole characters of the original text,
-//! which is what a row draws marked. Ranking applies to flat lists; a tree
-//! keeps its order and only drops what does not match.
+//! which is what a row draws marked. A flat list ranks its matches with
+//! [`FilterQuery::rank`]; a tree drops what does not match and orders its
+//! rows as its owner decides.
 
 use std::ops::Range;
 

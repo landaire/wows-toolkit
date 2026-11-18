@@ -2,6 +2,7 @@
 
 use wows_toolkit_viewmodel::text_filter::FilterKeyTable;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wows_toolkit_viewmodel::text_filter::MatchScore;
 
 /// A row's texts, each folded once so that a query typed only scores them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -43,17 +44,27 @@ impl FilterFields {
 
     /// The field `query` matches best, as shown; the earliest wins a tie.
     pub fn best(&self, query: &FilterQuery) -> Option<&str> {
-        let mut best = None;
-        for (index, text) in self.texts.iter().enumerate() {
+        self.best_match(query).map(|(index, _)| self.texts[index].as_str())
+    }
+
+    /// The score of the field `query` matches best.
+    pub fn score(&self, query: &FilterQuery) -> Option<MatchScore> {
+        self.best_match(query).map(|(_, score)| score)
+    }
+
+    /// The index and score of the field `query` matches best; the earliest wins a tie.
+    fn best_match(&self, query: &FilterQuery) -> Option<(usize, MatchScore)> {
+        let mut best: Option<(usize, MatchScore)> = None;
+        for index in 0..self.keys.len() {
             let Some(score) = query.score_at(&self.keys, index) else {
                 continue;
             };
             if best.is_none_or(|(_, kept)| score > kept) {
-                best = Some((text.as_str(), score));
+                best = Some((index, score));
             }
         }
 
-        best.map(|(text, _)| text)
+        best
     }
 
     /// The fields as shown, in the order added.

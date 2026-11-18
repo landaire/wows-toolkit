@@ -295,6 +295,71 @@ fn a_search_folds_accents_case_and_punctuation_away() {
 }
 
 #[test]
+fn a_search_lists_the_nations_classes_and_ships_it_names_best_first() {
+    use crate::catalog::ClassGroup;
+    use crate::catalog::NationGroup;
+    use wowsunpack::game_params::types::Species;
+
+    let ship = |param_index: &str, name: &str, tier: u32| ShipEntry {
+        param_index: param_index.to_string(),
+        display_name: name.to_string(),
+        filter_fields: [name, param_index].map(str::to_string).into_iter().collect(),
+        tier,
+    };
+    let class = |species: Species, ships: Vec<ShipEntry>| ClassGroup { species, ships };
+    let nation = |nation: &str, display_name: &str, classes: Vec<ClassGroup>| NationGroup {
+        nation: nation.to_string(),
+        display_name: display_name.to_string(),
+        classes,
+    };
+    let nations = vec![
+        nation("Germany", "Germany", vec![class(Species::Cruiser, vec![ship("PGSC107", "Yorck", 7)])]),
+        nation("United_Kingdom", "U.K.", vec![class(Species::Cruiser, vec![ship("PBSC106", "York", 6)])]),
+        nation(
+            "USA",
+            "U.S.A.",
+            vec![
+                class(
+                    Species::Battleship,
+                    vec![
+                        ship("PASB005", "New York", 5),
+                        ship("PASB006", "New Mexico", 6),
+                        ship("PASB110", "Montana", 10),
+                    ],
+                ),
+                class(Species::AirCarrier, vec![ship("PASA108", "Yorktown", 8)]),
+            ],
+        ),
+    ];
+    let data = Data { ships: ShipCatalog { nations, hidden: Vec::new() }, ..data() };
+
+    assert_eq!(
+        search(&data, "york"),
+        [
+            "U.K. (1)",
+            "  Cruiser (1)",
+            "    VI York",
+            "U.S.A. (2)",
+            "  Aircraft Carrier (1)",
+            "    VIII Yorktown",
+            "  Battleship (1)",
+            "    V New York",
+            "Germany (1)",
+            "  Cruiser (1)",
+            "    VII Yorck",
+            "Models",
+        ],
+        "the whole name, then a name it starts, then a word it starts, then letters spread out"
+    );
+    let ships: Vec<String> = search(&data, "mo").into_iter().take_while(|line| line != "Models").collect();
+    assert_eq!(
+        ships,
+        ["U.S.A. (2)", "  Battleship (2)", "    X Montana", "    VI New Mexico"],
+        "a name it starts comes before a lower tier the letters only spread through"
+    );
+}
+
+#[test]
 fn a_search_finds_a_building_model_by_the_building_param_using_it() {
     let data = data();
     let fort = model_row_id(&fixture::path(fixture::FORT));

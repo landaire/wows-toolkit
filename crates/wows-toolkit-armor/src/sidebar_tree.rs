@@ -7,8 +7,9 @@
 //! what is on screen rather than to the 15000-row catalogue.
 //!
 //! A search is matched once into [`SearchMatches`]. Folders without matches
-//! are dropped and the rest show their match counts. A section with few
-//! matches has its folders opened; a broad search leaves them closed.
+//! are dropped and the rest show their match counts. The ships section lists
+//! the nations, classes and ships the search names best first. A section with
+//! few matches has its folders opened; a broad search leaves them closed.
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use std::sync::Arc;
 
 use rust_i18n::t;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wows_toolkit_viewmodel::text_filter::MatchScore;
 use wowsunpack::export::model_catalog::BuildingKind;
 use wowsunpack::export::model_catalog::GeometryAvailability;
 use wowsunpack::export::model_catalog::ModelGroupKind;
@@ -382,14 +384,16 @@ impl FolderMatches {
     }
 }
 
-/// How a search names one ship.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How a search names one ship. Declared from worst to best, so that the
+/// greater ranks first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ShipMatch {
     Miss,
-    /// The ship itself, whatever its parts are called.
-    Name,
     /// Only one or more of its parts.
     Parts,
+    /// The ship itself, whatever its parts are called, with how well its
+    /// best field matched. `None` when only the tiers narrow the listing.
+    Name(Option<MatchScore>),
 }
 
 fn ship_match(
@@ -402,8 +406,11 @@ fn ship_match(
         return ShipMatch::Miss;
     }
 
-    if ship.filter_fields.matches(query) {
-        return ShipMatch::Name;
+    if !query.is_active() {
+        return ShipMatch::Name(None);
+    }
+    if let Some(score) = ship.filter_fields.score(query) {
+        return ShipMatch::Name(Some(score));
     }
 
     let parts = ship_parts.get(ship.param_index.as_str());
@@ -441,8 +448,29 @@ impl MatchCount for ShipMatch {
     fn match_count(&self) -> usize {
         match self {
             ShipMatch::Miss => 0,
-            ShipMatch::Name | ShipMatch::Parts => 1,
+            ShipMatch::Name(_) | ShipMatch::Parts => 1,
         }
+    }
+}
+
+/// The best match among the ships under a node, which orders the node
+/// among its siblings.
+trait ShipRank {
+    fn rank(&self) -> ShipMatch;
+}
+
+impl ShipRank for ShipMatch {
+    fn rank(&self) -> ShipMatch {
+        *self
+    }
+}
+
+impl<T> ShipRank for MatchGroup<T>
+where
+    T: ShipRank,
+{
+    fn rank(&self) -> ShipMatch {
+        self.members.iter().map(ShipRank::rank).max().unwrap_or(ShipMatch::Miss)
     }
 }
 
@@ -490,7 +518,7 @@ pub fn build_tree(
     let mut items = Vec::new();
 
     let ship_matches = search.map(|search| &search.ships);
-    for (nation, matches) in paired(&sources.ships.nations, members(ship_matches)) {
+    for (nation, matches) in ranked(&sources.ships.nations, members(ship_matches)) {
         if shown(matches) {
             items.push(builder.ship_nation(nation, matches));
         }
@@ -759,7 +787,7 @@ impl Builder<'_, '_, '_, '_> {
         let wanted = self.opens_ships();
         self.folder(id, label, RowKind::Nation(nation.nation.clone()), wanted, |b| {
             let mut items = Vec::new();
-            for (class, matches) in paired(&nation.classes, members(matches)) {
+            for (class, matches) in ranked(&nation.classes, members(matches)) {
                 if !shown(matches) {
                     continue;
                 }
@@ -767,7 +795,8 @@ impl Builder<'_, '_, '_, '_> {
                 let id: RowId = format!("armor-class-{}-{:?}", nation.nation, class.species).into();
                 let label = counted(species_name(&class.species), matches);
                 items.push(b.folder(id, label, RowKind::Class(class.species), wanted, |b| {
-                    paired(&class.ships, members(matches))
+                    ranked(&class.ships, members(matches))
+                        .into_iter()
                         .filter(|(_, found)| shown(*found))
                         .map(|(ship, found)| b.ship_row(ship, found.copied()))
                         .collect()
@@ -820,7 +849,7 @@ impl Builder<'_, '_, '_, '_> {
         let id = ship_row_id(&ship.param_index);
         let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
         let kind = RowKind::Ship { param_index: ship.param_index.clone(), display_name: ship.display_name.clone() };
-        if found == Some(ShipMatch::Name) {
+        if matches!(found, Some(ShipMatch::Name(_))) {
             self.note(&id, &ship.filter_fields);
         }
         // A search note says more than the tag, which stands in otherwise.
@@ -838,7 +867,7 @@ impl Builder<'_, '_, '_, '_> {
         // that names the ship leaves its parts folded.
         let part_query = match found {
             Some(ShipMatch::Parts) => self.search.map(|search| &search.query),
-            Some(ShipMatch::Name | ShipMatch::Miss) | None => None,
+            Some(ShipMatch::Name(_) | ShipMatch::Miss) | None => None,
         };
         let wanted = part_query.is_some() && self.opens_ship_parts();
         self.folder(id, label, kind, wanted, |b| b.ship_parts(&vehicle, parts, part_query))
@@ -1024,6 +1053,18 @@ impl Builder<'_, '_, '_, '_> {
 fn paired<'a, I, M>(items: &'a [I], matches: Option<&'a [M]>) -> impl Iterator<Item = (&'a I, Option<&'a M>)> {
     let mut members = matches.map(|matches| matches.iter());
     items.iter().map(move |item| (item, members.as_mut().and_then(Iterator::next)))
+}
+
+/// `items` beside their matches, those the search names best first. Ties,
+/// and a listing of everything, keep the items' order.
+fn ranked<'a, I, M>(items: &'a [I], matches: Option<&'a [M]>) -> Vec<(&'a I, Option<&'a M>)>
+where
+    M: ShipRank,
+{
+    let mut pairs: Vec<(&I, Option<&M>)> = paired(items, matches).collect();
+    pairs.sort_by_cached_key(|(_, found)| std::cmp::Reverse(found.map(ShipRank::rank)));
+
+    pairs
 }
 
 /// A group's matches in listing order.
