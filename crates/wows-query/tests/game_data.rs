@@ -129,6 +129,29 @@ fn des_moines_bow_sap_search_marks_overmatch() {
     insta::assert_yaml_snapshot!(search);
 }
 
+/// "Which tier 10 battleships cannot overmatch Colbert's 16 mm bow" is
+/// answered by the failing list: Conte Verde's largest AP is 203 mm.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn penetration_search_names_the_ships_that_fail() {
+    let search = game()
+        .penetration_search(&PenetrationSearchArgs {
+            target_ship: Some("Colbert".to_owned()),
+            zone: Some("bow".to_owned()),
+            ammo: Some(Ammo::Ap),
+            armament: Some(vec![Armament::MainBattery]),
+            class: Some(ShipClass::Battleship),
+            min_tier: Some(Tier(10)),
+            max_tier: Some(Tier(10)),
+            ..Default::default()
+        })
+        .expect("zone resolves");
+    let group = &search.groups[0];
+
+    assert_eq!(group.failing, ["T10 Conte Verde (battleship, Italy, premium): main battery 203 mm AP"]);
+    assert_eq!(group.considered.total - group.qualifying.total, group.failing.len());
+}
+
 /// A named shooter gets a verdict per group: GK's 420 mm AP overmatches Des
 /// Moines' 27 mm bow, Des Moines' own 203 mm AP does not.
 #[test]

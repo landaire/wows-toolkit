@@ -185,8 +185,19 @@ pub struct PenetrationGroup {
     /// it, ends with ", overmatches".
     pub ships: Vec<String>,
 
+    /// Qualifying ships left out of `ships` by the list cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted: Option<usize>,
+
+    /// Considered ships that do not defeat the plate, each with its strongest
+    /// munition of this method, e.g. "T10 Conte Verde (battleship, Italy,
+    /// premium): main battery 203 mm AP".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failing: Vec<String>,
+
+    /// Failing ships left out of `failing` by the list cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failing_omitted: Option<usize>,
 
     /// With a shooter: whether its best munition of this group defeats the
     /// plate, e.g. "Montana main battery 457 mm AP overmatches plates up to
@@ -333,7 +344,7 @@ impl GameData {
         let keys: Vec<(Armament, DefeatMethod)> =
             armaments.iter().flat_map(|armament| methods.iter().map(move |method| (*armament, *method))).collect();
 
-        let mut considered: BTreeMap<(Armament, DefeatMethod), Vec<&Ship>> = BTreeMap::new();
+        let mut considered: BTreeMap<(Armament, DefeatMethod), Vec<(&Ship, Munition)>> = BTreeMap::new();
         let mut hits: BTreeMap<(Armament, DefeatMethod), Vec<(&Ship, Munition)>> = BTreeMap::new();
         let mut strongest: BTreeMap<(Armament, DefeatMethod), Munition> = BTreeMap::new();
         let mut ships: Vec<&Ship> = match shooter {
@@ -351,7 +362,7 @@ impl GameData {
                 let Some((most_rated, _)) = rated else {
                     continue;
                 };
-                considered.entry((armament, method)).or_default().push(ship);
+                considered.entry((armament, method)).or_default().push((ship, most_rated.clone()));
                 if shooter.is_some() {
                     strongest.insert((armament, method), most_rated.clone());
                 }
@@ -440,7 +451,7 @@ fn strength(munition: &Munition, method: DefeatMethod, thickness: Millimeters) -
 fn group(
     armament: Armament,
     method: DefeatMethod,
-    considered: &[&Ship],
+    considered: &[(&Ship, Munition)],
     hits: &[(&Ship, Munition)],
     thickness: Millimeters,
 ) -> PenetrationGroup {
@@ -448,7 +459,18 @@ fn group(
         hits.iter().take(GROUP_LIMIT).map(|(ship, munition)| describe_hit(ship, munition, thickness)).collect();
     let omitted = (hits.len() > ships.len()).then(|| hits.len() - ships.len());
 
-    let considered = ShipCounts::from_ships(considered.iter().copied());
+    // Both lists are in listing order, so a considered ship qualifies when it
+    // is the next hit.
+    let mut remaining_hits = hits.iter().peekable();
+    let failures: Vec<&(&Ship, Munition)> = considered
+        .iter()
+        .filter(|(ship, _)| remaining_hits.next_if(|(hit, _)| std::ptr::eq(*hit, *ship)).is_none())
+        .collect();
+    let failing: Vec<String> =
+        failures.iter().take(GROUP_LIMIT).map(|(ship, munition)| describe_munition(ship, munition)).collect();
+    let failing_omitted = (failures.len() > failing.len()).then(|| failures.len() - failing.len());
+
+    let considered = ShipCounts::from_ships(considered.iter().map(|(ship, _)| *ship));
     let qualifying = ShipCounts::from_ships(hits.iter().map(|(ship, _)| *ship));
 
     PenetrationGroup {
@@ -459,19 +481,27 @@ fn group(
         qualifying,
         ships,
         omitted,
+        failing,
+        failing_omitted,
         verdict: None,
     }
 }
 
 fn describe_hit(ship: &Ship, munition: &Munition, thickness: Millimeters) -> String {
-    let penetration = munition.penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
     let overmatch = if munition.ammo == Ammo::Sap && munition.caliber.is_some_and(|mm| is_overmatch(mm, thickness)) {
         ", overmatches"
     } else {
         ""
     };
 
-    format!("{}: {}{penetration}{overmatch}", ship.listing_label(), weapon_label(munition))
+    format!("{}{overmatch}", describe_munition(ship, munition))
+}
+
+/// "T10 Gearing (destroyer, USA): main battery 127 mm HE, 21 mm pen".
+fn describe_munition(ship: &Ship, munition: &Munition) -> String {
+    let penetration = munition.penetration.map(|mm| format!(", {} mm pen", mm.value())).unwrap_or_default();
+
+    format!("{}: {}{penetration}", ship.listing_label(), weapon_label(munition))
 }
 
 /// "main battery 420 mm AP" or "B7A Ryusei skip bombers, 460 mm AP skip bomb (Type 99 No. 80 Mk. 7)".

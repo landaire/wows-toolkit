@@ -27,6 +27,10 @@ expression: groups
     - "T9 Giuseppe Verdi (battleship, Italy, premium) [replicas: Pilus Posterior]: secondary battery 120 mm SAP, 42 mm pen"
     - "T9 Michelangelo (cruiser, Italy, premium): secondary battery 120 mm SAP, 42 mm pen"
     - "T8 M. Colonna (battleship, Italy, premium) [replicas: BA Binah]: secondary battery 120 mm SAP, 42 mm pen"
+  failing:
+    - "T10 Gato (submarine, USA, premium): secondary battery 120 mm SAP, 22 mm pen"
+    - "T8 Salmon (submarine, USA): secondary battery 120 mm SAP, 22 mm pen"
+    - "T8 Sturdy (submarine, United_Kingdom): secondary battery 120 mm SAP, 22 mm pen"
 - armament: secondary_battery
   method: ap_overmatch
   considered:
@@ -40,3 +44,5 @@ expression: groups
   share_pct_by_class:
     cruiser: 0
   ships: []
+  failing:
+    - "T10 Almte. Irízar (cruiser, Pan_America, premium): secondary battery 120 mm AP"

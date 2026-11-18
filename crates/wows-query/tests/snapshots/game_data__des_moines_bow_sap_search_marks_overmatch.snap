@@ -77,3 +77,5 @@ groups:
       - "T10 Ravenna (cruiser, Italy, test): main battery 203 mm SAP, 54 mm pen"
       - "T9 Frank Friday (destroyer, USA, test): main battery 127 mm SAP, 36 mm pen"
       - "T8 Mirage (cruiser, Italy, test): main battery 203 mm SAP, 54 mm pen"
+    failing:
+      - "T10 A. da Barbiano (destroyer, Italy, premium): main battery 90 mm SAP, 26 mm pen"

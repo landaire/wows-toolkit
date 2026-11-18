@@ -35,3 +35,5 @@ expression: search.groups
     battleship: 50
   ships:
     - "T10 Neptunus (battleship, Netherlands, test): Fokker T.V. air strike, HE bomb (P.u.W. 300 kg), 50 mm pen"
+  failing:
+    - "T10 Willem de Eerste (battleship, Netherlands, premium): Fokker T.V. air strike, HE bomb (P.u.W. 250 kg), 46 mm pen"

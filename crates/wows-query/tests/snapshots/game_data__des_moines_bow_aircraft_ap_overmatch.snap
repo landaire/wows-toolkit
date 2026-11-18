@@ -33,6 +33,10 @@ groups:
       - "T10 Hakuryū (aircraft_carrier, Japan): J5N Tenrai dive bombers, 404 mm AP bomb (Type 99 No. 80 Mk. 5)"
       - "T10 M. Richthofen (aircraft_carrier, Germany) [replicas: Süsshofen]: Fw 190G8 dive bombers, 406 mm AP bomb (PC 500)"
       - "T10 Shinano (aircraft_carrier, Japan, premium) [replicas: AL Shinano]: B7A Ryūsei skip bombers, 460 mm AP skip bomb (Type 99 No. 80 Mk. 7)"
+    failing:
+      - "T10 Malta (aircraft_carrier, United_Kingdom, premium): Blackburn Firebrand dive bombers, 254 mm AP bomb (500 lb G.P. Bomb)"
+      - "T10 O. Lilienthal (aircraft_carrier, Germany, test): Ta 152C-1/R14 dive bombers, 356 mm AP bomb (PC 1000)"
+      - "T10 W. Voss (aircraft_carrier, Germany, test): Ta 152C-1/R14 skip bombers, 203 mm AP skip bomb (PC 500d)"
   - armament: airstrike
     method: ap_overmatch
     considered:
