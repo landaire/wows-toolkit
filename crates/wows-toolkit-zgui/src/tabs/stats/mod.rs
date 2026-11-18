@@ -1,10 +1,13 @@
 //! The session Stats tab, and the body a directory stats tab shares with it.
 //!
-//! A filter bar narrows the games every panel below it shows. Below it a dock holds the Overview
-//! and Ships panels and any number of chart panels. The session's filters, charts and dock layout
-//! are saved; a directory's are not.
+//! A filter bar narrows the games every panel below it shows. Below it a dock holds the Overview,
+//! Ships and Matches panels and any number of chart panels. The session's filters, charts and
+//! dock layout are saved; a directory's are not.
 
 mod chart;
+mod check_row;
+mod filters;
+mod matches;
 mod overview;
 #[cfg(test)]
 mod panel_tests;
@@ -49,6 +52,7 @@ use wows_toolkit_viewmodel::stats::GameLimit;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::all_match_groups;
+use wows_toolkit_viewmodel::stats::all_ships;
 use wows_toolkit_viewmodel::stats::chart::ChartId;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSettings;
@@ -131,6 +135,9 @@ use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
 use crate::tabs::dock_menu_strings;
 use crate::tabs::stats::chart::StatsChartProps;
+use crate::tabs::stats::filters::DateFilterProps;
+use crate::tabs::stats::filters::ShipFilterProps;
+use crate::tabs::stats::matches::StatsMatchesProps;
 use crate::tabs::stats::overview::StatsOverviewProps;
 use crate::tabs::stats::session::SessionScopeChoiceProps;
 use crate::tabs::stats::session::opened_label;
@@ -154,9 +161,11 @@ const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout_zgui";
 
 const OVERVIEW_KIND: &str = "StatsOverviewPanel";
 const SHIPS_KIND: &str = "StatsShipsPanel";
+const MATCHES_KIND: &str = "StatsMatchesPanel";
 const CHART_KIND: &str = "StatsChartPanel";
 const OVERVIEW_ID: &str = "overview";
 const SHIPS_ID: &str = "ships";
+const MATCHES_ID: &str = "matches";
 const CHART_ID_PREFIX: &str = "chart-";
 
 const SHEET: &str = "wt-stats";
@@ -301,8 +310,9 @@ pub fn StatsTab() -> impl IntoView {
     });
 
     // The saved filters apply once the saved session is read too: a mode saved for games no
-    // longer recorded would hide every game. A session since the app opened is still filling, so
-    // its modes say nothing about which saved ones are stale.
+    // longer recorded would hide every game, and a left-out game no longer recorded is dead
+    // weight. A session since the app opened is still filling, so its games say nothing about
+    // which saved ones are stale.
     effect(move |_| {
         if !services.session.is_read() {
             return;
@@ -313,10 +323,11 @@ pub fn StatsTab() -> impl IntoView {
             return;
         }
         if services.session.scope_untracked() == SessionScope::Manual {
+            let before = filters.clone();
             let modes = services.session.with_saved(all_match_groups);
-            let before = filters.game_modes.len();
             filters.game_modes.retain(|mode| modes.contains(mode));
-            if filters.game_modes.len() != before {
+            services.session.with_saved(|games| filters.excluded_games.retain_present(games));
+            if filters != before {
                 save_filters(services, &filters);
             }
         }
@@ -417,6 +428,7 @@ pub fn StatsBody(
     let charts_error = RwSignal::new(None::<ChartsError>);
 
     let available_modes = Memo::new(move |_| games.with(|games| all_match_groups(games)));
+    let ships = Memo::new(move |_| games.with(|games| all_ships(games)));
     let filtered: Signal<Arc<[PerGameStat]>> = Memo::new(move |_| {
         games.with(|games| filters.with(|filters| filter_games(games, filters).into_iter().cloned().collect()))
     })
@@ -453,17 +465,33 @@ pub fn StatsBody(
         }
     });
 
-    let change_filters = move |change: &dyn Fn(&mut StatsFilters)| {
-        filters.update(|filters| {
-            change(filters);
-        });
-        if let Some(session) = session {
-            session.filters_edited.set_value(true);
+    // A left-out game no longer held, as after a clear, would be counted on the bar with nothing in
+    // Matches to put back. Only a complete set of games decides that, as above; a session since
+    // the app opened holds only part of the saved games.
+    effect(move |previous| {
+        games.with(|_| ());
+        let read = !reading.is_some_and(|reading| reading.get());
+        let whole =
+            session.is_none() || (services.session.is_read() && services.session.scope() == SessionScope::Manual);
+        if previous.is_none() || !read || !whole || filters.with_untracked(|filters| filters.excluded_games.is_empty())
+        {
+            return;
         }
+        let kept = games.with_untracked(|games| {
+            filters.with_untracked(|filters| {
+                let mut kept = filters.excluded_games.clone();
+                kept.retain_present(games);
+                (kept != filters.excluded_games).then_some(kept)
+            })
+        });
+        let Some(kept) = kept else { return };
+        filters.update(|filters| filters.excluded_games = kept);
         if persists {
             save_filters(services, &filters.get_untracked());
         }
-    };
+    });
+
+    let editor = FilterEditor { filters, session, persists, services };
 
     let charts = RwSignal::new_local(Vec::<ChartSlot>::new());
     let slot_owner = StoredValue::new(Owner::current().expect("a component body runs under an owner"));
@@ -478,7 +506,7 @@ pub fn StatsBody(
             games,
             filtered,
             per_ship,
-            filters,
+            editor,
             personal_rating,
             session,
             clear_error,
@@ -495,7 +523,7 @@ pub fn StatsBody(
         }
     };
 
-    // Overview and Ships share the main tab group; the first chart opens beside them.
+    // Overview, Ships and Matches share the main tab group; the first chart opens beside them.
     if let Ok(group) = dock.add_panel(
         DockTarget::Region(DockRegion::Center),
         PanelEntry { closable: false, ..PanelEntry::new(PanelId::new(OVERVIEW_ID), PanelKind::new(OVERVIEW_KIND)) },
@@ -506,6 +534,7 @@ pub fn StatsBody(
             tracing::warn!("stats: the Ships panel was not added: {err}");
         }
     }
+    add_matches_panel(dock);
     open_chart(ChartSettings::default(), DockTarget::Region(DockRegion::Right));
     let _ = dock.activate(&PanelId::new(OVERVIEW_ID));
 
@@ -585,7 +614,7 @@ pub fn StatsBody(
         }),
         move |checked: Checked| {
             let count = last_count.get_untracked();
-            change_filters(&|filters| {
+            editor.edit(|filters| {
                 filters.limit = if checked == Checked::Yes { GameLimit::Recent(count) } else { GameLimit::All };
             });
         },
@@ -597,7 +626,7 @@ pub fn StatsBody(
         let count = (value as usize).clamp(MIN_GAME_LIMIT, MAX_GAME_LIMIT);
         last_count.set(count);
         if matches!(filters.get_untracked().limit, GameLimit::Recent(_)) {
-            change_filters(&|filters| filters.limit = GameLimit::Recent(count));
+            editor.edit(|filters| filters.limit = GameLimit::Recent(count));
         }
     });
     let limit_disabled = Signal::derive_local(move || !matches!(filters.get().limit, GameLimit::Recent(_)));
@@ -606,7 +635,7 @@ pub fn StatsBody(
         let pressed =
             Binding::controlled(Signal::derive_local(move || filters.get().division == division), move |_: bool| {
                 if filters.get_untracked().division != division {
-                    change_filters(&|filters| filters.division = division);
+                    editor.edit(|filters| filters.division = division);
                 }
             });
         view! {
@@ -619,7 +648,7 @@ pub fn StatsBody(
             view! {
                 Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
                 ModeMenu(filters = filters, modes = available_modes.into(), change = UnsyncCallback::new(move |mode: Option<String>| {
-                    change_filters(&|filters| match &mode {
+                    editor.edit(|filters| match &mode {
                         None => filters.game_modes.clear(),
                         Some(mode) => {
                             if !filters.game_modes.remove(mode) {
@@ -741,6 +770,45 @@ pub fn StatsBody(
         }
     };
 
+    // Games left out one at a time are listed only in Matches, so the bar says how many and leads
+    // there.
+    let left_out_count = Memo::new(move |_| filters.with(|filters| filters.excluded_games.len()));
+    let any_left_out = Memo::new(move |_| left_out_count.get() > 0);
+    let narrowed = Memo::new(move |_| filters.with(|filters| *filters != StatsFilters::default()));
+    let left_out_games = move || {
+        any_left_out.get().then(|| {
+            view! {
+                Button(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, attr:data-testid = "stats-left-out-games", on:click = move |_| {
+                    if let Err(err) = dock.activate(&PanelId::new(MATCHES_ID)) {
+                        tracing::warn!("stats: the Matches panel was not brought forward: {err}");
+                    }
+                }) {
+                    AppIcon(glyph = Glyph::EyeOff)
+                    text {{move || { locale.track(); t!("ui.stats.games_left_out", count = left_out_count.get()).into_owned() }}}
+                }
+            }
+            .into_view()
+        })
+    };
+    let reset_filters = move || {
+        narrowed.get().then(|| {
+            view! {
+                Tooltip {
+                    TooltipTrigger {
+                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, attr:data-testid = "stats-reset-filters", on:click = move |_| {
+                            editor.edit(|filters| *filters = StatsFilters::default());
+                        }) {
+                            AppIcon(glyph = Glyph::RotateCcw)
+                            text {{move || { locale.track(); t!("ui.stats.reset_filters").into_owned() }}}
+                        }
+                    }
+                    TooltipContent {{move || { locale.track(); t!("ui.stats.reset_filters_tooltip").into_owned() }}}
+                }
+            }
+            .into_view()
+        })
+    };
+
     view! {
         box(class = "wt-stats", {..attrs}) {
             row(class = "wt-stats__bar", attr:data-testid = "stats-filter-bar") {
@@ -773,6 +841,13 @@ pub fn StatsBody(
                 }
                 {mode_menu}
                 Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
+                row(class = "wt-stats__group") {
+                    ShipFilter(editor = editor, ships = ships)
+                    DateFilter(editor = editor)
+                }
+                {left_out_games}
+                {reset_filters}
+                Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
                 AddChartMenu(add = UnsyncCallback::new(add_chart))
                 box(class = "wt-stats__spacer") {}
                 {(scope == StatsScope::Sample).then(|| view! { text(class = "wt-stats__dim", attr:data-testid = "stats-sample-notice") {{t!("ui.stats.sample_notice").into_owned()}} }.into_view())}
@@ -804,6 +879,32 @@ pub fn StatsBody(
     }
 }
 
+/// Changes the tab's filters as the filter bar does: the change is the reader's, which a late
+/// load of the saved filters does not undo, and the session's are saved.
+#[derive(Clone, Copy)]
+struct FilterEditor {
+    filters: RwSignal<StatsFilters>,
+    session: Option<SessionStats>,
+    persists: bool,
+    services: Services,
+}
+
+impl FilterEditor {
+    fn filters(self) -> RwSignal<StatsFilters> {
+        self.filters
+    }
+
+    fn edit(self, change: impl FnOnce(&mut StatsFilters)) {
+        self.filters.update(change);
+        if let Some(session) = self.session {
+            session.filters_edited.set_value(true);
+        }
+        if self.persists {
+            save_filters(self.services, &self.filters.get_untracked());
+        }
+    }
+}
+
 /// What every panel the dock builds reads from.
 #[derive(Clone, Copy)]
 struct PanelSources {
@@ -812,7 +913,7 @@ struct PanelSources {
     games: Signal<Arc<[PerGameStat]>>,
     filtered: Signal<Arc<[PerGameStat]>>,
     per_ship: Signal<Arc<[PerGameStat]>>,
-    filters: RwSignal<StatsFilters>,
+    editor: FilterEditor,
     personal_rating: Signal<Option<Arc<PersonalRatingData>>>,
     session: Option<SessionStats>,
     clear_error: RwSignal<Option<String>>,
@@ -826,12 +927,13 @@ fn register_panels(dock: DockState, sources: PanelSources) {
         games,
         filtered,
         per_ship,
-        filters,
+        editor,
         personal_rating,
         session,
         clear_error,
         services,
     } = sources;
+    let filters = editor.filters();
     dock.register(
         PanelKind::new(OVERVIEW_KIND),
         PanelFactory::new(
@@ -849,6 +951,9 @@ fn register_panels(dock: DockState, sources: PanelSources) {
                         clear_ship(services, clear_error, ship);
                     }
                 });
+                let on_leave_out_ship = UnsyncCallback::new(move |ship: GameParamId| {
+                    editor.edit(|filters| filters.set_ship_excluded(ship, true))
+                });
                 // A session since the app opened is not saved, so it has nothing to forget.
                 let clearable =
                     Signal::derive_local(move || session.is_some() && services.session.scope() == SessionScope::Manual);
@@ -857,10 +962,18 @@ fn register_panels(dock: DockState, sources: PanelSources) {
                         games = per_ship,
                         personal_rating = personal_rating,
                         clearable = clearable,
-                        on_clear_ship = on_clear_ship
+                        on_clear_ship = on_clear_ship,
+                        on_leave_out_ship = on_leave_out_ship
                     )
                 })
             },
+        ),
+    );
+    dock.register(
+        PanelKind::new(MATCHES_KIND),
+        PanelFactory::new(
+            |_| t!("ui.stats.matches").into_owned(),
+            move |_| AnyView::new(view! { StatsMatches(games = games, editor = editor) }),
         ),
     );
     let slot_of = move |id: &PanelId| {
@@ -1060,6 +1173,26 @@ fn fail_load(charts_error: RwSignal<Option<ChartsError>>, reason: String) {
     charts_error.set(Some(ChartsError { reason, on_save: false }));
 }
 
+/// Puts the Matches panel beside Ships, or beside Overview when Ships is gone, unless a layout
+/// already holds it. A layout saved before the panel existed has no place for it. The tab in front
+/// stays in front.
+fn add_matches_panel(dock: DockState) {
+    let matches = PanelId::new(MATCHES_ID);
+    if dock.group_of(&matches).is_some() {
+        return;
+    }
+    let group = dock.group_of(&PanelId::new(SHIPS_ID)).or_else(|| dock.group_of(&PanelId::new(OVERVIEW_ID)));
+    let front = group.and_then(|group| dock.active_panel(group));
+    let target = group.map_or(DockTarget::Region(DockRegion::Center), DockTarget::Group);
+    let entry = PanelEntry { closable: false, ..PanelEntry::new(matches, PanelKind::new(MATCHES_KIND)) };
+    if let Err(err) = dock.add_panel(target, entry) {
+        tracing::warn!("stats: the Matches panel was not added: {err}");
+    }
+    if let Some(front) = front {
+        let _ = dock.activate(&front);
+    }
+}
+
 fn show_overview(dock: DockState) {
     if let Err(err) = dock.activate(&PanelId::new(OVERVIEW_ID)) {
         tracing::warn!("stats: the Overview panel was not brought forward: {err}");
@@ -1100,6 +1233,7 @@ fn restore_charts(
             if let Err(err) = dock.restore(&layout) {
                 tracing::warn!("stats: the saved chart layout was not restored: {err}");
             }
+            add_matches_panel(dock);
             if let Some(saved) = &saved {
                 // A chart closed in the other front end has no row; its panel goes too.
                 for &id in laid_out.iter().filter(|&&id| !saved.iter().any(|settings| settings.id == Some(id))) {
@@ -1234,6 +1368,9 @@ fn save_filters(services: Services, filters: &StatsFilters) {
     }
     services.settings.save(setting_keys::DIVISION_FILTER, &filters.division);
     services.settings.save(setting_keys::GAME_MODE_FILTER, &filters.game_modes);
+    services.settings.save(setting_keys::DATE_SPAN, &filters.dates);
+    services.settings.save(setting_keys::EXCLUDED_SHIPS, &filters.excluded_ships);
+    services.settings.save(setting_keys::EXCLUDED_GAMES, &filters.excluded_games);
 }
 
 /// Asks before forgetting every game in the saved session.

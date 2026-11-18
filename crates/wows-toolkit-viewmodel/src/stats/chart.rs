@@ -534,6 +534,7 @@ mod tests {
                 limit: GameLimit::Recent(25),
                 division: DivisionFilter::DivOnly,
                 game_modes: ["RandomBattle".to_string()].into_iter().collect(),
+                ..StatsFilters::default()
             }),
             selected_ships: vec![4288575440, 3541279184],
             selection_touched: true,

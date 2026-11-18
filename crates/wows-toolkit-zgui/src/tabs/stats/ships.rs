@@ -281,6 +281,7 @@ struct ShipsCx {
     /// The ship whose clear button has been pressed once and waits to be confirmed.
     armed: RwSignal<Option<GameParamId>, LocalStorage>,
     on_clear_ship: StoredValue<UnsyncCallback<GameParamId>, LocalStorage>,
+    on_leave_out_ship: StoredValue<UnsyncCallback<GameParamId>, LocalStorage>,
     toasts: Option<Toasts>,
     /// Read where the panel is built: an event handler has no context to find it in.
     clipboard: StoredValue<Option<Clipboards>, LocalStorage>,
@@ -311,6 +312,10 @@ impl ShipsCx {
         self.on_clear_ship.with_value(|on_clear| on_clear.run(ship));
     }
 
+    fn leave_out(self, ship: GameParamId) {
+        self.on_leave_out_ship.with_value(|leave_out| leave_out.run(ship));
+    }
+
     fn copy(self, text: String) {
         self.clipboard.with_value(|clipboard| {
             if let Some(clipboard) = clipboard {
@@ -324,13 +329,15 @@ impl ShipsCx {
 }
 
 /// `games` are the games the filters leave per ship, oldest first. `on_clear_ship` is offered
-/// when `clearable`.
+/// when `clearable`. `on_leave_out_ship` takes a ship out of the stats without forgetting its
+/// games.
 #[component]
 pub fn StatsShips(
     #[prop(into)] games: Signal<Arc<[PerGameStat]>>,
     #[prop(into)] personal_rating: Signal<Option<Arc<PersonalRatingData>>>,
     #[prop(into)] clearable: Signal<bool, LocalStorage>,
     on_clear_ship: UnsyncCallback<GameParamId>,
+    on_leave_out_ship: UnsyncCallback<GameParamId>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
@@ -356,6 +363,7 @@ pub fn StatsShips(
         expanded: RwSignal::new_local(HashSet::new()),
         armed: RwSignal::new_local(None),
         on_clear_ship: StoredValue::new_local(on_clear_ship),
+        on_leave_out_ship: StoredValue::new_local(on_leave_out_ship),
         toasts: Toasts::current(),
         clipboard: StoredValue::new_local(try_use_clipboard()),
         art: GameArt::new(),
@@ -511,7 +519,14 @@ fn ship_grid(
     ];
     let row_menu: RowMenu<GameParamId> = Rc::new(move |ship: GameParamId| {
         let summary = rows.with_untracked(|rows| rows.iter().find(|row| row.ship_id == ship).cloned());
-        summary.map(|summary| MenuItems::new(move || copy_items(cx, summary.clone())))
+        summary.map(|summary| {
+            MenuItems::new(move || {
+                view! {
+                    {copy_items(cx, summary.clone())}
+                    {leave_out_item(cx, &summary)}
+                }
+            })
+        })
     });
 
     AnyView::new(view! {
@@ -640,9 +655,34 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
     })
 }
 
-/// The copy menu and, for recorded games, the button that forgets the ship's games.
+/// The copy menu, the button that leaves the ship out of the stats and, for recorded games, the
+/// button that forgets the ship's games.
 fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
     let ship = row.ship_id;
+    let hint = t!("ui.stats.leave_out_ship_hint", ship = row.ship.as_str()).into_owned();
+    let tip = {
+        let hint = hint.clone();
+        move || hint.clone()
+    };
+    let leave_out = view! {
+        Tooltip {
+            TooltipTrigger {
+                Button(
+                    variant = ButtonVariant::Ghost,
+                    size = ButtonSize::IconSm,
+                    a11y:label = hint,
+                    attr:data-testid = format!("ship-leave-out-{ship}"),
+                    on:click = move |ev: &mut EventCx<'_, events::Click>| {
+                        ev.stop_propagation();
+                        cx.leave_out(ship);
+                    }
+                ) {
+                    AppIcon(glyph = Glyph::EyeOff)
+                }
+            }
+            TooltipContent {{tip.clone()}}
+        }
+    };
     let summary = Arc::clone(row);
     let copy = view! {
         Tooltip {
@@ -707,6 +747,7 @@ fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
     AnyView::new(view! {
         row(class = "wt-stats-ship__actions", on:click = |ev: &mut EventCx<'_, events::Click>| ev.stop_propagation()) {
             {copy}
+            {leave_out}
             {clear}
         }
     })
@@ -730,6 +771,20 @@ fn copy_items(cx: ShipsCx, summary: ShipRow) -> AnyView {
             on_select = UnsyncCallback::new(move |()| cx.copy(csv.clone()))
         ) {
             {t!("ui.stats.copy_csv").into_owned()}
+        }
+    })
+}
+
+fn leave_out_item(cx: ShipsCx, summary: &ShipRow) -> AnyView {
+    let ship = summary.ship_id;
+    let label = t!("ui.stats.leave_out_ship_hint", ship = summary.ship.as_str()).into_owned();
+
+    AnyView::new(view! {
+        MenuItem(
+            attr:data-testid = format!("leave-out-{ship}"),
+            on_select = UnsyncCallback::new(move |()| cx.leave_out(ship))
+        ) {
+            {label}
         }
     })
 }

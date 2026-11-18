@@ -20,8 +20,9 @@ pub async fn load_saved_games(pool: &SqlitePool) -> Result<Vec<PerGameStat>, sql
 }
 
 /// Reads the filter bar's saved state. Each miss falls back to that control's
-/// own default rather than to a sentinel: an unset limit means no limit, and
-/// an unset mode set means every mode.
+/// own default rather than to a sentinel: an unset limit means no limit, an
+/// unset mode set means every mode, and an unset date span or exclusion set
+/// narrows nothing.
 pub async fn load_filters(pool: &SqlitePool) -> StatsFilters {
     let limit_enabled = queries::get_setting::<bool>(pool, setting_keys::LIMIT_ENABLED).await.unwrap_or(false);
     let game_count = queries::get_setting::<usize>(pool, setting_keys::GAME_COUNT).await;
@@ -36,6 +37,9 @@ pub async fn load_filters(pool: &SqlitePool) -> StatsFilters {
         limit,
         division: queries::get_setting::<DivisionFilter>(pool, setting_keys::DIVISION_FILTER).await.unwrap_or_default(),
         game_modes: queries::get_setting(pool, setting_keys::GAME_MODE_FILTER).await.unwrap_or_default(),
+        dates: queries::get_setting(pool, setting_keys::DATE_SPAN).await.unwrap_or_default(),
+        excluded_ships: queries::get_setting(pool, setting_keys::EXCLUDED_SHIPS).await.unwrap_or_default(),
+        excluded_games: queries::get_setting(pool, setting_keys::EXCLUDED_GAMES).await.unwrap_or_default(),
     }
 }
 

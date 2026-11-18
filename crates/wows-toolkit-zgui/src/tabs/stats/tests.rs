@@ -224,8 +224,8 @@ fn DirectoryRoot(handles: Rc<RefCell<Option<DirectoryHandles>>>) -> impl IntoVie
     }
 }
 
-/// A directory's Stats body over the sample games, with Ranked ticked in the mode filter.
-fn open_directory_on_ranked() -> (HeadlessWindow, DirectoryHandles) {
+/// A directory's Stats body over the sample games.
+fn open_directory() -> (HeadlessWindow, DirectoryHandles) {
     let handles = Rc::new(RefCell::new(None));
     let mut window = {
         let handles = Rc::clone(&handles);
@@ -236,13 +236,91 @@ fn open_directory_on_ranked() -> (HeadlessWindow, DirectoryHandles) {
     };
     window.advance(Duration::from_millis(300));
     let handles = handles.borrow_mut().take().expect("the root publishes its handles");
+    (window, handles)
+}
 
+/// A directory's Stats body over the sample games, with Ranked ticked in the mode filter.
+fn open_directory_on_ranked() -> (HeadlessWindow, DirectoryHandles) {
+    let (mut window, handles) = open_directory();
     click(&mut window, "stats-mode-filter-trigger");
     click(&mut window, "stats-mode-ranked");
     window.press_key(NamedKey::Escape, Modifiers::NONE);
     window.advance(Duration::from_millis(300));
     assert!(window.by_test_id("stats-overview-summary").is_some(), "the ranked games are summed");
     (window, handles)
+}
+
+fn show_dock_tab(window: &mut HeadlessWindow, label: &str) {
+    let tab = window.by_role_and_label(Role::Tab, label).unwrap_or_else(|| panic!("the {label} tab is in the dock"));
+    window.click(tab).expect("the dock tab is clicked");
+    window.advance(Duration::from_millis(300));
+}
+
+#[test]
+fn a_left_out_ship_and_game_leave_every_panel_until_the_filters_reset() {
+    let (mut window, _handles) = open_directory();
+    let ships = |window: &HeadlessWindow| window.texts_by_class("wt-stats-ships__count");
+    let matches = |window: &HeadlessWindow| window.texts_by_class("wt-stats-matches__count");
+    let narrowed = |window: &HeadlessWindow, test_id: &str| {
+        let trigger = window.by_test_id(test_id).expect("the trigger is on screen");
+        window.all_by_attribute("data-narrowed", "true").contains(&trigger)
+    };
+    assert!(window.by_test_id("stats-reset-filters").is_none(), "nothing is filtered to begin with");
+
+    show_dock_tab(&mut window, &t!("ui.stats.ships"));
+    assert_eq!(ships(&window), ["3/3"]);
+    click(&mut window, &format!("ship-leave-out-{}", 4_288_675_536_u64));
+    assert_eq!(ships(&window), ["2/2"], "Yamato leaves the Ships panel");
+    assert!(narrowed(&window, "stats-ship-filter"), "the ship filter shows it narrows the games");
+
+    // Yamato's five games are no longer offered; the newest game, a Des Moines one, is.
+    show_dock_tab(&mut window, &t!("ui.stats.matches"));
+    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 9, total = 9, left_out = 0).into_owned()]);
+    assert!(window.by_test_id("stats-left-out-games").is_none());
+    click(&mut window, "stats-match-keep-13");
+    assert_eq!(checked(&mut window, "stats-match-keep-13"), Some(Toggled::False));
+    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 9, total = 9, left_out = 1).into_owned()]);
+    assert!(window.by_test_id("stats-left-out-games").is_some(), "the bar counts the game left out");
+
+    click(&mut window, "stats-reset-filters");
+    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 14, total = 14, left_out = 0).into_owned()]);
+    assert!(window.by_test_id("stats-left-out-games").is_none());
+    assert!(!narrowed(&window, "stats-ship-filter"));
+    assert!(window.by_test_id("stats-reset-filters").is_none(), "nothing is left to reset");
+}
+
+/// A left-out game that is no longer held is forgotten, so the bar does not count it.
+#[test]
+fn a_left_out_game_that_is_gone_is_forgotten() {
+    let (mut window, handles) = open_directory();
+    show_dock_tab(&mut window, &t!("ui.stats.matches"));
+    click(&mut window, "stats-match-keep-13");
+    assert!(window.by_test_id("stats-left-out-games").is_some());
+
+    let older: Vec<PerGameStat> = sample_games().into_iter().take(13).collect();
+    handles.games.set(Arc::from(older));
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("stats-left-out-games").is_none(), "nothing held is left out");
+    assert!(window.by_test_id("stats-reset-filters").is_none());
+}
+
+#[test]
+fn the_ship_filter_puts_a_left_out_ship_back() {
+    let (mut window, _handles) = open_directory();
+    let matches = |window: &HeadlessWindow| window.texts_by_class("wt-stats-matches__count");
+    show_dock_tab(&mut window, &t!("ui.stats.matches"));
+
+    click(&mut window, "stats-ship-filter");
+    let yamato = format!("stats-ship-filter-{}", 4_288_675_536_u64);
+    assert_eq!(checked(&mut window, &yamato), Some(Toggled::True), "every ship counts to begin with");
+    click(&mut window, &yamato);
+    assert_eq!(checked(&mut window, &yamato), Some(Toggled::False));
+    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 9, total = 9, left_out = 0).into_owned()]);
+
+    click(&mut window, "stats-ship-filter-none");
+    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 0, total = 0, left_out = 0).into_owned()]);
+    click(&mut window, "stats-ship-filter-all");
+    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 14, total = 14, left_out = 0).into_owned()]);
 }
 
 #[test]

@@ -1,0 +1,21 @@
+---
+source: crates/wows-toolkit-viewmodel/src/stats/mod.rs
+expression: json
+---
+{
+  "limit": "All",
+  "division": "All",
+  "game_modes": [],
+  "dates": {
+    "from": "2026-01-01",
+    "to": null
+  },
+  "excluded_ships": [
+    4288575440
+  ],
+  "excluded_games": {
+    "7": [
+      "01.01.2026 10:00:00"
+    ]
+  }
+}

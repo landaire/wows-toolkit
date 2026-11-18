@@ -29,7 +29,8 @@ use wows_toolkit_viewmodel::text_filter::FilterQuery;
 pub(super) struct ChartModel {
     /// The statistic drawn: the saved one, or damage when the saved one cannot be plotted.
     pub stat: ChartableStat,
-    /// The filters the chart is drawn under: its own, or the tab's, with the tab's game limit.
+    /// The filters the chart is drawn under: the tab's, with its own division and modes when it
+    /// has them.
     pub filters: StatsFilters,
     /// The ships the filtered games were played in, by name: what the ship picker lists.
     pub played: Vec<PlayedShip>,
@@ -134,10 +135,14 @@ pub(super) fn set_running(settings: &mut ChartSettings, running: bool, rated: bo
     settle_stat(settings, rated);
 }
 
-/// Takes the chart off the tab's filters, starting from what the tab says so the plot does not
-/// jump, or puts it back on them.
+/// Takes the chart off the tab's division and modes, starting from what the tab says so the plot
+/// does not jump, or puts it back on them.
 pub(super) fn set_own_filters(settings: &mut ChartSettings, own: bool, tab: &StatsFilters) {
-    settings.own_filters = own.then(|| tab.clone());
+    settings.own_filters = own.then(|| StatsFilters {
+        division: tab.division,
+        game_modes: tab.game_modes.clone(),
+        ..StatsFilters::default()
+    });
 }
 
 pub(super) fn set_own_division(settings: &mut ChartSettings, division: DivisionFilter) {
@@ -208,9 +213,14 @@ fn shown_stat(settings: &ChartSettings, rated: bool) -> ChartableStat {
     settings.stat
 }
 
+/// A chart's own filters choose only the division and modes; the limit, the date span and the
+/// ships and games left out are the tab's.
 fn effective_filters(settings: &ChartSettings, tab: &StatsFilters) -> StatsFilters {
-    let mut filters = settings.own_filters.clone().unwrap_or_else(|| tab.clone());
-    filters.limit = tab.limit;
+    let mut filters = tab.clone();
+    if let Some(own) = &settings.own_filters {
+        filters.division = own.division;
+        filters.game_modes.clone_from(&own.game_modes);
+    }
 
     filters
 }
@@ -312,13 +322,18 @@ mod tests {
     }
 
     #[test]
-    fn the_tab_limit_applies_per_ship_even_under_an_override() {
-        let tab = StatsFilters { limit: GameLimit::Recent(1), ..StatsFilters::default() };
+    fn the_tab_limit_and_left_out_ships_apply_even_under_an_override() {
+        let tab = StatsFilters {
+            limit: GameLimit::Recent(1),
+            excluded_ships: [GameParamId::from(2_u64)].into_iter().collect(),
+            ..StatsFilters::default()
+        };
         let settings = ChartSettings { own_filters: Some(StatsFilters::default()), ..ChartSettings::default() };
 
         let model = ChartModel::new(&settings, &session(), &tab, None);
 
         assert_eq!(model.filters.limit, GameLimit::Recent(1));
+        assert_eq!(model.played.iter().map(|ship| ship.name.as_str()).collect::<Vec<_>>(), ["Yamato"]);
         assert!(model.series.iter().all(|series| series.points.len() == 1), "one game per ship");
     }
 

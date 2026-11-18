@@ -197,7 +197,7 @@ fn PanelRoot(
                     {match panel {
                         Panel::Overview => AnyView::new(view! { StatsOverview(games = games, personal_rating = rating) }),
                         Panel::Ships { clearable } => AnyView::new(view! {
-                            StatsShips(games = games, personal_rating = rating, clearable = clearable, on_clear_ship = on_clear_ship)
+                            StatsShips(games = games, personal_rating = rating, clearable = clearable, on_clear_ship = on_clear_ship, on_leave_out_ship = UnsyncCallback::new(|_: GameParamId| {}))
                         }),
                     }}
                 }

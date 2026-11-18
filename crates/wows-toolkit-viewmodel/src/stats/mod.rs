@@ -339,6 +339,9 @@ pub mod setting_keys {
     pub const DIVISION_FILTER: &str = "session_stats_division_filter";
     pub const GAME_MODE_FILTER: &str = "session_stats_game_mode_filter";
     pub const SESSION_SCOPE: &str = "session_stats_scope";
+    pub const DATE_SPAN: &str = "session_stats_date_span";
+    pub const EXCLUDED_SHIPS: &str = "session_stats_excluded_ships";
+    pub const EXCLUDED_GAMES: &str = "session_stats_excluded_games";
 }
 
 /// How many recent games the tab looks at.
@@ -352,7 +355,106 @@ pub enum GameLimit {
     Recent(usize),
 }
 
+/// The calendar day a battle started on, in the replay's local time.
+///
+/// Stored as `YYYY-MM-DD`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GameDay(pub jiff::civil::Date);
+
+impl Serialize for GameDay {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for GameDay {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map(GameDay).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The days games are kept from. Both ends are inclusive, and an absent end leaves that side open.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DateSpan {
+    pub from: Option<GameDay>,
+    pub to: Option<GameDay>,
+}
+
+impl DateSpan {
+    pub fn is_open(self) -> bool {
+        self.from.is_none() && self.to.is_none()
+    }
+
+    /// A game whose time does not read as a date is outside every bounded span, since nothing
+    /// places it inside.
+    fn keeps(self, game: &PerGameStat) -> bool {
+        if self.is_open() {
+            return true;
+        }
+        let Some(day) = game.day() else { return false };
+        self.from.is_none_or(|from| from <= day) && self.to.is_none_or(|to| day <= to)
+    }
+}
+
+impl PerGameStat {
+    /// The day the battle started, when `game_time` reads as a time.
+    pub fn day(&self) -> Option<GameDay> {
+        session::battle_start(&self.game_time).map(|start| GameDay(start.date()))
+    }
+}
+
+/// Games the reader left out one at a time.
+///
+/// Keyed by recording player, then by the replay's `dateTime`: the pair the stored rows dedupe a
+/// battle on.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ExcludedGames(std::collections::BTreeMap<i64, std::collections::BTreeSet<String>>);
+
+impl ExcludedGames {
+    pub fn contains(&self, game: &PerGameStat) -> bool {
+        self.0.get(&game.player_id).is_some_and(|times| times.contains(game.game_time.as_str()))
+    }
+
+    pub fn set(&mut self, game: &PerGameStat, excluded: bool) {
+        if excluded {
+            self.0.entry(game.player_id).or_default().insert(game.game_time.clone());
+            return;
+        }
+        let Some(times) = self.0.get_mut(&game.player_id) else { return };
+        times.remove(game.game_time.as_str());
+        if times.is_empty() {
+            self.0.remove(&game.player_id);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.values().map(std::collections::BTreeSet::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// Forgets the games `games` does not hold.
+    pub fn retain_present(&mut self, games: &[PerGameStat]) {
+        let mut present = Self::default();
+        for game in games.iter().filter(|game| self.contains(game)) {
+            present.set(game, true);
+        }
+        *self = present;
+    }
+}
+
 /// Everything the shared filter bar controls.
+///
+/// The fields after `game_modes` default when absent, so settings rows written before them still
+/// read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatsFilters {
     pub limit: GameLimit,
@@ -360,16 +462,43 @@ pub struct StatsFilters {
     /// Match groups to keep. Empty means every group, matching the egui app's
     /// "All" state rather than meaning "none".
     pub game_modes: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    pub dates: DateSpan,
+    #[serde(default)]
+    pub excluded_ships: std::collections::BTreeSet<GameParamId>,
+    #[serde(default)]
+    pub excluded_games: ExcludedGames,
 }
 
 impl StatsFilters {
+    /// Whether every filter but the games left out one at a time keeps `game`: what a list for
+    /// picking games offers. No limit applies, so a game the limit drops can still be put back.
+    pub fn admits(&self, game: &PerGameStat) -> bool {
+        self.division.keeps(game)
+            && (self.game_modes.is_empty() || self.game_modes.contains(&game.match_group))
+            && self.dates.keeps(game)
+            && !self.excluded_ships.contains(&game.ship_id)
+    }
+
     fn keeps(&self, game: &PerGameStat) -> bool {
-        self.division.keeps(game) && (self.game_modes.is_empty() || self.game_modes.contains(&game.match_group))
+        self.admits(game) && !self.excluded_games.contains(game)
+    }
+
+    /// Ticks `ship` back in, or leaves it out.
+    pub fn set_ship_excluded(&mut self, ship: GameParamId, excluded: bool) {
+        if excluded {
+            self.excluded_ships.insert(ship);
+        } else {
+            self.excluded_ships.remove(&ship);
+        }
     }
 }
 
 /// Applies the filter bar. `games` is expected in `sort_key` order, which is
 /// how the database returns it, so the recency limit takes from the end.
+///
+/// Games left out by hand are gone before the limit counts, so "last 25" is 25 games the reader
+/// kept.
 pub fn filter_games<'a>(games: &'a [PerGameStat], filters: &StatsFilters) -> Vec<&'a PerGameStat> {
     let kept: Vec<&PerGameStat> = games.iter().filter(|game| filters.keeps(game)).collect();
     match filters.limit {
@@ -414,6 +543,17 @@ pub fn filter_games_per_ship<'a>(games: &'a [PerGameStat], filters: &StatsFilter
 /// Every match group present in `games`, for the filter bar's mode buttons.
 pub fn all_match_groups(games: &[PerGameStat]) -> std::collections::BTreeSet<String> {
     games.iter().map(|game| game.match_group.clone()).collect()
+}
+
+/// Every ship played in `games`, by name, for the filter bar's ship menu.
+pub fn all_ships(games: &[PerGameStat]) -> Vec<(GameParamId, String)> {
+    let mut ships: std::collections::BTreeMap<GameParamId, &str> = std::collections::BTreeMap::new();
+    for game in games {
+        ships.entry(game.ship_id).or_insert(&game.ship_name);
+    }
+    let mut ships: Vec<(GameParamId, String)> = ships.into_iter().map(|(ship, name)| (ship, name.to_owned())).collect();
+    ships.sort_by(|left, right| left.1.cmp(&right.1));
+    ships
 }
 
 /// Aggregate over a set of games, as the per-ship table row shows it.
@@ -940,6 +1080,109 @@ mod tests {
         let kept = filter_games(&games, &filters);
         assert_eq!(kept.len(), 2, "both solo games survive the limit");
         assert!(kept.iter().all(|game| !game.is_div));
+    }
+
+    fn played_on(ship: u64, game_time: &str) -> PerGameStat {
+        PerGameStat {
+            ship_id: ship.into(),
+            game_time: game_time.to_string(),
+            sort_key: sortable_game_time(game_time),
+            ..game("Ship", "", 1_000, 0, true, false, "pvp")
+        }
+    }
+
+    fn day(text: &str) -> Option<GameDay> {
+        Some(GameDay(text.parse().expect("a test date")))
+    }
+
+    #[test]
+    fn a_date_span_keeps_both_ends_and_drops_undated_games() {
+        let games = [
+            played_on(1, "31.12.2025 23:59:59"),
+            played_on(1, "01.01.2026 00:00:00"),
+            played_on(1, "05.01.2026 23:59:59"),
+            played_on(1, "06.01.2026 00:00:00"),
+            played_on(1, "not a time"),
+        ];
+        let times = |filters: &StatsFilters| -> Vec<String> {
+            filter_games(&games, filters).iter().map(|game| game.game_time.clone()).collect()
+        };
+
+        let span =
+            StatsFilters { dates: DateSpan { from: day("2026-01-01"), to: day("2026-01-05") }, ..Default::default() };
+        assert_eq!(times(&span), ["01.01.2026 00:00:00", "05.01.2026 23:59:59"]);
+
+        let since = StatsFilters { dates: DateSpan { from: day("2026-01-06"), to: None }, ..Default::default() };
+        assert_eq!(times(&since), ["06.01.2026 00:00:00"]);
+
+        let until = StatsFilters { dates: DateSpan { from: None, to: day("2025-12-31") }, ..Default::default() };
+        assert_eq!(times(&until), ["31.12.2025 23:59:59"]);
+
+        assert_eq!(times(&StatsFilters::default()).len(), 5, "an open span keeps undated games too");
+    }
+
+    #[test]
+    fn left_out_games_and_ships_are_gone_before_the_limit_counts() {
+        let games = [
+            played_on(1, "01.01.2026 10:00:00"),
+            played_on(2, "02.01.2026 10:00:00"),
+            played_on(1, "03.01.2026 10:00:00"),
+            played_on(1, "04.01.2026 10:00:00"),
+        ];
+        let mut filters = StatsFilters { limit: GameLimit::Recent(2), ..Default::default() };
+        filters.excluded_games.set(&games[3], true);
+        filters.set_ship_excluded(2u64.into(), true);
+
+        let kept: Vec<&str> = filter_games(&games, &filters).iter().map(|game| game.game_time.as_str()).collect();
+        assert_eq!(kept, ["01.01.2026 10:00:00", "03.01.2026 10:00:00"]);
+        assert_eq!(filter_games_per_ship(&games, &filters).len(), 2);
+
+        // The picking list still offers the left-out game, and no game of the left-out ship.
+        let pickable: Vec<&str> =
+            games.iter().filter(|game| filters.admits(game)).map(|game| game.game_time.as_str()).collect();
+        assert_eq!(pickable, ["01.01.2026 10:00:00", "03.01.2026 10:00:00", "04.01.2026 10:00:00"]);
+
+        // Putting both back leaves no trace, so the filter bar reads as unfiltered again.
+        filters.excluded_games.set(&games[3], false);
+        filters.set_ship_excluded(2u64.into(), false);
+        assert_eq!(filters, StatsFilters { limit: GameLimit::Recent(2), ..Default::default() });
+    }
+
+    #[test]
+    fn a_left_out_game_is_one_player_s_battle_at_one_time() {
+        let mine = played_on(1, "01.01.2026 10:00:00");
+        let other_player = PerGameStat { player_id: 8, ..mine.clone() };
+        let later = played_on(1, "01.01.2026 10:00:01");
+        let mut excluded = ExcludedGames::default();
+        excluded.set(&mine, true);
+
+        assert!(excluded.contains(&mine));
+        assert!(!excluded.contains(&other_player));
+        assert!(!excluded.contains(&later));
+
+        excluded.set(&later, true);
+        excluded.retain_present(std::slice::from_ref(&later));
+        assert_eq!(excluded.len(), 1, "a game no longer recorded is forgotten");
+        assert!(excluded.contains(&later));
+    }
+
+    #[test]
+    fn saved_filters_serialize_and_older_rows_read_on_the_defaults() {
+        let games = [played_on(1, "01.01.2026 10:00:00")];
+        let mut filters = StatsFilters {
+            dates: DateSpan { from: day("2026-01-01"), to: None },
+            excluded_ships: [GameParamId::from(4_288_575_440_u64)].into_iter().collect(),
+            ..Default::default()
+        };
+        filters.excluded_games.set(&games[0], true);
+
+        let json = serde_json::to_string_pretty(&filters).expect("the filters serialize");
+        insta::assert_snapshot!(json);
+        assert_eq!(serde_json::from_str::<StatsFilters>(&json).expect("and read back"), filters);
+
+        let older: StatsFilters = serde_json::from_str(r#"{"limit":"All","division":"All","game_modes":[]}"#)
+            .expect("a row written before the date span and exclusions reads");
+        assert_eq!(older, StatsFilters::default());
     }
 
     #[test]

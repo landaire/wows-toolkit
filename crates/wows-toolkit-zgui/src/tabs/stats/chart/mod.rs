@@ -14,7 +14,6 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use landaire_ui::EscapeClears;
-use landaire_ui::MarkedTextProps;
 use landaire_ui::OverlaySurfaceProps;
 use landaire_ui::PointerTipProps;
 use landaire_ui::Toasts;
@@ -53,7 +52,6 @@ use zgui::geom::CssPx;
 use zgui::geom::Point;
 use zgui::prelude::Fonts;
 use zgui::prelude::PointerButton;
-use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
@@ -82,10 +80,7 @@ use zgui::vocab::ScrollDelta;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
-use zgui_ui::CheckboxProps;
-use zgui_ui::Checked;
 use zgui_ui::InputProps;
-use zgui_ui::LabelProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
@@ -104,7 +99,7 @@ use crate::tabs::stats::chart::model::ChartModel;
 use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::PlotElement;
 use crate::tabs::stats::chart::plot::ThemeColors;
-use crate::text_marks::Marks;
+use crate::tabs::stats::check_row::CheckRowProps;
 use crate::text_marks::marks;
 
 const SHEET: &str = "wt-stats-chart";
@@ -976,35 +971,6 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
                 }
             }
             TooltipContent {{tr(locale, || t!("ui.stats.filter_ships"))}}
-        }
-    }
-}
-
-/// A checkbox and the words naming it, marked where `marks` says, either of which toggles it.
-#[component]
-fn CheckRow(
-    #[prop(into)] checked: Signal<bool, LocalStorage>,
-    #[prop(into, default = Signal::stored_local(false))] disabled: Signal<bool, LocalStorage>,
-    #[prop(into)] label: Signal<String, LocalStorage>,
-    #[prop(into, default = Signal::stored_local(Marks::default()))] marks: Signal<Marks, LocalStorage>,
-    change: UnsyncCallback<bool>,
-    #[prop(into)] test_id: String,
-) -> impl IntoView {
-    let name = NodeRef::new();
-    let control = NodeRef::new();
-    let binding = Binding::controlled(
-        Signal::derive_local(move || if checked.get() { Checked::Yes } else { Checked::No }),
-        move |next: Checked| change.run(next == Checked::Yes),
-    );
-
-    view! {
-        row(class = "wt-chart__row") {
-            Checkbox(node_ref = control, checked = binding, disabled = disabled, labelled_by = name, attr:data-testid = test_id)
-            Label(node_ref = name, control = control, on:click = move |_| {
-                if !disabled.get_untracked() {
-                    change.run(!checked.get_untracked());
-                }
-            }) {{move || view! { MarkedText(text = label.get(), ranges = marks.get()) }}}
         }
     }
 }
