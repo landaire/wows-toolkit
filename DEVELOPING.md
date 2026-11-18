@@ -197,7 +197,7 @@ default_allow_cache_upload = true
 
 Buck reads every file in that directory, so renaming one does not disable it; move it out instead. There is no remote execution, only the cache: the platform sets `remote_enabled = False`.
 
-CI uses the shared cache from [landaire/build-cache](https://github.com/landaire/build-cache). On pushes and manual runs, each Linux, macOS and Windows job joins the tailnet for its duration and points Buck2 at the cache. The repository variables `TS_CLIENT_ID` and `TS_AUDIENCE` name the Tailscale identity it joins with. Any job that joins can write to the cache, so pull requests build without it. So does a job that cannot reach the cache. The hermetic toolchain is what makes the hits valid: an action's key names the toolchain by its store path.
+CI uses the shared cache from [landaire/build-cache](https://github.com/landaire/build-cache). Each Linux, macOS and Windows job joins the tailnet for its duration and points Buck2 at the cache. Pushes and manual runs read and write it, with the Tailscale identity named by the repository variables `TS_CLIENT_ID` and `TS_AUDIENCE`. Pull requests only read it, with the identity named by `TS_PR_CLIENT_ID` and `TS_PR_AUDIENCE`. Pull requests from forks, and jobs that cannot reach the cache, build without it. The hermetic toolchain is what makes the hits valid: an action's key names the toolchain by its store path.
 
 ### Hermeticity
 

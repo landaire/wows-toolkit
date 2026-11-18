@@ -99,10 +99,12 @@ jobs:
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
 
-      - uses: landaire/build-cache/.github/actions/buck-cache@e09a7ffe91cd628fc96f7fa169040d97cf0c5d47
+      - uses: landaire/build-cache/.github/actions/buck-cache@8ebcdd82280718d26191a9f5d81fdc88be66dcb3
         with:
           client-id: ${{ vars.TS_CLIENT_ID }}
           audience: ${{ vars.TS_AUDIENCE }}
+          pr-client-id: ${{ vars.TS_PR_CLIENT_ID }}
+          pr-audience: ${{ vars.TS_PR_AUDIENCE }}
 
       - name: Build the affected aliases
         if: matrix.phase == 'checks'
@@ -177,10 +179,12 @@ jobs:
       - name: Bootstrap Buck2 and the toolchain
         run: ./bootstrap.sh
 
-      - uses: landaire/build-cache/.github/actions/buck-cache@e09a7ffe91cd628fc96f7fa169040d97cf0c5d47
+      - uses: landaire/build-cache/.github/actions/buck-cache@8ebcdd82280718d26191a9f5d81fdc88be66dcb3
         with:
           client-id: ${{ vars.TS_CLIENT_ID }}
           audience: ${{ vars.TS_AUDIENCE }}
+          pr-client-id: ${{ vars.TS_PR_CLIENT_ID }}
+          pr-audience: ${{ vars.TS_PR_AUDIENCE }}
 
       # One mode only: macOS runner minutes bill at a multiple of Linux, and the
       # graph itself is already covered there in both modes. The wasm sites are
@@ -221,10 +225,12 @@ jobs:
 
       - uses: ./.github/actions/provision-windows-toolchain
 
-      - uses: landaire/build-cache/.github/actions/buck-cache@e09a7ffe91cd628fc96f7fa169040d97cf0c5d47
+      - uses: landaire/build-cache/.github/actions/buck-cache@8ebcdd82280718d26191a9f5d81fdc88be66dcb3
         with:
           client-id: ${{ vars.TS_CLIENT_ID }}
           audience: ${{ vars.TS_AUDIENCE }}
+          pr-client-id: ${{ vars.TS_PR_CLIENT_ID }}
+          pr-audience: ${{ vars.TS_PR_AUDIENCE }}
           buckconfig: C:/w/.buckconfig.local
 
       - name: Build the affected aliases
