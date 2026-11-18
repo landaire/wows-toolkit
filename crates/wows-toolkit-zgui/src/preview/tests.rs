@@ -13,7 +13,6 @@ use futures::channel::mpsc;
 use futures::channel::oneshot;
 use image::Rgb;
 use image::RgbImage;
-use landaire_ui::HeadlessError;
 use landaire_ui::Scheme;
 use landaire_ui::ThemeChoice;
 use landaire_ui::ThemeRootProps;
@@ -490,7 +489,7 @@ fn open_gallery(baker: &Rc<ScriptedBaker>) -> Option<(HeadlessWindow, Handles, F
     });
     let window = match opened {
         Ok(window) => window,
-        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+        Err(err) if err.is_gpu_unavailable() => {
             eprintln!("skipped: no graphics adapter to draw on");
             return None;
         }

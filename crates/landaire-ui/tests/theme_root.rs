@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use landaire_ui::CollapseButtonProps;
-use landaire_ui::HeadlessError;
 use landaire_ui::MotionPreference;
 use landaire_ui::PanelSide;
 use landaire_ui::Rgb;
@@ -141,7 +140,7 @@ fn a_held_button_is_drawn_a_step_darker_than_under_the_pointer() {
     });
     let mut window = match opened {
         Ok(window) => window,
-        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+        Err(err) if err.is_gpu_unavailable() => {
             eprintln!("skipped: no graphics adapter to compose on");
             return;
         }

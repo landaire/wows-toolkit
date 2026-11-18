@@ -161,6 +161,7 @@ impl HeadlessWindow {
             .into_handler(view)
             .map_err(|source| HeadlessError::App { source })?
             .into_runtime();
+        let failure = runtime.failure();
 
         let platform = Headless::new();
         platform.set_color_scheme(options.desktop.map(|appearance| match appearance {
@@ -169,7 +170,9 @@ impl HeadlessWindow {
         }));
         let mut harness = Harness::over(platform, runtime);
         if harness.app().windows().is_empty() {
-            return Err(HeadlessError::NoWindow);
+            return Err(failure
+                .take()
+                .map_or(HeadlessError::NoWindow, |source| HeadlessError::WindowNotOpened { source }));
         }
 
         let scale = options.scale;

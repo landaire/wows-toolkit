@@ -13,7 +13,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 use landaire_ui::Appearance;
-use landaire_ui::HeadlessError;
 use landaire_ui::Scheme;
 use landaire_ui::ThemeChoice;
 use landaire_ui::ThemeRootProps;
@@ -201,7 +200,7 @@ fn open_in(options: HeadlessOptions, place: ViewBox) -> Option<(HeadlessWindow, 
     });
     match opened {
         Ok(window) => Some((window, handed.get().expect("the harness hands its state out"))),
-        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+        Err(err) if err.is_gpu_unavailable() => {
             eprintln!("skipped: no graphics adapter to draw the viewport on");
             None
         }
@@ -725,7 +724,7 @@ fn open_log(shots: usize) -> Option<(HeadlessWindow, ArmorViewportState)> {
     });
     let mut window = match opened {
         Ok(window) => window,
-        Err(HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }) => {
+        Err(err) if err.is_gpu_unavailable() => {
             eprintln!("skipped: no graphics adapter to draw the viewport on");
             return None;
         }

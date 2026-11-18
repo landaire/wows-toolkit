@@ -126,10 +126,7 @@ fn open(
     });
     let mut window = match opened {
         Ok(window) => window,
-        Err(
-            landaire_ui::HeadlessError::NoWindow
-            | landaire_ui::HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) },
-        ) => {
+        Err(err) if err.is_gpu_unavailable() => {
             eprintln!("skipped: no graphics adapter to draw on");
             return None;
         }

@@ -448,7 +448,6 @@ mod tests {
 
     use image::Rgb;
     use image::RgbImage;
-    use landaire_ui::HeadlessError;
     use landaire_ui::test_support::Drawing;
     use landaire_ui::test_support::HeadlessOptions;
     use landaire_ui::test_support::HeadlessWindow;
@@ -631,9 +630,7 @@ mod tests {
         });
         let mut window = match opened {
             Ok(window) => window,
-            Err(
-                HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) },
-            ) => {
+            Err(err) if err.is_gpu_unavailable() => {
                 eprintln!("skipped: no graphics adapter to compose on");
                 return;
             }

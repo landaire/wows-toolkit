@@ -513,10 +513,7 @@ pub(crate) mod testing {
 
     /// Whether `err` says the machine has no graphics device to draw on.
     pub(crate) fn no_device(err: &HeadlessError) -> bool {
-        matches!(
-            err,
-            HeadlessError::NoWindow | HeadlessError::App { source: zgui::runtime::AppError::GpuUnavailable(_) }
-        )
+        err.is_gpu_unavailable()
     }
 
     /// Panics unless the element with `class` shows [`UPRIGHT`] pointing right: lit towards its

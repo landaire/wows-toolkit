@@ -73,6 +73,11 @@ pub enum HeadlessError {
     #[error("the application opened no window")]
     NoWindow,
 
+    /// The runtime tried to open the window and recorded why it could not, such as no graphics
+    /// device for a window drawn on one.
+    #[error("the window could not be opened: {source}")]
+    WindowNotOpened { source: zgui::runtime::AppError },
+
     #[error("element {element:?} produced no box")]
     NoBox { element: zgui::view::NodeId },
 
@@ -87,4 +92,13 @@ pub enum HeadlessError {
 
     #[error("could not write {path:?} as a PNG")]
     Encode { path: std::path::PathBuf, source: image::ImageError },
+}
+
+#[cfg(feature = "test-support")]
+impl HeadlessError {
+    /// Whether the window could not open because no graphics device could draw it, which a test
+    /// drawing on the device skips rather than fails on a machine without one.
+    pub fn is_gpu_unavailable(&self) -> bool {
+        matches!(self, Self::WindowNotOpened { source: zgui::runtime::AppError::GpuUnavailable(_) })
+    }
 }
