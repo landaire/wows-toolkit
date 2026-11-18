@@ -23,6 +23,10 @@ jobs:
       frontend: ${{ steps.desktop.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The previous release tag and its CHANGELOG.md are what a pre-release
+          # without its own notes is described against.
+          fetch-depth: 0
 
       - name: Select desktop frontend
         id: desktop
@@ -50,8 +54,9 @@ jobs:
       - name: Extract release notes for this tag
         id: notes
         # Pull the RELEASE_NOTES.md section for the tag (## x.y.z - <date> ...
-        # up to the next ## heading) and use it as the release body. Fall back
-        # to auto-generated notes if the tag has no release-notes entry.
+        # up to the next ## heading) and use it as the release body. A
+        # pre-release without one lists the CHANGELOG.md entries added since the
+        # previous release tag. Fall back to auto-generated notes otherwise.
         run: |
           version="${GITHUB_REF_NAME#v}"
           # A heading is "## <version>" alone or followed by a date. Requiring
@@ -69,6 +74,9 @@ jobs:
           # which is the section that exists while the suffixed one does not.
           if ! grep -q '[^[:space:]]' release_notes.md; then
             extract "${version%%-*}" > release_notes.md
+          fi
+          if ! grep -q '[^[:space:]]' release_notes.md && [[ "$version" == *-* && "$GITHUB_REF" == refs/tags/* ]]; then
+            python3 scripts/changelog_since.py "$GITHUB_REF_NAME" > release_notes.md
           fi
           if grep -q '[^[:space:]]' release_notes.md; then
             echo "found=true" >> "$GITHUB_OUTPUT"

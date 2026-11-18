@@ -175,6 +175,12 @@ MSI ProductVersion uses the numeric core, such as `1.1.0`. Installers with the
 same numeric version replace each other in either direction, including beta
 and stable builds.
 
+The release body is the tag's section of `RELEASE_NOTES.md`, such as
+`## 1.1.0-beta5`. A pre-release without one uses the `## 1.1.0` section, and
+without that the `CHANGELOG.md` entries added since the release before it by
+version (`scripts/changelog_since.py`). Write the section before tagging a beta
+whose changes players should read about.
+
 For a local Buck beta installer, use
 `buck2 build -m release -c release.frontend=zgui toolchains//windows:wows_toolkit_msi`.
 The Cargo installer script, `scripts/build-msi.ps1`, selects the frontend from
