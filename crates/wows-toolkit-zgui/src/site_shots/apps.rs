@@ -214,6 +214,7 @@ fn site_shots_tracker() {
 fn site_shots_unpacker() {
     for (appearance, suffix) in APPEARANCES {
         let mut window = open_site_shell(appearance);
+        crate::interaction_tests::shell().apply_wows_dir(env_path("WT_WOWS_DIR").to_string_lossy().into_owned());
         press(&mut window, "unpacker");
         let model = crate::tabs::unpacker::built_model().expect("the Unpacker tab was built");
         let mut vfs = None;
