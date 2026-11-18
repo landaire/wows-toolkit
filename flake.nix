@@ -266,15 +266,15 @@
               # rav1e (AV1 CPU encoder) needs nasm to build hand-tuned x86 asm.
               nasm
 
-              # Development tools
+              # Development tools. reindeer is left to `nu scripts/dev.nu
+              # install-reindeer`: the revision nixpkgs packages rewrites much of
+              # third-party/rust/BUCK.
               depotdownloader
-              mise
               cargo-edit
               cargo-local-registry
               # THIRD_PARTY_NOTICES.txt. scripts/update_third_party_notices.nu
               # requires the version this nixpkgs revision provides.
               cargo-about
-              reindeer
               direnv
               nushell
 

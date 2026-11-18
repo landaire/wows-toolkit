@@ -10,7 +10,7 @@
 # Buck. cargo-about supplies the resolution and the license texts.
 #
 # Needs cargo-about at CARGO_ABOUT_VERSION: `nix develop` provides the one
-# flake.lock pins, and `mise run install-cargo-about` installs the same one
+# flake.lock pins, and `nu scripts/dev.nu install-cargo-about` installs the same one
 # elsewhere. Needs the network unless every crate source is already fetched.
 #
 # `--check` fails when the committed file differs from what this generates.
@@ -29,7 +29,7 @@ const APACHE_TEXT = "third-party/licenses/texts/apache-2.0.txt"
 def main [--check] {
     let version = (^cargo-about --version | str trim)
     if $version != $"cargo-about ($CARGO_ABOUT_VERSION)" {
-        error make {msg: $"Expected cargo-about ($CARGO_ABOUT_VERSION), found '($version)'. Run inside `nix develop`, or `mise run install-cargo-about`."}
+        error make {msg: $"Expected cargo-about ($CARGO_ABOUT_VERSION), found '($version)'. Run inside `nix develop`, or `nu scripts/dev.nu install-cargo-about`."}
     }
 
     let config = (open ($CONFIG_DIR | path join "notices.toml"))

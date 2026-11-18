@@ -89,7 +89,7 @@ check_host_tools() {
     have git || missing_required git "required. Buck2 fetches git dependencies with it."
 
     have reindeer ||
-        missing_optional reindeer "regenerating third-party/rust/BUCK after a dependency change needs it. Run mise run install-reindeer."
+        missing_optional reindeer "regenerating third-party/rust/BUCK after a dependency change needs it. Run nu scripts/dev.nu install-reindeer."
     have cargo ||
         missing_optional cargo "the wasm32 check of wt-web needs it. The Nix devShell provides it."
 

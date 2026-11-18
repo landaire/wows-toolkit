@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-# reindeer and cargo come from PATH: reindeer from `mise run install-reindeer`,
+# reindeer and cargo come from PATH: reindeer from `nu scripts/dev.nu install-reindeer`,
 # cargo from the rustup shim. Going through `nix develop` restricted this to
 # Linux and macOS, so Windows had to run it under WSL.
 #

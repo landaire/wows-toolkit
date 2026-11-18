@@ -11,18 +11,21 @@ Everything runs natively; Nix and WSL are not needed. You need:
   `ring` hardcodes clang when targeting wasm32 and `cc` has no MSVC fallback
   there, so `cargo check -p wt-web --target wasm32-unknown-unknown` cannot run
   without it. Standalone LLVM (`winget install -e --id LLVM.LLVM`) works too.
-- [mise](https://mise.jdx.dev/), then `mise run setup`. That downloads the
-  NASM pinned by `toolchains/windows/toolchain-manifest.json` (rav1e builds its
-  AV1 SIMD with it), locates clang and llvm-ar, and writes `.tooling/dev.env`
-  with the `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown` that
-  mise loads into every shell.
+- [Nushell](https://www.nushell.sh/), which runs the repository's scripts.
+  `scripts/dev.nu` holds the commands you run often; run it with no arguments
+  to list them.
+- `nu scripts/dev.nu setup`. That downloads the NASM pinned by
+  `toolchains/windows/toolchain-manifest.json` (rav1e builds its AV1 SIMD with
+  it), locates clang and llvm-ar, and writes `.tooling/dev.env` with the
+  `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown` that the
+  `scripts/dev.nu` Cargo commands set.
 - Buck needs nothing installed by hand: `bootstrap.ps1` fetches DotSlash and
   the pinned Buck2 (see [Setup](#setup)).
-- `mise run install-reindeer`, only if you need to regenerate
+- `nu scripts/dev.nu install-reindeer`, only if you need to regenerate
   `third-party/rust/BUCK` after changing a dependency.
 
-`mise run setup` exits non-zero and tells you what to install if anything is
-missing, so run it first and again after installing.
+`nu scripts/dev.nu setup` exits non-zero and tells you what to install if
+anything is missing, so run it first and again after installing.
 
 ### Recommended on Linux and macOS: Nix
 
@@ -83,7 +86,7 @@ powershell -ExecutionPolicy Bypass -File bootstrap.ps1    # Windows, from an ele
 
 It installs [DotSlash](https://dotslash-cli.com) into `.tools`, fetches the Buck2 release `toolchains/buck2` pins, and provisions the pinned toolchain. It reports any host tool it needs and does not install, such as Nix or git. Re-run it after the toolchain pin moves; it is cheap and skips whatever is already in place.
 
-Run Buck through `bin/buck2` (`bin\buck2.cmd` on Windows), or put `bin` on PATH; `mise` does that for you. `bin/buck2` runs the bootstrap's Buck2 half by itself the first time, so a checkout that only needs Buck2 can skip the bootstrap.
+Run Buck through `bin/buck2` (`bin\buck2.cmd` on Windows), or put `bin` on PATH; the Nix dev shell and the `scripts/dev.nu` commands do that for you. `bin/buck2` runs the bootstrap's Buck2 half by itself the first time, so a checkout that only needs Buck2 can skip the bootstrap.
 
 On Windows provisioning needs elevation because the Visual Studio and Windows SDK installers do, and it caches several GB of archives in `%LOCALAPPDATA%\wows-toolkit-buck-offline` by default. Pass `-OfflineRoot` to put them elsewhere. A finished install is stamped with a hash of `toolchains/windows/toolchain-manifest.json` and the provisioning scripts. While the stamp matches, provisioning installs nothing and only checks the tool versions and rewrites `.buckconfig.local`.
 
@@ -240,7 +243,7 @@ nu scripts/update-buck-deps.nu
 
 This regenerates `third-party/rust/BUCK` and flattens multi-line values in the generated environment. Commit `Cargo.toml`, `Cargo.lock`, the generated BUCK file, and any fixups together.
 
-It needs `reindeer` and `rustc` on PATH; run `mise run install-reindeer` once. That applies to regeneration only. Building needs neither Nix nor Cargo.
+It needs `reindeer` and `rustc` on PATH; run `nu scripts/dev.nu install-reindeer` once. That installs the reindeer revision the committed file was generated with, which the dev shell does not provide: another revision rewrites much of the file. It applies to regeneration only. Building needs neither Nix nor Cargo.
 
 Build the affected targets with Buck before pushing. A new dependency that pulls in a build script or native code usually needs a fixup, and CI will not let it through without one.
 
@@ -254,7 +257,7 @@ Do not hand-edit `third-party/rust/BUCK`. Everything in it comes from `reindeer.
 nu scripts/update_third_party_notices.nu
 ```
 
-It runs [cargo-about](https://github.com/EmbarkStudios/cargo-about) over every package listed in `third-party/licenses/notices.toml`. `nix develop` provides the pinned version, and `mise run install-cargo-about` installs it elsewhere. A component that is not a Rust crate, such as a font, icon set or bundled C library, is listed by hand in that file. So is a crate that bundles code under a license its manifest does not declare.
+It runs [cargo-about](https://github.com/EmbarkStudios/cargo-about) over every package listed in `third-party/licenses/notices.toml`. `nix develop` provides the pinned version, and `nu scripts/dev.nu install-cargo-about` installs it elsewhere. A component that is not a Rust crate, such as a font, icon set or bundled C library, is listed by hand in that file. So is a crate that bundles code under a license its manifest does not declare.
 
 `buck2 test //ci:third_party_notices` fails when any input of the file changed since it was generated: `Cargo.lock`, the Cargo manifests, the configuration, or a license file it reads from this repository. The graph test `scripts/test-third-party-notices.nu` fails when Buck links a crate into a release binary that the file does not list.
 

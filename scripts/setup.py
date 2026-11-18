@@ -13,7 +13,8 @@ Both are pinned by toolchains/windows/toolchain-manifest.json, which is also
 what the Buck toolchain provisions from, so a Cargo build and a Buck build use
 the same versions.
 
-Anything discovered here is written to .tooling/dev.env, which mise loads.
+Anything discovered here is written to .tooling/dev.env, which the Cargo
+commands in scripts/dev.nu read.
 """
 
 from __future__ import annotations
@@ -132,7 +133,7 @@ def find_clang_windows() -> tuple[Path, Path] | None:
 def clang_hint() -> str:
     return (
         "clang and llvm-ar were not found.\n"
-        "  ring hardcodes clang for wasm32, so `mise run fix-all` cannot check\n"
+        "  ring hardcodes clang for wasm32, so `nu scripts/dev.nu cargo-check` cannot check\n"
         "  the wt-web WASM target without it. Install either:\n"
         "\n"
         "    the Visual Studio component (preferred, matches CI):\n"
@@ -141,7 +142,7 @@ def clang_hint() -> str:
         "    or standalone LLVM:\n"
         "      winget install -e --id LLVM.LLVM\n"
         "\n"
-        "  Then re-run `mise run setup`."
+        "  Then re-run `nu scripts/dev.nu setup`."
     )
 
 

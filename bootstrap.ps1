@@ -128,7 +128,7 @@ function Test-HostTools {
     }
 
     if (-not (Get-Command reindeer -ErrorAction SilentlyContinue)) {
-        Write-MissingOptional "reindeer" "regenerating third-party/rust/BUCK after a dependency change needs it. Run mise run install-reindeer."
+        Write-MissingOptional "reindeer" "regenerating third-party/rust/BUCK after a dependency change needs it. Run nu scripts/dev.nu install-reindeer."
     }
 }
 

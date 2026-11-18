@@ -103,19 +103,12 @@ default in the CLI binary).
 | Default build, no NASM | `--no-default-features --features bin,vulkan,videotoolbox,cpu,cpu-av1,arc` |
 | Skip AV1 entirely | `--no-default-features --features bin,vulkan,videotoolbox,cpu,arc` |
 
-`mise.toml` adds the project-local `.tooling/nasm` directory and the winget
-default install location (`C:\Program Files\NASM`) to `PATH` via mise's
-`[env]._.path` block, so plain `cargo build` works inside any shell with
-`mise activate` (and inside `mise exec -- ...`) without needing to fix
-your system PATH. rust-analyzer and other IDE integrations pick this up
-automatically when launched from a mise-activated shell.
+The `cargo-*` commands in `scripts/dev.nu` put the project-local `.tooling/nasm` directory and the winget default install location (`C:\Program Files\NASM`) on `PATH`, so `nu scripts/dev.nu cargo-build` works without your system PATH naming NASM. A plain `cargo build` needs NASM on your own PATH.
 
 Installing NASM:
 
 - **Windows (recommended):** `winget install -e --id NASM.NASM`
-- **Windows (no admin, scripted):** `mise run setup` — downloads NASM into a
-  gitignored `.tooling/` directory and exports it on PATH for the current
-  process.
+- **Windows (no admin, scripted):** `nu scripts/dev.nu setup` downloads NASM into the gitignored `.tooling/` directory.
 - **Linux:** `sudo apt-get install nasm` (or your distro's equivalent)
 - **macOS:** `brew install nasm`
 - **Nix:** already provisioned in the flake's devShell

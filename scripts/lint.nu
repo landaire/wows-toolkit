@@ -14,7 +14,8 @@
 # rustfmt also writes, with --write: same pinned binary, same file list, same
 # arguments as the check, so formatting cannot drift from what the gate wants.
 # Clippy has no write mode here -- the rust rules produce diagnostics, not
-# rewrites -- so `cargo clippy --fix` remains the only autofix (see mise.toml).
+# rewrites -- so `cargo clippy --fix` remains the only autofix (see the fix-all
+# command in scripts/dev.nu).
 #
 # Usage:
 #   nu scripts/lint.nu              # clippy and rustfmt over root//...
