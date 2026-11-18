@@ -8,6 +8,20 @@ nix_system_library(
     visibility = ["PUBLIC"],
 )
 
+# yeslogic-fontconfig-sys links it on Linux.
+nix_system_library(
+    name = "fontconfig",
+    lib = "fontconfig",
+    visibility = ["PUBLIC"],
+)
+
+# xkbcommon links it on Linux.
+nix_system_library(
+    name = "xkbcommon",
+    lib = "xkbcommon",
+    visibility = ["PUBLIC"],
+)
+
 nix_cxx_toolchain(
     name = "nix_cxx_macos",
     os = "macos",

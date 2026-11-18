@@ -47974,6 +47974,7 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [
+        "toolchains//:xkbcommon",
         ":libc-0.2",
         ":memmap2-0.9",
         ":xkeysym-0.2",
@@ -48272,6 +48273,7 @@ cargo.rust_library(
     },
     visibility = [],
     deps = [
+        "toolchains//:fontconfig",
         ":dlib-0.5",
         ":once_cell-1",
     ],

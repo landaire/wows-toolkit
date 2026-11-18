@@ -1,0 +1,3 @@
+# The bindings link libxkbcommon by name. It comes from the Nix toolchain,
+# linked dynamically.
+extra_deps = ["toolchains//:xkbcommon"]

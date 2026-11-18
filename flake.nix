@@ -183,20 +183,41 @@
               wasmBindgenCli
               binaryen
             ];
+            nativeBuildInputs = [makeWrapper];
             # The wrapper's hardening flags (e.g. -fzero-call-used-regs) are
             # invalid for wasm32, so C compiled for wt-web uses the unwrapped
             # clang. The target prefix in the name selects wasm32 by default.
+            #
+            # A Buck action inherits the environment of the shell that started
+            # the daemon, and the Nix compiler and linker wrappers read that
+            # shell's flags (an -rpath into the checkout among them) whenever
+            # its role markers are set. Each wrapper here drops every NIX_
+            # variable, then pins the store path (without it the linker
+            # wrapper writes host directories such as /usr/lib64 into the
+            # runpath), the hardening and the refusal of -march=native the dev
+            # shell would have given, so no shell changes what a build makes.
             postBuild = ''
               ln -s ${llvmPackages.clang-unwrapped}/bin/clang $out/bin/wasm32-unknown-unknown-clang
+              for tool in c++ cc clang clang++ cpp ld ld.bfd ld.gold; do
+                [ -e "$out/bin/$tool" ] || continue
+                wrapped=$(readlink -f "$out/bin/$tool")
+                rm "$out/bin/$tool"
+                makeWrapper "$wrapped" "$out/bin/$tool" \
+                  --run 'for name in ''${!NIX_@}; do unset "$name"; done' \
+                  --set NIX_STORE ${builtins.storeDir} \
+                  --set NIX_HARDENING_ENABLE_${clang.suffixSalt} ${lib.escapeShellArg (lib.concatStringsSep " " clang.defaultHardeningFlags)} \
+                  --set NIX_ENFORCE_NO_NATIVE_${clang.suffixSalt} 1
+              done
             '';
           };
 
-          # Shared libraries Buck links dynamically (toolchains//:dbus-1). Kept
-          # apart from buck-toolchain so adding one leaves the toolchain path,
-          # and with it every cached action, unchanged.
+          # Shared libraries Buck links dynamically (toolchains//:dbus-1,
+          # :fontconfig, :xkbcommon). Kept apart from buck-toolchain so adding
+          # one leaves the toolchain path, and with it every cached action,
+          # unchanged.
           buck-system-libs = symlinkJoin {
             name = "wows-toolkit-buck-system-libs";
-            paths = lib.optionals stdenv.hostPlatform.isLinux [dbus.lib];
+            paths = lib.optionals stdenv.hostPlatform.isLinux [dbus.lib fontconfig.lib libxkbcommon];
           };
 
           wowsunpack = craneLib.buildPackage (commonArgs

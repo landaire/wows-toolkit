@@ -1,2 +1,4 @@
 # pkg_config::find_library("fontconfig"), which is host state. X11 only.
+# libfontconfig comes from the Nix toolchain instead, linked dynamically.
 buildscript.run = false
+extra_deps = ["toolchains//:fontconfig"]
