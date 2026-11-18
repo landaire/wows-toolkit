@@ -151,6 +151,28 @@ fn tier_8_to_10_cruiser_he_flight_time_to_10_km() {
     insta::assert_yaml_snapshot!(output);
 }
 
+/// The slowest tier 10 shells of every class at 10 km are Gearing's, a
+/// destroyer's; a battleship-only group would name Vermont.
+#[test]
+#[cfg_attr(not(has_build_13533378), ignore)]
+fn every_class_group_names_the_slowest_shells() {
+    let output = values(json!({
+        "quantities": [{ "name": "shell.flight_time", "params": { "range_km": 10, "ammo": "AP" } }],
+        "group": { "tier": 10 },
+    }));
+
+    let summary = &output["group"]["quantities"][0];
+    assert_eq!(output["group"]["group"], "tier 10 ships");
+    assert_eq!(summary["highest"]["ship"], "T10 Gearing (destroyer, USA)");
+    let battleships = summary["by_class"]
+        .as_array()
+        .expect("every class is summarized per class")
+        .iter()
+        .find(|class| class["class"] == "battleship")
+        .expect("battleships have AP");
+    assert_eq!(battleships["highest"]["ship"], "T10 Vermont (battleship, USA)");
+}
+
 #[test]
 #[cfg_attr(not(has_build_13533378), ignore)]
 fn grosser_kurfurst_ap_penetration_and_fuse_threshold() {

@@ -59,7 +59,7 @@ pub struct QuantityValuesArgs {
     /// Ships to value, by name, e.g. ["Shimakaze"].
     pub ships: Option<Vec<String>>,
 
-    /// Every ship of one class, optionally of a tier range and nation, summarized per quantity.
+    /// Every ship of a class, or of every class, optionally of a tier range and nation, summarized per quantity.
     pub group: Option<QuantityGroup>,
 }
 
@@ -74,11 +74,13 @@ pub struct QuantityRequest {
     pub params: Option<Map<String, Value>>,
 }
 
-/// A group of ships: one class, optionally narrowed by tier and nation.
+/// A group of ships: one class or every class, optionally narrowed by tier
+/// and nation.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QuantityGroup {
-    pub class: ShipClass,
+    /// A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names. Omit for every class; each quantity is then also summarized per class.
+    pub class: Option<ShipClass>,
 
     /// One tier. Use min_tier and max_tier for a range.
     pub tier: Option<Tier>,
@@ -271,7 +273,7 @@ pub struct QuantityValue {
 /// Statistics of each quantity over a group of ships.
 #[derive(Debug, Clone, Serialize)]
 pub struct GroupQuantities {
-    /// "tier 8-10 cruisers".
+    /// "tier 8-10 cruisers", or "tier 10 ships" for every class.
     pub group: String,
 
     /// Ships in the group, test ships included.
@@ -303,6 +305,10 @@ pub struct GroupSummary {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub by_tier: Vec<TierSummary>,
+
+    /// For a group of every class, the classes with a value.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_class: Vec<ClassSummary>,
 }
 
 /// Statistics over the ships with a value.
@@ -337,6 +343,14 @@ pub struct Extreme {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TierSummary {
     pub tier: Tier,
+
+    #[serde(flatten)]
+    pub summary: Summary,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClassSummary {
+    pub class: ShipClass,
 
     #[serde(flatten)]
     pub summary: Summary,
@@ -633,7 +647,7 @@ impl GameData {
         // replicas out.
         let filter = ShipFilter {
             tiers,
-            class: Some(group.class),
+            class: group.class,
             nation: group.nation.clone(),
             include_irregular: false,
             exclude_test: false,
@@ -671,6 +685,23 @@ impl GameData {
                     Vec::new()
                 };
 
+                let by_class = if group.class.is_none() {
+                    let mut by_class: BTreeMap<ShipClass, Vec<(&Ship, f32)>> = BTreeMap::new();
+                    for (ship, value) in &counted {
+                        by_class.entry(ship.class).or_default().push((ship, *value));
+                    }
+
+                    by_class
+                        .into_iter()
+                        .map(|(class, values)| ClassSummary {
+                            class,
+                            summary: summarize(&values, prepared.precision()),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
                 GroupSummary {
                     quantity: definition.name.clone(),
                     unit: definition.unit,
@@ -678,6 +709,7 @@ impl GameData {
                     summary: summarize(&counted, prepared.precision()),
                     without_value,
                     by_tier,
+                    by_class,
                 }
             })
             .collect();
@@ -688,9 +720,13 @@ impl GameData {
             None => "every tier".to_owned(),
         };
         let nation = group.nation.as_deref().map(|nation| format!(" {nation}")).unwrap_or_default();
+        let class = match group.class {
+            Some(class) => format!("{}s", class.label().replace('_', " ")),
+            None => "ships".to_owned(),
+        };
 
         Ok(GroupQuantities {
-            group: format!("{label}{nation} {}s", group.class.label().replace('_', " ")),
+            group: format!("{label}{nation} {class}"),
             ships: ships.len(),
             test_ships: ships.iter().filter(|ship| ship.status() == ShipStatus::Test).count(),
             quantities,
@@ -859,7 +895,7 @@ mod tests {
     #[test]
     fn group_rejects_tier_with_a_bound() {
         let group = QuantityGroup {
-            class: ShipClass::Cruiser,
+            class: Some(ShipClass::Cruiser),
             tier: Some(Tier(8)),
             min_tier: Some(Tier(7)),
             max_tier: None,

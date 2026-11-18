@@ -1004,7 +1004,7 @@ expression: specs()
     required:
       - query
 - name: quantity_values
-  description: "Values of 1 to 6 quantities named by quantity_search, computed from game data. For ships named, each value labeled by torpedo option (stock or module), shell or row, and by build (base, or the best-fit build with what it takes), with notes such as a distance beyond the torpedo's range or before it arms. For a group (one class, optionally tiers and nation), each ship counted once (counts says which value) with count, mean, median, lowest and highest with the ship, and the same per tier, over every ship of the group, test ships included and counted apart; ships without a value are listed. Values are final: game knots (2.6854 m/s each), arming distance, damage falloff, shell ballistics, skills and upgrades are already applied, so quote them and do not convert or estimate. Give params as quantity_search lists them, e.g. {\"name\": \"torpedo.travel_time\", \"params\": {\"distance_km\": 10}}."
+  description: "Values of 1 to 6 quantities named by quantity_search, computed from game data. For ships named, each value labeled by torpedo option (stock or module), shell or row, and by build (base, or the best-fit build with what it takes), with notes such as a distance beyond the torpedo's range or before it arms. For a group (one class, or every class when class is omitted, optionally tiers and nation), each ship counted once (counts says which value) with count, mean, median, lowest and highest with the ship, and the same per tier and, for every class, per class, over every ship of the group, test ships included and counted apart; ships without a value are listed. For the lowest or highest of all ships, such as the slowest shells at a tier, omit class. Values are final: game knots (2.6854 m/s each), arming distance, damage falloff, shell ballistics, skills and upgrades are already applied, so quote them and do not convert or estimate. Give params as quantity_search lists them, e.g. {\"name\": \"torpedo.travel_time\", \"params\": {\"distance_km\": 10}}."
   input_schema:
     type: object
     additionalProperties: false
@@ -1045,7 +1045,7 @@ expression: specs()
               - battleship
               - aircraft_carrier
               - submarine
-            description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names."
+            description: "A ship class. Arguments also accept the community abbreviations (DD, CA, CL, BB, CV, SS) and capitalized names. Omit for every class; each quantity is then also summarized per class."
           tier:
             type: integer
             description: One tier. Use min_tier and max_tier for a range.
@@ -1064,9 +1064,7 @@ expression: specs()
           nation:
             type: string
             description: "Nation as GameParams spells it, e.g. \"USA\"."
-        required:
-          - class
-        description: "Every ship of one class, optionally of a tier range and nation, summarized per quantity."
+        description: "Every ship of a class, or of every class, optionally of a tier range and nation, summarized per quantity."
     required:
       - quantities
 - name: captain_skill

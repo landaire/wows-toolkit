@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(wows-query)* Summarize `quantity_values` over every class when its group names no class, with each class's own statistics in `by_class`, so the slowest shells of a tier can be found across classes
 - *(wows-query)* Name the ships that do not defeat the plate in `penetration_search` as `failing`, each with its strongest weapon of that ammo and its penetration
 - *(wows-query)* Run jq filters over JSON values in the sandboxed worker with `jq_worker::evaluate_json`, alongside stored GameParams entries with `jq_worker::evaluate`
 - *(wows-query)* Tell whether one main battery salvo can sink a ship with `salvo_kill`: trace the shell through the target's armor, place every shell where it deals the most given saturation, and give the shells that must hit at stock HP and with the target's best HP build. `ship_hit_locations` explains that a section keeps taking its own 16.5% once the hull pool is spent
