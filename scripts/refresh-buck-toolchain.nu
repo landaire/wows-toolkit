@@ -75,11 +75,11 @@ let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-ou
     "[nix_system_libs]"
     $"root = ($system_libs_root)"
     ""
-    # Nothing reads debug info out of a CI artifact, and carrying all of it is
-    # what makes linking the GUI binary expensive. Line tables are kept so a
-    # panic in a Buck test still names a file and line.
+    # Nothing reads debug info out of a CI artifact, and it is most of the
+    # size of every debug rlib and test binary CI moves through the action
+    # cache. A panic still names its file and line without it.
     ...(if ($env.CI? | is-not-empty) {
-        ["[native_build]" "debuginfo = line-tables-only" ""]
+        ["[native_build]" "debuginfo = none" ""]
     } else {
         []
     })

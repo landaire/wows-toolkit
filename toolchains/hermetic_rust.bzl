@@ -97,10 +97,10 @@ windows_cross_resource = rule(
 _RELEASE = "toolchains//:release"
 
 # How much debug info a debug build carries. Release never carries any. CI reads
-# nothing out of the artifacts it builds, and full debug info is what makes
-# linking a binary the size of the GUI expensive, so the bootstrap sets this to
-# `line-tables-only` there: a panic in a Buck test still names a file and line,
-# without the rest of the DWARF the link would have to copy.
+# nothing out of the artifacts it builds, and debug info is most of the size of
+# the rlibs and test binaries it moves through the action cache, so the
+# bootstrap sets this to `none` there. A panic still names its file and line,
+# because that comes from the panic location rather than from debug info.
 _DEBUGINFO_LEVELS = {
     "full": "2",
     "line-tables-only": "1",
