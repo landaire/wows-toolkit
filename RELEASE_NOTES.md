@@ -4,6 +4,67 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.1.0-beta5
+
+### Ratings
+
+- Match contribution (MC) rates a player's performance in one battle on the personal rating (PR) scale. It is shown beside PR in the replay table, search results and stats.
+- Hover PR or MC to see what it is made of.
+- PR is shown only for Random and Ranked battles. Other battle types show a dash that explains why.
+- A new battle's PR and MC appear as soon as it lands. Replays indexed before the rating table arrived are rated once it does.
+
+### Replay listing and session stats
+
+- Session stats can hold your saved session or every battle since the app opened. Choose from the session chip in the listing header or in the Stats tab.
+- Battles you play are added to session stats as the game writes them.
+- Right-click a date or ship group to set or add it as session stats, or to render it to video. Right-click a replay to render it.
+- Battles played while the app was closed are indexed when it starts, and exported when auto-export is on.
+- Opening a replay folder also lists, indexes and watches its subfolders.
+- The listing keeps its scroll position, selection and closed groups when a battle lands or the folder is read again.
+- The Anonymize player names option shows generated names and clan tags everywhere in the app. Exports keep the real names.
+- Players seen in the Twitch chat you monitor around a battle are flagged in the replay panel.
+- A replay's Actions menu opens a Match Timeline window with filters, search, copy and save.
+- Changing the language updates replays that are already open.
+
+### Replay renderer
+
+- Playback runs at 30 frames a second at every speed. Ships, shells, torpedoes and planes move smoothly between recorded frames, and seeking lands on the exact time.
+- Drawing tools and undo work without a collab session. Shapes can be filled, Clear All removes every drawing, and a popup edits the picked drawing.
+- Measurements show a tick every half kilometre and their total length.
+- The stats panel is available, and video exports include it.
+- Trails use every recorded position. Speed trails, dead ship trails and the score timer can be turned on and off.
+- The camera direction is drawn as a wedge under each ship icon.
+- Exported videos include trails, drawings and range circles, and are named by battle start, player, map and ship.
+- The renderer draws at the screen's full resolution, so it stays sharp in a large window or on a high-DPI display.
+
+### Armor viewer
+
+- The options panel is grouped into Ship, Layers, Analysis and Display tabs. The search covers every tab.
+- The trajectory editor lists each plate a shell struck, with its thickness, impact angle, zone and what the shell did there.
+- Click a salvo or shell in the incoming fire log to draw its path through the hull.
+- The Layers tab lists a ship's splash boxes by group.
+- Searching for a ship lists the closest matches first.
+- Clicking a ship in the sidebar loads it without unfolding its parts. The arrow unfolds them.
+- Ctrl+Z, Ctrl+Shift+Z and Ctrl+S work anywhere in the armor viewer.
+- The viewer starts with the water off and the grid on.
+
+### Player Tracker
+
+- Players from every indexed replay are recorded in the Player Tracker, and division mates are marked. Populate fills the tracker from the replay index.
+- Ship class icons in Current Match keep their proportions.
+- The tables refresh when a battle is recorded while the tab is open.
+
+### Tactics board and collaboration
+
+- A placed ship's hull, Concealment Expert, range upgrades and range circles can be set.
+- Watchers of a collab session follow the host's layers, range circles and trails.
+- A peer's pointer shows only on the replay or board it is over, under that peer's name.
+
+### Game data and launcher
+
+- Game constants are generated from the installed client when none are published for its build yet.
+- Wine processes started by the toolkit end when the game exits or is stopped.
+
 ## 1.0.5
 
 ### Replay analysis
