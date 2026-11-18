@@ -1,4 +1,4 @@
-//! `wgcheck`: read WGCheck `.gch` report archives and pull the python logs.
+//! `wgcheck`: read WGCheck `.gch` report archives and extract the python logs.
 
 use std::fs;
 use std::path::Path;
