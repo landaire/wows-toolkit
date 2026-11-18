@@ -113,12 +113,26 @@ jobs:
           if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
           nix develop --command buck2 build $aliases
 
+      - name: Check the affected aliases' runpaths
+        if: matrix.phase == 'checks'
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 run //ci:runpath -- debug $aliases
+
       - name: Build the affected aliases in release mode
         if: matrix.phase == 'release'
         run: |
           aliases=$(jq -r '.aliases | join(" ")' affected.json)
           if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
           nix develop --command buck2 build -m release $aliases
+
+      - name: Check the affected aliases' runpaths in release mode
+        if: matrix.phase == 'release'
+        run: |
+          aliases=$(jq -r '.aliases | join(" ")' affected.json)
+          if [ -z "$aliases" ]; then echo "No alias is affected."; exit 0; fi
+          nix develop --command buck2 run //ci:runpath -- release $aliases
 
       - name: Check the action graph is hermetic
         if: matrix.phase == 'checks'

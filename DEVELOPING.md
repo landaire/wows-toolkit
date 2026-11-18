@@ -213,6 +213,12 @@ The point of the Buck build is that its actions cannot reach outside their decla
 buck2 run //ci:hermetic
 ```
 
+Actions still inherit the environment of the shell that started the Buck daemon. The toolchain's compiler and linker wrappers drop the dev shell's Nix flags, so that shell cannot change what they build. A second check catches a leak that gets past them: every file an alias builds may name only `/nix/store` and its own directory in its runpath. It takes the build mode and, optionally, the aliases:
+
+```bash
+buck2 run //ci:runpath -- debug
+```
+
 `scripts/test-*.nu` are the build-graph tests: toolchain configuration, build-script boundaries, build modes, workspace targets, and the hermeticity check against fixtures that must be rejected. They query the graph and do not build the aliases, so run them together with a build in both modes and the hermeticity check after touching anything under `toolchains/`, `build-support/buck/`, or `third-party/rust/fixups/`:
 
 ```bash

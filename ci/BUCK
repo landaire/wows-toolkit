@@ -30,6 +30,14 @@ nu_script(
     srcs = ["//scripts:check-buck-hermetic.nu"],
 )
 
+# Every root alias builds files whose runpaths name only the store and
+# themselves, whatever shell started the Buck daemon.
+nu_script(
+    name = "runpath",
+    script = "runpath.nu",
+    srcs = ["//scripts:check-buck-runpath.nu"],
+)
+
 # The tests of the build graph itself, scripts/test-*.nu.
 nu_script(
     name = "graph_tests",

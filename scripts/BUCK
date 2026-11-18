@@ -9,6 +9,7 @@
         "check-publish-dependencies.py",
         "check-third-party-notices.py",
         "check-buck-hermetic.nu",
+        "check-buck-runpath.nu",
         "lint.nu",
     ]
 ]
