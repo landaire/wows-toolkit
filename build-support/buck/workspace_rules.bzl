@@ -175,17 +175,21 @@ def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION,
         **kwargs
     )
 
-def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], test_deps = [], buildscript = None, resources = [], run_env = {}, incoming_transition = None):
+def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], test_deps = [], buildscript = None, resources = [], run_env = {}, gui = False, incoming_transition = None):
     """The crate's own #[test] functions, as a Buck test target.
 
     test_deps are Cargo's [dev-dependencies]. A third-party one reaches
     //third-party/rust through build-support/buck/reindeer-features.
+
+    `gui` links the test as the GUI binaries are, for tests that draw on the
+    graphics device: under the Nix loader the host's Vulkan drivers cannot
+    find the libraries they link against, and the device never opens.
     """
     env = _cargo_env(crate, package, version)
-    rustc_flags = []
+    rustc_flags = os_select(macos = [], linux = LINUX_GUI_RUSTC_FLAGS, windows = []) if gui else []
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
-        rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)]
+        rustc_flags = rustc_flags + ["@$(location :{}[rustc_flags])".format(buildscript)]
 
     # Tests read fixtures through env!("CARGO_MANIFEST_DIR"), some of them
     # outside the crate, so it names the crate's source directory as under
@@ -221,7 +225,7 @@ def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT
         **kwargs
     )
 
-def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = [], run_env = {}, buildscript = None):
+def workspace_integration_tests(package, version, library, deps = [], test_deps = [], edition = _DEFAULT_EDITION, features = [], exclude = [], run_env = {}, buildscript = None, gui = False):
     """One test target per file directly under tests/, as Cargo builds them.
 
     Each links `library`, the crate under test, as an integration test does.
@@ -243,6 +247,7 @@ def workspace_integration_tests(package, version, library, deps = [], test_deps 
             test_deps = test_deps,
             buildscript = buildscript,
             run_env = run_env,
+            gui = gui,
         )
 
 def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = [], incoming_transition = None, target_compatible_with = []):

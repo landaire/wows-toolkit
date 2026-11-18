@@ -128,4 +128,5 @@ workspace_test(
     test_deps = ["//third-party/rust:tempfile"],
     # Each test opens a window. One thread per core wedges the run on a machine with many of them.
     run_env = {"RUST_TEST_THREADS": "4"},
+    gui = True,
 )

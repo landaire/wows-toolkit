@@ -62,6 +62,8 @@ workspace_integration_tests(
         "//third-party/rust:zgui-ui",
         "//third-party/rust:zgui-ui-tokens",
     ],
+    # theme_root draws on the graphics device.
+    gui = True,
 )
 
 # The gallery example's own tests, which Cargo runs because the example sets `test = true`.

@@ -40,7 +40,7 @@ nix develop
 cargo build -p wows_toolkit --release
 ```
 
-On Linux, Buck links the GUI binaries against your system's dynamic loader, so they start directly, the same way the release build does. That needs glibc 2.39 or newer and, on NixOS, [nix-ld](https://github.com/nix-community/nix-ld). A GUI built with Cargo in the dev shell uses the Nix loader instead and cannot find your system's graphics drivers. Start it through `bin/with-host-graphics`, which adds their directory to `LD_LIBRARY_PATH` for that one command. The dev shell does not add it for everything, because Nix-built tools, `nix` included, break when they load the system's copies of their libraries.
+On Linux, Buck links the GUI binaries against your system's dynamic loader, so they start directly, the same way the release build does. Tests that draw on the graphics device, such as the zgui screenshot tests, are linked the same way. That needs glibc 2.39 or newer and, on NixOS, [nix-ld](https://github.com/nix-community/nix-ld). A GUI built with Cargo in the dev shell uses the Nix loader instead and cannot find your system's graphics drivers. Start it through `bin/with-host-graphics`, which adds their directory to `LD_LIBRARY_PATH` for that one command. The dev shell does not add it for everything, because Nix-built tools, `nix` included, break when they load the system's copies of their libraries.
 
 ```bash
 bin/with-host-graphics target/release/wows_toolkit
