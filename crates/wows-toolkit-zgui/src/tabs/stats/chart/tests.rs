@@ -21,6 +21,7 @@ use wows_toolkit_viewmodel::stats::plot::draw;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::platform::CursorStyle;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
@@ -156,16 +157,20 @@ fn press(window: &mut HeadlessWindow, id: &str) {
     window.advance(Duration::from_millis(50));
 }
 
-/// What the window's plot draws for `settings`, where the shared layout puts it in the plot's
-/// box, and the box's top-left corner in device pixels.
+/// What the window's plot draws for `settings` through `view`, where the shared layout puts it
+/// in the plot's box, and the box's top-left corner in device pixels.
 ///
 /// Laid out without measuring labels, so a line chart's legend is at its narrowest and the area
 /// is wider than the window's. The left edge, the heights and the bars do not depend on the
 /// legend, so a line's first game and every bar sit where the window drew them.
-fn drawn(window: &HeadlessWindow, settings: &ChartSettings) -> (PlotData, PlotLayout, Point<DevicePx, Device>) {
+fn drawn(
+    window: &HeadlessWindow,
+    settings: &ChartSettings,
+    view: PlotView,
+) -> (PlotData, PlotLayout, Point<DevicePx, Device>) {
     let filters = StatsFilters { limit: GameLimit::All, ..StatsFilters::default() };
     let model = ChartModel::new(settings, &session(), &filters, None);
-    let data = PlotData { series: model.series, bars: model.bars, ..PlotData::default() };
+    let data = PlotData { series: model.series, bars: model.bars, view, ..PlotData::default() };
 
     let plot = window.bounds(element(window, "chart-plot")).expect("the plot has a box");
     let bounds = PlotRect::new(0.0, 0.0, plot.size.width.0, plot.size.height.0);
@@ -190,24 +195,32 @@ fn tooltip_lines(window: &HeadlessWindow) -> Vec<String> {
         .collect()
 }
 
-/// Hovers Des Moines' first game on the line chart, where every line starts at the value axis.
-/// The pointer stands a little right of the point, inside the plot.
-fn hover_first_game(window: &mut HeadlessWindow, settings: &ChartSettings) {
-    let (data, layout, origin) = drawn(window, settings);
+/// Where Des Moines' first game is drawn, on the value axis like every line's first game.
+fn first_game(data: &PlotData, layout: &PlotLayout) -> PlotPoint {
     let series = data.series.iter().position(|series| series.name == "Des Moines").expect("Des Moines is plotted");
-    let first = layout
+
+    layout
         .line_points(&data.plot())
         .nth(series)
         .and_then(|mut points| points.next())
-        .expect("Des Moines has a first game");
+        .expect("Des Moines has a first game")
+}
 
-    window.hover_at(on_window(origin, PlotPoint::new(first.x + 3.0, first.y + 2.0)));
+/// Hovers a little right of `point`, inside the plot.
+fn hover_near(window: &mut HeadlessWindow, origin: Point<DevicePx, Device>, point: PlotPoint) {
+    window.hover_at(on_window(origin, PlotPoint::new(point.x + 3.0, point.y + 2.0)));
     window.advance(Duration::from_millis(50));
+}
+
+/// Hovers Des Moines' first game on the line chart.
+fn hover_first_game(window: &mut HeadlessWindow, settings: &ChartSettings) {
+    let (data, layout, origin) = drawn(window, settings, PlotView::default());
+    hover_near(window, origin, first_game(&data, &layout));
 }
 
 /// Hovers the Yamato bar near its base.
 fn hover_yamato_bar(window: &mut HeadlessWindow, settings: &ChartSettings) {
-    let (data, layout, origin) = drawn(window, settings);
+    let (data, layout, origin) = drawn(window, settings, PlotView::default());
     let index = data.bars.iter().position(|bar| bar.label == "Yamato").expect("Yamato has a bar");
     let rect = layout.bar_rects(&data.plot()).nth(index).expect("the bar is laid out");
 
@@ -327,6 +340,78 @@ fn a_bar_chart_does_not_pan() {
     window.drag(plot, Point::new(DevicePx(200.0), DevicePx(200.0)), 4).expect("the plot is dragged");
     window.advance(Duration::from_millis(50));
 
+    assert!(!shown(&window, "chart-reset-view"));
+}
+
+/// Dragging up on the value axis's gutter scales the values out about the press and leaves the
+/// games alone, so Des Moines' first game stays on the value axis at the height the zoom moved it
+/// to.
+#[test]
+fn dragging_the_value_axis_scales_the_values_alone() {
+    let settings = ChartSettings::default();
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+    let (data, layout, origin) = drawn(&window, &settings, PlotView::default());
+    let first = first_game(&data, &layout);
+    let centre = layout.area.y + layout.area.height * 0.5;
+    let press = PlotPoint::new(layout.area.x - 20.0, first.y + 40.0f32.copysign(centre - first.y));
+
+    window.hover_at(on_window(origin, press));
+    window.advance(Duration::from_millis(50));
+    assert_eq!(window.cursor(), Some(CursorStyle::ResizeNorthSouth), "the value axis offers to resize");
+
+    let to = PlotPoint::new(press.x, press.y - 25.0);
+    window.drag_from(on_window(origin, press), on_window(origin, to), 1);
+    window.advance(Duration::from_millis(50));
+    assert!(shown(&window, "chart-reset-view"), "a scaled axis offers its reset");
+
+    let mut expected = PlotView::default();
+    expected.drag_axis(PlotAxis::Y, to.y - press.y, press, &layout);
+    let (data, zoomed, _) = drawn(&window, &settings, expected);
+    let moved = first_game(&data, &zoomed);
+    assert_eq!(moved.x, first.x, "the games are where they were");
+    assert!((moved.y - first.y).abs() > 12.0, "the first game moved further than a pick reaches");
+
+    let des_moines = ["Des Moines", "127,850", "Game 1, 2026-11-01 20:06"];
+    hover_near(&mut window, origin, first);
+    assert_ne!(tooltip_lines(&window), des_moines, "the first game left where it was");
+    hover_near(&mut window, origin, moved);
+    assert_eq!(tooltip_lines(&window), des_moines, "the first game is where the scaled values put it");
+
+    let plot = element(&window, "chart-plot");
+    window.double_click(plot).expect("the plot is double-clicked");
+    window.advance(Duration::from_millis(50));
+    assert!(!shown(&window, "chart-reset-view"), "a double click shows the whole plot again");
+}
+
+#[test]
+fn dragging_the_game_axis_offers_its_reset() {
+    let settings = ChartSettings::default();
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+    let (_, layout, origin) = drawn(&window, &settings, PlotView::default());
+    let press = PlotPoint::new(layout.area.x + 40.0, layout.area.bottom() + 10.0);
+
+    window.hover_at(on_window(origin, press));
+    window.advance(Duration::from_millis(50));
+    assert_eq!(window.cursor(), Some(CursorStyle::ResizeEastWest), "the game axis offers to resize");
+
+    window.drag_from(on_window(origin, press), on_window(origin, PlotPoint::new(press.x + 30.0, press.y)), 3);
+    window.advance(Duration::from_millis(50));
+    assert!(shown(&window, "chart-reset-view"), "a scaled axis offers its reset");
+}
+
+#[test]
+fn a_bar_chart_does_not_scale_an_axis() {
+    let settings = ChartSettings { mode: ChartMode::Bar, ..ChartSettings::default() };
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+    let (_, layout, origin) = drawn(&window, &settings, PlotView::default());
+    let press = PlotPoint::new(layout.area.x - 20.0, layout.area.y + layout.area.height * 0.5);
+
+    window.hover_at(on_window(origin, press));
+    window.advance(Duration::from_millis(50));
+    assert_ne!(window.cursor(), Some(CursorStyle::ResizeNorthSouth), "a bar's axis offers no resize");
+
+    window.drag_from(on_window(origin, press), on_window(origin, PlotPoint::new(press.x, press.y + 40.0)), 3);
+    window.advance(Duration::from_millis(50));
     assert!(!shown(&window, "chart-reset-view"));
 }
 

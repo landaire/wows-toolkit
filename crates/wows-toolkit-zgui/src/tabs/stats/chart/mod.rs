@@ -35,6 +35,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::selectable_stats;
 use wows_toolkit_viewmodel::stats::chart::value_axis_label;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
+use wows_toolkit_viewmodel::stats::plot::PlotAxis;
 use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
@@ -161,6 +162,12 @@ const CSS: &str = css!(
         --wt-plot-grid: color-mix(in srgb, var(--lui-color-border) 40%, transparent);
         --wt-plot-text: var(--wt-color-text-dim);
         --wt-plot-background: var(--lui-color-panel);
+    }
+    .wt-chart__plot[data-axis=x] {
+        cursor: ew-resize;
+    }
+    .wt-chart__plot[data-axis=y] {
+        cursor: ns-resize;
     }
     .wt-chart__gone {
         display: none;
@@ -318,6 +325,8 @@ struct PlotSurface {
     view_state: RwSignal<PlotView, LocalStorage>,
     pannable: Signal<bool, LocalStorage>,
     drag: RwSignal<Option<Drag>, LocalStorage>,
+    /// The axis whose gutter the pointer is over or holds, which picks the resize cursor.
+    gutter: RwSignal<Option<PlotAxis>, LocalStorage>,
 
     /// What the pointer rests on, and where its mark is in window CSS pixels, which the tooltip
     /// stands beside.
@@ -326,14 +335,24 @@ struct PlotSurface {
 }
 
 /// Where the pointer was last seen while the primary button is held over a line plot, in window
-/// CSS pixels.
+/// CSS pixels, and what the press took hold of.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Drag {
     /// Pressed and not yet moved. The pointer is not captured yet, since a capture keeps the
     /// press from counting as a click and so from making a double click.
-    Pressed(PlotPoint),
-    /// Moving with the pointer captured, panning the view.
-    Panning(PlotPoint),
+    Pressed { last: PlotPoint, grip: Grip },
+    /// Moving with the pointer captured.
+    Moving { last: PlotPoint, grip: Grip },
+}
+
+/// What a press on a line plot took hold of.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Grip {
+    /// The data, which pans with the pointer.
+    Data,
+    /// An axis's gutter, which scales that axis about `anchor`, where it was pressed in the
+    /// plot's own logical pixels.
+    Axis { axis: PlotAxis, anchor: PlotPoint },
 }
 
 impl PlotSurface {
@@ -401,6 +420,7 @@ impl PlotSurface {
             // plot refuses drag and zoom for the same reason.
             pannable: Signal::derive_local(move || settings.with(|settings| settings.mode == ChartMode::Line)),
             drag: RwSignal::new_local(None),
+            gutter: RwSignal::new_local(None),
             hit,
             anchor,
         };
@@ -425,6 +445,25 @@ impl PlotSurface {
     /// Where the plot last drew its data, which a pan or a zoom is measured against.
     fn layout(&self) -> Option<PlotLayout> {
         self.handle.with_value(|handle| handle.update(|element| element.layout))
+    }
+
+    /// The axis whose gutter the pointer at `x_css`, `y_css` in window CSS pixels is over, and
+    /// where that is in the plot's own logical pixels. Only a line plot's axes scale.
+    fn axis_at(&self, x_css: f32, y_css: f32) -> Option<(PlotAxis, PlotPoint)> {
+        if !self.pannable.get_untracked() {
+            return None;
+        }
+
+        let at = self.local(x_css, y_css)?;
+        let axis = self.layout()?.axis_at(at)?;
+
+        Some((axis, at))
+    }
+
+    fn set_gutter(&self, axis: Option<PlotAxis>) {
+        if self.gutter.get_untracked() != axis {
+            self.gutter.set(axis);
+        }
     }
 
     /// Marks what the pointer at `x_css`, `y_css` in window CSS pixels rests on, and shows its
@@ -493,7 +532,7 @@ impl PlotSurface {
         model: Memo<ChartModel>,
         locale: Locale,
     ) -> impl IntoView {
-        let Self { area, view_state, pannable, drag, anchor, .. } = self;
+        let Self { area, view_state, pannable, drag, gutter, anchor, .. } = self;
 
         view! {
             box(
@@ -501,43 +540,67 @@ impl PlotSurface {
                 class = "wt-chart__plot",
                 class:wt-chart__gone = move || empty.get(),
                 attr:data-testid = "chart-plot",
+                attr:data-axis = move || gutter.get().map(|axis| match axis {
+                    PlotAxis::X => "x".to_string(),
+                    PlotAxis::Y => "y".to_string(),
+                }),
                 on:pointer_down = move |ev| {
                     if !pannable.get_untracked() || ev.button != Some(PointerButton::Primary) {
                         return;
                     }
-                    drag.set(Some(Drag::Pressed(PlotPoint::new(ev.position.x.0, ev.position.y.0))));
+                    let (x, y) = (ev.position.x.0, ev.position.y.0);
+                    let grip = match self.axis_at(x, y) {
+                        Some((axis, anchor)) => Grip::Axis { axis, anchor },
+                        None => Grip::Data,
+                    };
+                    drag.set(Some(Drag::Pressed { last: PlotPoint::new(x, y), grip }));
                 },
                 on:pointer_move = move |ev| {
-                    let last = match drag.get_untracked() {
+                    let (x, y) = (ev.position.x.0, ev.position.y.0);
+                    let (last, grip) = match drag.get_untracked() {
                         None => {
-                            self.hover(ev.position.x.0, ev.position.y.0);
+                            self.hover(x, y);
+                            self.set_gutter(self.axis_at(x, y).map(|(axis, _)| axis));
                             return;
                         }
-                        Some(Drag::Panning(last)) => last,
-                        Some(Drag::Pressed(last)) => {
+                        Some(Drag::Moving { last, grip }) => (last, grip),
+                        Some(Drag::Pressed { last, grip }) => {
                             ev.capture_pointer();
-                            last
+                            (last, grip)
                         }
                     };
-                    let (x, y) = (ev.position.x.0, ev.position.y.0);
                     if let Some(layout) = self.layout() {
-                        view_state.update(|view| view.drag(x - last.x, y - last.y, &layout));
+                        view_state.update(|view| match grip {
+                            Grip::Data => view.drag(x - last.x, y - last.y, &layout),
+                            Grip::Axis { axis, anchor } => {
+                                let delta = match axis {
+                                    PlotAxis::X => x - last.x,
+                                    PlotAxis::Y => y - last.y,
+                                };
+                                view.drag_axis(axis, delta, anchor, &layout);
+                            }
+                        });
                     }
-                    drag.set(Some(Drag::Panning(PlotPoint::new(x, y))));
+                    drag.set(Some(Drag::Moving { last: PlotPoint::new(x, y), grip }));
                 },
                 on:pointer_up = move |ev| {
-                    if matches!(drag.get_untracked(), Some(Drag::Panning(_))) {
+                    if matches!(drag.get_untracked(), Some(Drag::Moving { .. })) {
                         ev.release_pointer();
                     }
                     drag.set(None);
                 },
                 on:pointer_cancel = move |ev| {
-                    if matches!(drag.get_untracked(), Some(Drag::Panning(_))) {
+                    if matches!(drag.get_untracked(), Some(Drag::Moving { .. })) {
                         ev.release_pointer();
                     }
                     drag.set(None);
                 },
-                on:pointer_leave = move |_| self.show(None),
+                on:pointer_leave = move |_| {
+                    self.show(None);
+                    if drag.get_untracked().is_none() {
+                        self.set_gutter(None);
+                    }
+                },
                 on:double_click = move |_| {
                     if pannable.get_untracked() {
                         drag.set(None);

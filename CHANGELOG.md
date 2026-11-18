@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Add battles played to the session stats as the game writes them to its replays folder, and show set, added and cleared session battles in the Stats tab at once
 - *(zgui)* Add a replay opened from the game's replays folder listing to the saved session stats, as the egui app does
 - *(zgui)* Bring the Stats tab forward on its Overview after Set as Session Stats, as the egui app does
+- *(zgui)* Drag a stats line chart's value or game axis to stretch or squeeze that axis alone, or scroll over it, as the egui chart allowed
 - *(zgui)* List each plate a cast arc struck in the armor viewer's trajectory editor, with its thickness, strike angle, zone and material and what the shell did there, and say how the shell arrived. Click a salvo or shell in the incoming fire log to draw its path through the hull and list the plates it struck
 - *(zgui)* Offer the replay renderer's drawing tools and undo without a collab session, as the egui renderer does
 - *(zgui)* Fill a circle, rectangle or triangle in the replay renderer by pressing its tool's button again, as the egui toolbar does

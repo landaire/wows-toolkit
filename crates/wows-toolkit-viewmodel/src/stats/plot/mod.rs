@@ -162,6 +162,29 @@ impl AxisRange {
     fn shifted(&self, by: f64) -> Self {
         Self::new(self.min + by, self.max + by)
     }
+
+    /// `factor` cut short where it would take the range past `MAX_ZOOM` either way from `fit`.
+    /// `None` when nothing of it is left.
+    fn zoom_step(&self, factor: f64, fit: &AxisRange) -> Option<f64> {
+        let span = self.span();
+        let fit = fit.span();
+        // A window kept over changed data can sit past a stop; a step toward the stops still
+        // applies whole, and only a step past one is cut short.
+        let applied = if factor >= 1.0 {
+            factor.min((span / (fit / MAX_ZOOM)).max(1.0))
+        } else {
+            factor.max((span / (fit * MAX_ZOOM)).min(1.0))
+        };
+
+        (applied != 1.0 && applied.is_finite()).then_some(applied)
+    }
+}
+
+/// One axis of a plot: X numbers the games or bars, Y carries the values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlotAxis {
+    X,
+    Y,
 }
 
 /// The data a plot shows across both axes.
@@ -173,12 +196,28 @@ pub struct DataWindow {
     pub y: AxisRange,
 }
 
+impl DataWindow {
+    fn axis(&self, axis: PlotAxis) -> AxisRange {
+        match axis {
+            PlotAxis::X => self.x,
+            PlotAxis::Y => self.y,
+        }
+    }
+
+    fn axis_mut(&mut self, axis: PlotAxis) -> &mut AxisRange {
+        match axis {
+            PlotAxis::X => &mut self.x,
+            PlotAxis::Y => &mut self.y,
+        }
+    }
+}
+
 /// What a plot shows: the whole of its data until the reader pans or zooms, then the data window
 /// they left it on.
 ///
 /// Held in data units, so the same games and values stay in view when the plot is drawn at
-/// another size. Zooming scales both axes together: the shape of a line is what is being read,
-/// and stretching one axis alone would distort it.
+/// another size. Zooming over the data scales both axes together, keeping the shape of a line;
+/// zooming on an axis scales that axis alone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlotView {
     Fit,
@@ -212,18 +251,9 @@ impl PlotView {
     /// `layout` drew in. The data under the cursor stays under it.
     pub fn zoom_about(&mut self, factor: f64, cursor: PlotPoint, layout: &PlotLayout) {
         let shown = self.window(layout.fit);
-        let span = shown.x.span();
-        let fit = layout.fit.x.span();
-        // A window kept over changed data can sit past a stop; a step toward the stops still
-        // applies whole, and only a step past one is cut short.
-        let applied = if factor >= 1.0 {
-            factor.min((span / (fit / MAX_ZOOM)).max(1.0))
-        } else {
-            factor.max((span / (fit * MAX_ZOOM)).min(1.0))
-        };
-        if applied == 1.0 || !applied.is_finite() {
+        let Some(applied) = shown.x.zoom_step(factor, &layout.fit.x) else {
             return;
-        }
+        };
 
         let (game, value) = layout.data_at(&shown, cursor);
         *self = Self::Window(DataWindow {
@@ -232,13 +262,43 @@ impl PlotView {
         });
     }
 
+    /// Zooms `axis` alone by `factor` about `anchor`, a position in the canvas's space. The data
+    /// at the anchor along `axis` stays there, and the other axis is left as it is.
+    pub fn zoom_axis(&mut self, axis: PlotAxis, factor: f64, anchor: PlotPoint, layout: &PlotLayout) {
+        let mut shown = self.window(layout.fit);
+        let range = shown.axis(axis);
+        let Some(applied) = range.zoom_step(factor, &layout.fit.axis(axis)) else {
+            return;
+        };
+
+        let (game, value) = layout.data_at(&shown, anchor);
+        let held = match axis {
+            PlotAxis::X => game,
+            PlotAxis::Y => value,
+        };
+        *shown.axis_mut(axis) = range.scaled_about(held, range.span() / applied);
+        *self = Self::Window(shown);
+    }
+
+    /// Zooms `axis` alone for a pointer pressed on its gutter at `anchor` that moved `delta`
+    /// canvas pixels along it. Right or down zooms in, by egui_plot's axis drag factor.
+    pub fn drag_axis(&mut self, axis: PlotAxis, delta: f32, anchor: PlotPoint, layout: &PlotLayout) {
+        let factor = 1.0 + (0.02 * f64::from(delta)).clamp(-1.0, 1.0);
+        self.zoom_axis(axis, factor, anchor, layout);
+    }
+
     /// Zooms one wheel notch about `cursor`: in for a positive `delta`, out for a negative one.
+    /// Over an axis's gutter only that axis zooms.
     pub fn wheel(&mut self, delta: f32, cursor: PlotPoint, layout: &PlotLayout) {
         if delta == 0.0 {
             return;
         }
+
         let factor = if delta > 0.0 { WHEEL_ZOOM_STEP } else { 1.0 / WHEEL_ZOOM_STEP };
-        self.zoom_about(factor, cursor, layout);
+        match layout.axis_at(cursor) {
+            Some(axis) => self.zoom_axis(axis, factor, cursor, layout),
+            None => self.zoom_about(factor, cursor, layout),
+        }
     }
 
     /// Moves the data with a pointer that moved by `dx`, `dy` canvas pixels over the area
@@ -272,6 +332,19 @@ impl PlotLayout {
         let x = f64::from((point.x - self.area.x) / self.area.width);
         let y = f64::from((self.area.bottom() - point.y) / self.area.height);
         (window.x.at(x), window.y.at(y))
+    }
+
+    /// The axis whose gutter `point`, in the canvas's space, is in: X's below the area and Y's
+    /// left of it, each as long as the area's side. `None` elsewhere, the area itself included.
+    pub fn axis_at(&self, point: PlotPoint) -> Option<PlotAxis> {
+        let area = self.area;
+        let across = point.x >= area.x && point.x <= area.right();
+        let along = point.y >= area.y && point.y <= area.bottom();
+        if across && point.y > area.bottom() && point.y <= area.bottom() + BOTTOM_GUTTER {
+            return Some(PlotAxis::X);
+        }
+
+        (along && point.x < area.x && point.x >= area.x - LEFT_GUTTER).then_some(PlotAxis::Y)
     }
 
     /// Where `draw` put each line's points, one iterator per series in `plot`'s order, in the
@@ -910,6 +983,101 @@ mod tests {
             let (a, b) = (fraction(*big, wide.area), fraction(*little, small.area));
             assert!((a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4, "{a:?} and {b:?} sit alike");
         }
+    }
+
+    /// A point on each axis's gutter, an anchor for zooming that axis.
+    fn on_gutter(layout: &PlotLayout, axis: PlotAxis) -> PlotPoint {
+        match axis {
+            PlotAxis::X => PlotPoint::new(layout.area.x + 100.0, layout.area.bottom() + 10.0),
+            PlotAxis::Y => PlotPoint::new(layout.area.x - 20.0, layout.area.y + 50.0),
+        }
+    }
+
+    #[test]
+    fn zooming_an_axis_keeps_its_data_at_the_anchor_and_leaves_the_other_axis() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        for (axis, other) in [(PlotAxis::X, PlotAxis::Y), (PlotAxis::Y, PlotAxis::X)] {
+            let anchor = on_gutter(&layout, axis);
+            let along = |layout: &PlotLayout| {
+                let (game, value) = layout.data_at(&layout.window, anchor);
+                match axis {
+                    PlotAxis::X => game,
+                    PlotAxis::Y => value,
+                }
+            };
+
+            let mut view = PlotView::default();
+            view.zoom_axis(axis, 2.0, anchor, &layout);
+            let (_, zoomed) = drawn(view, WIDE);
+
+            assert!((along(&zoomed) - along(&layout)).abs() < 1e-2, "{axis:?}: the anchor's data does not move");
+            let ratio = layout.window.axis(axis).span() / zoomed.window.axis(axis).span();
+            assert!((ratio - 2.0).abs() < 1e-9, "{axis:?}: half of it shows");
+            assert_eq!(zoomed.window.axis(other), layout.window.axis(other), "{axis:?}: the other axis is kept");
+        }
+    }
+
+    #[test]
+    fn axis_zoom_has_a_stop_each_way() {
+        for axis in [PlotAxis::X, PlotAxis::Y] {
+            let mut view = PlotView::default();
+            for _ in 0..40 {
+                let (_, layout) = drawn(view, WIDE);
+                view.zoom_axis(axis, 2.0, on_gutter(&layout, axis), &layout);
+            }
+            let (_, layout) = drawn(view, WIDE);
+            let zoom = layout.fit.axis(axis).span() / layout.window.axis(axis).span();
+            assert!((zoom - MAX_ZOOM).abs() < 1e-6, "{axis:?} stops zooming in at {zoom}");
+
+            let mut view = PlotView::default();
+            for _ in 0..40 {
+                let (_, layout) = drawn(view, WIDE);
+                view.zoom_axis(axis, 0.5, on_gutter(&layout, axis), &layout);
+            }
+            let (_, layout) = drawn(view, WIDE);
+            let zoom = layout.window.axis(axis).span() / layout.fit.axis(axis).span();
+            assert!((zoom - MAX_ZOOM).abs() < 1e-6, "{axis:?} stops zooming out at {zoom}");
+        }
+    }
+
+    #[test]
+    fn dragging_an_axis_right_or_down_zooms_it_in() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let anchor = on_gutter(&layout, PlotAxis::Y);
+        let zoom = |delta: f32| {
+            let mut view = PlotView::default();
+            view.drag_axis(PlotAxis::Y, delta, anchor, &layout);
+            layout.fit.y.span() / view.window(layout.fit).y.span()
+        };
+
+        assert!((zoom(10.0) - 1.2).abs() < 1e-9);
+        assert!((zoom(-10.0) - 0.8).abs() < 1e-9);
+        assert!((zoom(500.0) - 2.0).abs() < 1e-9, "one move at most doubles the zoom");
+    }
+
+    #[test]
+    fn the_gutters_name_their_axis() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let area = layout.area;
+
+        assert_eq!(layout.axis_at(PlotPoint::new(area.x + 10.0, area.bottom() + 5.0)), Some(PlotAxis::X));
+        assert_eq!(layout.axis_at(PlotPoint::new(area.x - 5.0, area.y + 10.0)), Some(PlotAxis::Y));
+        assert_eq!(layout.axis_at(PlotPoint::new(area.x + 10.0, area.y + 10.0)), None, "the area is no gutter");
+        assert_eq!(layout.axis_at(PlotPoint::new(area.x - 5.0, area.bottom() + 5.0)), None, "the corner is neither");
+        assert_eq!(layout.axis_at(PlotPoint::new(area.x + 10.0, area.y - 5.0)), None, "above the area");
+        assert_eq!(layout.axis_at(PlotPoint::new(area.right() + 5.0, area.y + 10.0)), None, "right of the area");
+    }
+
+    #[test]
+    fn a_wheel_notch_over_a_gutter_zooms_that_axis_alone() {
+        let (_, layout) = drawn(PlotView::default(), WIDE);
+        let mut view = PlotView::default();
+
+        view.wheel(1.0, on_gutter(&layout, PlotAxis::X), &layout);
+
+        let zoomed = view.window(layout.fit);
+        assert!((layout.fit.x.span() / zoomed.x.span() - WHEEL_ZOOM_STEP).abs() < 1e-9);
+        assert_eq!(zoomed.y, layout.fit.y);
     }
 
     #[test]
