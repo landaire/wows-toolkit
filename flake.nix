@@ -316,14 +316,26 @@
             lib.optionalString stdenv.hostPlatform.isLinux
             "${lib.makeLibraryPath buildInputs}";
 
+          # The Buck toolchain this shell was evaluated with, built on entering
+          # it. bin/buck2 rewrites .buckconfig.local when it names others, so
+          # a flake.lock change needs no manual refresh.
+          WT_BUCK_TOOLCHAIN = self.packages.${system}.buck-toolchain;
+          WT_BUCK_SYSTEM_LIBS = self.packages.${system}.buck-system-libs;
+          WT_MACOS_SDK = lib.optionalString stdenv.hostPlatform.isDarwin "${self.packages.${system}.macos-sdk}";
+
           shellHook =
             # bin/buck2 runs the Buck2 release toolchains/buck2 pins; ./bootstrap.sh
             # installs the DotSlash it runs through. bin/with-host-graphics starts
             # the GUI with the host's graphics drivers.
+            #
+            # A shell that got this far evaluated, so it is not the older one
+            # nix-direnv falls back to; bin/buck2 refuses to run under that one,
+            # and `nix develop` from it would otherwise inherit its marker.
             ''
               if [ -x "$PWD/bin/buck2" ]; then
                 export PATH="$PWD/bin:$PATH"
               fi
+              unset NIX_DIRENV_DID_FALLBACK
             '';
 
         };

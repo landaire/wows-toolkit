@@ -1,13 +1,26 @@
 #!/usr/bin/env nu
 
+# The store path `installable` builds, kept alive by a GC root at `link`.
+# Inside the dev shell `variable` already names it, the path the shell was
+# evaluated with, so nothing is evaluated here; outside it, it is built.
+# .buckconfig.local names the store path directly, and without the root
+# `nix-collect-garbage` deletes it out from under Buck.
+def store_path [variable: string, installable: string, link: string] {
+    let given = ($env | get --optional $variable | default "")
+    if ($given | is-not-empty) {
+        ^nix build --out-link $link $given
+        $given
+    } else {
+        ^nix build --out-link $link --print-out-paths $installable | str trim
+    }
+}
+
 if $nu.os-info.name == "macos" {
-    let macos_sdk = (^nix build --no-link --print-out-paths .#macos-sdk | str trim)
+    let macos_sdk = (store_path WT_MACOS_SDK .#macos-sdk .tools/macos-sdk)
     nu build-support/check-macos-sdk.nu $macos_sdk
 }
 
-# .buckconfig.local names the store path directly, so keep a GC root for it;
-# without one, `nix-collect-garbage` deletes the toolchain out from under Buck.
-let toolchain_root = (^nix build --out-link .tools/buck-toolchain --print-out-paths .#buck-toolchain | str trim)
+let toolchain_root = (store_path WT_BUCK_TOOLCHAIN .#buck-toolchain .tools/buck-toolchain)
 
 let required = [
     "ar"
@@ -55,9 +68,12 @@ if $nu.os-info.name == "linux" {
     }
 }
 
-let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-out-paths .#buck-system-libs | str trim)
+let system_libs_root = (store_path WT_BUCK_SYSTEM_LIBS .#buck-system-libs .tools/buck-system-libs)
 
-# Buck reads these instead of resolving any tool through PATH.
+# Buck reads these instead of resolving any tool through PATH. Written in
+# .tools, which Buck ignores, and renamed over the file: bin/buck2 may run this
+# from two shells at once, and Buck must never read half of one.
+let config = $".tools/buckconfig.local.(random uuid)"
 [
     "[nix_toolchain]"
     $"root = ($toolchain_root)"
@@ -83,4 +99,5 @@ let system_libs_root = (^nix build --out-link .tools/buck-system-libs --print-ou
     } else {
         []
     })
-] | str join "\n" | save -f .buckconfig.local
+] | str join "\n" | save -f $config
+mv -f $config .buckconfig.local

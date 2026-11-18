@@ -21,6 +21,23 @@ if [ ! -x "$dotslash" ]; then
     "$root/bootstrap.sh" --buck2-only
 fi
 
+# A shell nix-direnv kept from before the flake last failed to evaluate holds
+# an older toolchain, and every build it starts would quietly use that one.
+if [ -n "${NIX_DIRENV_DID_FALLBACK:-}" ]; then
+    echo "buck2: direnv could not evaluate flake.nix and kept an older dev shell. Fix the error it reported, then run \`direnv reload\`." >&2
+    exit 1
+fi
+
+# Inside the dev shell .buckconfig.local follows the toolchain the shell was
+# evaluated with, so a flake.lock change needs no manual refresh.
+if [ -n "${WT_BUCK_TOOLCHAIN:-}" ]; then
+    config=$root/.buckconfig.local
+    if ! grep -qxF "root = $WT_BUCK_TOOLCHAIN" "$config" 2>/dev/null ||
+        ! grep -qxF "root = $WT_BUCK_SYSTEM_LIBS" "$config"; then
+        (cd "$root" && nu --no-config-file scripts/refresh-buck-toolchain.nu) >&2
+    fi
+fi
+
 DOTSLASH_CACHE=$root/.tools/dotslash
 export DOTSLASH_CACHE
 exec "$dotslash" "$root/toolchains/buck2" "$@"
