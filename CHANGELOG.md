@@ -67,6 +67,7 @@ All notable changes to this project will be documented in this file.
 
 - *(zgui)* List the nations, classes and ships an armor viewer search names best first, so a ship searched by its name is not listed below loose matches in other nations
 - *(zgui)* Open a ship in the armor viewer sidebar with a click that leaves its parts folded. Its chevron unfolds them
+- *(zgui)* Draw the ship class icons in the Player Tracker's Current Match roster at their own proportions rather than squeezed into a square
 - *(zgui)* Add the folder picked for an install, a game or a Proton build after the launcher popover or drawer that asked has closed
 - *(zgui)* Stop a popped-out replay renderer, the tactics board and other secondary windows from reading the main window's closed state while the app exits
 - *(zgui)* Undo, redo and open the options rail with Ctrl+Z, Ctrl+Shift+Z and Ctrl+S from anywhere in the armor viewer, as in egui, and leave Ctrl+Z to a focused text field

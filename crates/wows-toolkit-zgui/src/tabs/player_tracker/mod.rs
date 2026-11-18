@@ -190,7 +190,7 @@ const CSS: &str = css!(
     .wt-tracker-roster-row { height: 24px; font-size: 13px; }
     .wt-tracker-roster-row[data-band] { background-color: color-mix(in srgb, var(--wt-pr-band-hue) 8%, transparent); }
     .wt-tracker-roster-col--class { width: 16px; height: 16px; flex: none; display: flex; align-items: center; }
-    .wt-tracker-class-icon { width: 16px; height: 16px; }
+    .wt-tracker-class-icon { width: 16px; height: 16px; object-fit: contain; }
     .wt-tracker-roster-col--mark { width: 16px; flex: none; display: flex; align-items: center; }
     .wt-tracker-roster-col--chip { width: 24px; flex: none; display: flex; align-items: center; }
     .wt-tracker-roster-col--name { flex: 1 1 0; min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
