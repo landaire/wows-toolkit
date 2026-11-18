@@ -231,6 +231,10 @@ impl<M: TreeModel> TreeState<M> {
         self.model.with_untracked(|model| model.is_selectable(key))
     }
 
+    pub fn click_toggles(&self, key: &M::Key) -> bool {
+        self.model.with_untracked(|model| model.click_toggles(key))
+    }
+
     pub fn select_only(&self, key: M::Key) {
         if !self.selectable(&key) {
             return;

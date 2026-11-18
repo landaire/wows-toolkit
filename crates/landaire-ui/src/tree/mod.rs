@@ -134,7 +134,8 @@ pub enum BranchClick {
     /// Only selects. The chevron and the arrow keys expand and collapse.
     #[default]
     Select,
-    /// Selects and expands or collapses the node.
+    /// Selects and expands or collapses the node, unless
+    /// [`TreeModel::click_toggles`] declines for it.
     SelectAndToggle,
 }
 
@@ -788,7 +789,7 @@ where
     let toggles = branch && parts.branch_click == BranchClick::SelectAndToggle;
     let on_click = move |ev: &mut EventCx<'_, events::Click>| {
         state.press(pressed.clone(), ev.modifiers);
-        if toggles && ev.modifiers.is_empty() {
+        if toggles && ev.modifiers.is_empty() && state.click_toggles(&pressed) {
             state.toggle_expanded(pressed.clone());
         }
     };

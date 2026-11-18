@@ -125,4 +125,10 @@ impl TreeModel for SidebarTree {
     fn is_selectable(&self, key: &RowId) -> bool {
         !self.unselectable.contains(key)
     }
+
+    /// A ship or model row with parts or variants under it opens on a click, which leaves it
+    /// folded; its chevron unfolds it.
+    fn click_toggles(&self, key: &RowId) -> bool {
+        self.kind(key).is_some_and(RowKind::is_folder)
+    }
 }

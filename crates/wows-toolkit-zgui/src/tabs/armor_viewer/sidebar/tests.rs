@@ -648,18 +648,20 @@ fn a_folder_closed_during_a_search_stays_closed_when_the_ship_parts_arrive() {
 }
 
 #[test]
-fn a_ship_row_loads_the_ship_and_a_part_row_opens_the_part_model() {
+fn a_ship_row_loads_the_ship_without_unfolding_and_a_part_row_opens_the_part_model() {
     let mut sidebar = Sidebar::open();
     sidebar.browse(&["armor-nation-USA", "armor-class-USA-Battleship", "armor-part-PASB018-group-MainBattery"]);
     let iowa = ship_row_id(fixture::IOWA_INDEX);
-
-    sidebar.click_row(&iowa);
-    assert_eq!(sidebar.events(), [SidebarEvent::OpenShip(iowa_choice())]);
-
     let vehicle = VehicleParamIndex::new(fixture::IOWA_INDEX);
     let part = ShipPartKey::Mount(HardpointName::new("HP_AGM_1"));
     let part_row = part_row_id(&vehicle, &part);
-    assert!(sidebar.listed(&part_row), "opening the ship lists its mounts");
+
+    sidebar.click_row(&iowa);
+    assert_eq!(sidebar.events(), [SidebarEvent::OpenShip(iowa_choice())]);
+    assert!(!sidebar.listed(&part_row), "a click on the ship leaves its parts folded");
+
+    sidebar.browse(&[iowa.as_str()]);
+    assert!(sidebar.listed(&part_row), "unfolding the ship lists its mounts");
     sidebar.click_row(&part_row);
 
     let from_ship = Some(ShipPartRef { vehicle_param_index: vehicle, part });

@@ -34,6 +34,13 @@ pub trait TreeModel: 'static {
     fn is_selectable(&self, _key: &Self::Key) -> bool {
         true
     }
+
+    /// Whether a plain click on branch `key` expands or collapses it under
+    /// [`BranchClick::SelectAndToggle`](crate::BranchClick::SelectAndToggle). A branch that
+    /// stands for something a click opens can leave expanding to its chevron and the keyboard.
+    fn click_toggles(&self, _key: &Self::Key) -> bool {
+        true
+    }
 }
 
 impl<M> TreeModel for Rc<M>
@@ -64,5 +71,9 @@ where
 
     fn is_selectable(&self, key: &Self::Key) -> bool {
         (**self).is_selectable(key)
+    }
+
+    fn click_toggles(&self, key: &Self::Key) -> bool {
+        (**self).click_toggles(key)
     }
 }
