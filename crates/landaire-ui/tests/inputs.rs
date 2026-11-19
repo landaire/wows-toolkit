@@ -9,6 +9,7 @@ use std::time::Duration;
 use landaire_ui::CheckboxFieldProps;
 use landaire_ui::ColorPickerProps;
 use landaire_ui::EscapeClears;
+use landaire_ui::FocusText;
 use landaire_ui::NumberInputProps;
 use landaire_ui::NumberPattern;
 use landaire_ui::NumberRange;
@@ -20,15 +21,19 @@ use landaire_ui::SliderLabelPlacement;
 use landaire_ui::SliderRange;
 use landaire_ui::SwitchFieldProps;
 use landaire_ui::ThemeRootProps;
+use landaire_ui::focus_when;
 use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -440,4 +445,57 @@ fn the_eye_button_is_named_in_the_callers_words() {
     window.advance(Duration::from_millis(16));
 
     assert!(window.by_role_and_label(Role::Button, "Masquer").is_some());
+}
+
+/// The field is focused with its text selected as soon as it is built, and again each time the
+/// request is made after the focus left it.
+#[test]
+fn focus_when_focuses_a_field_once_it_is_built_and_again_on_request() {
+    let asked = Rc::new(Cell::new(None));
+    let taken = Rc::new(Cell::new(0_u32));
+    let (mut window, held) = {
+        let asked = Rc::clone(&asked);
+        let taken = Rc::clone(&taken);
+        open("Yamato".to_owned(), move |value| {
+            let wanted = RwSignal::new_local(true);
+            asked.set(Some(wanted));
+            let field = NodeRef::new();
+            let taken = Rc::clone(&taken);
+            focus_when(
+                field,
+                move || wanted.get(),
+                FocusText::SelectAll,
+                move || {
+                    taken.set(taken.get() + 1);
+                    wanted.set(false);
+                },
+            );
+
+            view! {
+                ThemeRoot {
+                    Input(node_ref = field, value = value, label = "Name")
+                    Input(label = "Other")
+                }
+            }
+        })
+    };
+    let wanted = asked.get().expect("the view was built");
+    window.advance(Duration::from_millis(16));
+    let name = window.by_role_and_label(Role::TextInput, "Name").expect("the field is announced");
+    assert!(window.a11y(name).is_some_and(|state| state.focused), "the field is focused once built");
+    assert_eq!(taken.get(), 1);
+
+    window.type_text("M");
+    window.advance(Duration::from_millis(16));
+    assert_eq!(value(&held), "M", "the text was selected, so typing replaced it");
+
+    let other = window.by_role_and_label(Role::TextInput, "Other").expect("the field is announced");
+    window.click(other).expect("the field has a box");
+    window.advance(Duration::from_millis(16));
+    assert!(window.a11y(name).is_some_and(|state| !state.focused));
+
+    wanted.set(true);
+    window.advance(Duration::from_millis(16));
+    assert!(window.a11y(name).is_some_and(|state| state.focused), "a new request moves the focus back");
+    assert_eq!(taken.get(), 2);
 }

@@ -155,6 +155,8 @@ pub use crate::grid::SortDirection;
 pub use crate::input::color_picker::ColorPicker;
 pub use crate::input::color_picker::ColorPickerProps;
 pub use crate::input::escape::EscapeClears;
+pub use crate::input::focus::FocusText;
+pub use crate::input::focus::focus_when;
 pub use crate::input::number::Decimals;
 pub use crate::input::number::NumberEntry;
 pub use crate::input::number::NumberInput;
