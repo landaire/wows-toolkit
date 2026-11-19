@@ -9,6 +9,7 @@ use landaire_ui::OverlaySurfaceProps;
 use landaire_ui::PanelSide;
 use landaire_ui::StripedRowsProps;
 use landaire_ui::TABULAR_CLASS;
+use landaire_ui::TippedProps;
 use landaire_ui::TreeDepth;
 use landaire_ui::test_support::WindowSize;
 use zgui::css;
@@ -92,6 +93,9 @@ fn view() -> AnyView {
                     Button {"Primary"}
                     Button(variant = ButtonVariant::Secondary) {"Secondary"}
                     Button(variant = ButtonVariant::Outline) {"Outline"}
+                    Tipped(tip = "Shown after the pointer rests") {
+                        Button(variant = ButtonVariant::Ghost) {"Ghost"}
+                    }
                 }
                 row(class = "gallery-surfaces__controls") {
                     Switch(checked = on, a11y:label = "Enabled")

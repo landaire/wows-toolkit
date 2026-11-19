@@ -379,6 +379,26 @@ pub fn TooltipContent(
     })
 }
 
+/// A [`Tooltip`] that says `tip` about its children, for a control that shows only a symbol.
+#[component]
+pub fn Tipped(
+    /// What the tooltip says.
+    #[prop(into)]
+    tip: Signal<String, LocalStorage>,
+    /// Classes merged after the trigger's own, on the box that wraps the children.
+    #[prop(into, optional)]
+    class: Classes,
+    /// What the tooltip is about.
+    children: Children,
+) -> impl IntoView {
+    view! {
+        Tooltip {
+            TooltipTrigger(class = class) {{children.into_view_once()}}
+            TooltipContent {{move || tip.get()}}
+        }
+    }
+}
+
 /// How far a [`PointerTip`] stands from its pointer, and how far it keeps inside the window, in CSS
 /// pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]

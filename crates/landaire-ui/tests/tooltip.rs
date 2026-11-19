@@ -9,6 +9,7 @@ use std::time::Duration;
 use landaire_ui::PointerTipProps;
 use landaire_ui::TOOLTIP_DELAY;
 use landaire_ui::ThemeRootProps;
+use landaire_ui::TippedProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -176,6 +177,28 @@ fn a_tooltip_waits_for_the_delay() {
 
     window.advance(Duration::from_millis(200));
     assert_eq!(shown(&window), ["about first"]);
+}
+
+#[test]
+fn a_tipped_control_shows_its_tip_after_the_delay() {
+    let view = || {
+        view! {
+            ThemeRoot {
+                Tipped(tip = "Refresh") {
+                    text(attr:data-testid = "symbol") {"R"}
+                }
+            }
+        }
+    };
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), view).expect("the window opens");
+    let symbol = element(&window, "symbol");
+
+    window.hover(symbol).expect("hovers");
+    window.advance(TOOLTIP_DELAY - Duration::from_millis(100));
+    assert!(shown(&window).is_empty(), "nothing shows before the delay");
+
+    window.advance(Duration::from_millis(200));
+    assert_eq!(shown(&window), ["Refresh"]);
 }
 
 #[test]
