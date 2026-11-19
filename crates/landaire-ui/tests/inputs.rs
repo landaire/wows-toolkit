@@ -6,6 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::CheckboxFieldProps;
 use landaire_ui::ColorPickerProps;
 use landaire_ui::EscapeClears;
 use landaire_ui::NumberInputProps;
@@ -15,6 +16,7 @@ use landaire_ui::Rgb;
 use landaire_ui::SliderFieldProps;
 use landaire_ui::SliderLabelPlacement;
 use landaire_ui::SliderRange;
+use landaire_ui::SwitchFieldProps;
 use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
@@ -28,6 +30,8 @@ use zgui::view::IntoView;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
+use zgui::vocab::Toggled;
+use zgui_ui::Checked;
 use zgui_ui::InputProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
@@ -297,4 +301,94 @@ fn escape_empties_a_filter_field_before_it_closes_the_popover_around_it() {
     window.press_key(NamedKey::Escape, Modifiers::NONE);
     window.advance(Duration::from_millis(300));
     assert!(!open.get_untracked(), "Escape in the empty field closes the popover");
+}
+
+#[test]
+fn a_press_on_a_switch_fields_label_turns_the_switch() {
+    let (mut window, held) = open(false, |on| {
+        view! {
+            ThemeRoot {
+                SwitchField(checked = on, label = "Sound")
+            }
+        }
+    });
+    let switch = window.by_role_and_label(Role::Switch, "Sound").expect("the label names the switch");
+    let label = window.by_class("lui-toggle-field__label").expect("the label is in the document");
+
+    window.click(label).expect("the label has a box");
+    window.advance(Duration::from_millis(16));
+    assert!(value(&held));
+    assert_eq!(window.a11y(switch).and_then(|state| state.checked), Some(Toggled::True));
+
+    window.click(label).expect("the label has a box");
+    window.advance(Duration::from_millis(16));
+    assert!(!value(&held));
+    assert_eq!(window.a11y(switch).and_then(|state| state.checked), Some(Toggled::False));
+}
+
+#[test]
+fn a_press_on_a_fields_control_turns_it_once() {
+    let (mut window, held) = open(false, |on| {
+        view! {
+            ThemeRoot {
+                SwitchField(checked = on, label = "Sound")
+            }
+        }
+    });
+    let switch = window.by_role_and_label(Role::Switch, "Sound").expect("the label names the switch");
+
+    window.click(switch).expect("the switch has a box");
+    window.advance(Duration::from_millis(16));
+    assert!(value(&held));
+
+    window.click(switch).expect("the switch has a box");
+    window.advance(Duration::from_millis(16));
+    assert!(!value(&held));
+}
+
+#[test]
+fn a_press_on_a_checkbox_fields_label_ticks_the_checkbox_and_a_mixed_one_becomes_ticked() {
+    let (mut window, held) = open(Checked::Mixed, |checked| {
+        view! {
+            ThemeRoot {
+                CheckboxField(checked = checked, label = "Every ship")
+            }
+        }
+    });
+    let checkbox = window.by_role_and_label(Role::CheckBox, "Every ship").expect("the label names the checkbox");
+    let label = window.by_class("lui-toggle-field__label").expect("the label is in the document");
+
+    window.click(label).expect("the label has a box");
+    window.advance(Duration::from_millis(16));
+    assert_eq!(value(&held), Checked::Yes);
+    assert_eq!(window.a11y(checkbox).and_then(|state| state.checked), Some(Toggled::True));
+
+    window.click(label).expect("the label has a box");
+    window.advance(Duration::from_millis(16));
+    assert_eq!(value(&held), Checked::No);
+}
+
+#[test]
+fn a_press_on_a_disabled_fields_label_or_control_changes_nothing() {
+    let (mut window, held) = open(false, |on| {
+        view! {
+            ThemeRoot {
+                SwitchField(checked = on, disabled = true, label = "Sound")
+                CheckboxField(default_checked = Checked::No, disabled = true, label = "Every ship")
+            }
+        }
+    });
+    let switch = window.by_role_and_label(Role::Switch, "Sound").expect("the label names the switch");
+    let checkbox = window.by_role_and_label(Role::CheckBox, "Every ship").expect("the label names the checkbox");
+    let labels = window.all_by_class("lui-toggle-field__label");
+    assert_eq!(labels.len(), 2);
+
+    for element in labels.into_iter().chain([switch, checkbox]) {
+        window.click(element).expect("the element has a box");
+    }
+    window.advance(Duration::from_millis(16));
+
+    assert!(!value(&held));
+    assert_eq!(window.a11y(switch).and_then(|state| state.checked), Some(Toggled::False));
+    assert_eq!(window.a11y(checkbox).and_then(|state| state.checked), Some(Toggled::False));
 }
