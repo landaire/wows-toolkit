@@ -12,6 +12,8 @@ use landaire_ui::EscapeClears;
 use landaire_ui::NumberInputProps;
 use landaire_ui::NumberPattern;
 use landaire_ui::NumberRange;
+use landaire_ui::PasswordInputProps;
+use landaire_ui::PasswordInputStrings;
 use landaire_ui::Rgb;
 use landaire_ui::SliderFieldProps;
 use landaire_ui::SliderLabelPlacement;
@@ -391,4 +393,51 @@ fn a_press_on_a_disabled_fields_label_or_control_changes_nothing() {
     assert!(!value(&held));
     assert_eq!(window.a11y(switch).and_then(|state| state.checked), Some(Toggled::False));
     assert_eq!(window.a11y(checkbox).and_then(|state| state.checked), Some(Toggled::False));
+}
+
+#[test]
+fn the_eye_button_shows_the_password_and_masks_it_again() {
+    let (mut window, _) = open("hunter2".to_owned(), |value| {
+        view! {
+            ThemeRoot {
+                PasswordInput(value = value, a11y:label = "Password")
+            }
+        }
+    });
+    let field = window.by_label("Password").expect("the field takes the forwarded name");
+    let masked = window.a11y(field).expect("the field is announced");
+    assert_eq!(masked.role, Role::PasswordInput);
+    assert_ne!(masked.value.as_deref(), Some("hunter2"), "a masked field keeps its text from a reader");
+
+    let show = window.by_role_and_label(Role::Button, "Show password").expect("the button is announced");
+    window.click(show).expect("the button has a box");
+    window.advance(Duration::from_millis(16));
+    let shown = window.a11y(field).expect("the field is announced");
+    assert_eq!(shown.role, Role::TextInput);
+    assert_eq!(shown.value.as_deref(), Some("hunter2"));
+    let hide = window.by_role_and_label(Role::Button, "Hide password").expect("the button is renamed");
+    let pressed = window.a11y(hide).and_then(|state| state.checked);
+    assert_eq!(pressed, None, "the name says what a press does, so the button reports no pressed state");
+
+    window.click(hide).expect("the button has a box");
+    window.advance(Duration::from_millis(16));
+    assert_eq!(window.a11y(field).map(|state| state.role), Some(Role::PasswordInput));
+}
+
+#[test]
+fn the_eye_button_is_named_in_the_callers_words() {
+    let (mut window, _) = open(String::new(), |value| {
+        let strings = PasswordInputStrings { show: "Afficher".into(), hide: "Masquer".into() };
+        view! {
+            ThemeRoot {
+                PasswordInput(value = value, strings = strings)
+            }
+        }
+    });
+    let show = window.by_role_and_label(Role::Button, "Afficher").expect("the button is announced");
+
+    window.click(show).expect("the button has a box");
+    window.advance(Duration::from_millis(16));
+
+    assert!(window.by_role_and_label(Role::Button, "Masquer").is_some());
 }

@@ -1,11 +1,12 @@
-//! The gallery's inputs section: a number input, a slider field, a color picker, and switches and
-//! a checkbox named by their labels.
+//! The gallery's inputs section: a number input, a slider field, a color picker, switches and a
+//! checkbox named by their labels, and a password field.
 
 use landaire_ui::CheckboxFieldProps;
 use landaire_ui::ColorPickerProps;
 use landaire_ui::NumberInputProps;
 use landaire_ui::NumberPattern;
 use landaire_ui::NumberRange;
+use landaire_ui::PasswordInputProps;
 use landaire_ui::Rgb;
 use landaire_ui::SliderFieldProps;
 use landaire_ui::SliderRange;
@@ -40,6 +41,7 @@ fn view() -> AnyView {
     let tint = RwSignal::new_local(Rgb::new(0x3b82f6));
     let sound = RwSignal::new_local(true);
     let ships = RwSignal::new_local(Checked::Mixed);
+    let password = RwSignal::new_local("hunter2".to_owned());
     let presets = [0xe5484d, 0xf76b15, 0xffc53d, 0x46a758, 0x3b82f6, 0x8e4ec6, 0xffffff, 0x000000]
         .into_iter()
         .map(Rgb::new)
@@ -76,6 +78,7 @@ fn view() -> AnyView {
                 SwitchField(checked = sound, label = "Sound")
                 SwitchField(disabled = true, label = "Disabled")
                 CheckboxField(checked = ships, label = "Every ship")
+                PasswordInput(value = password, placeholder = "Password", a11y:label = "Password")
             }
         }
     })
