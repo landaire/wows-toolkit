@@ -766,8 +766,9 @@ fn the_rows_keep_their_scroll_and_cursor_as_battles_land_and_the_folder_is_read_
     control.grouping.set(ReplayGrouping::None);
     let dir = tempfile::tempdir().expect("a temporary directory can be made");
     let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+    // One battle for every copy, so the rows are ordered by their names.
+    let name = FIXTURES[0];
     for copy in 0..40 {
-        let name = FIXTURES[copy % FIXTURES.len()];
         std::fs::copy(fixture(name), root.join(format!("{copy:02}-{name}"))).expect("the replay is copied");
     }
     control.open_folder(root.clone());
@@ -775,7 +776,7 @@ fn the_rows_keep_their_scroll_and_cursor_as_battles_land_and_the_folder_is_read_
     control.pin_folder(folder_id(control, &root), true);
     settle_in_real_time(&mut window);
 
-    let numbered = |number: usize| root.join(format!("{number:02}-{}", FIXTURES[number % FIXTURES.len()]));
+    let numbered = |number: usize| root.join(format!("{number:02}-{name}"));
     let rows = window.by_test_id("replay-listing-rows").expect("the folder's rows are shown");
     window.wheel(rows, 400.0).expect("the rows have a box");
     window.advance(Duration::from_millis(300));
@@ -787,9 +788,9 @@ fn the_rows_keep_their_scroll_and_cursor_as_battles_land_and_the_folder_is_read_
     assert!(cursor_on(&window, &cursor), "the arrow moves the cursor one row down");
     let top = window.bounds(row(&window, &cursor)).expect("the row has a box").origin.y;
 
-    // Named to sort last, so it lands below every row on screen.
-    let landed = root.join(format!("!landed-{}", FIXTURES[1]));
-    std::fs::copy(fixture(FIXTURES[1]), &landed).expect("the replay is copied");
+    // Named to sort last among the rows of its battle, so it lands below every row on screen.
+    let landed = root.join(format!("!landed-{name}"));
+    std::fs::copy(fixture(name), &landed).expect("the replay is copied");
     simulated_watch::report(&root, DirChange::Appeared(landed.clone()));
     settle_in_real_time(&mut window);
     assert!(listing(control, &root).holds(&landed), "the watch lists the battle");

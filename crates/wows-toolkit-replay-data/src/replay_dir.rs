@@ -99,8 +99,8 @@ pub fn scan_replay_files(
 
 /// Lists every non-temp `*.wowsreplay` file in `folder` and reads each one's
 /// header-only metadata. Ports `task/replays.rs::replay_filepaths`'s filter
-/// (minus the creation-time sort, which `build_browser_tree` redoes by path
-/// anyway) plus a per-file `ReplayFile::meta_from_file` read. A file that
+/// (minus the creation-time sort, which `build_browser_tree` redoes by battle
+/// time) plus a per-file `ReplayFile::meta_from_file` read. A file that
 /// fails to parse (corrupt, mid-write, or from a format this parser does not
 /// understand) is logged and skipped rather than aborting the whole scan.
 pub fn scan_folder(

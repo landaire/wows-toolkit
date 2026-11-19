@@ -21,7 +21,7 @@ use crate::replay_index::ScopedReplay;
 use crate::replay_index::SourceScope;
 
 /// The format replay headers record the battle time in.
-const HEADER_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
+pub(crate) const HEADER_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
 
 /// The format the confirmation states a battle time in.
 const SAID_DATE_FORMAT: &str = "%Y-%m-%d %H:%M";

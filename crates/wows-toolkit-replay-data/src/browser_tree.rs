@@ -11,9 +11,12 @@
 //! (`wows_toolkit_viewmodel::listing_row`), so the listing reads the same in
 //! both apps; this module only decides which rows sit under which group.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::PathBuf;
 
+use jiff::civil::DateTime;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -26,6 +29,7 @@ use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
 use wows_toolkit_viewmodel::listing_row::stats_line_parts;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
+use crate::force_reindex::HEADER_DATE_FORMAT;
 use crate::load::GameDataCache;
 use crate::replay_dir::ScannedReplay;
 
@@ -123,19 +127,33 @@ pub enum BrowserNode {
     },
 }
 
-/// Builds the file-browser tree for `grouping`. Sorts `files` by path
-/// descending first (mirroring both egui listing functions' own
-/// `files.sort_by(|a, b| b.0.cmp(&a.0))`), so replay filenames' leading
-/// timestamps put the newest replay first; the caller does not need to
-/// pre-sort.
+/// Builds the file-browser tree for `grouping`, newest battle first; the
+/// caller does not need to pre-sort.
+///
+/// Replays are ordered by the battle time their headers record, not by path:
+/// one folder's replays can lie in several directories (an overlaid install's
+/// layers, versioned subfolders), whose names would otherwise order them. A
+/// header time that does not parse sorts after every dated replay, and the
+/// file name, which the game leads with the time, orders the rest.
 pub fn build_browser_tree(files: &[ReplayLite], grouping: ReplayGrouping, locale: Option<&str>) -> Vec<BrowserNode> {
     let mut sorted: Vec<&ReplayLite> = files.iter().collect();
-    sorted.sort_by(|a, b| b.path.cmp(&a.path));
+    sorted.sort_by_cached_key(|&r| {
+        let played_at = DateTime::strptime(HEADER_DATE_FORMAT, &r.identity.date_time).ok();
+        Reverse((played_at, r.path.file_name(), r.path.as_path()))
+    });
 
     match grouping {
         ReplayGrouping::None => sorted.into_iter().map(|r| leaf(r, ReplayGrouping::None, locale)).collect(),
-        ReplayGrouping::Date => build_date_groups(&sorted, locale),
-        ReplayGrouping::Ship => build_ship_groups(&sorted, locale),
+        ReplayGrouping::Date => {
+            let groups = first_seen_groups(&sorted, |r| {
+                r.identity.date_time.split(' ').next().unwrap_or(&r.identity.date_time).to_string()
+            });
+            groups.into_iter().map(|(date, replays)| group_node(GroupKind::Date, date, replays, locale)).collect()
+        }
+        ReplayGrouping::Ship => {
+            let groups = first_seen_groups(&sorted, |r| r.identity.ship.clone());
+            groups.into_iter().map(|(ship, replays)| group_node(GroupKind::Ship, ship, replays, locale)).collect()
+        }
     }
 }
 
@@ -180,47 +198,24 @@ fn group_node(kind: GroupKind, name: String, replays: Vec<&ReplayLite>, locale: 
     BrowserNode::Group { kind, name, label, children }
 }
 
-/// Groups path-descending-sorted `files` by the date part of `game_time`
-/// (`game_time.split(' ').next()`).
-///
-/// One group per date, in first-seen order: rows are newest-first, so that
-/// puts the dates in descending order and a file whose timestamp is out of
-/// order still joins the group its date names rather than opening a second
-/// one. Mirrors `listing_cache.rs`'s `build_groups`.
-fn build_date_groups(files: &[&ReplayLite], locale: Option<&str>) -> Vec<BrowserNode> {
-    let mut groups: Vec<(String, Vec<&ReplayLite>)> = Vec::new();
-    let mut by_date: HashMap<String, usize> = HashMap::new();
+/// Buckets newest-first `files` by `key`, one group per key in first-seen
+/// order. That orders the groups by their newest replay, and a replay joins
+/// the group its key names wherever it falls in the order.
+fn first_seen_groups<'a, K: Clone + Eq + Hash>(
+    files: &[&'a ReplayLite],
+    key: impl Fn(&ReplayLite) -> K,
+) -> Vec<(K, Vec<&'a ReplayLite>)> {
+    let mut groups: Vec<(K, Vec<&ReplayLite>)> = Vec::new();
+    let mut by_key: HashMap<K, usize> = HashMap::new();
     for &r in files {
-        let date = r.identity.date_time.split(' ').next().unwrap_or(&r.identity.date_time).to_string();
-        let index = *by_date.entry(date.clone()).or_insert_with(|| {
-            groups.push((date, Vec::new()));
+        let name = key(r);
+        let index = *by_key.entry(name.clone()).or_insert_with(|| {
+            groups.push((name, Vec::new()));
             groups.len() - 1
         });
         groups[index].1.push(r);
     }
-    groups.into_iter().map(|(date, replays)| group_node(GroupKind::Date, date, replays, locale)).collect()
-}
-
-/// Groups path-descending-sorted `files` by ship name. Groups are ordered by
-/// each ship's most recent replay: since `files` is already newest-first, a
-/// ship's first occurrence during the scan is its most recent path. Mirrors
-/// `mod.rs:3345-3359`.
-fn build_ship_groups(files: &[&ReplayLite], locale: Option<&str>) -> Vec<BrowserNode> {
-    let mut ship_groups: HashMap<&str, Vec<&ReplayLite>> = HashMap::new();
-    let mut ship_most_recent: HashMap<&str, &PathBuf> = HashMap::new();
-    for &r in files {
-        ship_groups.entry(r.identity.ship.as_str()).or_default().push(r);
-        ship_most_recent.entry(r.identity.ship.as_str()).or_insert(&r.path);
-    }
-
-    let mut groups: Vec<(&str, Vec<&ReplayLite>)> = ship_groups.into_iter().collect();
-    groups.sort_by(|a, b| {
-        let a_recent = ship_most_recent[a.0];
-        let b_recent = ship_most_recent[b.0];
-        b_recent.cmp(a_recent)
-    });
-
-    groups.into_iter().map(|(ship, replays)| group_node(GroupKind::Ship, ship.to_string(), replays, locale)).collect()
+    groups
 }
 
 #[cfg(test)]
@@ -324,10 +319,8 @@ mod tests {
 
     #[test]
     fn date_grouping_buckets_same_date_entries_newest_first() {
-        // Paths sort descending to "b3, b2, b1, a2, a1"; game_time dates are
-        // "02" for the b-paths and "01" for the a-paths, so this is a clean
-        // two-group case that also proves the path-descending sort feeds the
-        // grouping loop (b-dated entries never touch the a group).
+        // Battle dates are "02" for the b-paths and "01" for the a-paths, so
+        // this is a clean two-group case.
         let files = vec![
             replay("replays/a1.wowsreplay", "Kleber", "Ocean", "01.01.2026 10:00:00", MatchOutcome::Unknown),
             replay("replays/a2.wowsreplay", "Kleber", "Volcano", "01.01.2026 11:30:00", MatchOutcome::Win),
@@ -352,17 +345,17 @@ mod tests {
         );
     }
 
-    /// A file whose timestamp is out of order joins the group its date
-    /// names. It used to open a second group with the same heading, which
-    /// read as two different days.
+    /// An overlaid install's replays lie in two directories, the older ones
+    /// in a layer whose path sorts after the newer ones'. The listing still
+    /// leads with the newest battle, and orders days across a year end,
+    /// which the header's day-first text does not.
     #[test]
-    fn date_grouping_folds_an_out_of_order_entry_into_its_own_date() {
-        // Paths sort descending to "c, b, a"; "c" and "a" share a date but
-        // "b" sits between them with a different date.
+    fn replays_in_several_directories_list_newest_battle_first() {
         let files = vec![
-            replay("replays/a.wowsreplay", "Kleber", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Unknown),
-            replay("replays/b.wowsreplay", "Kleber", "Ocean", "02.01.2026 09:00:00", MatchOutcome::Unknown),
-            replay("replays/c.wowsreplay", "Kleber", "Ocean", "01.01.2026 20:00:00", MatchOutcome::Unknown),
+            replay("/mnt/r/20251231_a.wowsreplay", "Kleber", "Ocean", "31.12.2025 20:00:00", MatchOutcome::Unknown),
+            replay("/mnt/r/20261116_b.wowsreplay", "Kleber", "Ocean", "16.11.2026 12:00:00", MatchOutcome::Unknown),
+            replay("/home/r/20261119_c.wowsreplay", "Yamato", "Volcano", "19.11.2026 15:02:19", MatchOutcome::Unknown),
+            replay("/home/r/20260101_d.wowsreplay", "Yamato", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Unknown),
         ];
 
         let tree = build_browser_tree(&files, ReplayGrouping::Date, None);
@@ -370,24 +363,40 @@ mod tests {
         assert_eq!(
             labels(&tree),
             vec![
-                (0, "01.01.2026 (2)".to_string()),
+                (0, "19.11.2026 (1)".to_string()),
+                (1, "Yamato - Volcano".to_string()),
+                (0, "16.11.2026 (1)".to_string()),
                 (1, "Kleber - Ocean".to_string()),
-                (1, "Kleber - Ocean".to_string()),
-                (0, "02.01.2026 (1)".to_string()),
+                (0, "01.01.2026 (1)".to_string()),
+                (1, "Yamato - Ocean".to_string()),
+                (0, "31.12.2025 (1)".to_string()),
                 (1, "Kleber - Ocean".to_string()),
             ]
         );
     }
 
+    /// A header time that does not parse places its replay after every dated one.
+    #[test]
+    fn a_replay_without_a_battle_time_lists_last() {
+        let files = vec![
+            replay("replays/b.wowsreplay", "Yamato", "Volcano", "", MatchOutcome::Unknown),
+            replay("replays/a.wowsreplay", "Kleber", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Unknown),
+        ];
+
+        let tree = build_browser_tree(&files, ReplayGrouping::None, None);
+
+        assert_eq!(labels(&tree), vec![(0, "Kleber - Ocean".to_string()), (0, "Yamato - Volcano".to_string())]);
+    }
+
     #[test]
     fn ship_grouping_orders_groups_by_each_ships_most_recent_replay() {
-        // Paths sort descending to "c, b, a". Kleber's most recent (first
-        // seen) path is "c"; Yamato's is "b". So Kleber's group comes first
-        // even though it has fewer replays.
+        // Kleber's most recent battle is "c", Yamato's is "b", so Kleber's
+        // group comes first even though it has fewer replays and its file
+        // lies in a directory whose path sorts last.
         let files = vec![
-            replay("replays/a.wowsreplay", "Yamato", "Ocean", "01.01.2026 08:00:00", MatchOutcome::Loss),
-            replay("replays/b.wowsreplay", "Yamato", "Volcano", "01.01.2026 09:00:00", MatchOutcome::Win),
-            replay("replays/c.wowsreplay", "Kleber", "Ocean", "01.01.2026 10:00:00", MatchOutcome::Win),
+            replay("z/a.wowsreplay", "Yamato", "Ocean", "01.01.2026 08:00:00", MatchOutcome::Loss),
+            replay("z/b.wowsreplay", "Yamato", "Volcano", "01.01.2026 09:00:00", MatchOutcome::Win),
+            replay("a/c.wowsreplay", "Kleber", "Ocean", "01.01.2026 10:00:00", MatchOutcome::Win),
         ];
 
         let tree = build_browser_tree(&files, ReplayGrouping::Ship, None);
