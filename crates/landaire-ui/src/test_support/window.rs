@@ -532,6 +532,19 @@ impl HeadlessWindow {
         Ok(())
     }
 
+    /// Asks to close the window, as a window manager does when its close button is pressed, and
+    /// runs what that asks for. The application may refuse; [`Self::is_open`] tells whether it did.
+    /// Fails once the window has closed.
+    pub fn request_close(&mut self) -> Result<(), HeadlessError> {
+        if !self.is_open() {
+            return Err(HeadlessError::NoWindow);
+        }
+
+        self.deliver(SurfaceEvent::CloseRequested);
+
+        Ok(())
+    }
+
     /// The cursor the window last asked the platform to show, or `None` before it asked for one.
     pub fn cursor(&self) -> Option<CursorStyle> {
         self.surface().and_then(|surface| surface.last_cursor())

@@ -12,8 +12,11 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::component;
+use zgui::prelude::CloseResponse;
+use zgui::prelude::on_close_request;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
+use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
@@ -114,4 +117,36 @@ fn a_window_opens_after_every_window_on_its_thread_has_closed() {
     let (mut third, _) = open_counter();
     click_count(&mut third);
     assert_eq!(label(&mut third, "clicks"), "clicks 1");
+}
+
+/// A window whose application refuses to close.
+#[component]
+fn Refusing(asked: Rc<Cell<u32>>) -> impl IntoView {
+    let guard = on_close_request(move || {
+        asked.set(asked.get() + 1);
+        CloseResponse::Veto
+    });
+    on_cleanup_local(move || drop(guard));
+
+    view! { ThemeRoot { box(style = "width: 10px; height: 10px") } }
+}
+
+#[test]
+fn a_close_request_closes_a_window_unless_the_application_refuses() {
+    let asked = Rc::new(Cell::new(0));
+    let handed = Rc::clone(&asked);
+    let mut refusing = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        view! { Refusing(asked = Rc::clone(&handed)) }
+    })
+    .expect("opens");
+
+    refusing.request_close().expect("the window has a surface");
+    assert_eq!(asked.get(), 1, "the application was asked");
+    assert!(refusing.is_open(), "the application refused");
+    drop(refusing);
+
+    let (mut closing, _) = open_counter();
+    closing.request_close().expect("the window has a surface");
+    assert!(!closing.is_open());
+    assert!(closing.request_close().is_err(), "a closed window has nothing to ask");
 }
