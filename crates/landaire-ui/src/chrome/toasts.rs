@@ -228,6 +228,12 @@ impl Toasts {
             self.queue.dismiss(id);
         }
     }
+
+    /// Takes every message down, keyed or not.
+    pub fn clear(self) {
+        self.keyed.update_value(HashMap::clear);
+        self.queue.clear();
+    }
 }
 
 /// A button on a message.

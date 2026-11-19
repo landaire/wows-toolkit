@@ -95,6 +95,27 @@ fn a_sticky_message_stays_until_it_is_withdrawn() {
     assert!(messages(&mut window).is_empty(), "withdrawing it from every window took it down");
 }
 
+#[test]
+fn clearing_takes_every_message_down_and_a_key_can_be_used_again() {
+    let (mut window, toasts) = open_host(MotionPreference::Full);
+    let key = ToastKey::new("sync");
+
+    toasts.show(Notice::warn("Sync stopped").keyed(key.clone()).sticky());
+    toasts.info("Opened");
+    window.advance(MOVE);
+    toasts.clear();
+    window.advance(MOVE);
+    assert!(messages(&mut window).is_empty(), "the sticky and the brief message both went");
+
+    toasts.show(Notice::info("Sync started").keyed(key.clone()).sticky());
+    window.advance(MOVE);
+    assert_eq!(messages(&mut window), ["Sync started"], "a message about the cleared key went up");
+
+    toasts.withdraw(&key);
+    window.advance(MOVE);
+    assert!(messages(&mut window).is_empty(), "the key withdrew its new message");
+}
+
 /// How many animations the message and its slot run a frame after `toasts` puts one up.
 fn moving_after_show(motion: MotionPreference) -> usize {
     let (mut window, toasts) = open_host(motion);
