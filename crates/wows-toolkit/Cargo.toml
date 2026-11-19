@@ -28,7 +28,7 @@ egui_dock = { workspace = true, features = ["serde"] }
 egui-phosphor = { workspace = true }
 egui_table = "0.11.0"
 egui_commonmark = "0.26"
-egui_ltreeview = { version = "0.10.0", features = ["persistence"] }
+egui_ltreeview = { workspace = true, features = ["persistence"] }
 egui_plot = "0.38.0"
 egui_taffy = "0.16.0"
 egui-palette = "0.7.0"

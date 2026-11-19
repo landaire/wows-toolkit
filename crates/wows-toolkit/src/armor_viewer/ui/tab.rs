@@ -482,7 +482,7 @@ impl ToolkitTabViewer<'_> {
                     state.prev_selector_search = search.clone();
                 }
 
-                let tree = egui_ltreeview::TreeView::new(tree_id);
+                let tree = egui_ltreeview::TreeView::new(tree_id).sticky_dirs(true);
 
                 let scroll_out = egui::ScrollArea::both().show(&mut sidebar_ui, |ui| {
                     tree.show(ui, |builder| {

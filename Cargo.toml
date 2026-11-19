@@ -98,6 +98,8 @@ egui = "0.37"
 # egui 0.37 ports of egui-phosphor and egui_dock are not released upstream.
 egui-phosphor = { git = "https://github.com/landaire-contrib/egui-phosphor", rev = "9b98fa3e49ed6c7d0fd9c3ddde5257065c9ca5e8" }
 egui_dock = { git = "https://github.com/landaire-contrib/egui_dock", rev = "fdb395d4fbe91f39c0166651bc69c31824bc6ffb" }
+# Adds directory rows that pin to the top of the view while scrolling.
+egui_ltreeview = { git = "https://github.com/landaire-contrib/egui_ltreeview", rev = "91d1658bca5a09e76dc42291d56516264160b1ce" }
 # Runs a build's client scripts to generate its constants.json.
 wowsdeob = { git = "https://github.com/landaire/wowsdeob", rev = "8f8dabf1ea85f4c7b814d29f91eebafb85ab756e", default-features = false, features = ["constants"] }
 eframe = { version = "0.37", default-features = false }

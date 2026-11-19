@@ -441,7 +441,7 @@ impl UnpackerPaneViewer<'_> {
                         let root_id = egui::Id::unique(("browser_dir", source_id, "/"));
                         id_to_path.insert(root_id, "/".to_string());
 
-                        let tree = egui_ltreeview::TreeView::new(tree_id);
+                        let tree = egui_ltreeview::TreeView::new(tree_id).sticky_dirs(true);
 
                         let (_response, actions) = tree.show(ui, |builder| {
                             let root_node = egui_ltreeview::NodeBuilder::dir(root_id)

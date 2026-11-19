@@ -4106,6 +4106,7 @@ impl ToolkitTabViewer<'_> {
             let fallback_tree = Arc::clone(&groups.tree);
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(workspace_salt(ws_id, tree_id_salt)))
                 .allow_multi_selection(true)
+                .sticky_dirs(true)
                 .fallback_context_menu(move |ui, selected_ids| {
                     show_multi_selection_context_menu(&fallback_tree, ui, selected_ids, ws_id);
                 });

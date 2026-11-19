@@ -18,6 +18,13 @@ git_fetch(
 )
 
 git_fetch(
+    name = "egui_ltreeview-090ec0688728fa57.git",
+    repo = "https://github.com/landaire-contrib/egui_ltreeview",
+    rev = "91d1658bca5a09e76dc42291d56516264160b1ce",
+    visibility = [],
+)
+
+git_fetch(
     name = "unfuck-334941d93454d79d.git",
     repo = "https://github.com/landaire/unfuck",
     rev = "d1131672bb329ec5b2291c4f370b7946593644a6",
@@ -10391,33 +10398,24 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
-    name = "egui_ltreeview-0.10.0.crate",
-    sha256 = "3000337dc789042362153ca4f986336f7d9846a22c7199a9da601fdd319595c6",
-    size_bytes = 61140,
-    strip_prefix = "egui_ltreeview-0.10.0",
-    urls = ["https://static.crates.io/crates/egui_ltreeview/0.10.0/download"],
-    visibility = [],
-)
-
 cargo.rust_library(
     name = "egui_ltreeview-0.10",
-    srcs = [":egui_ltreeview-0.10.0.crate"],
+    srcs = [":egui_ltreeview-090ec0688728fa57.git"],
     crate = "egui_ltreeview",
-    crate_root = "egui_ltreeview-0.10.0.crate/src/lib.rs",
+    crate_root = "egui_ltreeview-090ec0688728fa57/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_CRATE_NAME": "egui_ltreeview",
-        "CARGO_MANIFEST_DIR": "egui_ltreeview-0.10.0.crate",
+        "CARGO_MANIFEST_DIR": "egui_ltreeview-090ec0688728fa57",
         "CARGO_PKG_AUTHORS": "Leonard Schüngel <schuengel.leonard@gmail.com>",
         "CARGO_PKG_DESCRIPTION": "A tree view widget for egui",
         "CARGO_PKG_NAME": "egui_ltreeview",
         "CARGO_PKG_REPOSITORY": "https://github.com/LennysLounge/egui_ltreeview",
-        "CARGO_PKG_VERSION": "0.10.0",
+        "CARGO_PKG_VERSION": "0.10.1-dev",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "10",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "dev",
     },
     features = [
         "default",

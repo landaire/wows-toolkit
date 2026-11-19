@@ -3047,9 +3047,8 @@ dependencies = [
 
 [[package]]
 name = "egui_ltreeview"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3000337dc789042362153ca4f986336f7d9846a22c7199a9da601fdd319595c6"
+version = "0.10.1-dev"
+source = "git+https://github.com/landaire-contrib/egui_ltreeview?rev=91d1658bca5a09e76dc42291d56516264160b1ce#91d1658bca5a09e76dc42291d56516264160b1ce"
 dependencies = [
  "egui",
  "serde",
