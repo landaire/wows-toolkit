@@ -307,6 +307,7 @@ pub fn ArmorSidebar(
                 selection = state.selection,
                 branch_click = BranchClick::SelectAndToggle,
                 leaf_lead = LeafLead::Space,
+                sticky_branches = true,
                 on_activate = UnsyncCallback::new(move |id: RowId| state.open_row(&id)),
                 context_menu = TreeMenu::new(move |id: &RowId| row_menu(state, shell, id)),
                 tooltip = TreeTooltip::new(move |id: &RowId| row_tip(state, id)),

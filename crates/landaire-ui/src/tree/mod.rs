@@ -81,6 +81,7 @@ use crate::tooltip::TooltipProps;
 use crate::tooltip::TooltipTriggerProps;
 use crate::tree::flat::FlatRow;
 use crate::tree::flat::FlatRows;
+use crate::tree::flat::PinnedRow;
 use crate::tree::keys::Command;
 use crate::tree::state::KeptPlace;
 use crate::tree::state::TreeState;
@@ -344,6 +345,10 @@ pub fn Tree<M, V, F>(
     /// Whether each level of indent draws a guide.
     #[prop(default = true)]
     guides: bool,
+    /// Whether an expanded branch stays at the top of the scrollport, below the branches that
+    /// hold it, while its descendants scroll past it.
+    #[prop(optional)]
+    sticky_branches: bool,
     /// Told the key of a row that is double-clicked, or the cursor's when Enter is pressed.
     #[prop(optional)]
     on_activate: Option<UnsyncCallback<M::Key>>,
@@ -372,8 +377,8 @@ where
     let state = TreeState::new(model, expanded, selection, selection_mode, kept);
     let port = NodeRef::new();
     let following = follow_model(state);
-    let revealing = handle.map(|handle| follow_handle(state, handle, port, row_height));
-    let landing = handle.map(|handle| follow_landing(state, handle, port, row_height));
+    let revealing = handle.map(|handle| follow_handle(state, handle, port, row_height, sticky_branches));
+    let landing = handle.map(|handle| follow_landing(state, handle, port, row_height, sticky_branches));
     let remembering = memory.map(|memory| follow_scroll(memory, port));
     on_cleanup_local(move || {
         drop(following);
@@ -396,7 +401,7 @@ where
         tooltip,
         cursor_row: RwSignal::new_local(None),
     });
-    let body = Body { parts, port, row_height, menu_shown, label, class, attrs };
+    let body = Body { parts, port, row_height, sticky: sticky_branches, menu_shown, label, class, attrs };
 
     if context_menu.is_none() {
         return AnyView::new(body.into_view());
@@ -452,11 +457,26 @@ struct RowSpec<K> {
     row: FlatRow<K>,
 }
 
+/// One row of the pane: a built row, or the space of a row drawn pinned instead.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum PaneRow<K> {
+    Row(RowSpec<K>),
+    Space(RowIndex),
+}
+
+/// The branches pinned at one scroll offset.
+#[derive(Clone, PartialEq)]
+struct Pins {
+    offset: CssPx,
+    rows: Vec<PinnedRow>,
+}
+
 /// The scroll container and the rows in it.
 struct Body<M: TreeModel, F> {
     parts: Rc<RowParts<M, F>>,
     port: NodeRef,
     row_height: Signal<RowHeight, LocalStorage>,
+    sticky: bool,
     /// The items of the menu last asked for.
     menu_shown: RwSignal<Option<MenuItems>, LocalStorage>,
     label: Option<String>,
@@ -472,7 +492,7 @@ where
 {
     /// Built inside the context menu's trigger, when there is one, so the keyboard can open it.
     fn into_view(self) -> impl IntoView {
-        let Self { parts, port, row_height, menu_shown, label, class, attrs } = self;
+        let Self { parts, port, row_height, sticky, menu_shown, label, class, attrs } = self;
         let state = parts.state;
         let cursor_row = parts.cursor_row;
         let menu_request = parts.menu.as_ref().map(|menu| menu.request);
@@ -480,6 +500,15 @@ where
         let count = Signal::derive_local(move || state.rows.with(FlatRows::len));
         let seen = Virtualize::new(port, count, Signal::derive_local(move || row_height.get().0), 4);
         let window = Signal::derive_local(move || seen.window());
+
+        let pins = sticky.then(|| follow_pins(state, port, row_height));
+        let holding = pins.map(|pins| hold_collapsed_pins(state, port, row_height, pins));
+        on_cleanup_local(move || drop(holding));
+        let held = Memo::new(move |_| {
+            pins.and_then(|pins| pins.try_with(|pins| pins.rows.iter().map(|pin| pin.index).collect()))
+                .unwrap_or_default()
+        });
+        let pinned_layer = pins.map(|pins| pinned_layer(state, pins, held, Rc::clone(&parts)));
 
         let keyboard = Keyboard {
             state,
@@ -491,6 +520,7 @@ where
             menu: parts.menu.as_ref().map(|menu| menu.menu.clone()),
             cursor_row,
             typed: Typeahead::new(),
+            sticky,
         };
         let on_key_down = move |ev: &mut EventCx<'_, events::KeyDown>| {
             if keyboard.key(&ev.key, ev.modifiers, ev.repeat) {
@@ -507,8 +537,7 @@ where
             if ev.cause == FocusCause::Keyboard
                 && let Some(index) = entered
             {
-                let count = state.rows.with_untracked(FlatRows::len);
-                bring_into_view(port, count, row_height.get_untracked(), index);
+                bring_into_view(port, state, row_height.get_untracked(), index, sticky);
             }
         };
 
@@ -566,13 +595,14 @@ where
                 {..attrs},
                 class = class
             ) {
+                {pinned_layer}
                 box(
                     class = "lui-tree__pane",
                     style:padding-top = move || window.try_get().map(|seen| format!("{}px", seen.lead)),
                     style:padding-bottom = move || window.try_get().map(|seen| format!("{}px", seen.trail))
                 ) {
-                    for spec in move || visible_rows(state, window.get()), key = |spec: &RowSpec<M::Key>| spec.clone() {
-                        {tree_row(spec, Rc::clone(&parts))}
+                    for item in move || visible_rows(state, window.get(), &held.get()), key = |item: &PaneRow<M::Key>| item.clone() {
+                        {pane_row(item, Rc::clone(&parts))}
                     }
                 }
             }
@@ -580,18 +610,176 @@ where
     }
 }
 
-/// The rows of `window` that exist among the visible rows.
-fn visible_rows<M: TreeModel>(state: TreeState<M>, window: VirtualWindow) -> Vec<RowSpec<M::Key>> {
+/// The rows of `window` that exist among the visible rows. A row in `held` is drawn pinned, so
+/// the pane keeps only its space.
+fn visible_rows<M: TreeModel>(state: TreeState<M>, window: VirtualWindow, held: &[RowIndex]) -> Vec<PaneRow<M::Key>> {
     state.rows.with(|rows| {
         let end = window.end().min(rows.len());
 
         (window.first.min(end)..end)
             .filter_map(|index| {
                 let index = RowIndex(index);
-                rows.get(index).map(|row| RowSpec { index, row: row.clone() })
+                if held.contains(&index) {
+                    return Some(PaneRow::Space(index));
+                }
+                rows.get(index).map(|row| PaneRow::Row(RowSpec { index, row: row.clone() }))
             })
             .collect()
     })
+}
+
+fn pane_row<M, V, F>(item: PaneRow<M::Key>, parts: Rc<RowParts<M, F>>) -> AnyView
+where
+    M: TreeModel,
+    V: IntoView + 'static,
+    F: Fn(TreeRow<M::Key>) -> V + 'static,
+{
+    match item {
+        PaneRow::Row(spec) => tree_row(spec, parts),
+        PaneRow::Space(_) => AnyView::new(view! { box(class = "lui-tree__space", a11y:hidden = true) }),
+    }
+}
+
+/// Follows which branches are pinned as `port` scrolls and its rows change.
+fn follow_pins<M: TreeModel>(
+    state: TreeState<M>,
+    port: NodeRef,
+    row_height: Signal<RowHeight, LocalStorage>,
+) -> Memo<Pins> {
+    let scroll = port.observe_scroll();
+    let branches = Memo::new(move |_| state.rows.try_with(FlatRows::open_branches).unwrap_or_default());
+
+    Memo::new(move |_| {
+        // Gone as the tree is torn down, which then pins nothing.
+        let (Some(position), Some(height)) = (scroll.try_get(), row_height.try_get()) else {
+            return Pins { offset: CssPx(0.0), rows: Vec::new() };
+        };
+        let scale = port.scale();
+        let offset = CssPx(position.offset.y.0 / scale);
+        let room = pin_room(position.scrollport.height.0 / scale, height);
+        let rows = branches.try_with(|branches| branches.pinned(offset, height, room)).unwrap_or_default();
+
+        Pins { offset, rows }
+    })
+}
+
+/// How many rows may be pinned in a scrollport `port_height` CSS pixels tall: all but one of the
+/// rows it shows whole, so one row of content stays in view.
+fn pin_room(port_height: f32, height: RowHeight) -> usize {
+    if height.0 <= 0.0 {
+        return 0;
+    }
+
+    ((port_height / height.0).floor() as usize).saturating_sub(1)
+}
+
+/// Builds the pinned branch rows, which lie over the pane at the top of the scrollport.
+fn pinned_layer<M, V, F>(
+    state: TreeState<M>,
+    pins: Memo<Pins>,
+    held: Memo<Vec<RowIndex>>,
+    parts: Rc<RowParts<M, F>>,
+) -> AnyView
+where
+    M: TreeModel,
+    V: IntoView + 'static,
+    F: Fn(TreeRow<M::Key>) -> V + 'static,
+{
+    AnyView::new(view! {
+        box(class = "lui-tree__pins") {
+            for spec in move || pinned_specs(state, &held.get()), key = |spec: &RowSpec<M::Key>| spec.clone() {
+                {pinned_row(spec, pins, Rc::clone(&parts))}
+            }
+        }
+    })
+}
+
+/// The rows at `held`, outermost first.
+fn pinned_specs<M: TreeModel>(state: TreeState<M>, held: &[RowIndex]) -> Vec<RowSpec<M::Key>> {
+    state.rows.with(|rows| {
+        held.iter().filter_map(|&index| rows.get(index).map(|row| RowSpec { index, row: row.clone() })).collect()
+    })
+}
+
+/// Builds one pinned branch row.
+fn pinned_row<M, V, F>(spec: RowSpec<M::Key>, pins: Memo<Pins>, parts: Rc<RowParts<M, F>>) -> AnyView
+where
+    M: TreeModel,
+    V: IntoView + 'static,
+    F: Fn(TreeRow<M::Key>) -> V + 'static,
+{
+    let index = spec.index;
+    let top = move || {
+        pins.try_with(|pins| pins.rows.iter().find(|pin| pin.index == index).map(|pin| format!("{}px", pin.top.0)))
+            .flatten()
+    };
+    // An outer row lies over the inner rows pushed up under it.
+    let layer = move || {
+        pins.try_with(|pins| {
+            let at = pins.rows.iter().position(|pin| pin.index == index)?;
+            Some((pins.rows.len() - at).to_string())
+        })
+        .flatten()
+    };
+    let own = Attrs::new().attribute(AttrName::new("data-last"), move || {
+        pins.try_with(|pins| pins.rows.last().is_some_and(|pin| pin.index == index).to_string())
+    });
+
+    let row = tree_row(spec, parts);
+    AnyView::new(view! {
+        box(class = "lui-tree__pinned", style:top = top, style:z-index = layer, {..own}) {{row}}
+    })
+}
+
+/// Scrolls a pinned branch that is collapsed to where it was pinned, so the rows that took its
+/// descendants' place do not move it out of view.
+fn hold_collapsed_pins<M: TreeModel>(
+    state: TreeState<M>,
+    port: NodeRef,
+    row_height: Signal<RowHeight, LocalStorage>,
+    pins: Memo<Pins>,
+) -> RenderEffect<Vec<PinnedKey<M::Key>>> {
+    RenderEffect::new(move |previous: Option<Vec<PinnedKey<M::Key>>>| {
+        let Some(pins) = pins.try_get() else {
+            return Vec::new();
+        };
+        let height = row_height.get_untracked();
+
+        // A branch is collapsed when it leaves the expanded set. Its descendants leaving the rows
+        // while it stays expanded is a change of the model, which keeps the offset.
+        let collapsed = previous.into_iter().flatten().find_map(|pinned| {
+            if state.expanded.contains_untracked(&pinned.key) {
+                return None;
+            }
+            let index = state.rows.with_untracked(|rows| rows.position(&pinned.key))?;
+            Some((index, pinned.from_port_top))
+        });
+        if let Some((index, from_port_top)) = collapsed {
+            let target = (index.0 as f32 * height.0 - from_port_top) * port.scale();
+            let position = port.scroll_position();
+            port.scroll_to(
+                ScrollTarget::Offset(Point::new(position.offset.x, DevicePx(target.max(0.0)))),
+                ScrollBehavior::Instant,
+            );
+        }
+
+        state.rows.with_untracked(|rows| {
+            pins.rows
+                .iter()
+                .filter_map(|pin| {
+                    let key = rows.get(pin.index)?.key.clone();
+                    Some(PinnedKey { key, from_port_top: pin.top.0 - pins.offset.0 })
+                })
+                .collect()
+        })
+    })
+}
+
+/// A pinned branch as [`hold_collapsed_pins`] remembers it.
+struct PinnedKey<K> {
+    key: K,
+    /// How far the pinned row was below the top of the scrollport, in CSS pixels.
+    from_port_top: f32,
 }
 
 /// What the tree's keyboard handler holds.
@@ -605,6 +793,8 @@ struct Keyboard<M: TreeModel> {
     menu: Option<TreeMenu<M::Key>>,
     cursor_row: RwSignal<Option<NodeRef>, LocalStorage>,
     typed: Typeahead,
+    /// Whether the tree pins branches, which then cover the top of the scrollport.
+    sticky: bool,
 }
 
 impl<M: TreeModel> Keyboard<M> {
@@ -720,8 +910,7 @@ impl<M: TreeModel> Keyboard<M> {
     }
 
     fn bring_into_view(&self, index: RowIndex) {
-        let count = self.state.rows.with_untracked(FlatRows::len);
-        bring_into_view(self.port, count, self.row_height.get_untracked(), index);
+        bring_into_view(self.port, self.state, self.row_height.get_untracked(), index, self.sticky);
     }
 }
 
@@ -933,6 +1122,7 @@ fn follow_handle<M: TreeModel>(
     handle: TreeHandle<M::Key>,
     port: NodeRef,
     row_height: Signal<RowHeight, LocalStorage>,
+    sticky: bool,
 ) -> RenderEffect<()> {
     RenderEffect::new(move |_| {
         let Some(key) = handle.request.get() else {
@@ -941,10 +1131,10 @@ fn follow_handle<M: TreeModel>(
 
         // Read with tracking, so a request waiting on its ancestors to open runs again once their
         // rows are in.
-        let found = state.rows.with(|rows| rows.position(&key).map(|index| (index, rows.len())));
-        if let Some((index, count)) = found {
+        let found = state.rows.with(|rows| rows.position(&key));
+        if let Some(index) = found {
             handle.request.set(None);
-            bring_into_view(port, count, row_height.get_untracked(), index);
+            bring_into_view(port, state, row_height.get_untracked(), index, sticky);
             return;
         }
 
@@ -964,6 +1154,7 @@ fn follow_landing<M: TreeModel>(
     handle: TreeHandle<M::Key>,
     port: NodeRef,
     row_height: Signal<RowHeight, LocalStorage>,
+    sticky: bool,
 ) -> RenderEffect<()> {
     RenderEffect::new(move |_| {
         let Some(Landing { key, focus, reveal }) = handle.landing.get() else {
@@ -972,14 +1163,14 @@ fn follow_landing<M: TreeModel>(
 
         // Read with tracking, so a request made with the model it lands in runs again once the
         // rows follow that model.
-        let found = state.rows.with(|rows| rows.position(&key).map(|index| (index, rows.len())));
-        let Some((index, count)) = found else {
+        let found = state.rows.with(|rows| rows.position(&key));
+        let Some(index) = found else {
             return;
         };
         handle.landing.set(None);
         state.select_only(key);
         if reveal {
-            bring_into_view(port, count, row_height.get_untracked(), index);
+            bring_into_view(port, state, row_height.get_untracked(), index, sticky);
         }
         if focus {
             port.focus();
@@ -1014,19 +1205,22 @@ fn follow_scroll<K: 'static>(memory: TreeMemory<K>, port: NodeRef) -> RenderEffe
     })
 }
 
-/// Scrolls `port`, holding `count` rows of `height`, the least distance that shows the row at
-/// `index` whole.
-fn bring_into_view(port: NodeRef, count: usize, height: RowHeight, index: RowIndex) {
+/// Scrolls `port` the least distance that shows the row at `index` whole. With `sticky`, the
+/// row's ancestors are pinned above it, so it is shown below them.
+fn bring_into_view<M: TreeModel>(port: NodeRef, state: TreeState<M>, height: RowHeight, index: RowIndex, sticky: bool) {
+    let (count, depth) = state.rows.with_untracked(|rows| (rows.len(), rows.get(index).map_or(0, |row| row.depth.0)));
     let layout = zgui_ui::virtualize::window(count, height.0, 0.0, 0.0, 0);
     let scale = port.scale();
     let top = layout.offset_of(index.0) * scale;
     let bottom = top + height.0 * scale;
-
     let position = port.scroll_position();
+    let pinned_above = if sticky { depth.min(pin_room(position.scrollport.height.0 / scale, height)) } else { 0 };
+    let covered = pinned_above as f32 * height.0 * scale;
+
     let start = position.offset.y.0;
     let span = position.scrollport.height.0;
-    let target = if top < start {
-        top
+    let target = if top - covered < start {
+        (top - covered).max(0.0)
     } else if bottom > start + span {
         bottom - span
     } else {

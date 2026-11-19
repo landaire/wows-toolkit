@@ -4,6 +4,9 @@
 use std::collections::HashSet;
 use std::ops::RangeInclusive;
 
+use zgui::geom::CssPx;
+
+use crate::surface::RowHeight;
 use crate::surface::RowIndex;
 use crate::surface::TreeDepth;
 use crate::tree::model::TreeModel;
@@ -31,6 +34,71 @@ pub(crate) struct FlatRow<K> {
     pub depth: TreeDepth,
     pub kind: NodeKind,
     pub place: SiblingPlace,
+}
+
+/// An expanded branch drawn at the top of the scrollport while its descendants scroll past it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PinnedRow {
+    pub index: RowIndex,
+    /// Where the row is drawn, from the top of the first row.
+    pub top: CssPx,
+}
+
+/// The rows an expanded branch spans.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BranchSpan {
+    index: RowIndex,
+    /// The index just past the branch's last visible descendant.
+    end: usize,
+}
+
+/// The expanded branches that show descendants, by depth, each depth in row order.
+///
+/// Built once per change of the rows, so finding the pinned branches as the tree scrolls costs a
+/// search per pinned depth rather than a walk over the rows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct OpenBranches {
+    by_depth: Vec<Vec<BranchSpan>>,
+}
+
+impl OpenBranches {
+    /// The branches pinned to the top of a scrollport scrolled `offset` down rows of `height`,
+    /// outermost first, at most `room` of them.
+    ///
+    /// Each branch whose row is above the pin line while one of its descendants is at it is
+    /// pinned, the outermost at the top of the scrollport and each deeper one below the one that
+    /// holds it. A branch whose last descendant is passing under its pinned row is pushed up with
+    /// that row.
+    pub fn pinned(&self, offset: CssPx, height: RowHeight, room: usize) -> Vec<PinnedRow> {
+        let mut pinned = Vec::new();
+        if height.0 <= 0.0 {
+            return pinned;
+        }
+
+        let mut pin_line = offset.0.max(0.0);
+        while pinned.len() < room {
+            let Some(level) = self.by_depth.get(pinned.len()) else {
+                break;
+            };
+            let at_line = (pin_line / height.0) as usize;
+            // The row at the line is inside the last branch of this depth that starts at or above
+            // it, or inside none of them.
+            let starts_above = level.partition_point(|span| span.index.0 <= at_line);
+            let Some(span) = starts_above.checked_sub(1).map(|at| level[at]) else {
+                break;
+            };
+            let row_top = span.index.0 as f32 * height.0;
+            if at_line >= span.end || row_top >= pin_line {
+                break;
+            }
+
+            let top = pin_line.min(span.end as f32 * height.0 - height.0);
+            pinned.push(PinnedRow { index: span.index, top: CssPx(top) });
+            pin_line = top + height.0;
+        }
+
+        pinned
+    }
 }
 
 /// The visible rows of a tree.
@@ -129,6 +197,36 @@ where
 
     pub fn keys(&self) -> impl Iterator<Item = &K> {
         self.rows.iter().map(|row| &row.key)
+    }
+
+    /// The expanded branches that show descendants, with the rows each spans.
+    pub fn open_branches(&self) -> OpenBranches {
+        let mut by_depth: Vec<Vec<BranchSpan>> = Vec::new();
+        // The depth and the slot in `by_depth` of each branch whose last descendant is not yet
+        // found, innermost last.
+        let mut unclosed: Vec<(TreeDepth, usize)> = Vec::new();
+
+        for (at, row) in self.rows.iter().enumerate() {
+            while let Some(&(depth, slot)) = unclosed.last() {
+                if depth < row.depth {
+                    break;
+                }
+                by_depth[depth.0][slot].end = at;
+                unclosed.pop();
+            }
+
+            if !self.is_open(RowIndex(at)) {
+                continue;
+            }
+            if by_depth.len() <= row.depth.0 {
+                by_depth.resize_with(row.depth.0 + 1, Vec::new);
+            }
+            let level = &mut by_depth[row.depth.0];
+            level.push(BranchSpan { index: RowIndex(at), end: self.rows.len() });
+            unclosed.push((row.depth, level.len() - 1));
+        }
+
+        OpenBranches { by_depth }
     }
 
     fn expand<M>(&mut self, model: &M, expanded: &HashSet<K>, index: RowIndex)
@@ -299,5 +397,25 @@ mod tests {
         assert_eq!(rows.parent(RowIndex(3)), Some(RowIndex(1)), "101 is below 10");
         assert_eq!(rows.parent(RowIndex(4)), Some(RowIndex(0)), "11 is below 1");
         assert_eq!(rows.parent(RowIndex(5)), None, "2 is a top-level node");
+    }
+
+    #[test]
+    fn branches_pin_while_their_descendants_scroll_past() {
+        let model = sample();
+        // Ten pixels a row: 1 [10 [100, 101], 11], 2 [20], 3.
+        let branches = FlatRows::build(&model, &HashSet::from([1, 10, 2])).open_branches();
+        let pinned_at = |offset: f32, room: usize| -> Vec<(usize, f32)> {
+            let pinned = branches.pinned(CssPx(offset), RowHeight(10.0), room);
+            pinned.into_iter().map(|pin| (pin.index.0, pin.top.0)).collect()
+        };
+
+        assert_eq!(pinned_at(0.0, 9), vec![], "no row is above the top");
+        assert_eq!(pinned_at(15.0, 9), vec![(0, 15.0), (1, 25.0)], "1 holds 10, which holds 100");
+        assert_eq!(pinned_at(22.0, 9), vec![(0, 22.0), (1, 30.0)], "10 is pushed up by its last row");
+        assert_eq!(pinned_at(45.0, 9), vec![(0, 40.0)], "1 is pushed up by 11");
+        assert_eq!(pinned_at(50.0, 9), vec![], "2 is at the top in its own place");
+        assert_eq!(pinned_at(55.0, 9), vec![(5, 55.0)], "2 pins over 20");
+        assert_eq!(pinned_at(75.0, 9), vec![], "3 is a leaf");
+        assert_eq!(pinned_at(15.0, 1), vec![(0, 15.0)], "a port with room for one pins only 1");
     }
 }

@@ -123,10 +123,19 @@ struct Probe {
 }
 
 fn open(nodes: Nodes, expanded: &[u32]) -> (HeadlessWindow, Probe) {
-    open_with_menu(nodes, expanded, MenuSelection::Follow)
+    open_with_menu(nodes, expanded, MenuSelection::Follow, false)
 }
 
-fn open_with_menu(nodes: Nodes, expanded: &[u32], menu_selection: MenuSelection) -> (HeadlessWindow, Probe) {
+fn open_sticky(nodes: Nodes, expanded: &[u32]) -> (HeadlessWindow, Probe) {
+    open_with_menu(nodes, expanded, MenuSelection::Follow, true)
+}
+
+fn open_with_menu(
+    nodes: Nodes,
+    expanded: &[u32],
+    menu_selection: MenuSelection,
+    sticky_branches: bool,
+) -> (HeadlessWindow, Probe) {
     let model = Rc::new(nodes);
     let opened: HashSet<u32> = expanded.iter().copied().collect();
     let probe: Rc<Cell<Option<Probe>>> = Rc::new(Cell::new(None));
@@ -152,6 +161,7 @@ fn open_with_menu(nodes: Nodes, expanded: &[u32], menu_selection: MenuSelection)
                         text(attr:data-testid = format!("row-{}", row.key)) {{row.key.to_string()}}
                     },
                     expanded = probe.expanded,
+                    sticky_branches = sticky_branches,
                     selection = probe.selection,
                     handle = probe.handle,
                     on_activate = UnsyncCallback::new(move |key: u32| activated.update(|keys| keys.push(key))),
@@ -335,7 +345,7 @@ fn a_row_whose_key_builds_no_menu_opens_none_and_keeps_the_selection() {
 
 #[test]
 fn a_menu_that_keeps_the_selection_leaves_it_on_its_row() {
-    let (mut window, probe) = open_with_menu(Nodes::small(), &[2], MenuSelection::Keep);
+    let (mut window, probe) = open_with_menu(Nodes::small(), &[2], MenuSelection::Keep, false);
     window.click(row(&window, 20)).expect("the row has a box");
 
     window.right_click(row(&window, 3)).expect("the row has a box");
@@ -484,4 +494,91 @@ fn ten_thousand_nodes_build_only_the_rows_in_view() {
     assert!(window.by_test_id(&format!("row-{last}")).is_some(), "End scrolls the last of 10 100 rows in");
     assert!(window.by_test_id("row-0").is_none(), "and the first one out");
     assert!(window.by_role(Role::TreeItem).len() < 40);
+}
+
+/// `1 [10 [100..=129], 200..=209], 2 [300..=329]`, all expanded.
+fn nested() -> (Nodes, Vec<u32>) {
+    let mut nodes = Nodes::new();
+    nodes.add(1, None, "one");
+    nodes.add(10, Some(1), "ten");
+    for leaf in 100..=129 {
+        nodes.add(leaf, Some(10), "leaf");
+    }
+    for leaf in 200..=209 {
+        nodes.add(leaf, Some(1), "leaf");
+    }
+    nodes.add(2, None, "two");
+    for leaf in 300..=329 {
+        nodes.add(leaf, Some(2), "leaf");
+    }
+
+    (nodes, vec![1, 10, 2])
+}
+
+/// Asserts that the row of `key` starts `expected` device pixels below the top of the tree.
+fn assert_row_at(window: &HeadlessWindow, key: u32, expected: f32, what: &str) {
+    let tree = window.bounds(window.by_test_id("tree").expect("the tree is built")).expect("the tree has a box");
+    let label = window.bounds(row(window, key)).expect("the row has a box");
+    // The test id is on the label, which is centred in its 22 pixel row and snapped to a pixel.
+    let inset = (22.0 - label.size.height.0) / 2.0;
+    let actual = label.origin.y.0 - inset - tree.origin.y.0;
+
+    assert!((actual - expected).abs() <= 1.0, "{what}: row {key} starts {actual} below the top, not {expected}");
+}
+
+fn scroll_by(window: &mut HeadlessWindow, down: f32) {
+    let tree = window.by_test_id("tree").expect("the tree is built");
+    window.wheel(tree, down).expect("the tree has a box");
+    window.advance(Duration::from_secs(1));
+}
+
+#[test]
+fn expanded_branches_stay_at_the_top_while_their_rows_scroll_past() {
+    let (nodes, expanded) = nested();
+    let (mut window, _probe) = open_sticky(nodes, &expanded);
+
+    // Rows are 22 pixels tall: five rows down, 1 and 10 have scrolled away above 100..=104.
+    scroll_by(&mut window, 110.0);
+    assert_row_at(&window, 1, 0.0, "1 is pinned at the top");
+    assert_row_at(&window, 10, 22.0, "10 is pinned below 1");
+    assert_row_at(&window, 105, 44.0, "105 is the first row below them");
+
+    // 200 is the 33rd row, so 10's rows have all scrolled past.
+    scroll_by(&mut window, 32.0 * 22.0 - 110.0);
+    assert_row_at(&window, 1, 0.0, "1 still holds rows below it");
+    assert!(window.by_test_id("row-10").is_none(), "10 has no rows left in view");
+
+    // 209, the last row under 1, is the 42nd row; 1 moves up with it.
+    scroll_by(&mut window, 41.0 * 22.0 - 32.0 * 22.0 + 8.0);
+    assert_row_at(&window, 1, -8.0, "1 is pushed up by its last row");
+    assert_row_at(&window, 2, 14.0, "2 follows below 1");
+}
+
+#[test]
+fn a_pinned_branch_closed_from_its_chevron_stays_where_it_was_pinned() {
+    let (nodes, expanded) = nested();
+    let (mut window, probe) = open_sticky(nodes, &expanded);
+    scroll_by(&mut window, 110.0);
+
+    let chevrons = window.all_by_class("lui-tree__chevron");
+    assert!(chevrons.len() >= 2, "1 and 10 are pinned with their chevrons");
+    window.click(chevrons[1]).expect("10's chevron has a box");
+    window.advance(SETTLE);
+
+    assert!(!probe.expanded.get_untracked().contains(&10), "10 closed");
+    assert_row_at(&window, 10, 22.0, "10 stays below 1");
+    assert_row_at(&window, 200, 44.0, "the rows after 10 follow it");
+}
+
+#[test]
+fn moving_up_onto_a_row_under_the_pinned_branches_scrolls_it_below_them() {
+    let (nodes, expanded) = nested();
+    let (mut window, probe) = open_sticky(nodes, &expanded);
+    scroll_by(&mut window, 110.0);
+
+    window.click(row(&window, 105)).expect("the row has a box");
+    press(&mut window, NamedKey::ArrowUp, Modifiers::NONE);
+
+    assert_eq!(selected(probe), HashSet::from([104]));
+    assert_row_at(&window, 104, 44.0, "104 is shown below 1 and 10");
 }

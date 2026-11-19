@@ -65,6 +65,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* List AP raw penetration every 5 km out to firing range in ship_shells
 - *(wows-query)* Compare the main battery guns of several ships in gun_module_matchups
 - *(egui)* Keep open folders at the top of the armor viewer ship list, the file unpacker folder tree and the grouped replay listing while their contents scroll past
+- *(zgui)* Keep open folders at the top of the armor viewer sidebar, the unpacker folder tree and the replay listing while their contents scroll past, as the egui app does
 
 ### Bug Fixes
 

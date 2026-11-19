@@ -418,6 +418,7 @@ fn ListingRows(
             leaf_lead = LeafLead::Nothing,
             indent = IndentWidth(0.0),
             guides = false,
+            sticky_branches = true,
             on_activate = on_activate,
             context_menu = menu,
             label = t!("ui.replay.listing_caption").into_owned(),

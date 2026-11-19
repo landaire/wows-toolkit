@@ -25,6 +25,25 @@ pub(crate) const CSS: &str = css!(
         display: flex;
         flex-direction: column;
     }
+    .lui-tree__pins {
+        display: block;
+        height: 0;
+    }
+    .lui-tree__pinned {
+        position: absolute;
+        left: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        background-color: var(--lui-color-panel);
+    }
+    .lui-tree__pinned[data-last=\"true\"] {
+        box-shadow: 0 1px 0 var(--lui-color-border);
+    }
+    .lui-tree__space {
+        flex: none;
+        height: var(--lui-tree-row);
+    }
     .lui-tooltip-trigger.lui-tree__tip {
         display: flex;
         flex-direction: column;

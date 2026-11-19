@@ -265,6 +265,7 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     expanded = pane.expanded,
                     selection = pane.tree_selection,
                     selection_mode = SelectionMode::Single,
+                    sticky_branches = true,
                     handle = pane.tree_handle,
                     label = pane.source.title(),
                     attr:data-testid = format!("unpacker-{fragment}-tree")
