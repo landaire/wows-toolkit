@@ -45,6 +45,7 @@ use crate::grid::column::GridColumn;
 use crate::grid::copy;
 use crate::grid::layout;
 use crate::grid::layout::ColumnLayout;
+use crate::grid::layout::ColumnState;
 use crate::grid::mode::RowDetail;
 use crate::grid::mode::RowGroups;
 use crate::grid::mode::RowMark;
@@ -191,10 +192,28 @@ impl Carry {
 /// A width drag on a header's grip.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Resize {
+    /// The column whose grip is held.
+    pub(crate) grip: ColumnId,
+    /// The column the drag resizes: the grip's own, or for a fill column's grip the column after
+    /// it, which narrows as the fill column widens.
     pub(crate) column: ColumnId,
     pub(crate) from: f32,
     pub(crate) start: f32,
+    /// The widest the resized column may become, for a fill column's grip: as wide as it was plus
+    /// the room the fill column has above its minimum.
+    pub(crate) widest: Option<f32>,
     pub(crate) width: ColumnWidth,
+}
+
+impl Resize {
+    /// The resized column's width for the pointer at `x`, before the column's own limits.
+    pub(crate) fn wanted(&self, x: f32) -> f32 {
+        let moved = x - self.from;
+        let moved = if self.grip == self.column { moved } else { -moved };
+        let width = self.start + moved;
+
+        self.widest.map_or(width, |widest| width.min(widest))
+    }
 }
 
 /// How many times a grid's columns have been replaced. Every header and cell is keyed by it with
@@ -365,23 +384,24 @@ where
         }
 
         let resized = self.layout.with_untracked(|layout| layout.width(id));
-        let width = self.with_column(id, |column| match resized {
-            Some(width) => column.clamp(width.0).0,
-            None => match column.sizing_value() {
-                ColumnSizing::Fixed(width) => column.clamp(width.0).0,
-                ColumnSizing::Fit => column.min_width_value().0,
-            },
+        let width = self.with_column(id, |column| match (column.sizing_value(), resized) {
+            (ColumnSizing::Fill, _) | (ColumnSizing::Fit, None) => column.min_width_value().0,
+            (ColumnSizing::Fixed(_) | ColumnSizing::Fit, Some(width)) | (ColumnSizing::Fixed(width), None) => {
+                column.clamp(width.0).0
+            }
         });
 
         width.unwrap_or(ColumnWidth::MIN.0)
     }
 
     /// The grid's `grid-template-columns`: one track per column as drawn, then one that takes up
-    /// whatever room is left so a row's ground reaches the far edge.
+    /// whatever room is left so a row's ground reaches the far edge. A fill column takes that room
+    /// instead.
     pub(crate) fn tracks(&self) -> String {
         let resize = self.resize.get();
         let fitted = self.fitted.get();
         let waived = self.waived.get();
+        let mut fills = false;
         let mut tracks: Vec<String> = self.columns.with(|columns| {
             self.drawn.with(|drawn| {
                 drawn
@@ -393,6 +413,10 @@ where
                             resize.as_ref().filter(|resize| resize.column == *state.id()).map(|resize| resize.width);
                         if let Some(width) = dragged {
                             return Some(width.css());
+                        }
+                        if column.sizing_value() == ColumnSizing::Fill {
+                            fills = true;
+                            return Some(format!("minmax({}, 1fr)", column.min_width_value().css()));
                         }
 
                         let track = match set_width(column, state.width()) {
@@ -410,12 +434,13 @@ where
                     .collect()
             })
         });
-        tracks.push("minmax(0px, 1fr)".to_owned());
+        tracks.push(if fills { "0px" } else { "minmax(0px, 1fr)" }.to_owned());
 
         tracks.join(" ")
     }
 
-    /// The width `id` is set to as drawn: dragged, resized or sized. `None` for a fitted column.
+    /// The width `id` is set to as drawn: dragged, resized or sized. `None` for a fitted or filling
+    /// column.
     pub(crate) fn set_width_of(&self, id: &ColumnId) -> Option<ColumnWidth> {
         self.columns.with(|columns| {
             let column = find_column(columns, id)?;
@@ -583,6 +608,44 @@ where
         let room = if pinned { self.pinned_room(id) } else { None };
 
         self.with_column(id, |column| column.clamp(room.map_or(width, |room| width.min(room))))
+    }
+
+    /// The column a fill column's grip resizes: the first resizable column drawn after it. `None`
+    /// for any other column, or a fill column with no resizable column after it.
+    pub(crate) fn partner_of(&self, id: &ColumnId) -> Option<ColumnId> {
+        self.columns.with(|columns| {
+            let column = find_column(columns, id)?;
+            if column.sizing_value() != ColumnSizing::Fill || !column.resizable_value() {
+                return None;
+            }
+            self.drawn.with(|drawn| {
+                let order = drawn.columns();
+                let at = order.iter().position(|state| state.id() == id)?;
+                order[at + 1..]
+                    .iter()
+                    .map(ColumnState::id)
+                    .find(|next| find_column(columns, next).is_some_and(GridColumn::is_resizable))
+                    .cloned()
+            })
+        })
+    }
+
+    /// A drag on `grip`'s grip starting with the pointer at `from`, `grip` laid out `width` CSS
+    /// pixels wide. `None` when the grip resizes nothing.
+    pub(crate) fn start_resize(&self, grip: &ColumnId, from: f32, width: f32) -> Option<Resize> {
+        let resizable = self.with_column(grip, GridColumn::is_resizable)?;
+        let (column, start, widest) = if resizable {
+            (grip.clone(), width, None)
+        } else {
+            let partner = self.partner_of(grip)?;
+            let least = self.with_column(grip, |column| column.min_width_value().0)?;
+            let start = self.width_of(&partner);
+            (partner, start, Some(start + (width - least).max(0.0)))
+        };
+        let resize = Resize { grip: grip.clone(), column, from, start, widest, width: ColumnWidth::MIN };
+        let width = self.resized_width(&resize.column, start)?;
+
+        Some(Resize { width, ..resize })
     }
 
     /// Commits `next` as the reader's layout, sliding the columns from where they are drawn.
@@ -900,11 +963,13 @@ fn find_column<'a, T>(columns: &'a [GridColumn<T>], id: &ColumnId) -> Option<&'a
 }
 
 /// The width `column` is set to: `resized`, what a reader resized it to, or else the width it is
-/// sized to. `None` for a column fitted to its content.
+/// sized to. `None` for a column fitted to its content or filling the view.
 fn set_width<T>(column: &GridColumn<T>, resized: Option<ColumnWidth>) -> Option<ColumnWidth> {
     match (resized, column.sizing_value()) {
-        (Some(width), _) | (None, ColumnSizing::Fixed(width)) => Some(column.clamp(width.0)),
-        (None, ColumnSizing::Fit) => None,
+        (_, ColumnSizing::Fill) | (None, ColumnSizing::Fit) => None,
+        (Some(width), ColumnSizing::Fixed(_) | ColumnSizing::Fit) | (None, ColumnSizing::Fixed(width)) => {
+            Some(column.clamp(width.0))
+        }
     }
 }
 

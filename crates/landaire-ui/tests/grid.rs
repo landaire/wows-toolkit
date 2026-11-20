@@ -37,6 +37,7 @@ use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::UnsyncCallback;
+use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::view;
@@ -205,6 +206,129 @@ fn a_column_dragged_wider_than_its_maximum_stops_at_it() {
 
     let name = header(&mut window, "Name");
     assert_eq!(width(&window, name), 150.0);
+}
+
+#[test]
+fn a_fill_column_takes_the_room_the_view_leaves_and_follows_the_view() {
+    let view = RwSignal::new_local(420.0_f32);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let columns = vec![
+            GridColumn::new("name", "Name", |item: &Item| item.name.clone())
+                .sizing(ColumnSizing::Fill)
+                .min_width(ColumnWidth(60.0)),
+            GridColumn::new("size", "Size", |item: &Item| item.size.to_string())
+                .sizing(ColumnSizing::Fixed(ColumnWidth(80.0))),
+        ];
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; height: 300px", style:width = move || Some(format!("{}px", view.get()))) {
+                    Grid(
+                        rows = RwSignal::new_local(items(3)),
+                        columns = columns,
+                        row_key = |item: &Item| item.id,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(50));
+
+    let name = header(&mut window, "Name");
+    let size = header(&mut window, "Size");
+    assert_eq!(width(&window, name), 340.0, "the fill column takes what the size column leaves");
+
+    view.set(300.0);
+    window.advance(Duration::from_millis(50));
+    assert_eq!(width(&window, name), 220.0, "the fill column follows the view");
+
+    view.set(100.0);
+    window.advance(Duration::from_millis(50));
+    assert_eq!(width(&window, name), 60.0, "the fill column stops at its minimum");
+    assert_eq!(width(&window, size), 80.0, "and the grid scrolls rather than squeeze the rest");
+}
+
+/// A grid of a fill column called Name, 60px at least, and the columns `after` it, in a view
+/// 420px wide.
+fn open_fill(after: Vec<GridColumn<Item>>) -> HeadlessWindow {
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let mut columns = vec![
+            GridColumn::new("name", "Name", |item: &Item| item.name.clone())
+                .sizing(ColumnSizing::Fill)
+                .min_width(ColumnWidth(60.0)),
+        ];
+        columns.extend(after.clone());
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(3)),
+                        columns = columns,
+                        row_key = |item: &Item| item.id,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(50));
+
+    window
+}
+
+/// Drags `grip` from its middle `dx` CSS pixels sideways.
+fn drag_grip(window: &mut HeadlessWindow, grip: Element, dx: f32) {
+    let from = window.bounds(grip).expect("the grip has a box");
+    let x = from.origin.x.0 + from.size.width.0 / 2.0 + dx;
+    let y = from.origin.y.0 + from.size.height.0 / 2.0;
+    window.drag(grip, Point::<DevicePx, Device>::new(DevicePx(x), DevicePx(y)), 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+}
+
+#[test]
+fn a_fill_columns_grip_moves_the_edge_between_it_and_the_column_after_it() {
+    let mut window = open_fill(vec![
+        GridColumn::new("size", "Size", |item: &Item| item.size.to_string())
+            .sizing(ColumnSizing::Fixed(ColumnWidth(80.0)))
+            .min_width(ColumnWidth(40.0)),
+    ]);
+    let name = header(&mut window, "Name");
+    let size = header(&mut window, "Size");
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Name").expect("the fill column has a grip");
+
+    drag_grip(&mut window, grip, 20.0);
+    assert_eq!(width(&window, size), 60.0, "the column after narrows as far as the grip moved");
+    assert_eq!(width(&window, name), 360.0, "the fill column takes the room it gave up");
+
+    drag_grip(&mut window, grip, 200.0);
+    assert_eq!(width(&window, size), 40.0, "the column after stops at its minimum");
+    assert_eq!(width(&window, name), 380.0);
+
+    drag_grip(&mut window, grip, -600.0);
+    assert_eq!(width(&window, name), 60.0, "the fill column stops at its minimum");
+    assert_eq!(width(&window, size), 360.0, "and the column after widens no further than fills the view");
+
+    window.right_click(name).expect("the header has a box");
+    window.advance(Duration::from_millis(300));
+    let reset = window.by_role_and_label(Role::MenuItem, "Reset width").expect("the header menu is open");
+    assert!(!window.a11y(reset).expect("the item is announced").disabled, "the fill column's menu offers the reset");
+    window.click(reset).expect("the item has a box");
+    window.advance(Duration::from_millis(300));
+    assert_eq!(width(&window, size), 80.0, "the reset gives the column after its own width back");
+    assert_eq!(width(&window, name), 340.0);
+}
+
+#[test]
+fn a_fill_column_with_no_resizable_column_after_it_has_no_grip() {
+    let mut window = open_fill(vec![
+        GridColumn::new("size", "Size", |item: &Item| item.size.to_string())
+            .sizing(ColumnSizing::Fixed(ColumnWidth(80.0)))
+            .resizable(false),
+    ]);
+
+    assert!(window.by_role_and_label(Role::Splitter, "Resize Name").is_none());
 }
 
 #[test]

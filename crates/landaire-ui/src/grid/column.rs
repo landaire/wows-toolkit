@@ -54,6 +54,12 @@ pub enum ColumnSizing {
     /// As wide as its widest cell or its header, measured as laid out. A column only grows while
     /// the rows stay the same, so scrolling a virtualized grid does not make it jump back and forth.
     Fit,
+    /// As wide as the view leaves once the other columns have their widths, and no narrower than
+    /// its minimum, so the grid scrolls sideways only when even that does not fit. It follows the
+    /// view and the other columns as they resize. A width a layout holds for it is ignored. Its
+    /// grip resizes the first resizable column after it the other way, so dragging the grip moves
+    /// the edge between the two; with no such column it has no grip. Give a grid at most one.
+    Fill,
 }
 
 /// Which edge of its column a cell's content sits against.
@@ -203,8 +209,10 @@ impl<T> GridColumn<T> {
         &self.label
     }
 
+    /// Whether a reader may set the column's width. Never for a [`ColumnSizing::Fill`] column,
+    /// whose grip resizes the column after it.
     pub fn is_resizable(&self) -> bool {
-        self.resizable
+        self.resizable && self.sizing != ColumnSizing::Fill
     }
 
     pub fn is_reorderable(&self) -> bool {
@@ -236,6 +244,10 @@ impl<T> GridColumn<T> {
 
     pub(crate) fn sizing_value(&self) -> ColumnSizing {
         self.sizing
+    }
+
+    pub(crate) fn resizable_value(&self) -> bool {
+        self.resizable
     }
 
     pub(crate) fn min_width_value(&self) -> ColumnWidth {

@@ -40,6 +40,7 @@ use zgui_ui_icons::set::arrow::ARROW_UP;
 use crate::grid::body::keyed_ids;
 use crate::grid::column::ColumnAlign;
 use crate::grid::column::ColumnId;
+use crate::grid::column::ColumnSizing;
 use crate::grid::column::GridColumn;
 use crate::grid::layout;
 use crate::grid::layout::Placement;
@@ -307,7 +308,18 @@ where
         ColumnAlign::End => (sort_slot, None),
         ColumnAlign::Start | ColumnAlign::Center => (None, sort_slot),
     };
-    let grip = column.is_resizable().then(|| AnyView::new(grip(Rc::clone(&cx), id.clone(), cell)));
+    let grip = if column.is_resizable() {
+        Some(AnyView::new(grip(Rc::clone(&cx), id.clone(), cell)))
+    } else if column.sizing_value() == ColumnSizing::Fill && column.resizable_value() {
+        // A fill column's grip comes and goes with a resizable column after it.
+        let cx = Rc::clone(&cx);
+        let id = id.clone();
+        Some(AnyView::new(move || {
+            cx.partner_of(&id).is_some().then(|| AnyView::new(grip(Rc::clone(&cx), id.clone(), cell)))
+        }))
+    } else {
+        None
+    };
 
     AnyView::new(view! {
         control(
@@ -342,7 +354,7 @@ where
     let resize = cx.resize;
     let active = {
         let id = id.clone();
-        move || resize.with(|resize| resize.as_ref().is_some_and(|resize| resize.column == id)).then(String::new)
+        move || resize.with(|resize| resize.as_ref().is_some_and(|resize| resize.grip == id)).then(String::new)
     };
 
     let on_pointer_down = {
@@ -361,11 +373,7 @@ where
 
             ev.prevent_default();
             ev.capture_pointer();
-            let start = bounds.size.width.0 / cx.scale();
-            let Some(width) = cx.resized_width(&id, start) else {
-                return;
-            };
-            cx.resize.set(Some(Resize { column: id.clone(), from: ev.position.x.0, start, width }));
+            cx.resize.set(cx.start_resize(&id, ev.position.x.0, bounds.size.width.0 / cx.scale()));
         }
     };
     let on_pointer_move = {
@@ -374,7 +382,7 @@ where
             let Some(resize) = cx.resize.get_untracked() else {
                 return;
             };
-            let Some(width) = cx.resized_width(&resize.column, resize.start + ev.position.x.0 - resize.from) else {
+            let Some(width) = cx.resized_width(&resize.column, resize.wanted(ev.position.x.0)) else {
                 return;
             };
 
@@ -411,7 +419,9 @@ where
         let id = id.clone();
         move |ev: &mut EventCx<'_, events::DoubleClick>| {
             ev.stop_propagation();
-            cx.reset_width(&id);
+            if let Some(resize) = cx.start_resize(&id, 0.0, cx.width_of(&id)) {
+                cx.reset_width(&resize.column);
+            }
         }
     };
     let on_click = move |ev: &mut EventCx<'_, events::Click>| ev.stop_propagation();
@@ -425,12 +435,15 @@ where
             };
             ev.prevent_default();
             ev.stop_propagation();
-            let Some(width) = cx.resized_width(&id, cx.width_of(&id) + by) else {
+            let Some(resize) = cx.start_resize(&id, 0.0, cx.width_of(&id)) else {
+                return;
+            };
+            let Some(width) = cx.resized_width(&resize.column, resize.wanted(by)) else {
                 return;
             };
 
-            cx.layout.update(|layout| layout.set_width(&id, Some(width)));
-            cx.waive(&id);
+            cx.layout.update(|layout| layout.set_width(&resize.column, Some(width)));
+            cx.waive(&resize.column);
         }
     };
 
@@ -543,7 +556,9 @@ where
     // A column that can never be pinned has no pin item rather than one that is always refused.
     let offers_pin = pinned || cx.with_column(&id, GridColumn::is_pinnable) == Some(true);
     let refused = !pinned && !cx.may_pin(&id);
-    let resized = cx.layout.with_untracked(|layout| layout.width(&id).is_some());
+    // A fill column's grip resizes the column after it, so its menu resets that one.
+    let width_target = cx.partner_of(&id).unwrap_or_else(|| id.clone());
+    let resized = cx.layout.with_untracked(|layout| layout.width(&width_target).is_some());
     let (pin_label, reset_label) = cx.strings.with(|strings| {
         let pin = if pinned { &strings.unpin } else { &strings.pin };
         (pin.clone(), strings.reset_width.clone())
@@ -562,7 +577,7 @@ where
             cx.rearrange(next);
         })
     };
-    let on_reset = UnsyncCallback::new(move |()| cx.reset_width(&id));
+    let on_reset = UnsyncCallback::new(move |()| cx.reset_width(&width_target));
     let reset = view! { MenuItem(disabled = !resized, on_select = on_reset) {{reset_label}} };
 
     if !offers_pin {
