@@ -94,6 +94,7 @@ pub struct GridColumn<T> {
 
     sizing: ColumnSizing,
     min_width: ColumnWidth,
+    max_width: Option<ColumnWidth>,
     align: ColumnAlign,
 
     resizable: bool,
@@ -117,6 +118,7 @@ impl<T> GridColumn<T> {
             text: None,
             sizing: ColumnSizing::Fit,
             min_width: ColumnWidth::MIN,
+            max_width: None,
             align: ColumnAlign::Start,
             resizable: true,
             reorderable: true,
@@ -152,6 +154,13 @@ impl<T> GridColumn<T> {
     #[must_use]
     pub fn min_width(mut self, width: ColumnWidth) -> Self {
         self.min_width = width;
+        self
+    }
+
+    /// The widest a reader may resize the column to. Without it there is no limit.
+    #[must_use]
+    pub fn max_width(mut self, width: ColumnWidth) -> Self {
+        self.max_width = Some(width);
         self
     }
 
@@ -237,8 +246,10 @@ impl<T> GridColumn<T> {
         self.align
     }
 
-    /// `width` held to this column's minimum.
+    /// `width` held between this column's minimum and maximum.
     pub(crate) fn clamp(&self, width: f32) -> ColumnWidth {
+        let width = self.max_width.map_or(width, |max| width.min(max.0));
+
         ColumnWidth(width.max(self.min_width.0))
     }
 }
@@ -253,6 +264,7 @@ impl<T> Clone for GridColumn<T> {
             text: self.text.clone(),
             sizing: self.sizing,
             min_width: self.min_width,
+            max_width: self.max_width,
             align: self.align,
             resizable: self.resizable,
             reorderable: self.reorderable,
@@ -270,6 +282,7 @@ impl<T> fmt::Debug for GridColumn<T> {
             .field("label", &self.label)
             .field("sizing", &self.sizing)
             .field("min_width", &self.min_width)
+            .field("max_width", &self.max_width)
             .finish_non_exhaustive()
     }
 }

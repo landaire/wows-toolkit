@@ -178,6 +178,36 @@ fn a_column_dragged_narrower_than_its_minimum_stops_at_it() {
 }
 
 #[test]
+fn a_column_dragged_wider_than_its_maximum_stops_at_it() {
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), || {
+        let mut columns = columns();
+        columns[0] = columns[0].clone().max_width(ColumnWidth(150.0));
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(3)),
+                        columns = columns,
+                        row_key = |item: &Item| item.id,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Name").expect("the grip is announced");
+    let from = window.bounds(grip).expect("the grip has a box");
+
+    let to = Point::<DevicePx, Device>::new(DevicePx(from.origin.x.0 + 300.0), from.origin.y);
+    window.drag(grip, to, 8).expect("the grip has a box");
+    window.advance(Duration::from_millis(50));
+
+    let name = header(&mut window, "Name");
+    assert_eq!(width(&window, name), 150.0);
+}
+
+#[test]
 fn a_pinned_column_dragged_wider_stops_at_the_pinned_share_of_the_view() {
     let handles = Rc::new(Handles::default());
     let mut window =
