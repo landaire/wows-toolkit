@@ -34,12 +34,14 @@ use zgui::view::AttrName;
 use zgui::view::ClassName;
 use zgui::view::NodeId;
 use zgui::view::OverlayLayer;
+use zgui::vocab::GesturePhase;
 use zgui::vocab::KeyCode;
 use zgui::vocab::KeyEvent;
 use zgui::vocab::KeyState;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::PhysicalKey;
+use zgui::vocab::PinchEvent;
 use zgui::vocab::PointerAction;
 use zgui::vocab::PointerButton;
 use zgui::vocab::PointerEvent;
@@ -364,15 +366,71 @@ impl HeadlessWindow {
     pub fn wheel(&mut self, element: Element, down: f32) -> Result<(), HeadlessError> {
         let at = self.centre(element)?;
         self.move_pointer(at);
+        self.scroll_event(at, Size::new(CssPx(0.0), CssPx(down)), ScrollPhase::Discrete);
 
-        let event = WheelEvent {
-            id: PointerId::MOUSE,
-            kind: PointerKind::Mouse,
-            position: at,
-            delta: ScrollDelta::Pixels(Size::new(CssPx(0.0), CssPx(down))),
-            phase: ScrollPhase::Discrete,
-        };
-        self.deliver(SurfaceEvent::Wheel { event, modifiers: Modifiers::NONE, timestamp: Timestamp::ORIGIN });
+        Ok(())
+    }
+
+    /// Scrolls over the middle of `element` with two fingers on a trackpad, as macOS reports it:
+    /// a started stage, a moved stage asking to move the scroll offset by each of `deltas` CSS
+    /// pixels, and an ended stage. Positive moves the offset right and down.
+    ///
+    /// Momentum after the fingers lift is not included. Add it with [`HeadlessWindow::scroll_stage`]
+    /// in [`ScrollPhase::Momentum`] followed by [`ScrollPhase::Ended`].
+    pub fn trackpad_scroll(&mut self, element: Element, deltas: &[Size<CssPx, Css>]) -> Result<(), HeadlessError> {
+        let at = self.centre(element)?;
+        self.hold_pointer_at(at);
+
+        let still = Size::new(CssPx(0.0), CssPx(0.0));
+        self.scroll_event(at, still, ScrollPhase::Started);
+        for delta in deltas {
+            self.scroll_event(at, *delta, ScrollPhase::Moved);
+        }
+        self.scroll_event(at, still, ScrollPhase::Ended);
+
+        Ok(())
+    }
+
+    /// Delivers one stage of a trackpad scroll over the middle of `element`, asking to move the
+    /// scroll offset by `delta` CSS pixels. Positive moves the offset right and down.
+    pub fn scroll_stage(
+        &mut self,
+        element: Element,
+        delta: Size<CssPx, Css>,
+        phase: ScrollPhase,
+    ) -> Result<(), HeadlessError> {
+        let at = self.centre(element)?;
+        self.hold_pointer_at(at);
+        self.scroll_event(at, delta, phase);
+
+        Ok(())
+    }
+
+    /// Pinches over the middle of `element` on a trackpad: a started stage, a moved stage for each
+    /// of `scale_deltas`, and an ended stage. A positive delta moves the fingers apart.
+    pub fn pinch(&mut self, element: Element, scale_deltas: &[f32]) -> Result<(), HeadlessError> {
+        let at = self.centre(element)?;
+        self.hold_pointer_at(at);
+
+        self.pinch_event(at, 0.0, GesturePhase::Started);
+        for scale_delta in scale_deltas {
+            self.pinch_event(at, *scale_delta, GesturePhase::Moved);
+        }
+        self.pinch_event(at, 0.0, GesturePhase::Ended);
+
+        Ok(())
+    }
+
+    /// Delivers one stage of a trackpad pinch over the middle of `element`.
+    pub fn pinch_stage(
+        &mut self,
+        element: Element,
+        scale_delta: f32,
+        phase: GesturePhase,
+    ) -> Result<(), HeadlessError> {
+        let at = self.centre(element)?;
+        self.hold_pointer_at(at);
+        self.pinch_event(at, scale_delta, phase);
 
         Ok(())
     }
@@ -691,6 +749,31 @@ impl HeadlessWindow {
         }
         self.pointer = Some(at);
         self.pointer_event(PointerAction::Moved, at, None);
+    }
+
+    /// Moves the pointer to `at` unless it is there already, so the stages of one gesture are not
+    /// separated by pointer moves.
+    fn hold_pointer_at(&mut self, at: Point<CssPx, Css>) {
+        if self.pointer != Some(at) {
+            self.move_pointer(at);
+        }
+    }
+
+    fn scroll_event(&mut self, at: Point<CssPx, Css>, delta: Size<CssPx, Css>, phase: ScrollPhase) {
+        // winit on macOS reports a trackpad scroll in pixels from the mouse pointer.
+        let event = WheelEvent {
+            id: PointerId::MOUSE,
+            kind: PointerKind::Mouse,
+            position: at,
+            delta: ScrollDelta::Pixels(delta),
+            phase,
+        };
+        self.deliver(SurfaceEvent::Wheel { event, modifiers: Modifiers::NONE, timestamp: Timestamp::ORIGIN });
+    }
+
+    fn pinch_event(&mut self, at: Point<CssPx, Css>, scale_delta: f32, phase: GesturePhase) {
+        let event = PinchEvent { scale_delta, phase, position: at };
+        self.deliver(SurfaceEvent::Pinch { event, modifiers: Modifiers::NONE, timestamp: Timestamp::ORIGIN });
     }
 
     fn pointer_event(&mut self, action: PointerAction, at: Point<CssPx, Css>, button: Option<PointerButton>) {
