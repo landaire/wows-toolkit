@@ -145,25 +145,25 @@ sha2 = "0.10"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
 rust-i18n = "3.1.5"
 sys-locale = "0.3"
-# landaire-contrib/zgui, branch `wows-toolkit`.
-zgui = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-ui = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-ui-icons = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-ui-primitives = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-ui-tokens = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-image = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-css = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-platform-headless = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-render-wgpu = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-render-vector-vello = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
-zgui-testkit-scene = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+# landaire-contrib/zgui, branch `main`.
+zgui = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-ui = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-ui-icons = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-ui-primitives = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-ui-tokens = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-image = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-css = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-platform-headless = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-render-wgpu = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-render-vector-vello = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+zgui-testkit-scene = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
 # The accessibility tree zgui publishes, read back as a screen reader reads it.
 accesskit_consumer = "0.38"
 
 [patch.crates-io]
 # zgui's copy of fontique, which keeps resolved font families across queries
 # and caches the system font collection between launches.
-fontique = { git = "https://github.com/landaire-contrib/zgui", branch = "wows-toolkit" }
+fontique = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
 # pickled = { path = "../pickled" }
 # egui = { git = "https://github.com/emilk/egui", branch = "main" }
 # eframe = { git = "https://github.com/emilk/egui", branch = "main" }
