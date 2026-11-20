@@ -536,7 +536,14 @@ where
         let fits = self.with_column(id, |column| column.sizing_value() == ColumnSizing::Fit) == Some(true)
             && !self.resize.with_untracked(|resize| resize.as_ref().is_some_and(|resize| resize.column == *id))
             && self.layout.with_untracked(|layout| layout.width(id).is_none());
-        let wider = self.fitted.with_untracked(|fitted| fitted.get(id).is_none_or(|known| width > *known));
+        // Layout rounds each edge to a device pixel, so a column held at its fitted width can
+        // measure a pixel wider than it. Taken as new content, that pixel would widen it again on
+        // every pass. Compared in whole device pixels, which the measure is.
+        let scale = self.scale();
+        let device = |css: f32| (css * scale).round();
+        let wider = self
+            .fitted
+            .with_untracked(|fitted| fitted.get(id).is_none_or(|known| device(width) > device(*known) + 1.0));
         if fits && wider {
             self.fitted.update(|fitted| {
                 fitted.insert(id.clone(), width);
