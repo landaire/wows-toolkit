@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::BuiltRows;
 use landaire_ui::ColumnId;
 use landaire_ui::ColumnLayout;
 use landaire_ui::ColumnSizing;
@@ -1380,6 +1381,50 @@ fn a_measured_grid_shows_a_reorder_from_its_first_row_at_each_row_s_height() {
     let built = built_ids(&window, &reversed);
     assert_eq!(built.first(), Some(&299), "the reorder is shown from its first row");
     assert_rows_apart(&window, &built);
+}
+
+#[test]
+fn a_measured_grid_tells_the_rows_it_builds_as_a_scroll_changes_them() {
+    let told: Rc<RefCell<Vec<BuiltRows<u32>>>> = Rc::default();
+    let given = Rc::clone(&told);
+    let port = NodeRef::new();
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let given = Rc::clone(&given);
+        let on_rows_built = UnsyncCallback::new(move |built: BuiltRows<u32>| given.borrow_mut().push(built));
+        view! {
+            ThemeRoot(motion = MotionPreference::Reduced) {
+                box(style = "display: flex; width: 420px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(2_000)),
+                        columns = tall_columns(),
+                        row_key = |item: &Item| item.id,
+                        mode = RowMode::measured(RowHeight(30.0)),
+                        on_rows_built = on_rows_built,
+                        node_ref = port,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(100));
+
+    let rows = items(2_000);
+    let last = told.borrow().last().cloned().expect("the rows built are told");
+    assert_eq!(last.first, 0);
+    assert_eq!(last.keys, built_ids(&window, &rows), "the rows told are the rows built");
+    let before = told.borrow().len();
+    window.advance(Duration::from_millis(100));
+    assert_eq!(told.borrow().len(), before, "rows that stay are not told again");
+
+    port.scroll_to(ScrollTarget::Offset(Point::new(DevicePx(0.0), DevicePx(30_000.0))), ScrollBehavior::Instant);
+    window.advance(Duration::from_millis(200));
+    let last = told.borrow().last().cloned().expect("the rows built are told");
+    let built = built_ids(&window, &rows);
+    assert!(last.first > 0, "the first row told follows the scroll");
+    assert_eq!(last.keys, built, "the rows told after the scroll are the rows built");
+    assert_eq!(last.keys.first().copied(), u32::try_from(last.first).ok(), "the first index names the first key");
 }
 
 #[test]

@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use zgui::component;
 use zgui::elements::Focus;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
@@ -39,6 +40,7 @@ use zgui_ui::ContextMenuProps;
 use zgui_ui::ContextMenuTriggerProps;
 use zgui_ui::virtualize::MeasuredRows;
 use zgui_ui::virtualize::MeasuredVirtualize;
+use zgui_ui::virtualize::VirtualWindow;
 use zgui_ui::virtualize::Virtualize;
 
 use crate::grid::body;
@@ -54,6 +56,7 @@ use crate::grid::selection::GridSelectionMode;
 use crate::grid::selection::Selection;
 use crate::grid::sort::ColumnSort;
 use crate::grid::state;
+use crate::grid::state::BuiltRows;
 use crate::grid::state::Carry;
 use crate::grid::state::ColumnGeneration;
 use crate::grid::state::GridCx;
@@ -128,6 +131,10 @@ pub fn Grid<T, K, F>(
     /// Told when the pointer comes onto a row and when it leaves it.
     #[prop(optional)]
     on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
+    /// Told which rows the grid builds whenever that changes, such as for an application that
+    /// refreshes what the reader can see.
+    #[prop(optional)]
+    on_rows_built: Option<UnsyncCallback<BuiltRows<K>>>,
     /// Names each row's mark: a bar down the row's leading edge, its detail included, which the
     /// application's styles colour by the name under `.lui-grid__mark[data-mark]`.
     #[prop(optional)]
@@ -336,6 +343,10 @@ where
         drop(reconciling);
         drop(rooming);
     });
+    if let Some(on_rows_built) = on_rows_built {
+        let telling = built_rows(order, window, measured, on_rows_built);
+        on_cleanup_local(move || drop(telling));
+    }
 
     let menu_open = RwSignal::new_local(false);
     // A menu for a row that is gone has nothing left to act on.
@@ -474,4 +485,40 @@ where
             {overlay}
         }
     }
+}
+
+/// Tells `on_rows_built` the rows the grid builds each time they differ from those it was told
+/// last.
+fn built_rows<K>(
+    order: RwSignal<Rc<Vec<K>>, LocalStorage>,
+    window: Option<Signal<VirtualWindow, LocalStorage>>,
+    measured: Option<MeasuredVirtualize>,
+    on_rows_built: UnsyncCallback<BuiltRows<K>>,
+) -> RenderEffect<BuiltRows<K>>
+where
+    K: Clone + PartialEq + 'static,
+{
+    RenderEffect::new(move |previous: Option<BuiltRows<K>>| {
+        let (first, end) = match (window, measured) {
+            (Some(window), _) => {
+                let window = window.get();
+                (window.first, window.end())
+            }
+            (None, Some(seen)) => {
+                let window = seen.window();
+                (window.first, window.end())
+            }
+            (None, None) => (0, usize::MAX),
+        };
+        let built = order.with(|order| {
+            let end = end.min(order.len());
+            let first = first.min(end);
+            BuiltRows { first, keys: order[first..end].to_vec() }
+        });
+
+        if previous.as_ref() != Some(&built) {
+            on_rows_built.run(built.clone());
+        }
+        built
+    })
 }

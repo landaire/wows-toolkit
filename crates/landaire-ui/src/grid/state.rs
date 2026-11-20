@@ -142,6 +142,15 @@ pub enum RowHover<K> {
     },
 }
 
+/// The rows a grid builds, in row order: in a virtualized grid those in view and the overscan
+/// beyond each edge, otherwise every row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuiltRows<K> {
+    /// The index of the first row built among all the rows.
+    pub first: usize,
+    pub keys: Vec<K>,
+}
+
 /// The words a grid shows of its own, in its header menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GridStrings {

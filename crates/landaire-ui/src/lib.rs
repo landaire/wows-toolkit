@@ -126,6 +126,7 @@ pub use crate::error::HexColorError;
 pub use crate::error::LengthError;
 pub use crate::error::ShareError;
 pub use crate::error::TierOrderError;
+pub use crate::grid::BuiltRows;
 pub use crate::grid::CellText;
 pub use crate::grid::CellView;
 pub use crate::grid::ColumnAlign;
