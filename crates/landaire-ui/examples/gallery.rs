@@ -27,6 +27,8 @@ use zgui::view::install_stylesheet;
 mod chrome;
 #[path = "gallery_parts/dock.rs"]
 mod dock;
+#[path = "gallery_parts/floating.rs"]
+mod floating;
 #[path = "gallery_parts/grid.rs"]
 mod grid;
 #[path = "gallery_parts/inputs.rs"]
@@ -41,10 +43,11 @@ mod title_bar;
 mod tree;
 
 /// The sections in the order the window shows them.
-const SECTIONS: [Section; 8] = [
+const SECTIONS: [Section; 9] = [
     schemes::SECTION,
     surfaces::SECTION,
     chrome::SECTION,
+    floating::SECTION,
     title_bar::SECTION,
     tree::SECTION,
     grid::SECTION,

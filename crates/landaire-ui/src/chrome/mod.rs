@@ -3,6 +3,7 @@
 
 pub(crate) mod count_up;
 pub(crate) mod drawer;
+pub(crate) mod floating_window;
 pub(crate) mod frame_window;
 pub(crate) mod loading;
 pub(crate) mod reveal;
