@@ -293,6 +293,7 @@ pub fn semantic_sheet(choice: ThemeChoice) -> String {
             format!("{light}\n@media (prefers-color-scheme: dark) {{ {dark} }}")
         }
         landaire_ui::ThemeChoice::Fixed(scheme) => Semantic::rule(scheme.palette().appearance),
+        landaire_ui::ThemeChoice::Custom(palette) => Semantic::rule(palette.appearance),
     }
 }
 

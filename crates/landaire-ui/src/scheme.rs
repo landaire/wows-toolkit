@@ -76,6 +76,8 @@ pub enum ThemeChoice {
     /// resolves this through `prefers-color-scheme`, so it follows the desktop while running.
     System,
     Fixed(Scheme),
+    /// A palette of the application's own, in force whatever the desktop prefers.
+    Custom(&'static Palette),
 }
 
 impl ThemeChoice {
@@ -100,6 +102,7 @@ impl ThemeChoice {
             (Self::System, Appearance::Light) => &LIGHT,
             (Self::System, Appearance::Dark) => &DARK,
             (Self::Fixed(scheme), _) => scheme.palette(),
+            (Self::Custom(palette), _) => palette,
         }
     }
 
@@ -107,6 +110,7 @@ impl ThemeChoice {
         match self {
             Self::System => "System",
             Self::Fixed(scheme) => scheme.label(),
+            Self::Custom(_) => "Custom",
         }
     }
 
@@ -114,14 +118,8 @@ impl ThemeChoice {
     pub(crate) const fn slots(self) -> Slots {
         match self {
             Self::System => Slots { light: &LIGHT, dark: &DARK, scheme: ColorScheme::System },
-            Self::Fixed(scheme) => {
-                let palette = scheme.palette();
-                let scheme = match palette.appearance {
-                    Appearance::Light => ColorScheme::Light,
-                    Appearance::Dark => ColorScheme::Dark,
-                };
-                Slots { light: palette, dark: palette, scheme }
-            }
+            Self::Fixed(scheme) => Slots::fixed(scheme.palette()),
+            Self::Custom(palette) => Slots::fixed(palette),
         }
     }
 }
@@ -132,6 +130,17 @@ pub(crate) struct Slots {
     pub(crate) light: &'static Palette,
     pub(crate) dark: &'static Palette,
     pub(crate) scheme: ColorScheme,
+}
+
+impl Slots {
+    /// `palette` in both slots, with the slot its appearance names in force.
+    const fn fixed(palette: &'static Palette) -> Self {
+        let scheme = match palette.appearance {
+            Appearance::Light => ColorScheme::Light,
+            Appearance::Dark => ColorScheme::Dark,
+        };
+        Self { light: palette, dark: palette, scheme }
+    }
 }
 
 const DARK: Palette = Palette {

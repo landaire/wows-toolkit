@@ -412,4 +412,19 @@ mod tests {
         assert!(!css.contains("@media"));
         assert_eq!(css.matches(&Scheme::GruvboxLight.palette().panel.to_string()).count(), 1);
     }
+
+    #[test]
+    fn a_custom_palette_writes_its_own_tiers_and_no_media_query() {
+        static AMBER: Palette = Palette {
+            panel: crate::color::Rgb::new(0x141310),
+            accent: crate::color::Rgb::new(0xc8793e),
+            ..*Scheme::Dark.palette()
+        };
+        let css = lui_sheet(ThemeChoice::Custom(&AMBER));
+
+        assert!(!css.contains("@media"));
+        assert_eq!(css.matches(&AMBER.panel.to_string()).count(), 1);
+        assert!(css.contains(&AMBER.accent.to_string()));
+        assert!(!css.contains(&Scheme::Dark.palette().panel.to_string()));
+    }
 }
