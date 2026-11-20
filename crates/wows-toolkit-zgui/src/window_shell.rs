@@ -12,6 +12,7 @@ use wows_toolkit_config::WindowKind;
 use wows_toolkit_config::WindowSettings;
 use zgui::App;
 use zgui::component;
+use zgui::css;
 use zgui::prelude::FullscreenMode;
 use zgui::prelude::WindowHandle;
 use zgui::prelude::WindowOptions;
@@ -27,12 +28,26 @@ use zgui::view;
 use zgui::view::Children;
 use zgui::view::IntoView;
 use zgui::view::Timers;
+use zgui::view::install_stylesheet;
 
+use crate::app_icon;
 use crate::services::Services;
 
 /// Where the main window opens when nothing was remembered.
 const DEFAULT_ORIGIN: (f32, f32) = (200.0, 120.0);
 const DEFAULT_SIZE: (f32, f32) = (1200.0, 800.0);
+
+const SHEET: &str = "wt-window-shell";
+
+// The title box clips its overflow, so the icon holds its size while the text gives way.
+const CSS: &str = css!(
+    ".wt-window-shell__icon {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        margin-right: 8px;
+    }"
+);
 
 /// The main window's title.
 pub fn main_window_title() -> String {
@@ -44,6 +59,7 @@ pub fn main_window_title() -> String {
 /// desktop's own frame stays and the content fills the window.
 #[component]
 pub fn DecoratedWindow(#[prop(into)] title: String, children: Children) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
     let title = StoredValue::new_local(title);
     let strings = TitleBarStrings {
         minimize: t!("ui.windows.minimize").into_owned(),
@@ -55,6 +71,7 @@ pub fn DecoratedWindow(#[prop(into)] title: String, children: Children) -> impl 
     view! {
         WindowFrame(attr:data-testid = "window-frame") {
             TitleBar(strings = strings, attr:data-testid = "window-title-bar") {
+                image(class = "wt-window-shell__icon", src = app_icon::image_src(), a11y:hidden = true)
                 text {{title.get_value()}}
             }
             {children.into_view_once()}
@@ -96,8 +113,11 @@ pub fn secondary_window_options(
     let [width, height] = saved.inner_size_points.unwrap_or([default_size.0, default_size.1]);
     let fullscreen = saved.fullscreen.then_some(FullscreenMode::Borderless);
 
-    let options =
-        WindowOptions::new(title).with_size(width, height).with_maximized(saved.maximized).with_fullscreen(fullscreen);
+    let options = WindowOptions::new(title)
+        .with_icon(app_icon::window_icon())
+        .with_size(width, height)
+        .with_maximized(saved.maximized)
+        .with_fullscreen(fullscreen);
     match saved.outer_position_pixels {
         Some([x, y]) => options.with_position(x, y),
         None => options,

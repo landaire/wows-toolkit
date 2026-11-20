@@ -277,7 +277,7 @@ jobs:
           cp assets/wows-toolkit.desktop "build-dir/files/share/applications/${APP_ID}.desktop"
 
           mkdir -p build-dir/files/share/icons/hicolor/256x256/apps
-          cp assets/icon-256.png "build-dir/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+          cp assets/wows_toolkit_256.png "build-dir/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
           mkdir -p build-dir/files/share/metainfo
           cp "assets/${APP_ID}.metainfo.xml" build-dir/files/share/metainfo/

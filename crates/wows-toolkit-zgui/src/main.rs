@@ -82,6 +82,7 @@
 // default.
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
+mod app_icon;
 mod cli;
 mod desktop;
 mod frames;
@@ -202,6 +203,7 @@ fn main() {
     let app = zgui::app()
         .with_title(title.clone())
         .with_application_id(APPLICATION_ID)
+        .with_icon(app_icon::window_icon())
         .with_min_size(MIN_WINDOW_SIZE.0, MIN_WINDOW_SIZE.1)
         .with_zoom(zoom::to_window(wows_toolkit_viewmodel::settings::ZoomFactor::DEFAULT))
         .with_adapter_preference(asked.adapter_preference())

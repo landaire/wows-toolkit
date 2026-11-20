@@ -4,6 +4,12 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+export_file(
+    name = "wows_toolkit_256_png",
+    src = "wows_toolkit_256.png",
+    visibility = ["PUBLIC"],
+)
+
 # `out` keeps the original filenames: an export_file otherwise names its output
 # after the target, and the resource script refers to the icon by name.
 export_file(

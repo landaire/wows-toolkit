@@ -6,6 +6,7 @@ buildscript = workspace_buildscript(
     package = "wows-toolkit-zgui",
     version = "1.1.0-beta5",
     rustc_flags = ["--cfg=wows_buck_build"],
+    env = {"WOWS_TOOLKIT_ICON": "$(location //assets:wows_toolkit_256_png)"},
 )
 
 ZGUI_DEPS = [
