@@ -3,6 +3,8 @@
 
 use std::borrow::Cow;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::config::hide_command_parts;
@@ -21,12 +23,32 @@ use crate::replay_render::motion::reach_ships;
 use crate::replay_render::ships::ShipChoices;
 use crate::replay_render::track::Track;
 
-/// A canvas built for one side-panel layout: the renderer that draws on it,
+/// A canvas built for one side-panel layout: the renderers that draw on it,
 /// and where the map's corner sits on it.
 pub struct Canvas {
     pub layout: SidePanelLayout,
-    pub renderer: SharedPreviewRenderer,
+    pub renderers: Vec<SharedPreviewRenderer>,
     pub map_origin: (f32, f32),
+}
+
+/// The most frames a viewport rasterises at once. One frame of a large window at a high pixel
+/// density takes a single core more than two frame intervals of playback.
+const MOST_DRAWS_AT_ONCE: usize = 3;
+
+/// `renderer` and copies of it, one for each frame a viewport may rasterise at once, so a playing
+/// battle is drawn at its frame rate even where one frame takes longer than a frame interval.
+///
+/// At most half the machine's cores, and always `renderer` itself first.
+pub fn renderers_for_playback(renderer: SharedPreviewRenderer) -> Vec<SharedPreviewRenderer> {
+    // One core is the safe reading of a machine that will not say how many it has.
+    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let count = (cores / 2).clamp(1, MOST_DRAWS_AT_ONCE);
+    let copies: Vec<SharedPreviewRenderer> = {
+        let held = renderer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        (1..count).map(|_| Arc::new(Mutex::new(held.clone()))).collect()
+    };
+
+    std::iter::once(renderer).chain(copies).collect()
 }
 
 /// The commands drawn at `clock`, between `motion`'s frame and the next.
@@ -93,7 +115,7 @@ pub fn shown_commands(
 /// back and forth costs little after the first time.
 pub fn build_canvas(path: &Path, game_data: &GameDataCache, layout: SidePanelLayout) -> Result<Canvas, PreviewError> {
     let (renderer, origin) = renderer_for_replay(path, game_data, layout)?;
-    Ok(Canvas { layout, renderer, map_origin: (origin.0 as f32, origin.1 as f32) })
+    Ok(Canvas { layout, renderers: renderers_for_playback(renderer), map_origin: (origin.0 as f32, origin.1 as f32) })
 }
 
 /// `options` as a canvas laid out for `layout` can draw them: the gutter

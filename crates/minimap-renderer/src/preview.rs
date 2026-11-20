@@ -44,6 +44,9 @@ impl std::fmt::Display for PreviewRenderError {
 impl std::error::Error for PreviewRenderError {}
 
 /// A renderer bound to one build's assets and one map.
+///
+/// A clone draws on surfaces of its own, so two can rasterise frames at once.
+#[derive(Clone)]
 pub struct PreviewRenderer {
     target: ImageTarget,
 }

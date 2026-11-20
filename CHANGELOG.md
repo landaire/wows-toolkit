@@ -69,6 +69,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Draw up to three renderer frames at once while a replay plays, so a large or high-density window shows the battle moving every frame rather than repeating a frame while the next is drawn
 - *(zgui)* List the nations, classes and ships an armor viewer search names best first, so a ship searched by its name is not listed below loose matches in other nations
 - *(zgui)* Open a ship in the armor viewer sidebar with a click that leaves its parts folded. Its chevron unfolds them
 - *(zgui)* Draw the ship class icons in the Player Tracker's Current Match roster at their own proportions rather than squeezed into a square

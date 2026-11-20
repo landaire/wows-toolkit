@@ -78,6 +78,7 @@ use wows_toolkit_replay_data::replay_render::raster::Canvas;
 use wows_toolkit_replay_data::replay_render::raster::build_canvas;
 use wows_toolkit_replay_data::replay_render::raster::fit_to_canvas;
 use wows_toolkit_replay_data::replay_render::raster::raster_commands;
+use wows_toolkit_replay_data::replay_render::raster::renderers_for_playback;
 use wows_toolkit_replay_data::replay_render::ships::ShipChoices;
 use wows_toolkit_replay_data::replay_render::ships::ShipMenu;
 use wows_toolkit_replay_data::replay_render::ships::drawn_ships;
@@ -121,7 +122,6 @@ use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::task::Task;
-use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view::IntervalHandle;
 use zgui::view::Timers;
@@ -250,21 +250,27 @@ struct Run {
     services: Services,
     game_data: Option<GameDataCache>,
     sink: FrameSink,
-    /// The renderer the track is rasterised through. Taken while a frame is drawn off the UI
-    /// thread or an export runs, which is what keeps two draws from running at once.
-    renderer: Option<SharedPreviewRenderer>,
-    /// Moved on whenever `renderer` is replaced, so a frame drawn on the old canvas, and the old
+    /// The renderers the track is rasterised through that are free. One is taken while a frame is
+    /// drawn off the UI thread or an export runs, so frames of a playing battle are drawn side by
+    /// side when one takes longer than a frame interval.
+    renderers: Vec<SharedPreviewRenderer>,
+    /// Moved on whenever `renderers` is replaced, so a frame drawn on the old canvas, and the old
     /// renderer it brings back, are dropped.
     renderer_generation: Generation,
-    /// The layout `renderer` draws on.
+    /// The layout `renderers` draw on.
     layout: SidePanelLayout,
     /// The layout of the canvas being built off the UI thread, while one is.
     building: Option<SidePanelLayout>,
     /// The canvas build in flight. A newer one, or a return to the canvas there is, drops what an
     /// older one builds.
     canvas_generation: Generation,
-    /// A frame was asked for while one was being drawn. The draw in flight starts another as it
-    /// finishes, so what ends up on screen is the newest thing asked for.
+    /// Moved on as each draw starts. Draws finish out of order, and one that started before the
+    /// frame on screen is dropped.
+    draw_generation: Generation,
+    /// The draw whose frame is on screen.
+    shown_draw: Generation,
+    /// A frame was asked for while every renderer was drawing. The first to finish starts another,
+    /// so what ends up on screen is the newest thing asked for.
     redraw_wanted: bool,
     /// An export asked for while a frame was being drawn. It starts as the draw hands the
     /// renderer back.
@@ -351,11 +357,13 @@ impl RendererSession {
                 services,
                 game_data: services.game_data.cache_untracked(),
                 sink: FrameSink::new(),
-                renderer: None,
+                renderers: Vec::new(),
                 renderer_generation: Generation::default(),
                 layout: SidePanelLayout::None,
                 building: None,
                 canvas_generation: Generation::default(),
+                draw_generation: Generation::default(),
+                shown_draw: Generation::default(),
                 redraw_wanted: false,
                 pending_export: None,
                 regions: Vec::new(),
@@ -545,7 +553,10 @@ impl RendererSession {
         self.spawn(async move {
             let options = RenderOptions { player_names: names, ..playback_options() };
             let merged = !request.alts.is_empty();
-            let baking = long_job(move || bake(&request.path, &request.alts, &game_data, &cancel, options));
+            let baking = long_job(move || {
+                bake(&request.path, &request.alts, &game_data, &cancel, options)
+                    .map(|(track, renderer)| (track, renderers_for_playback(renderer)))
+            });
             // Read beside the bake, so the first frame is drawn with what the reader saved.
             let first = shown.is_none();
             let defaults = async move { if first { Some(load_saved_defaults(services).await) } else { None } };
@@ -554,7 +565,7 @@ impl RendererSession {
             if current != Some(true) {
                 return;
             }
-            let (track, renderer) = match baked {
+            let (track, renderers) = match baked {
                 Ok(baked) => baked,
                 // A battle already on screen stays: only the recordings asked for since failed.
                 Err(err) if shown.is_some() => {
@@ -571,7 +582,7 @@ impl RendererSession {
             };
             let track = Arc::new(track);
             self.run.update_value(|run| {
-                run.renderer = Some(renderer);
+                run.renderers = renderers;
                 run.renderer_generation.next();
                 run.layout = SidePanelLayout::None;
                 run.building = None;
@@ -769,11 +780,11 @@ impl RendererSession {
                 return;
             }
             match built {
-                Ok(Canvas { layout, renderer, map_origin }) => {
+                Ok(Canvas { layout, renderers, map_origin }) => {
                     self.run.update_value(|run| {
                         run.layout = layout;
-                        // A draw or an export in flight on the old renderer drops it as it finishes.
-                        run.renderer = Some(renderer);
+                        // A draw or an export in flight on an old renderer drops it as it finishes.
+                        run.renderers = renderers;
                         run.renderer_generation.next();
                     });
                     self.map_origin.set(map_origin);
@@ -1549,15 +1560,20 @@ impl RendererSession {
     fn draw_shared(self) {
         let Some(track) = self.track_untracked() else { return };
         let Some(game_data) = self.run.try_with_value(|run| run.game_data.clone()).flatten() else { return };
-        let Some(DrawStart { renderer, generation, layout }) = self
+        let Some(DrawStart { renderer, generation, draw, layout }) = self
             .with_run(|run| {
-                run.redraw_wanted = false;
-                let Some(renderer) = run.renderer.take() else {
+                let Some(renderer) = run.renderers.pop() else {
                     run.redraw_wanted = true;
                     return None;
                 };
                 // This draw is of the newest state, which is what any earlier ask wanted.
-                Some(DrawStart { renderer, generation: run.renderer_generation, layout: run.layout })
+                run.redraw_wanted = false;
+                Some(DrawStart {
+                    renderer,
+                    generation: run.renderer_generation,
+                    draw: run.draw_generation.next(),
+                    layout: run.layout,
+                })
             })
             .flatten()
         else {
@@ -1566,7 +1582,7 @@ impl RendererSession {
 
         let (at, clock) = self.playback.with_untracked(|playback| (playback.at(), playback.clock(&track)));
         let Some(motion) = self.motion(&track, at) else {
-            self.run.update_value(|run| run.renderer = Some(renderer));
+            self.run.update_value(|run| run.renderers.push(renderer));
             return;
         };
         let link = self.collab.get_untracked();
@@ -1587,7 +1603,9 @@ impl RendererSession {
         let (view, scale) = self.map.with_untracked(|map| (map.shaped_view(), map.render_scale()));
         let drawing = Arc::clone(&renderer);
         self.spawn(async move {
-            let drawn = blocking(move || {
+            // A playing viewport keeps several draws running, which would hold zgui's few shared
+            // threads.
+            let drawn = long_job(move || {
                 let mut drawing = drawing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let mut bgra = Vec::new();
                 let drawn = drawing.render_regions_bgra(view, scale, &shown, &mut bgra);
@@ -1596,24 +1614,35 @@ impl RendererSession {
                 RasterOutput { frame: BgraFrame::from_bgra(width, height, bgra), size, regions: drawn.regions }
             })
             .await;
-            self.finish_draw(generation, renderer, drawn);
+            self.finish_draw(generation, draw, renderer, drawn);
         });
     }
 
-    fn finish_draw(self, generation: Generation, renderer: SharedPreviewRenderer, drawn: RasterOutput) {
+    fn finish_draw(
+        self,
+        generation: Generation,
+        draw: Generation,
+        renderer: SharedPreviewRenderer,
+        drawn: RasterOutput,
+    ) {
         let RasterOutput { frame, size, regions } = drawn;
-        let current = self.with_run(|run| {
+        let newest = self.with_run(|run| {
             // Drawn on a canvas a layout change replaced: neither the frame nor the renderer is wanted.
-            let current = run.renderer_generation == generation;
-            if current {
-                run.renderer = Some(renderer);
-                run.regions = regions;
+            if run.renderer_generation != generation {
+                return false;
             }
-            current
+            run.renderers.push(renderer);
+            // A draw that started later has already put a newer frame on screen.
+            if draw < run.shown_draw {
+                return false;
+            }
+            run.shown_draw = draw;
+            run.regions = regions;
+            true
         });
-        let Some(current) = current else { return };
+        let Some(newest) = newest else { return };
 
-        if current {
+        if newest {
             self.sink().push(frame);
             if self.frame_size.get_untracked() != Some(size) {
                 self.frame_size.set(Some(size));
@@ -1643,7 +1672,7 @@ impl RendererSession {
     fn give_back(self, generation: Generation, renderer: SharedPreviewRenderer) {
         self.with_run(|run| {
             if run.renderer_generation == generation {
-                run.renderer = Some(renderer);
+                run.renderers.push(renderer);
             }
         });
     }
@@ -1767,9 +1796,9 @@ impl RendererSession {
         // Held for the whole encode, which is why the transport refuses while one runs.
         let Some((renderer, generation)) = self
             .with_run(|run| {
-                let renderer = run.renderer.take();
+                let renderer = run.renderers.pop();
                 if renderer.is_none() {
-                    // A frame is being drawn; the export starts as the draw hands the renderer back.
+                    // Every renderer is drawing; the export starts as the first draw hands one back.
                     run.pending_export = Some(target);
                     run.ticker = None;
                 }
@@ -1938,7 +1967,7 @@ struct HeldMotion {
 
 /// Counts the starts of one kind of work, so a result that a newer start replaced is recognised
 /// and dropped.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Generation(u64);
 
 impl Generation {
@@ -1953,6 +1982,8 @@ impl Generation {
 struct DrawStart {
     renderer: SharedPreviewRenderer,
     generation: Generation,
+    /// Which draw this is, so a frame that finishes after a later one's is dropped.
+    draw: Generation,
     /// The layout `renderer` draws on.
     layout: SidePanelLayout,
 }

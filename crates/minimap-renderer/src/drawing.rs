@@ -2135,6 +2135,7 @@ pub type ShipIcon = RgbaImage;
 ///
 /// Commands, regions and the map origin are all in canvas pixels; the frame
 /// itself is drawn at the target's [`RenderScale`].
+#[derive(Clone)]
 pub struct ImageTarget {
     canvas: Surface,
     /// The map art, kept so the drawn map can be rebuilt when the viewport
