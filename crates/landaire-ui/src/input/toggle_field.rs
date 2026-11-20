@@ -6,15 +6,11 @@ use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
-use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::view::Attrs;
 use zgui::view::Classes;
-use zgui::view::EventCx;
 use zgui::view::IntoView;
 use zgui::view::NodeRef;
-use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
@@ -34,11 +30,7 @@ const CSS: &str = css!(
         gap: 8px;
     }
     .lui-toggle-field .lui-toggle-field__label {
-        cursor: default;
         font-weight: 400;
-    }
-    .lui-toggle-field-disabled .lui-toggle-field__label {
-        opacity: 0.5;
     }"
 );
 
@@ -74,16 +66,11 @@ pub fn SwitchField(
     let name = NodeRef::new();
 
     let to_switch = Binding::controlled(held.signal(), move |on| held.set(on));
-    let toggle = move |_: &mut EventCx<'_, events::Click>| {
-        if !disabled.get_untracked() {
-            held.toggle();
-        }
-    };
 
     view! {
-        row(class = "lui-toggle-field", class:lui-toggle-field-disabled = move || disabled.get(), class = class) {
+        row(class = "lui-toggle-field", class = class) {
             Switch(node_ref = control, checked = to_switch, disabled = disabled, labelled_by = name, {..attrs})
-            Label(class = "lui-toggle-field__label", node_ref = name, control = control, on:click = toggle) {{label}}
+            Label(class = "lui-toggle-field__label", node_ref = name, control = control) {{label}}
         }
     }
 }
@@ -121,16 +108,11 @@ pub fn CheckboxField(
     let name = NodeRef::new();
 
     let to_checkbox = Binding::controlled(held.signal(), move |next| held.set(next));
-    let toggle = move |_: &mut EventCx<'_, events::Click>| {
-        if !disabled.get_untracked() {
-            held.set(held.get_untracked().toggled());
-        }
-    };
 
     view! {
-        row(class = "lui-toggle-field", class:lui-toggle-field-disabled = move || disabled.get(), class = class) {
+        row(class = "lui-toggle-field", class = class) {
             Checkbox(node_ref = control, checked = to_checkbox, disabled = disabled, labelled_by = name, {..attrs})
-            Label(class = "lui-toggle-field__label", node_ref = name, control = control, on:click = toggle) {{label}}
+            Label(class = "lui-toggle-field__label", node_ref = name, control = control) {{label}}
         }
     }
 }

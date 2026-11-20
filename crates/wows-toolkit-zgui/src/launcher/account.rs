@@ -327,8 +327,7 @@ fn TwoFactor(model: LauncherModel, form: SignInForm) -> impl IntoView {
             Label(
                 node_ref = backup_name,
                 control = backup_box,
-                attr:data-testid = "launcher-backup-code-label",
-                on:click = move |_| backup.set(Checked::from(!backup.get_untracked().is_checked()))
+                attr:data-testid = "launcher-backup-code-label"
             ) {
                 {locale.text("ui.launcher.account.use_backup_code")}
             }

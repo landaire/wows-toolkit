@@ -8,7 +8,6 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::view::IntoView;
 use zgui::view::NodeRef;
@@ -49,14 +48,18 @@ pub fn CheckRow(
         move |next: Checked| change.run(next == Checked::Yes),
     );
 
+    // A label of marked text holds no text node to name the box, so the box carries its own name.
     view! {
         row(class = "wt-check-row") {
-            Checkbox(node_ref = control, checked = binding, disabled = disabled, labelled_by = name, attr:data-testid = test_id)
-            Label(node_ref = name, control = control, on:click = move |_| {
-                if !disabled.get_untracked() {
-                    change.run(!checked.get_untracked());
-                }
-            }) {{move || view! { MarkedText(text = label.get(), ranges = marks.get()) }}}
+            Checkbox(
+                node_ref = control,
+                checked = binding,
+                disabled = disabled,
+                labelled_by = name,
+                attr:data-testid = test_id,
+                a11y:label = move || label.get()
+            )
+            Label(node_ref = name, control = control) {{move || view! { MarkedText(text = label.get(), ranges = marks.get()) }}}
         }
     }
 }

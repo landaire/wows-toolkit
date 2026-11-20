@@ -24,9 +24,9 @@ use crate::tabs::armor_viewer::options::tree_filter::RowFilter;
 use crate::tabs::armor_viewer::options::tree_filter::TreeFilter;
 use crate::tabs::armor_viewer::options::tree_filter::filtered_checkbox;
 use crate::tabs::armor_viewer::options::tree_filter::match_count;
+use crate::tabs::armor_viewer::options::visibility::TriCheck;
 use crate::tabs::armor_viewer::options::visibility::chevron;
 use crate::tabs::armor_viewer::options::visibility::hoverable_row;
-use crate::tabs::armor_viewer::options::visibility::row_label;
 use crate::tabs::armor_viewer::options::visibility::tri_checkbox;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
 use crate::tabs::armor_viewer::viewport::SplashBoxName;
@@ -176,8 +176,9 @@ fn group_row(
     };
     let all_on = acted_on.iter().all(|box_name| state.checked.contains(box_name));
     let any_on = acted_on.iter().any(|box_name| state.checked.contains(box_name));
-    let checkbox = tri_checkbox(
+    let TriCheck { checkbox, title } = tri_checkbox(
         format!("armor-splash-zone-group-check-{name}"),
+        &filter.marked(name.clone()),
         TriState::from_all_any(all_on, any_on),
         move |checked| viewport.set_splash_boxes_checked(acted_on.clone(), checked),
     );
@@ -190,7 +191,6 @@ fn group_row(
         (!filter.is_active())
             .then(|| Box::new(move || viewport.toggle_splash_group_expanded(expand_group.clone())) as Box<dyn Fn()>),
     );
-    let title = row_label(&filter.marked(name.clone()));
     let count = format!("({})", group.boxes.len());
     let key = SidebarHighlightKey::SplashBoxes(group.boxes.iter().map(|row| row.name.as_str().to_owned()).collect());
     let header = hoverable_row(

@@ -63,6 +63,7 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
+use zgui_ui::LabelProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
 use zgui_ui_icons::IconProps;
@@ -301,6 +302,8 @@ pub fn IncomingLog(
             })
         });
         let detail = viewport.incoming_detail().map(|detail| shell_detail(detail, viewport));
+        let secondaries_box = NodeRef::new();
+        let secondaries_name = NodeRef::new();
 
         AnyView::new(view! {
             column(class = "wt-armor-incoming", attr:data-testid = "armor-incoming") {
@@ -319,10 +322,13 @@ pub fn IncomingLog(
                         checked = Binding::controlled(secondaries_checked, move |checked: Checked| {
                             incoming.update(|fire| fire.filter.secondaries = checked == Checked::Yes)
                         }),
-                        attr:data-testid = "armor-incoming-secondaries",
-                        a11y:label = locale.text("ui.armor.realtime.show_secondaries")
+                        node_ref = secondaries_box,
+                        labelled_by = secondaries_name,
+                        attr:data-testid = "armor-incoming-secondaries"
                     )
-                    text {{locale.text("ui.armor.realtime.show_secondaries")}}
+                    Label(node_ref = secondaries_name, control = secondaries_box) {
+                        {locale.text("ui.armor.realtime.show_secondaries")}
+                    }
                 }
                 {pick_hint}
                 {log}

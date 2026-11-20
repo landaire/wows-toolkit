@@ -28,6 +28,7 @@ use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -37,6 +38,7 @@ use zgui_ui::Checked;
 use zgui_ui::DropdownMenuContentProps;
 use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
+use zgui_ui::LabelProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
@@ -337,6 +339,10 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
             settings.replay.clone()
         });
     };
+    let auto_load_box = NodeRef::new();
+    let auto_load_name = NodeRef::new();
+    let anonymize_box = NodeRef::new();
+    let anonymize_name = NodeRef::new();
 
     view! {
         Tooltip {
@@ -376,10 +382,13 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                 row(class = "wt-listing-options__check") {
                                     Checkbox(
                                         checked = Binding::controlled(auto_load, set_auto_load),
-                                        attr:data-testid = "replay-listing-auto-load-latest",
-                                        a11y:label = t!("ui.replay.autoload_latest").into_owned()
+                                        node_ref = auto_load_box,
+                                        labelled_by = auto_load_name,
+                                        attr:data-testid = "replay-listing-auto-load-latest"
                                     )
-                                    text {{locale.text("ui.replay.autoload_latest")}}
+                                    Label(node_ref = auto_load_name, control = auto_load_box) {
+                                        {locale.text("ui.replay.autoload_latest")}
+                                    }
                                 }
                             }
                             TooltipContent {{locale.text("ui.replay.autoload_latest_tooltip")}}
@@ -389,10 +398,13 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                 row(class = "wt-listing-options__check") {
                                     Checkbox(
                                         checked = Binding::controlled(anonymize, set_anonymize),
-                                        attr:data-testid = "replay-listing-anonymize-names",
-                                        a11y:label = t!("ui.replay.anonymize_names").into_owned()
+                                        node_ref = anonymize_box,
+                                        labelled_by = anonymize_name,
+                                        attr:data-testid = "replay-listing-anonymize-names"
                                     )
-                                    text {{locale.text("ui.replay.anonymize_names")}}
+                                    Label(node_ref = anonymize_name, control = anonymize_box) {
+                                        {locale.text("ui.replay.anonymize_names")}
+                                    }
                                 }
                             }
                             TooltipContent {{locale.text("ui.replay.anonymize_names_tooltip")}}
@@ -474,15 +486,18 @@ fn ColumnFilterCheck(filter: ColumnFilter) -> impl IntoView {
         });
     };
     let label = filter.label();
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     view! {
         row(class = "wt-listing-options__check") {
             Checkbox(
                 checked = Binding::controlled(checked, set),
-                attr:data-testid = filter.test_id(),
-                a11y:label = label.clone()
+                node_ref = control,
+                labelled_by = name,
+                attr:data-testid = filter.test_id()
             )
-            text {{label}}
+            Label(node_ref = name, control = control) {{label}}
         }
     }
 }

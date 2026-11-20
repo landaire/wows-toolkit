@@ -544,8 +544,7 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                         Label(
                             node_ref = division_mates_name,
                             control = division_mates_box,
-                            attr:data-testid = "tracker-show-division-mates-label",
-                            on:click = move |_| model.set_show_division_mates(!model.show_division_mates.get_untracked())
+                            attr:data-testid = "tracker-show-division-mates-label"
                         ) {
                             {t!("ui.player_tracker.show_division_mates").into_owned()}
                         }

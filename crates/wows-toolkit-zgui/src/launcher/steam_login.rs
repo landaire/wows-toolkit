@@ -13,10 +13,12 @@ use zgui::reactive::prelude::GetValue;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
+use zgui_ui::LabelProps;
 use zgui_ui::SpinnerProps;
 use zgui_ui::SwitchProps;
 use zgui_ui::SwitchSize;
@@ -51,6 +53,8 @@ pub fn WgcLoginControl(model: LauncherModel, path: PathBuf, test_id: String, bri
     let status_id = format!("{test_id}-status");
     let help_id = StoredValue::new(format!("{test_id}-help"));
     let status_line = move || login.get().map(|login| status(login.status, status_id.clone()));
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     view! {
         Show(when = move || login.get().is_some()) {
@@ -63,10 +67,13 @@ pub fn WgcLoginControl(model: LauncherModel, path: PathBuf, test_id: String, bri
                         }),
                         disabled = locked,
                         size = SwitchSize::Sm,
-                        attr:data-testid = switch_id.clone(),
-                        a11y:label = t!("ui.launcher.wgc_login.label").into_owned()
+                        node_ref = control,
+                        labelled_by = name,
+                        attr:data-testid = switch_id.clone()
                     )
-                    text(class = "wt-launcher__text") {{locale.text("ui.launcher.wgc_login.label")}}
+                    Label(node_ref = name, control = control, class = "wt-launcher__text") {
+                        {locale.text("ui.launcher.wgc_login.label")}
+                    }
                 }
                 {status_line.clone()}
                 if move || !brief {

@@ -57,6 +57,7 @@ use zgui_ui::DropdownMenuContentProps;
 use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::prelude::Binding;
 use zgui_ui_icons::IconProps;
@@ -82,7 +83,7 @@ const CSS: &str = css!(
     .wt-armor-tree__rows { display: flex; flex-direction: column; gap: 4px; }
     .wt-armor-tree__children { display: flex; flex-direction: column; gap: 4px; padding-left: 20px; }
     .wt-armor-tree__row { display: flex; align-items: center; gap: 4px; min-width: 0; }
-    .wt-armor-tree__label { font-size: 13px; min-width: 0; }
+    .wt-armor-tree__label.wt-armor-tree__label { font-size: 13px; font-weight: 400; min-width: 0; }
     .wt-armor-tree__heading { font-size: 13px; font-weight: 700; }
     .wt-armor-tree__chevron {
         flex: none;
@@ -263,23 +264,46 @@ pub(super) fn tree_field(
     })
 }
 
+/// A tri-state checkbox and the label that names it, which a press on either toggles.
+pub(super) struct TriCheck {
+    pub checkbox: AnyView,
+    pub title: AnyView,
+}
+
 /// A checkbox that can show "some of these": a box whose rows are partly shown reads as mixed,
 /// an empty box with a dash in the warning colour. `on_change` is told whether the box was ticked.
-pub(super) fn tri_checkbox(test_id: String, state: TriState, on_change: impl Fn(bool) + 'static) -> AnyView {
+pub(super) fn tri_checkbox(
+    test_id: String,
+    label: &MarkedLabel,
+    state: TriState,
+    on_change: impl Fn(bool) + 'static,
+) -> TriCheck {
     install_stylesheet(SHEET, CSS);
     let checked = match state {
         TriState::On => Checked::Yes,
         TriState::Partial => Checked::Mixed,
         TriState::Off => Checked::No,
     };
+    let control = NodeRef::new();
+    let name = NodeRef::new();
+    let marked = label.view();
 
-    AnyView::new(view! {
+    // A label of marked text holds no text node to name the box, so the box carries its own name.
+    let checkbox = AnyView::new(view! {
         Checkbox(
             checked = Binding::controlled(Signal::stored_local(checked), move |next: Checked| on_change(next.is_checked())),
             class = "wt-armor-tri",
-            attr:data-testid = test_id
+            node_ref = control,
+            labelled_by = name,
+            attr:data-testid = test_id,
+            a11y:label = label.text.clone()
         )
-    })
+    });
+    let title = AnyView::new(view! {
+        Label(node_ref = name, control = control, class = "wt-armor-tree__label") {{marked}}
+    });
+
+    TriCheck { checkbox, title }
 }
 
 /// Wraps `content` in a row that highlights `key`'s plates or meshes in the viewport while the
@@ -321,13 +345,6 @@ pub(super) fn chevron(test_id: String, open: bool, on_click: Option<Box<dyn Fn()
             Icon(icon = CHEVRON_RIGHT, size = IconSize::Sm)
         }
     })
-}
-
-/// A row label as a view.
-pub(super) fn row_label(label: &MarkedLabel) -> AnyView {
-    let label = label.view();
-
-    AnyView::new(view! { box(class = "wt-armor-tree__label") {{label}} })
 }
 
 /// The All, None and Reset Plates switches over the whole tree.
@@ -538,10 +555,15 @@ fn zone_row(
     let shell = tree.shell;
     let toggle_zone = zone.name.clone();
     let toggle_parts: Vec<String> = acted_on.parts.iter().map(|part| part.name.clone()).collect();
-    let checkbox = tri_checkbox(format!("armor-vis-zone-{}", zone.name), tri, move |checked| {
-        let solo = ModifierKey::Primary.is_down(shell.held_modifiers());
-        viewport.toggle_zone(toggle_zone.clone(), toggle_parts.clone(), checked, solo);
-    });
+    let TriCheck { checkbox, title } = tri_checkbox(
+        format!("armor-vis-zone-{}", zone.name),
+        &filter.marked(zone_label.clone()),
+        tri,
+        move |checked| {
+            let solo = ModifierKey::Primary.is_down(shell.held_modifiers());
+            viewport.toggle_zone(toggle_zone.clone(), toggle_parts.clone(), checked, solo);
+        },
+    );
 
     // Inert while filtering, where every zone is open whatever it was left at.
     let expand_zone = zone.name.clone();
@@ -552,7 +574,6 @@ fn zone_row(
             .then(|| Box::new(move || viewport.toggle_zone_expanded(expand_zone.clone())) as Box<dyn Fn()>),
     );
 
-    let title = row_label(&filter.marked(zone_label.clone()));
     let tooltip = tree.zone_tooltip.to_string();
     let toggle_id = format!("armor-vis-zone-toggle-{}", zone.name);
     let toggle = view! {
@@ -615,11 +636,16 @@ fn part_row(
     let row_id = format!("armor-vis-part-row-{zone_name}-{}", part.name);
     let box_id = format!("armor-vis-part-{zone_name}-{}", part.name);
     let key = SidebarHighlightKey::Part(zone_name.to_owned(), part.name.clone());
-    let title = row_label(&label);
-
-    if visible_plates.len() <= 1 {
+    let single = visible_plates.len() <= 1;
+    let tri = if single {
         let checked = part_visible && !any_plate_hidden;
-        let checkbox = tri_checkbox(box_id, TriState::from_all_any(checked, checked), on_change);
+        TriState::from_all_any(checked, checked)
+    } else {
+        TriState::from_all_any(part_visible && !any_plate_hidden, part_visible)
+    };
+    let TriCheck { checkbox, title } = tri_checkbox(box_id, &label, tri, on_change);
+
+    if single {
         return hoverable_row(
             row_id,
             viewport,
@@ -629,8 +655,6 @@ fn part_row(
     }
 
     let expanded = state.expanded_parts.contains(&part_key);
-    let tri = TriState::from_all_any(part_visible && !any_plate_hidden, part_visible);
-    let checkbox = tri_checkbox(box_id, tri, on_change);
     let caret = chevron(
         format!("armor-vis-part-expand-{zone_name}-{}", part.name),
         expanded,
@@ -677,12 +701,12 @@ fn plate_row(
 
     let checked = part_visible && plate_visible;
     let toggled = key.clone();
-    let checkbox = tri_checkbox(
+    let TriCheck { checkbox, title } = tri_checkbox(
         format!("armor-vis-plate-{zone_name}-{part_name}-{thickness_tenths}"),
+        &MarkedLabel::plain(format!("{thickness_mm:.0} mm")),
         TriState::from_all_any(checked, checked),
         move |_| viewport.toggle_plate(toggled.clone()),
     );
-    let label = format!("{thickness_mm:.0} mm");
 
     hoverable_row(
         format!("armor-vis-plate-row-{zone_name}-{part_name}-{thickness_tenths}"),
@@ -692,7 +716,7 @@ fn plate_row(
             row(class = "wt-armor-tree__row") {
                 box(class = "wt-armor-tree__swatch", style:background-color = swatch) {}
                 {checkbox}
-                text(class = "wt-armor-tree__label") {{label}}
+                {title}
             }
         }),
     )

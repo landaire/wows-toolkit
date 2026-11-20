@@ -21,11 +21,13 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
+use zgui_ui::LabelProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
@@ -225,18 +227,21 @@ fn check(
     toggle: impl Fn(Checked) + 'static,
 ) -> impl IntoView {
     let locale = Services::current().locale;
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     view! {
         Tooltip {
             TooltipTrigger {
-                row(class = "wt-armor-common__check", style:opacity = move || disabled.get().then(|| "0.5".to_string())) {
+                row(class = "wt-armor-common__check") {
                     Checkbox(
                         checked = Binding::controlled(checked, toggle),
                         disabled = disabled,
-                        attr:data-testid = test_id,
-                        a11y:label = t!(label).into_owned()
+                        node_ref = control,
+                        labelled_by = name,
+                        attr:data-testid = test_id
                     )
-                    text {{locale.text(label)}}
+                    Label(node_ref = name, control = control) {{locale.text(label)}}
                 }
             }
             TooltipContent {{locale.text(hint)}}
@@ -251,15 +256,18 @@ fn xray_choice(mode: XrayHighlight) -> AnyView {
         locale.track();
         xray_label(mode)
     };
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     AnyView::new(view! {
         row(class = "wt-armor-common__check") {
             RadioGroupItem(
                 value = xray_value(mode),
-                label = xray_label(mode),
+                node_ref = control,
+                labelled_by = name,
                 attr:data-testid = format!("armor-pane-xray-highlight-{}", xray_value(mode))
             )
-            text {{label}}
+            Label(node_ref = name, control = control) {{label}}
         }
     })
 }

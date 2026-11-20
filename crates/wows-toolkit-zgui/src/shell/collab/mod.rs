@@ -402,6 +402,8 @@ fn before_revealing_address(shell: Shell, go: impl Fn() + Copy + 'static) {
                 on
             });
         };
+        let control = NodeRef::new();
+        let name = NodeRef::new();
         AnyView::new(view! {
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "notice-address") {
@@ -423,10 +425,11 @@ fn before_revealing_address(shell: Shell, go: impl Fn() + Copy + 'static) {
                     row(class = "wt-collab__check") {
                         Checkbox(
                             checked = Binding::controlled(ticked, suppress),
-                            attr:data-testid = "notice-suppress",
-                            a11y:label = t!("ui.labels.suppress_warning").into_owned()
+                            node_ref = control,
+                            labelled_by = name,
+                            attr:data-testid = "notice-suppress"
                         )
-                        text {{t!("ui.labels.suppress_warning").into_owned()}}
+                        Label(node_ref = name, control = control) {{t!("ui.labels.suppress_warning").into_owned()}}
                     }
                     AlertDialogFooter {
                         AlertDialogCancel(size = ButtonSize::Sm, attr:data-testid = "notice-cancel") {
@@ -920,7 +923,7 @@ fn LockRow(
                 labelled_by = name,
                 attr:data-testid = test_id
             )
-            Label(node_ref = name, control = control, on:click = move |_| change(!locked.get_untracked())) {
+            Label(node_ref = name, control = control) {
                 {locale.text(label_key)}
             }
         }

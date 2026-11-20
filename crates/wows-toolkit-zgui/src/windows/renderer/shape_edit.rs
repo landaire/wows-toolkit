@@ -30,6 +30,7 @@ use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
@@ -37,6 +38,7 @@ use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
+use zgui_ui::LabelProps;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
@@ -58,7 +60,7 @@ const CSS: &str = css!(
         pointer-events: auto;
     }
     .wt-renderer-shape-edit__field { display: flex; align-items: center; gap: 6px; }
-    .wt-renderer-shape-edit__label { flex: 1; color: var(--lui-color-text-dim); }
+    .wt-renderer-shape-edit__label.wt-renderer-shape-edit__label { flex: 1; color: var(--lui-color-text-dim); }
     .wt-renderer-shape-edit__size { width: 104px; }
     .wt-renderer-shape-edit__delete.wt-renderer-shape-edit__delete { color: var(--lui-color-danger); }"
 );
@@ -218,15 +220,18 @@ fn FilledField(session: RendererSession, picked: Memo<Option<PickedShape>>) -> i
         if filled == Some(true) { Checked::Yes } else { Checked::No }
     });
     let named = t!("ui.renderer.annotations.filled").into_owned();
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     view! {
         row(class = "wt-renderer-shape-edit__field") {
             Checkbox(
                 checked = Binding::controlled(state, move |next: Checked| edit(session, ShapeEdit::Filled(next.is_checked()))),
-                a11y:label = named.clone(),
+                node_ref = control,
+                labelled_by = name,
                 attr:data-testid = "replay-renderer-shape-filled"
             )
-            text(class = "wt-renderer-shape-edit__label") {{named}}
+            Label(node_ref = name, control = control, class = "wt-renderer-shape-edit__label") {{named}}
         }
     }
 }

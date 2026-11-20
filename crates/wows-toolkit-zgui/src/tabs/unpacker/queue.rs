@@ -183,8 +183,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                                 node_ref = decode_name,
                                 control = decode_box,
                                 class = "wt-queue__dim",
-                                attr:data-testid = "unpacker-decode-prototypes-label",
-                                on:click = move |_| set_decode(!decode.get_untracked().is_checked())
+                                attr:data-testid = "unpacker-decode-prototypes-label"
                             ) {
                                 {t!("ui.unpacker.decode_prototypes").into_owned()}
                             }

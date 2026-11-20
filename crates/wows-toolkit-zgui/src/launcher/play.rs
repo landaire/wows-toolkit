@@ -391,7 +391,7 @@ pub fn SafeModeCheck(model: LauncherModel, test_id: &'static str) -> impl IntoVi
                 labelled_by = name,
                 attr:data-testid = test_id
             )
-            Label(node_ref = name, control = control, on:click = move |_| model.set_safe_mode(!model.safe_mode_untracked())) {
+            Label(node_ref = name, control = control) {
                 {locale.text("ui.launcher.popover.play_safe_mode")}
             }
         }

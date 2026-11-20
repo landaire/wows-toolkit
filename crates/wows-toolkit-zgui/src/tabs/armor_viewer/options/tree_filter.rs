@@ -3,18 +3,18 @@
 //! kept. Also the checkbox row every section draws, kept or dropped by such a filter.
 
 use std::ops::Range;
-use std::rc::Rc;
 
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
+use zgui_ui::LabelProps;
 use zgui_ui::prelude::Binding;
 
 use crate::tabs::armor_viewer::options::filter::MarkedLabel;
@@ -29,8 +29,7 @@ const CSS: &str = css!(
         gap: 8px;
         min-width: 0;
     }
-    .wt-armor-check__label { font-size: 13px; cursor: pointer; min-width: 0; }
-    .wt-armor-check__label[data-disabled] { cursor: default; color: var(--wt-color-text-dim); }"
+    .wt-armor-check__label.wt-armor-check__label { font-size: 13px; font-weight: 400; min-width: 0; }"
 );
 
 /// A filter a checkbox row's label is drawn and kept by.
@@ -126,7 +125,7 @@ pub fn match_count(query: &RailFilter, groups: &[(String, Vec<String>)]) -> usiz
 }
 
 /// A checkbox kept only when `filter` keeps its label, which is drawn beside it marked where the
-/// filter matched. A click on the label toggles the box as the box's own label would.
+/// filter matched.
 pub fn filtered_checkbox(
     test_id: String,
     label: String,
@@ -138,29 +137,24 @@ pub fn filtered_checkbox(
     let marked = filter.row_label(label.clone())?;
     install_stylesheet(SHEET, CSS);
     let disabled: Signal<bool, LocalStorage> = disabled.into();
-    let on_change = Rc::new(on_change);
-    let from_box = Rc::clone(&on_change);
     let state = Signal::derive_local(move || if checked.get() { Checked::Yes } else { Checked::No });
     let label_id = format!("{test_id}-label");
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     Some(AnyView::new(view! {
         row(class = "wt-armor-check") {
             Checkbox(
-                checked = Binding::controlled(state, move |next: Checked| from_box(next.is_checked())),
+                checked = Binding::controlled(state, move |next: Checked| on_change(next.is_checked())),
                 disabled = disabled,
+                node_ref = control,
+                labelled_by = name,
                 attr:data-testid = test_id,
                 a11y:label = label
             )
-            text(
-                class = "wt-armor-check__label",
-                attr:data-testid = label_id,
-                attr:data-disabled = move || disabled.get().then(String::new),
-                on:click = move |_| {
-                    if !disabled.get_untracked() {
-                        on_change(!checked.get_untracked());
-                    }
-                }
-            ) {{marked.view()}}
+            Label(node_ref = name, control = control, class = "wt-armor-check__label", attr:data-testid = label_id) {
+                {marked.view()}
+            }
         }
     }))
 }

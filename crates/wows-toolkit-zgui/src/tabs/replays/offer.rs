@@ -29,6 +29,7 @@ use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -40,6 +41,7 @@ use zgui_ui::DialogDescriptionProps;
 use zgui_ui::DialogFooterProps;
 use zgui_ui::DialogHeaderProps;
 use zgui_ui::DialogTitleProps;
+use zgui_ui::LabelProps;
 use zgui_ui::prelude::Binding;
 
 use crate::long_job::long_job;
@@ -314,16 +316,19 @@ fn OfferRow(number: u32, said: String, enabled: bool, ticked: RwSignal<BTreeSet<
             }
         });
     };
+    let control = NodeRef::new();
+    let name = NodeRef::new();
 
     view! {
         row(class = "wt-offer__row") {
             Checkbox(
                 checked = Binding::controlled(checked, set),
                 disabled = !enabled,
-                attr:data-testid = format!("download-build-{number}"),
-                a11y:label = said.clone()
+                node_ref = control,
+                labelled_by = name,
+                attr:data-testid = format!("download-build-{number}")
             )
-            text {{said}}
+            Label(node_ref = name, control = control) {{said}}
         }
     }
 }

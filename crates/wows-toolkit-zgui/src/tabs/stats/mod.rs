@@ -94,6 +94,7 @@ use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::ForProps;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
 use zgui_ui::AlertDialogActionProps;
@@ -112,6 +113,7 @@ use zgui_ui::Checked;
 use zgui_ui::DropdownMenuContentProps;
 use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
+use zgui_ui::LabelProps;
 use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuLabelProps;
@@ -808,6 +810,8 @@ pub fn StatsBody(
             .into_view()
         })
     };
+    let limit_box = NodeRef::new();
+    let limit_name = NodeRef::new();
 
     view! {
         box(class = "wt-stats", {..attrs}) {
@@ -817,8 +821,15 @@ pub fn StatsBody(
                     Tooltip {
                         TooltipTrigger {
                             row(class = "wt-stats__group") {
-                                Checkbox(checked = limit_checked, attr:data-testid = "stats-limit-enabled")
-                                text {{move || { locale.track(); t!("ui.stats.limit_to_recent").into_owned() }}}
+                                Checkbox(
+                                    checked = limit_checked,
+                                    node_ref = limit_box,
+                                    labelled_by = limit_name,
+                                    attr:data-testid = "stats-limit-enabled"
+                                )
+                                Label(node_ref = limit_name, control = limit_box) {
+                                    {move || { locale.track(); t!("ui.stats.limit_to_recent").into_owned() }}
+                                }
                             }
                         }
                         TooltipContent {{t!("ui.stats.limit_to_recent_tooltip").into_owned()}}

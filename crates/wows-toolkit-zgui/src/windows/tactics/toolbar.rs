@@ -625,11 +625,7 @@ fn RangeCheck(
     };
 
     let control = NodeRef::new();
-    let toggle = move || {
-        if !locked.get_untracked() {
-            set(Checked::from(checked.get_untracked() != Checked::Yes));
-        }
-    };
+    let name = NodeRef::new();
 
     view! {
         row(class = "wt-tactics-panel__row") {
@@ -637,14 +633,15 @@ fn RangeCheck(
                 checked = Binding::controlled(checked, set),
                 disabled = locked,
                 node_ref = control,
+                labelled_by = name,
                 attr:data-testid = format!("tactics-range-{}", circle as u8),
                 a11y:label = t!(key).into_owned()
             )
             Label(
+                node_ref = name,
                 control = control,
                 class = "wt-tactics-panel__text",
-                attr:data-testid = format!("tactics-range-{}-name", circle as u8),
-                on:click = move |_| toggle()
+                attr:data-testid = format!("tactics-range-{}-name", circle as u8)
             ) {
                 {label}
             }
@@ -1003,12 +1000,8 @@ fn ShipCheck(
     locked: Signal<bool, LocalStorage>,
 ) -> impl IntoView {
     let control = NodeRef::new();
+    let name = NodeRef::new();
     let ticked = Signal::derive_local(move || Checked::from(checked.get()));
-    let toggle = move || {
-        if !locked.get_untracked() {
-            set.run(!checked.get_untracked());
-        }
-    };
 
     view! {
         row(class = "wt-tactics-panel__row") {
@@ -1016,14 +1009,14 @@ fn ShipCheck(
                 checked = Binding::controlled(ticked, move |next: Checked| set.run(next == Checked::Yes)),
                 disabled = locked,
                 node_ref = control,
-                attr:data-testid = test_id.clone(),
-                a11y:label = t!(key).into_owned()
+                labelled_by = name,
+                attr:data-testid = test_id.clone()
             )
             Label(
+                node_ref = name,
                 control = control,
                 class = "wt-tactics-panel__text",
-                attr:data-testid = format!("{test_id}-name"),
-                on:click = move |_| toggle()
+                attr:data-testid = format!("{test_id}-name")
             ) {
                 {t!(key).into_owned()}
             }

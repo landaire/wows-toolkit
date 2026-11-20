@@ -38,10 +38,10 @@ use crate::tabs::armor_viewer::options::tree_filter::RowFilter;
 use crate::tabs::armor_viewer::options::tree_filter::TreeFilter;
 use crate::tabs::armor_viewer::options::tree_filter::filtered_checkbox;
 use crate::tabs::armor_viewer::options::tree_filter::match_count;
+use crate::tabs::armor_viewer::options::visibility::TriCheck;
 use crate::tabs::armor_viewer::options::visibility::chevron;
 use crate::tabs::armor_viewer::options::visibility::hoverable_row;
 use crate::tabs::armor_viewer::options::visibility::no_ship_loaded;
-use crate::tabs::armor_viewer::options::visibility::row_label;
 use crate::tabs::armor_viewer::options::visibility::tree_field;
 use crate::tabs::armor_viewer::options::visibility::tri_checkbox;
 use crate::tabs::armor_viewer::viewport::ArmorViewportState;
@@ -539,10 +539,12 @@ fn hull_group_row(
     };
     let all_on = hull_group_all_on(&state.hull_visibility, &acted_on);
     let any_on = hull_group_any_on(&state.hull_visibility, &acted_on);
-    let checkbox =
-        tri_checkbox(format!("armor-hull-vis-group-{group}"), TriState::from_all_any(all_on, any_on), move |checked| {
-            set_meshes(viewport, &acted_on, checked)
-        });
+    let TriCheck { checkbox, title } = tri_checkbox(
+        format!("armor-hull-vis-group-{group}"),
+        &filter.marked(group.to_owned()),
+        TriState::from_all_any(all_on, any_on),
+        move |checked| set_meshes(viewport, &acted_on, checked),
+    );
 
     // Inert while filtering, where every group is open whatever it was left at.
     let expand_group = group.to_owned();
@@ -552,7 +554,6 @@ fn hull_group_row(
         (!filter.is_active())
             .then(|| Box::new(move || viewport.toggle_hull_group_expanded(expand_group.clone())) as Box<dyn Fn()>),
     );
-    let title = row_label(&filter.marked(group.to_owned()));
     let header = hoverable_row(
         format!("armor-hull-vis-group-row-{group}"),
         viewport,

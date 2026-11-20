@@ -18,7 +18,6 @@ use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
-use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::view;
@@ -277,9 +276,7 @@ pub(super) fn CheckRow(
                     labelled_by = name,
                     attr:data-testid = test_id.clone()
                 )
-                // A label only focuses its control; a press on the name here toggles it as well,
-                // as the egui checkboxes do.
-                Label(node_ref = name, control = control, on:click = move |_| on_change.run(!checked.get_untracked())) {
+                Label(node_ref = name, control = control) {
                     {label.clone()}
                 }
             }

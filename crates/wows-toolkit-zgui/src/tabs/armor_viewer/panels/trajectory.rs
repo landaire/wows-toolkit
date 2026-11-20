@@ -35,6 +35,7 @@ use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui::vocab::PointerButton;
 use zgui::vocab::Role;
@@ -46,6 +47,7 @@ use zgui_ui::Checked;
 use zgui_ui::DropdownMenuContentProps;
 use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
+use zgui_ui::LabelProps;
 use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
@@ -147,6 +149,8 @@ pub fn TrajectoryPanel(
     // Built again only for another arc: a rebuild under a dragged range slider ends the drag.
     let selected = Memo::new(move |_| viewport.selected_arc().map(|(id, _)| id));
     let editor = move || selected.get().and_then(|id| editor(pen, viewport, id, plates_open));
+    let ricochet_box = NodeRef::new();
+    let ricochet_name = NodeRef::new();
 
     view! {
         column(class = "wt-armor-trajectory", attr:data-testid = "armor-trajectory") {
@@ -165,10 +169,11 @@ pub fn TrajectoryPanel(
                         checked = Binding::controlled(continuing, move |checked: Checked| {
                             viewport.set_continue_on_ricochet(checked == Checked::Yes)
                         }),
-                        attr:data-testid = "armor-trajectory-ricochet",
-                        a11y:label = locale.text("ui.armor.continue_ricochet")
+                        node_ref = ricochet_box,
+                        labelled_by = ricochet_name,
+                        attr:data-testid = "armor-trajectory-ricochet"
                     )
-                    text {{locale.text("ui.armor.continue_ricochet")}}
+                    Label(node_ref = ricochet_name, control = ricochet_box) {{locale.text("ui.armor.continue_ricochet")}}
                 }
             }
             {markers}

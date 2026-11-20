@@ -47,6 +47,7 @@ use zgui::reactive::prelude::WithValue;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -54,6 +55,7 @@ use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
 use zgui_ui_primitives::Binding;
@@ -306,6 +308,8 @@ pub fn PenCheckPanel(
             }
         })
     };
+    let ifhe_box = NodeRef::new();
+    let ifhe_name = NodeRef::new();
 
     view! {
         column(class = "wt-armor-pen", attr:data-testid = "armor-pen") {
@@ -318,10 +322,11 @@ pub fn PenCheckPanel(
                                 checked = Binding::controlled(ifhe, move |checked: Checked| {
                                     pen.update(|pen| pen.ifhe = checked == Checked::Yes)
                                 }),
-                                attr:data-testid = "armor-pen-ifhe",
-                                a11y:label = locale.text("ui.armor.pen.ifhe")
+                                node_ref = ifhe_box,
+                                labelled_by = ifhe_name,
+                                attr:data-testid = "armor-pen-ifhe"
                             )
-                            text {{locale.text("ui.armor.pen.ifhe")}}
+                            Label(node_ref = ifhe_name, control = ifhe_box) {{locale.text("ui.armor.pen.ifhe")}}
                         }
                     }
                     TooltipContent {{locale.text("ui.armor.pen.ifhe_tooltip")}}

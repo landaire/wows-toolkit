@@ -61,6 +61,7 @@ use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
@@ -71,6 +72,7 @@ use zgui_ui::DialogContentProps;
 use zgui_ui::DialogFooterProps;
 use zgui_ui::DialogHeaderProps;
 use zgui_ui::DialogTitleProps;
+use zgui_ui::LabelProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
 use zgui_ui_primitives::Binding;
@@ -791,15 +793,18 @@ fn CamoList(dialog: ExportDialog) -> impl IntoView {
                         }
                     })
                 };
+                let control = NodeRef::new();
+                let label = NodeRef::new();
                 views.push(AnyView::new(view! {
                     row(class = "wt-armor-export__check") {
                         Checkbox(
                             checked = Binding::controlled(ticked, tick),
                             disabled = Signal::derive_local(move || !textured()),
-                            attr:data-testid = format!("armor-export-camo-{index}"),
-                            a11y:label = name.clone()
+                            node_ref = control,
+                            labelled_by = label,
+                            attr:data-testid = format!("armor-export-camo-{index}")
                         )
-                        text {{name.clone()}}
+                        Label(node_ref = label, control = control) {{name.clone()}}
                     }
                 }));
                 index += 1;
