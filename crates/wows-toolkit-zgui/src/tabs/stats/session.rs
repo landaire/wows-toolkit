@@ -1,55 +1,22 @@
-//! The control that chooses which battles the session holds, shown in the replay listing's header
+//! The control that chooses which battles the session holds, shown in the replay listing's options
 //! and the Stats tab's filter bar.
 
-use landaire_ui::TooltipContentProps;
-use landaire_ui::TooltipProps;
-use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
-use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use zgui::component;
-use zgui::css;
-use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
-use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::With;
 use zgui::view;
 use zgui::view::IntoView;
-use zgui::view::install_stylesheet;
-use zgui_ui::ButtonSize;
-use zgui_ui::ButtonVariant;
-use zgui_ui::PopoverContentProps;
-use zgui_ui::PopoverProps;
-use zgui_ui::PopoverTriggerProps;
 use zgui_ui::ToggleGroupItemProps;
 use zgui_ui::ToggleGroupProps;
 use zgui_ui::ToggleSize;
 use zgui_ui::ToggleVariant;
-use zgui_ui_primitives::Align;
 use zgui_ui_primitives::Binding;
-use zgui_ui_primitives::Placement;
-use zgui_ui_primitives::Side;
 
-use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::services::Session;
-
-const SHEET: &str = "wt-session-scope";
-
-const CSS: &str = css!(
-    ".wt-session-scope {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        width: 280px;
-        padding: 4px;
-    }
-    .wt-session-scope__title { font-size: 14px; font-weight: 700; }
-    .wt-session-scope__hint { font-size: 12px; color: var(--wt-color-text-dim); }
-    .wt-session-scope__chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-    .wt-session-scope__chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }"
-);
 
 /// The local time the app opened, as a session since then names it.
 pub fn opened_label(opened: AppOpened) -> String {
@@ -128,53 +95,6 @@ pub fn SessionScopeChoice(test_id: &'static str) -> impl IntoView {
             ToggleGroupItem(value = scope_value(SessionScope::SinceAppOpened), attr:data-testid = format!("{test_id}-since-opened")) {
                 {locale.text(SessionScope::SinceAppOpened.translation_key())}
             }
-        }
-    }
-}
-
-/// The session's state as a button in the listing's header, opening the scope choice.
-#[component]
-pub fn SessionChip() -> impl IntoView {
-    install_stylesheet(SHEET, CSS);
-    let services = Services::current();
-    let session = services.session;
-    let locale = services.locale;
-    let open = RwSignal::new_local(false);
-    let state = Signal::derive_local(move || {
-        locale.track();
-        session_state(session)
-    });
-    let hint = Signal::derive_local(move || {
-        locale.track();
-        scope_hint(session)
-    });
-
-    view! {
-        Tooltip {
-            TooltipTrigger {
-                Popover(open = open) {
-                    PopoverTrigger(
-                        variant = ButtonVariant::Outline,
-                        size = ButtonSize::Xs,
-                        class = "wt-session-scope__chip",
-                        attr:data-testid = "replay-listing-session",
-                        a11y:label = move || state.get()
-                    ) {
-                        AppIcon(glyph = Glyph::ChartColumn)
-                        text(class = "wt-session-scope__chip-text") {{move || state.get()}}
-                    }
-                    PopoverContent(
-                        placement = Placement::new(Side::Bottom, Align::Start),
-                        class = "wt-session-scope",
-                        attr:data-testid = "replay-listing-session-menu"
-                    ) {
-                        text(class = "wt-session-scope__title") {{locale.text("ui.stats.session_title")}}
-                        SessionScopeChoice(test_id = "replay-listing-session-scope")
-                        text(class = "wt-session-scope__hint") {{move || hint.get()}}
-                    }
-                }
-            }
-            TooltipContent {{locale.text("ui.stats.session_chip_tooltip")}}
         }
     }
 }

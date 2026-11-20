@@ -1,5 +1,5 @@
-//! The listing's header: its caption, the session stats' scope, the selected directory's search and
-//! index actions, the listing's options, and the open actions.
+//! The listing's header: its caption, the selected directory's search and index actions, the
+//! listing's options, and the open actions.
 
 use std::path::PathBuf;
 
@@ -62,7 +62,8 @@ use crate::tabs::replays::browser::ReplayBrowserEvent;
 use crate::tabs::replays::browser::actions;
 use crate::tabs::replays::browser::actions::Offer;
 use crate::tabs::replays::browser::folders::BrowserControl;
-use crate::tabs::stats::session::SessionChipProps;
+use crate::tabs::stats::session::SessionScopeChoiceProps;
+use crate::tabs::stats::session::scope_hint;
 
 const SHEET: &str = "wt-replay-listing-header";
 
@@ -84,13 +85,6 @@ const CSS: &str = css!(
         white-space: nowrap;
         font-size: 14px;
         font-weight: 700;
-    }
-    .wt-listing-session {
-        display: flex;
-        flex: none;
-        align-items: center;
-        padding: 2px 8px;
-        border-bottom: 1px solid var(--lui-color-border);
     }
     .wt-listing-options {
         display: flex;
@@ -198,10 +192,6 @@ pub fn ListingHeader(control: BrowserControl, events: BrowserEvents) -> impl Int
             ListingOptions(control = control, events = events)
             OpenMenu(control = control)
         }
-        // A row of its own: the session's state is read at a glance and names a time.
-        row(class = "wt-listing-session") {
-            SessionChip()
-        }
     }
 }
 
@@ -243,8 +233,9 @@ fn HeaderAction(
     }
 }
 
-/// The listing's options: the selected directory's path and the actions on it as a whole, then
-/// autoload, name anonymization, grouping and the column filters of the egui app's replay header.
+/// The listing's options: the selected directory's path and the actions on it as a whole,
+/// autoload, name anonymization and the session stats' scope, then the grouping and column filters
+/// of the egui app's replay header.
 ///
 /// Grouping is a row of exclusive toggles rather than a select: a select's list is drawn outside
 /// the popover, and a press on it would dismiss the popover before the choice landed.
@@ -262,6 +253,10 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
     });
     let ready = Signal::derive_local(move || matches!(services.game_data.state(), GameDataState::Ready(_)));
     let tip = locale.text("ui.replay.listing_options");
+    let session_hint = Signal::derive_local(move || {
+        locale.track();
+        scope_hint(services.session)
+    });
 
     let check_game_data = move |_: &mut zgui::view::EventCx<'_, zgui::view::events::Click>| {
         let missing = control.selected_listing().map(|listing| listing.missing_builds()).unwrap_or_default();
@@ -409,6 +404,10 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                             }
                             TooltipContent {{locale.text("ui.replay.anonymize_names_tooltip")}}
                         }
+                        Separator()
+                        text(class = "wt-listing-options__title") {{locale.text("ui.stats.session_title")}}
+                        SessionScopeChoice(test_id = "replay-listing-session-scope")
+                        text(class = "wt-listing-options__hint") {{move || session_hint.get()}}
                         Separator()
                         text(class = "wt-listing-options__title") {{locale.text("ui.replay.group_label")}}
                         ToggleGroup(

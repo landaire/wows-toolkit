@@ -109,17 +109,12 @@ fn session_times(control: BrowserControl, scope: SessionScope) -> Vec<String> {
 }
 
 fn choose_since_opened_in_the_listing(window: &mut HeadlessWindow) {
-    let chip = window.by_test_id("replay-listing-session").expect("the header shows the session");
-    window.click(chip).expect("the session chip is clicked");
+    let options = window.by_test_id("replay-listing-options").expect("the header shows its options");
+    window.click(options).expect("the options button is clicked");
     window.advance(Duration::from_millis(300));
     let since = window.by_test_id("replay-listing-session-scope-since-opened").expect("the scope choice is open");
     window.click(since).expect("the scope is chosen");
     settle_in_real_time(window);
-}
-
-fn chip_label(window: &mut HeadlessWindow) -> String {
-    let chip = window.by_test_id("replay-listing-session").expect("the header shows the session");
-    window.a11y(chip).and_then(|state| state.label).unwrap_or_default()
 }
 
 #[test]
@@ -154,20 +149,12 @@ fn battles_played_in_the_install_join_the_session_and_one_elsewhere_does_not() {
     settle_in_real_time(&mut window);
     assert_eq!(session_times(control, SessionScope::SinceAppOpened), [STARTED[1], STARTED[2]]);
     assert_eq!(session_times(control, SessionScope::Manual), [STARTED[0], STARTED[1]], "the saved session is kept");
-    assert_eq!(
-        chip_label(&mut window),
-        t!("ui.stats.session_chip_since", time = "09:00", battles = t!("ui.stats.session_battles_many", count = 2))
-    );
 }
 
 #[test]
 fn choosing_since_the_app_opened_takes_in_the_replays_already_listed() {
     let (mut window, control, _replays, _dir) = open_install(open(), 3);
     assert!(session_times(control, SessionScope::SinceAppOpened).is_empty(), "nothing is read under Manual");
-    assert_eq!(
-        chip_label(&mut window),
-        t!("ui.stats.session_chip_manual", battles = t!("ui.stats.session_battles_many", count = 0))
-    );
 
     choose_since_opened_in_the_listing(&mut window);
 
@@ -182,10 +169,6 @@ fn choosing_since_the_app_opened_takes_in_the_replays_already_listed() {
         "the listed battles that started after the app opened join; the older one does not"
     );
     assert!(session_times(control, SessionScope::Manual).is_empty(), "the saved session is left alone");
-    assert_eq!(
-        chip_label(&mut window),
-        t!("ui.stats.session_chip_since", time = "09:00", battles = t!("ui.stats.session_battles_many", count = 2))
-    );
 }
 
 #[test]
