@@ -6,6 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use landaire_ui::TabMove;
 use landaire_ui::TabStripProps;
 use landaire_ui::TabStripStrings;
 use landaire_ui::TabStripTabProps;
@@ -15,6 +16,9 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::component;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -24,6 +28,7 @@ use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
 use zgui::view;
+use zgui::view::ForProps;
 use zgui::view::IntoView;
 use zgui::vocab::Role;
 
@@ -321,4 +326,233 @@ fn a_change_of_language_reaches_the_strip_its_close_buttons_and_its_menu() {
     window.advance(SETTLE);
     assert!(window.by_role_and_label(Role::MenuItem, "Fermer les autres").is_some(), "the menu is translated");
     assert!(window.by_role_and_label(Role::MenuItem, "Close others").is_none());
+}
+
+/// What a test reads back from a strip whose tabs can be dragged.
+#[derive(Clone, Copy)]
+struct Moving {
+    value: RwSignal<String, LocalStorage>,
+    order: RwSignal<Vec<&'static str>, LocalStorage>,
+    moves: RwSignal<u32, LocalStorage>,
+}
+
+#[component]
+fn MovingStrip(moving: Moving) -> impl IntoView {
+    let Moving { value, order, moves } = moving;
+    let on_move = UnsyncCallback::new(move |to: TabMove| {
+        moves.update(|moves| *moves += 1);
+        order.update(|order| {
+            order.retain(|tab| *tab != to.value);
+            let tab = ["alpha", "bravo", "charlie"].into_iter().find(|tab| *tab == to.value).expect("a known tab");
+            order.insert(to.index, tab);
+        });
+    });
+
+    view! {
+        ThemeRoot {
+            TabStrip(value = value, label = "Sections", on_move = on_move) {
+                for tab in move || order.get(), key = |tab: &&'static str| *tab {
+                    TabStripTab(value = tab, a11y:label = tab) {{tab}}
+                }
+            }
+        }
+    }
+}
+
+fn open_moving() -> (HeadlessWindow, Moving) {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let moving = Moving {
+            value: RwSignal::new_local("alpha".to_owned()),
+            order: RwSignal::new_local(vec!["alpha", "bravo", "charlie"]),
+            moves: RwSignal::new_local(0),
+        };
+        sent.set(Some(moving));
+        view! { MovingStrip(moving = moving) }
+    })
+    .expect("opens");
+
+    (window, handed.get().expect("the view was built"))
+}
+
+fn right_of(window: &HeadlessWindow, tab: Element) -> Point<DevicePx, Device> {
+    let bounds = window.bounds(tab).expect("the tab has a box");
+
+    Point::new(DevicePx(bounds.origin.x.0 + bounds.size.width.0 + 4.0), DevicePx(bounds.origin.y.0 + 4.0))
+}
+
+#[test]
+fn a_tab_dragged_past_the_others_moves_after_them() {
+    let (mut window, moving) = open_moving();
+    let [alpha, _bravo, charlie] = tabs(&mut window)[..] else {
+        panic!("three tabs are announced");
+    };
+    let past_charlie = right_of(&window, charlie);
+
+    window.drag(alpha, past_charlie, 12).expect("the tab has a box");
+    window.advance(SETTLE);
+
+    assert_eq!(moving.order.get_untracked(), vec!["bravo", "charlie", "alpha"]);
+    let announced: Vec<_> = tabs(&mut window)
+        .into_iter()
+        .map(|tab| window.bounds(tab).expect("the tab has a box").origin.x.0)
+        .collect();
+    assert!(announced.is_sorted(), "the tabs are laid out in the new order");
+    let alpha = window.by_role_and_label(Role::Tab, "alpha").expect("the tab is announced");
+    let bravo = window.by_role_and_label(Role::Tab, "bravo").expect("the tab is announced");
+    assert!(
+        window.bounds(alpha).expect("a box").origin.x.0 > window.bounds(bravo).expect("a box").origin.x.0,
+        "the dragged tab is drawn after the others"
+    );
+}
+
+#[test]
+fn a_held_tab_follows_the_pointer_while_its_neighbour_makes_room() {
+    let (mut window, moving) = open_moving();
+    let [alpha, bravo, _charlie] = tabs(&mut window)[..] else {
+        panic!("three tabs are announced");
+    };
+    let alpha_at = window.bounds(alpha).expect("the tab has a box");
+    let bravo_at = window.bounds(bravo).expect("the tab has a box");
+    let start = Point::new(DevicePx(alpha_at.origin.x.0 + 8.0), DevicePx(alpha_at.origin.y.0 + 4.0));
+    // Carried as far as bravo is wide, alpha takes bravo's place.
+    let carried = bravo_at.size.width.0;
+
+    window.press_at(start);
+    for step in 1..=10 {
+        let x = start.x.0 + carried * step as f32 / 10.0;
+        window.hover_at(Point::new(DevicePx(x), start.y));
+    }
+    window.advance(SETTLE);
+
+    let alpha_now = window.bounds(alpha).expect("the tab has a box").origin.x.0;
+    assert!((alpha_now - (alpha_at.origin.x.0 + carried)).abs() < 1.0, "the held tab is under the pointer: {alpha_now}");
+    let bravo_now = window.bounds(bravo).expect("the tab has a box").origin.x.0;
+    assert!(
+        (bravo_now - alpha_at.origin.x.0).abs() < 1.0,
+        "bravo slides into the room alpha left: {bravo_now} against {}",
+        alpha_at.origin.x.0
+    );
+    assert_eq!(moving.moves.get_untracked(), 0, "nothing moves until the tab is let go");
+
+    window.release();
+    window.advance(Duration::from_millis(34));
+    assert_eq!(moving.order.get_untracked(), vec!["bravo", "alpha", "charlie"]);
+    assert_eq!(moving.moves.get_untracked(), 1);
+    let bravo = window.by_role_and_label(Role::Tab, "bravo").expect("the tab is announced");
+    assert_eq!(window.running_animations(bravo), 0, "the drop does not slide the tabs again");
+    let bravo_now = window.bounds(bravo).expect("the tab has a box").origin.x.0;
+    assert!((bravo_now - alpha_at.origin.x.0).abs() < 1.0, "bravo stays in the room alpha left: {bravo_now}");
+}
+
+#[test]
+fn a_tab_carried_past_its_neighbour_and_back_stays_where_it_was() {
+    let (mut window, moving) = open_moving();
+    let [alpha, bravo, _charlie] = tabs(&mut window)[..] else {
+        panic!("three tabs are announced");
+    };
+    let start = window.bounds(alpha).expect("the tab has a box");
+    let start = Point::new(DevicePx(start.origin.x.0 + 8.0), DevicePx(start.origin.y.0 + 4.0));
+    let past_bravo = right_of(&window, bravo);
+
+    window.press_at(start);
+    for step in 1..=10 {
+        let x = start.x.0 + (past_bravo.x.0 - start.x.0) * step as f32 / 10.0;
+        window.hover_at(Point::new(DevicePx(x), start.y));
+    }
+    for step in 1..=10 {
+        let x = past_bravo.x.0 + (start.x.0 - past_bravo.x.0) * step as f32 / 10.0;
+        window.hover_at(Point::new(DevicePx(x), start.y));
+    }
+    window.release();
+    window.advance(SETTLE);
+
+    assert_eq!(moving.order.get_untracked(), vec!["alpha", "bravo", "charlie"]);
+    assert_eq!(moving.moves.get_untracked(), 0, "a tab let go where it was is not moved");
+}
+
+#[test]
+fn a_click_on_a_tab_that_can_be_dragged_chooses_it_and_moves_nothing() {
+    let (mut window, moving) = open_moving();
+    let bravo = tabs(&mut window)[1];
+
+    window.click(bravo).expect("the tab has a box");
+
+    assert_eq!(moving.value.get_untracked(), "bravo");
+    assert_eq!(moving.moves.get_untracked(), 0);
+}
+
+#[component]
+fn UnequalStrip(moving: Moving) -> impl IntoView {
+    let Moving { value, order, moves } = moving;
+    let on_move = UnsyncCallback::new(move |to: TabMove| {
+        moves.update(|moves| *moves += 1);
+        order.update(|order| {
+            order.retain(|tab| *tab != to.value);
+            let tab = ["alpha", "bravo"].into_iter().find(|tab| *tab == to.value).expect("a known tab");
+            order.insert(to.index, tab);
+        });
+    });
+    let label = |tab: &'static str| if tab == "alpha" { "Alpha, a tab much wider than the other" } else { "B" };
+
+    view! {
+        ThemeRoot {
+            TabStrip(value = value, label = "Sections", on_move = on_move) {
+                for tab in move || order.get(), key = |tab: &&'static str| *tab {
+                    TabStripTab(value = tab, a11y:label = tab) {{label(tab)}}
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_wide_tab_can_be_dragged_past_a_narrow_one() {
+    let handed = Rc::new(Cell::new(None));
+    let sent = Rc::clone(&handed);
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let moving = Moving {
+            value: RwSignal::new_local("alpha".to_owned()),
+            order: RwSignal::new_local(vec!["alpha", "bravo"]),
+            moves: RwSignal::new_local(0),
+        };
+        sent.set(Some(moving));
+        view! { UnequalStrip(moving = moving) }
+    })
+    .expect("opens");
+    let moving = handed.get().expect("the view was built");
+    let [alpha, bravo] = tabs(&mut window)[..] else {
+        panic!("two tabs are announced");
+    };
+    let past_bravo = right_of(&window, bravo);
+
+    window.drag(alpha, Point::new(DevicePx(past_bravo.x.0 + 100.0), past_bravo.y), 12).expect("the tab has a box");
+    window.advance(SETTLE);
+
+    assert_eq!(moving.order.get_untracked(), vec!["bravo", "alpha"]);
+}
+
+#[test]
+fn a_drag_ends_without_a_move_when_the_tabs_change_under_it() {
+    let (mut window, moving) = open_moving();
+    let [alpha, _bravo, charlie] = tabs(&mut window)[..] else {
+        panic!("three tabs are announced");
+    };
+    let start = window.bounds(alpha).expect("the tab has a box");
+    let start = Point::new(DevicePx(start.origin.x.0 + 8.0), DevicePx(start.origin.y.0 + 4.0));
+    let past_charlie = right_of(&window, charlie);
+
+    window.press_at(start);
+    for step in 1..=10 {
+        let x = start.x.0 + (past_charlie.x.0 - start.x.0) * step as f32 / 10.0;
+        window.hover_at(Point::new(DevicePx(x), start.y));
+    }
+    moving.order.update(|order| order.retain(|tab| *tab != "charlie"));
+    window.advance(SETTLE);
+    window.release();
+    window.advance(SETTLE);
+
+    assert_eq!(moving.order.get_untracked(), vec!["alpha", "bravo"]);
+    assert_eq!(moving.moves.get_untracked(), 0, "a place found among tabs that are gone is not asked for");
 }
