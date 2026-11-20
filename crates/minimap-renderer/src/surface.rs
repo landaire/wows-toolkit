@@ -105,6 +105,47 @@ impl Surface {
         self.pixels.draw_pixmap(x, y, layer.pixels.as_ref(), paint, Transform::identity(), None);
     }
 
+    /// Composites `layer`, drawn at this surface's scale, over this surface at full opacity with
+    /// its corner at canvas point `(x, y)`, pixel for pixel.
+    ///
+    /// The same pixels tiny-skia's source-over draws, without the per-pixel pipeline it runs a
+    /// pixmap through. The map layer is composited at least once a frame, and through that pipeline
+    /// it costs more than the rest of a frame's fixed work together.
+    pub(crate) fn composite(&mut self, x: i32, y: i32, layer: &Surface) {
+        let (x, y) = (self.to_pixel(x), self.to_pixel(y));
+        let (to_width, to_height) = (self.pixels.width() as i32, self.pixels.height() as i32);
+        let (from_width, from_height) = (layer.pixels.width() as i32, layer.pixels.height() as i32);
+        let (left, top) = (x.max(0), y.max(0));
+        let (right, bottom) = ((x + from_width).min(to_width), (y + from_height).min(to_height));
+        if left >= right || top >= bottom {
+            return;
+        }
+
+        let row_bytes = (right - left) as usize * 4;
+        let from = layer.pixels.data();
+        let to = self.pixels.data_mut();
+        for row in top..bottom {
+            let from_start = (((row - y) * from_width + (left - x)) * 4) as usize;
+            let to_start = ((row * to_width + left) * 4) as usize;
+            let from_row = from[from_start..from_start + row_bytes].as_chunks::<4>().0;
+            let to_row = to[to_start..to_start + row_bytes].as_chunks_mut::<4>().0;
+            for (under, over) in to_row.iter_mut().zip(from_row) {
+                match over[3] {
+                    0 => {}
+                    u8::MAX => *under = *over,
+                    alpha => {
+                        let left_through = u32::from(u8::MAX - alpha);
+                        for (under, over) in under.iter_mut().zip(over) {
+                            // Rounded to nearest, as tiny-skia rounds.
+                            let kept = (u32::from(*under) * left_through + 127) / 255;
+                            *under = over.saturating_add(kept as u8);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// A copy of the canvas rectangle `rect`, at this surface's scale.
     pub(crate) fn clone_rect(&self, rect: IntRect) -> Option<Self> {
         let scale = self.scale;
@@ -126,5 +167,55 @@ impl Surface {
 
     fn to_pixel(&self, at: i32) -> i32 {
         (at as f32 * self.scale.factor()).round() as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tiny_skia::BlendMode;
+    use tiny_skia::FilterQuality;
+
+    use super::*;
+
+    /// Fills `surface` with premultiplied pixels whose alpha is drawn from `alphas`, where `None`
+    /// stands for any alpha.
+    fn fill_with_noise(surface: &mut Surface, seed: &mut u32, alphas: &[Option<u8>]) {
+        let mut next = || {
+            *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *seed >> 8
+        };
+        for pixel in surface.pixels.data_mut().as_chunks_mut::<4>().0 {
+            let alpha = alphas[next() as usize % alphas.len()].unwrap_or(next() as u8);
+            for channel in &mut pixel[..3] {
+                *channel = (next() % (u32::from(alpha) + 1)) as u8;
+            }
+            pixel[3] = alpha;
+        }
+    }
+
+    /// Over every kind of pixel, at fractional scales and with the layer partly off either edge,
+    /// a composite draws exactly what tiny-skia's source-over draws.
+    #[test]
+    fn a_composite_draws_what_tiny_skia_draws() {
+        let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
+        let mut seed = 7;
+        for factor in [1.0, 1.5, 2.0] {
+            let scale = RenderScale::new(factor).expect("a positive scale");
+            for (x, y) in [(0, 0), (13, 30), (-5, -7), (90, 110)] {
+                let mut drawn = Surface::new(100, 120, scale).expect("a surface");
+                fill_with_noise(&mut drawn, &mut seed, &[Some(u8::MAX), Some(0), None]);
+                let mut composited = drawn.clone();
+                let mut layer = Surface::new(60, 70, scale).expect("a layer");
+                fill_with_noise(&mut layer, &mut seed, &[Some(u8::MAX), Some(0), None, None]);
+
+                drawn.draw_surface(x, y, &layer, &paint);
+                composited.composite(x, y, &layer);
+
+                assert!(
+                    drawn.pixels.data() == composited.pixels.data(),
+                    "at scale {factor} with the layer at ({x}, {y})"
+                );
+            }
+        }
     }
 }

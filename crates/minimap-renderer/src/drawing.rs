@@ -2376,8 +2376,7 @@ impl ImageTarget {
         if !self.map_dirty {
             return;
         }
-        let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
-        self.canvas.draw_surface(self.map_x_offset as i32, HUD_HEIGHT as i32, &self.map_layer, &paint);
+        self.canvas.composite(self.map_x_offset as i32, HUD_HEIGHT as i32, &self.map_layer);
         self.map_layer.clear();
         self.map_dirty = false;
     }

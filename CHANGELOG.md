@@ -123,6 +123,10 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Offer beta updates only to beta builds, and on Windows only once the release's archive is uploaded
 - *(wows-query)* Describe torpedo damage falloff as linear between distanceOfDamage points
 
+### Performance
+
+- *(renderer)* Composite the map layer onto each rendered frame in about a tenth of the time, which takes a third to nearly half off each frame of the zgui replay renderer and of exported videos
+
 ## [1.0.1] - 2026-08-12
 
 ### 🚀 Features
