@@ -149,6 +149,14 @@ pub fn Grid<T, K, F>(
     #[prop(optional)]
     on_copy: Option<UnsyncCallback<String>>,
     #[prop(into, default = Signal::stored_local(GridStrings::new()))] strings: Signal<GridStrings, LocalStorage>,
+    /// Makes the columns share the width of the view in proportion to the widths they are set or
+    /// sized to, each within its own limits, and follow the view as it resizes. A column fitted to
+    /// its content or filling the view asks for its minimum until it is resized, and a fill
+    /// column's grip resizes the column itself. A column being resized keeps the width it is
+    /// dragged to while the others share the rest; once the drag ends, every column keeps the
+    /// width it is drawn at.
+    #[prop(optional)]
+    auto_size: bool,
     /// Names the grid for a screen reader.
     #[prop(into)]
     label: Signal<String, LocalStorage>,
@@ -214,6 +222,8 @@ where
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
         port_size.get().map(|size| format!("{}px", size.width.0 / scale))
     });
+    let scroll = port.observe_scroll();
+    let scrollport_width = Memo::new(move |_| scroll.with(|position| position.scrollport.width.0));
     let order: RwSignal<Rc<Vec<K>>, LocalStorage> = RwSignal::new_local(Rc::new(Vec::new()));
     let count = Signal::derive_local(move || order.with(|order| order.len()));
     let window = match building {
@@ -286,7 +296,9 @@ where
         clipboard: try_use_clipboard(),
         strings,
         port,
-        scroll: port.observe_scroll(),
+        scroll,
+        auto_size,
+        scrollport_width,
         row_cells: RefCell::new(HashMap::new()),
         header_height: RwSignal::new_local(0.0),
         view_width,

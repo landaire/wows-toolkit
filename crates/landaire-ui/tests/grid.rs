@@ -322,6 +322,101 @@ fn a_fill_columns_grip_moves_the_edge_between_it_and_the_column_after_it() {
 }
 
 #[test]
+fn auto_sized_columns_share_the_view_and_keep_the_shares_a_drag_leaves() {
+    let view = RwSignal::new_local(420.0_f32);
+    let layout = RwSignal::new_local(ColumnLayout::new([ColumnId::from("name"), ColumnId::from("size")]));
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let columns = vec![
+            GridColumn::new("name", "Name", |item: &Item| item.name.clone())
+                .sizing(ColumnSizing::Fixed(ColumnWidth(200.0)))
+                .min_width(ColumnWidth(60.0)),
+            GridColumn::new("size", "Size", |item: &Item| item.size.to_string())
+                .sizing(ColumnSizing::Fixed(ColumnWidth(100.0)))
+                .min_width(ColumnWidth(40.0)),
+        ];
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; height: 300px", style:width = move || Some(format!("{}px", view.get()))) {
+                    Grid(
+                        rows = RwSignal::new_local(items(3)),
+                        columns = columns,
+                        row_key = |item: &Item| item.id,
+                        layout = layout,
+                        auto_size = true,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(50));
+    let name = header(&mut window, "Name");
+    let size = header(&mut window, "Size");
+    assert_eq!((width(&window, name), width(&window, size)), (280.0, 140.0), "two to one, as their widths ask");
+
+    view.set(300.0);
+    window.advance(Duration::from_millis(50));
+    assert_eq!((width(&window, name), width(&window, size)), (200.0, 100.0), "the shares follow the view");
+
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Size").expect("the size column has a grip");
+    let at = window.bounds(grip).expect("the grip has a box");
+    let from = Point::<DevicePx, Device>::new(
+        DevicePx(at.origin.x.0 + at.size.width.0 / 2.0),
+        DevicePx(at.origin.y.0 + at.size.height.0 / 2.0),
+    );
+    // Dragging the last column's trailing edge in narrows it, and the name column takes the room.
+    window.drag_from(from, Point::new(DevicePx(from.x.0 - 40.0), from.y), 8);
+    window.advance(Duration::from_millis(50));
+    assert_eq!((width(&window, name), width(&window, size)), (240.0, 60.0));
+    let kept = |id: &str| layout.get_untracked().width(&ColumnId::from(id)).map(|width| width.0.round());
+    assert_eq!((kept("name"), kept("size")), (Some(240.0), Some(60.0)), "every column keeps the width it is drawn at");
+
+    view.set(600.0);
+    window.advance(Duration::from_millis(50));
+    assert_eq!((width(&window, name), width(&window, size)), (480.0, 120.0), "the new shares follow the view");
+}
+
+#[test]
+fn an_auto_sized_fill_column_resizes_itself_and_keeps_the_width_it_is_dropped_at() {
+    let layout = RwSignal::new_local(ColumnLayout::new([ColumnId::from("name"), ColumnId::from("size")]));
+    let mut window = HeadlessWindow::open(HeadlessOptions::new(SIZE), move || {
+        let columns = vec![
+            GridColumn::new("name", "Name", |item: &Item| item.name.clone())
+                .sizing(ColumnSizing::Fill)
+                .min_width(ColumnWidth(100.0)),
+            GridColumn::new("size", "Size", |item: &Item| item.size.to_string())
+                .sizing(ColumnSizing::Fixed(ColumnWidth(100.0)))
+                .min_width(ColumnWidth(40.0)),
+        ];
+        view! {
+            ThemeRoot {
+                box(style = "display: flex; width: 300px; height: 300px") {
+                    Grid(
+                        rows = RwSignal::new_local(items(3)),
+                        columns = columns,
+                        row_key = |item: &Item| item.id,
+                        layout = layout,
+                        auto_size = true,
+                        label = "Items"
+                    )
+                }
+            }
+        }
+    })
+    .expect("opens");
+    window.advance(Duration::from_millis(50));
+    let name = header(&mut window, "Name");
+    let size = header(&mut window, "Size");
+    assert_eq!((width(&window, name), width(&window, size)), (150.0, 150.0), "the fill column asks for its minimum");
+
+    let grip = window.by_role_and_label(Role::Splitter, "Resize Name").expect("the fill column has a grip");
+    drag_grip(&mut window, grip, 30.0);
+
+    assert_eq!((width(&window, name), width(&window, size)), (180.0, 120.0), "it keeps the width it was dropped at");
+}
+
+#[test]
 fn a_fill_column_with_no_resizable_column_after_it_has_no_grip() {
     let mut window = open_fill(vec![
         GridColumn::new("size", "Size", |item: &Item| item.size.to_string())

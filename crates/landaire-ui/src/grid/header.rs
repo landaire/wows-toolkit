@@ -12,7 +12,6 @@ use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
-use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
@@ -308,7 +307,7 @@ where
         ColumnAlign::End => (sort_slot, None),
         ColumnAlign::Start | ColumnAlign::Center => (None, sort_slot),
     };
-    let grip = if column.is_resizable() {
+    let grip = if cx.resizes_itself(&column) {
         Some(AnyView::new(grip(Rc::clone(&cx), id.clone(), cell)))
     } else if column.sizing_value() == ColumnSizing::Fill && column.resizable_value() {
         // A fill column's grip comes and goes with a resizable column after it.
@@ -398,8 +397,7 @@ where
                 return;
             };
             cx.resize.set(None);
-            cx.layout.update(|layout| layout.set_width(&resize.column, Some(resize.width)));
-            cx.waive(&resize.column);
+            cx.commit_resize(&resize);
         }
     };
     let on_pointer_up = {
@@ -442,8 +440,7 @@ where
                 return;
             };
 
-            cx.layout.update(|layout| layout.set_width(&resize.column, Some(width)));
-            cx.waive(&resize.column);
+            cx.commit_resize(&Resize { width, ..resize });
         }
     };
 

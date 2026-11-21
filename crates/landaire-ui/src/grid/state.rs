@@ -350,6 +350,10 @@ where
     /// How wide the grid's view is, as CSS text, for a detail region or group heading to stay that
     /// wide and in view while the columns scroll. Watched only when rows have either.
     pub(crate) view_width: Signal<Option<String>, LocalStorage>,
+    /// Whether the columns share the view's width, as [`Grid`](crate::Grid)'s `auto_size` asks.
+    pub(crate) auto_size: bool,
+    /// How wide the visible part of the view is, in device pixels.
+    pub(crate) scrollport_width: Memo<f32>,
     pub(crate) timers: Option<Timers>,
 }
 
@@ -407,6 +411,12 @@ where
     /// whatever room is left so a row's ground reaches the far edge. A fill column takes that room
     /// instead.
     pub(crate) fn tracks(&self) -> String {
+        if let Some(shared) = self.shared_widths(self.resize.get().as_ref()) {
+            let mut tracks: Vec<String> = shared.iter().map(|(_, width)| format!("{width}px")).collect();
+            // Takes what is left once every column is as wide as it may be.
+            tracks.push("minmax(0px, 1fr)".to_owned());
+            return tracks.join(" ");
+        }
         let resize = self.resize.get();
         let fitted = self.fitted.get();
         let waived = self.waived.get();
@@ -446,6 +456,48 @@ where
         tracks.push(if fills { "0px" } else { "minmax(0px, 1fr)" }.to_owned());
 
         tracks.join(" ")
+    }
+
+    /// With `auto_size`, each drawn column's width: the view's width shared in proportion to the
+    /// widths the columns are set or sized to, each held to its own limits, with a column `resize`
+    /// drags held at the width it is dragged to. `None` without `auto_size`, or before the view is
+    /// laid out.
+    pub(crate) fn shared_widths(&self, resize: Option<&Resize>) -> Option<Vec<(ColumnId, f32)>> {
+        if !self.auto_size {
+            return None;
+        }
+        let view = self.scrollport_width.get() / self.scale();
+        let shares = self.columns.with(|columns| self.drawn.with(|drawn| shares_of(columns, drawn, resize)));
+
+        shared(view, shares)
+    }
+
+    /// [`Self::shared_widths`], read without tracking, for a gesture's handler.
+    fn shared_widths_untracked(&self, resize: Option<&Resize>) -> Option<Vec<(ColumnId, f32)>> {
+        if !self.auto_size {
+            return None;
+        }
+        let view = self.scrollport_width.get_untracked() / self.scale();
+        let shares =
+            self.columns.with_untracked(|columns| self.drawn.with_untracked(|drawn| shares_of(columns, drawn, resize)));
+
+        shared(view, shares)
+    }
+
+    /// Ends a width change: keeps the width `resize` reached. With `auto_size`, every column keeps
+    /// the width it is drawn at, so the shares do not move once the drag ends.
+    pub(crate) fn commit_resize(&self, resize: &Resize) {
+        match self.shared_widths_untracked(Some(resize)) {
+            Some(shared) => self.layout.update(|layout| {
+                for (id, width) in &shared {
+                    layout.set_width(id, Some(ColumnWidth(*width)));
+                }
+            }),
+            None => {
+                self.layout.update(|layout| layout.set_width(&resize.column, Some(resize.width)));
+                self.waive(&resize.column);
+            }
+        }
     }
 
     /// The width `id` is set to as drawn: dragged, resized or sized. `None` for a fitted or filling
@@ -620,8 +672,12 @@ where
     }
 
     /// The column a fill column's grip resizes: the first resizable column drawn after it. `None`
-    /// for any other column, or a fill column with no resizable column after it.
+    /// for any other column, a fill column with no resizable column after it, or under
+    /// `auto_size`, where a fill column resizes itself.
     pub(crate) fn partner_of(&self, id: &ColumnId) -> Option<ColumnId> {
+        if self.auto_size {
+            return None;
+        }
         self.columns.with(|columns| {
             let column = find_column(columns, id)?;
             if column.sizing_value() != ColumnSizing::Fill || !column.resizable_value() {
@@ -639,10 +695,17 @@ where
         })
     }
 
+    /// Whether `column`'s grip sets its own width: any resizable column, and under `auto_size` a
+    /// fill column too, which then shares the view like the others.
+    pub(crate) fn resizes_itself(&self, column: &GridColumn<T>) -> bool {
+        column.is_resizable()
+            || (self.auto_size && column.sizing_value() == ColumnSizing::Fill && column.resizable_value())
+    }
+
     /// A drag on `grip`'s grip starting with the pointer at `from`, `grip` laid out `width` CSS
     /// pixels wide. `None` when the grip resizes nothing.
     pub(crate) fn start_resize(&self, grip: &ColumnId, from: f32, width: f32) -> Option<Resize> {
-        let resizable = self.with_column(grip, GridColumn::is_resizable)?;
+        let resizable = self.with_column(grip, |column| self.resizes_itself(column))?;
         let (column, start, widest) = if resizable {
             (grip.clone(), width, None)
         } else {
@@ -966,6 +1029,96 @@ pub(crate) enum Step {
     Last,
 }
 
+/// What each drawn column asks of the view under `auto_size`, with a column `resize` drags held
+/// at its dragged width.
+fn shares_of<T>(columns: &[GridColumn<T>], drawn: &ColumnLayout, resize: Option<&Resize>) -> Vec<(ColumnId, Share)> {
+    drawn
+        .columns()
+        .iter()
+        .filter_map(|state| {
+            let column = find_column(columns, state.id())?;
+            let held = resize.filter(|resize| resize.column == *state.id()).map(|resize| resize.width.0);
+            // The width a reader resized it to, else what it is sized to. A fitted or filling
+            // column asks for its minimum: its content cannot be measured once the view sets its
+            // width.
+            let asked = match (state.width(), column.sizing_value()) {
+                (Some(width), _) | (None, ColumnSizing::Fixed(width)) => width.0,
+                (None, ColumnSizing::Fit | ColumnSizing::Fill) => column.min_width_value().0,
+            };
+            let share = Share {
+                asked: column.clamp(asked).0,
+                least: column.min_width_value().0,
+                most: column.max_width_value().map_or(f32::INFINITY, |width| width.0),
+                held,
+            };
+            Some((state.id().clone(), share))
+        })
+        .collect()
+}
+
+/// The widths `shares` take of a view `view` wide. `None` before the view is laid out.
+fn shared(view: f32, shares: Vec<(ColumnId, Share)>) -> Option<Vec<(ColumnId, f32)>> {
+    if view <= 0.0 {
+        return None;
+    }
+    let (ids, shares): (Vec<ColumnId>, Vec<Share>) = shares.into_iter().unzip();
+    // Whole pixels, rounded down, so the columns never come out a fraction wider than the view:
+    // a sideways scroll bar would take height, which can bring the vertical one and with it a
+    // narrower view, and the widths would then go back and forth.
+    let widths = share_widths(view, &shares).into_iter().map(f32::floor);
+
+    Some(ids.into_iter().zip(widths).collect())
+}
+
+/// What one column asks of the view's width under `auto_size`, in CSS pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Share {
+    /// The width it is set or sized to, which is its share of the view.
+    asked: f32,
+    least: f32,
+    most: f32,
+    /// The width it is being dragged to, which it keeps while the others share the rest.
+    held: Option<f32>,
+}
+
+/// The widths `shares` take of a view `view` wide: in proportion to what each asks, none below its
+/// least or above its most. A column that reaches a limit stays there and the rest share what is
+/// left, so the widths sum to `view` unless the limits do not allow it.
+fn share_widths(view: f32, shares: &[Share]) -> Vec<f32> {
+    let mut widths: Vec<Option<f32>> = shares.iter().map(|share| share.held).collect();
+    let mut room = view - widths.iter().flatten().sum::<f32>();
+    loop {
+        let open: Vec<usize> = (0..shares.len()).filter(|&index| widths[index].is_none()).collect();
+        if open.is_empty() {
+            break;
+        }
+        let asked: f32 = open.iter().map(|&index| shares[index].asked).sum();
+        let scale = if asked > 0.0 { room / asked } else { 0.0 };
+        let proposed = |index: usize| shares[index].asked * scale;
+        // Columns held to their minimum first: they free the room the others then share.
+        let short: Vec<usize> = open.iter().copied().filter(|&index| proposed(index) < shares[index].least).collect();
+        let limited = if short.is_empty() {
+            open.iter().copied().filter(|&index| proposed(index) > shares[index].most).collect()
+        } else {
+            short
+        };
+        if limited.is_empty() {
+            for &index in &open {
+                widths[index] = Some(proposed(index));
+            }
+            break;
+        }
+        for index in limited {
+            let share = shares[index];
+            let width = proposed(index).clamp(share.least, share.most.max(share.least));
+            widths[index] = Some(width);
+            room -= width;
+        }
+    }
+
+    widths.into_iter().map(|width| width.unwrap_or(0.0)).collect()
+}
+
 /// The column of `columns` named `id`.
 fn find_column<'a, T>(columns: &'a [GridColumn<T>], id: &ColumnId) -> Option<&'a GridColumn<T>> {
     columns.iter().find(|column| column.id() == id)
@@ -1019,6 +1172,42 @@ pub(crate) fn known_ids<T>(columns: &[GridColumn<T>]) -> Arc<[ColumnId]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn share(asked: f32, least: f32, most: f32) -> Share {
+        Share { asked, least, most, held: None }
+    }
+
+    #[test]
+    fn columns_share_the_view_in_proportion_to_what_they_ask() {
+        let widths = share_widths(600.0, &[share(200.0, 10.0, f32::INFINITY), share(100.0, 10.0, f32::INFINITY)]);
+
+        assert_eq!(widths, [400.0, 200.0]);
+    }
+
+    #[test]
+    fn a_column_at_its_limit_leaves_the_rest_to_the_others() {
+        let widths = share_widths(
+            600.0,
+            &[share(100.0, 10.0, 150.0), share(100.0, 10.0, f32::INFINITY), share(100.0, 250.0, f32::INFINITY)],
+        );
+
+        assert_eq!(widths, [150.0, 200.0, 250.0], "the first stops at its most and the last at its least");
+    }
+
+    #[test]
+    fn a_held_column_keeps_its_width_and_the_others_share_the_rest() {
+        let held = Share { held: Some(300.0), ..share(100.0, 10.0, f32::INFINITY) };
+        let widths = share_widths(600.0, &[held, share(100.0, 10.0, f32::INFINITY), share(200.0, 10.0, f32::INFINITY)]);
+
+        assert_eq!(widths, [300.0, 100.0, 200.0]);
+    }
+
+    #[test]
+    fn a_view_narrower_than_the_minimums_gives_each_its_minimum() {
+        let widths = share_widths(100.0, &[share(300.0, 80.0, f32::INFINITY), share(300.0, 60.0, f32::INFINITY)]);
+
+        assert_eq!(widths, [80.0, 60.0]);
+    }
 
     fn sizes(entries: &[(&str, f32)]) -> HashMap<ColumnId, f32> {
         entries.iter().map(|(id, width)| (ColumnId::from(*id), *width)).collect()

@@ -58,7 +58,8 @@ pub enum ColumnSizing {
     /// its minimum, so the grid scrolls sideways only when even that does not fit. It follows the
     /// view and the other columns as they resize. A width a layout holds for it is ignored. Its
     /// grip resizes the first resizable column after it the other way, so dragging the grip moves
-    /// the edge between the two; with no such column it has no grip. Give a grid at most one.
+    /// the edge between the two; with no such column it has no grip. Under the grid's `auto_size`
+    /// it is one more share of the view instead. Give a grid at most one.
     Fill,
 }
 
@@ -252,6 +253,10 @@ impl<T> GridColumn<T> {
 
     pub(crate) fn min_width_value(&self) -> ColumnWidth {
         self.min_width
+    }
+
+    pub(crate) fn max_width_value(&self) -> Option<ColumnWidth> {
+        self.max_width
     }
 
     pub(crate) fn align_value(&self) -> ColumnAlign {
