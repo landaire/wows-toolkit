@@ -22,6 +22,8 @@ pub use db::load_startup_setting;
 pub use db::open_db;
 pub use db::open_db_at;
 pub use db::set_migrated;
+pub use settings::ListingRowElement;
+pub use settings::ListingRowElements;
 pub use settings::ReplayExportFormat;
 pub use settings::ReplayGrouping;
 pub use settings::ReplaySettings;

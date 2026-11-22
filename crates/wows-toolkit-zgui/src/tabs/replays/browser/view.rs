@@ -27,6 +27,8 @@ use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
 use landaire_ui::TreeStripes;
 use rust_i18n::t;
+use wows_toolkit_config::ListingRowElement;
+use wows_toolkit_config::ListingRowElements;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::force_reindex::Confirm;
@@ -388,7 +390,11 @@ fn ListingRows(
     thumbnails: Thumbnails,
 ) -> impl IntoView {
     let shell = Shell::current();
+    let services = Services::current();
     let model: Signal<Rc<BrowserTree>, LocalStorage> = listing.tree.into();
+    // Every element is shown until the settings are read, as the setting's own default is.
+    let elements =
+        Memo::new(move |_| services.settings.read(|settings| settings.replay.listing_row_elements).unwrap_or_default());
     let activate_events = events.clone();
     // Enter or a double-click opens a replay, and opens or closes a group, as a click on it does.
     let on_activate = UnsyncCallback::new(move |key: NodeKey| match key {
@@ -408,7 +414,7 @@ fn ListingRows(
     view! {
         Tree(
             model = model,
-            row = move |row: TreeRow<NodeKey>| row_view(listing, preview, thumbnails, row),
+            row = move |row: TreeRow<NodeKey>| row_view(listing, preview, thumbnails, elements, row),
             row_height = ROW_HEIGHT,
             expanded = listing.expanded,
             selection = listing.selection,
@@ -427,7 +433,13 @@ fn ListingRows(
     }
 }
 
-fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row: TreeRow<NodeKey>) -> AnyView {
+fn row_view(
+    listing: Listing,
+    preview: HoverPreview,
+    thumbnails: Thumbnails,
+    elements: Memo<ListingRowElements>,
+    row: TreeRow<NodeKey>,
+) -> AnyView {
     match row.key {
         NodeKey::Group(id) => {
             let label =
@@ -449,7 +461,8 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
             let glowed = listing.glow_elapsed(&path);
             let content = move || {
                 let leaf = listing.tree.with(|tree| tree.leaf(&leaf_path).cloned())?;
-                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, depth, glowed))
+                let elements = elements.get();
+                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, elements, depth, glowed))
             };
             let enter = move |_: &mut EventCx<'_, events::PointerEnter>| {
                 let map_name = listing.tree.with_untracked(|tree| tree.leaf(&path).map(|leaf| leaf.map_name.clone()));
@@ -492,13 +505,14 @@ fn row_view(listing: Listing, preview: HoverPreview, thumbnails: Thumbnails, row
 }
 
 /// What a replay row draws: the outcome edge, the map, the identity line with its tags and the
-/// stats line. The map is set in by `depth`, since the tree indents nothing. `glowed` is how long
-/// the row had glowed when it was made.
+/// stats line, less the elements the reader hides. The map is set in by `depth`, since the tree
+/// indents nothing. `glowed` is how long the row had glowed when it was made.
 fn leaf_view(
     listing: Listing,
     thumbnails: Thumbnails,
     path: PathBuf,
     leaf: LeafRow,
+    elements: ListingRowElements,
     depth: TreeDepth,
     glowed: Option<Duration>,
 ) -> AnyView {
@@ -523,7 +537,8 @@ fn leaf_view(
         Some(Thumbnail::Missing) => AnyView::new(view! { box(class = "wt-row__thumb wt-row__thumb--missing") }),
         Some(Thumbnail::Loading) | None => AnyView::new(view! { box(class = "wt-row__thumb") }),
     };
-    let division = leaf.in_division.then(|| view! { AppIcon(glyph = Glyph::Users, class = "wt-row__division") });
+    let division = (leaf.in_division && elements.division)
+        .then(|| view! { AppIcon(glyph = Glyph::Users, class = "wt-row__division") });
     let rating_chip = |id: &'static str, name: &str, value: f64| {
         let said = format!("{name} {value:.0}");
         let style = rating_style(PersonalRatingCategory::from_pr(value));
@@ -553,14 +568,14 @@ fn leaf_view(
         })
     };
     let pr_name = t!("ui.replay.column.personal_rating");
-    let pr = match leaf.personal_rating {
+    let pr = match leaf.personal_rating.filter(|_| elements.personal_rating) {
         Some(BattleRating::Rated(rating)) => Some(rating_chip("pr", &pr_name, rating.pr)),
         Some(BattleRating::Unrated) => {
             Some(unrated_chip("pr", UNRATED_LEAF_ID, t!("ui.personal_rating.unrated_hover").into_owned()))
         }
         None => None,
     };
-    let mc = match leaf.match_contribution {
+    let mc = match leaf.match_contribution.filter(|_| elements.match_contribution) {
         Some(LeafMc::Rated(value)) => Some(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value)),
         Some(LeafMc::Unrated) => {
             Some(unrated_chip("mc", UNRATED_MC_LEAF_ID, MatchContributionWithheld::UnratedBattle.explanation()))
@@ -568,27 +583,38 @@ fn leaf_view(
         None => None,
     };
     // PR keeps the upper slot and MC the lower one, so each lines up with its own kind across rows.
+    // A hidden kind gives up its slot, so the other sits centred in every row.
     let scores = (pr.is_some() || mc.is_some()).then(|| {
+        let pr_slot = elements
+            .personal_rating
+            .then(|| view! { box(class = "wt-row__score-slot") {{pr.map(IntoView::into_view)}} });
+        let mc_slot = elements
+            .match_contribution
+            .then(|| view! { box(class = "wt-row__score-slot") {{mc.map(IntoView::into_view)}} });
         view! {
             column(class = "wt-row__scores") {
-                box(class = "wt-row__score-slot") {{pr.map(IntoView::into_view)}}
-                box(class = "wt-row__score-slot") {{mc.map(IntoView::into_view)}}
+                {pr_slot.map(IntoView::into_view)}
+                {mc_slot.map(IntoView::into_view)}
             }
         }
     });
-    let stats: Vec<AnyView> = leaf
-        .stats
-        .into_iter()
-        .enumerate()
-        .map(|(at, part)| match part {
-            // The figures are spaced by their glyphs' margins, not by the spaces around them.
-            LinePart::Text(text) => AnyView::new(view! { text(class = "wt-row__part") {{text.trim().to_owned()}} }),
-            LinePart::Glyph(glyph) => {
-                let class = if at == 0 { "wt-row__glyph" } else { "wt-row__glyph wt-row__glyph--later" };
-                AnyView::new(view! { AppIcon(glyph = line_glyph(glyph), class = class) })
-            }
-        })
-        .collect();
+    // With the whole line hidden the identity line sits alone, centred on the map.
+    let shown_parts = if elements.shows_stats_line() { shown_stats(leaf.stats, elements) } else { Vec::new() };
+    let stats = (!shown_parts.is_empty()).then(|| {
+        let parts: Vec<AnyView> = shown_parts
+            .into_iter()
+            .enumerate()
+            .map(|(at, part)| match part {
+                // The figures are spaced by their glyphs' margins, not by the spaces around them.
+                LinePart::Text(text) => AnyView::new(view! { text(class = "wt-row__part") {{text.trim().to_owned()}} }),
+                LinePart::Glyph(glyph) => {
+                    let class = if at == 0 { "wt-row__glyph" } else { "wt-row__glyph wt-row__glyph--later" };
+                    AnyView::new(view! { AppIcon(glyph = line_glyph(glyph), class = class) })
+                }
+            })
+            .collect();
+        view! { row(class = "wt-row__stats") {{parts}} }
+    });
     let inset = format!("{}px", depth.0 as f32 * LEVEL_INSET);
 
     AnyView::new(view! {
@@ -608,11 +634,29 @@ fn leaf_view(
                         text(class = "wt-row__new", attr:data-testid = "replay-row-new") {{t!("ui.replay.new_tag").into_owned()}}
                     }
                 }
-                row(class = "wt-row__stats") {{stats}}
+                {stats.map(IntoView::into_view)}
             }
             {scores.map(IntoView::into_view)}
         }
     })
+}
+
+/// The stats line's parts for the elements the reader shows. A figure is the glyph that introduces
+/// it and the text after it. A note before any glyph, which says the replay is not indexed, stands
+/// in for the figures and is kept.
+fn shown_stats(parts: Vec<LinePart>, elements: ListingRowElements) -> Vec<LinePart> {
+    let mut figure: Option<LineGlyph> = None;
+    let mut shown = Vec::with_capacity(parts.len());
+    for part in parts {
+        if let LinePart::Glyph(glyph) = part {
+            figure = Some(glyph);
+        }
+        if figure.is_none_or(|glyph| elements.shows(line_element(glyph))) {
+            shown.push(part);
+        }
+    }
+
+    shown
 }
 
 /// The icon a stats-line glyph is drawn as.
@@ -621,6 +665,15 @@ const fn line_glyph(glyph: LineGlyph) -> Glyph {
         LineGlyph::Clock => Glyph::Clock,
         LineGlyph::Crosshair => Glyph::Crosshair,
         LineGlyph::Sword => Glyph::Sword,
+    }
+}
+
+/// The row element the figure a stats-line glyph introduces belongs to.
+const fn line_element(glyph: LineGlyph) -> ListingRowElement {
+    match glyph {
+        LineGlyph::Clock => ListingRowElement::Time,
+        LineGlyph::Crosshair => ListingRowElement::Damage,
+        LineGlyph::Sword => ListingRowElement::Kills,
     }
 }
 

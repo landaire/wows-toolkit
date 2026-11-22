@@ -87,6 +87,9 @@ pub struct ReplaySettings {
     /// Exports keep the real values.
     #[serde(default)]
     pub anonymize_player_names: bool,
+    /// Which optional elements a replay listing row draws.
+    #[serde(default)]
+    pub listing_row_elements: ListingRowElements,
 }
 
 impl Default for ReplaySettings {
@@ -105,7 +108,72 @@ impl Default for ReplaySettings {
             listing_collapsed: false,
             enable_replay_previews: true,
             anonymize_player_names: false,
+            listing_row_elements: ListingRowElements::default(),
         }
+    }
+}
+
+/// An optional element of a replay listing row. The label and the map thumbnail are always drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListingRowElement {
+    PersonalRating,
+    MatchContribution,
+    Division,
+    Damage,
+    Kills,
+    Time,
+}
+
+/// Whether a replay listing row draws each of its optional elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ListingRowElements {
+    pub personal_rating: bool,
+    pub match_contribution: bool,
+    pub division: bool,
+
+    pub damage: bool,
+    pub kills: bool,
+    pub time: bool,
+}
+
+impl ListingRowElements {
+    pub const fn new() -> Self {
+        Self { personal_rating: true, match_contribution: true, division: true, damage: true, kills: true, time: true }
+    }
+
+    pub const fn shows(&self, element: ListingRowElement) -> bool {
+        match element {
+            ListingRowElement::PersonalRating => self.personal_rating,
+            ListingRowElement::MatchContribution => self.match_contribution,
+            ListingRowElement::Division => self.division,
+            ListingRowElement::Damage => self.damage,
+            ListingRowElement::Kills => self.kills,
+            ListingRowElement::Time => self.time,
+        }
+    }
+
+    pub fn set(&mut self, element: ListingRowElement, shown: bool) {
+        let field = match element {
+            ListingRowElement::PersonalRating => &mut self.personal_rating,
+            ListingRowElement::MatchContribution => &mut self.match_contribution,
+            ListingRowElement::Division => &mut self.division,
+            ListingRowElement::Damage => &mut self.damage,
+            ListingRowElement::Kills => &mut self.kills,
+            ListingRowElement::Time => &mut self.time,
+        };
+        *field = shown;
+    }
+
+    /// Whether any element of the stats line under the label is drawn.
+    pub const fn shows_stats_line(&self) -> bool {
+        self.damage || self.kills || self.time
+    }
+}
+
+impl Default for ListingRowElements {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -140,5 +208,17 @@ mod tests {
         let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
         assert!(!parsed.anonymize_player_names);
         assert!(!ReplaySettings::default().anonymize_player_names);
+    }
+
+    #[test]
+    fn listing_row_elements_default_shown_and_survive_missing_fields() {
+        let legacy = r#"{"show_entity_id":false,"show_observed_damage":false}"#;
+        let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
+        assert_eq!(parsed.listing_row_elements, ListingRowElements::new());
+
+        // A field added to the elements later loads shown beside the choices already saved.
+        let partial = r#"{"show_entity_id":false,"show_observed_damage":false,"listing_row_elements":{"kills":false}}"#;
+        let parsed: ReplaySettings = serde_json::from_str(partial).expect("partial settings should parse");
+        assert_eq!(parsed.listing_row_elements, ListingRowElements { kills: false, ..ListingRowElements::new() });
     }
 }

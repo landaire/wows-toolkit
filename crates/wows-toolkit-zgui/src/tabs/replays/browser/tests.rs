@@ -6,6 +6,7 @@ use std::time::Duration;
 use landaire_ui::Appearance;
 use landaire_ui::TreeModel;
 use landaire_ui::test_support::Drawing;
+use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
@@ -13,12 +14,15 @@ use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_core::rating_scope::RatedBattle;
 use wows_core::rating_scope::RatingScope;
+use wows_toolkit_config::ListingRowElements;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::DivisionMate;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::RowSummary;
+use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::HeaderReadError;
 use wows_toolkit_replay_data::replay_dir::ScanProgress;
@@ -34,6 +38,7 @@ use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use wowsunpack::game_types::ArenaId;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::Update;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
 use zgui::view;
@@ -1590,6 +1595,111 @@ fn a_rows_scores_stack_pr_above_mc_and_line_up_across_rows() {
     assert!(same_slot(dash, pr), "the PR dash keeps the PR slot: {dash:?} against {pr:?}");
     let dash = chip_in_row(&window, &unrated, "mc").expect("an unrated battle shows a dash for MC");
     assert!(same_slot(dash, mc), "the MC dash keeps the MC slot: {dash:?} against {mc:?}");
+}
+
+/// The elements of `class` drawn in the row of `path`.
+fn in_row(window: &HeadlessWindow, path: &Path, class: &str) -> Vec<Element> {
+    let row = window.bounds(row(window, path)).expect("the row has a box");
+
+    window
+        .all_by_class(class)
+        .into_iter()
+        .filter(|element| {
+            window.bounds(*element).is_some_and(|bounds| {
+                let middle = bounds.top().0 + bounds.size.height.0 / 2.0;
+                row.top().0 <= middle && middle <= row.bottom().0
+            })
+        })
+        .collect()
+}
+
+/// The vertical middle of the one element of `class` in the row of `path`, from the row's top.
+fn middle_in_row(window: &HeadlessWindow, path: &Path, class: &str) -> f32 {
+    let row_top = window.bounds(row(window, path)).expect("the row has a box").top().0;
+    let found = in_row(window, path, class);
+    let [element] = found.as_slice() else {
+        panic!("the row draws one {class}, got {}", found.len());
+    };
+    let bounds = window.bounds(*element).expect("the element has a box");
+
+    bounds.top().0 + bounds.size.height.0 / 2.0 - row_top
+}
+
+/// Each row element the listing options hide leaves the rows at once and is saved. With the whole
+/// stats line hidden the label sits centred on the map, as does a lone score chip, and the row keeps
+/// its height.
+#[test]
+fn hidden_row_elements_leave_the_row_and_the_rest_centre_on_the_map() {
+    let (mut window, control) = open();
+    // The choices this saves would otherwise reach the rows of every later window.
+    control.shell().services().settings.use_private_database_for_test();
+    let (_dir, paths) = scored_listing(&mut window, control, Reached::Scanned);
+    let both = paths[0].clone();
+    let root = both.parent().expect("the replay is in a directory").to_path_buf();
+    listing(control, &root).summaries.update(|summaries| {
+        let summary = summaries.get_mut(&both).expect("the row is scored");
+        summary.division_mates = vec![DivisionMate { player_name: "Mate".to_owned(), clan: String::new() }];
+    });
+    settle_in_real_time(&mut window);
+
+    let icons = |window: &HeadlessWindow| -> Vec<String> {
+        in_row(window, &both, "wt-icon").into_iter().filter_map(|icon| window.attribute(icon, "data-icon")).collect()
+    };
+    let shows = |window: &HeadlessWindow, glyph: Glyph| icons(window).iter().any(|name| name == glyph.name());
+    let height = window.bounds(row(&window, &both)).expect("the row has a box").size.height.0;
+    for glyph in [Glyph::Users, Glyph::Crosshair, Glyph::Sword, Glyph::Clock] {
+        assert!(shows(&window, glyph), "the row starts with {glyph:?}: {:?}", icons(&window));
+    }
+
+    let options = window.by_test_id("replay-listing-options").expect("the options button is drawn");
+    window.click(options).expect("the button has a box");
+    window.advance(Duration::from_millis(300));
+    // The row elements close the options, below the bottom of this window until scrolled to.
+    let menu = window.by_test_id("replay-listing-options-menu").expect("the options popover opened");
+    window.wheel(menu, 1000.0).expect("the popover has a box");
+    window.advance(Duration::from_millis(300));
+    let toggle = |window: &mut HeadlessWindow, id: &str| {
+        let check = window.by_test_id(id).unwrap_or_else(|| panic!("the options draw {id}"));
+        window.click(check).expect("the box has a box");
+        window.advance(Duration::from_millis(300));
+    };
+
+    toggle(&mut window, "replay-listing-row-division");
+    assert!(!shows(&window, Glyph::Users), "the division mark leaves the row: {:?}", icons(&window));
+
+    toggle(&mut window, "replay-listing-row-damage");
+    assert!(!shows(&window, Glyph::Crosshair), "the damage leaves the row: {:?}", icons(&window));
+    assert!(shows(&window, Glyph::Sword) && shows(&window, Glyph::Clock), "the rest of the line stays");
+
+    toggle(&mut window, "replay-listing-row-personal-rating");
+    assert!(chip_in_row(&window, &both, "pr").is_none(), "the PR leaves the row");
+    let mc = chip_in_row(&window, &both, "mc").expect("the MC stays");
+    let thumb = middle_in_row(&window, &both, "wt-row__thumb");
+    let mc_middle = (mc.top + mc.bottom) / 2.0;
+    assert!((mc_middle - thumb).abs() <= 1.0, "the lone MC at {mc_middle} sits centred on the map at {thumb}");
+
+    toggle(&mut window, "replay-listing-row-kills");
+    toggle(&mut window, "replay-listing-row-time");
+    assert!(in_row(&window, &both, "wt-row__stats").is_empty(), "the empty stats line is not drawn");
+    let label = middle_in_row(&window, &both, "wt-row__label");
+    let thumb = middle_in_row(&window, &both, "wt-row__thumb");
+    assert!((label - thumb).abs() <= 1.0, "the label at {label} sits centred on the map at {thumb}");
+    assert_eq!(window.bounds(row(&window, &both)).expect("the row has a box").size.height.0, height);
+
+    let saved = control.shell().services().settings.read_untracked(|settings| settings.replay.listing_row_elements);
+    let hidden = ListingRowElements {
+        personal_rating: false,
+        match_contribution: true,
+        division: false,
+        damage: false,
+        kills: false,
+        time: false,
+    };
+    assert_eq!(saved, Some(hidden), "the choices are saved with the replay settings");
+
+    toggle(&mut window, "replay-listing-row-time");
+    assert_eq!(in_row(&window, &both, "wt-row__stats").len(), 1, "the line returns with the time");
+    assert_eq!(icons(&window), vec![Glyph::Clock.name().to_owned()], "and holds the time alone");
 }
 
 #[test]

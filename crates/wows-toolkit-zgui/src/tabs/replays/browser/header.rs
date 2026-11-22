@@ -7,6 +7,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_toolkit_config::ListingRowElement;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_icons::Glyph;
@@ -67,7 +68,8 @@ use crate::tabs::stats::session::scope_hint;
 
 const SHEET: &str = "wt-replay-listing-header";
 
-// The options are 300px wide, which is where a long path wraps.
+// The options are 300px wide, which is where a long path wraps. They scroll when the window is too
+// short to hold them, and their parts keep their height rather than shrinking to fit.
 const CSS: &str = css!(
     ".wt-listing-header {
         display: flex;
@@ -92,7 +94,9 @@ const CSS: &str = css!(
         gap: 4px;
         width: 300px;
         padding: 4px;
+        overflow-y: auto;
     }
+    .wt-listing-options > * { flex: none; }
     .wt-listing-options__path {
         display: flex;
         align-items: flex-start;
@@ -105,7 +109,9 @@ const CSS: &str = css!(
     .wt-listing-options__action { width: 100%; justify-content: flex-start; }
     .wt-listing-options__hint { font-size: 12px; color: var(--wt-color-text-dim); }
     .wt-listing-options__title { font-size: 14px; font-weight: 700; }
-    .wt-listing-options__check { display: flex; align-items: center; gap: 8px; font-size: 14px; }"
+    .wt-listing-options__check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .wt-listing-options__checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
+    .wt-listing-options__checks .wt-listing-options__check { min-width: 0; }"
 );
 
 /// The grouping choices, in the egui header's order.
@@ -235,7 +241,7 @@ fn HeaderAction(
 
 /// The listing's options: the selected directory's path and the actions on it as a whole,
 /// autoload, name anonymization and the session stats' scope, then the grouping and column filters
-/// of the egui app's replay header.
+/// of the egui app's replay header, and which elements a replay row draws.
 ///
 /// Grouping is a row of exclusive toggles rather than a select: a select's list is drawn outside
 /// the popover, and a press on it would dismiss the popover before the choice landed.
@@ -432,6 +438,16 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                         ColumnFilterCheck(filter = ColumnFilter::RawXp)
                         ColumnFilterCheck(filter = ColumnFilter::ObservedDamage)
                         ColumnFilterCheck(filter = ColumnFilter::Heals)
+                        Separator()
+                        text(class = "wt-listing-options__title") {{locale.text("ui.replay.row_elements")}}
+                        box(class = "wt-listing-options__checks") {
+                            RowElementCheck(element = ListingRowElement::PersonalRating)
+                            RowElementCheck(element = ListingRowElement::MatchContribution)
+                            RowElementCheck(element = ListingRowElement::Division)
+                            RowElementCheck(element = ListingRowElement::Damage)
+                            RowElementCheck(element = ListingRowElement::Kills)
+                            RowElementCheck(element = ListingRowElement::Time)
+                        }
                     }
                 }
             }
@@ -498,6 +514,62 @@ fn ColumnFilterCheck(filter: ColumnFilter) -> impl IntoView {
             )
             Label(node_ref = name, control = control) {{label}}
         }
+    }
+}
+
+/// One row element's checkbox, writing the replay settings as it changes.
+#[component]
+fn RowElementCheck(element: ListingRowElement) -> impl IntoView {
+    let services = Services::current();
+    let checked = Signal::derive_local(move || {
+        // Checked until the settings are read, as the setting's own default is.
+        let shown =
+            services.settings.read(|settings| settings.replay.listing_row_elements.shows(element)).unwrap_or(true);
+        if shown { Checked::Yes } else { Checked::No }
+    });
+    let set = move |checked: Checked| {
+        services.settings.edit(keys::REPLAY_SETTINGS, |settings| {
+            settings.replay.listing_row_elements.set(element, checked == Checked::Yes);
+            settings.replay.clone()
+        });
+    };
+    let label = row_element_label(element);
+    let control = NodeRef::new();
+    let name = NodeRef::new();
+
+    view! {
+        row(class = "wt-listing-options__check") {
+            Checkbox(
+                checked = Binding::controlled(checked, set),
+                node_ref = control,
+                labelled_by = name,
+                attr:data-testid = row_element_test_id(element)
+            )
+            Label(node_ref = name, control = control) {{label}}
+        }
+    }
+}
+
+fn row_element_label(element: ListingRowElement) -> String {
+    match element {
+        ListingRowElement::PersonalRating => t!("ui.replay.row_element_personal_rating"),
+        ListingRowElement::MatchContribution => t!("ui.replay.row_element_match_contribution"),
+        ListingRowElement::Division => t!("ui.replay.row_element_division"),
+        ListingRowElement::Damage => t!("ui.replay.row_element_damage"),
+        ListingRowElement::Kills => t!("ui.replay.row_element_kills"),
+        ListingRowElement::Time => t!("ui.replay.row_element_time"),
+    }
+    .into_owned()
+}
+
+const fn row_element_test_id(element: ListingRowElement) -> &'static str {
+    match element {
+        ListingRowElement::PersonalRating => "replay-listing-row-personal-rating",
+        ListingRowElement::MatchContribution => "replay-listing-row-match-contribution",
+        ListingRowElement::Division => "replay-listing-row-division",
+        ListingRowElement::Damage => "replay-listing-row-damage",
+        ListingRowElement::Kills => "replay-listing-row-kills",
+        ListingRowElement::Time => "replay-listing-row-time",
     }
 }
 
