@@ -546,7 +546,8 @@ fn the_overview_win_rate_counts_random_and_ranked_and_breaks_down_on_hover() {
     handles.games.set(mixed_evening());
     settle(&mut window);
 
-    assert_eq!(window.texts_by_class("wt-stats-summary__record"), ["4W/4L (50.0%)"], "the other modes are left out");
+    assert_eq!(window.texts_by_class("wt-stats-summary__record"), ["4W/4L", "(50.0%)"], "the other modes are left out");
+    assert_eq!(band_of(&window, "stats-overview-record-rate"), Some("average"), "the rate takes its band's colour");
     let expected = [
         t!("ui.stats.win_rate_rated_only").into_owned(),
         breakdown_line("ui.stats.mode_random", 8, "50.0%"),
@@ -595,6 +596,9 @@ fn a_ship_played_only_in_other_modes_shows_no_record_and_no_rating() {
     settle(&mut window);
     assert!(window.by_test_id(&format!("ship-record-{YAMATO}")).is_some(), "its Random games give it a record");
     assert!(window.by_test_id(&format!("ship-record-{KLEBER}")).is_none());
+    assert_eq!(band_of(&window, &format!("ship-record-rate-{YAMATO}")), Some("super-unicum"));
+    assert_eq!(band_of(&window, &format!("ship-win-rate-{YAMATO}")), Some("super-unicum"));
+    assert_eq!(band_of(&window, &format!("ship-win-rate-{KLEBER}")), None, "no rated battles, no colour");
     let hover = tooltip_of(&mut window, &format!("ship-win-rate-{YAMATO}"));
     let expected = [
         t!("ui.stats.win_rate_rated_only").into_owned(),

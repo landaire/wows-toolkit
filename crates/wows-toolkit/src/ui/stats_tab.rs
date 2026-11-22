@@ -26,6 +26,8 @@ use crate::tab_state::StatsSubTab;
 use crate::tab_state::TabState;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
+use crate::util::personal_rating::PersonalRatingCategory;
+use crate::util::personal_rating::PersonalRatingCategorySwatch;
 use crate::util::personal_rating::PersonalRatingData;
 use crate::util::separate_number;
 use rust_i18n::t;
@@ -46,6 +48,25 @@ fn translated_column(column: stats_table::Column) -> String {
 /// A row label in the active locale.
 fn translated_label(label: stats_table::StatLabel) -> String {
     t!(label.translation_key()).into_owned()
+}
+
+/// A ship's collapsed line with its win rate in the colour of the band the rate falls in.
+fn ship_header_job(ui: &egui::Ui, header: &stats_table::ShipHeader) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let style = ui.style();
+    let append = |job: &mut egui::text::LayoutJob, text: RichText| {
+        text.append_to(job, style, egui::FontSelection::Default, egui::Align::Center);
+    };
+
+    append(&mut job, RichText::new(&header.lead));
+    if let (Some(rate), Some(text)) = (header.win_rate, header.win_rate_text()) {
+        let swatch = PersonalRatingCategory::from_win_rate(rate).swatch(ui.visuals());
+        append(&mut job, RichText::new(" "));
+        append(&mut job, RichText::new(text).color(swatch.text));
+    }
+    append(&mut job, RichText::new(&header.trail));
+
+    job
 }
 
 /// Which games a stats pane shows.
@@ -524,7 +545,13 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
         let rated = summary.records.rated();
         let mut led = false;
         if let Some(win_rate) = rated.win_rate() {
-            ui.strong(format!("{} ({win_rate:.01}%)", rated.label())).on_hover_ui(|ui| {
+            let swatch = PersonalRatingCategory::from_win_rate(win_rate).swatch(ui.visuals());
+            ui.horizontal(|ui| {
+                ui.strong(rated.label());
+                ui.label(RichText::new(format!("({win_rate:.01}%)")).strong().color(swatch.text));
+            })
+            .response
+            .on_hover_ui(|ui| {
                 ui.label(summary.records.hover_text());
             });
             led = true;
@@ -678,7 +705,8 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
             let locale_ref2 = locale.as_deref();
             let pr_stats = pr_stats_by_ship.get(ship_id);
             let mc_stats = mc_stats_by_ship.get(ship_id);
-            let header = stats_table::ship_header(&ship_name, perf_info, pr_stats, mc_stats);
+            let header_parts = stats_table::ship_header(&ship_name, perf_info, pr_stats, mc_stats);
+            let header = header_parts.to_string();
 
             let mut table_rows = stats_table::ship_rows(perf_info, pr_stats, locale_ref2);
             if let Some(mc) = mc_stats {
@@ -688,7 +716,7 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
             let collapsing_id = ui.make_persistent_id(("ship_stats_collapse", ship_id));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), collapsing_id, false)
                 .show_header(ui, |ui| {
-                    ui.label(&header).on_hover_ui(|ui| {
+                    ui.label(ship_header_job(ui, &header_parts)).on_hover_ui(|ui| {
                         ui.label(perf_info.records().hover_text());
                     });
                     ui.menu_button(icons::COPY, |ui| {

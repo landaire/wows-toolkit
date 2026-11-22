@@ -673,7 +673,7 @@ fn every_view(window: &mut HeadlessWindow) -> (String, String, String) {
     let tab = window.by_role_and_label(Role::Tab, &overview).expect("the Overview tab is in the dock");
     window.click(tab).expect("the Overview tab is clicked");
     window.advance(Duration::from_millis(300));
-    let record = text_of(window, "wt-stats-summary__record");
+    let record = window.texts_by_class("wt-stats-summary__record").join(" ");
 
     let ships = t!("ui.stats.ships").into_owned();
     let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");

@@ -15,7 +15,6 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
-use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::stats::McStats;
@@ -91,6 +90,11 @@ const CSS: &str = css!(
         gap: 12px;
         padding: 8px;
         border-bottom: 1px solid var(--lui-color-border);
+    }
+    .wt-stats-summary__record-line {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
     }
     .wt-stats-summary__record { font-weight: 700; }
     .wt-stats-summary__fact {
@@ -305,12 +309,22 @@ fn summary_line(computed: &Computed) -> AnyView {
     let locale = wows_toolkit_viewmodel::locale();
     let rated = summary.records.rated();
     let record = rated.win_rate().map(|rate| {
-        let record = format!("{} ({rate:.1}%)", rated.label());
+        let label = rated.label();
+        let rate_text = format!("({rate:.1}%)");
+        let band = rating::WinRateBand::from_rate(rate);
         let hover = summary.records.hover_text();
         AnyView::new(view! {
             Tooltip {
                 TooltipTrigger {
-                    text(class = "wt-stats-summary__record", class = TABULAR_CLASS, attr:data-testid = "stats-overview-record") {{record}}
+                    row(class = "wt-stats-summary__record-line", class = TABULAR_CLASS, attr:data-testid = "stats-overview-record") {
+                        text(class = "wt-stats-summary__record") {{label}}
+                        text(
+                            class = "wt-stats-summary__record",
+                            attr:data-testid = "stats-overview-record-rate",
+                            attr:data-band = band.name,
+                            style:color = band.color
+                        ) {{rate_text}}
+                    }
                 }
                 TooltipContent {{hover.clone()}}
             }
@@ -548,11 +562,11 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
 /// Player Tracker draws one, broken down by battle kind on hover.
 fn win_rate_cell(ship: &OverviewShip) -> AnyView {
     let rate = ship.info.rated_win_rate();
-    let band = rate.map(PersonalRatingCategory::from_win_rate);
+    let band = rate.map(rating::WinRateBand::from_rate);
     let hover = ship.info.records().hover_text();
     let test_id = ship.info.ship_id().map(|id| format!("stats-overview-win-rate-{id}"));
-    let band_name = band.map(|band| rating_band_name(band).to_owned());
-    let color = band.map(rating::text_color);
+    let band_name = band.as_ref().map(|band| band.name.clone());
+    let color = band.map(|band| band.color);
     let text = optional_percent(rate);
 
     AnyView::new(view! {

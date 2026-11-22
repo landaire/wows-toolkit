@@ -26,6 +26,21 @@ pub(super) fn text_color(category: PersonalRatingCategory) -> String {
     format!("var(--wt-pr-{}-text)", rating_band_name(category))
 }
 
+/// The band a Random and Ranked win rate falls in, as a `data-band` name and a text colour.
+pub(super) struct WinRateBand {
+    pub(super) name: String,
+    pub(super) color: String,
+}
+
+impl WinRateBand {
+    /// The band for `rate`, a percentage from 0 to 100.
+    pub(super) fn from_rate(rate: f64) -> Self {
+        let category = PersonalRatingCategory::from_win_rate(rate);
+
+        Self { name: rating_band_name(category).to_owned(), color: text_color(category) }
+    }
+}
+
 /// The band's hue at the chip tint alpha.
 fn tint(category: PersonalRatingCategory) -> String {
     let percent = f32::from(personal_rating::CHIP_TINT_ALPHA) / 255.0 * 100.0;

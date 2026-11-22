@@ -1536,7 +1536,9 @@ mod scope_tests {
         assert_eq!(info.rated_win_rate(), Some(50.0));
         assert_eq!(info.records().rated(), Record { wins: 2, losses: 2, draws: 0 });
         assert_eq!(info.records().other, Record { wins: 3, losses: 1, draws: 0 });
-        assert_eq!(ship_header("Yamato", &info, None, None), "Yamato 2W/2L (50%)");
+        let header = ship_header("Yamato", &info, None, None);
+        assert_eq!(header.to_string(), "Yamato 2W/2L (50%)");
+        assert_eq!((header.lead.as_str(), header.win_rate), ("Yamato 2W/2L", Some(50.0)), "the rate is set apart");
     }
 
     /// Each rating aggregate over a mixed set is the one its rated games give
@@ -1606,7 +1608,11 @@ mod scope_tests {
         let info = PerformanceInfo::from_games(&refs);
         assert_eq!(info.rated_win_rate(), None);
         assert_eq!(info.personal_rating(&table), None);
-        assert_eq!(ship_header("Yamato", &info, None, None), "Yamato", "no record or rate for unrated battles");
+        assert_eq!(
+            ship_header("Yamato", &info, None, None).to_string(),
+            "Yamato",
+            "no record or rate for unrated battles"
+        );
 
         for stat in [ChartableStat::PersonalRating, ChartableStat::WinRate] {
             assert!(line_chart_series(&refs, stat, &ships, Some(&table), true, true).is_empty(), "{stat:?}");

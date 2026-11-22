@@ -548,14 +548,18 @@ fn ship_grid(
 
 /// A ship's Random and Ranked win rate, broken down by battle kind on hover.
 fn win_rate_cell(row: &ShipRow) -> AnyView {
-    let rate = optional_percent(row.performance.rated_win_rate());
+    let rate = row.performance.rated_win_rate();
+    let band = rate.map(rating::WinRateBand::from_rate);
+    let band_name = band.as_ref().map(|band| band.name.clone());
+    let color = band.map(|band| band.color);
+    let rate = optional_percent(rate);
     let hover = row.performance.records().hover_text();
     let ship = row.ship_id;
 
     AnyView::new(view! {
         Tooltip {
             TooltipTrigger {
-                text(attr:data-testid = format!("ship-win-rate-{ship}")) {{rate}}
+                text(attr:data-testid = format!("ship-win-rate-{ship}"), attr:data-band = band_name, style:color = color) {{rate}}
             }
             TooltipContent {{hover.clone()}}
         }
@@ -591,6 +595,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
         let draws = (rated.draws > 0).then(|| format!("{}D", rated.draws));
         let wins = format!("{}W", rated.wins);
         let losses = format!("{}L", rated.losses);
+        let band = rating::WinRateBand::from_rate(rate);
         let rate = format!("({rate:.0}%)");
         let hover = row.performance.records().hover_text();
         AnyView::new(view! {
@@ -600,7 +605,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
                         text(class = "wt-stats-ship__win") {{wins}}
                         text(class = "wt-stats-ship__loss") {{losses}}
                         {draws.map(|draws| AnyView::new(view! { text {{draws}} }))}
-                        text {{rate}}
+                        text(attr:data-testid = format!("ship-record-rate-{ship}"), attr:data-band = band.name, style:color = band.color) {{rate}}
                     }
                 }
                 TooltipContent {{hover.clone()}}

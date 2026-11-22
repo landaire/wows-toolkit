@@ -338,7 +338,8 @@ pub fn ship_summaries(
             let performance = PerformanceInfo::from_games(&games);
             let rating = table.and_then(|table| PrStats::from_games(&games, table));
             let match_contribution = McStats::from_games(&games);
-            let header = ship_header(&first.ship_name, &performance, rating.as_ref(), match_contribution.as_ref());
+            let header =
+                ship_header(&first.ship_name, &performance, rating.as_ref(), match_contribution.as_ref()).to_string();
             let mut rows = ship_rows(&performance, rating.as_ref(), locale);
             if let Some(stats) = match_contribution.as_ref() {
                 rows.insert(usize::from(rating.is_some()), match_contribution_row(stats));
@@ -362,7 +363,36 @@ pub fn ship_summaries(
     summaries
 }
 
-/// A ship's collapsed line, as every front end shows and copies it.
+/// A ship's collapsed line, as every front end shows and copies it, split so a
+/// front end can colour the win rate.
+pub struct ShipHeader {
+    /// The ship name and, with Random or Ranked battles, the record.
+    pub lead: String,
+    /// The Random and Ranked win rate, 0 to 100.
+    pub win_rate: Option<f64>,
+    /// The rating and match contribution, each set off by " - ".
+    pub trail: String,
+}
+
+impl ShipHeader {
+    /// The win rate as written in the line, without its leading space.
+    pub fn win_rate_text(&self) -> Option<String> {
+        self.win_rate.map(|rate| format!("({rate:.0}%)"))
+    }
+}
+
+impl std::fmt::Display for ShipHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.lead)?;
+        if let Some(rate) = self.win_rate_text() {
+            write!(f, " {rate}")?;
+        }
+
+        f.write_str(&self.trail)
+    }
+}
+
+/// A ship's collapsed line.
 ///
 /// The record and win rate count Random and Ranked battles, the ones the
 /// rating counts; a ship played in neither shows no record rather than a
@@ -372,20 +402,23 @@ pub fn ship_header(
     performance: &PerformanceInfo,
     rating: Option<&PrStats>,
     match_contribution: Option<&McStats>,
-) -> String {
+) -> ShipHeader {
     let rated = performance.records().rated();
-    let mut header = ship.to_string();
-    if let Some(win_rate) = rated.win_rate() {
-        header.push_str(&format!(" {} ({win_rate:.0}%)", rated.label()));
-    }
+    let win_rate = rated.win_rate();
+    let lead = match win_rate {
+        Some(_) => format!("{ship} {}", rated.label()),
+        None => ship.to_string(),
+    };
+
+    let mut trail = String::new();
     if let Some(rating) = rating {
-        header.push_str(&format!(" - PR: {:.0}", rating.average.pr));
+        trail.push_str(&format!(" - PR: {:.0}", rating.average.pr));
     }
     if let Some(stats) = match_contribution {
-        header.push_str(&format!(" - MC: {:.0}", stats.average));
+        trail.push_str(&format!(" - MC: {:.0}", stats.average));
     }
 
-    header
+    ShipHeader { lead, win_rate, trail }
 }
 
 #[cfg(test)]
