@@ -158,7 +158,11 @@ pub(crate) fn bake_preview_track(
     // This costs the bake shot and hit recording it would otherwise skip.
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
-    let mut sink = TrackSink::new();
+    // A recording that never shows the countdown end keeps it all rather than nothing.
+    let mut sink = match session.battle_start_clock() {
+        Some(start) => TrackSink::new().starting_at(start),
+        None => TrackSink::new(),
+    };
     build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink, TrailRecording::Skip);
     session.finish();
 

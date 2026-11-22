@@ -47,6 +47,8 @@ pub struct TrackSink {
     stride: usize,
     /// Source frames seen since the last frame was retained.
     since_kept: usize,
+    /// Frames drawn before this clock are not fed to the track.
+    start: Option<GameClock>,
 }
 
 impl Default for TrackSink {
@@ -72,7 +74,14 @@ impl TrackSink {
             budget: budget.max(1),
             stride: 1,
             since_kept: 0,
+            start: None,
         }
+    }
+
+    /// Ignores every frame drawn before `start`, so the budget is spent on
+    /// the battle rather than the pre-battle countdown.
+    pub fn starting_at(self, start: GameClock) -> Self {
+        Self { start: Some(start), ..self }
     }
 
     #[cfg(test)]
@@ -112,6 +121,9 @@ impl TrackSink {
 
 impl FrameSink for TrackSink {
     fn push(&mut self, _index: usize, clock: GameClock, commands: Vec<DrawCommand>) {
+        if self.start.is_some_and(|start| clock.seconds() < start.seconds()) {
+            return;
+        }
         if self.since_kept.is_multiple_of(self.stride) {
             self.frames.push(commands);
             self.clocks.push(clock);
@@ -333,6 +345,16 @@ mod track_tests {
         let sink = TrackSink::new();
         let frames = sink.finish();
         assert!(frames.is_empty());
+    }
+
+    #[test]
+    fn a_track_started_at_the_battle_spends_its_budget_on_the_battle() {
+        let countdown = 30;
+        let mut sink = TrackSink::new().starting_at(GameClock(countdown as f32));
+        feed(&mut sink, countdown + PREVIEW_MAX_FRAMES);
+        assert_eq!(sink.kept_clocks()[0], GameClock(countdown as f32));
+        assert_eq!(sink.stride(), 1, "countdown frames were counted against the budget");
+        assert_eq!(sink.finish().len(), PREVIEW_MAX_FRAMES);
     }
 
     #[test]

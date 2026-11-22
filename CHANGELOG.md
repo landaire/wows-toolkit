@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Tell whether one main battery salvo can sink a ship with `salvo_kill`: trace the shell through the target's armor, place every shell where it deals the most given saturation, and give the shells that must hit at stock HP and with the target's best HP build. `ship_hit_locations` explains that a section keeps taking its own 16.5% once the hull pool is spent
 - *(wows-query)* Explain submarine dive capacity as the seconds a full battery lasts underwater and its recharge rate as seconds regained per second on the surface, rank `battery.recharge_time` (time to refill from empty) in `stat_search`, and give the dive capacity, recharge rate and recharge time with builds in `ship_stats`
 - *(toolkit)* Name the build link action in a player's menu Open Build in WoWs SB, after the site it opens
+- *(toolkit)* Start replay hover previews at the battle start rather than the pre-battle countdown
 - *(zgui)* Choose whether session stats hold a saved session or every battle since the app opened, from the replay listing's options or the Stats tab's filter bar. The saved session is kept while the other is shown, and an empty session says what fills it
 - *(zgui)* Add battles played to the session stats as the game writes them to its replays folder, and show set, added and cleared session battles in the Stats tab at once
 - *(zgui)* Add a replay opened from the game's replays folder listing to the saved session stats, as the egui app does
