@@ -1281,6 +1281,8 @@ pub struct ReconcileIndexDeps {
     pub db_pool: sqlx::SqlitePool,
     pub tokio_runtime: Arc<tokio::runtime::Runtime>,
     pub personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+    /// Holds the session games a read replay gives their battle details.
+    pub persisted: crate::tab_state::SharedPersistedState,
 }
 
 impl ReconcileIndexDeps {
@@ -1294,6 +1296,7 @@ impl ReconcileIndexDeps {
             db_pool: tab_state.db_pool.clone()?,
             tokio_runtime: Arc::clone(tab_state.tokio_runtime.as_ref()?),
             personal_rating_data: Arc::clone(&tab_state.personal_rating_data),
+            persisted: Arc::clone(&tab_state.persisted),
         })
     }
 }
@@ -1385,6 +1388,14 @@ fn index_one_replay(
     };
     replay.build_ui_report(&replay_deps);
 
+    // Results read through constants that do not fit are not stored, and neither are the
+    // details taken from them.
+    if matches!(fit, crate::data::constants::ConstantsFit::Matched)
+        && let Some(game) = crate::data::session_stats::PerGameStat::from_replay(&replay, &replay.resource_loader)
+    {
+        give_session_game_details(&deps.persisted, &game);
+    }
+
     crate::data::replay_index::index_replay_blocking(
         &deps.tokio_runtime,
         &deps.db_pool,
@@ -1397,6 +1408,20 @@ fn index_one_replay(
     );
 
     ParseOutcome::ParsedAndSent
+}
+
+/// Gives the session's game for the battle `game` was read from the battle details read, so a game
+/// recorded before they were kept takes them. The periodic save writes them to the database.
+fn give_session_game_details(
+    persisted: &crate::tab_state::TrackedPersistedState,
+    game: &crate::data::session_stats::PerGameStat,
+) {
+    // A tracked write marks the state for saving, so it is taken only for a change.
+    if !persisted.read().session_stats.holds_other_details(game) {
+        return;
+    }
+
+    persisted.write().session_stats.replace_details(game);
 }
 
 /// Which replays a reconciliation pass parses, and how hard it writes.

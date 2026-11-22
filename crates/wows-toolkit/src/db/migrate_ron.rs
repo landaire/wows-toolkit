@@ -10,7 +10,6 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
-use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
@@ -230,65 +229,14 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
     // Snapshot rows under a short-lived read guard.
     let rows: Vec<queries::SessionStatRow> = {
         let p = ctx.persisted.read();
-        p.session_stats
-            .games
-            .iter()
-            .map(|game| queries::SessionStatRow {
-                id: 0,
-                sort_key: game.sort_key.clone(),
-                ship_name: game.ship_name.clone(),
-                ship_id: game.ship_id.raw() as i64,
-                player_id: game.player_id,
-                game_time: game.game_time.clone(),
-                match_group: game.match_group.clone(),
-                damage: game.damage as i64,
-                spotting_damage: game.spotting_damage as i64,
-                frags: game.frags,
-                raw_xp: game.raw_xp,
-                base_xp: game.base_xp,
-                is_win: game.is_win,
-                is_loss: game.is_loss,
-                is_draw: game.is_draw,
-                is_div: game.is_div,
-                achievements: serde_json::to_string(&game.achievements).unwrap_or_else(|_| "[]".to_string()),
-                match_contribution: game.match_contribution.map(|mc| mc as f64),
-                match_contribution_version: game
-                    .match_contribution
-                    .map(|_| i64::from(MatchContributionVersion::CURRENT.0)),
-            })
-            .collect()
+        p.session_stats.games.iter().map(|game| game.to_shared().to_row()).collect()
     };
 
     // Use a transaction so a crash mid-save doesn't wipe the table.
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM session_stats").execute(&mut *tx).await?;
     for row in &rows {
-        sqlx::query(
-            "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
-             damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements, \
-             match_contribution, match_contribution_version) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-        )
-        .bind(&row.sort_key)
-        .bind(&row.ship_name)
-        .bind(row.ship_id)
-        .bind(row.player_id)
-        .bind(&row.game_time)
-        .bind(&row.match_group)
-        .bind(row.damage)
-        .bind(row.spotting_damage)
-        .bind(row.frags)
-        .bind(row.raw_xp)
-        .bind(row.base_xp)
-        .bind(row.is_win)
-        .bind(row.is_loss)
-        .bind(row.is_draw)
-        .bind(row.is_div)
-        .bind(&row.achievements)
-        .bind(row.match_contribution)
-        .bind(row.match_contribution_version)
-        .execute(&mut *tx)
-        .await?;
+        queries::insert_session_stat(&mut *tx, row).await?;
     }
     tx.commit().await?;
 

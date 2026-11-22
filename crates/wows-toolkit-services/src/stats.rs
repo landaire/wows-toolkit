@@ -48,6 +48,8 @@ mod tests {
     use wows_toolkit_viewmodel::stats::session::SessionScope;
 
     use super::*;
+    use wows_toolkit_viewmodel::stats::BattleDetails;
+
     use crate::settings::StartupSettings;
 
     fn game(game_time: &str, ship: u64) -> PerGameStat {
@@ -69,6 +71,7 @@ mod tests {
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 

@@ -424,6 +424,7 @@ pub fn ship_header(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stats::BattleDetails;
     use crate::stats::PerGameStat;
     use crate::stats::per_ship_performance;
 
@@ -446,6 +447,7 @@ mod tests {
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 

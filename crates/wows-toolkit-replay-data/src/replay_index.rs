@@ -7,6 +7,7 @@
 //! What is here is the pass itself: which files to walk, and reporting how
 //! far it has got.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -22,6 +23,8 @@ use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
 use wows_toolkit_config::index::unindexable::Unindexable;
+use wows_toolkit_config::queries;
+use wows_toolkit_config::queries::SessionStatKey;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::apply_sniper_flags;
@@ -31,6 +34,7 @@ use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::player_tracker::record::BattleRoster;
 use wows_toolkit_viewmodel::player_tracker::store as tracker_store;
+use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::twitch;
 
 use crate::load::GameDataCache;
@@ -128,6 +132,49 @@ pub struct IndexProgress {
     pub failed: u64,
     /// Replays this pass did not read: already indexed, or known unreadable.
     pub skipped: u64,
+    /// Saved session games whose battle details this pass rewrote.
+    pub session_games_updated: u64,
+}
+
+impl IndexProgress {
+    fn note_session_game(&mut self, update: SessionGameUpdate) {
+        match update {
+            SessionGameUpdate::Updated => self.session_games_updated += 1,
+            SessionGameUpdate::Unchanged => {}
+        }
+    }
+}
+
+/// Whether storing a read replay rewrote the battle details of the saved session's game for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionGameUpdate {
+    Updated,
+    /// The session holds no game for the battle or holds it with these details, the battle has no
+    /// trustworthy details, or the write failed.
+    Unchanged,
+}
+
+/// The battles the saved session holds, read once per pass so a replay whose battle it lacks
+/// costs no write.
+#[derive(Debug, Clone, Default)]
+pub struct SessionGames(HashSet<SessionStatKey>);
+
+impl SessionGames {
+    /// Reads them from `pool`. A session that will not read is taken as holding nothing: its games
+    /// keep the details they have until a later pass reads it.
+    pub async fn load(pool: &SqlitePool) -> Self {
+        match queries::session_stat_keys(pool).await {
+            Ok(keys) => Self(keys.into_iter().collect()),
+            Err(err) => {
+                tracing::warn!("replay index: the saved session was not read, so no session game is updated: {err}");
+                Self::default()
+            }
+        }
+    }
+
+    fn holds(&self, key: &SessionStatKey) -> bool {
+        self.0.contains(key)
+    }
 }
 
 /// Every replay under `root`, newest first.
@@ -209,7 +256,8 @@ impl IndexOneError {
     }
 }
 
-/// Parses one replay and stores what it says.
+/// Parses one replay and stores what it says, writing its battle details over the saved
+/// session's game for it as well when `session_games` holds the battle.
 ///
 /// Blocking: the parse walks the packet stream and the writes are awaited on
 /// the runtime the caller provides. Run it off whatever thread is drawing.
@@ -220,15 +268,66 @@ pub fn index_one(
     path: &Path,
     game_data: &GameDataCache,
     personal_rating: Option<&PersonalRatingData>,
+    session_games: &SessionGames,
     source_id: SourceId,
     indexed_at: Timestamp,
     mode: IndexWriteMode,
-) -> Result<(), IndexOneError> {
+) -> Result<SessionGameUpdate, IndexOneError> {
     // Rated here rather than by the parse: the parse would also rate every row
     // of the player table, which the index never reads.
     let parsed = parse_replay(path, game_data, None).map_err(IndexOneError::Parse)?;
 
-    index_parsed(runtime, pool, path, parsed.indexable, personal_rating, source_id, indexed_at, mode)
+    let read = SessionRead { session_stat: parsed.session_stat.as_ref(), session_games };
+    store_read(runtime, pool, path, parsed.indexable, read, personal_rating, source_id, indexed_at, mode)
+}
+
+/// A read replay's battle as a session game, and the battles the saved session holds.
+#[derive(Clone, Copy)]
+struct SessionRead<'a> {
+    session_stat: Option<&'a PerGameStat>,
+    session_games: &'a SessionGames,
+}
+
+/// Stores `battle` as [`index_parsed`] does, then writes the battle details of `session.session_stat`
+/// over the saved session's game for it. A session game recorded before its details were kept
+/// takes them this way.
+#[allow(clippy::too_many_arguments)]
+fn store_read(
+    runtime: &tokio::runtime::Runtime,
+    pool: &SqlitePool,
+    path: &Path,
+    battle: IndexableBattle,
+    session: SessionRead<'_>,
+    personal_rating: Option<&PersonalRatingData>,
+    source_id: SourceId,
+    indexed_at: Timestamp,
+    mode: IndexWriteMode,
+) -> Result<SessionGameUpdate, IndexOneError> {
+    // Results read through constants that do not fit are not stored, and neither are the
+    // details taken from them.
+    let trustworthy = !battle.results_pending && matches!(battle.constants_fit, ConstantsFit::Matched);
+    let details = session
+        .session_stat
+        .filter(|_| trustworthy)
+        .map(PerGameStat::to_details_row)
+        .filter(|details| session.session_games.holds(&details.key));
+    index_parsed(runtime, pool, path, battle, personal_rating, source_id, indexed_at, mode)?;
+
+    let Some(details) = details else {
+        return Ok(SessionGameUpdate::Unchanged);
+    };
+
+    // The index rows are in, so a session write that fails costs only the session's details.
+    let update = match runtime.block_on(queries::update_session_stat_details(pool, &details)) {
+        Ok(true) => SessionGameUpdate::Updated,
+        Ok(false) => SessionGameUpdate::Unchanged,
+        Err(err) => {
+            tracing::warn!("replay index: the session game of {} was not updated: {err}", path.display());
+            SessionGameUpdate::Unchanged
+        }
+    };
+
+    Ok(update)
 }
 
 /// Stores what `battle`, parsed from `path` by the caller, says, rating it
@@ -382,6 +481,10 @@ pub fn build_index(
 /// than read again, and when an overlaid install's game rewrites one, the
 /// record of the copy it replaced is dropped, so the battle is held once.
 ///
+/// A replay read whose battle the saved session holds gives that session game the battle details
+/// it reads, as [`index_one`] does. Each step reported counts the session games updated so far,
+/// so a caller whose pass ends in an error still learns of the ones written.
+///
 /// One replay's failure does not stop the pass: a directory of a few hundred
 /// replays reliably holds one the parser cannot read, and stopping there
 /// would leave the rest unindexed.
@@ -417,6 +520,7 @@ pub fn build_folder_index(
     // every pass. Keyed by path and modification time, so a replaced file is
     // tried again.
     let mut unindexable = runtime.block_on(Unindexable::load(pool));
+    let session_games = runtime.block_on(SessionGames::load(pool));
     let mut ledger_grew = false;
     // Records of a replay that is now indexed under its other spellings, and of the copies it
     // replaced in another layer.
@@ -462,11 +566,14 @@ pub fn build_folder_index(
         let stored = read.and_then(|parsed| {
             on_read(&path, &parsed);
             let write_mode = mode.write_mode();
-            index_parsed(runtime, pool, &path, parsed.indexable, personal_rating, source_id, indexed_at, write_mode)
+            let session = SessionRead { session_stat: parsed.session_stat.as_ref(), session_games: &session_games };
+            let battle = parsed.indexable;
+            store_read(runtime, pool, &path, battle, session, personal_rating, source_id, indexed_at, write_mode)
         });
         match stored {
-            Ok(()) => {
+            Ok(session_game) => {
                 progress.indexed += 1;
+                progress.note_session_game(session_game);
                 superseded.extend(spellings);
                 superseded.extend(folder.layer_copies(&path));
             }
@@ -590,6 +697,7 @@ pub fn reindex_replays(
         }
     }
     let mut unindexable = runtime.block_on(Unindexable::load(pool));
+    let session_games = runtime.block_on(SessionGames::load(pool));
     let mut ledger_changed = false;
     report(progress);
 
@@ -599,10 +707,22 @@ pub fn reindex_replays(
         }
         let path = &replay.path;
         let source_id = sources[&replay.scope];
-        match index_one(runtime, pool, path, game_data, personal_rating, source_id, Timestamp::now(), write_mode) {
+        let indexed_at = Timestamp::now();
+        match index_one(
+            runtime,
+            pool,
+            path,
+            game_data,
+            personal_rating,
+            &session_games,
+            source_id,
+            indexed_at,
+            write_mode,
+        ) {
             // A file that reads is no longer one for later passes to skip.
-            Ok(()) => {
+            Ok(session_game) => {
                 progress.indexed += 1;
+                progress.note_session_game(session_game);
                 ledger_changed |= unindexable.remove(path);
             }
             Err(err) => {
@@ -897,6 +1017,98 @@ mod tests {
                 .is_unreadable_file()
         );
         assert!(!IndexOneError::Parse(ReplayLoadError::GameData("broken dump".to_owned())).is_unreadable_file());
+    }
+
+    /// A battle the saved session recorded without its battle details takes them when its replay
+    /// is read again. A read whose results are pending or were read through constants that do not
+    /// fit gives none, a battle missing from the session games the pass read issues no write, and
+    /// a battle the session does not hold is not added to it.
+    #[test]
+    fn reading_a_replay_again_fills_the_details_of_its_session_game() {
+        use wows_toolkit_viewmodel::stats::BattleDetails;
+
+        let rt = runtime();
+        let pool = rt.block_on(wows_toolkit_config::test_pool());
+        let path = Path::new("G:/wows/replays/recorded.wowsreplay");
+        let live = query::ensure_default_source(&pool, Path::new("G:/wows/replays"), Timestamp::now());
+        let source = rt.block_on(live).expect("the live source is made");
+        let game = PerGameStat::from_report(&rated_battle().normalized, "28.12.2023 00:52:26", &|_| None)
+            .expect("the report names a self player");
+        assert_ne!(game.details, BattleDetails::default(), "the read gives details");
+        let recorded = PerGameStat { details: BattleDetails::default(), ..game.clone() };
+        let before_recording = rt.block_on(SessionGames::load(&pool));
+        rt.block_on(queries::add_session_stat(&pool, &recorded.to_row())).expect("the session game is written");
+        let session_games = rt.block_on(SessionGames::load(&pool));
+        let read = |battle: IndexableBattle, game: &PerGameStat, session_games: &SessionGames| {
+            let session = SessionRead { session_stat: Some(game), session_games };
+            let mode = IndexWriteMode::Incremental;
+            store_read(&rt, &pool, path, battle, session, None, source, Timestamp::now(), mode)
+                .expect("the battle is written")
+        };
+        let saved = || {
+            let rows = rt.block_on(queries::get_all_session_stats(&pool)).expect("the session reads");
+            rows.into_iter().map(PerGameStat::from_row).collect::<Vec<_>>()
+        };
+
+        let pending = IndexableBattle { results_pending: true, ..rated_battle() };
+        assert_eq!(read(pending, &game, &session_games), SessionGameUpdate::Unchanged, "pending results");
+        let mismatched = IndexableBattle { constants_fit: ConstantsFit::Mismatched, ..rated_battle() };
+        assert_eq!(read(mismatched, &game, &session_games), SessionGameUpdate::Unchanged, "unfit constants");
+        let unread = read(rated_battle(), &game, &before_recording);
+        assert_eq!(unread, SessionGameUpdate::Unchanged, "the pass read no session game for the battle");
+        assert_eq!(saved(), [recorded], "the session game is as recorded");
+
+        assert_eq!(read(rated_battle(), &game, &session_games), SessionGameUpdate::Updated);
+        let again = read(rated_battle(), &game, &session_games);
+        assert_eq!(again, SessionGameUpdate::Unchanged, "the game holds these details");
+        let unrecorded = PerGameStat { game_time: "29.12.2023 10:00:00".to_owned(), ..game.clone() };
+        assert_eq!(read(rated_battle(), &unrecorded, &session_games), SessionGameUpdate::Unchanged);
+        assert_eq!(saved(), [game], "the session holds its one game, with the details read");
+    }
+
+    /// An index pass over a real replay whose battle the saved session recorded without its
+    /// battle details fills them. Run with:
+    ///
+    /// ```text
+    /// WOWS_GAME_DATA=<game data directory> cargo test -p wows-toolkit-replay-data -- --ignored \
+    ///   an_index_pass_fills_the_details_of_a_session_game
+    /// ```
+    #[test]
+    #[ignore = "needs the dumped game data for build 11965230; see the doc comment for the run command"]
+    fn an_index_pass_fills_the_details_of_a_session_game() {
+        use wows_toolkit_viewmodel::stats::BattleDetails;
+
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/replays/20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+        let dump = wows_data_mgr::game_dir_for_build(11965230).expect("build 11965230 is dumped under WOWS_GAME_DATA");
+        let dump_base = dump.parent().expect("a dump sits in a dump base");
+        let game_data = GameDataCache::without_install().with_cache_dir(&dump_base.to_string_lossy());
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+        let replay = root.join(fixture.file_name().expect("the fixture is a file"));
+        std::fs::copy(&fixture, &replay).expect("the fixture is copied");
+
+        let parsed = parse_replay(&replay, &game_data, None).expect("the replay parses");
+        let game = parsed.session_stat.expect("the replay names its recording player");
+        assert!(!parsed.indexable.results_pending, "the replay carries its results");
+        assert_ne!(game.details, BattleDetails::default(), "the replay gives details");
+        let recorded = PerGameStat { details: BattleDetails::default(), ..game.clone() };
+        let rt = runtime();
+        let pool = rt.block_on(wows_toolkit_config::test_pool());
+        rt.block_on(queries::add_session_stat(&pool, &recorded.to_row())).expect("the session game is written");
+        let live = query::ensure_default_source(&pool, &root, Timestamp::now());
+        let source = rt.block_on(live).expect("the live source is made");
+
+        let cancel = AtomicBool::new(false);
+        let folder = ReplayFolder::from_dir(root);
+        let mode = IndexMode::FillGaps;
+        let built = build_folder_index(&rt, &pool, source, &folder, &game_data, None, &cancel, mode, |_| {}, |_, _| {})
+            .expect("the pass runs");
+
+        assert_eq!((built.indexed, built.session_games_updated), (1, 1));
+        let rows = rt.block_on(queries::get_all_session_stats(&pool)).expect("the session reads");
+        let saved: Vec<PerGameStat> = rows.into_iter().map(PerGameStat::from_row).collect();
+        assert_eq!(saved.iter().map(|game| game.details).collect::<Vec<_>>(), [game.details]);
     }
 
     #[test]

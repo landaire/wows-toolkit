@@ -1522,6 +1522,56 @@ mod session_stat_tests {
         assert_eq!(stat.raw_xp, 1_200);
     }
 
+    /// The figures beyond the core columns come off the same player, and a figure the results
+    /// lack is absent rather than zero.
+    #[test]
+    fn the_row_carries_the_recording_players_battle_details() {
+        let report = fixture_normalized_battle_report();
+        let stat = PerGameStat::from_report(&report, GAME_TIME, &named).expect("the report names a self player");
+
+        insta::assert_debug_snapshot!(stat.details, @r"
+        BattleDetails {
+            potential_damage: Some(
+                20000,
+            ),
+            received_damage: Some(
+                4000,
+            ),
+            hits: Some(
+                12,
+            ),
+            fires: Some(
+                1,
+            ),
+            floods: Some(
+                0,
+            ),
+            citadels: Some(
+                1,
+            ),
+            crits: Some(
+                0,
+            ),
+            distance: Some(
+                Km(
+                    12.5,
+                ),
+            ),
+            capture_points: None,
+            planes_killed: None,
+            anti_air_damage: None,
+            time_lived: None,
+            survived: Some(
+                true,
+            ),
+            torpedoes_spotted: Some(
+                0,
+            ),
+            heals: None,
+        }
+        ");
+    }
+
     /// The date is rewritten so a string sort is a chronological one; the
     /// stored `game_time` is left as the game wrote it.
     #[test]

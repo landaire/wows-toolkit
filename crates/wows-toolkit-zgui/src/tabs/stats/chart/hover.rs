@@ -3,6 +3,7 @@
 
 use rust_i18n::t;
 use wows_toolkit_viewmodel::formatting::separate_number;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::Rgb;
 use wows_toolkit_viewmodel::stats::plot::Plot;
@@ -11,6 +12,7 @@ use wows_toolkit_viewmodel::stats::plot::PlotColor;
 use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
+use wows_toolkit_viewmodel::stats::plot::ValueTone;
 
 use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::ThemeColors;
@@ -43,6 +45,8 @@ pub(super) struct HoverText {
     /// The game and when it was played. Absent for a bar, which is a ship over many games.
     pub game: Option<String>,
     pub value: String,
+    /// The account win rate band the value falls in, for a win rate.
+    pub band: Option<PersonalRatingCategory>,
 }
 
 /// The point within `radius` of `cursor` nearest it, as the egui plot picks one. Points outside
@@ -111,6 +115,7 @@ pub(super) fn hover_text(data: &PlotData, hit: PlotHit, stat: ChartableStat, loc
                 color: line.color,
                 game: Some(t!("ui.stats.chart_hover_game", number = point + 1, time = at.label).into_owned()),
                 value: value_text(stat, at.value, locale),
+                band: value_band(stat, at.value),
             })
         }
         PlotHit::Bar { index } => {
@@ -120,24 +125,67 @@ pub(super) fn hover_text(data: &PlotData, hit: PlotHit, stat: ChartableStat, loc
                 color: bar.color,
                 game: None,
                 value: value_text(stat, bar.value, locale),
+                band: value_band(stat, bar.value),
             })
         }
     }
 }
 
-/// A plotted value as the reader counts it: whole figures grouped by `locale`, a win rate as a
-/// percentage, and frags with their fraction when an average has one.
+/// A plotted value as the reader counts it: whole figures grouped by `locale`, a rate as a
+/// percentage, a distance in kilometers, a time as minutes and seconds, and a count with its
+/// fraction when an average has one.
 pub(super) fn value_text(stat: ChartableStat, value: f64, locale: &str) -> String {
     match stat {
-        ChartableStat::WinRate => format!("{value:.1}%"),
-        ChartableStat::Frags if value.fract() != 0.0 => format!("{value:.2}"),
+        ChartableStat::WinRate | ChartableStat::SurvivalRate => format!("{value:.1}%"),
+        ChartableStat::DistanceTraveled => format!("{value:.1} km"),
+        ChartableStat::TimeLived => {
+            let seconds = value.round() as i64;
+            format!("{}:{:02}", seconds / 60, seconds % 60)
+        }
+        ChartableStat::Frags
+        | ChartableStat::Hits
+        | ChartableStat::Fires
+        | ChartableStat::Floods
+        | ChartableStat::Citadels
+        | ChartableStat::Crits
+        | ChartableStat::PlanesKilled
+        | ChartableStat::TorpedoesSpotted
+        | ChartableStat::Heals
+            if value.fract() != 0.0 =>
+        {
+            format!("{value:.2}")
+        }
         ChartableStat::Damage
         | ChartableStat::SpottingDamage
         | ChartableStat::Frags
         | ChartableStat::RawXp
         | ChartableStat::BaseXp
-        | ChartableStat::PersonalRating => separate_number(value.round() as i64, Some(locale)),
+        | ChartableStat::PersonalRating
+        | ChartableStat::MatchContribution
+        | ChartableStat::PotentialDamage
+        | ChartableStat::ReceivedDamage
+        | ChartableStat::Hits
+        | ChartableStat::Fires
+        | ChartableStat::Floods
+        | ChartableStat::Citadels
+        | ChartableStat::Crits
+        | ChartableStat::CapturePoints
+        | ChartableStat::PlanesKilled
+        | ChartableStat::AntiAirDamage
+        | ChartableStat::TorpedoesSpotted
+        | ChartableStat::Heals => separate_number(value.round() as i64, Some(locale)),
     }
+}
+
+/// What colour the plot writes `stat`'s value labels in: a win rate in its account band's, as the
+/// overview colours one.
+pub(super) fn value_tone(stat: ChartableStat) -> ValueTone {
+    if stat == ChartableStat::WinRate { ValueTone::WinRateBand } else { ValueTone::Series }
+}
+
+/// The account win rate band a win rate falls in. `None` for every other statistic.
+pub(super) fn value_band(stat: ChartableStat, value: f64) -> Option<PersonalRatingCategory> {
+    (value_tone(stat) == ValueTone::WinRateBand).then(|| PersonalRatingCategory::from_win_rate(value))
 }
 
 /// Marks `hit` over a plot drawn at `layout`, as the egui plot does: rulers through it to both
@@ -274,7 +322,22 @@ mod tests {
     fn values_read_as_the_reader_counts_them() {
         assert_eq!(value_text(ChartableStat::Damage, 52_345.6, "en"), "52,346");
         assert_eq!(value_text(ChartableStat::WinRate, 54.25, "en"), "54.2%");
+        assert_eq!(value_text(ChartableStat::SurvivalRate, 100.0 / 3.0, "en"), "33.3%");
         assert_eq!(value_text(ChartableStat::Frags, 2.0, "en"), "2");
         assert_eq!(value_text(ChartableStat::Frags, 1.3333, "en"), "1.33");
+        assert_eq!(value_text(ChartableStat::Fires, 2.5, "en"), "2.50");
+        assert_eq!(value_text(ChartableStat::Hits, 37.0, "en"), "37");
+        assert_eq!(value_text(ChartableStat::DistanceTraveled, 23.456, "en"), "23.5 km");
+        assert_eq!(value_text(ChartableStat::TimeLived, 754.4, "en"), "12:34");
+        assert_eq!(value_text(ChartableStat::TimeLived, 59.6, "en"), "1:00");
+        assert_eq!(value_text(ChartableStat::PotentialDamage, 1_234_567.0, "en"), "1,234,567");
+    }
+
+    #[test]
+    fn only_a_win_rate_takes_a_band() {
+        assert_eq!(value_band(ChartableStat::WinRate, 54.0), Some(PersonalRatingCategory::VeryGood));
+        assert_eq!(value_band(ChartableStat::WinRate, 46.9), Some(PersonalRatingCategory::Bad));
+        assert_eq!(value_band(ChartableStat::SurvivalRate, 54.0), None);
+        assert_eq!(value_band(ChartableStat::Damage, 54.0), None);
     }
 }

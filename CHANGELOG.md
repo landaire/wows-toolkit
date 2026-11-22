@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Bring the Stats tab forward on its Overview after Set as Session Stats, as the egui app does
 - *(zgui)* Leave ships, single games and days out of the stats. The Stats tab's filter bar picks the ships counted and a span of days, a Matches panel lists every game with a box that keeps it or leaves it out, the Ships panel can leave a ship out, and Reset filters shows every game again. The session's choices are saved
 - *(zgui)* Drag a stats line chart's value or game axis to stretch or squeeze that axis alone, or scroll over it, as the egui chart allowed
+- *(zgui)* Chart potential damage, damage received, hits, fires, floods, citadels, critical hits, distance traveled, capture points, planes shot down, anti-air damage, time lived, survival rate, torpedoes spotted, heals and match contribution in the Stats tab, each picked from a list that narrows as its name is typed. Battles stored without these figures are left out of them rather than counted as zero. A win rate in a chart's tooltip is colored by its band
 - *(zgui)* List each plate a cast arc struck in the armor viewer's trajectory editor, with its thickness, strike angle, zone and material and what the shell did there, and say how the shell arrived. Click a salvo or shell in the incoming fire log to draw its path through the hull and list the plates it struck
 - *(zgui)* Offer the replay renderer's drawing tools and undo without a collab session, as the egui renderer does
 - *(zgui)* Fill a circle, rectangle or triangle in the replay renderer by pressing its tool's button again, as the egui toolbar does
@@ -70,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Compare the main battery guns of several ships in gun_module_matchups
 - *(egui)* Keep open folders at the top of the armor viewer ship list, the file unpacker folder tree and the grouped replay listing while their contents scroll past
 - *(zgui)* Keep open folders at the top of the armor viewer sidebar, the unpacker folder tree and the replay listing while their contents scroll past, as the egui app does
+- *(toolkit)* Re-indexing replays fills in the chart statistics of saved session battles recorded before those statistics were kept
 
 ### Bug Fixes
 

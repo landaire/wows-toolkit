@@ -16,6 +16,8 @@ use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::ShipBattleStats;
 
 /// A statistic a chart can plot.
+///
+/// Saved by variant name, so a variant is never renamed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChartableStat {
     #[default]
@@ -26,19 +28,90 @@ pub enum ChartableStat {
     BaseXp,
     WinRate,
     PersonalRating,
+    MatchContribution,
+    PotentialDamage,
+    ReceivedDamage,
+    Hits,
+    Fires,
+    Floods,
+    Citadels,
+    Crits,
+    DistanceTraveled,
+    CapturePoints,
+    PlanesKilled,
+    AntiAirDamage,
+    TimeLived,
+    SurvivalRate,
+    TorpedoesSpotted,
+    Heals,
 }
 
 impl ChartableStat {
-    /// Alphabetical, the order the egui picker lists them in.
-    pub const ALL: [ChartableStat; 7] = [
+    /// Every statistic, alphabetical by name.
+    pub const ALL: [ChartableStat; 23] = [
+        Self::AntiAirDamage,
         Self::BaseXp,
+        Self::CapturePoints,
+        Self::Citadels,
+        Self::Crits,
         Self::Damage,
+        Self::DistanceTraveled,
+        Self::Fires,
+        Self::Floods,
         Self::Frags,
+        Self::Heals,
+        Self::Hits,
+        Self::MatchContribution,
         Self::PersonalRating,
+        Self::PlanesKilled,
+        Self::PotentialDamage,
         Self::RawXp,
+        Self::ReceivedDamage,
         Self::SpottingDamage,
+        Self::SurvivalRate,
+        Self::TimeLived,
+        Self::TorpedoesSpotted,
         Self::WinRate,
     ];
+
+    /// The variant name, as the settings row saves it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Damage => "Damage",
+            Self::SpottingDamage => "SpottingDamage",
+            Self::Frags => "Frags",
+            Self::RawXp => "RawXp",
+            Self::BaseXp => "BaseXp",
+            Self::WinRate => "WinRate",
+            Self::PersonalRating => "PersonalRating",
+            Self::MatchContribution => "MatchContribution",
+            Self::PotentialDamage => "PotentialDamage",
+            Self::ReceivedDamage => "ReceivedDamage",
+            Self::Hits => "Hits",
+            Self::Fires => "Fires",
+            Self::Floods => "Floods",
+            Self::Citadels => "Citadels",
+            Self::Crits => "Crits",
+            Self::DistanceTraveled => "DistanceTraveled",
+            Self::CapturePoints => "CapturePoints",
+            Self::PlanesKilled => "PlanesKilled",
+            Self::AntiAirDamage => "AntiAirDamage",
+            Self::TimeLived => "TimeLived",
+            Self::SurvivalRate => "SurvivalRate",
+            Self::TorpedoesSpotted => "TorpedoesSpotted",
+            Self::Heals => "Heals",
+        }
+    }
+
+    /// The statistic saved as `name`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|stat| stat.name() == name)
+    }
+
+    /// A distinct position below `ALL.len()`, for tables kept per statistic.
+    pub const fn index(self) -> usize {
+        self as usize
+    }
 
     /// The catalogue key this statistic's name lives under, so both front
     /// ends name it the same way and in the reader's own language.
@@ -51,6 +124,22 @@ impl ChartableStat {
             Self::BaseXp => "stat.base_xp",
             Self::WinRate => "stat.win_rate",
             Self::PersonalRating => "stat.personal_rating",
+            Self::MatchContribution => "stat.match_contribution",
+            Self::PotentialDamage => "ui.replay.column.potential_damage",
+            Self::ReceivedDamage => "ui.replay.column.received_damage",
+            Self::Hits => "ui.replay.column.hits",
+            Self::Fires => "ui.replay.column.fires",
+            Self::Floods => "ui.replay.column.floods",
+            Self::Citadels => "ui.replay.column.citadels",
+            Self::Crits => "ui.replay.column.crits",
+            Self::DistanceTraveled => "ui.replay.column.distance_traveled",
+            Self::CapturePoints => "stat.capture_points",
+            Self::PlanesKilled => "stat.planes_shot_down",
+            Self::AntiAirDamage => "stat.anti_air_damage",
+            Self::TimeLived => "ui.replay.column.time_lived",
+            Self::SurvivalRate => "stat.survival_rate",
+            Self::TorpedoesSpotted => "stat.torpedoes_spotted",
+            Self::Heals => "ui.replay.column.heals",
         }
     }
 
@@ -67,37 +156,69 @@ impl ChartableStat {
 
     /// Whether a single game carries this statistic.
     ///
-    /// A win rate over one game is either 0 or 100, which plots as noise, so
+    /// A rate over one game is either 0 or 100, which plots as noise, so
     /// the line chart has nothing to draw for it; the bar chart, comparing
     /// ships over many games, does.
     pub fn is_per_game(self) -> bool {
-        !matches!(self, Self::WinRate | Self::PersonalRating)
+        !matches!(self, Self::WinRate | Self::SurvivalRate | Self::PersonalRating)
     }
 
-    /// This game's value, absent when the statistic is not a per-game one.
+    /// Whether the value is a percentage of games.
+    pub fn is_rate(self) -> bool {
+        matches!(self, Self::WinRate | Self::SurvivalRate)
+    }
+
+    /// This game's value. Absent when the statistic is not a per-game one, and when the game did
+    /// not record it: match contribution outside Random and Ranked, or a figure an older row or
+    /// replay lacks.
     pub fn of_game(self, game: &PerGameStat) -> Option<f64> {
+        let details = &game.details;
+        let count = |value: Option<u64>| value.map(|value| value as f64);
+
         match self {
             Self::Damage => Some(game.damage as f64),
             Self::SpottingDamage => Some(game.spotting_damage as f64),
             Self::Frags => Some(game.frags as f64),
             Self::RawXp => Some(game.raw_xp as f64),
             Self::BaseXp => Some(game.base_xp as f64),
-            Self::WinRate | Self::PersonalRating => None,
+            Self::MatchContribution => {
+                game.match_contribution.filter(|_| game.rating_scope().is_rated()).map(|mc| mc as f64)
+            }
+            Self::PotentialDamage => count(details.potential_damage),
+            Self::ReceivedDamage => count(details.received_damage),
+            Self::Hits => count(details.hits),
+            Self::Fires => count(details.fires),
+            Self::Floods => count(details.floods),
+            Self::Citadels => count(details.citadels),
+            Self::Crits => count(details.crits),
+            Self::DistanceTraveled => details.distance.map(|km| f64::from(km.value())),
+            Self::CapturePoints => count(details.capture_points),
+            Self::PlanesKilled => count(details.planes_killed),
+            Self::AntiAirDamage => count(details.anti_air_damage),
+            Self::TimeLived => details.time_lived.map(|time| time.as_secs_f64()),
+            Self::TorpedoesSpotted => count(details.torpedoes_spotted),
+            Self::Heals => details.heals.map(f64::from),
+            Self::WinRate | Self::SurvivalRate | Self::PersonalRating => None,
         }
     }
 
-    /// This ship's value over the games it played, absent when the aggregate
-    /// has no games to average. Win rate counts its Random and Ranked games
-    /// alone, and is absent without one.
+    /// What one game adds to this statistic's mean: its value, or for survival rate 100 for a
+    /// game survived and 0 for one not, so the mean is the percentage survived. Win rate and
+    /// personal rating are not means of per-game figures, so have none.
+    pub(super) fn tally(self, game: &PerGameStat) -> Option<f64> {
+        match self {
+            Self::SurvivalRate => game.details.survived.map(|survived| if survived { 100.0 } else { 0.0 }),
+            _ => self.of_game(game),
+        }
+    }
+
+    /// This ship's value over the games it played, absent when no game recorded it. Win rate
+    /// counts its Random and Ranked games alone, and is absent without one.
     pub fn of_ship(self, info: &PerformanceInfo) -> Option<f64> {
         match self {
-            Self::Damage => info.avg_damage(),
-            Self::SpottingDamage => info.avg_spotting_damage(),
-            Self::Frags => info.avg_frags(),
-            Self::RawXp => info.avg_xp(),
-            Self::BaseXp => info.avg_win_adjusted_xp(),
             Self::WinRate => info.rated_win_rate(),
             Self::PersonalRating => None,
+            _ => info.mean(self),
         }
     }
 }
@@ -341,7 +462,9 @@ pub fn line_chart_series(
 /// Win rate counts the wins so far over the games so far, and personal rating
 /// is recomputed from everything played so far rather than averaged, since a
 /// rating is not the mean of the ratings it is made of. Both count Random and
-/// Ranked games alone: any other game adds no point and moves neither.
+/// Ranked games alone: any other game adds no point and moves neither. Every
+/// other statistic, survival rate included, is the mean of the games so far
+/// that recorded it; a game that did not adds no point and moves nothing.
 fn accumulated_points(
     games: &[&PerGameStat],
     stat: ChartableStat,
@@ -387,12 +510,13 @@ fn accumulated_points(
         }
         _ => {
             let mut sum = 0.0;
+            let mut counted = 0u32;
             games
                 .iter()
-                .enumerate()
-                .filter_map(|(index, game)| {
-                    sum += stat.of_game(game)?;
-                    Some(SeriesPoint { label: game.game_time.clone(), value: sum / (index + 1) as f64 })
+                .filter_map(|game| {
+                    sum += stat.tally(game)?;
+                    counted += 1;
+                    Some(SeriesPoint { label: game.game_time.clone(), value: sum / f64::from(counted) })
                 })
                 .collect()
         }
@@ -505,6 +629,7 @@ pub fn value_axis_label(stat: ChartableStat, mode: ChartMode, running: bool, com
 
 #[cfg(test)]
 mod tests {
+    use super::super::BattleDetails;
     use super::super::PerGameStat;
     use super::super::per_ship_performance;
     use super::ChartMode;
@@ -568,6 +693,7 @@ mod tests {
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 
@@ -783,10 +909,89 @@ mod tests {
 
     #[test]
     fn every_stat_and_mode_is_labelled() {
-        assert_eq!(ChartableStat::ALL.len(), 7);
-        assert!(ChartableStat::ALL.iter().all(|stat| !stat.label().is_empty()));
+        assert!(
+            ChartableStat::ALL.iter().all(|stat| !stat.label().ends_with(stat.translation_key())),
+            "every statistic has a translated name"
+        );
         assert_eq!(ChartMode::ALL.len(), 2);
         assert!(ChartMode::ALL.iter().all(|mode| !mode.label().is_empty()));
+    }
+
+    /// The name a picker passes around is the one the settings row saves, and each statistic
+    /// has its own slot in a table kept per statistic.
+    #[test]
+    fn every_stat_is_listed_once_under_its_saved_name() {
+        for stat in ChartableStat::ALL {
+            let saved = serde_json::to_string(&stat).expect("a statistic serializes");
+            assert_eq!(saved, format!("\"{}\"", stat.name()));
+            assert_eq!(ChartableStat::from_name(stat.name()), Some(stat));
+        }
+
+        let mut slots: Vec<usize> = ChartableStat::ALL.iter().map(|stat| stat.index()).collect();
+        slots.sort_unstable();
+        assert_eq!(slots, (0..ChartableStat::ALL.len()).collect::<Vec<_>>());
+    }
+
+    /// A game that did not record a figure leaves a gap in that statistic rather than a zero: no
+    /// point on the line, no weight in the running mean or the ship's average.
+    #[test]
+    fn a_game_without_a_figure_is_left_out_of_its_series() {
+        let recorded = |time: &str, fires: u64| PerGameStat {
+            details: BattleDetails { fires: Some(fires), ..BattleDetails::default() },
+            ..game("Yamato", time, 1, 0, true)
+        };
+        let games = [recorded("t1", 2), game("Yamato", "t2", 1, 0, true), recorded("t3", 4)];
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+
+        let line = line_series(&refs, ChartableStat::Fires);
+        assert_eq!(line.iter().map(|point| point.label.as_str()).collect::<Vec<_>>(), ["t1", "t3"]);
+
+        let running = super::line_chart_series(&refs, ChartableStat::Fires, &[1u64.into()], None, true, false);
+        let values: Vec<f64> = running[0].points.iter().map(|point| point.value).collect();
+        assert_eq!(values, [2.0, 3.0], "the mean of the two games that recorded fires");
+
+        let ships = per_ship_performance(&refs);
+        assert_eq!(bar_series(&ships, ChartableStat::Fires)[0].value, 3.0);
+        assert!(bar_series(&ships, ChartableStat::Floods).is_empty(), "no game recorded floods");
+    }
+
+    /// Survival is 0 or 100 over one game, so like win rate it is plotted as the rate so far, over
+    /// the games that say whether the ship survived.
+    #[test]
+    fn survival_rate_is_the_share_of_games_survived_so_far() {
+        let ended = |time: &str, survived: Option<bool>| PerGameStat {
+            details: BattleDetails { survived, ..BattleDetails::default() },
+            ..game("Yamato", time, 1, 0, true)
+        };
+        let games = [ended("t1", Some(true)), ended("t2", None), ended("t3", Some(false)), ended("t4", Some(false))];
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+
+        assert!(line_series(&refs, ChartableStat::SurvivalRate).is_empty(), "no per-game line");
+        let running = super::line_chart_series(&refs, ChartableStat::SurvivalRate, &[1u64.into()], None, true, false);
+        let points: Vec<(&str, f64)> =
+            running[0].points.iter().map(|point| (point.label.as_str(), point.value)).collect();
+        assert_eq!(points, [("t1", 100.0), ("t3", 50.0), ("t4", 100.0 / 3.0)]);
+
+        let ships = per_ship_performance(&refs);
+        assert_eq!(bar_series(&ships, ChartableStat::SurvivalRate)[0].value, 100.0 / 3.0);
+    }
+
+    /// Match contribution rates Random and Ranked battles alone, so another battle's stored
+    /// figure is not plotted.
+    #[test]
+    fn match_contribution_is_plotted_for_rated_games_alone() {
+        let rated = PerGameStat { match_contribution: Some(1_200), ..game("Yamato", "t1", 1, 0, true) };
+        let coop = PerGameStat {
+            match_contribution: Some(900),
+            match_group: "cooperative".to_string(),
+            ..game("Yamato", "t2", 1, 0, true)
+        };
+        let games = [rated, coop];
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+
+        assert_eq!(line_series(&refs, ChartableStat::MatchContribution).len(), 1);
+        let ships = per_ship_performance(&refs);
+        assert_eq!(bar_series(&ships, ChartableStat::MatchContribution)[0].value, 1_200.0);
     }
 
     #[test]

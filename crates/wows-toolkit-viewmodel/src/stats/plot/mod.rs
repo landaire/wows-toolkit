@@ -14,6 +14,7 @@ use rust_i18n::t;
 use super::chart::ChartBar;
 use super::chart::ChartSeries;
 use super::chart::Rgb;
+use crate::personal_rating::PersonalRatingCategory;
 
 /// Room left for the value ticks, the game numbers, and the axis titles.
 const LEFT_GUTTER: f32 = 64.0;
@@ -124,6 +125,58 @@ pub struct PlotColors {
     pub axis: PlotColor,
     pub grid: PlotColor,
     pub text: PlotColor,
+    pub bands: BandColors,
+}
+
+/// The text colour of each account win rate band.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BandColors([PlotColor; PersonalRatingCategory::ALL.len()]);
+
+impl BandColors {
+    /// `color(band)` for every band.
+    pub fn from_fn(color: impl FnMut(PersonalRatingCategory) -> PlotColor) -> Self {
+        Self(PersonalRatingCategory::ALL.map(color))
+    }
+
+    /// `color(band)` for every band, or `None` when any band has none.
+    pub fn try_from_fn(mut color: impl FnMut(PersonalRatingCategory) -> Option<PlotColor>) -> Option<Self> {
+        let mut colors = [PlotColor::new(0.0, 0.0, 0.0, 0.0); PersonalRatingCategory::ALL.len()];
+        for (slot, band) in colors.iter_mut().zip(PersonalRatingCategory::ALL) {
+            *slot = color(band)?;
+        }
+
+        Some(Self(colors))
+    }
+
+    /// The colour of the band `rate`, a percentage, falls in.
+    pub fn of_win_rate(&self, rate: f64) -> PlotColor {
+        self.0[band_slot(PersonalRatingCategory::from_win_rate(rate))]
+    }
+}
+
+/// Where `band` sits in [`PersonalRatingCategory::ALL`].
+const fn band_slot(band: PersonalRatingCategory) -> usize {
+    match band {
+        PersonalRatingCategory::Bad => 0,
+        PersonalRatingCategory::BelowAverage => 1,
+        PersonalRatingCategory::Average => 2,
+        PersonalRatingCategory::Good => 3,
+        PersonalRatingCategory::VeryGood => 4,
+        PersonalRatingCategory::Great => 5,
+        PersonalRatingCategory::Unicum => 6,
+        PersonalRatingCategory::SuperUnicum => 7,
+    }
+}
+
+/// What colour a plot writes its value labels in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ValueTone {
+    /// The colour of the line or bar a value belongs to.
+    #[default]
+    Series,
+    /// The colour of the account win rate band the value falls in, for values that are Random
+    /// and Ranked win rates.
+    WinRateBand,
 }
 
 /// The part of one axis a plot shows, in data units.
@@ -373,6 +426,7 @@ pub struct Plot<'a> {
     pub x_label: &'a str,
     pub y_label: &'a str,
     pub show_values: bool,
+    pub value_tone: ValueTone,
     pub view: PlotView,
 }
 
@@ -425,7 +479,7 @@ pub fn draw(plot: &Plot<'_>, bounds: PlotRect, colors: PlotColors, canvas: &mut 
 
     canvas.clipped(area, &mut |canvas| {
         if plot.bars.is_empty() {
-            paint_lines(plot, &frame, canvas);
+            paint_lines(plot, &frame, colors, canvas);
         } else {
             paint_bars(plot, &frame, colors, canvas);
         }
@@ -641,7 +695,7 @@ fn paint_axes(area: PlotRect, color: PlotColor, canvas: &mut dyn PlotCanvas) {
     canvas.fill(PlotRect::new(area.x, area.y, 1.0, area.height), color, 0.0);
 }
 
-fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
+fn paint_lines(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
     let (line_width, point_radius, opacity) = match plot.series.len() {
         0..=7 => (1.5, POINT_RADIUS, 1.0),
         8..=15 => (1.2, 2.25, 0.82),
@@ -661,7 +715,7 @@ fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
                 let label = format_value(point.value);
                 let width = canvas.measure(&label, TICK_FONT);
                 let origin = PlotPoint::new(position.x - width * 0.5, position.y - (TICK_FONT + 6.0));
-                canvas.text(origin, &label, TICK_FONT, color);
+                canvas.text(origin, &label, TICK_FONT, value_color(plot, colors, point.value, color));
             }
         }
     }
@@ -687,8 +741,16 @@ fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: &mut d
             let label = format_value(bar.value);
             let label_width = canvas.measure(&label, TICK_FONT);
             let origin = PlotPoint::new(centre - label_width * 0.5, top - (TICK_FONT + 4.0));
-            canvas.text(origin, &label, TICK_FONT, PlotColor::from(bar.color));
+            canvas.text(origin, &label, TICK_FONT, value_color(plot, colors, bar.value, PlotColor::from(bar.color)));
         }
+    }
+}
+
+/// The colour `value`'s label is written in, beside a mark drawn in `mark`.
+fn value_color(plot: &Plot<'_>, colors: PlotColors, value: f64, mark: PlotColor) -> PlotColor {
+    match plot.value_tone {
+        ValueTone::Series => mark,
+        ValueTone::WinRateBand => colors.bands.of_win_rate(value),
     }
 }
 
@@ -791,6 +853,7 @@ mod tests {
         fills: Vec<PlotRect>,
         lines: Vec<Vec<PlotPoint>>,
         texts: Vec<String>,
+        text_colors: Vec<PlotColor>,
     }
 
     impl PlotCanvas for Recorder {
@@ -806,8 +869,9 @@ mod tests {
             text.chars().count() as f32 * 6.0
         }
 
-        fn text(&mut self, _origin: PlotPoint, text: &str, _size: f32, _color: PlotColor) {
+        fn text(&mut self, _origin: PlotPoint, text: &str, _size: f32, color: PlotColor) {
             self.texts.push(text.to_string());
+            self.text_colors.push(color);
         }
 
         fn clipped(&mut self, _area: PlotRect, body: &mut dyn FnMut(&mut dyn PlotCanvas)) {
@@ -817,7 +881,7 @@ mod tests {
 
     fn grey() -> PlotColors {
         let grey = PlotColor::new(0.6, 0.6, 0.6, 1.0);
-        PlotColors { axis: grey, grid: grey, text: grey }
+        PlotColors { axis: grey, grid: grey, text: grey, bands: BandColors::from_fn(|_| grey) }
     }
 
     fn series(values: &[f64]) -> ChartSeries {
@@ -853,7 +917,15 @@ mod tests {
     /// A three-game line drawn into `bounds` through `view`, and where it went.
     fn drawn(view: PlotView, bounds: PlotRect) -> (Recorder, PlotLayout) {
         let lines = [series(&[1_000.0, 3_000.0, 2_000.0])];
-        let plot = Plot { series: &lines, bars: &[], x_label: "Game", y_label: "Damage", show_values: false, view };
+        let plot = Plot {
+            series: &lines,
+            bars: &[],
+            x_label: "Game",
+            y_label: "Damage",
+            show_values: false,
+            value_tone: ValueTone::Series,
+            view,
+        };
         let mut canvas = Recorder::default();
         let layout = draw(&plot, bounds, grey(), &mut canvas).expect("the bounds hold a plot");
 
@@ -1096,6 +1168,7 @@ mod tests {
             x_label: "Game",
             y_label: "Damage",
             show_values: true,
+            value_tone: ValueTone::Series,
             view: PlotView::default(),
         };
         let bounds = PlotRect::new(0.0, 0.0, 600.0, 300.0);
@@ -1125,6 +1198,7 @@ mod tests {
             x_label: "Ship",
             y_label: "Damage",
             show_values: false,
+            value_tone: ValueTone::Series,
             view: PlotView::default(),
         };
         let bounds = PlotRect::new(0.0, 0.0, 600.0, 300.0);
@@ -1139,6 +1213,38 @@ mod tests {
         assert!(drawn[0].height > drawn[1].height * 1.9, "heights follow the values");
         assert!(canvas.texts.iter().any(|text| text == "Shima"));
         assert!(canvas.lines.is_empty(), "a bar chart draws no line");
+    }
+
+    /// A win rate's value label takes its band's colour rather than its bar's, so a plotted win
+    /// rate reads as the rest of the app colours one.
+    #[test]
+    fn win_rate_values_are_written_in_their_band_colour() {
+        let band_color = |band: PersonalRatingCategory| PlotColor::new(band_slot(band) as f32 / 10.0, 0.0, 0.0, 1.0);
+        let colors = PlotColors { bands: BandColors::from_fn(band_color), ..grey() };
+        let bars = [
+            ChartBar { label: "Yamato".into(), value: 61.0, color: Rgb { r: 1, g: 2, b: 3 } },
+            ChartBar { label: "Shima".into(), value: 47.5, color: Rgb { r: 3, g: 2, b: 1 } },
+        ];
+        let plot = Plot {
+            series: &[],
+            bars: &bars,
+            x_label: "Ship",
+            y_label: "Win rate",
+            show_values: true,
+            value_tone: ValueTone::WinRateBand,
+            view: PlotView::default(),
+        };
+        let mut canvas = Recorder::default();
+
+        draw(&plot, PlotRect::new(0.0, 0.0, 600.0, 300.0), colors, &mut canvas);
+
+        let color_of = |label: &str| {
+            let at = canvas.texts.iter().position(|text| text == label).expect("the label is drawn");
+            canvas.text_colors[at]
+        };
+        assert_eq!(color_of(&format_value(61.0)), band_color(PersonalRatingCategory::Unicum));
+        assert_eq!(color_of(&format_value(47.5)), band_color(PersonalRatingCategory::BelowAverage));
+        assert_eq!(color_of("Yamato"), grey().text, "a bar's name keeps the text colour");
     }
 
     #[test]

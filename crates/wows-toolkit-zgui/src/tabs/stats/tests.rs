@@ -18,6 +18,7 @@ use rust_i18n::t;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
+use wows_toolkit_viewmodel::stats::BattleDetails;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSettings;
@@ -78,6 +79,7 @@ fn sample_games() -> Vec<PerGameStat> {
                 match_group: if index % 5 == 0 { "ranked" } else { "pvp" }.to_owned(),
                 achievements: Vec::new(),
                 match_contribution: Some(500 + damage as i64 / 120),
+                details: BattleDetails::default(),
             }
         })
         .collect()
@@ -358,9 +360,26 @@ fn adding_a_chart_opens_another_panel_on_the_asked_statistic() {
     assert!(window.by_role_and_label(Role::Tab, &frags_title).is_none(), "one damage chart is open to begin with");
 
     click(&mut window, "stats-add-chart");
-    click(&mut window, &format!("stats-add-chart-stat-{}", ChartableStat::Frags as usize));
+    click(&mut window, &format!("stats-add-chart-{}", ChartableStat::Frags.name()));
 
     assert!(window.by_role_and_label(Role::Tab, &frags_title).is_some(), "the new panel plots frags");
+}
+
+/// Typing narrows the statistics a chart can be added on, and a rate opens as its running
+/// figure, the only line it has.
+#[test]
+fn adding_a_chart_by_typing_part_of_its_name() {
+    let mut window = open_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
+    let survival = ChartSettings { stat: ChartableStat::SurvivalRate, running: true, ..ChartSettings::default() };
+
+    click(&mut window, "stats-add-chart");
+    let typed: String = ChartableStat::SurvivalRate.label().chars().take(4).collect();
+    window.type_text(&typed);
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("stats-add-chart-Damage").is_none(), "Damage does not match");
+    click(&mut window, &format!("stats-add-chart-{}", ChartableStat::SurvivalRate.name()));
+
+    assert!(window.by_role_and_label(Role::Tab, &chart_title(&survival)).is_some(), "the new panel plots survival");
 }
 
 #[test]
@@ -442,11 +461,15 @@ fn saved_chart_stats() -> Option<Vec<ChartableStat>> {
     })
 }
 
-/// Adds a chart whose settings row the database refuses, and lets the write fail.
+/// Adds a chart whose settings row the database refuses, and lets the write fail. The statistic
+/// is typed first: its option sits below the part of the list that shows without scrolling.
 fn fail_a_chart_save(window: &mut HeadlessWindow) {
     refuse_chart_rows_naming(ChartableStat::SpottingDamage, true);
     click(window, "stats-add-chart");
-    click(window, &format!("stats-add-chart-stat-{}", ChartableStat::SpottingDamage as usize));
+    let typed: String = ChartableStat::SpottingDamage.label().chars().take(4).collect();
+    window.type_text(&typed);
+    window.advance(Duration::from_millis(300));
+    click(window, &format!("stats-add-chart-{}", ChartableStat::SpottingDamage.name()));
     settle_in_real_time(window);
 }
 
@@ -484,6 +507,9 @@ fn a_chart_tab_names_its_statistic_and_how_it_is_plotted() {
     assert_eq!(chart_title(&bar), t!("stat.avg_prefix", name = damage));
     let win_rate = ChartSettings { mode: ChartMode::Bar, stat: ChartableStat::WinRate, ..ChartSettings::default() };
     assert_eq!(chart_title(&win_rate), ChartableStat::WinRate.label(), "a win rate is not averaged twice");
+    let survival =
+        ChartSettings { mode: ChartMode::Bar, stat: ChartableStat::SurvivalRate, ..ChartSettings::default() };
+    assert_eq!(chart_title(&survival), ChartableStat::SurvivalRate.label(), "nor is a survival rate");
 }
 
 #[test]
@@ -635,6 +661,7 @@ fn yamato_at(game_time: &str, damage: u64, win: bool) -> PerGameStat {
         match_group: "pvp".to_owned(),
         achievements: Vec::new(),
         match_contribution: None,
+        details: BattleDetails::default(),
     }
 }
 

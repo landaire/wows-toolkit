@@ -57,6 +57,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartId;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSettings;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
+use wows_toolkit_viewmodel::stats::chart::selectable_stats;
 use wows_toolkit_viewmodel::stats::filter_games;
 use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
@@ -115,14 +116,11 @@ use zgui_ui::DropdownMenuProps;
 use zgui_ui::DropdownMenuTriggerProps;
 use zgui_ui::LabelProps;
 use zgui_ui::MenuCheckboxItemProps;
-use zgui_ui::MenuItemProps;
 use zgui_ui::MenuLabelProps;
 use zgui_ui::SeparatorOrientation;
 use zgui_ui::SeparatorProps;
 use zgui_ui::ToggleProps;
 use zgui_ui::ToggleSize;
-use zgui_ui_icons::IconProps;
-use zgui_ui_icons::set::mark::PLUS;
 use zgui_ui_primitives::Binding;
 
 use crate::icons::AppIconProps;
@@ -136,6 +134,7 @@ use crate::shell::tabs::PanelToggle;
 use crate::shell::tabs::TabChrome;
 use crate::shell::tabs::panel_side_name;
 use crate::tabs::dock_menu_strings;
+use crate::tabs::stats::chart::StatPickerProps;
 use crate::tabs::stats::chart::StatsChartProps;
 use crate::tabs::stats::filters::DateFilterProps;
 use crate::tabs::stats::filters::ShipFilterProps;
@@ -196,6 +195,9 @@ const CSS: &str = css!(
         flex-direction: row;
         align-items: center;
         gap: 8px;
+    }
+    .wt-stats__add-chart {
+        width: 180px;
     }
     .wt-stats__rule {
         flex: none;
@@ -664,11 +666,14 @@ pub fn StatsBody(
         })
     };
 
+    // A rate is meaningless over one game, so a chart opened on one plots its running figure.
     let add_chart = move |stat: ChartableStat| {
         persistence.user_modified.set_value(true);
         persistence.enabled.set_value(true);
-        open_chart(ChartSettings { stat, ..ChartSettings::default() }, DockTarget::Region(DockRegion::Right));
+        let settings = ChartSettings { stat, running: !stat.is_per_game(), ..ChartSettings::default() };
+        open_chart(settings, DockTarget::Region(DockRegion::Right));
     };
+    let rated = Signal::derive(move || personal_rating.with(Option::is_some));
 
     let charts_error_view = move || {
         charts_error.get().map(|error| {
@@ -859,7 +864,7 @@ pub fn StatsBody(
                 {left_out_games}
                 {reset_filters}
                 Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
-                AddChartMenu(add = UnsyncCallback::new(add_chart))
+                AddChartMenu(add = UnsyncCallback::new(add_chart), rated = rated)
                 box(class = "wt-stats__spacer") {}
                 {(scope == StatsScope::Sample).then(|| view! { text(class = "wt-stats__dim", attr:data-testid = "stats-sample-notice") {{t!("ui.stats.sample_notice").into_owned()}} }.into_view())}
                 {charts_error_view}
@@ -1059,7 +1064,7 @@ fn chart_id(panel: &PanelId) -> Option<ChartId> {
 fn chart_title(settings: &ChartSettings) -> String {
     let stat = settings.stat.label();
     match settings.mode {
-        ChartMode::Bar if settings.stat != ChartableStat::WinRate => t!("stat.avg_prefix", name = stat).into_owned(),
+        ChartMode::Bar if !settings.stat.is_rate() => t!("stat.avg_prefix", name = stat).into_owned(),
         ChartMode::Bar => stat,
         ChartMode::Line if settings.combined => format!("{stat} {}", t!("chart.combined_suffix")),
         ChartMode::Line if settings.running => format!("{stat} {}", t!("chart.rolling_average_suffix")),
@@ -1503,22 +1508,21 @@ fn mode_item(filters: RwSignal<StatsFilters>, change: UnsyncCallback<Option<Stri
     }
 }
 
-/// The Add-chart control: a menu of statistics, so the chart opens on the one asked for.
+/// The Add-chart control: a search over the statistics, so the chart opens on the one picked.
+///
+/// Offers what a new line chart can plot, with a rate as its running figure.
 #[component]
-fn AddChartMenu(add: UnsyncCallback<ChartableStat>) -> impl IntoView {
+fn AddChartMenu(add: UnsyncCallback<ChartableStat>, rated: Signal<bool>) -> impl IntoView {
+    let locale = Services::current().locale;
+    let stats = Signal::derive_local(move || selectable_stats(ChartMode::Line, true, false, rated.get()));
+    let hint = Signal::derive_local(move || {
+        locale.track();
+        t!("ui.stats.add_chart").into_owned()
+    });
+
     view! {
-        DropdownMenu {
-            DropdownMenuTrigger(size = ButtonSize::Sm, variant = ButtonVariant::Outline, attr:data-testid = "stats-add-chart") {
-                Icon(icon = PLUS)
-                text {{t!("ui.stats.add_chart").into_owned()}}
-            }
-            DropdownMenuContent(attr:data-testid = "stats-add-chart-menu") {
-                for stat in move || ChartableStat::ALL.to_vec(), key = |stat: &ChartableStat| *stat as usize {
-                    MenuItem(on_select = UnsyncCallback::new(move |()| add.run(stat)), attr:data-testid = format!("stats-add-chart-stat-{}", stat as usize)) {
-                        {t!(stat.translation_key()).into_owned()}
-                    }
-                }
-            }
+        box(class = "wt-stats__add-chart") {
+            StatPicker(stats = stats, current = hint, label = "ui.stats.add_chart", pick = add, test_id = "stats-add-chart", locale = locale)
         }
     }
 }

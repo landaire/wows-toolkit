@@ -23,9 +23,13 @@ pub mod record;
 
 pub mod session;
 
+use std::time::Duration;
+
 use serde::Deserialize;
 use serde::Serialize;
+use wows_core::units::Km;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replay_insights::battle_report::NormalizedPlayer;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 use wowsunpack::rating_scope::RatingScope;
@@ -34,8 +38,11 @@ use crate::personal_rating::PersonalRatingCategory;
 use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::PersonalRatingResult;
 use crate::personal_rating::ShipBattleStats;
+use crate::stats::chart::ChartableStat;
 use crate::stats::record::RecordBreakdown;
 use wows_replay_insights::match_contribution::MatchContributionVersion;
+use wows_toolkit_config::queries::SessionStatDetails;
+use wows_toolkit_config::queries::SessionStatKey;
 use wows_toolkit_config::queries::SessionStatRow;
 
 /// One achievement earned, as the session rows store it.
@@ -106,7 +113,7 @@ pub fn match_group_display_name(match_group: &str) -> &str {
 }
 
 /// One recorded game.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PerGameStat {
     pub ship_name: String,
     pub ship_id: GameParamId,
@@ -128,6 +135,93 @@ pub struct PerGameStat {
     /// The recording player's match contribution, in whole points. `None` when the
     /// game was not rated, or was rated by an older formula.
     pub match_contribution: Option<i64>,
+    pub details: BattleDetails,
+}
+
+/// Figures a battle's results carry beyond the ones every stored game has.
+///
+/// Each is `None` when the battle did not record it, which is also every figure of a row stored
+/// before these were kept. The default is that row: nothing recorded.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BattleDetails {
+    pub potential_damage: Option<u64>,
+    pub received_damage: Option<u64>,
+    /// The results' relevant hits: main battery for a ship, rockets and skip bombs for a carrier.
+    pub hits: Option<u64>,
+    pub fires: Option<u64>,
+    pub floods: Option<u64>,
+    pub citadels: Option<u64>,
+    pub crits: Option<u64>,
+    pub distance: Option<Km>,
+    /// Victory points earned at capture points, in the server's units: capturing, holding,
+    /// blocking, resetting and holding at the end together.
+    pub capture_points: Option<u64>,
+    /// Aircraft of every kind shot down, by the ship's own anti-air or its fighters.
+    pub planes_killed: Option<u64>,
+    pub anti_air_damage: Option<u64>,
+    pub time_lived: Option<Duration>,
+    pub survived: Option<bool>,
+    pub torpedoes_spotted: Option<u64>,
+    /// Repair Party charges used. `None` for a ship that carries none.
+    pub heals: Option<u32>,
+}
+
+impl BattleDetails {
+    /// The figures `player`'s results carry.
+    pub fn from_player(player: &NormalizedPlayer) -> Self {
+        let results = player.server_results.as_ref();
+
+        Self {
+            potential_damage: player.potential_damage(),
+            received_damage: results.map(|results| results.received_damage),
+            hits: results.and_then(|results| results.hits),
+            fires: results.and_then(|results| results.fires_dealt),
+            floods: results.and_then(|results| results.floods_dealt),
+            citadels: results.and_then(|results| results.citadels_dealt),
+            crits: results.and_then(|results| results.crits_dealt),
+            distance: results.and_then(|results| results.distance_traveled).map(|km| Km::new(km as f32)),
+            capture_points: results.and_then(|results| results.objective_points).map(|points| {
+                (points.capture + points.hold + points.block + points.drop + points.battle_end).round() as u64
+            }),
+            planes_killed: results.and_then(|results| results.planes_killed).map(|planes| {
+                planes.rocket_planes
+                    + planes.bombers
+                    + planes.torpedo_bombers
+                    + planes.skip_bombers
+                    + planes.consumable_fighters
+                    + planes.scouts
+            }),
+            anti_air_damage: results.and_then(|results| results.anti_air_damage),
+            time_lived: player.time_lived_secs.map(Duration::from_secs),
+            survived: player.survived,
+            torpedoes_spotted: results.and_then(|results| results.torpedoes_spotted),
+            heals: player.heal_count,
+        }
+    }
+
+    /// Read off a stored row. A negative count, which only a damaged row could hold, reads as
+    /// not recorded.
+    fn from_row(row: &SessionStatRow) -> Self {
+        let count = |value: Option<i64>| value.and_then(|value| u64::try_from(value).ok());
+
+        Self {
+            potential_damage: count(row.potential_damage),
+            received_damage: count(row.received_damage),
+            hits: count(row.hits),
+            fires: count(row.fires),
+            floods: count(row.floods),
+            citadels: count(row.citadels),
+            crits: count(row.crits),
+            distance: row.distance_km.map(|km| Km::new(km as f32)),
+            capture_points: count(row.capture_points),
+            planes_killed: count(row.planes_killed),
+            anti_air_damage: count(row.anti_air_damage),
+            time_lived: count(row.time_lived_secs).map(Duration::from_secs),
+            survived: row.survived,
+            torpedoes_spotted: count(row.torpedoes_spotted),
+            heals: row.heals.and_then(|heals| u32::try_from(heals).ok()),
+        }
+    }
 }
 
 impl PerGameStat {
@@ -211,18 +305,38 @@ impl PerGameStat {
                 })
                 .collect(),
             match_contribution: player.match_contribution.as_ref().map(|rating| rating.mc.round() as i64),
+            details: BattleDetails::from_player(player),
         })
     }
 
     /// The row this game is stored as.
     pub fn to_row(&self) -> SessionStatRow {
+        let SessionStatDetails {
+            key: SessionStatKey { game_time, player_id },
+            potential_damage,
+            received_damage,
+            hits,
+            fires,
+            floods,
+            citadels,
+            crits,
+            distance_km,
+            capture_points,
+            planes_killed,
+            anti_air_damage,
+            time_lived_secs,
+            survived,
+            torpedoes_spotted,
+            heals,
+        } = self.to_details_row();
+
         SessionStatRow {
             id: 0,
             sort_key: self.sort_key.clone(),
             ship_name: self.ship_name.clone(),
             ship_id: self.ship_id.raw() as i64,
-            player_id: self.player_id,
-            game_time: self.game_time.clone(),
+            player_id,
+            game_time,
             match_group: self.match_group.clone(),
             damage: self.damage as i64,
             spotting_damage: self.spotting_damage as i64,
@@ -236,6 +350,43 @@ impl PerGameStat {
             achievements: serde_json::to_string(&self.achievements).unwrap_or_else(|_| "[]".to_string()),
             match_contribution: self.match_contribution.map(|mc| mc as f64),
             match_contribution_version: self.match_contribution.map(|_| i64::from(MatchContributionVersion::CURRENT.0)),
+            potential_damage,
+            received_damage,
+            hits,
+            fires,
+            floods,
+            citadels,
+            crits,
+            distance_km,
+            capture_points,
+            planes_killed,
+            anti_air_damage,
+            time_lived_secs,
+            survived,
+            torpedoes_spotted,
+            heals,
+        }
+    }
+
+    /// This game's battle detail columns, keyed as its row is.
+    pub fn to_details_row(&self) -> SessionStatDetails {
+        SessionStatDetails {
+            key: SessionStatKey { game_time: self.game_time.clone(), player_id: self.player_id },
+            potential_damage: self.details.potential_damage.map(|value| value as i64),
+            received_damage: self.details.received_damage.map(|value| value as i64),
+            hits: self.details.hits.map(|value| value as i64),
+            fires: self.details.fires.map(|value| value as i64),
+            floods: self.details.floods.map(|value| value as i64),
+            citadels: self.details.citadels.map(|value| value as i64),
+            crits: self.details.crits.map(|value| value as i64),
+            distance_km: self.details.distance.map(|km| f64::from(km.value())),
+            capture_points: self.details.capture_points.map(|value| value as i64),
+            planes_killed: self.details.planes_killed.map(|value| value as i64),
+            anti_air_damage: self.details.anti_air_damage.map(|value| value as i64),
+            time_lived_secs: self.details.time_lived.map(|time| time.as_secs() as i64),
+            survived: self.details.survived,
+            torpedoes_spotted: self.details.torpedoes_spotted.map(|value| value as i64),
+            heals: self.details.heals.map(i64::from),
         }
     }
 
@@ -245,6 +396,8 @@ impl PerGameStat {
     /// achievements rather than failing the load: the rest of the row is
     /// still sound, and the overview counts what it can read.
     pub fn from_row(row: SessionStatRow) -> Self {
+        let details = BattleDetails::from_row(&row);
+
         Self {
             ship_name: row.ship_name,
             ship_id: (row.ship_id as u64).into(),
@@ -268,6 +421,7 @@ impl PerGameStat {
                 .match_contribution
                 .filter(|_| row.match_contribution_version == Some(i64::from(MatchContributionVersion::CURRENT.0)))
                 .map(|mc| mc.round() as i64),
+            details,
         }
     }
 }
@@ -557,7 +711,7 @@ pub fn all_ships(games: &[PerGameStat]) -> Vec<(GameParamId, String)> {
 }
 
 /// Aggregate over a set of games, as the per-ship table row shows it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PerformanceInfo {
     ship_id: Option<GameParamId>,
     records: RecordBreakdown,
@@ -582,6 +736,9 @@ pub struct PerformanceInfo {
 
     /// The Random and Ranked games alone, which the rating is scored on.
     rated: RatedTotals,
+
+    /// Each statistic's mean over the games that recorded it, by [`ChartableStat::index`].
+    means: [Mean; ChartableStat::ALL.len()],
 }
 
 impl PerformanceInfo {
@@ -598,6 +755,10 @@ impl PerformanceInfo {
                 info.rated.battles += 1;
                 info.rated.damage += game.damage;
                 info.rated.frags += game.frags;
+            }
+
+            for stat in ChartableStat::ALL {
+                info.means[stat.index()].add(stat.tally(game));
             }
 
             info.total_frags += game.frags;
@@ -764,6 +925,13 @@ impl PerformanceInfo {
         };
         table.calculate_pr(&[stats])
     }
+
+    /// `stat`'s mean over the games in view that recorded it: a count or figure averaged per
+    /// game, or a rate as a percentage. `None` when no game recorded it, and for win rate and
+    /// personal rating, which are not means of per-game figures.
+    pub fn mean(&self, stat: ChartableStat) -> Option<f64> {
+        self.means[stat.index()].value()
+    }
 }
 
 /// Totals over the games a rating applies to.
@@ -773,6 +941,27 @@ struct RatedTotals {
     battles: u32,
     damage: u64,
     frags: i64,
+}
+
+/// A sum and the number of games it was summed over.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Mean {
+    total: f64,
+    games: u32,
+}
+
+impl Mean {
+    /// Counts `value` in. A game that did not record it is left out rather than counted as zero.
+    fn add(&mut self, value: Option<f64>) {
+        let Some(value) = value else { return };
+
+        self.total += value;
+        self.games += 1;
+    }
+
+    fn value(self) -> Option<f64> {
+        (self.games > 0).then(|| self.total / f64::from(self.games))
+    }
 }
 
 /// The session's rating across every ship played in Random and Ranked.
@@ -960,7 +1149,54 @@ mod tests {
             match_group: mode.to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
+    }
+
+    /// A stored game reads back with every detail it was written with, and a row written before
+    /// the details were kept reads with none of them.
+    #[test]
+    fn the_battle_details_round_trip_through_the_stored_row() {
+        let details = BattleDetails {
+            potential_damage: Some(1_900_000),
+            received_damage: Some(48_000),
+            hits: Some(37),
+            fires: Some(4),
+            floods: Some(0),
+            citadels: Some(3),
+            crits: Some(6),
+            distance: Some(Km::new(23.5)),
+            capture_points: Some(1_800),
+            planes_killed: Some(11),
+            anti_air_damage: Some(9_400),
+            time_lived: Some(Duration::from_secs(1_034)),
+            survived: Some(false),
+            torpedoes_spotted: Some(5),
+            heals: Some(2),
+        };
+        let recorded = PerGameStat { details, ..game("Yamato", "2026-01-01 10:00:00", 1, 0, true, false, "pvp") };
+        assert_eq!(PerGameStat::from_row(recorded.to_row()), recorded);
+
+        let older = PerGameStat { details: BattleDetails::default(), ..recorded.clone() };
+        let row = SessionStatRow {
+            potential_damage: None,
+            received_damage: None,
+            hits: None,
+            fires: None,
+            floods: None,
+            citadels: None,
+            crits: None,
+            distance_km: None,
+            capture_points: None,
+            planes_killed: None,
+            anti_air_damage: None,
+            time_lived_secs: None,
+            survived: None,
+            torpedoes_spotted: None,
+            heals: None,
+            ..recorded.to_row()
+        };
+        assert_eq!(PerGameStat::from_row(row), older);
     }
 
     /// The recency limit counts per ship on the surfaces that are about ships:
@@ -1339,6 +1575,7 @@ mod tests {
 
 #[cfg(test)]
 mod rating_tests {
+    use super::BattleDetails;
     use super::PerGameStat;
     use super::PerformanceInfo;
     use super::PrStats;
@@ -1364,6 +1601,7 @@ mod rating_tests {
             match_group: "pvp".into(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 
@@ -1440,6 +1678,7 @@ mod rating_tests {
 /// Win rate and rating count Random and Ranked games alone.
 #[cfg(test)]
 mod scope_tests {
+    use super::BattleDetails;
     use super::PerGameStat;
     use super::PerformanceInfo;
     use super::PrStats;
@@ -1484,6 +1723,7 @@ mod scope_tests {
             achievements: Vec::new(),
 
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 

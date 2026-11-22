@@ -302,11 +302,13 @@ mod tests {
     use crate::stats::chart::ChartSeries;
     use crate::stats::chart::Rgb;
     use crate::stats::chart::SeriesPoint;
+    use crate::stats::plot::BandColors;
     use crate::stats::plot::PlotView;
+    use crate::stats::plot::ValueTone;
 
     fn colors() -> PlotColors {
         let grey = PlotColor::new(0.6, 0.6, 0.6, 1.0);
-        PlotColors { axis: grey, grid: grey, text: grey }
+        PlotColors { axis: grey, grid: grey, text: grey, bands: BandColors::from_fn(|_| grey) }
     }
 
     fn series() -> Vec<ChartSeries> {
@@ -320,7 +322,15 @@ mod tests {
     }
 
     fn plot(series: &[ChartSeries]) -> Plot<'_> {
-        Plot { series, bars: &[], x_label: "Games", y_label: "Damage", show_values: false, view: PlotView::default() }
+        Plot {
+            series,
+            bars: &[],
+            x_label: "Games",
+            y_label: "Damage",
+            show_values: false,
+            value_tone: ValueTone::Series,
+            view: PlotView::default(),
+        }
     }
 
     /// The pixmap is drawn on, not handed back blank: a copied chart that is all background would

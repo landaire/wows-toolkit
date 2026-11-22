@@ -52,6 +52,7 @@ use zgui::geom::CssPx;
 use zgui::geom::Point;
 use zgui::prelude::Fonts;
 use zgui::prelude::PointerButton;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
@@ -80,6 +81,11 @@ use zgui::vocab::ScrollDelta;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
+use zgui_ui::CommandEmptyProps;
+use zgui_ui::CommandInputProps;
+use zgui_ui::CommandItemProps;
+use zgui_ui::CommandListProps;
+use zgui_ui::CommandProps;
 use zgui_ui::InputProps;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
@@ -95,12 +101,15 @@ use crate::tabs::stats::chart::hover::Hovered;
 use crate::tabs::stats::chart::hover::PlotHit;
 use crate::tabs::stats::chart::hover::hover_at;
 use crate::tabs::stats::chart::hover::hover_text;
+use crate::tabs::stats::chart::hover::value_tone;
 use crate::tabs::stats::chart::model::ChartModel;
 use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::PlotElement;
 use crate::tabs::stats::chart::plot::ThemeColors;
 use crate::tabs::stats::check_row::CheckRowProps;
+use crate::tabs::stats::rating;
 use crate::text_marks::marks;
+use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-stats-chart";
 
@@ -210,6 +219,19 @@ const CSS: &str = css!(
     .wt-chart__dim {
         font-size: var(--zui-type-size-xs);
         color: var(--wt-color-text-dim);
+    }
+    .wt-chart__picker {
+        justify-content: space-between;
+        min-width: 180px;
+    }
+    .wt-chart__picker-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        text-align: left;
+    }
+    .wt-chart__picker-menu {
+        width: 240px;
+        padding: 0;
     }
     .wt-chart__ships[data-narrowed=true] {
         background-color: var(--zui-color-secondary);
@@ -380,6 +402,7 @@ impl PlotSurface {
                     x_label,
                     y_label,
                     show_values: settings.with(|settings| settings.show_values),
+                    value_tone: value_tone(model.stat),
                     view: view_state.get(),
                 }
             });
@@ -507,6 +530,8 @@ impl PlotSurface {
             .with_value(|handle| handle.update(|element| hover_text(&element.data, hit, stat, &language)))?;
         let swatch = format!("rgb({}, {}, {})", text.color.r, text.color.g, text.color.b);
         let game = text.game.map(|game| AnyView::new(view! { text(class = "wt-chart__tip-game") {{game}} }));
+        let band_name = text.band.map(|band| rating_band_name(band).to_owned());
+        let value_color = text.band.map(rating::text_color);
 
         Some(AnyView::new(view! {
             OverlaySurface(class = "wt-chart__tip", attr:data-testid = "chart-hover-tooltip") {
@@ -514,7 +539,7 @@ impl PlotSurface {
                     box(class = "wt-chart__swatch", style:background-color = swatch)
                     text(class = "wt-chart__tip-name") {{text.name}}
                 }
-                text(class = "wt-chart__tip-value") {{text.value}}
+                text(class = "wt-chart__tip-value", attr:data-band = band_name, style:color = value_color) {{text.value}}
                 {game}
             }
         }))
@@ -695,21 +720,18 @@ fn SettingsMenu(
     let line = flag(|settings| settings.mode == ChartMode::Line);
     let own = flag(|settings| settings.own_filters.is_some());
 
-    let stat_toggle = move |stat: ChartableStat| {
-        let pressed = Binding::controlled(
-            Signal::derive_local(move || model.with(|model| model.stat) == stat),
-            move |_: bool| {
-                if settings.with_untracked(|settings| settings.stat) != stat {
-                    settings.update(|settings| model::set_stat(settings, stat));
-                }
-            },
-        );
-        view! {
-            Toggle(pressed = pressed, size = ToggleSize::Sm, attr:data-testid = format!("chart-stat-{}", stat.translation_key())) {
-                {tr(locale, move || stat.label().into())}
-            }
+    let selectable = Signal::derive_local(move || {
+        settings.with(|settings| selectable_stats(settings.mode, settings.running, settings.combined, rated.get()))
+    });
+    let shown = Signal::derive_local(move || {
+        locale.track();
+        model.with(|model| model.stat).label()
+    });
+    let pick_stat = UnsyncCallback::new(move |stat: ChartableStat| {
+        if settings.with_untracked(|settings| settings.stat) != stat {
+            settings.update(|settings| model::set_stat(settings, stat));
         }
-    };
+    });
     let mode_toggle = move |mode: ChartMode| {
         let pressed = Binding::controlled(
             Signal::derive_local(move || settings.with(|settings| settings.mode) == mode),
@@ -764,11 +786,7 @@ fn SettingsMenu(
                     }
                     PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-settings-menu") {
                         text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.statistic"))}}
-                        row(class = "wt-chart__wrap") {
-                            for stat in move || settings.with(|settings| selectable_stats(settings.mode, settings.running, settings.combined, rated.get())), key = |stat: &ChartableStat| stat.translation_key() {
-                                {stat_toggle(stat)}
-                            }
-                        }
+                        StatPicker(stats = selectable, current = shown, label = "ui.stats.statistic", pick = pick_stat, test_id = "chart-stat", locale = locale)
                         text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.chart"))}}
                         row(class = "wt-chart__wrap") {
                             {mode_toggle(ChartMode::Line)}
@@ -832,6 +850,67 @@ fn SettingsMenu(
                 }
             }
             TooltipContent {{tr(locale, || t!("ui.stats.settings"))}}
+        }
+    }
+}
+
+/// A button reading `current` that opens a search over `stats`, and reports the one picked.
+///
+/// The whole button opens it, and the search field takes the caret as it opens, so typing
+/// narrows the list at once.
+#[component]
+pub(super) fn StatPicker(
+    #[prop(into)] stats: Signal<Vec<ChartableStat>, LocalStorage>,
+    /// What the button reads as: the statistic shown, or what pressing it does.
+    #[prop(into)]
+    current: Signal<String, LocalStorage>,
+    /// The catalogue key of what the control is called, for a reader.
+    label: &'static str,
+    pick: UnsyncCallback<ChartableStat>,
+    test_id: &'static str,
+    locale: Locale,
+) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
+    let open = RwSignal::new_local(false);
+    // Keyed by the translated name, so the options and what they are searched by follow the
+    // language.
+    let entries = move || {
+        locale.track();
+        stats.get().into_iter().map(|stat| (stat, stat.label())).collect::<Vec<(ChartableStat, String)>>()
+    };
+    let label = locale.text(label);
+    let option = move |(stat, name): (ChartableStat, String)| {
+        let choose = UnsyncCallback::new(move |()| {
+            open.set(false);
+            pick.run(stat);
+        });
+        view! {
+            CommandItem(value = stat.name(), text = name.clone(), on_select = choose, attr:data-testid = format!("{test_id}-{}", stat.name())) {
+                {name.clone()}
+            }
+        }
+    };
+
+    view! {
+        Popover(open = open) {
+            PopoverTrigger(size = ButtonSize::Sm, variant = ButtonVariant::Outline, class = "wt-chart__picker", a11y:label = label, attr:data-testid = test_id) {
+                text(class = "wt-chart__picker-text") {{move || current.get()}}
+                AppIcon(glyph = Glyph::ChevronDown)
+            }
+            PopoverContent(class = "wt-chart__picker-menu", attr:data-testid = format!("{test_id}-list")) {
+                Command {
+                    // Built again with the language, as the field's texts are fixed once it is built.
+                    {move || view! {
+                        CommandInput(placeholder = t!("ui.stats.search_statistics").into_owned(), label = label())
+                    }}
+                    CommandList(label = label()) {
+                        for entry in move || entries(), key = |entry: &(ChartableStat, String)| entry.1.clone() {
+                            {option(entry)}
+                        }
+                        CommandEmpty {{tr(locale, || t!("ui.stats.no_statistic_matches"))}}
+                    }
+                }
+            }
         }
     }
 }

@@ -248,6 +248,7 @@ fn pick_ships(settings: &mut ChartSettings, ships: &[GameParamId]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wows_toolkit_viewmodel::stats::BattleDetails;
     use wows_toolkit_viewmodel::stats::GameLimit;
 
     fn game(ship: &str, id: u64, time: &str, damage: u64, win: bool, mode: &str) -> PerGameStat {
@@ -269,6 +270,7 @@ mod tests {
             match_group: mode.to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 

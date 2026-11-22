@@ -9,9 +9,11 @@ use std::time::Duration;
 use landaire_ui::Appearance;
 use landaire_ui::test_support::HeadlessWindow;
 use rust_i18n::t;
+use wows_toolkit_config::queries;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
+use wows_toolkit_viewmodel::stats::BattleDetails;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
@@ -68,6 +70,7 @@ fn game(game_time: &str) -> PerGameStat {
         match_group: "pvp".to_owned(),
         achievements: Vec::new(),
         match_contribution: None,
+        details: BattleDetails::default(),
     }
 }
 
@@ -281,6 +284,29 @@ fn set_as_session_stats_brings_the_stats_tab_forward_on_its_overview() {
     assert_eq!(dock_tab_selected(&mut window, &overview), Some(true), "on its Overview");
     assert_eq!(dock_tab_selected(&mut window, &ships), Some(false));
     assert_eq!(session_times(control, SessionScope::Manual), [STARTED[0]], "the set replay is the session");
+}
+
+/// A saved game an index pass gave its battle details reads with them once the pass says so.
+#[test]
+fn a_saved_game_takes_the_details_an_index_pass_wrote() {
+    let (mut window, control, _replays, _dir) = open_install(open(), 0);
+    let services = control.shell().services();
+    let pool = services.settings.pool().expect("the private database is open");
+    let runtime = services.runtime().expect("the test runtime is up");
+    let recorded = game(STARTED[0]);
+    runtime.block_on(queries::add_session_stat(&pool, &recorded.to_row())).expect("the session game is written");
+    services.session.read_saved();
+    settle_in_real_time(&mut window);
+    let details = BattleDetails { fires: Some(3), survived: Some(true), ..BattleDetails::default() };
+    let read = PerGameStat { details, ..recorded };
+    let updated = runtime.block_on(queries::update_session_stat_details(&pool, &read.to_details_row()));
+    assert!(updated.expect("the details are written"), "the saved game held no details");
+
+    services.session.index_updated(1);
+    settle_in_real_time(&mut window);
+
+    let saved = services.session.with_saved(|games| games.iter().map(|game| game.details).collect::<Vec<_>>());
+    assert_eq!(saved, [details]);
 }
 
 #[test]

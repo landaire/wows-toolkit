@@ -81,6 +81,7 @@ pub fn match_group_display_name(match_group: &str) -> &str {
 /// Parse the replay `dateTime` format (`DD.MM.YYYY HH:MM:SS`) into a
 /// lexicographically sortable string (`YYYY-MM-DD HH:MM:SS`).
 /// Falls back to the original string if parsing fails.
+use wows_toolkit_viewmodel::stats::BattleDetails;
 use wows_toolkit_viewmodel::stats::sortable_game_time;
 
 /// Per-game statistics extracted from a single replay
@@ -111,6 +112,10 @@ pub struct PerGameStat {
     /// game was not rated, or was rated by an older formula.
     #[serde(default)]
     pub match_contribution: Option<i64>,
+    /// Kept so the periodic save writes back what the shared database holds. The legacy RON
+    /// record never carried these, so it reads them as not recorded.
+    #[serde(skip)]
+    pub details: BattleDetails,
 }
 
 impl PerGameStat {
@@ -145,6 +150,7 @@ impl PerGameStat {
                 })
                 .collect(),
             match_contribution: self.match_contribution,
+            details: self.details,
         }
     }
 
@@ -178,6 +184,7 @@ impl PerGameStat {
                 })
                 .collect(),
             match_contribution: game.match_contribution,
+            details: game.details,
         }
     }
 
@@ -228,6 +235,14 @@ impl PerGameStat {
             match_group,
             achievements,
             match_contribution: self_report.match_contribution.as_ref().map(|rating| rating.mc.round() as i64),
+            // Read off the same report as zgui, so a game egui replaces keeps the figures zgui stored.
+            details: ui_report
+                .normalized()
+                .players
+                .iter()
+                .find(|player| player.is_self)
+                .map(BattleDetails::from_player)
+                .unwrap_or_default(),
         })
     }
 
@@ -327,10 +342,7 @@ impl SessionStats {
             stat.sort_key = sortable_game_time(&stat.game_time);
         }
 
-        let old_index = self
-            .games
-            .iter()
-            .position(|existing| existing.game_time == stat.game_time && existing.player_id == stat.player_id);
+        let old_index = self.position_of(&stat);
 
         if let Some(old_index) = old_index {
             self.games.remove(old_index);
@@ -338,6 +350,25 @@ impl SessionStats {
 
         self.games.push(stat);
         self.sort_games();
+    }
+
+    /// Whether the session holds the game `game` was read as, with battle details other than
+    /// `game`'s.
+    pub fn holds_other_details(&self, game: &PerGameStat) -> bool {
+        self.position_of(game).is_some_and(|index| self.games[index].details != game.details)
+    }
+
+    /// Gives the session's game for the battle `game` was read from `game`'s battle details. A
+    /// battle the session does not hold is not added.
+    pub fn replace_details(&mut self, game: &PerGameStat) {
+        if let Some(index) = self.position_of(game) {
+            self.games[index].details = game.details;
+        }
+    }
+
+    /// Where the session holds the game `game` was read as: the same moment, by the same account.
+    fn position_of(&self, game: &PerGameStat) -> Option<usize> {
+        self.games.iter().position(|held| held.game_time == game.game_time && held.player_id == game.player_id)
     }
 
     /// Ensure all games are sorted chronologically and have valid sort keys.
@@ -497,6 +528,7 @@ mod tests {
             match_group: match_group.to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 
@@ -593,6 +625,31 @@ mod tests {
         ss.add_game(g1);
         ss.add_game(g2);
         assert_eq!(ss.games.len(), 2, "different player_ids should not be deduped");
+    }
+
+    /// A re-read battle gives the held game its battle details and leaves the rest of it, its
+    /// rating included. A battle the session does not hold is not added.
+    #[test]
+    fn re_read_details_replace_only_the_held_games_details() {
+        let mut ss = SessionStats::default();
+        let mut recorded = pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000);
+        recorded.match_contribution = Some(1_250);
+        ss.add_game(recorded);
+        let details = BattleDetails { fires: Some(4), survived: Some(false), ..BattleDetails::default() };
+        let mut read = pvp_win("Vermont", 1, "13.02.2026 14:00:00", 90000, 1, 1800);
+        read.details = details;
+        let mut unrecorded = pvp_win("Vermont", 1, "13.02.2026 15:00:00", 90000, 1, 1800);
+        unrecorded.details = details;
+
+        assert!(ss.holds_other_details(&read));
+        assert!(!ss.holds_other_details(&unrecorded), "the session does not hold the battle");
+        ss.replace_details(&read);
+        ss.replace_details(&unrecorded);
+
+        assert!(!ss.holds_other_details(&read), "the held game has these details");
+        let [held] = ss.games.as_slice() else { panic!("the session holds {} games", ss.games.len()) };
+        assert_eq!(held.details, details);
+        assert_eq!((held.damage, held.frags, held.match_contribution), (100000, 2, Some(1_250)));
     }
 
     fn totals(ss: &SessionStats) -> SessionTotals {
@@ -818,6 +875,7 @@ mod tests {
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         });
         ss.sort_games();
         assert_eq!(ss.games[0].sort_key, "2026-02-13 14:00:00");

@@ -11,12 +11,10 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_viewmodel::player_tracker::saved_view;
 use wows_toolkit_viewmodel::settings::keys;
 
 use crate::data::session_stats::PerGameStat;
-use crate::data::session_stats::SerializableAchievement;
 use crate::data::session_stats::SessionStats;
 use crate::db::index::query_text::parse_query;
 use crate::tab_state::TabState;
@@ -212,36 +210,10 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
 /// Load session stats from the database.
 async fn load_session_stats(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx::Error> {
     let rows = queries::get_all_session_stats(pool).await?;
-    let mut games = Vec::with_capacity(rows.len());
-
-    for row in rows {
-        let achievements: Vec<SerializableAchievement> = serde_json::from_str(&row.achievements).unwrap_or_default();
-
-        games.push(PerGameStat {
-            ship_name: row.ship_name,
-            ship_id: (row.ship_id as u64).into(),
-            game_time: row.game_time,
-            sort_key: row.sort_key,
-            player_id: row.player_id,
-            damage: row.damage as u64,
-            spotting_damage: row.spotting_damage as u64,
-            frags: row.frags,
-            raw_xp: row.raw_xp,
-            base_xp: row.base_xp,
-            is_win: row.is_win,
-            is_loss: row.is_loss,
-            is_draw: row.is_draw,
-            is_div: row.is_div,
-            match_group: row.match_group,
-            achievements,
-            // A rating from another formula revision would sit beside current
-            // ones as if comparable; it reads as unrated until re-recorded.
-            match_contribution: row
-                .match_contribution
-                .filter(|_| row.match_contribution_version == Some(i64::from(MatchContributionVersion::CURRENT.0)))
-                .map(|mc| mc.round() as i64),
-        });
-    }
+    let games: Vec<PerGameStat> = rows
+        .into_iter()
+        .map(|row| PerGameStat::from_shared(&wows_toolkit_viewmodel::stats::PerGameStat::from_row(row)))
+        .collect();
 
     let mut p = ts.persisted.write();
     p.session_stats = SessionStats { games, ..Default::default() };
@@ -697,6 +669,7 @@ mod tests {
             match_group: "pvp".to_owned(),
             achievements: Vec::new(),
             match_contribution,
+            details: wows_toolkit_viewmodel::stats::BattleDetails::default(),
         };
         let saved = TabState::default();
         saved.persisted.write().session_stats.games =
@@ -713,5 +686,57 @@ mod tests {
         let read: Vec<Option<i64>> =
             loaded.persisted.read().session_stats.games.iter().map(|game| game.match_contribution).collect();
         assert_eq!(read, vec![Some(1432), None]);
+    }
+
+    /// A game the zgui app recorded with its battle details keeps them through an egui load and
+    /// the periodic save that rewrites the table.
+    #[test]
+    fn a_saved_session_game_keeps_its_battle_details() {
+        let runtime = runtime();
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db_path = directory.path().join("session.db");
+
+        let details = wows_toolkit_viewmodel::stats::BattleDetails {
+            potential_damage: Some(1_900_000),
+            fires: Some(4),
+            time_lived: Some(std::time::Duration::from_secs(1_034)),
+            survived: Some(false),
+            heals: Some(2),
+            ..wows_toolkit_viewmodel::stats::BattleDetails::default()
+        };
+        let recorded = wows_toolkit_viewmodel::stats::PerGameStat {
+            ship_name: "Vermont".to_owned(),
+            ship_id: 1u64.into(),
+            game_time: "13.02.2026 14:00:00".to_owned(),
+            sort_key: "2026-02-13 14:00:00".to_owned(),
+            player_id: 1,
+            damage: 100_000,
+            spotting_damage: 0,
+            frags: 2,
+            raw_xp: 2000,
+            base_xp: 2000,
+            is_win: true,
+            is_loss: false,
+            is_draw: false,
+            is_div: false,
+            match_group: "pvp".to_owned(),
+            achievements: Vec::new(),
+            match_contribution: None,
+            details,
+        };
+
+        let mut egui = TabState::default();
+        let read = runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db_at(&db_path).await.expect("the database opens");
+            wows_toolkit_config::queries::add_session_stat(&pool, &recorded.to_row()).await.expect("zgui records it");
+            super::load_session_stats(&pool, &mut egui).await.expect("egui reads it");
+            crate::db::migrate_ron::save_tab_state_to_db(&pool, &egui).await.expect("egui saves");
+            let rows = wows_toolkit_config::queries::get_all_session_stats(&pool).await.expect("the games read back");
+            pool.close().await;
+            rows
+        });
+
+        let [row] = <[_; 1]>::try_from(read).expect("one game is stored");
+        assert_eq!(wows_toolkit_viewmodel::stats::PerGameStat::from_row(row).details, details);
     }
 }

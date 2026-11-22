@@ -4,9 +4,11 @@
 //! and names, and are never stored.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use jiff::Span;
 use jiff::civil::DateTime;
+use wows_core::units::Km;
 use wows_replays::types::GameParamId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -18,6 +20,7 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::rating_scope::RatingScope;
 
 use crate::personal_rating::PersonalRatingData;
+use crate::stats::BattleDetails;
 use crate::stats::PerGameStat;
 use crate::stats::SerializableAchievement;
 use crate::stats::sortable_game_time;
@@ -166,6 +169,8 @@ pub fn sample_games(
         return Vec::new();
     }
     let mut rng = SplitMix(seed);
+    // A stream of its own, so the battle details leave the games drawn from `rng` as they were.
+    let mut detail_rng = SplitMix(seed ^ 0xD1B5_4A32_D192_ED03);
 
     let mut pool = catalog.achievements.clone();
     rng.shuffle(&mut pool);
@@ -198,7 +203,9 @@ pub fn sample_games(
             // Form improves across the weeks, so a running average has a slope to show.
             let progress = day as f64 / DAYS as f64;
             let form = (rng.normal() * 0.45).exp() * (0.85 + 0.3 * progress);
-            games.push(sample_game(&mut rng, ship, rating, &pool, form, in_division, at));
+            let mut game = sample_game(&mut rng, ship, rating, &pool, form, in_division, at);
+            game.details = sample_details(&mut detail_rng, ship.class, &game, form);
+            games.push(game);
             at = at.checked_add(Span::new().minutes(18 + rng.below(10) as i64)).unwrap_or(at);
         }
         day = (day + 1) % DAYS;
@@ -282,6 +289,35 @@ fn sample_game(
         match_group: match_group.to_owned(),
         achievements: earned_achievements,
         match_contribution,
+        details: BattleDetails::default(),
+    }
+}
+
+/// Made-up figures for the rest of a game's results, in proportion to its damage and form.
+fn sample_details(rng: &mut SplitMix, class: Species, game: &PerGameStat, form: f64) -> BattleDetails {
+    let damage = game.damage as f64;
+    let survived = rng.chance((0.3 * form).clamp(0.1, 0.7));
+    let full_battle = 1_200.0;
+    let time_lived = if survived { full_battle } else { full_battle * (0.25 + 0.7 * rng.unit()) };
+    let planes_killed = rng.poisson(2.5 * form) as u64;
+    let carries_heal = matches!(class, Species::Battleship | Species::Cruiser);
+
+    BattleDetails {
+        potential_damage: Some((damage * (8.0 + 12.0 * rng.unit())) as u64),
+        received_damage: Some((damage * (0.3 + 0.6 * rng.unit())) as u64),
+        hits: Some(rng.poisson(25.0 * form) as u64),
+        fires: Some(rng.poisson(1.5 * form) as u64),
+        floods: Some(rng.poisson(0.3 * form) as u64),
+        citadels: Some(rng.poisson(0.8 * form) as u64),
+        crits: Some(rng.poisson(2.0) as u64),
+        distance: Some(Km::new((10.0 + 35.0 * rng.unit()) as f32)),
+        capture_points: Some(rng.below(40) * 100),
+        planes_killed: Some(planes_killed),
+        anti_air_damage: Some(planes_killed * (500 + rng.below(400))),
+        time_lived: Some(Duration::from_secs(time_lived as u64)),
+        survived: Some(survived),
+        torpedoes_spotted: Some(rng.poisson(0.8) as u64),
+        heals: carries_heal.then(|| rng.poisson(1.5).min(4) as u32),
     }
 }
 
@@ -389,6 +425,8 @@ mod tests {
         assert!(days.len() >= 21);
         assert!(games.iter().any(|game| !game.achievements.is_empty()));
         assert!(games.iter().map(|game| game.frags).max() >= Some(3));
+        assert!(games.iter().all(|game| game.details.survived.is_some()), "every chart statistic has data");
+        assert!(games.iter().any(|game| game.details.heals.is_none()), "a ship without a heal records none");
     }
 
     #[test]

@@ -89,7 +89,8 @@ impl Session {
         self.read.get()
     }
 
-    /// Reads the saved session. Called once the settings database is open.
+    /// Reads the saved session. Called once the settings database is open, and again by
+    /// [`Self::index_updated`].
     pub fn read_saved(self) {
         let Some(pool) = self.settings.pool() else { return };
         let runtime = self.runtime.get_value();
@@ -116,6 +117,14 @@ impl Session {
             }
             self.read.set(true);
         });
+    }
+
+    /// Takes the saved games an index pass rewrote: `updated` of them took the battle details the
+    /// pass read.
+    pub fn index_updated(self, updated: u64) {
+        if updated > 0 {
+            self.read_saved();
+        }
     }
 
     /// Adds `game` to the saved session once its row is written.

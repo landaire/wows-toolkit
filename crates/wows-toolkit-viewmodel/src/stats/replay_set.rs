@@ -110,6 +110,7 @@ impl ReplaySetGames {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stats::BattleDetails;
 
     fn game(game_time: &str, player_id: i64, damage: u64) -> PerGameStat {
         PerGameStat {
@@ -130,6 +131,7 @@ mod tests {
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 

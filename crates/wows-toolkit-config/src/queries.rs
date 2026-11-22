@@ -155,11 +155,64 @@ pub struct SessionStatRow {
     pub match_contribution: Option<f64>,
     /// The formula revision `match_contribution` was computed with.
     pub match_contribution_version: Option<i64>,
+
+    /// Figures beyond the core columns. `None` when the battle did not record one, or the row
+    /// was written before the column existed.
+    pub potential_damage: Option<i64>,
+    pub received_damage: Option<i64>,
+    pub hits: Option<i64>,
+    pub fires: Option<i64>,
+    pub floods: Option<i64>,
+    pub citadels: Option<i64>,
+    pub crits: Option<i64>,
+    pub distance_km: Option<f64>,
+    pub capture_points: Option<i64>,
+    pub planes_killed: Option<i64>,
+    pub anti_air_damage: Option<i64>,
+    pub time_lived_secs: Option<i64>,
+    pub survived: Option<bool>,
+    pub torpedoes_spotted: Option<i64>,
+    pub heals: Option<i64>,
+}
+
+/// What identifies one recorded game, the rule [`add_session_stat`] dedupes on: the moment the
+/// battle was played and the account that played it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, sqlx::FromRow)]
+pub struct SessionStatKey {
+    pub game_time: String,
+    pub player_id: i64,
+}
+
+/// The battle detail columns of one recorded game.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionStatDetails {
+    pub key: SessionStatKey,
+
+    pub potential_damage: Option<i64>,
+    pub received_damage: Option<i64>,
+    pub hits: Option<i64>,
+    pub fires: Option<i64>,
+    pub floods: Option<i64>,
+    pub citadels: Option<i64>,
+    pub crits: Option<i64>,
+    pub distance_km: Option<f64>,
+    pub capture_points: Option<i64>,
+    pub planes_killed: Option<i64>,
+    pub anti_air_damage: Option<i64>,
+    pub time_lived_secs: Option<i64>,
+    pub survived: Option<bool>,
+    pub torpedoes_spotted: Option<i64>,
+    pub heals: Option<i64>,
 }
 
 /// Load all session stats ordered by sort_key.
 pub async fn get_all_session_stats(pool: &SqlitePool) -> Result<Vec<SessionStatRow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM session_stats ORDER BY sort_key ASC").fetch_all(pool).await
+}
+
+/// The key of every recorded game.
+pub async fn session_stat_keys(pool: &SqlitePool) -> Result<Vec<SessionStatKey>, sqlx::Error> {
+    sqlx::query_as("SELECT game_time, player_id FROM session_stats").fetch_all(pool).await
 }
 
 /// Records one game, replacing an earlier record of the same battle.
@@ -175,11 +228,23 @@ pub async fn add_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result
         .bind(row.player_id)
         .execute(&mut *tx)
         .await?;
+    insert_session_stat(&mut *tx, row).await?;
+    tx.commit().await
+}
+
+/// Writes `row` as a new game, every column included. The caller decides what it replaces.
+pub async fn insert_session_stat<'e, E>(executor: E, row: &SessionStatRow) -> Result<(), sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
     sqlx::query(
         "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
          damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements, \
-         match_contribution, match_contribution_version) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+         match_contribution, match_contribution_version, potential_damage, received_damage, hits, fires, \
+         floods, citadels, crits, distance_km, capture_points, planes_killed, anti_air_damage, \
+         time_lived_secs, survived, torpedoes_spotted, heals) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, \
+         ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)",
     )
     .bind(&row.sort_key)
     .bind(&row.ship_name)
@@ -199,9 +264,64 @@ pub async fn add_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result
     .bind(&row.achievements)
     .bind(row.match_contribution)
     .bind(row.match_contribution_version)
-    .execute(&mut *tx)
+    .bind(row.potential_damage)
+    .bind(row.received_damage)
+    .bind(row.hits)
+    .bind(row.fires)
+    .bind(row.floods)
+    .bind(row.citadels)
+    .bind(row.crits)
+    .bind(row.distance_km)
+    .bind(row.capture_points)
+    .bind(row.planes_killed)
+    .bind(row.anti_air_damage)
+    .bind(row.time_lived_secs)
+    .bind(row.survived)
+    .bind(row.torpedoes_spotted)
+    .bind(row.heals)
+    .execute(executor)
     .await?;
-    tx.commit().await
+    Ok(())
+}
+
+/// Writes `details` over the battle details of the recorded game played at the same moment by the
+/// same account, returning whether that game held other details. Never adds a game: the session
+/// holds only the battles added to it.
+pub async fn update_session_stat_details<'e, E>(executor: E, details: &SessionStatDetails) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    let result = sqlx::query(
+        "UPDATE session_stats SET potential_damage = ?3, received_damage = ?4, hits = ?5, fires = ?6, \
+         floods = ?7, citadels = ?8, crits = ?9, distance_km = ?10, capture_points = ?11, planes_killed = ?12, \
+         anti_air_damage = ?13, time_lived_secs = ?14, survived = ?15, torpedoes_spotted = ?16, heals = ?17 \
+         WHERE game_time = ?1 AND player_id = ?2 AND (potential_damage IS NOT ?3 OR received_damage IS NOT ?4 \
+         OR hits IS NOT ?5 OR fires IS NOT ?6 OR floods IS NOT ?7 OR citadels IS NOT ?8 OR crits IS NOT ?9 \
+         OR distance_km IS NOT ?10 OR capture_points IS NOT ?11 OR planes_killed IS NOT ?12 \
+         OR anti_air_damage IS NOT ?13 OR time_lived_secs IS NOT ?14 OR survived IS NOT ?15 \
+         OR torpedoes_spotted IS NOT ?16 OR heals IS NOT ?17)",
+    )
+    .bind(&details.key.game_time)
+    .bind(details.key.player_id)
+    .bind(details.potential_damage)
+    .bind(details.received_damage)
+    .bind(details.hits)
+    .bind(details.fires)
+    .bind(details.floods)
+    .bind(details.citadels)
+    .bind(details.crits)
+    .bind(details.distance_km)
+    .bind(details.capture_points)
+    .bind(details.planes_killed)
+    .bind(details.anti_air_damage)
+    .bind(details.time_lived_secs)
+    .bind(details.survived)
+    .bind(details.torpedoes_spotted)
+    .bind(details.heals)
+    .execute(executor)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 /// Forgets every recorded game.

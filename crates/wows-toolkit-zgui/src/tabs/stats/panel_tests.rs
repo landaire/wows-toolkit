@@ -22,6 +22,7 @@ use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wows_toolkit_viewmodel::stats::BattleDetails;
 use wows_toolkit_viewmodel::stats::McStats;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
@@ -81,6 +82,7 @@ fn game(ship: &str, ship_id: u64, sort_key: &str, damage: u64, frags: i64, win: 
         match_group: "pvp".to_owned(),
         achievements: Vec::new(),
         match_contribution: Some(400 + damage as i64 / 80 + frags * 150),
+        details: BattleDetails::default(),
     }
 }
 

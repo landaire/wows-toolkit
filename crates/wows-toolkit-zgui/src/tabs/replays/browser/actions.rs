@@ -48,6 +48,8 @@ use wows_toolkit_replay_data::replay_index::IndexOneError;
 use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_replay_data::replay_index::ScopeSourceError;
 use wows_toolkit_replay_data::replay_index::ScopedReplay;
+use wows_toolkit_replay_data::replay_index::SessionGameUpdate;
+use wows_toolkit_replay_data::replay_index::SessionGames;
 use wows_toolkit_replay_data::replay_index::SourceScope;
 use wows_toolkit_replay_data::replay_index::build_index;
 use wows_toolkit_replay_data::replay_index::index_one;
@@ -1161,6 +1163,7 @@ async fn read_again(
     let said = match ran {
         Ok(progress) => {
             work.shell_index.note_written(progress.indexed);
+            services.session.index_updated(progress.session_games_updated);
             let end = if cancel.load(Ordering::Relaxed) { PassEnd::Stopped(progress) } else { PassEnd::Done(progress) };
             let report = pass_report(&purpose, end, skipped);
             shell.toasts().show(report.notice());
@@ -1388,7 +1391,9 @@ fn run_next_pass(control: BrowserControl) {
             IndexWrite { outcome, rated: rating.is_some() }
         });
         let mut flush = SummaryFlush::new(Instant::now());
+        let mut reached = IndexProgress::default();
         let built = follow(walking, steps, |step| {
+            reached = step;
             job.report(Job { name: name.clone(), progress: Progress::new(step.done, step.total) });
             // The rows fill as the pass writes them rather than all at its end.
             if flush.is_due(step, Instant::now())
@@ -1399,6 +1404,8 @@ fn run_next_pass(control: BrowserControl) {
         })
         .await;
         drop(job);
+        // Read off the last step rather than the outcome, which a late error leaves without it.
+        control.shell().services().session.index_updated(reached.session_games_updated);
         pass_finished(control, id, built);
     });
     work.passes.update(|passes| {
@@ -1473,25 +1480,42 @@ pub fn reindex_stale(control: BrowserControl, id: FolderId, paths: Vec<PathBuf>)
     let proxy = proxy_url(services);
 
     control.work.spawn(async move {
-        let indexed = long_job(move || -> Result<bool, IndexOneError> {
+        let indexed = long_job(move || -> Result<StaleRead, IndexOneError> {
             let now = jiff::Timestamp::now();
             let source = runtime.block_on(scope.ensure(&pool, &live_root, now))?;
             let rating = owner_rating(&runtime, &proxy);
+            let session_games = runtime.block_on(SessionGames::load(&pool));
+            let mut session_games_updated = 0;
             for path in &paths {
+                let mode = IndexWriteMode::Incremental;
                 let indexed =
-                    index_one(&runtime, &pool, path, &game_data, rating.as_ref(), source, now, IndexWriteMode::Incremental);
-                if let Err(err) = indexed {
-                    tracing::warn!(path = %path.display(), "replay index: a rewritten replay was not indexed again: {err}");
+                    index_one(&runtime, &pool, path, &game_data, rating.as_ref(), &session_games, source, now, mode);
+                match indexed {
+                    Ok(SessionGameUpdate::Updated) => session_games_updated += 1,
+                    Ok(SessionGameUpdate::Unchanged) => {}
+                    Err(err) => {
+                        tracing::warn!(path = %path.display(), "replay index: a rewritten replay was not indexed again: {err}");
+                    }
                 }
             }
-            Ok(rating.is_some())
+            Ok(StaleRead { rated: rating.is_some(), session_games_updated })
         })
         .await;
         match indexed {
-            Ok(rated) => landed_indexed(control, id, rated),
+            Ok(read) => {
+                control.shell().services().session.index_updated(read.session_games_updated);
+                landed_indexed(control, id, read.rated);
+            }
             Err(err) => tracing::warn!("replay index: the rewritten replays were not indexed again: {err}"),
         }
     });
+}
+
+/// What reading a tab's rewritten replays again wrote.
+struct StaleRead {
+    /// Whether the rows were rated, which they are not without a rating table.
+    rated: bool,
+    session_games_updated: u64,
 }
 
 /// Shows what the index learned of a battle that landed in tab `id`, whose row is listed already

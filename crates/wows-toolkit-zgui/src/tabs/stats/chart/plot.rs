@@ -4,8 +4,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::stats::chart::ChartBar;
 use wows_toolkit_viewmodel::stats::chart::ChartSeries;
+use wows_toolkit_viewmodel::stats::plot::BandColors;
 use wows_toolkit_viewmodel::stats::plot::Plot;
 use wows_toolkit_viewmodel::stats::plot::PlotCanvas;
 use wows_toolkit_viewmodel::stats::plot::PlotColor;
@@ -14,6 +16,7 @@ use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
 use wows_toolkit_viewmodel::stats::plot::PlotView;
+use wows_toolkit_viewmodel::stats::plot::ValueTone;
 use wows_toolkit_viewmodel::stats::plot::draw;
 use zgui::app::LineRequest;
 use zgui::app::Shaper;
@@ -40,6 +43,7 @@ use zgui::view::Ident;
 
 use crate::tabs::stats::chart::hover::PlotHit;
 use crate::tabs::stats::chart::hover::paint_hit;
+use crate::theme::rating_band_name;
 
 /// The custom properties the element reads its colours from, set by the chart's stylesheet.
 pub(super) const AXIS_PROPERTY: &str = "wt-plot-axis";
@@ -64,6 +68,7 @@ pub(super) struct PlotData {
     pub x_label: String,
     pub y_label: String,
     pub show_values: bool,
+    pub value_tone: ValueTone,
     pub view: PlotView,
 }
 
@@ -75,6 +80,7 @@ impl PlotData {
             x_label: &self.x_label,
             y_label: &self.y_label,
             show_values: self.show_values,
+            value_tone: self.value_tone,
             view: self.view,
         }
     }
@@ -123,10 +129,14 @@ impl PlotElement {
 impl CustomElement for PlotElement {
     fn layout(&mut self, cx: &mut CustomLayoutCx<'_>) -> CustomMeasured {
         let read = |name: &str| zgui_css::values::custom::color(cx.style, name).map(plot_color);
-        if let (Some(axis), Some(grid), Some(text), Some(background)) =
-            (read(AXIS_PROPERTY), read(GRID_PROPERTY), read(TEXT_PROPERTY), read(BACKGROUND_PROPERTY))
+        // The theme's band colours, which a win rate's value label is written in.
+        let bands = BandColors::try_from_fn(|band: PersonalRatingCategory| {
+            read(&format!("wt-pr-{}-text", rating_band_name(band)))
+        });
+        if let (Some(axis), Some(grid), Some(text), Some(background), Some(bands)) =
+            (read(AXIS_PROPERTY), read(GRID_PROPERTY), read(TEXT_PROPERTY), read(BACKGROUND_PROPERTY), bands)
         {
-            self.colors = Some(ThemeColors { plot: PlotColors { axis, grid, text }, background });
+            self.colors = Some(ThemeColors { plot: PlotColors { axis, grid, text, bands }, background });
         }
 
         // The box is sized by its stylesheet; the element has no size of its own to ask for.
@@ -159,7 +169,7 @@ impl CustomElement for PlotElement {
     }
 
     fn custom_properties_read(&self) -> Option<&'static [&'static str]> {
-        Some(&["wt-plot-*"])
+        Some(&["wt-plot-*", "wt-pr-*"])
     }
 }
 

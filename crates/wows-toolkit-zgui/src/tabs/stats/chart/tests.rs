@@ -13,7 +13,9 @@ use landaire_ui::test_support::Element as TestElement;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_toolkit_viewmodel::stats::BattleDetails;
 use wows_toolkit_viewmodel::stats::GameLimit;
+use wows_toolkit_viewmodel::stats::plot::BandColors;
 use wows_toolkit_viewmodel::stats::plot::PlotCanvas;
 use wows_toolkit_viewmodel::stats::plot::PlotColor;
 use wows_toolkit_viewmodel::stats::plot::PlotColors;
@@ -84,6 +86,11 @@ fn session() -> Arc<[PerGameStat]> {
                 match_group: if index % 6 == 0 { "ranked" } else { "pvp" }.to_string(),
                 achievements: Vec::new(),
                 match_contribution: None,
+                details: BattleDetails {
+                    fires: Some((index % 3) as u64),
+                    survived: Some(index % 2 == 0),
+                    ..BattleDetails::default()
+                },
             }
         })
         .collect()
@@ -172,7 +179,7 @@ fn drawn(
     let plot = window.bounds(element(window, "chart-plot")).expect("the plot has a box");
     let bounds = PlotRect::new(0.0, 0.0, plot.size.width.0, plot.size.height.0);
     let color = PlotColor::new(0.0, 0.0, 0.0, 1.0);
-    let colors = PlotColors { axis: color, grid: color, text: color };
+    let colors = PlotColors { axis: color, grid: color, text: color, bands: BandColors::from_fn(|_| color) };
     let layout = draw(&data.plot(), bounds, colors, &mut Unmeasured).expect("the plot has room");
 
     (data, layout, plot.origin)
@@ -225,13 +232,26 @@ fn hover_yamato_bar(window: &mut HeadlessWindow, settings: &ChartSettings) {
     window.advance(Duration::from_millis(50));
 }
 
+/// The statistic search sits in the settings popover, and its list is drawn on a surface of its
+/// own. A press on an option is a press outside the popover, so this proves the popover lets the
+/// choice land and stays open. Frags is typed first: its option sits below the part of the list
+/// that shows without scrolling.
 #[test]
 fn picking_a_statistic_and_mode_writes_the_whole_settings_row() {
     let saved = ChartSettings { id: Some(4), ..ChartSettings::default() };
     let (mut window, settings) = open(saved, Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
 
     press(&mut window, "chart-settings");
-    press(&mut window, "chart-stat-stat.frags");
+    press(&mut window, "chart-stat");
+    assert!(window.by_test_id("chart-stat-list").is_some(), "a press on the button opens the list");
+    window.type_text("frag");
+    window.advance(Duration::from_millis(50));
+    press(&mut window, "chart-stat-Frags");
+    assert_eq!(settings.get_untracked().stat, ChartableStat::Frags, "the choice lands");
+    // Longer than the popover's exit, so a dismissed menu would be gone.
+    window.advance(Duration::from_millis(300));
+    assert!(window.by_test_id("chart-settings-menu").is_some(), "and the settings menu stays open");
+    assert!(window.by_test_id("chart-stat-list").is_none(), "the list closes on the choice");
     press(&mut window, "chart-mode-Bar");
     press(&mut window, "chart-values");
 
@@ -240,6 +260,56 @@ fn picking_a_statistic_and_mode_writes_the_whole_settings_row() {
     assert_eq!(written.stat, ChartableStat::Frags);
     assert_eq!(written.mode, ChartMode::Bar);
     assert!(written.show_values);
+}
+
+/// Typing narrows the statistics to the ones whose name holds what was typed, and picking one
+/// plots it.
+#[test]
+fn typing_in_the_statistic_field_narrows_the_list_to_what_matches() {
+    let (mut window, settings) =
+        open(ChartSettings::default(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+
+    press(&mut window, "chart-settings");
+    press(&mut window, "chart-stat");
+    assert!(window.by_test_id("chart-stat-Damage").is_some(), "every statistic is offered before typing");
+    window.type_text("fire");
+    window.advance(Duration::from_millis(50));
+
+    assert!(window.by_test_id("chart-stat-Fires").is_some(), "Fires matches");
+    assert!(window.by_test_id("chart-stat-Damage").is_none(), "Damage does not");
+    assert!(window.by_test_id("chart-stat-WinRate").is_none(), "nor does a statistic a plain line cannot plot");
+
+    press(&mut window, "chart-stat-Fires");
+    assert_eq!(settings.get_untracked().stat, ChartableStat::Fires);
+    assert_eq!(window.texts_by_class("wt-chart__title"), [ChartableStat::Fires.label()]);
+    assert!(!shown(&window, "chart-empty"), "the games that recorded fires are plotted");
+}
+
+/// The chevron end of the statistic button is part of the button: over it the pointer is not a
+/// text caret, a press there opens the search, and the caret lands in the search field.
+#[test]
+fn the_statistic_button_opens_from_its_chevron_and_takes_typing_at_once() {
+    let (mut window, settings) =
+        open(ChartSettings::default(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+
+    press(&mut window, "chart-settings");
+    let button = window.bounds(element(&window, "chart-stat")).expect("the statistic button has a box");
+    let chevron = Point::new(
+        DevicePx(button.origin.x.0 + button.size.width.0 - 8.0),
+        DevicePx(button.origin.y.0 + button.size.height.0 * 0.5),
+    );
+    window.hover_at(chevron);
+    window.advance(Duration::from_millis(50));
+    assert_ne!(window.cursor(), Some(CursorStyle::Text), "the chevron is no text field");
+
+    window.click_at(chevron);
+    window.advance(Duration::from_millis(50));
+    assert!(window.by_test_id("chart-stat-list").is_some(), "a press on the chevron opens the search");
+    window.type_text("flood");
+    window.advance(Duration::from_millis(50));
+    assert!(window.by_test_id("chart-stat-Damage").is_none(), "what was typed narrows the list");
+    press(&mut window, "chart-stat-Floods");
+    assert_eq!(settings.get_untracked().stat, ChartableStat::Floods);
 }
 
 #[test]
@@ -433,6 +503,33 @@ fn hovering_a_bar_shows_its_ship_and_average() {
 
     hover_yamato_bar(&mut window, &settings);
     assert_eq!(tooltip_lines(&window), ["Yamato", "87,326"]);
+}
+
+/// A ship's average count keeps its fraction.
+#[test]
+fn hovering_a_bar_of_a_detail_shows_its_average() {
+    let settings = ChartSettings { stat: ChartableStat::Fires, mode: ChartMode::Bar, ..ChartSettings::default() };
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+
+    hover_yamato_bar(&mut window, &settings);
+    assert_eq!(tooltip_lines(&window), ["Yamato", "0.80"]);
+}
+
+/// A win rate reads in the color of the account band it falls in, as the overview draws one.
+#[test]
+fn a_hovered_win_rate_is_colored_by_its_band() {
+    let settings = ChartSettings { stat: ChartableStat::WinRate, mode: ChartMode::Bar, ..ChartSettings::default() };
+    let (mut window, _) = open(settings.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+
+    hover_yamato_bar(&mut window, &settings);
+    assert_eq!(tooltip_lines(&window), ["Yamato", "60.0%"]);
+    let band = rating_band_name(wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory::Unicum);
+    assert!(!window.all_by_attribute("data-band", band).is_empty(), "the value carries its band");
+
+    let damage = ChartSettings { mode: ChartMode::Bar, ..ChartSettings::default() };
+    let (mut window, _) = open(damage.clone(), Scheme::Dark, Drawing::Recorded).expect("a recorded window opens");
+    hover_yamato_bar(&mut window, &damage);
+    assert!(window.all_by_attribute("data-band", band).is_empty(), "another statistic carries none");
 }
 
 fn shot_path(name: &str) -> PathBuf {

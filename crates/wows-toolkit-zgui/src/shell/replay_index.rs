@@ -348,7 +348,9 @@ impl Shell {
                 )?;
                 Ok::<_, IndexError>(Built { progress, rated: rating.is_some(), exported })
             });
+            let mut reached = IndexProgress::default();
             let built = progress::follow(working, received, |step| {
+                reached = step;
                 index.progress.set(Some(step));
                 held.report(Job { name: named.clone(), progress: Progress::new(step.done, step.total) });
             })
@@ -365,6 +367,8 @@ impl Shell {
                 built.exported.say(self.toasts());
             }
             index.progress.set(None);
+            // Read off the last step rather than the outcome, which a late error leaves without it.
+            self.services().session.index_updated(reached.session_games_updated);
             index.cancel.set_value(None);
             let said = match built {
                 Ok(Built { progress, .. }) => {

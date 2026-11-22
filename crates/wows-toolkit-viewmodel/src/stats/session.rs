@@ -122,6 +122,7 @@ impl SessionBattles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stats::BattleDetails;
 
     fn opened() -> AppOpened {
         AppOpened::new(jiff::civil::date(2026, 11, 16).at(14, 32, 0, 0))
@@ -146,6 +147,7 @@ mod tests {
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
             match_contribution: None,
+            details: BattleDetails::default(),
         }
     }
 
