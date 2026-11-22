@@ -641,6 +641,7 @@ mod tests {
                 scenario: String::new(),
                 date_time: String::new(),
                 build,
+                rating_scope: wows_core::rating_scope::RatingScope::Unrated,
             },
         };
 

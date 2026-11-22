@@ -240,8 +240,9 @@ fn HeaderAction(
 }
 
 /// The listing's options: the selected directory's path and the actions on it as a whole,
-/// autoload, name anonymization and the session stats' scope, then the grouping and column filters
-/// of the egui app's replay header, and which elements a replay row draws.
+/// autoload, name anonymization and the session stats' scope, then the grouping, which game modes
+/// the group win rates count, the column filters of the egui app's replay header, and which
+/// elements a replay row draws.
 ///
 /// Grouping is a row of exclusive toggles rather than a select: a select's list is drawn outside
 /// the popover, and a press on it would dismiss the popover before the choice landed.
@@ -344,6 +345,19 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
     let auto_load_name = NodeRef::new();
     let anonymize_box = NodeRef::new();
     let anonymize_name = NodeRef::new();
+    let all_modes = Signal::derive_local(move || {
+        // Unchecked until the settings are read, as the setting's own default is.
+        let on = services.settings.read(|settings| settings.replay.group_win_rate_all_modes).unwrap_or(false);
+        if on { Checked::Yes } else { Checked::No }
+    });
+    let set_all_modes = move |checked: Checked| {
+        services.settings.edit(keys::REPLAY_SETTINGS, |settings| {
+            settings.replay.group_win_rate_all_modes = checked == Checked::Yes;
+            settings.replay.clone()
+        });
+    };
+    let all_modes_box = NodeRef::new();
+    let all_modes_name = NodeRef::new();
 
     view! {
         Tooltip {
@@ -432,6 +446,22 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                             ToggleGroupItem(value = grouping_value(ReplayGrouping::None), attr:data-testid = "replay-listing-grouping-none") {
                                 {locale.text("ui.replay.group.none")}
                             }
+                        }
+                        Tooltip {
+                            TooltipTrigger {
+                                row(class = "wt-listing-options__check") {
+                                    Checkbox(
+                                        checked = Binding::controlled(all_modes, set_all_modes),
+                                        node_ref = all_modes_box,
+                                        labelled_by = all_modes_name,
+                                        attr:data-testid = "replay-listing-group-win-rate-all-modes"
+                                    )
+                                    Label(node_ref = all_modes_name, control = all_modes_box) {
+                                        {locale.text("ui.replay.group_win_rate_all_modes")}
+                                    }
+                                }
+                            }
+                            TooltipContent {{locale.text("ui.replay.group_win_rate_all_modes_tooltip")}}
                         }
                         Separator()
                         text(class = "wt-listing-options__title") {{locale.text("ui.replay.column_filters")}}

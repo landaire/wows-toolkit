@@ -6799,6 +6799,7 @@ mod shipbuilds_batch_dispatch_tests {
             scenario: "Domination".into(),
             date_time: "06.08.2026 12:00:00".into(),
             build: None,
+            rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
         })
     }
 

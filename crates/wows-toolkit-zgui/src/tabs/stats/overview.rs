@@ -58,8 +58,8 @@ use crate::game_art::GameArt;
 use crate::icons::AppIconProps;
 use crate::services::GameDataState;
 use crate::services::Services;
-use crate::tabs::stats::rating;
 use crate::tabs::stats::rating::RatingChipProps;
+use crate::theme::WinRateBand;
 use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-stats-overview";
@@ -311,7 +311,7 @@ fn summary_line(computed: &Computed) -> AnyView {
     let record = rated.win_rate().map(|rate| {
         let label = rated.label();
         let rate_text = format!("({rate:.1}%)");
-        let band = rating::WinRateBand::from_rate(rate);
+        let band = WinRateBand::from_rate(rate);
         let hover = summary.records.hover_text();
         AnyView::new(view! {
             Tooltip {
@@ -562,7 +562,7 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
 /// Player Tracker draws one, broken down by battle kind on hover.
 fn win_rate_cell(ship: &OverviewShip) -> AnyView {
     let rate = ship.info.rated_win_rate();
-    let band = rate.map(rating::WinRateBand::from_rate);
+    let band = rate.map(WinRateBand::from_rate);
     let hover = ship.info.records().hover_text();
     let test_id = ship.info.ship_id().map(|id| format!("stats-overview-win-rate-{id}"));
     let band_name = band.as_ref().map(|band| band.name.clone());

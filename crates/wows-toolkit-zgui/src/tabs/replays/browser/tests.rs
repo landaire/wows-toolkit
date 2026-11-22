@@ -25,6 +25,7 @@ use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_config::index::rows::TwitchChatter;
 use wows_toolkit_config::index::rows::TwitchLogin;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::browser_tree::RecordScope;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::HeaderReadError;
 use wows_toolkit_replay_data::replay_dir::ScanProgress;
@@ -34,6 +35,7 @@ use wows_toolkit_replay_data::simulated_panic;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::personal_rating::BattleRating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
@@ -67,6 +69,7 @@ use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::tabs::replays::BUILT;
 use crate::tabs::replays::workspace::ReplayWorkspace;
+use crate::theme::rating_band_name;
 
 pub(super) const FIXTURES: [&str; 3] = [
     "10000_1736020571_20250101_215420_PVSB018-Ipiranga_41_Conquest.wowsreplay",
@@ -831,7 +834,11 @@ fn a_closed_group_stays_closed_and_selected_as_its_label_changes() {
     set_autoload(&mut window, control, false);
     control.adopt_pinned_folders(PinnedFolders::default());
     control.grouping.set(ReplayGrouping::Date);
-    let (_dir, root) = replay_dir(1);
+    // A Random battle, whose result the group's record counts.
+    let rated = FIXTURES[1];
+    let dir = tempfile::tempdir().expect("a temporary directory can be made");
+    let root = std::fs::canonicalize(dir.path()).expect("the directory resolves");
+    std::fs::copy(fixture(rated), root.join(rated)).expect("the replay is copied");
     control.open_folder(root.clone());
     settle_in_real_time(&mut window);
     control.pin_folder(folder_id(control, &root), true);
@@ -851,14 +858,15 @@ fn a_closed_group_stays_closed_and_selected_as_its_label_changes() {
     let (closed, unscored) = group();
     assert!(!shown.expanded.with_untracked(|expanded| expanded.contains(&closed)), "a click closes the group");
 
-    let won = HashMap::from([(root.join(FIXTURES[0]), summary(MatchOutcome::Win, RatingScope::Unrated, None))]);
+    let random = RatingScope::Rated(RatedBattle::Random);
+    let won = HashMap::from([(root.join(rated), summary(MatchOutcome::Win, random, None))]);
     shown.summaries.set(won);
     window.advance(Duration::from_millis(50));
     let (scored, label) = group();
     assert_ne!(label, unscored, "the result reaches the group's label");
     assert_eq!(scored, closed, "and the group keeps its row");
 
-    land(&root, FIXTURES[0], &mut window);
+    land(&root, rated, &mut window);
     let (landed, label) = group();
     assert!(label.contains("(2)"), "the landed battle joins the group: {label}");
     assert_eq!(landed, closed, "which keeps its row");
@@ -1391,6 +1399,7 @@ fn a_rated_row_carries_its_rating_and_outcome() {
         cache: None,
         fallback: None,
         grouping: ReplayGrouping::Date,
+        record_scope: RecordScope::Rated,
         locale: None,
         names: NameDisplay::Real,
     });
@@ -1424,6 +1433,7 @@ fn grouping_by_date_puts_each_replay_under_its_day_and_keeps_group_keys() {
         cache: None,
         fallback: None,
         grouping: ReplayGrouping::Date,
+        record_scope: RecordScope::Rated,
         locale: None,
         names: NameDisplay::Real,
     };
@@ -1440,6 +1450,46 @@ fn grouping_by_date_puts_each_replay_under_its_day_and_keeps_group_keys() {
 
     let flat = BrowserTree::build(&TreeInputs { grouping: ReplayGrouping::None, ..inputs });
     assert!(flat.roots().iter().all(|key| matches!(key, NodeKey::Leaf(_))), "no grouping lists the replays alone");
+}
+
+/// A group header's record counts Random and Ranked battles alone, its rate in the account win rate
+/// band, until the options count every game mode, which leaves the rate without a band.
+#[test]
+fn a_group_header_counts_rated_battles_until_the_options_count_every_mode() {
+    let (mut window, control) = open();
+    // The choice this saves would otherwise reach the listings of every later window.
+    control.shell().services().settings.use_private_database_for_test();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    // An Event battle and a Random battle, on two days.
+    let (_dir, root) = replay_dir(2);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let random = RatingScope::Rated(RatedBattle::Random);
+    listing(control, &root).summaries.set(HashMap::from([
+        (root.join(FIXTURES[0]), summary(MatchOutcome::Win, RatingScope::Unrated, None)),
+        (root.join(FIXTURES[1]), summary(MatchOutcome::Win, random, Some(1650.0))),
+    ]));
+    settle_in_real_time(&mut window);
+    let bands = |window: &HeadlessWindow| -> Vec<Option<String>> {
+        window.all_by_class("wt-row__group-rate").into_iter().map(|rate| window.attribute(rate, "data-band")).collect()
+    };
+
+    assert_eq!(window.texts_by_class("wt-row__group-tally"), ["- 1W/0L"], "only the Random day has a record");
+    assert_eq!(window.texts_by_class("wt-row__group-rate"), ["(100%)"]);
+    let band = rating_band_name(PersonalRatingCategory::from_win_rate(100.0)).to_owned();
+    assert_eq!(bands(&window), [Some(band)], "the rate is drawn in its band");
+
+    let options = window.by_test_id("replay-listing-options").expect("the options button is drawn");
+    window.click(options).expect("the button has a box");
+    window.advance(Duration::from_millis(300));
+    let check = window.by_test_id("replay-listing-group-win-rate-all-modes").expect("the options draw the choice");
+    window.click(check).expect("the box has a box");
+    settle_in_real_time(&mut window);
+
+    assert_eq!(window.texts_by_class("wt-row__group-tally"), ["- 1W/0L", "- 1W/0L"], "the Event day counts too");
+    assert_eq!(bands(&window), [None, None], "a record of every mode has no band");
+    let saved = control.shell().services().settings.read_untracked(|settings| settings.replay.group_win_rate_all_modes);
+    assert_eq!(saved, Some(true), "the choice is saved with the replay settings");
 }
 
 #[test]

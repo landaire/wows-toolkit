@@ -87,9 +87,10 @@ use crate::tabs::stats::overview::loaded_build;
 use crate::tabs::stats::overview::optional_decimal;
 use crate::tabs::stats::overview::optional_number;
 use crate::tabs::stats::overview::optional_percent;
-use crate::tabs::stats::rating;
 use crate::tabs::stats::ships::detail::ShipDetailProps;
 use crate::text_marks::marks;
+use crate::theme::WinRateBand;
+use crate::theme::rating_text_color;
 
 const SHEET: &str = "wt-stats-ships";
 
@@ -549,7 +550,7 @@ fn ship_grid(
 /// A ship's Random and Ranked win rate, broken down by battle kind on hover.
 fn win_rate_cell(row: &ShipRow) -> AnyView {
     let rate = row.performance.rated_win_rate();
-    let band = rate.map(rating::WinRateBand::from_rate);
+    let band = rate.map(WinRateBand::from_rate);
     let band_name = band.as_ref().map(|band| band.name.clone());
     let color = band.map(|band| band.color);
     let rate = optional_percent(rate);
@@ -595,7 +596,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
         let draws = (rated.draws > 0).then(|| format!("{}D", rated.draws));
         let wins = format!("{}W", rated.wins);
         let losses = format!("{}L", rated.losses);
-        let band = rating::WinRateBand::from_rate(rate);
+        let band = WinRateBand::from_rate(rate);
         let rate = format!("({rate:.0}%)");
         let hover = row.performance.records().hover_text();
         AnyView::new(view! {
@@ -613,12 +614,12 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
         })
     });
     let rating = row.rating.as_ref().map(|rating| {
-        let color = rating::text_color(rating.average.category);
+        let color = rating_text_color(rating.average.category);
         let text = format!("PR: {:.0}", rating.average.pr);
         AnyView::new(view! { text(style:color = color) {{text}} })
     });
     let match_contribution = row.match_contribution.map(|mc| {
-        let color = rating::text_color(McStats::category(mc.average));
+        let color = rating_text_color(McStats::category(mc.average));
         let text = format!("MC: {:.0}", mc.average);
         AnyView::new(view! { text(style:color = color, attr:data-testid = format!("ship-mc-{ship}")) {{text}} })
     });

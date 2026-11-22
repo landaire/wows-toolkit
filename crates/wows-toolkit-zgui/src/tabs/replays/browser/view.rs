@@ -31,6 +31,8 @@ use wows_toolkit_config::ListingRowElement;
 use wows_toolkit_config::ListingRowElements;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::browser_tree::GroupRecord;
+use wows_toolkit_replay_data::browser_tree::RecordScope;
 use wows_toolkit_replay_data::force_reindex::Confirm;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::listing_row::LineGlyph;
@@ -99,6 +101,7 @@ use crate::tabs::replays::browser::tree::LeafMc;
 use crate::tabs::replays::browser::tree::LeafRow;
 use crate::tabs::replays::browser::tree::NodeKey;
 use crate::tabs::stats::session::opened_label;
+use crate::theme::WinRateBand;
 use crate::theme::rating_band_name;
 
 const SHEET: &str = "wt-replay-listing";
@@ -197,6 +200,7 @@ const CSS: &str = css!(
         white-space: nowrap;
         font-size: 14px;
     }
+    .wt-row__group-record { flex: none; display: flex; gap: 4px; font-size: 14px; white-space: nowrap; }
     .wt-row__division { color: var(--wt-color-division); }
     .wt-row__twitch { flex: none; }
     /* As tall as the label's line, so a tagged row lays out as any other. */
@@ -443,11 +447,16 @@ fn row_view(
 ) -> AnyView {
     match row.key {
         NodeKey::Group(id) => {
-            let label =
-                move || listing.tree.with(|tree| tree.group(&id).map(|group| group.label.clone()).unwrap_or_default());
+            let title_id = id.clone();
+            let title = move || {
+                listing.tree.with(|tree| tree.group(&title_id).map(|group| group.title.clone()).unwrap_or_default())
+            };
+            let record =
+                move || listing.tree.with(|tree| tree.group(&id).and_then(|group| group.record)).map(group_record_view);
             AnyView::new(view! {
                 row(class = "wt-row") {
-                    text(class = "wt-row__group-label") {{label}}
+                    text(class = "wt-row__group-label") {{title}}
+                    {record}
                 }
             })
         }
@@ -701,6 +710,25 @@ fn rating_style(category: PersonalRatingCategory) -> String {
         "color: var(--wt-pr-{band}-text, #{text:06x}); \
          background-color: color-mix(in srgb, var(--wt-pr-{band}-hue, #{hue:06x}) 18%, transparent);"
     )
+}
+
+/// A group's wins and losses, then its win rate. A record of Random and Ranked battles alone is
+/// drawn in its account win rate band; the bands are calibrated for Random battles, so a record of
+/// every mode is not.
+fn group_record_view(record: GroupRecord) -> AnyView {
+    let band = match record.scope() {
+        RecordScope::Rated => Some(WinRateBand::from_rate(record.win_rate())),
+        RecordScope::AllModes => None,
+    };
+    let band_name = band.as_ref().map(|band| band.name.clone());
+    let color = band.map(|band| band.color);
+
+    AnyView::new(view! {
+        row(class = "wt-row__group-record") {
+            text(class = "wt-row__group-tally") {{format!("- {}", record.tally_text())}}
+            text(class = "wt-row__group-rate", attr:data-band = band_name, style:color = color) {{record.rate_text()}}
+        }
+    })
 }
 
 /// The menu a secondary click on `key` opens. A group with no replays under it has none.

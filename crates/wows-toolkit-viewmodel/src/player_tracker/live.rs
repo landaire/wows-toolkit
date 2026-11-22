@@ -1091,6 +1091,7 @@ mod debug_replay_choice_tests {
             scenario: "Domination".to_owned(),
             date_time: date_time.to_owned(),
             build: None,
+            rating_scope: RatingScope::Unrated,
         }
     }
 

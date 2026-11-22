@@ -22,6 +22,7 @@ use landaire_ui::TreeMemory;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::RowSummary;
+use wows_toolkit_replay_data::browser_tree::RecordScope;
 use wows_toolkit_replay_data::force_reindex::ReindexCandidate;
 use wows_toolkit_replay_data::replay_dir::APPEARED_REPLAY_ATTEMPTS;
 use wows_toolkit_replay_data::replay_dir::APPEARED_REPLAY_RETRY;
@@ -278,6 +279,10 @@ impl Listing {
             let locale = services.settings.read(|settings| settings.locale.clone()).flatten();
             let names = services.settings.name_display();
             let grouping = self.grouping.get();
+            // Random and Ranked only until the settings are read, as the setting's own default is.
+            let all_modes =
+                services.settings.read(|settings| settings.replay.group_win_rate_all_modes).unwrap_or(false);
+            let record_scope = if all_modes { RecordScope::AllModes } else { RecordScope::Rated };
             let fallback = match &state {
                 GameDataState::Ready(loaded) => Some(std::sync::Arc::clone(loaded.provider())),
                 _ => None,
@@ -292,6 +297,7 @@ impl Listing {
                             cache: cache.as_ref(),
                             fallback: fallback.as_deref(),
                             grouping,
+                            record_scope,
                             locale: locale.as_deref(),
                             names,
                         })

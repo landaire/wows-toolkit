@@ -7,6 +7,7 @@
 
 use rust_i18n::t;
 use wows_core::pseudonym;
+use wows_core::rating_scope::RatingScope;
 use wows_replays::ReplayMeta;
 use wows_replays::ReplayMetaRef;
 use wows_replays::types::GameParamId;
@@ -16,6 +17,7 @@ use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_config::index::rows::TwitchChatter;
+use wows_toolkit_config::index::rows::stored_rating_scope;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
@@ -46,36 +48,47 @@ pub struct ListedReplay {
     /// build its replays actually need, which is not always the installed
     /// one.
     pub build: Option<u32>,
+    /// Whether the battle is a Random or Ranked one, from `gameType` and `matchGroup`, so an
+    /// unindexed replay classifies too.
+    pub rating_scope: RatingScope,
 }
 
 impl ListedReplay {
     pub fn from_meta(meta: &ReplayMeta) -> Self {
+        let game_type = meta.gameType.clone().unwrap_or_default();
+        // An absent matchGroup names no group, which classifies as unrated, as the index does.
+        let rating_scope = stored_rating_scope(&game_type, meta.matchGroup.as_deref().unwrap_or(""));
+
         ListedReplay {
             ship_id: meta.vehicles.iter().find(|vehicle| vehicle.relation == 0).map(|vehicle| vehicle.shipId),
             map_name: meta.mapName.clone(),
-            game_type: meta.gameType.clone().unwrap_or_default(),
+            game_type,
             scenario: meta.scenario.clone(),
             date_time: meta.dateTime.clone(),
             build: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
                 .and_then(|version| version.build)
                 .map(|build| build.get()),
+            rating_scope,
         }
     }
 
     /// Same extraction from the borrowed metadata parse, so bulk directory
     /// scans only allocate the handful of fields a row keeps.
     pub fn from_meta_ref(meta: &ReplayMetaRef<'_>) -> Self {
+        // Absent gameType renders as an empty mode column, matching `from_meta`.
+        let game_type = meta.gameType.clone().map(std::borrow::Cow::into_owned).unwrap_or_default();
+        let rating_scope = stored_rating_scope(&game_type, meta.matchGroup.as_deref().unwrap_or(""));
+
         ListedReplay {
             ship_id: meta.vehicles.iter().find(|vehicle| vehicle.relation == 0).map(|vehicle| vehicle.shipId),
             map_name: meta.mapName.clone().into_owned(),
-            // Absent gameType renders as an empty mode column, matching
-            // `from_meta`.
-            game_type: meta.gameType.clone().map(std::borrow::Cow::into_owned).unwrap_or_default(),
+            game_type,
             scenario: meta.scenario.clone().into_owned(),
             date_time: meta.dateTime.clone().into_owned(),
             build: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
                 .and_then(|version| version.build)
                 .map(|build| build.get()),
+            rating_scope,
         }
     }
 }
@@ -557,6 +570,7 @@ pub fn file_mtime_secs(path: &std::path::Path) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wows_core::rating_scope::RatedBattle;
 
     fn identity() -> RowIdentity {
         RowIdentity {
@@ -702,14 +716,15 @@ mod tests {
     /// The borrowed and owned constructors must extract identically, since the
     /// bulk scan uses one and single-file paths use the other. One fixture
     /// carries an escaped vehicle name (forcing serde's owned-Cow fallback)
-    /// and the other an absent gameType, so both divergence-prone branches
-    /// are pinned.
+    /// and the other an absent gameType classified by its matchGroup, so both
+    /// divergence-prone branches are pinned.
     #[test]
     fn from_meta_ref_matches_from_meta() {
         let mut with_game_type = meta(vec![vehicle(1, 777), vehicle(0, 4_281_269_200), vehicle(2, 999)]);
         with_game_type.vehicles[0].name = "Some\"one".to_string();
         let mut without_game_type = meta(vec![vehicle(0, 777)]);
         without_game_type.gameType = None;
+        without_game_type.matchGroup = Some("ranked".to_string());
 
         for owned in [with_game_type, without_game_type] {
             let json = serde_json::to_vec(&owned).expect("meta serializes");
@@ -728,6 +743,28 @@ mod tests {
         let listed = ListedReplay::from_meta(&spectator);
         assert_eq!(listed.ship_id, None);
         assert_eq!(listed.game_type, "");
+    }
+
+    /// The listing tells Random and Ranked battles from the rest without the index, and an older
+    /// replay with no gameType by its matchGroup.
+    #[test]
+    fn from_meta_classifies_the_battle() {
+        let random = meta(vec![vehicle(0, 777)]);
+        assert_eq!(ListedReplay::from_meta(&random).rating_scope, RatingScope::Rated(RatedBattle::Random));
+
+        let mut coop = meta(vec![vehicle(0, 777)]);
+        coop.gameType = Some("CooperativeBattle".to_string());
+        coop.matchGroup = Some("pvp".to_string());
+        assert_eq!(ListedReplay::from_meta(&coop).rating_scope, RatingScope::Unrated);
+
+        let mut old_ranked = meta(vec![vehicle(0, 777)]);
+        old_ranked.gameType = None;
+        old_ranked.matchGroup = Some("ranked".to_string());
+        assert_eq!(ListedReplay::from_meta(&old_ranked).rating_scope, RatingScope::Rated(RatedBattle::Ranked));
+
+        let mut unnamed = meta(vec![vehicle(0, 777)]);
+        unnamed.gameType = None;
+        assert_eq!(ListedReplay::from_meta(&unnamed).rating_scope, RatingScope::Unrated);
     }
 
     #[test]

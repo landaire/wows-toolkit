@@ -421,6 +421,9 @@ fn listing(data: &SharedBuildData, count: usize, mut report: Report) {
                 scenario: "Domination".to_string(),
                 date_time: "17.08.2026 11:46:44".to_string(),
                 build: Some(13_187_581),
+                rating_scope: wowsunpack::rating_scope::RatingScope::Rated(
+                    wowsunpack::rating_scope::RatedBattle::Random,
+                ),
             };
             (path.clone(), Arc::new(listed))
         })

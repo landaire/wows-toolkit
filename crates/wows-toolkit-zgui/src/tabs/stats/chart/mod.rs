@@ -107,9 +107,9 @@ use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::PlotElement;
 use crate::tabs::stats::chart::plot::ThemeColors;
 use crate::tabs::stats::check_row::CheckRowProps;
-use crate::tabs::stats::rating;
 use crate::text_marks::marks;
 use crate::theme::rating_band_name;
+use crate::theme::rating_text_color;
 
 const SHEET: &str = "wt-stats-chart";
 
@@ -531,7 +531,7 @@ impl PlotSurface {
         let swatch = format!("rgb({}, {}, {})", text.color.r, text.color.g, text.color.b);
         let game = text.game.map(|game| AnyView::new(view! { text(class = "wt-chart__tip-game") {{game}} }));
         let band_name = text.band.map(|band| rating_band_name(band).to_owned());
-        let value_color = text.band.map(rating::text_color);
+        let value_color = text.band.map(rating_text_color);
 
         Some(AnyView::new(view! {
             OverlaySurface(class = "wt-chart__tip", attr:data-testid = "chart-hover-tooltip") {

@@ -209,6 +209,26 @@ pub const fn rating_band_name(category: PersonalRatingCategory) -> &'static str 
     }
 }
 
+/// The colour text in `category` is drawn in.
+pub fn rating_text_color(category: PersonalRatingCategory) -> String {
+    format!("var(--wt-pr-{}-text)", rating_band_name(category))
+}
+
+/// The band a Random and Ranked win rate falls in, as a `data-band` name and a text colour.
+pub struct WinRateBand {
+    pub name: String,
+    pub color: String,
+}
+
+impl WinRateBand {
+    /// The band for `rate`, a percentage from 0 to 100.
+    pub fn from_rate(rate: f64) -> Self {
+        let category = PersonalRatingCategory::from_win_rate(rate);
+
+        Self { name: rating_band_name(category).to_owned(), color: rating_text_color(category) }
+    }
+}
+
 /// The suffix of a damage type's `--wt-damage-*` property.
 pub const fn damage_kind_name(kind: DamageKind) -> &'static str {
     match kind {

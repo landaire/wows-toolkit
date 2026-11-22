@@ -12,8 +12,11 @@ use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wows_toolkit_replay_data::browser_tree::BrowserNode;
 use wows_toolkit_replay_data::browser_tree::GroupKind;
+use wows_toolkit_replay_data::browser_tree::GroupRecord;
+use wows_toolkit_replay_data::browser_tree::RecordScope;
 use wows_toolkit_replay_data::browser_tree::ReplayLite;
 use wows_toolkit_replay_data::browser_tree::build_browser_tree;
+use wows_toolkit_replay_data::browser_tree::group_label;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::replay_dir::ScannedReplay;
 use wows_toolkit_replay_data::replay_dir::UnreadableReplay;
@@ -54,7 +57,11 @@ impl NodeKey {
 /// What a group row draws, and the replays under it for its menu.
 #[derive(Clone, Debug)]
 pub struct GroupRow {
+    /// The title and record as one line, for the row's accessible name and type-ahead.
     pub label: String,
+    /// `"{name} ({count})"`.
+    pub title: String,
+    pub record: Option<GroupRecord>,
     pub paths: Vec<PathBuf>,
 }
 
@@ -128,6 +135,7 @@ pub struct TreeInputs<'a> {
     pub cache: Option<&'a GameDataCache>,
     pub fallback: Option<&'a GameMetadataProvider>,
     pub grouping: ReplayGrouping,
+    pub record_scope: RecordScope,
     pub locale: Option<&'a str>,
     pub names: NameDisplay,
 }
@@ -153,7 +161,7 @@ impl BrowserTree {
                 (lite.path.clone(), facts)
             })
             .collect();
-        let nodes = build_browser_tree(&lites, inputs.grouping, inputs.locale);
+        let nodes = build_browser_tree(&lites, inputs.grouping, inputs.record_scope, inputs.locale);
 
         let mut tree = Self::default();
         // A worklist of (node, parent key), walked in order so the visible order of the replays is
@@ -161,13 +169,14 @@ impl BrowserTree {
         let mut work: Vec<(BrowserNode, Option<NodeKey>)> = nodes.into_iter().rev().map(|node| (node, None)).collect();
         while let Some((node, parent)) = work.pop() {
             let (key, below) = match node {
-                BrowserNode::Group { kind, name, label, children } => {
+                BrowserNode::Group { kind, name, title, record, children } => {
                     let mut group = GroupId { kind, name, repeat: 0 };
                     while tree.groups.contains_key(&group) {
                         group.repeat += 1;
                     }
                     let paths = descendant_paths(&children);
-                    tree.groups.insert(group.clone(), GroupRow { label, paths });
+                    let label = group_label(&title, record);
+                    tree.groups.insert(group.clone(), GroupRow { label, title, record, paths });
                     (NodeKey::Group(group), Some(children))
                 }
                 BrowserNode::Leaf { label, battle, stats, path, map_name, outcome, in_division, in_twitch_chat } => {

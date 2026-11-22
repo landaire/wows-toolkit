@@ -544,6 +544,7 @@ mod tests {
             scenario: "Domination".to_string(),
             date_time: date_time.to_string(),
             build: None,
+            rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
         })
     }
 

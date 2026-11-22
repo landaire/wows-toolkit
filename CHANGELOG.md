@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(zgui)* Count only Random and Ranked battles in a replay group header's win rate, colored by its account win rate band, with a listing option to count every game mode instead
 - *(wows-query)* Summarize `quantity_values` over every class when its group names no class, with each class's own statistics in `by_class`, so the slowest shells of a tier can be found across classes
 - *(wows-query)* Name the ships that do not defeat the plate in `penetration_search` as `failing`, each with its strongest weapon of that ammo and its penetration
 - *(wows-query)* Run jq filters over JSON values in the sandboxed worker with `jq_worker::evaluate_json`, alongside stored GameParams entries with `jq_worker::evaluate`

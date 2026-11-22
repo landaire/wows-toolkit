@@ -9,6 +9,7 @@ use zgui::view::IntoView;
 use zgui::view::install_stylesheet;
 
 use crate::theme::rating_band_name;
+use crate::theme::rating_text_color;
 
 const SHEET: &str = "wt-stats-rating";
 
@@ -20,26 +21,6 @@ const CSS: &str = css!(
         white-space: nowrap;
     }"
 );
-
-/// The colour text in `category` is drawn in.
-pub(super) fn text_color(category: PersonalRatingCategory) -> String {
-    format!("var(--wt-pr-{}-text)", rating_band_name(category))
-}
-
-/// The band a Random and Ranked win rate falls in, as a `data-band` name and a text colour.
-pub(super) struct WinRateBand {
-    pub(super) name: String,
-    pub(super) color: String,
-}
-
-impl WinRateBand {
-    /// The band for `rate`, a percentage from 0 to 100.
-    pub(super) fn from_rate(rate: f64) -> Self {
-        let category = PersonalRatingCategory::from_win_rate(rate);
-
-        Self { name: rating_band_name(category).to_owned(), color: text_color(category) }
-    }
-}
 
 /// The band's hue at the chip tint alpha.
 fn tint(category: PersonalRatingCategory) -> String {
@@ -55,7 +36,7 @@ pub(super) fn RatingChip(#[prop(into)] text: String, category: PersonalRatingCat
     view! {
         text(
             class = "wt-rating-chip",
-            style:color = text_color(category),
+            style:color = rating_text_color(category),
             style:background-color = tint(category)
         ) {{text}}
     }

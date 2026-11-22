@@ -2196,6 +2196,7 @@ mod tests {
             scenario: "Domination".into(),
             date_time: "28.07.2026 14:23:05".into(),
             build: None,
+            rating_scope: wowsunpack::rating_scope::RatingScope::Rated(wowsunpack::rating_scope::RatedBattle::Random),
         })
     }
 

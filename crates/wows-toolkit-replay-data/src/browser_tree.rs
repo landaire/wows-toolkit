@@ -5,7 +5,9 @@
 //! `build_file_listing_grouped`/`build_file_listing_ungrouped`
 //! (`mod.rs:3267-3448`), `win_rate_label` (`mod.rs:150`), and `colorize_label`
 //! (`mod.rs:136`, whose win/loss/draw color is resolved by the render layer
-//! from `battle_result`, not stored as text here).
+//! from `battle_result`, not stored as text here). Unlike the egui listing, a
+//! group's record counts only Random and Ranked battles unless asked to count
+//! every mode.
 //!
 //! A row's own two lines and its outcome come from the shared assembly
 //! (`wows_toolkit_viewmodel::listing_row`), so the listing reads the same in
@@ -17,6 +19,7 @@ use std::hash::Hash;
 use std::path::PathBuf;
 
 use jiff::civil::DateTime;
+use wows_core::rating_scope::RatingScope;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
@@ -48,6 +51,9 @@ pub struct ReplayLite {
     /// What the row reports: outcome, damage, kills, division. From the
     /// replay index, so it is unknown until the index has seen the file.
     pub stats: RowStats,
+    /// Whether the battle is a Random or Ranked one, which decides whether a
+    /// group's record counts it by default.
+    pub rating_scope: RatingScope,
 }
 
 impl ReplayLite {
@@ -79,6 +85,7 @@ impl ReplayLite {
             map_name: listed.map_name.clone(),
             identity,
             stats: resolve_row_stats(None, summary),
+            rating_scope: listed.rating_scope,
         }
     }
 }
@@ -100,16 +107,83 @@ impl GroupKind {
     }
 }
 
+/// Which battles a group's record counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordScope {
+    /// Random and Ranked battles, the ones the account win rate bands are calibrated for.
+    Rated,
+    /// Every game mode.
+    AllModes,
+}
+
+impl RecordScope {
+    fn counts(self, battle: RatingScope) -> bool {
+        match self {
+            Self::Rated => battle.is_rated(),
+            Self::AllModes => true,
+        }
+    }
+}
+
+/// The wins and losses among a group's battles that its scope counts. At
+/// least one of the two is nonzero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupRecord {
+    wins: u32,
+    losses: u32,
+    scope: RecordScope,
+}
+
+impl GroupRecord {
+    /// The record of the battles in `replays` that `scope` counts. Draws and
+    /// unknown outcomes are left out, matching the egui `_ =>` arm. `None`
+    /// when no counted battle was won or lost.
+    fn tally(replays: &[&ReplayLite], scope: RecordScope) -> Option<Self> {
+        let mut wins = 0;
+        let mut losses = 0;
+        for replay in replays.iter().filter(|replay| scope.counts(replay.rating_scope)) {
+            match replay.stats.outcome {
+                MatchOutcome::Win => wins += 1,
+                MatchOutcome::Loss => losses += 1,
+                MatchOutcome::Draw | MatchOutcome::Unknown => {}
+            }
+        }
+
+        (wins + losses > 0).then_some(Self { wins, losses, scope })
+    }
+
+    pub fn scope(self) -> RecordScope {
+        self.scope
+    }
+
+    /// The share of wins as a percentage from 0 to 100.
+    pub fn win_rate(self) -> f64 {
+        f64::from(self.wins) / f64::from(self.wins + self.losses) * 100.0
+    }
+
+    /// `"{W}W/{L}L"`.
+    pub fn tally_text(self) -> String {
+        format!("{}W/{}L", self.wins, self.losses)
+    }
+
+    /// `"({pct}%)"`.
+    pub fn rate_text(self) -> String {
+        format!("({:.0}%)", self.win_rate())
+    }
+}
+
 /// One row of the file-browser tree: a Date/Ship group with its children, or
 /// a single replay leaf. A leaf carries both of its lines plus the outcome
-/// its first line is tinted by; a group's label already encodes its win rate.
+/// its first line is tinted by.
 #[derive(Debug, Clone)]
 pub enum BrowserNode {
     Group {
         kind: GroupKind,
         /// The date or ship the group gathers, which stays while its count and results change.
         name: String,
-        label: String,
+        /// `"{name} ({count})"`, the count taking in every replay of the group.
+        title: String,
+        record: Option<GroupRecord>,
         children: Vec<BrowserNode>,
     },
     Leaf {
@@ -137,25 +211,39 @@ pub enum BrowserNode {
 /// layers, versioned subfolders), whose names would otherwise order them. A
 /// header time that does not parse sorts after every dated replay, and the
 /// file name, which the game leads with the time, orders the rest.
-pub fn build_browser_tree(files: &[ReplayLite], grouping: ReplayGrouping, locale: Option<&str>) -> Vec<BrowserNode> {
+pub fn build_browser_tree(
+    files: &[ReplayLite],
+    grouping: ReplayGrouping,
+    record_scope: RecordScope,
+    locale: Option<&str>,
+) -> Vec<BrowserNode> {
     let mut sorted: Vec<&ReplayLite> = files.iter().collect();
     sorted.sort_by_cached_key(|&r| {
         let played_at = DateTime::strptime(HEADER_DATE_FORMAT, &r.identity.date_time).ok();
         Reverse((played_at, r.path.file_name(), r.path.as_path()))
     });
 
+    let group = |kind, name, replays| group_node(kind, name, replays, record_scope, locale);
     match grouping {
         ReplayGrouping::None => sorted.into_iter().map(|r| leaf(r, ReplayGrouping::None, locale)).collect(),
         ReplayGrouping::Date => {
             let groups = first_seen_groups(&sorted, |r| {
                 r.identity.date_time.split(' ').next().unwrap_or(&r.identity.date_time).to_string()
             });
-            groups.into_iter().map(|(date, replays)| group_node(GroupKind::Date, date, replays, locale)).collect()
+            groups.into_iter().map(|(date, replays)| group(GroupKind::Date, date, replays)).collect()
         }
         ReplayGrouping::Ship => {
             let groups = first_seen_groups(&sorted, |r| r.identity.ship.clone());
-            groups.into_iter().map(|(ship, replays)| group_node(GroupKind::Ship, ship, replays, locale)).collect()
+            groups.into_iter().map(|(ship, replays)| group(GroupKind::Ship, ship, replays)).collect()
         }
+    }
+}
+
+/// `"{title} - {W}W/{L}L ({pct}%)"`, or the title alone for a group with no record.
+pub fn group_label(title: &str, record: Option<GroupRecord>) -> String {
+    match record {
+        Some(record) => format!("{title} - {} {}", record.tally_text(), record.rate_text()),
+        None => title.to_owned(),
     }
 }
 
@@ -175,30 +263,20 @@ fn leaf(r: &ReplayLite, grouping: ReplayGrouping, locale: Option<&str>) -> Brows
     }
 }
 
-/// `" - {W}W/{L}L ({pct}%)"` computed from the known battle results only
-/// (entries with `battle_result: None` are skipped, matching the egui `_ =>`
-/// arm); empty when no result in the group is known. Mirrors
-/// `win_rate_label` (`mod.rs:150-162`).
-fn win_rate_label(replays: &[&ReplayLite]) -> String {
-    let (wins, losses) = replays.iter().fold((0u32, 0u32), |(w, l), r| match r.stats.outcome {
-        MatchOutcome::Win => (w + 1, l),
-        MatchOutcome::Loss => (w, l + 1),
-        MatchOutcome::Draw | MatchOutcome::Unknown => (w, l),
-    });
-    let total = wins + losses;
-    if total > 0 {
-        format!(" - {wins}W/{losses}L ({:.0}%)", (wins as f64 / total as f64) * 100.0)
-    } else {
-        String::new()
-    }
-}
-
-/// Builds one `BrowserNode::Group` from a named bucket of replays: label
-/// `"{name} ({count})" + win_rate_label`, children labeled by `leaf_label`.
-fn group_node(kind: GroupKind, name: String, replays: Vec<&ReplayLite>, locale: Option<&str>) -> BrowserNode {
-    let label = format!("{} ({}){}", name, replays.len(), win_rate_label(&replays));
+/// Builds one `BrowserNode::Group` from a named bucket of replays, children
+/// labeled by `leaf`.
+fn group_node(
+    kind: GroupKind,
+    name: String,
+    replays: Vec<&ReplayLite>,
+    record_scope: RecordScope,
+    locale: Option<&str>,
+) -> BrowserNode {
+    let title = format!("{name} ({})", replays.len());
+    let record = GroupRecord::tally(&replays, record_scope);
     let children = replays.into_iter().map(|r| leaf(r, kind.grouping(), locale)).collect();
-    BrowserNode::Group { kind, name, label, children }
+
+    BrowserNode::Group { kind, name, title, record, children }
 }
 
 /// Buckets newest-first `files` by `key`, one group per key in first-seen
@@ -224,6 +302,7 @@ fn first_seen_groups<'a, K: Clone + Eq + Hash>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wows_core::rating_scope::RatedBattle;
 
     fn replay(path: &str, ship: &str, map: &str, game_time: &str, outcome: MatchOutcome) -> ReplayLite {
         ReplayLite {
@@ -249,7 +328,13 @@ mod tests {
                 // shared assembly.
                 known: true,
             },
+            rating_scope: RatingScope::Rated(RatedBattle::Random),
         }
+    }
+
+    /// A replay of a battle in `scope`.
+    fn replay_in(scope: RatingScope, path: &str, game_time: &str, outcome: MatchOutcome) -> ReplayLite {
+        ReplayLite { rating_scope: scope, ..replay(path, "Kleber", "Ocean", game_time, outcome) }
     }
 
     /// Flattens a tree to `(depth, label)` pairs for asserting shape.
@@ -258,8 +343,8 @@ mod tests {
     fn flatten(nodes: &[BrowserNode], depth: usize, out: &mut Vec<(usize, String)>) {
         for node in nodes {
             match node {
-                BrowserNode::Group { label, children, .. } => {
-                    out.push((depth, label.clone()));
+                BrowserNode::Group { title, record, children, .. } => {
+                    out.push((depth, group_label(title, *record)));
                     flatten(children, depth + 1, out);
                 }
                 BrowserNode::Leaf { label, .. } => out.push((depth, label.clone())),
@@ -297,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn win_rate_label_counts_only_known_results_and_skips_none() {
+    fn a_group_record_counts_only_known_results() {
         let replays = [
             replay("z", "Kleber", "Ocean", "01.01.2026 00:00:00", MatchOutcome::Win),
             replay("y", "Kleber", "Ocean", "01.01.2026 00:01:00", MatchOutcome::Win),
@@ -306,19 +391,73 @@ mod tests {
             replay("v", "Kleber", "Ocean", "01.01.2026 00:04:00", MatchOutcome::Draw),
         ];
         let refs: Vec<&ReplayLite> = replays.iter().collect();
-        // 2 wins, 1 loss out of the 3 known-outcome entries; the None entry
-        // and the Draw entry are both excluded from the W/L tally.
-        assert_eq!(win_rate_label(&refs), " - 2W/1L (67%)");
+        // 2 wins, 1 loss out of the 3 known-outcome entries; the unknown entry
+        // and the draw are both excluded from the tally.
+        let record = GroupRecord::tally(&refs, RecordScope::Rated);
+        assert_eq!(group_label("Kleber (5)", record), "Kleber (5) - 2W/1L (67%)");
     }
 
     #[test]
-    fn win_rate_label_is_empty_when_no_result_is_known() {
+    fn a_group_has_no_record_when_no_result_is_known() {
         let replays = [
             replay("a", "Kleber", "Ocean", "01.01.2026 00:00:00", MatchOutcome::Unknown),
             replay("b", "Kleber", "Ocean", "01.01.2026 00:01:00", MatchOutcome::Draw),
         ];
         let refs: Vec<&ReplayLite> = replays.iter().collect();
-        assert_eq!(win_rate_label(&refs), "");
+        assert_eq!(GroupRecord::tally(&refs, RecordScope::AllModes), None);
+    }
+
+    /// A day of a Random win, a Ranked loss and a co-op win, then a day of a
+    /// co-op win alone.
+    fn mixed_modes() -> Vec<ReplayLite> {
+        let coop = RatingScope::Unrated;
+        vec![
+            replay_in(RatingScope::Rated(RatedBattle::Random), "a", "01.01.2026 10:00:00", MatchOutcome::Win),
+            replay_in(RatingScope::Rated(RatedBattle::Ranked), "b", "01.01.2026 11:00:00", MatchOutcome::Loss),
+            replay_in(coop, "c", "01.01.2026 12:00:00", MatchOutcome::Win),
+            replay_in(coop, "d", "02.01.2026 12:00:00", MatchOutcome::Win),
+        ]
+    }
+
+    /// The group headers of `tree` with the scope of each record.
+    fn headers(tree: &[BrowserNode]) -> Vec<(String, Option<RecordScope>)> {
+        tree.iter()
+            .filter_map(|node| match node {
+                BrowserNode::Group { title, record, .. } => {
+                    Some((group_label(title, *record), record.map(GroupRecord::scope)))
+                }
+                BrowserNode::Leaf { .. } => None,
+            })
+            .collect()
+    }
+
+    /// The account win rate bands are calibrated for Random battles, so by
+    /// default a group's record leaves every other mode out, while its count
+    /// still takes in every replay.
+    #[test]
+    fn by_default_a_groups_record_counts_only_random_and_ranked_battles() {
+        let tree = build_browser_tree(&mixed_modes(), ReplayGrouping::Date, RecordScope::Rated, None);
+
+        assert_eq!(
+            headers(&tree),
+            [
+                ("02.01.2026 (1)".to_string(), None),
+                ("01.01.2026 (3) - 1W/1L (50%)".to_string(), Some(RecordScope::Rated)),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_mode_counts_when_asked() {
+        let tree = build_browser_tree(&mixed_modes(), ReplayGrouping::Date, RecordScope::AllModes, None);
+
+        assert_eq!(
+            headers(&tree),
+            [
+                ("02.01.2026 (1) - 1W/0L (100%)".to_string(), Some(RecordScope::AllModes)),
+                ("01.01.2026 (3) - 2W/1L (67%)".to_string(), Some(RecordScope::AllModes)),
+            ]
+        );
     }
 
     #[test]
@@ -333,7 +472,7 @@ mod tests {
             replay("replays/b3.wowsreplay", "Yamato", "Ocean", "02.01.2026 14:45:00", MatchOutcome::Win),
         ];
 
-        let tree = build_browser_tree(&files, ReplayGrouping::Date, None);
+        let tree = build_browser_tree(&files, ReplayGrouping::Date, RecordScope::Rated, None);
 
         assert_eq!(
             labels(&tree),
@@ -362,7 +501,7 @@ mod tests {
             replay("/home/r/20260101_d.wowsreplay", "Yamato", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Unknown),
         ];
 
-        let tree = build_browser_tree(&files, ReplayGrouping::Date, None);
+        let tree = build_browser_tree(&files, ReplayGrouping::Date, RecordScope::Rated, None);
 
         assert_eq!(
             labels(&tree),
@@ -387,7 +526,7 @@ mod tests {
             replay("replays/a.wowsreplay", "Kleber", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Unknown),
         ];
 
-        let tree = build_browser_tree(&files, ReplayGrouping::None, None);
+        let tree = build_browser_tree(&files, ReplayGrouping::None, RecordScope::Rated, None);
 
         assert_eq!(labels(&tree), vec![(0, "Kleber - Ocean".to_string()), (0, "Yamato - Volcano".to_string())]);
     }
@@ -403,7 +542,7 @@ mod tests {
             replay("a/c.wowsreplay", "Kleber", "Ocean", "01.01.2026 10:00:00", MatchOutcome::Win),
         ];
 
-        let tree = build_browser_tree(&files, ReplayGrouping::Ship, None);
+        let tree = build_browser_tree(&files, ReplayGrouping::Ship, RecordScope::Rated, None);
 
         assert_eq!(
             labels(&tree),
@@ -424,7 +563,7 @@ mod tests {
             replay("replays/20260102_b.wowsreplay", "Yamato", "Volcano", "02.01.2026 09:00:00", MatchOutcome::Unknown),
         ];
 
-        let tree = build_browser_tree(&files, ReplayGrouping::None, None);
+        let tree = build_browser_tree(&files, ReplayGrouping::None, RecordScope::Rated, None);
 
         assert_eq!(labels(&tree), vec![(0, "Yamato - Volcano".to_string()), (0, "Kleber - Ocean".to_string())]);
         // Flat: no group wrapping, so every entry is a Leaf at depth 0.
@@ -438,12 +577,12 @@ mod tests {
     fn the_stats_line_carries_the_timestamp_the_identity_line_drops() {
         let files = vec![replay("a", "Yamato", "Ocean", "01.01.2026 14:45:00", MatchOutcome::Win)];
 
-        let dated = stats_lines(&build_browser_tree(&files, ReplayGrouping::Date, None));
+        let dated = stats_lines(&build_browser_tree(&files, ReplayGrouping::Date, RecordScope::Rated, None));
         assert_eq!(dated.len(), 1);
         assert!(dated[0].ends_with("14:45"), "a date group states the date, so the row shows the time: {dated:?}");
         assert!(!dated[0].contains("01.01.2026"), "and not the date again: {dated:?}");
 
-        let ungrouped = stats_lines(&build_browser_tree(&files, ReplayGrouping::None, None));
+        let ungrouped = stats_lines(&build_browser_tree(&files, ReplayGrouping::None, RecordScope::Rated, None));
         assert!(
             ungrouped[0].contains("01.01.2026 14:45"),
             "with no group to state it, the row carries the whole stamp: {ungrouped:?}"
@@ -457,7 +596,7 @@ mod tests {
         let mut file = replay("a", "Yamato", "Ocean", "01.01.2026 14:45:00", MatchOutcome::Unknown);
         file.stats.known = false;
 
-        let lines = stats_lines(&build_browser_tree(&[file], ReplayGrouping::Date, None));
+        let lines = stats_lines(&build_browser_tree(&[file], ReplayGrouping::Date, RecordScope::Rated, None));
         assert!(!lines[0].is_empty());
         assert!(lines[0].ends_with("14:45"), "the timestamp is still there: {lines:?}");
     }
@@ -467,7 +606,7 @@ mod tests {
         let files =
             vec![replay("replays/only.wowsreplay", "Kleber", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Draw)];
 
-        let tree = build_browser_tree(&files, ReplayGrouping::Date, None);
+        let tree = build_browser_tree(&files, ReplayGrouping::Date, RecordScope::Rated, None);
         let BrowserNode::Group { children, .. } = &tree[0] else { panic!("expected a Date group") };
         let BrowserNode::Leaf { path, outcome, .. } = &children[0] else { panic!("expected a leaf") };
 

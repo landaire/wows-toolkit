@@ -87,6 +87,10 @@ pub struct ReplaySettings {
     /// Exports keep the real values.
     #[serde(default)]
     pub anonymize_player_names: bool,
+    /// Whether a listing group header's win rate counts every game mode rather than only Random
+    /// and Ranked battles.
+    #[serde(default)]
+    pub group_win_rate_all_modes: bool,
     /// Which optional elements a replay listing row draws.
     #[serde(default)]
     pub listing_row_elements: ListingRowElements,
@@ -108,6 +112,7 @@ impl Default for ReplaySettings {
             listing_collapsed: false,
             enable_replay_previews: true,
             anonymize_player_names: false,
+            group_win_rate_all_modes: false,
             listing_row_elements: ListingRowElements::default(),
         }
     }
@@ -221,6 +226,14 @@ mod tests {
         let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
         assert!(!parsed.anonymize_player_names);
         assert!(!ReplaySettings::default().anonymize_player_names);
+    }
+
+    #[test]
+    fn group_win_rate_all_modes_defaults_off_and_survives_a_missing_field() {
+        let legacy = r#"{"show_entity_id":false,"show_observed_damage":false}"#;
+        let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
+        assert!(!parsed.group_win_rate_all_modes);
+        assert!(!ReplaySettings::default().group_win_rate_all_modes);
     }
 
     #[test]
