@@ -1941,7 +1941,7 @@ impl UiReport {
                                 if ui
                                     .small_button(wt_translations::icon_t(
                                         icons::SHARE,
-                                        &t!("ui.replay.build.open_in_browser"),
+                                        &t!("ui.replay.build.open_in_ship_builder"),
                                     ))
                                     .clicked()
                                 {

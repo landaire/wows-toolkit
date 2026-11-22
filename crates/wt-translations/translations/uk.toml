@@ -536,7 +536,7 @@ never_connected = "Гравець не підключився до бою"
 
 [ui.replay.build]
 open_shiptool = "Відкрити збірку в ShipTool"
-open_in_browser = "Відкрити збірку в браузері"
+open_in_ship_builder = "Відкрити збірку в WoWs SB"
 copy_link = "Копіювати посилання на збірку"
 copy_short_link = "Копіювати коротке посилання на збірку"
 link_copied = "Посилання на збірку скопійовано"

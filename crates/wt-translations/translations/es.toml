@@ -536,7 +536,7 @@ never_connected = "El jugador nunca se conectó a la partida"
 
 [ui.replay.build]
 open_shiptool = "Abrir build en ShipTool"
-open_in_browser = "Abrir build en el navegador"
+open_in_ship_builder = "Abrir build en WoWs SB"
 copy_link = "Copiar enlace del build"
 copy_short_link = "Copiar enlace corto del build"
 link_copied = "Enlace del build copiado"

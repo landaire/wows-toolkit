@@ -68,7 +68,7 @@ fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
             added_any = true;
         }
         if let Some(url) = row.ship_config_url.clone() {
-            items.push(link(t!("ui.replay.build.open_in_browser").into_owned(), url.clone()));
+            items.push(link(t!("ui.replay.build.open_in_ship_builder").into_owned(), url.clone()));
             items.push(copy_item(t!("ui.replay.build.copy_link").into_owned(), cx, move || {
                 Some((url.clone(), t!("ui.replay.build.link_copied").into_owned()))
             }));

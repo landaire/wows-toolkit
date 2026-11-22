@@ -536,7 +536,7 @@ never_connected = "Hráč se nikdy nepřipojil k zápasu"
 
 [ui.replay.build]
 open_shiptool = "Otevřít build v ShipTool"
-open_in_browser = "Otevřít build v prohlížeči"
+open_in_ship_builder = "Otevřít build ve WoWs SB"
 copy_link = "Kopírovat odkaz na build"
 copy_short_link = "Kopírovat krátký odkaz na build"
 link_copied = "Odkaz na build zkopírován"

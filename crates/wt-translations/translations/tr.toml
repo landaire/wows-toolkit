@@ -536,7 +536,7 @@ never_connected = "Oyuncu maça hiç bağlanmadı"
 
 [ui.replay.build]
 open_shiptool = "Build'i ShipTool'da Aç"
-open_in_browser = "Build'i Tarayıcıda Aç"
+open_in_ship_builder = "Build'i WoWs SB'de Aç"
 copy_link = "Build Bağlantısını Kopyala"
 copy_short_link = "Kısa Build Bağlantısını Kopyala"
 link_copied = "Build bağlantısı kopyalandı"

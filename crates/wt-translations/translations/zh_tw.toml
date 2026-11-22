@@ -562,7 +562,7 @@ never_connected = "該玩家從未連線至比賽"
 
 [ui.replay.build]
 open_shiptool = "在 ShipTool 中開啟配裝"
-open_in_browser = "在瀏覽器中開啟配裝"
+open_in_ship_builder = "在 WoWs SB 中開啟配裝"
 copy_link = "複製配裝連結"
 copy_short_link = "複製短配裝連結"
 link_copied = "配裝連結已複製"

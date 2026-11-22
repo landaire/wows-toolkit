@@ -562,7 +562,7 @@ never_connected = "ผู้เล่นไม่ได้เชื่อมต�
 
 [ui.replay.build]
 open_shiptool = "เปิดบิลด์ใน ShipTool"
-open_in_browser = "เปิดบิลด์ในเบราว์เซอร์"
+open_in_ship_builder = "เปิดบิลด์ใน WoWs SB"
 copy_link = "คัดลอกลิงก์บิลด์"
 copy_short_link = "คัดลอกลิงก์บิลด์แบบสั้น"
 link_copied = "คัดลอกลิงก์บิลด์แล้ว"

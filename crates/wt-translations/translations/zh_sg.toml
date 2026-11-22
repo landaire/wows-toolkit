@@ -562,7 +562,7 @@ never_connected = "玩家从未连接到比赛"
 
 [ui.replay.build]
 open_shiptool = "在 ShipTool 中打开配置"
-open_in_browser = "在浏览器中打开配置"
+open_in_ship_builder = "在 WoWs SB 中打开配置"
 copy_link = "复制配置链接"
 copy_short_link = "复制短配置链接"
 link_copied = "配置链接已复制"
