@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
 use std::time::Duration;
+use std::time::Instant;
 
 use accesskit_consumer::Node;
 use accesskit_consumer::Tree;
@@ -134,6 +135,10 @@ pub struct HeadlessWindow {
     harness: Harness<Runtime>,
     scale: DisplayScale,
     pointer: Option<Point<CssPx, Css>>,
+    /// Where the finger that is down is.
+    touch: Option<Point<CssPx, Css>>,
+    /// The virtual time the window opened at, which touch stamps count from.
+    opened: Instant,
     a11y: Option<Tree>,
     exclusive: Exclusive,
 }
@@ -185,7 +190,8 @@ impl HeadlessWindow {
         harness.deliver_to_first(SurfaceEvent::ScaleFactorChanged { scale_factor: scale.0, size: device });
         harness.settle(SETTLE_TURNS);
 
-        let mut window = Self { harness, scale, pointer: None, a11y: None, exclusive };
+        let opened = harness.now();
+        let mut window = Self { harness, scale, pointer: None, touch: None, opened, a11y: None, exclusive };
         window.redraw_whole();
 
         Ok(window)
@@ -506,6 +512,50 @@ impl HeadlessWindow {
         self.pointer_event(PointerAction::Released, at, Some(PointerButton::Primary));
     }
 
+    /// Puts a finger down at `at`, in device pixels from the window's top-left corner, for a touch
+    /// drag that is looked at part way: move it with [`Self::touch_move`], and lift it with
+    /// [`Self::touch_release`].
+    pub fn touch_press(&mut self, at: Point<DevicePx, Device>) {
+        let at = self.to_css(at);
+        self.touch = Some(at);
+        self.touch_event(PointerAction::Pressed, at);
+    }
+
+    /// Moves the finger that is down to `at`, then moves the clock on one output frame, so that a
+    /// series of moves has the speed of a finger.
+    pub fn touch_move(&mut self, at: Point<DevicePx, Device>) {
+        let at = self.to_css(at);
+        self.touch = Some(at);
+        self.touch_event(PointerAction::Moved, at);
+        self.advance(FRAME);
+    }
+
+    /// Lifts the finger where it is. Does nothing when no finger is down.
+    pub fn touch_release(&mut self) {
+        let Some(at) = self.touch.take() else {
+            return;
+        };
+
+        self.touch_event(PointerAction::Released, at);
+    }
+
+    /// Puts a finger down at `from`, in device pixels from the window's top-left corner, moves it
+    /// to `to` in `steps` moves, one output frame apart, and lifts it there.
+    pub fn touch_drag(&mut self, from: Point<DevicePx, Device>, to: Point<DevicePx, Device>, steps: u32) {
+        self.touch_press(from);
+
+        let steps = steps.max(1);
+        for step in 1..=steps {
+            let travel = step as f32 / steps as f32;
+            self.touch_move(Point::new(
+                DevicePx(from.x.0 + (to.x.0 - from.x.0) * travel),
+                DevicePx(from.y.0 + (to.y.0 - from.y.0) * travel),
+            ));
+        }
+
+        self.touch_release();
+    }
+
     fn drag_css(&mut self, from: Point<CssPx, Css>, to: Point<CssPx, Css>, steps: u32) {
         self.move_pointer(from);
         self.pointer_event(PointerAction::Pressed, from, Some(PointerButton::Primary));
@@ -774,6 +824,24 @@ impl HeadlessWindow {
     fn pinch_event(&mut self, at: Point<CssPx, Css>, scale_delta: f32, phase: GesturePhase) {
         let event = PinchEvent { scale_delta, phase, position: at };
         self.deliver(SurfaceEvent::Pinch { event, modifiers: Modifiers::NONE, timestamp: Timestamp::ORIGIN });
+    }
+
+    /// Delivers one event of the first finger on a touch screen, stamped with the virtual clock so
+    /// that the window reads the speed of a pan from the stamps.
+    fn touch_event(&mut self, action: PointerAction, at: Point<CssPx, Css>) {
+        // winit numbers touches from one, after the mouse.
+        const FINGER: PointerId = PointerId::new(1);
+
+        let event = PointerEvent {
+            id: FINGER,
+            kind: PointerKind::Touch,
+            primary: true,
+            position: at,
+            button: Some(PointerButton::Primary),
+            pressure: None,
+        };
+        let timestamp = Timestamp::from_origin(self.harness.now().saturating_duration_since(self.opened));
+        self.deliver(SurfaceEvent::Pointer { action, event, modifiers: Modifiers::NONE, timestamp });
     }
 
     fn pointer_event(&mut self, action: PointerAction, at: Point<CssPx, Css>, button: Option<PointerButton>) {

@@ -14,6 +14,9 @@ use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use zgui::component;
 use zgui::geom::CssPx;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
 use zgui::geom::Size;
 use zgui::prelude::CloseResponse;
 use zgui::prelude::on_close_request;
@@ -221,4 +224,51 @@ fn a_trackpad_scroll_and_a_pinch_arrive_in_their_stages() {
             Heard::Pinch { phase: GesturePhase::Ended, scale_delta: 0.0 },
         ]
     );
+}
+
+/// A list taller than its box, which counts its scroll events and the clicks on its content.
+#[component]
+fn TouchList(scrolls: RwSignal<u64, LocalStorage>, clicks: RwSignal<u64, LocalStorage>) -> impl IntoView {
+    view! {
+        ThemeRoot {
+            column(
+                attr:data-testid = "list",
+                style = "width: 100px; height: 100px; overflow-y: scroll",
+                on:scroll = move |_| scrolls.update(|scrolls| *scrolls += 1)
+            ) {
+                box(
+                    style = "width: 100px; height: 400px; flex: none",
+                    on:click = move |_| clicks.update(|clicks| *clicks += 1)
+                )
+            }
+        }
+    }
+}
+
+#[test]
+fn a_finger_taps_and_drags_as_on_a_touch_screen() {
+    let scrolls = RwSignal::new_local(0);
+    let clicks = RwSignal::new_local(0);
+    let mut window = HeadlessWindow::open(
+        HeadlessOptions::new(SIZE),
+        move || view! { TouchList(scrolls = scrolls, clicks = clicks) },
+    )
+    .expect("opens");
+    let list = window.by_test_id("list").expect("the list is built");
+    let bounds = window.bounds(list).expect("the list has a box");
+    let at = |x: f32, y: f32| -> Point<DevicePx, Device> {
+        Point::new(DevicePx(bounds.origin.x.0 + x), DevicePx(bounds.origin.y.0 + y))
+    };
+
+    window.touch_press(at(50.0, 50.0));
+    window.touch_release();
+    assert_eq!(clicks.get(), 1, "a tap clicks");
+    assert_eq!(scrolls.get(), 0, "a tap does not scroll");
+
+    window.touch_drag(at(50.0, 90.0), at(50.0, 10.0), 4);
+    assert!(scrolls.get() > 0, "a drag up the list scrolls it");
+
+    let clicked = clicks.get();
+    window.touch_release();
+    assert_eq!(clicks.get(), clicked, "a release with no finger down does nothing");
 }
