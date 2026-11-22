@@ -4,6 +4,40 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.1.0-beta6
+
+### Stats
+
+- Charts can plot many more statistics: potential damage, damage received, hits, fires, floods, citadels, critical hits, distance traveled, capture points, planes shot down, anti-air damage, time lived, survival rate, torpedoes spotted, heals and match contribution. Pick one from a list that narrows as you type.
+- Battles saved before these statistics were kept are left out of their charts rather than counted as zero. Rebuilding the replay index fills them in for saved session battles whose replays are still on disk.
+- Leave ships, single games or days out of the stats. The filter bar picks the ships and a span of days, a Matches panel keeps or leaves out each game, and Reset filters shows every game again.
+- Drag or scroll over a line chart's axis to stretch or squeeze that axis alone.
+- Random and Ranked win rates are colored by the same bands as the Player Tracker: in the session record, the Ships panel, chart tooltips and chart value labels.
+
+### Replay listing
+
+- The listing's options choose what each row shows: PR, MC, division, Twitch, damage, kills and battle time. A row without its stats line centers its name on the map.
+- A row shows the Twitch logo when another player in the battle was seen in the Twitch chat you monitor. Its hover card names each of them and their Twitch login.
+- Group headers count only Random and Ranked battles in their win rate, colored by its band. A listing option counts every game mode instead.
+- The session stats scope moved from the header chip into the listing's options.
+- Hover previews start when the battle starts, not at the countdown.
+- Replays are ordered by battle time.
+- Open folders stay at the top of the listing while their contents scroll past. The armor viewer sidebar and the unpacker folder tree do the same.
+
+### Player Tracker
+
+- Players seen in Twitch chat during a battle with you show a Twitch icon naming their login. The Seen in Twitch chat box narrows the list to them, and the games-together columns show how many battles you have had with them.
+
+### Replay renderer
+
+- Large and high-DPI windows show the battle moving every frame, because several frames are drawn at once.
+- Each rendered frame takes a third to nearly half less time, in the renderer and in exported videos.
+
+### Other
+
+- The build link in a player's menu reads Open Build in WoWs SB.
+- Windows show the application icon, including in their title bar.
+
 ## 1.1.0-beta5
 
 ### Ratings
