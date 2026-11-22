@@ -119,6 +119,7 @@ pub enum ListingRowElement {
     PersonalRating,
     MatchContribution,
     Division,
+    Twitch,
     Damage,
     Kills,
     Time,
@@ -131,6 +132,8 @@ pub struct ListingRowElements {
     pub personal_rating: bool,
     pub match_contribution: bool,
     pub division: bool,
+    /// The mark on a battle whose players other than the self player were seen in Twitch chat.
+    pub twitch: bool,
 
     pub damage: bool,
     pub kills: bool,
@@ -139,7 +142,15 @@ pub struct ListingRowElements {
 
 impl ListingRowElements {
     pub const fn new() -> Self {
-        Self { personal_rating: true, match_contribution: true, division: true, damage: true, kills: true, time: true }
+        Self {
+            personal_rating: true,
+            match_contribution: true,
+            division: true,
+            twitch: true,
+            damage: true,
+            kills: true,
+            time: true,
+        }
     }
 
     pub const fn shows(&self, element: ListingRowElement) -> bool {
@@ -147,6 +158,7 @@ impl ListingRowElements {
             ListingRowElement::PersonalRating => self.personal_rating,
             ListingRowElement::MatchContribution => self.match_contribution,
             ListingRowElement::Division => self.division,
+            ListingRowElement::Twitch => self.twitch,
             ListingRowElement::Damage => self.damage,
             ListingRowElement::Kills => self.kills,
             ListingRowElement::Time => self.time,
@@ -158,6 +170,7 @@ impl ListingRowElements {
             ListingRowElement::PersonalRating => &mut self.personal_rating,
             ListingRowElement::MatchContribution => &mut self.match_contribution,
             ListingRowElement::Division => &mut self.division,
+            ListingRowElement::Twitch => &mut self.twitch,
             ListingRowElement::Damage => &mut self.damage,
             ListingRowElement::Kills => &mut self.kills,
             ListingRowElement::Time => &mut self.time,
@@ -220,5 +233,13 @@ mod tests {
         let partial = r#"{"show_entity_id":false,"show_observed_damage":false,"listing_row_elements":{"kills":false}}"#;
         let parsed: ReplaySettings = serde_json::from_str(partial).expect("partial settings should parse");
         assert_eq!(parsed.listing_row_elements, ListingRowElements { kills: false, ..ListingRowElements::new() });
+
+        // Elements saved before the Twitch mark existed load with it shown.
+        let saved = r#"{"show_entity_id":false,"show_observed_damage":false,"listing_row_elements":{"personal_rating":true,"match_contribution":false,"division":false,"damage":true,"kills":true,"time":false}}"#;
+        let parsed: ReplaySettings = serde_json::from_str(saved).expect("saved settings should parse");
+        assert_eq!(
+            parsed.listing_row_elements,
+            ListingRowElements { match_contribution: false, division: false, time: false, ..ListingRowElements::new() }
+        );
     }
 }

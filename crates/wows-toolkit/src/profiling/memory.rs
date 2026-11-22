@@ -443,6 +443,7 @@ fn listing(data: &SharedBuildData, count: usize, mut report: Report) {
                 self_mc: Some(1320.0),
                 division_id: None,
                 division_mates: Vec::new(),
+                twitch_chatters: Vec::new(),
                 results_available: true,
                 file_mtime: Some(1_760_000_000),
             };

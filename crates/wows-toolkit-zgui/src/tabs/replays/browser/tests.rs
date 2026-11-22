@@ -22,6 +22,8 @@ use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::RowSummary;
+use wows_toolkit_config::index::rows::TwitchChatter;
+use wows_toolkit_config::index::rows::TwitchLogin;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_dir::DirChange;
 use wows_toolkit_replay_data::replay_dir::HeaderReadError;
@@ -1362,6 +1364,7 @@ fn summary(outcome: MatchOutcome, rating_scope: RatingScope, self_pr: Option<f64
         self_mc: self_pr.map(|pr| pr - 200.0),
         division_id: None,
         division_mates: Vec::new(),
+        twitch_chatters: Vec::new(),
         results_available: true,
         file_mtime: None,
     }
@@ -1639,6 +1642,8 @@ fn hidden_row_elements_leave_the_row_and_the_rest_centre_on_the_map() {
     listing(control, &root).summaries.update(|summaries| {
         let summary = summaries.get_mut(&both).expect("the row is scored");
         summary.division_mates = vec![DivisionMate { player_name: "Mate".to_owned(), clan: String::new() }];
+        summary.twitch_chatters =
+            vec![TwitchChatter { player_name: "Watcher".to_owned(), login: TwitchLogin("watcher_tv".to_owned()) }];
     });
     settle_in_real_time(&mut window);
 
@@ -1647,7 +1652,7 @@ fn hidden_row_elements_leave_the_row_and_the_rest_centre_on_the_map() {
     };
     let shows = |window: &HeadlessWindow, glyph: Glyph| icons(window).iter().any(|name| name == glyph.name());
     let height = window.bounds(row(&window, &both)).expect("the row has a box").size.height.0;
-    for glyph in [Glyph::Users, Glyph::Crosshair, Glyph::Sword, Glyph::Clock] {
+    for glyph in [Glyph::Users, Glyph::Twitch, Glyph::Crosshair, Glyph::Sword, Glyph::Clock] {
         assert!(shows(&window, glyph), "the row starts with {glyph:?}: {:?}", icons(&window));
     }
 
@@ -1666,6 +1671,9 @@ fn hidden_row_elements_leave_the_row_and_the_rest_centre_on_the_map() {
 
     toggle(&mut window, "replay-listing-row-division");
     assert!(!shows(&window, Glyph::Users), "the division mark leaves the row: {:?}", icons(&window));
+
+    toggle(&mut window, "replay-listing-row-twitch");
+    assert!(!shows(&window, Glyph::Twitch), "the Twitch mark leaves the row: {:?}", icons(&window));
 
     toggle(&mut window, "replay-listing-row-damage");
     assert!(!shows(&window, Glyph::Crosshair), "the damage leaves the row: {:?}", icons(&window));
@@ -1691,6 +1699,7 @@ fn hidden_row_elements_leave_the_row_and_the_rest_centre_on_the_map() {
         personal_rating: false,
         match_contribution: true,
         division: false,
+        twitch: false,
         damage: false,
         kills: false,
         time: false,
@@ -1700,6 +1709,42 @@ fn hidden_row_elements_leave_the_row_and_the_rest_centre_on_the_map() {
     toggle(&mut window, "replay-listing-row-time");
     assert_eq!(in_row(&window, &both, "wt-row__stats").len(), 1, "the line returns with the time");
     assert_eq!(icons(&window), vec![Glyph::Clock.name().to_owned()], "and holds the time alone");
+}
+
+/// A battle with players seen in Twitch chat carries the Twitch mark, and its hover card names each
+/// player with the login they matched. A battle with none has no mark.
+#[test]
+fn a_battle_seen_in_twitch_chat_is_marked_and_names_the_players() {
+    let (mut window, control) = open();
+    let (_dir, paths) = scored_listing(&mut window, control, Reached::Scanned);
+    let seen = paths[0].clone();
+    let root = seen.parent().expect("the replay is in a directory").to_path_buf();
+    listing(control, &root).summaries.update(|summaries| {
+        let summary = summaries.get_mut(&seen).expect("the row is scored");
+        summary.twitch_chatters = vec![
+            TwitchChatter { player_name: "Anna".to_owned(), login: TwitchLogin("anna_tv".to_owned()) },
+            TwitchChatter { player_name: "Zed".to_owned(), login: TwitchLogin("zed".to_owned()) },
+        ];
+    });
+    settle_in_real_time(&mut window);
+
+    let marks = |window: &HeadlessWindow, path: &Path| {
+        in_row(window, path, "wt-icon")
+            .into_iter()
+            .filter(|icon| window.attribute(*icon, "data-icon").as_deref() == Some(Glyph::Twitch.name()))
+            .count()
+    };
+    assert_eq!(marks(&window, &seen), 1, "the battle seen in chat is marked");
+    assert_eq!(marks(&window, &paths[1]), 0, "a battle with no one seen in chat is not");
+
+    window.hover(row(&window, &seen)).expect("the row has a box");
+    window.advance(Duration::from_millis(100));
+    let label = t!("ui.replay.hover.twitch").into_owned();
+    let labels = window.texts_by_class("wt-hover-fact__label");
+    let values = window.texts_by_class("wt-hover-fact__value");
+    let at =
+        labels.iter().position(|said| *said == label).unwrap_or_else(|| panic!("the card has {label}: {labels:?}"));
+    assert_eq!(values[at], "Anna (anna_tv), Zed (zed)");
 }
 
 #[test]

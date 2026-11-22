@@ -108,6 +108,7 @@ mod tests {
             self_mc: Some(1300.0),
             division_id: Some(4),
             division_mates: vec![DivisionMate { player_name: "Mate".into(), clan: "MATE".into() }],
+            twitch_chatters: Vec::new(),
             results_available: true,
             file_mtime: Some(42),
         }
@@ -145,6 +146,7 @@ mod tests {
             survived: Some(true),
             in_division,
             division_mates: Vec::new(),
+            twitch_chatters: Vec::new(),
             known: true,
         }
     }

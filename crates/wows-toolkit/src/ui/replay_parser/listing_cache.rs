@@ -558,6 +558,7 @@ mod tests {
             self_mc: None,
             division_id: None,
             division_mates: Vec::new(),
+            twitch_chatters: Vec::new(),
             results_available: true,
             file_mtime: None,
         }

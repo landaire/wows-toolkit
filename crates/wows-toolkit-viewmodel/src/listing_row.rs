@@ -15,6 +15,7 @@ use wows_toolkit_config::index::rows::DivisionMate;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
+use wows_toolkit_config::index::rows::TwitchChatter;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
@@ -143,16 +144,24 @@ pub struct RowStats {
     /// The other players who shared the division, for the hover tooltip. Always
     /// empty on the parsed branch: a parsed report carries no mate roster.
     pub division_mates: Vec<DivisionMate>,
+    /// The other players seen in Twitch chat during the battle. From the index
+    /// on either branch: a parsed report carries no Twitch matches.
+    pub twitch_chatters: Vec<TwitchChatter>,
     /// False only when neither an index summary nor a parsed report exists.
     pub known: bool,
 }
 
 impl RowStats {
-    /// Replaces the division mates' names and clan tags with their pseudonyms.
+    /// Replaces the division mates' and Twitch chatters' names, clan tags and
+    /// logins with their pseudonyms.
     pub fn anonymize(&mut self) {
         for mate in &mut self.division_mates {
             mate.player_name = pseudonym::player_name(&mate.player_name);
             mate.clan = pseudonym::clan_tag(&mate.clan);
+        }
+        for chatter in &mut self.twitch_chatters {
+            chatter.player_name = pseudonym::player_name(&chatter.player_name);
+            chatter.login.0 = pseudonym::player_name(&chatter.login.0);
         }
     }
 }
@@ -163,6 +172,8 @@ impl RowStats {
 /// index regardless of what is parsed.
 pub fn resolve_row_stats(parsed: Option<ParsedStats>, summary: Option<&RowSummary>) -> RowStats {
     let survived = summary.and_then(|s| s.self_survived);
+    // No summary means the index has not seen the battle, so there is no match to show.
+    let twitch_chatters = summary.map_or_else(Vec::new, |s| s.twitch_chatters.clone());
     match parsed {
         Some(parsed) => RowStats {
             outcome: parsed.outcome,
@@ -171,6 +182,7 @@ pub fn resolve_row_stats(parsed: Option<ParsedStats>, summary: Option<&RowSummar
             survived,
             in_division: parsed.in_division,
             division_mates: Vec::new(),
+            twitch_chatters,
             known: true,
         },
         None => match summary {
@@ -185,6 +197,7 @@ pub fn resolve_row_stats(parsed: Option<ParsedStats>, summary: Option<&RowSummar
                 survived,
                 in_division: !s.division_mates.is_empty(),
                 division_mates: s.division_mates.clone(),
+                twitch_chatters,
                 known: true,
             },
             None => RowStats {
@@ -194,6 +207,7 @@ pub fn resolve_row_stats(parsed: Option<ParsedStats>, summary: Option<&RowSummar
                 survived: None,
                 in_division: false,
                 division_mates: Vec::new(),
+                twitch_chatters,
                 known: false,
             },
         },
@@ -345,6 +359,20 @@ fn division_members(stats: &RowStats) -> Option<String> {
     Some(members)
 }
 
+/// The Twitch chatters, `Name (login)` per player. `None` when there are none.
+fn twitch_members(stats: &RowStats) -> Option<String> {
+    if stats.twitch_chatters.is_empty() {
+        return None;
+    }
+    let members = stats
+        .twitch_chatters
+        .iter()
+        .map(|chatter| format!("{} ({})", chatter.player_name, chatter.login.0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(members)
+}
+
 /// One labelled fact about a replay, for a hover that lays them out rather
 /// than running them together.
 ///
@@ -401,6 +429,9 @@ pub fn hover_facts(identity: &RowIdentity, stats: &RowStats, locale: Option<&str
     if let Some(division) = division_members(stats) {
         facts.push(fact("ui.replay.hover.division", division));
     }
+    if let Some(chatters) = twitch_members(stats) {
+        facts.push(fact("ui.replay.hover.twitch", chatters));
+    }
     facts
 }
 
@@ -433,6 +464,8 @@ pub fn hover_facts_for_match(hit: &MatchHit, ship: String, locale: Option<&str>)
         // says nothing about one rather than claiming there was none.
         in_division: false,
         division_mates: Vec::new(),
+        // A search result does not read the roster's Twitch matches.
+        twitch_chatters: Vec::new(),
         known: hit.results_available,
     };
     hover_facts(&identity, &stats, locale)
@@ -608,6 +641,7 @@ mod tests {
             self_mc: Some(1300.0),
             division_id: Some(4),
             division_mates: vec![DivisionMate { player_name: "Mate".into(), clan: "MATE".into() }],
+            twitch_chatters: Vec::new(),
             results_available: true,
             file_mtime: Some(42),
         }
@@ -855,6 +889,38 @@ mod tests {
         assert!(orphaned.division_id.is_some(), "the fixture must still carry a division id for this to be meaningful");
         let stats = resolve_row_stats(None, Some(&orphaned));
         assert!(!stats.in_division, "a division id with no recorded mates must not show the division glyph");
+    }
+
+    /// The hover names each player seen in Twitch chat with the login they matched, and says
+    /// nothing about Twitch for a battle with no match.
+    #[test]
+    fn hover_facts_name_twitch_chatters_with_their_logins() {
+        let chatter = |player_name: &str, login: &str| TwitchChatter {
+            player_name: player_name.into(),
+            login: wows_toolkit_config::index::rows::TwitchLogin(login.into()),
+        };
+        let seen = RowSummary { twitch_chatters: vec![chatter("Anna", "anna_tv"), chatter("Zed", "zed")], ..summary() };
+        let label = t!("ui.replay.hover.twitch").into_owned();
+
+        let facts = hover_facts(&identity(), &resolve_row_stats(None, Some(&seen)), Some("en-US"));
+        let twitch = facts.iter().find(|fact| fact.label == label).expect("a Twitch line");
+        assert_eq!(twitch.value, "Anna (anna_tv), Zed (zed)");
+
+        let unseen = hover_facts(&identity(), &resolve_row_stats(None, Some(&summary())), Some("en-US"));
+        assert!(!unseen.iter().any(|fact| fact.label == label), "{unseen:?}");
+    }
+
+    /// A parsed report wins the figures, but only the index knows who was seen in Twitch chat.
+    #[test]
+    fn parsed_report_keeps_the_twitch_chatters_of_the_summary() {
+        let chatters = vec![TwitchChatter {
+            player_name: "Anna".into(),
+            login: wows_toolkit_config::index::rows::TwitchLogin("anna_tv".into()),
+        }];
+        let seen = RowSummary { twitch_chatters: chatters.clone(), ..summary() };
+        let parsed = ParsedStats { outcome: MatchOutcome::Loss, damage: Some(1), kills: Some(0), in_division: false };
+
+        assert_eq!(resolve_row_stats(Some(parsed), Some(&seen)).twitch_chatters, chatters);
     }
 
     #[test]

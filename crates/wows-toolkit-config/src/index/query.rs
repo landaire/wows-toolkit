@@ -45,6 +45,8 @@ use super::rows::RowSummary;
 use super::rows::ShipFacet;
 use super::rows::SourceId;
 use super::rows::SourceKind;
+use super::rows::TwitchChatter;
+use super::rows::TwitchLogin;
 use super::rows::VehicleRelation;
 use super::rows::stored_rating_scope;
 
@@ -1046,9 +1048,10 @@ pub async fn mark_replay_records_current(
 /// by construction. The subquery form also guarantees one output row per record,
 /// which a join would not.
 ///
-/// `division_mates` is filled by one additional source-wide query rather than
-/// one query per row: a listing can hold thousands of replays, and a per-row
-/// roster lookup would be pathological at that scale.
+/// `division_mates` and `twitch_chatters` are each filled by one additional
+/// source-wide query rather than one query per row: a listing can hold
+/// thousands of replays, and a per-row roster lookup would be pathological at
+/// that scale.
 pub async fn row_summaries_for_source(
     pool: &SqlitePool,
     source: SourceId,
@@ -1101,6 +1104,32 @@ pub async fn row_summaries_for_source(
         }
     }
 
+    // A Twitch channel's chatter list includes the broadcaster, so the recording
+    // player can match their own chat and is excluded. `IS NOT` keeps every
+    // player of a spectator recording, whose self_account_id is NULL.
+    let chatter_rows = sqlx::query(
+        "SELECT DISTINCT r.replay_path, v.player_name, v.sniper_twitch_login \
+         FROM replay_record r \
+         JOIN indexed_vehicle v ON v.arena_id = r.arena_id \
+         WHERE r.source_id = ?1 \
+           AND v.is_stream_sniper = 1 \
+           AND v.sniper_twitch_login IS NOT NULL \
+           AND v.account_id IS NOT r.self_account_id \
+         ORDER BY r.replay_path, v.player_name, v.sniper_twitch_login",
+    )
+    .bind(source.0)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &chatter_rows {
+        let path = PathBuf::from(row.try_get::<String, _>("replay_path")?);
+        let player_name: String = row.try_get("player_name")?;
+        let login = TwitchLogin(row.try_get("sniper_twitch_login")?);
+        if let Some(summary) = out.get_mut(&path) {
+            summary.twitch_chatters.push(TwitchChatter { player_name, login });
+        }
+    }
+
     Ok(out)
 }
 
@@ -1122,6 +1151,7 @@ fn row_to_row_summary(row: &sqlx::sqlite::SqliteRow) -> Result<(PathBuf, RowSumm
         self_mc: row.try_get("self_mc")?,
         division_id: row.try_get("division_id")?,
         division_mates: Vec::new(),
+        twitch_chatters: Vec::new(),
         results_available: row.try_get("results_available")?,
         file_mtime: row.try_get("file_mtime")?,
     };

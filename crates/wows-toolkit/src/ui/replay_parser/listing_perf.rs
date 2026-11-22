@@ -138,6 +138,7 @@ fn synth_summary(i: usize) -> RowSummary {
         } else {
             Vec::new()
         },
+        twitch_chatters: Vec::new(),
         results_available: true,
         file_mtime: Some(1_700_000_000),
     }

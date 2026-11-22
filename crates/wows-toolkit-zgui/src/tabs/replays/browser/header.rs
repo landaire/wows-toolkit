@@ -444,6 +444,7 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                             RowElementCheck(element = ListingRowElement::PersonalRating)
                             RowElementCheck(element = ListingRowElement::MatchContribution)
                             RowElementCheck(element = ListingRowElement::Division)
+                            RowElementCheck(element = ListingRowElement::Twitch)
                             RowElementCheck(element = ListingRowElement::Damage)
                             RowElementCheck(element = ListingRowElement::Kills)
                             RowElementCheck(element = ListingRowElement::Time)
@@ -555,6 +556,7 @@ fn row_element_label(element: ListingRowElement) -> String {
         ListingRowElement::PersonalRating => t!("ui.replay.row_element_personal_rating"),
         ListingRowElement::MatchContribution => t!("ui.replay.row_element_match_contribution"),
         ListingRowElement::Division => t!("ui.replay.row_element_division"),
+        ListingRowElement::Twitch => t!("ui.replay.row_element_twitch"),
         ListingRowElement::Damage => t!("ui.replay.row_element_damage"),
         ListingRowElement::Kills => t!("ui.replay.row_element_kills"),
         ListingRowElement::Time => t!("ui.replay.row_element_time"),
@@ -567,6 +569,7 @@ const fn row_element_test_id(element: ListingRowElement) -> &'static str {
         ListingRowElement::PersonalRating => "replay-listing-row-personal-rating",
         ListingRowElement::MatchContribution => "replay-listing-row-match-contribution",
         ListingRowElement::Division => "replay-listing-row-division",
+        ListingRowElement::Twitch => "replay-listing-row-twitch",
         ListingRowElement::Damage => "replay-listing-row-damage",
         ListingRowElement::Kills => "replay-listing-row-kills",
         ListingRowElement::Time => "replay-listing-row-time",

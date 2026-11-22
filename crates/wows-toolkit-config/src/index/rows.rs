@@ -206,6 +206,10 @@ pub struct IndexedVehicleRow {
     pub sniper_twitch_login: Option<String>,
 }
 
+/// A Twitch account's login name, as chat reports it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TwitchLogin(pub String);
+
 /// How an upsert treats values an earlier pass already stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexWriteMode {
@@ -308,6 +312,13 @@ pub struct DivisionMate {
     pub clan: String,
 }
 
+/// A player of a battle whose name matched a login seen in Twitch chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TwitchChatter {
+    pub player_name: String,
+    pub login: TwitchLogin,
+}
+
 /// Everything one replay-listing row draws beyond its identity, for a single
 /// record. Keyed by `replay_path` within a source.
 #[derive(Debug, Clone)]
@@ -329,6 +340,10 @@ pub struct RowSummary {
     /// The other players who shared `division_id`, excluding the self player.
     /// Empty when solo or unknown. Ordered by `player_name`.
     pub division_mates: Vec<DivisionMate>,
+    /// The players other than the self player whose names matched a Twitch
+    /// chat login during the battle. Empty when none matched or detection never
+    /// ran. Ordered by `player_name`.
+    pub twitch_chatters: Vec<TwitchChatter>,
     pub results_available: bool,
     /// Modification time of the file as of indexing. Compared against the
     /// on-disk value to decide whether the row is stale.

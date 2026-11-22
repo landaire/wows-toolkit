@@ -69,6 +69,8 @@ pub struct LeafRow {
     pub map_name: String,
     pub outcome: MatchOutcome,
     pub in_division: bool,
+    /// Whether a player other than the reader was seen in Twitch chat. The hover names them.
+    pub in_twitch_chat: bool,
     pub hover: Vec<HoverFact>,
     /// The reader's rating in the battle, once the index has scored it, or
     /// that the battle is unrated.
@@ -168,7 +170,7 @@ impl BrowserTree {
                     tree.groups.insert(group.clone(), GroupRow { label, paths });
                     (NodeKey::Group(group), Some(children))
                 }
-                BrowserNode::Leaf { label, battle, stats, path, map_name, outcome, in_division } => {
+                BrowserNode::Leaf { label, battle, stats, path, map_name, outcome, in_division, in_twitch_chat } => {
                     let summary = inputs.summaries.get(&path);
                     let personal_rating =
                         summary.and_then(|summary| BattleRating::from_stored(summary.rating_scope, summary.self_pr));
@@ -181,6 +183,7 @@ impl BrowserTree {
                         map_name,
                         outcome,
                         in_division,
+                        in_twitch_chat,
                         hover: hover.remove(&path).unwrap_or_default(),
                         personal_rating,
                         match_contribution,

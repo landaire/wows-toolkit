@@ -15,6 +15,8 @@ use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::ReplayRecord;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::rows::SourceKind;
+use wows_toolkit_config::index::rows::TwitchChatter;
+use wows_toolkit_config::index::rows::TwitchLogin;
 use wows_toolkit_config::index::rows::VehicleRelation;
 
 async fn mem_pool() -> SqlitePool {
@@ -117,6 +119,27 @@ fn sample_vehicle_named(
         clan: clan.into(),
         ..sample_vehicle(arena, account, division, relation)
     }
+}
+
+/// A roster row with the given stream-sniper detection result.
+fn sample_vehicle_sniper(
+    arena: i64,
+    account: i64,
+    name: &str,
+    is_stream_sniper: Option<bool>,
+    login: Option<&str>,
+    relation: VehicleRelation,
+) -> IndexedVehicleRow {
+    IndexedVehicleRow {
+        player_name: name.into(),
+        is_stream_sniper,
+        sniper_twitch_login: login.map(str::to_owned),
+        ..sample_vehicle(arena, account, None, relation)
+    }
+}
+
+fn chatter(player_name: &str, login: &str) -> TwitchChatter {
+    TwitchChatter { player_name: player_name.into(), login: TwitchLogin(login.into()) }
 }
 
 #[tokio::test]
@@ -397,4 +420,62 @@ async fn division_resolves_for_a_perspective_whose_roster_relation_was_overwritt
     let row8 = summaries.get(&PathBuf::from("p8.wowsreplay")).expect("summary for p8");
     assert_eq!(row7.division_id, Some(3), "must resolve through self_account_id, not the now-stale relation column");
     assert_eq!(row8.division_id, Some(9), "player 8's own perspective still resolves to their own division");
+}
+
+#[tokio::test]
+async fn twitch_chatters_list_matched_players_except_the_self_player() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "a.wowsreplay", Some(7))).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            // The broadcaster is in their own chat list, so the self player can match.
+            sample_vehicle_sniper(100, 7, "Self", Some(true), Some("self_tv"), VehicleRelation::SelfPlayer),
+            sample_vehicle_sniper(100, 8, "Zed", Some(true), Some("zed_live"), VehicleRelation::Enemy),
+            sample_vehicle_sniper(100, 9, "Anna", Some(true), Some("anna"), VehicleRelation::Ally),
+            sample_vehicle_sniper(100, 10, "Checked", Some(false), None, VehicleRelation::Enemy),
+            sample_vehicle_sniper(100, 11, "Unchecked", None, None, VehicleRelation::Enemy),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("a.wowsreplay")).expect("summary for the recorded path");
+    assert_eq!(
+        row.twitch_chatters,
+        vec![chatter("Anna", "anna"), chatter("Zed", "zed_live")],
+        "only the other matched players, ordered by name; no match and no detection are left out"
+    );
+}
+
+#[tokio::test]
+async fn twitch_chatters_of_a_spectator_recording_include_every_matched_player() {
+    let pool = mem_pool().await;
+    let now = Timestamp::from_second(1_700_000_000).unwrap();
+    let src = query::ensure_default_source(&pool, Path::new("C:/wows/replays"), now).await.unwrap();
+
+    query::upsert_match(&pool, &sample_match(100)).await.unwrap();
+    query::upsert_record(&pool, &sample_record(100, src, "spec.wowsreplay", None)).await.unwrap();
+    query::upsert_vehicles(
+        &pool,
+        &[
+            sample_vehicle_sniper(100, 7, "Ally", Some(true), Some("ally_tv"), VehicleRelation::Ally),
+            sample_vehicle_sniper(100, 8, "Enemy", Some(true), Some("enemy_tv"), VehicleRelation::Enemy),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let summaries = query::row_summaries_for_source(&pool, src).await.unwrap();
+    let row = summaries.get(&PathBuf::from("spec.wowsreplay")).expect("summary for the recorded path");
+    assert_eq!(
+        row.twitch_chatters,
+        vec![chatter("Ally", "ally_tv"), chatter("Enemy", "enemy_tv")],
+        "a recording with no self account excludes nobody"
+    );
 }

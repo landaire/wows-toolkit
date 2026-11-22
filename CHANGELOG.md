@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Color the Stats tab's Random and Ranked win rates, in the session record, the per-ship headers and the Ships panel, by the band the rate falls in, as the Player Tracker does
 - *(zgui)* Choose whether session stats hold a saved session or every battle since the app opened, from the replay listing's options or the Stats tab's filter bar. The saved session is kept while the other is shown, and an empty session says what fills it
 - *(zgui)* Choose which elements a replay listing row shows from the listing's options: personal rating, match contribution, division, damage, kills and battle time. A row whose stats line is hidden centres its name on the map. The choices are saved
+- *(zgui)* Mark a replay listing row with the Twitch logo when another player of the battle was seen in the monitored Twitch chat, and name each player and their Twitch login on the row's hover card. The listing's options can hide the mark
 - *(zgui)* Add battles played to the session stats as the game writes them to its replays folder, and show set, added and cleared session battles in the Stats tab at once
 - *(zgui)* Add a replay opened from the game's replays folder listing to the saved session stats, as the egui app does
 - *(zgui)* Bring the Stats tab forward on its Overview after Set as Session Stats, as the egui app does

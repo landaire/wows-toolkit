@@ -198,6 +198,7 @@ const CSS: &str = css!(
         font-size: 14px;
     }
     .wt-row__division { color: var(--wt-color-division); }
+    .wt-row__twitch { flex: none; }
     /* As tall as the label's line, so a tagged row lays out as any other. */
     .wt-row__new {
         flex: none;
@@ -539,6 +540,17 @@ fn leaf_view(
     };
     let division = (leaf.in_division && elements.division)
         .then(|| view! { AppIcon(glyph = Glyph::Users, class = "wt-row__division") });
+    // The players and their logins are on the hover card, beside the division mates.
+    let twitch = (leaf.in_twitch_chat && elements.twitch).then(|| {
+        view! {
+            AppIcon(
+                glyph = Glyph::Twitch,
+                label = t!("ui.replay.hover.twitch").into_owned(),
+                class = "wt-row__twitch",
+                attr:data-testid = "replay-row-twitch"
+            )
+        }
+    });
     let rating_chip = |id: &'static str, name: &str, value: f64| {
         let said = format!("{name} {value:.0}");
         let style = rating_style(PersonalRatingCategory::from_pr(value));
@@ -630,6 +642,7 @@ fn leaf_view(
                 row(class = "wt-row__identity") {
                     text(class = "wt-row__label") {{leaf.label}}
                     {division.map(IntoView::into_view)}
+                    {twitch.map(IntoView::into_view)}
                     Show(when = move || tagged.get()) {
                         text(class = "wt-row__new", attr:data-testid = "replay-row-new") {{t!("ui.replay.new_tag").into_owned()}}
                     }

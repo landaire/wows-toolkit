@@ -124,6 +124,8 @@ pub enum BrowserNode {
         map_name: String,
         outcome: MatchOutcome,
         in_division: bool,
+        /// Whether a player other than the self player was seen in Twitch chat.
+        in_twitch_chat: bool,
     },
 }
 
@@ -169,6 +171,7 @@ fn leaf(r: &ReplayLite, grouping: ReplayGrouping, locale: Option<&str>) -> Brows
         map_name: r.map_name.clone(),
         outcome: r.stats.outcome,
         in_division: r.stats.in_division,
+        in_twitch_chat: !r.stats.twitch_chatters.is_empty(),
     }
 }
 
@@ -240,6 +243,7 @@ mod tests {
                 survived: None,
                 in_division: false,
                 division_mates: Vec::new(),
+                twitch_chatters: Vec::new(),
                 // Known, so the row reads as an indexed one; an unindexed row
                 // is the `stats_line` fallback and has its own tests in the
                 // shared assembly.
