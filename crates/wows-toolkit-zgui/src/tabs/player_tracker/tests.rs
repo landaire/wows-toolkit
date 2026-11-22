@@ -13,6 +13,7 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use sqlx::sqlite::SqlitePool;
 use tokio::runtime::Runtime;
+use wows_core::pseudonym::NameDisplay;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
@@ -23,6 +24,8 @@ use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::ObjectiveMatch;
 use wows_toolkit_config::index::rows::PlayerFacet;
 use wows_toolkit_config::index::rows::ReplayRecord;
+use wows_toolkit_config::index::rows::TwitchLogin;
+use wows_toolkit_config::index::rows::TwitchSightings;
 use wows_toolkit_config::index::rows::VehicleRelation;
 use wows_toolkit_config::queries;
 use wows_toolkit_replay_data::live_match::ARENA_INFO_FILE;
@@ -31,6 +34,8 @@ use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::match_stats::Region;
+use wows_toolkit_viewmodel::player_tracker::TRACKER_SETTINGS_KEY;
+use wows_toolkit_viewmodel::player_tracker::TrackerSettings;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
@@ -64,6 +69,7 @@ use crate::tabs::player_tracker::live::take_stats_lookups;
 use crate::tabs::player_tracker::model::LoadState;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::roster::sniper_hover_text;
+use crate::tabs::player_tracker::tables::twitch_hover;
 
 pub(crate) const ARENA_INFO: &str = r#"{
     "gameMode": 7,
@@ -146,11 +152,12 @@ impl TrackerWindow {
         let mut window = open_shell(options);
         let tab = window.by_test_id("player-tracker").expect("the strip has a Player Tracker tab");
         window.click(tab).expect("the tab can be pressed");
-        // The tests share one settings database, so a filter an earlier test typed is read back
-        // here; it is cleared once that read has landed.
+        // The tests share one settings database, so a filter or a Twitch toggle an earlier test
+        // set is read back here; both are cleared once that read has landed.
         settle_in_real_time(&mut window);
         let model = built_model().expect("the Player Tracker tab was built");
         model.set_filter(String::new());
+        model.set_seen_in_twitch_chat(false);
         window.advance(Duration::from_millis(300));
         Self { window, model }
     }
@@ -389,6 +396,77 @@ fn the_division_mates_label_toggles_its_box() {
     assert_eq!(tracker.model.show_division_mates.get_untracked(), !before, "the label ticks the box");
     tracker.press("tracker-show-division-mates-label");
     assert_eq!(tracker.model.show_division_mates.get_untracked(), before, "and unticks it");
+}
+
+/// A player matched to a chat login carries the Twitch glyph naming the login, and the toggle
+/// narrows the table to such players and is saved.
+#[test]
+fn the_twitch_toggle_keeps_the_players_seen_in_chat() {
+    let _modes = VIEW_MODES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let saved = SavedView::open();
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    tracker.seed_two_players();
+    let sightings = TwitchSightings { battles: 1, logins: vec![TwitchLogin("harvey_tv".to_owned())] };
+    let hover = twitch_hover(&sightings, NameDisplay::Real);
+    tracker.model.seed_twitch([(AccountId(7), sightings)].into_iter().collect());
+    tracker.settle();
+
+    assert_eq!(tracker.label("tracker-player-twitch-7"), hover, "the glyph names the login");
+    assert!(hover.contains("harvey_tv"), "{hover}");
+    assert!(!tracker.has("tracker-player-twitch-8"), "a player never matched carries no glyph");
+    assert!(tracker.has("tracker-player-8"), "the toggle starts off and keeps everyone");
+
+    tracker.press("tracker-seen-in-twitch-chat");
+    assert!(tracker.has("tracker-player-7"), "the matched player stays");
+    assert!(!tracker.has("tracker-player-8"), "the other goes");
+
+    let stored = || {
+        let read = queries::try_get_setting::<TrackerSettings>(&saved.pool, TRACKER_SETTINGS_KEY);
+        saved.runtime.block_on(read).expect("the view row reads").is_some_and(|view| view.seen_in_twitch_chat)
+    };
+    for _ in 0..100 {
+        if stored() {
+            break;
+        }
+        tracker.window.advance(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(stored(), "the toggle is saved");
+
+    tracker.press("tracker-player-expand-7");
+    let lines = tracker.window.texts_by_class("wt-tracker-small");
+    assert!(lines.contains(&hover), "the opened row repeats the match: {lines:?}");
+
+    tracker.press("tracker-seen-in-twitch-chat-label");
+    assert!(tracker.has("tracker-player-8"), "unticking brings the other back");
+}
+
+/// With names anonymized, the glyph and the opened row name the login by its pseudonym, as the
+/// replay listing does.
+#[test]
+fn anonymized_names_hide_the_twitch_login() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let settings = tracker.model.services.settings;
+    // The setting is written to a database of this test's own, so other windows keep real names.
+    settings.use_private_database_for_test();
+    tracker.seed_two_players();
+    let sightings = TwitchSightings { battles: 1, logins: vec![TwitchLogin("harvey_tv".to_owned())] };
+    tracker.model.seed_twitch([(AccountId(7), sightings)].into_iter().collect());
+    settings.edit(wows_toolkit_viewmodel::settings::keys::REPLAY_SETTINGS, |settings| {
+        settings.replay.anonymize_player_names = true;
+        settings.replay.clone()
+    });
+    tracker.settle();
+
+    let pseudonym = wows_core::pseudonym::player_name("harvey_tv");
+    let label = tracker.label("tracker-player-twitch-7");
+    assert!(!label.contains("harvey_tv"), "the glyph hides the login: {label}");
+    assert!(label.contains(&pseudonym), "and names its pseudonym: {label}");
+
+    tracker.press("tracker-player-expand-7");
+    let lines = tracker.window.texts_by_class("wt-tracker-small");
+    assert!(lines.iter().all(|line| !line.contains("harvey_tv")), "the opened row hides it too: {lines:?}");
+    assert!(lines.iter().any(|line| line.contains(&pseudonym)), "{lines:?}");
 }
 
 #[test]

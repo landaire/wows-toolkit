@@ -381,6 +381,15 @@ pub struct PlayerEncounter {
     pub clan: String,
 }
 
+/// The battles in which an account was matched to a Twitch chat login.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TwitchSightings {
+    /// Distinct battles with a match.
+    pub battles: usize,
+    /// The logins matched, sorted and distinct. Never empty.
+    pub logins: Vec<TwitchLogin>,
+}
+
 /// A distinct player seen in the index (for palette/Search facets).
 #[derive(Debug, Clone)]
 pub struct PlayerFacet {

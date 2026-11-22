@@ -16,6 +16,7 @@ use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
+use wows_toolkit_config::index::rows::TwitchSightings;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
@@ -217,6 +218,30 @@ fn LastSeen(at: Option<Timestamp>) -> impl IntoView {
     view! { HoverText(text = relative, hover = exact, class = "wt-tracker-col--seen wt-tracker-dim") }
 }
 
+/// What the Twitch glyph and the detail block say of a player matched to a chat login. The logins
+/// follow `names`, as the replay listing's do.
+pub fn twitch_hover(sightings: &TwitchSightings, names: NameDisplay) -> String {
+    let logins: Vec<String> = sightings.logins.iter().map(|login| names.player_name(&login.0).into_owned()).collect();
+    t!("ui.player_tracker.twitch_seen_hover", logins = logins.join(", "), count = sightings.battles).into_owned()
+}
+
+/// The Twitch glyph a player matched to a chat login carries. A player never matched has none.
+#[component]
+fn TwitchMark(account: AccountId, sightings: Option<TwitchSightings>, names: NameDisplay) -> impl IntoView {
+    let Some(sightings) = sightings else {
+        return AnyView::new(());
+    };
+    let hover = StoredValue::new(twitch_hover(&sightings, names));
+    AnyView::new(view! {
+        Tooltip {
+            TooltipTrigger(class = "wt-tracker-twitch-mark") {
+                AppIcon(glyph = Glyph::Twitch, label = hover.get_value(), attr:data-testid = format!("tracker-player-twitch-{}", account.raw()))
+            }
+            TooltipContent {{hover.get_value()}}
+        }
+    })
+}
+
 /// What a table shows in place of its rows, or the rows.
 fn table_body(
     state: Signal<LoadState>,
@@ -315,6 +340,7 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
     let clan = names.clan_tag(&row.facet.clan).into_owned();
     // Kept by its name or its tag; whichever the filter did not match is drawn plain.
     let (name_marks, clan_marks) = model.query.with_untracked(|query| (marks(query, &name), marks(query, &clan)));
+    let twitch = row.twitch.clone();
 
     view! {
         column(
@@ -332,6 +358,7 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
                         on_toggle = move || model.toggle_player_expanded(account)
                     )
                     MarkedText(class = "wt-tracker-truncate", text = name, ranges = name_marks)
+                    TwitchMark(account = account, sightings = twitch, names = names)
                 }
                 text(class = "wt-tracker-col--count", class = TABULAR_CLASS, attr:data-severity = tone.clone()) {{count_text(row.total_encounters)}}
                 text(class = "wt-tracker-col--range", class = TABULAR_CLASS, attr:data-severity = tone) {{separate_number(row.encounters_in_range as i64, None)}}
@@ -375,7 +402,7 @@ fn PlayerDetail(model: TrackerModel, shell: Shell, account: AccountId) -> impl I
         locale.track();
         let show_division_mates = model.show_division_mates.get();
         let names = model.names.get();
-        model.tracked.with(|tracked| {
+        let mut lines = model.tracked.with(|tracked| {
             let Some(player) = tracked.get(&account) else { return Vec::new() };
             let mut aliases: Vec<String> = player
                 .names
@@ -395,7 +422,11 @@ fn PlayerDetail(model: TrackerModel, shell: Shell, account: AccountId) -> impl I
             let count = player.visible_arena_ids(show_division_mates).count();
             lines.push(t!("ui.player_tracker.arena_count", count = count).into_owned());
             lines
-        })
+        });
+        if let Some(hover) = model.twitch.with(|twitch| twitch.get(&account).map(|seen| twitch_hover(seen, names))) {
+            lines.push(hover);
+        }
+        lines
     });
     let id = account.raw().to_string();
     let copied = id.clone();

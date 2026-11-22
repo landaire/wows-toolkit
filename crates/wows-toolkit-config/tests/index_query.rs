@@ -556,6 +556,98 @@ async fn twitch_observations_round_trip_window_and_dedup() {
     assert_eq!(remaining, vec![("streamer_a".to_string(), 2000)]);
 }
 
+/// Arena 100 (ts 1000) and arena 200 (ts 2000), both recorded by account 7.
+/// Account 501 is matched in both, under a different login each time and on
+/// two ships in arena 100; 7 is matched against itself, as a broadcaster in
+/// their own chat is; 777 ran detection without a match, 888 never ran it,
+/// 999 is flagged without a login, and the bot account 0 is matched.
+async fn twitch_pool() -> sqlx::SqlitePool {
+    let pool = mem_pool().await;
+    seed_two_matches(&pool).await;
+
+    let vehicle = |arena: i64, account: i64, ship: u64, flag: Option<bool>, login: Option<&str>| IndexedVehicleRow {
+        arena_id: ArenaId::new(arena),
+        account_id: AccountId(account),
+        player_name: format!("Player{account}"),
+        clan: String::new(),
+        realm: Some("na".into()),
+        ship_id: GameParamId::from(ship),
+        ship_index: "PJSB018".into(),
+        ship_name: "Yamato".into(),
+        nation: "japan".into(),
+        species: "Battleship".into(),
+        tier: 10,
+        relation: VehicleRelation::Enemy,
+        division_id: None,
+        survived: Some(true),
+        damage: Some(50_000),
+        kills: Some(1),
+        spotting: Some(0),
+        potential: Some(0),
+        received: Some(0),
+        pr: Some(1200.0),
+        is_test_ship: false,
+        disconnected: None,
+        is_stream_sniper: flag,
+        sniper_twitch_login: login.map(str::to_owned),
+        mc: None,
+        mc_version: None,
+        mc_torpedoes_observed: false,
+    };
+    query::upsert_vehicles(
+        &pool,
+        &[
+            IndexedVehicleRow { relation: VehicleRelation::SelfPlayer, ..vehicle(100, 7, 999, Some(true), Some("me")) },
+            vehicle(100, 501, 111, Some(true), Some("viewer_a")),
+            vehicle(100, 501, 112, Some(true), Some("viewer_a")),
+            vehicle(200, 501, 111, Some(true), Some("viewer_b")),
+            vehicle(100, 777, 111, Some(false), None),
+            vehicle(200, 888, 111, None, None),
+            vehicle(200, 999, 111, Some(true), None),
+            vehicle(200, 0, 111, Some(true), Some("bot")),
+        ],
+    )
+    .await
+    .unwrap();
+
+    pool
+}
+
+#[tokio::test]
+async fn twitch_sightings_count_flagged_battles_per_account_without_the_recorder() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+    use wows_toolkit_config::index::rows::TwitchLogin;
+    use wows_toolkit_config::index::rows::TwitchSightings;
+
+    let pool = twitch_pool().await;
+    let sightings = query::twitch_sightings(&pool, &MatchFilter::default()).await.unwrap();
+
+    assert_eq!(
+        sightings.keys().copied().collect::<Vec<_>>(),
+        vec![AccountId(501)],
+        "the recorder, unmatched, never-checked, login-less and bot rows are left out"
+    );
+    assert_eq!(
+        sightings[&AccountId(501)],
+        TwitchSightings { battles: 2, logins: vec![TwitchLogin("viewer_a".into()), TwitchLogin("viewer_b".into())] },
+        "two ships in one battle count that battle once"
+    );
+}
+
+#[tokio::test]
+async fn twitch_sightings_honour_the_date_range() {
+    use wows_toolkit_config::index::rows::MatchFilter;
+    use wows_toolkit_config::index::rows::TwitchLogin;
+
+    let pool = twitch_pool().await;
+    let filter = MatchFilter { date_from: Some(Timestamp::from_second(1500).unwrap()), ..Default::default() };
+    let sightings = query::twitch_sightings(&pool, &filter).await.unwrap();
+
+    let account = &sightings[&AccountId(501)];
+    assert_eq!(account.battles, 1, "only arena 200 falls inside the range");
+    assert_eq!(account.logins, vec![TwitchLogin("viewer_b".into())]);
+}
+
 /// Two matches for account 501: arena 100 as RAIN, then the later arena 101 as
 /// WOLF. WOLF is therefore the account's latest clan and arena 100 the only
 /// encounter whose clan differs from it.

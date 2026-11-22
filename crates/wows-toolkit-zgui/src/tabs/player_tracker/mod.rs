@@ -152,6 +152,7 @@ const CSS: &str = css!(
     .wt-tracker-dim { color: var(--wt-color-text-dim); }
     .wt-tracker-small { font-size: 12px; }
     .wt-tracker-truncate { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wt-tracker-twitch-mark { display: flex; flex: none; align-items: center; }
     [data-severity=\"noted\"] { color: var(--wt-color-division); }
     [data-severity=\"warned\"] { color: var(--wt-color-warn); }
     [data-severity=\"heavy\"] { color: var(--wt-color-loss); }
@@ -481,6 +482,9 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
     let show_division_mates = Signal::derive_local(move || Checked::from(model.show_division_mates.get()));
     let division_mates_box = NodeRef::new();
     let division_mates_name = NodeRef::new();
+    let seen_in_twitch_chat = Signal::derive_local(move || Checked::from(model.seen_in_twitch_chat.get()));
+    let twitch_box = NodeRef::new();
+    let twitch_name = NodeRef::new();
 
     let escape = EscapeClears::new(filter);
     view! {
@@ -551,6 +555,29 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                     }
                 }
                 TooltipContent {{t!("ui.player_tracker.show_division_mates_hover").into_owned()}}
+            }
+            Tooltip {
+                TooltipTrigger {
+                    row(class = "wt-tracker-toolbar__filter") {
+                        Checkbox(
+                            checked = Binding::controlled(seen_in_twitch_chat, move |checked: Checked| {
+                                model.set_seen_in_twitch_chat(checked == Checked::Yes);
+                            }),
+                            attr:data-testid = "tracker-seen-in-twitch-chat",
+                            labelled_by = twitch_name,
+                            node_ref = twitch_box
+                        )
+                        Label(
+                            node_ref = twitch_name,
+                            control = twitch_box,
+                            attr:data-testid = "tracker-seen-in-twitch-chat-label",
+                            on:click = move |_| model.set_seen_in_twitch_chat(!model.seen_in_twitch_chat.get_untracked())
+                        ) {
+                            {t!("ui.player_tracker.seen_in_twitch_chat").into_owned()}
+                        }
+                    }
+                }
+                TooltipContent {{t!("ui.player_tracker.seen_in_twitch_chat_hover").into_owned()}}
             }
         }
     }

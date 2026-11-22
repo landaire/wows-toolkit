@@ -115,12 +115,14 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<TrackerSettings>, LoadView
         return Ok(None);
     }
 
-    // A key egui never wrote stands for egui's default, which is the same view as this one's.
+    // A key egui never wrote stands for egui's default, which is the same view as this one's. Egui
+    // has no Twitch chat toggle, so the import leaves it off.
     let settings = TrackerSettings {
         period: period.unwrap_or_default(),
         sort: sort.map(Sort::from).unwrap_or_default(),
         clan_sort: clan_sort.map(ClanSort::from).unwrap_or_default(),
         filter: filter.unwrap_or_default(),
+        seen_in_twitch_chat: false,
     };
     // A view saved while this ran, by this front end or another, wins over the import.
     let inserted =
@@ -150,6 +152,7 @@ mod tests {
             sort: Sort { column: SortColumn::TotalEncounters, order: SortOrder::Ascending },
             clan_sort: ClanSort { column: ClanSortColumn::LastEncountered, order: SortOrder::Descending },
             filter: "RAIN".to_owned(),
+            seen_in_twitch_chat: false,
         };
         assert_eq!(imported, Some(expected.clone()));
 
@@ -165,6 +168,16 @@ mod tests {
         queries::set_setting_raw(&pool, EGUI_TIME_PERIOD_KEY, r#""LastHour""#).await.unwrap();
 
         assert_eq!(load(&pool).await.unwrap(), Some(saved));
+    }
+
+    #[tokio::test]
+    async fn a_view_saved_without_the_twitch_toggle_reads_with_it_off() {
+        let pool = wows_toolkit_config::test_pool().await;
+        queries::set_setting_raw(&pool, TRACKER_SETTINGS_KEY, r#"{"filter":"RAIN"}"#).await.unwrap();
+
+        let view = load(&pool).await.unwrap().expect("the saved view reads");
+        assert_eq!(view.filter, "RAIN");
+        assert!(!view.seen_in_twitch_chat);
     }
 
     #[tokio::test]

@@ -47,6 +47,7 @@ use std::collections::HashMap;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::rows::MatchFilter;
 use wows_toolkit_config::index::rows::PlayerFacet;
+use wows_toolkit_config::index::rows::TwitchSightings;
 
 /// A player's wows-numbers page.
 pub fn wows_numbers_player_url(region: Region, account_id: AccountId, name: &str) -> String {
@@ -86,7 +87,8 @@ pub fn shipbuilds_player_url(region: Region, account_id: AccountId, name: &str) 
 pub const TRACKER_SETTINGS_KEY: &str = "player_tracker";
 
 /// What the tracker remembers between sessions: the window of time it looks
-/// back over, how each table is ordered, and what the filter box holds.
+/// back over, how each table is ordered, and what the filter box and the
+/// Twitch chat toggle hold.
 ///
 /// The egui tracker keeps the same view under keys of its own, which
 /// [`saved_view::load`] imports once.
@@ -100,6 +102,8 @@ pub struct TrackerSettings {
     pub clan_sort: ClanSort,
     #[serde(default)]
     pub filter: String,
+    #[serde(default)]
+    pub seen_in_twitch_chat: bool,
 }
 
 /// How far back the tracker looks.
@@ -291,46 +295,61 @@ pub struct PlayerRow {
     pub encounters_in_range: usize,
     /// When the player was last met, from the tracker.
     pub last_seen: Option<Timestamp>,
+    /// The period's battles in which the player was matched to a Twitch chat
+    /// login. `None` for a player never matched.
+    pub twitch: Option<TwitchSightings>,
 }
 
-/// The historical table's rows: filtered by `filter`, joined to `tracked`,
-/// and sorted in the reader's order.
-///
-/// `since` is the period's resolved boundary and `show_division_mates` the
-/// toggle above the table. While the toggle is off, a player met inside the
-/// period only as a division mate leaves the table entirely, which is what
-/// the egui tracker does.
+/// What narrows the historical table.
+#[derive(Debug, Clone, Copy)]
+pub struct PlayerRowFilter<'a> {
+    pub query: &'a FilterQuery,
+    /// The period's resolved boundary.
+    pub since: Option<Timestamp>,
+    /// The toggle above the table. While it is off, a player met inside the
+    /// period only as a division mate leaves the table entirely, which is
+    /// what the egui tracker does.
+    pub show_division_mates: bool,
+    /// Keeps only the players matched to a Twitch chat login in the period.
+    pub seen_in_twitch_chat: bool,
+}
+
+/// The historical table's rows: narrowed by `filter`, joined to `tracked`
+/// and `twitch`, and sorted in the reader's order.
 ///
 /// Ties break on the account id so the order is stable between refreshes
 /// rather than reshuffling players with the same count.
 pub fn visible_player_rows(
     players: &[PlayerFacet],
     tracked: &HashMap<AccountId, tracked::TrackedPlayer>,
-    filter: &FilterQuery,
-    since: Option<Timestamp>,
-    show_division_mates: bool,
+    twitch: &HashMap<AccountId, TwitchSightings>,
+    filter: PlayerRowFilter<'_>,
     sort: Sort,
 ) -> Vec<PlayerRow> {
     let mut rows: Vec<PlayerRow> = players
         .iter()
-        .filter(|player| matches_filter(player, filter))
+        .filter(|player| !filter.seen_in_twitch_chat || twitch.contains_key(&player.account_id))
+        .filter(|player| matches_filter(player, filter.query))
         .filter_map(|facet| {
+            let sightings = twitch.get(&facet.account_id).cloned();
             let Some(player) = tracked.get(&facet.account_id) else {
                 return Some(PlayerRow {
                     facet: facet.clone(),
                     total_encounters: None,
                     encounters_in_range: facet.match_count.max(0) as usize,
                     last_seen: None,
+                    twitch: sightings,
                 });
             };
-            if !show_division_mates && history::met_only_in_division(player, since) {
+            if !filter.show_division_mates && history::met_only_in_division(player, filter.since) {
                 return None;
             }
             Some(PlayerRow {
                 facet: facet.clone(),
-                total_encounters: Some(player.visible_arena_ids(show_division_mates).count()),
-                encounters_in_range: history::encounters_in_range(player, since, show_division_mates),
-                last_seen: player.last_visible_timestamp(show_division_mates),
+                total_encounters: Some(player.visible_arena_ids(filter.show_division_mates).count()),
+                encounters_in_range: history::encounters_in_range(player, filter.since, filter.show_division_mates),
+                last_seen: player.last_visible_timestamp(filter.show_division_mates),
+                twitch: sightings,
             })
         })
         .collect();
@@ -416,15 +435,27 @@ mod tests {
         (account.into(), player)
     }
 
+    /// The rows with no typed filter, no Twitch matches and the Twitch toggle off.
+    fn unfiltered_rows(
+        players: &[PlayerFacet],
+        tracked: &HashMap<AccountId, tracked::TrackedPlayer>,
+        since: Option<Timestamp>,
+        show_division_mates: bool,
+        sort: Sort,
+    ) -> Vec<PlayerRow> {
+        let query = FilterQuery::default();
+        let filter = PlayerRowFilter { query: &query, since, show_division_mates, seen_in_twitch_chat: false };
+        visible_player_rows(players, tracked, &HashMap::new(), filter, sort)
+    }
+
     #[test]
     fn a_row_takes_its_counts_from_the_tracker_when_it_knows_the_player() {
         let now = Timestamp::now();
         let tracked: HashMap<AccountId, tracked::TrackedPlayer> =
             [met(1, &[(1, false), (24 * 40, false)])].into_iter().collect();
-        let rows = visible_player_rows(
+        let rows = unfiltered_rows(
             &[player(1, "Zeta", "ALPHA", 99)],
             &tracked,
-            &FilterQuery::default(),
             Some(now - (24 * 7).hours()),
             false,
             Sort::default(),
@@ -438,14 +469,7 @@ mod tests {
 
     #[test]
     fn a_player_the_tracker_never_recorded_falls_back_to_the_indexed_count() {
-        let rows = visible_player_rows(
-            &[player(1, "Zeta", "ALPHA", 4)],
-            &HashMap::new(),
-            &FilterQuery::default(),
-            None,
-            false,
-            Sort::default(),
-        );
+        let rows = unfiltered_rows(&[player(1, "Zeta", "ALPHA", 4)], &HashMap::new(), None, false, Sort::default());
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].total_encounters, None, "there is no all-time figure to give");
@@ -458,12 +482,41 @@ mod tests {
         let tracked: HashMap<AccountId, tracked::TrackedPlayer> = [met(1, &[(1, true)])].into_iter().collect();
         let players = [player(1, "Zeta", "ALPHA", 1)];
 
-        assert!(
-            visible_player_rows(&players, &tracked, &FilterQuery::default(), None, false, Sort::default()).is_empty()
-        );
-        let shown = visible_player_rows(&players, &tracked, &FilterQuery::default(), None, true, Sort::default());
+        assert!(unfiltered_rows(&players, &tracked, None, false, Sort::default()).is_empty());
+        let shown = unfiltered_rows(&players, &tracked, None, true, Sort::default());
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].encounters_in_range, 1);
+    }
+
+    #[test]
+    fn the_twitch_toggle_keeps_only_players_seen_in_chat() {
+        use wows_toolkit_config::index::rows::TwitchLogin;
+
+        let tracked: HashMap<AccountId, tracked::TrackedPlayer> =
+            [met(2, &[(1, false), (2, false), (3, false)])].into_iter().collect();
+        let sightings = TwitchSightings { battles: 2, logins: vec![TwitchLogin("alpha_tv".to_owned())] };
+        let twitch: HashMap<AccountId, TwitchSightings> = [(AccountId(2), sightings.clone())].into_iter().collect();
+        let query = FilterQuery::default();
+        let filter = |seen_in_twitch_chat| PlayerRowFilter {
+            query: &query,
+            since: None,
+            show_division_mates: false,
+            seen_in_twitch_chat,
+        };
+
+        let all = visible_player_rows(&sample(), &tracked, &twitch, filter(false), Sort::default());
+        assert_eq!(all.len(), 3, "the toggle off keeps everyone");
+        assert_eq!(
+            all.iter().filter(|row| row.twitch.is_some()).map(|row| row.facet.account_id).collect::<Vec<_>>(),
+            vec![AccountId(2)],
+            "the match rides on its own row only"
+        );
+
+        let seen = visible_player_rows(&sample(), &tracked, &twitch, filter(true), Sort::default());
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].facet.account_id, AccountId(2));
+        assert_eq!(seen[0].encounters_in_range, 3, "the games together stay the tracker's count");
+        assert_eq!(seen[0].twitch, Some(sightings));
     }
 
     #[test]
@@ -472,13 +525,12 @@ mod tests {
             [met(1, &[(1, false)]), met(2, &[(2, false), (3, false), (4, false)])].into_iter().collect();
         let players = [player(1, "Zeta", "ALPHA", 1), player(2, "Alpha", "ZULU", 3)];
 
-        let by_count = visible_player_rows(&players, &tracked, &FilterQuery::default(), None, false, Sort::default());
+        let by_count = unfiltered_rows(&players, &tracked, None, false, Sort::default());
         assert_eq!(by_count[0].facet.latest_name, "Alpha", "the most-met player leads");
 
-        let by_last_seen = visible_player_rows(
+        let by_last_seen = unfiltered_rows(
             &players,
             &tracked,
-            &FilterQuery::default(),
             None,
             false,
             Sort { column: SortColumn::LastEncountered, order: SortOrder::Descending },

@@ -1,5 +1,6 @@
 //! Typed query API for the replay index. Populated in later tasks.
 
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
@@ -47,6 +48,7 @@ use super::rows::SourceId;
 use super::rows::SourceKind;
 use super::rows::TwitchChatter;
 use super::rows::TwitchLogin;
+use super::rows::TwitchSightings;
 use super::rows::VehicleRelation;
 use super::rows::stored_rating_scope;
 
@@ -1425,6 +1427,69 @@ pub async fn self_account_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result
     Ok(rows.into_iter().map(|(a,)| AccountId::from(a)).collect())
 }
 
+/// The battles in which each account was matched to a Twitch chat login
+/// (`is_stream_sniper = 1`), keyed by account.
+///
+/// Honours `source_ids` and the `date_from`/`date_to` range the same way
+/// [`distinct_players`] does; the remaining filter fields are ignored here.
+/// The recording accounts are left out: chat lists include the broadcaster,
+/// who is then matched against their own name. A flag stored without its
+/// login is left out too, so every account returned has a login to name.
+pub async fn twitch_sightings(
+    pool: &SqlitePool,
+    filter: &MatchFilter,
+) -> Result<HashMap<AccountId, TwitchSightings>, IndexError> {
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("");
+    push_twitch_sightings(&mut qb, filter);
+
+    let rows = qb.build().fetch_all(pool).await?;
+    let mut seen: HashMap<AccountId, (HashSet<ArenaId>, BTreeSet<TwitchLogin>)> = HashMap::new();
+    for row in &rows {
+        let account = AccountId::from(row.try_get::<i64, _>("account_id")?);
+        let arena = ArenaId::new(row.try_get::<i64, _>("arena_id")?);
+        let login = TwitchLogin(row.try_get("sniper_twitch_login")?);
+        let (arenas, logins) = seen.entry(account).or_default();
+        arenas.insert(arena);
+        logins.insert(login);
+    }
+
+    Ok(seen
+        .into_iter()
+        .map(|(account, (arenas, logins))| {
+            (account, TwitchSightings { battles: arenas.len(), logins: logins.into_iter().collect() })
+        })
+        .collect())
+}
+
+/// The [`twitch_sightings`] select. Its flag predicates are those of the
+/// partial index `idx_vehicle_twitch`, which SQLite uses only while they match.
+fn push_twitch_sightings(qb: &mut QueryBuilder<'_, Sqlite>, filter: &MatchFilter) {
+    qb.push(
+        "SELECT DISTINCT v.account_id, v.arena_id, v.sniper_twitch_login FROM indexed_vehicle v \
+          WHERE v.is_stream_sniper = 1 AND v.sniper_twitch_login IS NOT NULL AND v.account_id <> 0 \
+            AND v.account_id NOT IN \
+                (SELECT self_account_id FROM replay_record WHERE self_account_id IS NOT NULL)",
+    );
+    if let Some(sources) = &filter.source_ids {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM replay_record WHERE source_id IN (");
+        let mut sep = qb.separated(", ");
+        for s in sources {
+            sep.push_bind(s.0);
+        }
+        qb.push("))");
+    }
+    if filter.date_from.is_some() || filter.date_to.is_some() {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM indexed_match WHERE 1=1");
+        if let Some(from) = filter.date_from {
+            qb.push(" AND timestamp >= ").push_bind(from.as_second());
+        }
+        if let Some(to) = filter.date_to {
+            qb.push(" AND timestamp <= ").push_bind(to.as_second());
+        }
+        qb.push(")");
+    }
+}
+
 /// The encounters in which an account shared a division with the replay's self
 /// player, one row per (account, match).
 ///
@@ -2211,5 +2276,34 @@ mod sort_cycle_tests {
         let moved = sorted.after_click(SortColumn::Date);
         assert_eq!(moved.column, SortColumn::Date);
         assert_eq!(moved.direction, SortColumn::Date.default_direction());
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod twitch_plan_tests {
+    use super::*;
+
+    async fn plan(filter: &MatchFilter) -> Vec<String> {
+        let pool = crate::test_pool().await;
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("EXPLAIN QUERY PLAN ");
+        push_twitch_sightings(&mut qb, filter);
+        let rows = qb.build().fetch_all(&pool).await.expect("the plan reads");
+        rows.iter().map(|row| row.get::<String, _>("detail")).collect()
+    }
+
+    /// Without a period the roster table is read through the partial index
+    /// alone; a predicate edited out of step with the index's `WHERE` would
+    /// scan every row. A period reaches the rows by arena instead.
+    #[tokio::test]
+    async fn the_roster_table_is_never_scanned_whole() {
+        let all_time = plan(&MatchFilter::default()).await;
+        assert!(all_time.iter().any(|step| step.contains("USING COVERING INDEX idx_vehicle_twitch")), "{all_time:?}");
+
+        let since = MatchFilter { date_from: Some(Timestamp::from_second(1000).unwrap()), ..Default::default() };
+        let bounded = plan(&since).await;
+        assert!(
+            !bounded.iter().any(|step| step.starts_with("SCAN v") && !step.contains("idx_vehicle_twitch")),
+            "a bounded period must not scan the roster table: {bounded:?}"
+        );
     }
 }

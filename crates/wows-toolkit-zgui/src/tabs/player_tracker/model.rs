@@ -17,9 +17,11 @@ use wows_toolkit_config::index::rows::ClanCorrection;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::MatchFilter;
 use wows_toolkit_config::index::rows::PlayerFacet;
+use wows_toolkit_config::index::rows::TwitchSightings;
 use wows_toolkit_viewmodel::player_tracker::ClanSort;
 use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
 use wows_toolkit_viewmodel::player_tracker::PlayerRow;
+use wows_toolkit_viewmodel::player_tracker::PlayerRowFilter;
 use wows_toolkit_viewmodel::player_tracker::Sort;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::TRACKER_SETTINGS_KEY;
@@ -88,11 +90,12 @@ struct ViewEdits {
     sort: bool,
     clan_sort: bool,
     filter: bool,
+    seen_in_twitch_chat: bool,
 }
 
 impl ViewEdits {
     fn any(self) -> bool {
-        self.period || self.sort || self.clan_sort || self.filter
+        self.period || self.sort || self.clan_sort || self.filter || self.seen_in_twitch_chat
     }
 }
 
@@ -117,10 +120,14 @@ pub struct TrackerModel {
     pub players: RwSignal<Vec<PlayerFacet>, LocalStorage>,
     /// Notes and encounters kept against the players met, shared with the other front ends.
     pub tracked: RwSignal<HashMap<AccountId, TrackedPlayer>, LocalStorage>,
+    /// The period's battles in which each player was matched to a Twitch chat login.
+    pub twitch: RwSignal<HashMap<AccountId, TwitchSightings>, LocalStorage>,
     /// The index's latest clan per account, and the encounters whose clan at the time differed.
     clan_latest: RwSignal<HashMap<AccountId, String>, LocalStorage>,
     clan_corrections: RwSignal<Vec<ClanCorrection>, LocalStorage>,
     pub show_division_mates: RwSignal<bool, LocalStorage>,
+    /// Keeps only the players matched to a Twitch chat login.
+    pub seen_in_twitch_chat: RwSignal<bool, LocalStorage>,
     pub view_mode: RwSignal<CurrentMatchViewMode, LocalStorage>,
     pub win_rate_mode: RwSignal<WinRateMode, LocalStorage>,
     pub load: RwSignal<LoadState, LocalStorage>,
@@ -162,9 +169,11 @@ impl TrackerModel {
         let query = Memo::new(move |_| FilterQuery::new(&filter.get()));
         let players = RwSignal::new_local(Vec::new());
         let tracked = RwSignal::new_local(HashMap::new());
+        let twitch = RwSignal::new_local(HashMap::new());
         let clan_latest = RwSignal::new_local(HashMap::new());
         let clan_corrections = RwSignal::new_local(Vec::new());
         let show_division_mates = RwSignal::new_local(false);
+        let seen_in_twitch_chat = RwSignal::new_local(false);
 
         // The rows have no equality, so a recompute always notifies; the inputs change rarely.
         let rows = Memo::new_with_compare(
@@ -172,8 +181,16 @@ impl TrackerModel {
                 let since = period.get().earliest(Timestamp::now());
                 players.with(|players| {
                     tracked.with(|tracked| {
-                        query.with(|query| {
-                            visible_player_rows(players, tracked, query, since, show_division_mates.get(), sort.get())
+                        twitch.with(|twitch| {
+                            query.with(|query| {
+                                let filter = PlayerRowFilter {
+                                    query,
+                                    since,
+                                    show_division_mates: show_division_mates.get(),
+                                    seen_in_twitch_chat: seen_in_twitch_chat.get(),
+                                };
+                                visible_player_rows(players, tracked, twitch, filter, sort.get())
+                            })
                         })
                     })
                 })
@@ -224,9 +241,11 @@ impl TrackerModel {
             query,
             players,
             tracked,
+            twitch,
             clan_latest,
             clan_corrections,
             show_division_mates,
+            seen_in_twitch_chat,
             view_mode: RwSignal::new_local(CurrentMatchViewMode::default()),
             win_rate_mode: RwSignal::new_local(WinRateMode::default()),
             load: RwSignal::new_local(LoadState::Idle),
@@ -276,6 +295,9 @@ impl TrackerModel {
                     }
                     if !edits.filter {
                         self.filter.set(settings.filter);
+                    }
+                    if !edits.seen_in_twitch_chat {
+                        self.seen_in_twitch_chat.set(settings.seen_in_twitch_chat);
                     }
                 }
                 // Nothing saved: the defaults stand.
@@ -380,15 +402,17 @@ impl TrackerModel {
                     // The perspective player of a replay is not someone you met; left in they
                     // lead the table, since they were in every battle their own replay recorded.
                     let own = query::self_account_ids(&pool, &filter).await?;
-                    Ok::<_, IndexError>((players, own))
+                    let twitch = query::twitch_sightings(&pool, &filter).await?;
+                    Ok::<_, IndexError>((players, own, twitch))
                 })
                 .await;
             if self.generation.get_value() != generation {
                 return;
             }
             match found {
-                Ok(Ok((players, own))) => {
+                Ok(Ok((players, own, twitch))) => {
                     self.players.set(players.into_iter().filter(|facet| !own.contains(&facet.account_id)).collect());
+                    self.twitch.set(twitch);
                     self.load.set(LoadState::Loaded);
                 }
                 Ok(Err(err)) => self.load.set(LoadState::Failed(err.to_string())),
@@ -481,6 +505,7 @@ impl TrackerModel {
             sort: self.sort.get_untracked(),
             clan_sort: self.clan_sort.get_untracked(),
             filter: self.filter.get_untracked(),
+            seen_in_twitch_chat: self.seen_in_twitch_chat.get_untracked(),
         };
         self.services.settings.save(TRACKER_SETTINGS_KEY, &settings);
     }
@@ -534,6 +559,15 @@ impl TrackerModel {
         }
         self.show_division_mates.set(show);
         self.store_view_modes();
+    }
+
+    pub fn set_seen_in_twitch_chat(self, seen: bool) {
+        if self.seen_in_twitch_chat.get_untracked() == seen {
+            return;
+        }
+        self.seen_in_twitch_chat.set(seen);
+        self.note_edit(|edits| edits.seen_in_twitch_chat = true);
+        self.save_view();
     }
 
     pub fn set_view_mode(self, mode: CurrentMatchViewMode) {
@@ -669,6 +703,12 @@ impl TrackerModel {
         self.tracked.set(tracked);
         self.load.set(LoadState::Loaded);
         self.clan_load.set(LoadState::Loaded);
+    }
+
+    /// Seeds what the Twitch read would have produced.
+    #[cfg(test)]
+    pub fn seed_twitch(self, twitch: HashMap<AccountId, TwitchSightings>) {
+        self.twitch.set(twitch);
     }
 }
 
