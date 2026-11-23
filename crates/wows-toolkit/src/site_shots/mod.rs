@@ -4,9 +4,10 @@
 //! The tests are ignored; run them by hand:
 //!
 //! ```text
-//! WT_SITE_STORAGE=/path/to/copy/of/storage WT_WOWS_DIR=/path/to/World_of_Warships \
-//! WT_SITE_REPLAY=/path/to/showcase.wowsreplay \
-//!   cargo test -p wows-toolkit -- --ignored site_shots --test-threads=1
+//! bin/buck2 test '//crates/wows-toolkit:zgui_test?release' -- \
+//!   --env WT_SITE_STORAGE=/path/to/copy/of/storage --env WT_WOWS_DIR=/path/to/World_of_Warships \
+//!   --env WT_SITE_REPLAY=/path/to/showcase.wowsreplay \
+//!   --test-arg=--ignored --test-arg=site_shots --test-arg=--test-threads=1
 //! ```
 //!
 //! `WT_SITE_STORAGE` must be a copy of the app's storage directory: the shell writes settings

@@ -10,7 +10,7 @@ dst="$root/site/img/shots"
 # Shots that show a detail are cropped to it, keeping the 16:10 frame the site
 # displays. Geometry is WIDTHxHEIGHT+X+Y in pixels of the 1600x1000 capture.
 declare -A crops=(
-    [rating]="1040x650+560+230"
+    [rating]="1040x650+560+300"
 )
 
 mkdir -p "$dst"

@@ -3,10 +3,10 @@
 A monorepo of tools for interacting with World of Warships game data, replays, and assets.
 
 <p>
-  <img src="assets/replay_inspector.png" alt="Replay Inspector" width="800">
+  <img src="site/img/shots/replay-dark.webp" alt="Replay Inspector" width="800">
 </p>
 <p>
-  <img src="assets/armor_viewer.png" alt="Armor Viewer" width="800">
+  <img src="site/img/shots/armor-dark.webp" alt="Armor Viewer" width="800">
 </p>
 
 ## Crates
