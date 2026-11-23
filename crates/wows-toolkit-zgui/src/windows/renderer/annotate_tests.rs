@@ -56,6 +56,7 @@ fn Mounted(opened: Rc<Cell<Option<RendererSession>>>) -> impl IntoView {
         clocks: vec![GameClock(0.0), GameClock(30.0)],
         battle_start: GameClock(0.0),
         battle_end: None,
+        replay_end: GameClock(30.0),
         space_size: 1400.0,
         version: Version::base(99, 0, 0),
         space: String::new(),

@@ -334,9 +334,9 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         self.world().resource::<MatchState>().battle_stage
     }
 
-    /// Seconds remaining in the match from BattleLogic `timeLeft`.
+    /// Seconds remaining in the match, as BattleLogic `timeLeft` last sent them.
     pub fn time_left(&self) -> Option<i64> {
-        self.world().resource::<MatchState>().time_left.map(|s| s.0)
+        self.world().resource::<MatchState>().countdown.map(|countdown| countdown.latest().remaining.0)
     }
 
     /// Clock when the battle stage first became `Waiting` (pre-battle start).

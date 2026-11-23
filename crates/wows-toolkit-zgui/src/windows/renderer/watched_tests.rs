@@ -116,7 +116,7 @@ fn frame(commands: Vec<DrawCommand>) -> PlaybackFrame {
 }
 
 fn timer() -> DrawCommand {
-    DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(42.0) }
+    DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(42.0), remaining: None }
 }
 
 fn torpedo() -> DrawCommand {

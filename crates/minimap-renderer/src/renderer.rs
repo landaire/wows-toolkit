@@ -43,10 +43,10 @@ use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::PlaneId;
 use wows_replays::types::Relation;
+use wows_replays::types::TimeRemaining;
 use wows_replays::types::WorldPos;
 
 use crate::activity_feed;
-use crate::activity_feed::PlaybackRate;
 use crate::assets::GameFonts;
 use crate::draw_command::ActivityFeedEntry;
 use crate::draw_command::ActivityFeedKind;
@@ -66,6 +66,7 @@ use crate::draw_command::STATS_RIBBON_ROW_H;
 use crate::draw_command::ShipConfigCircleKind;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
+use crate::timing::PlaybackRate;
 use crate::trail::BakedTrails;
 use crate::trail::hue_to_rgb;
 
@@ -2210,20 +2211,25 @@ impl<'a> MinimapRenderer<'a> {
         // 10. Timer / Pre-battle countdown
         if self.options.show_timer {
             let stage = controller.battle_stage();
+            let remaining = controller.time_remaining_at(clock);
 
             match stage {
                 Some(BattleStage::Battle) => {
                     // BattleStage::Battle (raw value 1) = pre-battle countdown period
-                    if let Some(time_left) = controller.time_left()
-                        && time_left > 0
+                    if let Some(seconds) = remaining.map(TimeRemaining::shown_seconds)
+                        && seconds > 0
                     {
-                        commands.push(DrawCommand::PreBattleCountdown { seconds: time_left });
+                        commands.push(DrawCommand::PreBattleCountdown { seconds });
                     }
                 }
                 _ => {
                     // BattleStage::Waiting (raw value 0) = battle active, or stage unknown
                     let elapsed = clock.to_elapsed(controller.battle_start_clock().unwrap_or(GameClock(0.0)));
-                    commands.push(DrawCommand::Timer { time_remaining: controller.time_left(), elapsed });
+                    commands.push(DrawCommand::Timer {
+                        time_remaining: remaining.map(TimeRemaining::shown_seconds),
+                        elapsed,
+                        remaining,
+                    });
                 }
             }
         }

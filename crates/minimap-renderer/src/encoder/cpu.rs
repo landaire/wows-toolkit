@@ -14,7 +14,7 @@ use rootcause::prelude::*;
 
 use crate::encoder::EncoderConfig as Cfg;
 use crate::error::VideoError;
-use crate::video::FPS;
+use crate::timing::FPS;
 
 pub struct CpuEncoder {
     encoder: Encoder,

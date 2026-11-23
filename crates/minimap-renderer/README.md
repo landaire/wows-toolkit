@@ -125,6 +125,8 @@ minimap_renderer \
 | `--show-speed-trails` | Show speed-based trails (blue=slow, red=fast) |
 | `--show-ship-config` | Show detection/battery range circles |
 | `--config <path>` | Load render settings from a TOML config file |
+| `--video-length <seconds>` | Fit the video into this many seconds, 1 to 600 (default 60) |
+| `--speed <multiplier>` | Play at this many game seconds per video second, at least 1, instead of fitting a length |
 | `--dump-frame <n\|mid\|last>` | Dump a single frame as PNG instead of video |
 | `--cpu` | Use CPU encoder (openh264) instead of GPU |
 | `--check-encoder` | Check encoder availability and exit |

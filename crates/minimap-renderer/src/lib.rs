@@ -28,6 +28,7 @@ pub mod renderer;
 pub mod saved_options;
 #[cfg(feature = "rendering")]
 mod surface;
+pub mod timing;
 pub mod toggles;
 #[cfg(feature = "track-file")]
 pub mod track_file;
@@ -84,6 +85,11 @@ pub use render_scale::RenderScale;
 #[cfg(feature = "rendering")]
 pub use renderer::MinimapRenderer;
 pub use saved_options::SavedRenderOptions;
+pub use timing::ExportSpeed;
+pub use timing::ExportTiming;
+pub use timing::ExportWindow;
+pub use timing::PlaybackRate;
+pub use timing::VideoLength;
 #[cfg(feature = "rendering")]
 pub use video::DumpMode;
 #[cfg(feature = "rendering")]

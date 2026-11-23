@@ -18,6 +18,7 @@ pub use wowsunpack::game_types::PlayerId;
 pub use wowsunpack::game_types::Relation;
 pub use wowsunpack::game_types::ShotId;
 pub use wowsunpack::game_types::TeamId;
+pub use wowsunpack::game_types::TimeRemaining;
 pub use wowsunpack::game_types::Vec2;
 pub use wowsunpack::game_types::Vec3;
 pub use wowsunpack::game_types::Velocity;

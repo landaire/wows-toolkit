@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(renderer)* Choose a CLI export's video length with `--video-length` (1 to 600 seconds) or play it at a speed with `--speed` (at least 1x), or with `video_length` or `speed` in the config. The length is fitted to the rendered stretch of the replay rather than the match time limit, and the default bitrate follows the video's length. `--max-size-mib` refuses a size the video cannot be made to fit
+- *(renderer)* Count the battle clock down once per game second instead of jumping when the server's time update arrives
+- *(zgui)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
+- *(egui)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
 - *(zgui)* Count only Random and Ranked battles in a replay group header's win rate, colored by its account win rate band, with a listing option to count every game mode instead
 - *(wows-query)* Summarize `quantity_values` over every class when its group names no class, with each class's own statistics in `by_class`, so the slowest shells of a tier can be found across classes
 - *(wows-query)* Name the ships that do not defeat the plate in `penetration_search` as `failing`, each with its strongest weapon of that ammo and its penetration

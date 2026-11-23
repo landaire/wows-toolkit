@@ -7,29 +7,43 @@ use std::time::Duration;
 
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::EncoderKind;
+use wows_minimap_renderer::ExportSpeed;
+use wows_minimap_renderer::ExportTiming;
 use wows_minimap_renderer::MINIMAP_SIZE;
+use wows_minimap_renderer::PlaybackRate;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::RenderScale;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
+use wows_minimap_renderer::VideoLength;
+use wows_minimap_renderer::activity_feed;
 use wows_minimap_renderer::advantage::AdvantageBreakdown;
 use wows_minimap_renderer::config::should_draw_command;
+use wows_minimap_renderer::draw_command::ActivityFeedEntry;
+use wows_minimap_renderer::draw_command::ActivityFeedKind;
 use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::ChargeCount;
+use wows_minimap_renderer::draw_command::ChatEntry;
 use wows_minimap_renderer::draw_command::ConsumableAvailability;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::FontHint;
 use wows_minimap_renderer::draw_command::HitPoints;
 use wows_minimap_renderer::draw_command::RosterConsumable;
 use wows_minimap_renderer::draw_command::RosterRow;
 use wows_minimap_renderer::draw_command::RosterSide;
+use wows_minimap_renderer::draw_command::RowShade;
 use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
 use wows_minimap_renderer::drawing::DrawnRegion;
 use wows_minimap_renderer::drawing::RegionKind;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::encoder::CodecSupport;
 use wows_minimap_renderer::encoder::EncoderStatus;
+use wows_minimap_renderer::frame_track::FrameSink;
+use wows_minimap_renderer::frame_track::TrackSink;
 use wows_minimap_renderer::map_data::MinimapPos;
+use wows_minimap_renderer::timing::FPS;
+use wows_minimap_renderer::timing::SPEED_LADDER;
 use wows_minimap_renderer::toggles::TOGGLES;
 use wows_minimap_renderer::toggles::Toggle;
 use wows_minimap_renderer::trail::BakedTrails;
@@ -44,6 +58,7 @@ use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::PlaneId;
+use wows_replays::types::TimeRemaining;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::push_ping_aged;
@@ -84,16 +99,17 @@ use crate::replay_render::collab::cursor_opacity;
 use crate::replay_render::collab::moment_broadcast;
 use crate::replay_render::collab::range_overrides;
 use crate::replay_render::export::BatchStep;
-use crate::replay_render::export::EXPORT_FRAME_COUNT;
 use crate::replay_render::export::ExportFrames;
 use crate::replay_render::export::ExportLayers;
 use crate::replay_render::export::ExportProgress;
 use crate::replay_render::export::ExportSettings;
 use crate::replay_render::export::ExportStage;
+use crate::replay_render::export::approximate_speed;
 use crate::replay_render::export::batch_export;
 use crate::replay_render::export::batch_layers;
 use crate::replay_render::export::export_settings_of;
 use crate::replay_render::export::must_use_cpu;
+use crate::replay_render::export::video_length_label;
 use crate::replay_render::hover::advantage_hover;
 use crate::replay_render::hover::consumable_at;
 use crate::replay_render::motion::FrameMotion;
@@ -105,7 +121,6 @@ use crate::replay_render::options::playback_options;
 use crate::replay_render::options::playback_options_hidden;
 use crate::replay_render::playback::FRAME_INTERVAL;
 use crate::replay_render::playback::Playback;
-use crate::replay_render::playback::SPEEDS;
 use crate::replay_render::playback::Tick;
 use crate::replay_render::playback::mmss;
 use crate::replay_render::raster::raster_commands;
@@ -132,10 +147,11 @@ use crate::replay_render::view::Wheel;
 use crate::replay_render::view::WindowPoint;
 
 /// A track holding `clocks`' worth of empty frames, with the battle starting
-/// at the first of them.
+/// at the first of them and the replay ending at the last.
 fn track(clocks: Vec<f32>) -> Track {
     Track {
         frames: vec![Vec::new(); clocks.len()],
+        replay_end: GameClock(clocks.last().copied().unwrap_or(0.0)),
         clocks: clocks.into_iter().map(GameClock).collect(),
         battle_start: GameClock(0.0),
         battle_end: None,
@@ -308,8 +324,8 @@ fn the_transport_opens_at_the_speed_the_egui_renderer_does() {
     let playback = Playback::new();
 
     assert_eq!(playback.speed(), 20.0);
-    assert!(SPEEDS.contains(&playback.speed()), "and it is one of the offered speeds");
-    assert_eq!(SPEEDS, [1.0, 5.0, 10.0, 20.0, 40.0, 60.0], "the egui ladder");
+    assert!(SPEED_LADDER.contains(&playback.speed()), "and it is one of the offered speeds");
+    assert_eq!(SPEED_LADDER, [1.0, 5.0, 10.0, 20.0, 40.0, 60.0], "the egui ladder");
 }
 
 /// The clock reads the battle's own time, not the recording's.
@@ -421,6 +437,7 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
         show_player_names: true,
         include_pre_battle: true,
         prefer_cpu_encoder: true,
+        export_timing: ExportTiming::Speed(ExportSpeed::new(40.0).expect("an export speed")),
         show_stats_panel: true,
         // Kept for the egui renderer rather than read here, so a save from
         // this app must not clear it.
@@ -438,9 +455,12 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
     assert!(options.show_stats_panel, "the saved stats panel is drawn");
     assert!(export.include_pre_battle);
     assert!(export.prefer_cpu);
+    assert_eq!(export.timing, stored.export_timing, "the saved video timing");
 
     options.show_smoke = false;
     options.show_stats_panel = false;
+    let thirty_seconds = ExportTiming::Length(VideoLength::new(30.0).expect("a positive length"));
+    let export = ExportSettings { timing: thirty_seconds, ..export };
     let saved = defaults_to_save(&stored, &options, show_dead_ships, &export, None);
 
     assert!(!saved.show_smoke, "what the viewport shows is what is saved");
@@ -448,6 +468,7 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
     assert!(saved.show_self_radar_range, "the ranges this app does not read are left as they were");
     assert!(saved.include_pre_battle, "as are the export settings it did not change");
     assert!(!saved.show_stats_panel, "and the stats panel is saved as the viewport shows it");
+    assert_eq!(saved.export_timing, thirty_seconds, "and the video timing chosen since is saved");
 }
 
 /// The self ranges the egui renderer saves go on the recording player's ship when a viewport
@@ -678,14 +699,18 @@ fn a_batch_draws_the_saved_layers() {
 /// them off films none.
 #[test]
 fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
-    let mut track = track(vec![0.0, 0.5]);
+    // The last written frame sits a frame's step before the window's end, so the second ship is
+    // kept through a third frame for it to land on.
+    let mut track = track(vec![0.0, 0.5, 1.0]);
     track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
     track.frames[1] = vec![drawn_ship(2, "me", 20.0, true), range_circle(2, "me")];
+    track.frames[2] = track.frames[1].clone();
     let (on, show_dead_ships) = batch_options(&SavedRenderOptions { show_ship_config: true, ..Default::default() });
 
     let layers = batch_layers(&on, show_dead_ships, &track);
     assert!(layers.choices.ranges_for("someone").detection && layers.choices.ranges_for("me").detection);
-    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let frames: Vec<_> =
+        ExportFrames::new(Arc::new(track), true, ExportTiming::default(), layers).expect("there are frames").collect();
     let circles = |frame: &[DrawCommand]| {
         frame.iter().filter(|command| matches!(command, DrawCommand::ShipConfigCircle { .. })).count()
     };
@@ -696,7 +721,8 @@ fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
     off_track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
     let (off, show_dead_ships) = batch_options(&SavedRenderOptions::default());
     let layers = batch_layers(&off, show_dead_ships, &off_track);
-    let first = ExportFrames::new(Arc::new(off_track), true, layers).and_then(|mut frames| frames.next());
+    let first = ExportFrames::new(Arc::new(off_track), true, ExportTiming::default(), layers)
+        .and_then(|mut frames| frames.next());
     assert_eq!(first.map(|frame| circles(&frame)), Some(0), "none while they are saved off");
 }
 
@@ -899,16 +925,18 @@ fn an_export_leaves_out_the_pre_battle_phase_unless_it_is_asked_for() {
     };
 
     assert_eq!(track.export_start(false), FrameIndex::new(80), "the eighty frames before the battle are cut");
-    let battle = ExportFrames::new(Arc::clone(&track), false, layers()).expect("there are frames");
+    let battle =
+        ExportFrames::new(Arc::clone(&track), false, ExportTiming::default(), layers()).expect("there are frames");
     assert_eq!(battle.duration_seconds(), 59.5, "the video covers the battle");
 
     assert_eq!(track.export_start(true), FrameIndex::FIRST, "and kept when asked for");
-    let whole = ExportFrames::new(Arc::clone(&track), true, layers()).expect("there are frames");
+    let whole =
+        ExportFrames::new(Arc::clone(&track), true, ExportTiming::default(), layers()).expect("there are frames");
     assert_eq!(whole.duration_seconds(), 99.5, "the video covers the recording");
 }
 
-/// Every export is the same length at the same rate, however few frames the bake kept: a long
-/// battle's track is sampled more coarsely, and the time it covers is read off its own clocks.
+/// Every export at a length is that length at the same rate, however few frames the bake kept: a
+/// long battle's track is sampled more coarsely, and the time it covers is read off its own clocks.
 #[test]
 fn an_export_is_a_fixed_length_whatever_the_track_kept() {
     let layers = || ExportLayers {
@@ -920,15 +948,114 @@ fn an_export_is_a_fixed_length_whatever_the_track_kept() {
     // A twenty-minute battle decimated to a frame every two seconds.
     let coarse = Arc::new(track((0..600).map(|frame| frame as f32 * 2.0).collect()));
     let short = Arc::new(track((0..120).map(|frame| frame as f32 * 0.5).collect()));
+    let timing = ExportTiming::Length(VideoLength::DEFAULT);
 
-    let coarse = ExportFrames::new(coarse, true, layers()).expect("there are frames");
+    let coarse = ExportFrames::new(coarse, true, timing, layers()).expect("there are frames");
     assert_eq!(coarse.duration_seconds(), 1198.0, "the time the track's clocks span");
-    assert_eq!(coarse.len(), EXPORT_FRAME_COUNT);
-    assert_eq!(coarse.count(), EXPORT_FRAME_COUNT, "every frame is written");
+    let frames = (f64::from(VideoLength::DEFAULT.seconds()) * FPS) as usize;
+    assert_eq!(coarse.len(), frames, "a minute at the video's frame rate");
+    assert_eq!(coarse.count(), frames, "every frame is written");
 
-    let short = ExportFrames::new(short, true, layers()).expect("there are frames");
+    let short = ExportFrames::new(short, true, timing, layers()).expect("there are frames");
     assert_eq!(short.duration_seconds(), 59.5);
-    assert_eq!(short.count(), EXPORT_FRAME_COUNT, "a short battle is stretched to the same length");
+    assert_eq!(short.count(), frames, "a short battle is stretched to the same length");
+}
+
+/// What a video timing comes to reads as a clock reads a length, and as a whole number of times
+/// faster unless that would read as none.
+#[test]
+fn a_video_timing_reads_as_a_length_and_a_speed() {
+    let rate = |speed: f32| PlaybackRate::new(speed).expect("a positive rate");
+
+    assert_eq!(video_length_label(28.7), "0:29");
+    assert_eq!(video_length_label(60.0), "1:00");
+    assert_eq!(video_length_label(300.0), "5:00");
+    assert_eq!(approximate_speed(rate(19.11)), "19");
+    assert_eq!(approximate_speed(rate(40.0)), "40");
+    assert_eq!(approximate_speed(rate(0.66)), "0.7");
+}
+
+/// An export at a speed plays the battle at that rate, so its length follows the battle's.
+#[test]
+fn an_export_at_a_speed_runs_as_long_as_the_battle_takes() {
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    let track = Arc::new(track((0..600).map(|frame| frame as f32 * 2.0).collect()));
+    let twenty = ExportTiming::Speed(ExportSpeed::new(20.0).expect("an export speed"));
+
+    let frames = ExportFrames::new(Arc::clone(&track), true, twenty, layers()).expect("there are frames");
+    // 1198 game seconds at twenty a second is 59.9 seconds of video, rounded up to a whole frame.
+    assert_eq!(frames.len(), 1797);
+    assert_eq!(frames.count(), 1797, "every frame is written");
+
+    let short = Arc::new(self::track((0..120).map(|frame| frame as f32 * 0.5).collect()));
+    let short = ExportFrames::new(short, true, twenty, layers()).expect("there are frames");
+    assert_eq!(short.len(), 90, "59.5 game seconds is three seconds of video");
+}
+
+/// An export runs to the replay's end rather than to the last frame the track kept, so a
+/// decimated track exports as many frames as the CLI and the egui renderer write for the replay.
+#[test]
+fn an_export_runs_to_the_replay_end_past_the_last_kept_frame() {
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    // Twenty minutes drawn every half second, kept within a small budget.
+    let mut sink = TrackSink::with_budget(125);
+    for index in 0..2400 {
+        sink.push(index, GameClock(index as f32 * 0.5), Vec::new());
+    }
+    let clocks: Vec<f32> = sink.kept_clocks().iter().map(|clock| clock.seconds()).collect();
+    let mut track = track(clocks);
+    track.frames = sink.finish();
+    track.replay_end = GameClock(1200.0);
+    let last_kept = track.seconds_at(track.last());
+    assert!(last_kept < 1190.0, "the budget dropped the tail: the last kept frame is at {last_kept}");
+    let twenty = ExportTiming::Speed(ExportSpeed::new(20.0).expect("an export speed"));
+
+    let frames = ExportFrames::new(Arc::new(track), true, twenty, layers()).expect("there are frames");
+
+    assert_eq!(frames.duration_seconds(), 1200.0);
+    assert_eq!(frames.len(), twenty.frame_count(1200.0));
+    assert_eq!(frames.count(), 1800, "every frame is written, the tail from the last kept frame");
+}
+
+/// Past the last kept frame the timer counts on from it, and stops where the battle ended.
+#[test]
+fn the_timer_counts_on_past_the_last_kept_frame_until_the_battle_ends() {
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    let timer = |left: f32| DrawCommand::Timer {
+        time_remaining: Some(TimeRemaining(left).shown_seconds()),
+        elapsed: ElapsedClock(0.0),
+        remaining: Some(TimeRemaining(left)),
+    };
+    let baked = |battle_end: Option<f32>| {
+        let mut track = track(vec![0.0, 2.0]);
+        track.frames = vec![vec![timer(600.0)], vec![timer(598.0)]];
+        track.battle_end = battle_end.map(GameClock);
+        track.replay_end = GameClock(8.0);
+        Arc::new(track)
+    };
+    // A game second per video frame.
+    let second_a_frame = ExportTiming::Speed(ExportSpeed::new(FPS as f32).expect("an export speed"));
+
+    let running = ExportFrames::new(baked(None), true, second_a_frame, layers()).expect("there are frames");
+    assert_eq!(shown_countdown(running), [600, 599, 598, 597, 596, 595, 594, 593]);
+
+    let ended = ExportFrames::new(baked(Some(5.0)), true, second_a_frame, layers()).expect("there are frames");
+    assert_eq!(shown_countdown(ended), [600, 599, 598, 597, 596, 595, 595, 595]);
 }
 
 /// A written frame between two baked ones has each ship part of the way along, with what is
@@ -943,8 +1070,9 @@ fn an_export_moves_ships_between_the_frames_the_bake_kept() {
     choices.set_ranges_for("me", |filter| filter.detection = true, &mut options);
     let layers = ExportLayers { options, show_dead_ships: true, choices, drawn_on: Vec::new() };
 
-    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
-    let middle = &frames[EXPORT_FRAME_COUNT / 2];
+    let frames: Vec<_> =
+        ExportFrames::new(Arc::new(track), true, ExportTiming::default(), layers).expect("there are frames").collect();
+    let middle = &frames[frames.len() / 2];
     let ship_x = middle.iter().find_map(|command| match command {
         DrawCommand::Ship { pos, .. } => Some(pos.x),
         _ => None,
@@ -974,8 +1102,9 @@ fn an_exported_trail_ends_at_its_ship_between_baked_frames() {
         drawn_on: Vec::new(),
     };
 
-    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
-    let frame = &frames[EXPORT_FRAME_COUNT * 3 / 4];
+    let frames: Vec<_> =
+        ExportFrames::new(Arc::new(track), true, ExportTiming::default(), layers).expect("there are frames").collect();
+    let frame = &frames[frames.len() * 3 / 4];
     let ship_x = frame.iter().find_map(|command| match command {
         DrawCommand::Ship { pos, .. } => Some(pos.x),
         _ => None,
@@ -1226,10 +1355,11 @@ fn an_export_flies_shells_between_the_frames_the_bake_kept() {
         drawn_on: Vec::new(),
     };
 
-    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, layers).expect("there are frames").collect();
+    let timing = ExportTiming::default();
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, timing, layers).expect("there are frames").collect();
     let heads: Vec<f32> = frames.iter().flat_map(|frame| tracer_ends(frame)).map(|(_, _, head, _)| head).collect();
 
-    assert_eq!(heads.len(), EXPORT_FRAME_COUNT, "the shell is in every written frame");
+    assert_eq!(heads.len(), timing.frame_count(10.0), "the shell is in every written frame");
     assert!(heads.windows(2).all(|pair| pair[1] > pair[0]), "and flies on in each");
 }
 
@@ -1237,19 +1367,209 @@ fn an_export_flies_shells_between_the_frames_the_bake_kept() {
 /// that frame is reached.
 #[test]
 fn the_timer_counts_on_and_events_wait_for_their_frame() {
+    let timer = |left: f32, elapsed: f32| DrawCommand::Timer {
+        time_remaining: Some(TimeRemaining(left).shown_seconds()),
+        elapsed: ElapsedClock(elapsed),
+        remaining: Some(TimeRemaining(left)),
+    };
     let mut track = track(vec![0.0, 2.0]);
-    track.frames[0] = vec![DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(10.5) }];
-    track.frames[1] = vec![
-        DrawCommand::Timer { time_remaining: Some(598), elapsed: ElapsedClock(12.5) },
-        DrawCommand::KillFeed { entries: Vec::new() },
-    ];
+    track.frames[0] = vec![timer(599.5, 10.5)];
+    track.frames[1] = vec![timer(597.5, 12.5), DrawCommand::KillFeed { entries: Vec::new() }];
 
     let between = moved_to(&track, 1.75);
-    let [DrawCommand::Timer { time_remaining, elapsed }] = &between[..] else {
+    let [DrawCommand::Timer { time_remaining, elapsed, remaining }] = &between[..] else {
         panic!("the timer alone, with no kill yet: {between:?}");
     };
+    assert_eq!(*remaining, Some(TimeRemaining(597.75)), "counted on at game rate");
     assert_eq!(*time_remaining, Some(598), "two seconds off the countdown");
     assert_eq!(*elapsed, ElapsedClock(12.25));
+}
+
+/// A track baked as `build_frame_track` bakes one, with `budget` frames kept: a frame each
+/// [`BAKE_INTERVAL`] labelled with the last packet clock before it and drawn at that clock, so a
+/// gap between packets is caught up on in a burst of frames that share one clock. The battle timer
+/// counts down from `left_at_start` at clock 0.
+fn baked_countdown(packets: &[f32], budget: usize, left_at_start: f32) -> Track {
+    let timer = |clock: f32| {
+        let left = TimeRemaining(left_at_start - clock);
+        DrawCommand::Timer {
+            time_remaining: Some(left.shown_seconds()),
+            elapsed: ElapsedClock(clock),
+            remaining: Some(left),
+        }
+    };
+    let mut sink = TrackSink::with_budget(budget);
+    let mut drawn: i64 = -1;
+    let mut prev = 0.0;
+    for &step in packets {
+        if step <= prev {
+            continue;
+        }
+        let target = (prev / BAKE_INTERVAL) as i64;
+        while drawn < target {
+            drawn += 1;
+            sink.push(drawn as usize, GameClock(prev), vec![timer(prev)]);
+        }
+        prev = step;
+    }
+
+    let clocks: Vec<f32> = sink.kept_clocks().iter().map(|clock| clock.seconds()).collect();
+    let mut track = track(clocks);
+    track.frames = sink.finish();
+    // The replay ends at its last packet, which the kept frames can fall short of.
+    track.replay_end = GameClock(packets.last().copied().unwrap_or(0.0));
+
+    track
+}
+
+/// The large number of the battle timer in each frame `frames` writes.
+fn shown_countdown(frames: ExportFrames) -> Vec<i64> {
+    frames
+        .map(|frame| {
+            frame
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::Timer { time_remaining, .. } => *time_remaining,
+                    _ => None,
+                })
+                .expect("every frame shows the timer")
+        })
+        .collect()
+}
+
+/// The battle timer in an export loses one second per game second, with no second shown twice or
+/// left out: through the bursts of frames a bake draws at one clock after a gap in the packets,
+/// and however far apart the budget left the kept frames.
+#[test]
+fn an_exported_countdown_loses_one_second_per_game_second() {
+    // Off the whole second, so a sample on a whole game second is never on a tick.
+    const LEFT_AT_START: f32 = 1200.5;
+
+    // A packet every 0.3 s, with a 3.1 s gap every 150 of them.
+    let packets: Vec<f32> = (0..2000).map(|packet| packet as f32 * 0.3 + (packet / 150) as f32 * 3.1).collect();
+    let layers = || ExportLayers {
+        options: playback_options_hidden(),
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    // A game second per video frame, so every frame is one second on from the last.
+    let second_a_frame = ExportTiming::Speed(ExportSpeed::new(FPS as f32).expect("an export speed"));
+    let twenty = ExportTiming::Speed(ExportSpeed::new(20.0).expect("an export speed"));
+
+    // Kept frames half a second apart, then 1, 2, 4 and 8 seconds as the budget halves the track.
+    for (budget, apart) in [(2000, 0.5), (1000, 1.0), (500, 2.0), (250, 4.0), (125, 8.0)] {
+        let track = Arc::new(baked_countdown(&packets, budget, LEFT_AT_START));
+        let mut gaps: Vec<f32> = track.clocks.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        gaps.sort_by(f32::total_cmp);
+        let typical = gaps[gaps.len() / 2];
+        assert!((typical - apart).abs() <= 0.5, "budget {budget}: kept frames are about {apart} s apart: {typical}");
+
+        let frames = ExportFrames::new(Arc::clone(&track), true, second_a_frame, layers()).expect("there are frames");
+        let shown = shown_countdown(frames);
+        assert_eq!(shown.first(), Some(&1201), "budget {budget}");
+        let off = shown.windows(2).position(|pair| pair[0] - pair[1] != 1);
+        assert_eq!(off, None, "budget {budget}: one second lost per game second: {shown:?}");
+
+        // Between whole seconds the number is the one the game showed at that clock.
+        let frames = ExportFrames::new(Arc::clone(&track), true, twenty, layers()).expect("there are frames");
+        let step = twenty.frame_step(track.export_window(true).expect("a window").seconds());
+        for (index, left) in shown_countdown(frames).into_iter().enumerate() {
+            let at = step * index as f32;
+            assert_eq!(left, (LEFT_AT_START - at).ceil() as i64, "budget {budget}: at {at} s");
+        }
+    }
+}
+
+/// A row of the activity feed eases in over the video's own time: the bake drew it at real time,
+/// where it settles within a few game seconds, which at an export's speed is gone in a frame.
+#[test]
+fn an_export_eases_feed_rows_in_at_its_own_speed() {
+    let row = ActivityFeedEntry {
+        clock: GameClock(5.0),
+        kind: ActivityFeedKind::Chat(ChatEntry {
+            clan_tag: String::new(),
+            clan_color: None,
+            player_name: "me".to_owned(),
+            team_color: [0, 255, 0],
+            ship_species: None,
+            ship_name: None,
+            message: "o7".to_owned(),
+            message_color: [255, 255, 255],
+            opacity: 1.0,
+            font_hint: FontHint::Primary,
+        }),
+        // Settled, as a real-time bake has it a game second later.
+        reveal: 1.0,
+        shade: RowShade::Plain,
+    };
+    let feed = DrawCommand::StatsActivityFeed { x: 0, y: 0, width: 100, height: 100, entries: vec![row] };
+    let mut track = track(vec![0.0, 6.0, 12.0]);
+    track.frames[1] = vec![feed.clone()];
+    track.frames[2] = vec![feed];
+    let layers = ExportLayers {
+        options: RenderOptions { show_stats_panel: true, ..playback_options_hidden() },
+        show_dead_ships: true,
+        choices: ShipChoices::new(),
+        drawn_on: Vec::new(),
+    };
+    let speed = ExportSpeed::new(20.0).expect("an export speed");
+
+    let frames: Vec<_> = ExportFrames::new(Arc::new(track), true, ExportTiming::Speed(speed), layers)
+        .expect("there are frames")
+        .collect();
+    // Twenty game seconds a second at thirty frames a second: frame 9 is game second 6.
+    let reveal = frames[9].iter().find_map(|command| match command {
+        DrawCommand::StatsActivityFeed { entries, .. } => entries.first().map(|entry| entry.reveal),
+        _ => None,
+    });
+    let expected = activity_feed::reveal(1.0, speed.rate());
+    assert!(expected < 1.0, "a game second on is still easing in at twenty times");
+    assert!(reveal.is_some_and(|reveal| (reveal - expected).abs() < 1e-4), "{reveal:?} against {expected}");
+}
+
+/// Every baked frame's timer is read at the clock the track labels the frame with, so playback
+/// and an export count it on from one base.
+///
+/// The bake reads a real replay against a real game install. Run with:
+///
+/// ```text
+/// WOWS_RENDERER_TEST_REPLAY="E:\WoWs\World_of_Warships\replays\some.wowsreplay" \
+/// WOWS_RENDERER_TEST_GAME_DIR="E:\WoWs\World_of_Warships" \
+/// cargo test -p wows-toolkit-replay-data -- --ignored every_baked_timer_is_read_at_its_frames_clock
+/// ```
+#[test]
+#[ignore = "needs a local game install and a replay; see the doc comment for the run command"]
+fn every_baked_timer_is_read_at_its_frames_clock() {
+    let replay = std::env::var("WOWS_RENDERER_TEST_REPLAY").expect("set WOWS_RENDERER_TEST_REPLAY to a replay");
+    let game_dir =
+        std::env::var("WOWS_RENDERER_TEST_GAME_DIR").expect("set WOWS_RENDERER_TEST_GAME_DIR to a WoWs install");
+
+    let cache = GameDataCache::new(PathBuf::from(game_dir));
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let baked = crate::minimap_preview::bake_track(
+        std::path::Path::new(&replay),
+        &[],
+        &cache,
+        &cancel,
+        TRACK_BUDGET,
+        BAKE_INTERVAL,
+        playback_options(),
+    )
+    .expect("the replay bakes");
+
+    let mut timers = 0;
+    // Before the battle starts the world has no start to measure from, so only the battle's own
+    // frames are held to it.
+    let battle = baked.frames.iter().zip(&baked.clocks).filter(|(_, clock)| **clock >= baked.battle_start);
+    for (commands, clock) in battle {
+        for command in commands {
+            let DrawCommand::Timer { elapsed, .. } = command else { continue };
+            assert_eq!(*elapsed, clock.to_elapsed(baked.battle_start), "the frame labelled {clock:?}");
+            timers += 1;
+        }
+    }
+    assert!(timers > 0, "the battle timer is baked");
 }
 
 /// What is on screen is what is written: the trails asked for, and what was drawn over the
@@ -1274,7 +1594,9 @@ fn an_export_writes_the_trails_and_what_was_drawn_over_the_battle() {
         drawn_on: vec![annotation.clone()],
     };
     let last = |show_trails: bool| {
-        ExportFrames::new(Arc::clone(&track), true, layers(show_trails)).and_then(Iterator::last).expect("a last frame")
+        ExportFrames::new(Arc::clone(&track), true, ExportTiming::default(), layers(show_trails))
+            .and_then(Iterator::last)
+            .expect("a last frame")
     };
     let has_trail =
         |frame: &[DrawCommand]| frame.iter().any(|command| matches!(command, DrawCommand::PositionTrail { .. }));

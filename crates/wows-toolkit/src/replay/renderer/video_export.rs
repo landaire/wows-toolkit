@@ -9,6 +9,8 @@ use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::battle_scans::BattleScans;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
+use wows_minimap_renderer::timing::ExportTiming;
+use wows_minimap_renderer::timing::ExportWindow;
 
 use wows_battle_world::merged::MergedReplays;
 use wows_replays::ReplayFile;
@@ -40,9 +42,9 @@ pub(super) fn execute_video_export(
             options,
             prefer_cpu,
             codec,
-            actual_game_duration,
             encoder_config,
             include_pre_battle,
+            timing,
         } => {
             save_as_video(
                 output_path,
@@ -50,7 +52,6 @@ pub(super) fn execute_video_export(
                 video_export_data.packet_data.clone(),
                 video_export_data.alt_replays.clone(),
                 video_export_data.map_name.clone(),
-                video_export_data.game_duration,
                 options,
                 video_export_data.wows_data.clone(),
                 Arc::clone(&video_export_data.asset_cache),
@@ -59,18 +60,18 @@ pub(super) fn execute_video_export(
                 Arc::clone(video_export_progress),
                 prefer_cpu,
                 codec,
-                actual_game_duration,
                 encoder_config,
                 include_pre_battle,
+                timing,
             );
         }
         PendingVideoExport::CopyToClipboard {
             options,
             prefer_cpu,
             codec,
-            actual_game_duration,
             encoder_config,
             include_pre_battle,
+            timing,
         } => {
             let file_name = format!("{}.mp4", video_export_data.video_file_stem);
             render_video_to_clipboard(
@@ -82,9 +83,9 @@ pub(super) fn execute_video_export(
                 Arc::clone(video_export_progress),
                 prefer_cpu,
                 codec,
-                actual_game_duration,
                 encoder_config,
                 include_pre_battle,
+                timing,
             );
         }
     }
@@ -99,7 +100,6 @@ pub(super) fn save_as_video(
     packet_data: Vec<u8>,
     alt_replays: Vec<super::AltReplayBytes>,
     map_name: String,
-    game_duration: f32,
     options: RenderOptions,
     wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -108,9 +108,9 @@ pub(super) fn save_as_video(
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
-    actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
     include_pre_battle: bool,
+    timing: ExportTiming,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -121,16 +121,15 @@ pub(super) fn save_as_video(
             &packet_data,
             &alt_replays,
             &map_name,
-            game_duration,
             options,
             &wows_data,
             &asset_cache,
             &video_export_progress,
             prefer_cpu,
             codec,
-            actual_game_duration,
             encoder_config,
             include_pre_battle,
+            timing,
         );
 
         match result {
@@ -158,9 +157,9 @@ pub(super) fn render_video_to_clipboard(
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
-    actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
     include_pre_battle: bool,
+    timing: ExportTiming,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -183,16 +182,15 @@ pub(super) fn render_video_to_clipboard(
             &export_data.packet_data,
             &export_data.alt_replays,
             &export_data.map_name,
-            export_data.game_duration,
             options,
             &export_data.wows_data,
             &export_data.asset_cache,
             &video_export_progress,
             prefer_cpu,
             codec,
-            actual_game_duration,
             encoder_config,
             include_pre_battle,
+            timing,
         );
 
         match result {
@@ -282,18 +280,13 @@ pub fn replay_render_input(path: &std::path::Path, build_cache: &BuildDataCache)
     })
 }
 
-/// The frame count a replay of `game_duration` seconds is expected to produce.
-/// An estimate: it drives the progress bar, not the encoder.
-fn estimated_frames(game_duration: f32) -> u64 {
-    (game_duration * 7.0) as u64
-}
-
 /// Encoding/output preferences shared by the batch render entry points.
 #[derive(Clone, Copy)]
 pub struct BatchEncodeOptions {
     pub prefer_cpu: bool,
     pub codec: Option<wows_minimap_renderer::VideoCodec>,
     pub include_pre_battle: bool,
+    pub timing: ExportTiming,
 }
 
 /// Everything a batch render needs beyond the replay list and destination.
@@ -338,7 +331,6 @@ fn render_batch(
 
         {
             let mut p = progress.lock();
-            p.current_total_frames = Some(estimated_frames(replay.game_duration));
             p.current_name = replay.replay_name.clone();
         }
         ctx.egui_ctx.request_repaint();
@@ -358,7 +350,9 @@ fn render_batch(
                 while !stop_flag.load(Ordering::Relaxed) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     if let Some(ref p) = *per_replay_progress.lock() {
-                        progress.lock().current_frames = p.current;
+                        let mut batch = progress.lock();
+                        batch.current_frames = p.current;
+                        batch.current_total_frames = Some(p.total);
                         // Deferred so the sampler does not pin the repaint rate.
                         egui_ctx.request_repaint_after(std::time::Duration::from_millis(100));
                     }
@@ -372,16 +366,15 @@ fn render_batch(
             &replay.packet_data,
             &[], // batch rendering doesn't propagate per-replay merge state
             &replay.map_name,
-            replay.game_duration,
             ctx.options.clone(),
             &replay.wows_data,
             &ctx.asset_cache,
             &per_replay_progress,
             ctx.encode.prefer_cpu,
             ctx.encode.codec,
-            None,
             wows_minimap_renderer::EncoderConfig::default(),
             ctx.encode.include_pre_battle,
+            ctx.encode.timing,
         );
 
         stop_flag.store(true, Ordering::Relaxed);
@@ -482,16 +475,15 @@ pub(super) fn render_video_blocking(
     packet_data: &[u8],
     alt_replays: &[super::AltReplayBytes],
     map_name: &str,
-    game_duration: f32,
     options: RenderOptions,
     wows_data: &SharedBuildData,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
-    actual_game_duration: Option<f32>,
     encoder_config: wows_minimap_renderer::EncoderConfig,
     include_pre_battle: bool,
+    timing: ExportTiming,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
@@ -618,20 +610,6 @@ pub(super) fn render_video_blocking(
         wows_minimap_renderer::drawing::SidePanelLayout::from_options(&options),
     );
     target.set_text_resolver(std::sync::Arc::new(crate::LocalizedTextResolver));
-    let (cw, ch) = target.canvas_size();
-    let mut encoder = VideoEncoder::new(Some(output_path), None, false, game_duration, cw, ch);
-    encoder.set_prefer_cpu(prefer_cpu);
-    encoder.set_codec(match codec {
-        Some(c) => wows_minimap_renderer::video::CodecChoice::Explicit(c),
-        None => wows_minimap_renderer::video::CodecChoice::Auto,
-    });
-    encoder.set_encoder_config(encoder_config);
-    {
-        let progress = Arc::clone(progress);
-        encoder.set_progress_callback(move |p| {
-            *progress.lock() = Some(p);
-        });
-    }
 
     // Drive the parse via MergedReplays so a single code path handles both the
     // standalone case (zero alt replays, single primary) and the merged case
@@ -661,9 +639,26 @@ pub(super) fn render_video_blocking(
     // session; falling back to clock 0 renders the full replay.
     let render_start =
         if include_pre_battle { GameClock(0.0) } else { session.battle_start_clock().unwrap_or(GameClock(0.0)) };
-    encoder.set_render_start(render_start);
-    if let Some(duration) = actual_game_duration {
-        encoder.set_battle_duration(GameClock(duration));
+    let Some(window) = ExportWindow::new(render_start, session.total_duration()) else {
+        return Err(report!(
+            "the replay ends at {} before the video would start at {render_start}",
+            session.total_duration()
+        ));
+    };
+
+    let (cw, ch) = target.canvas_size();
+    let mut encoder = VideoEncoder::new(Some(output_path), None, false, timing, window, cw, ch);
+    encoder.set_prefer_cpu(prefer_cpu);
+    encoder.set_codec(match codec {
+        Some(c) => wows_minimap_renderer::video::CodecChoice::Explicit(c),
+        None => wows_minimap_renderer::video::CodecChoice::Auto,
+    });
+    encoder.set_encoder_config(encoder_config);
+    {
+        let progress = Arc::clone(progress);
+        encoder.set_progress_callback(move |p| {
+            *progress.lock() = Some(p);
+        });
     }
 
     let mut prev_render_clock = GameClock(0.0);

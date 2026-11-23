@@ -9,17 +9,19 @@ use std::sync::atomic::Ordering;
 
 use rust_i18n::t;
 use wows_minimap_renderer::EncoderKind;
+use wows_minimap_renderer::PlaybackRate;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::VideoEncoder;
+use wows_minimap_renderer::activity_feed;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::error::VideoError;
+use wows_minimap_renderer::timing::ExportTiming;
+use wows_minimap_renderer::timing::ExportWindow;
 use wows_minimap_renderer::video::CodecChoice;
-use wows_minimap_renderer::video::FPS;
-use wows_minimap_renderer::video::OUTPUT_DURATION;
 use wows_replays::types::GameClock;
 
 use crate::load::GameDataCache;
@@ -36,7 +38,7 @@ use crate::replay_render::track::Track;
 use crate::replay_render::track::bake;
 
 /// What an export is encoded with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ExportSettings {
     /// Encode in software even where the GPU could do it.
     pub prefer_cpu: bool,
@@ -45,6 +47,8 @@ pub struct ExportSettings {
     /// The codec to encode with. `None` lets the encoder pick the best one it
     /// can, which is what most readers want.
     pub codec: Option<VideoCodec>,
+    /// How the exported stretch of the battle maps onto the video's length.
+    pub timing: ExportTiming,
 }
 
 /// How far an export has got, in frames.
@@ -166,6 +170,7 @@ pub fn export_settings_of(saved: &SavedRenderOptions) -> ExportSettings {
         prefer_cpu: saved.prefer_cpu_encoder,
         codec: saved.video_codec,
         include_pre_battle: saved.include_pre_battle,
+        timing: saved.export_timing,
     }
 }
 
@@ -174,9 +179,19 @@ pub fn suggested_name(video_stem: &str) -> String {
     format!("{video_stem}.mp4")
 }
 
-/// How many frames every export writes: a fixed length at a fixed rate, the battle compressed to
-/// fit, as the egui renderer writes it.
-pub const EXPORT_FRAME_COUNT: usize = (OUTPUT_DURATION * FPS) as usize;
+/// Seconds of video as `m:ss`, to the nearest second.
+pub fn video_length_label(seconds: f32) -> String {
+    let seconds = seconds.max(0.0).round() as u32;
+
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// How many times faster than the battle ran a video plays it: to the nearest whole time, or to a
+/// tenth below once, where the nearest whole time would read as zero or as real time.
+pub fn approximate_speed(rate: PlaybackRate) -> String {
+    let speed = rate.game_seconds_per_second();
+    if speed >= 1.0 { format!("{}", speed.round() as u32) } else { format!("{speed:.1}") }
+}
 
 /// What an export draws of a battle: the layers and per-ship choices on screen, and what was
 /// drawn over the battle rather than by it (annotations and placed ranges).
@@ -189,21 +204,24 @@ pub struct ExportLayers {
 
 /// The frames an export writes, drawn one at a time as the encoder takes them.
 ///
-/// [`EXPORT_FRAME_COUNT`] frames spread evenly over the exported stretch of the battle. A track
-/// keeps fewer frames than that, and a long battle's are further apart, so each written frame is
-/// placed between the two baked frames around its clock, as playback places its frames.
-/// What is on screen is what is written: a layer the reader turned off does not come back in the
-/// file, and trails are read from the track's recorded positions, as the viewport reads them.
+/// Frame `n` shows the clock `window start + n * step`, as [`ExportTiming`] places it for the CLI
+/// and the egui renderer. A track keeps fewer frames than that, and a long battle's are further
+/// apart, so each written frame is placed between the two baked frames around its clock, as
+/// playback places its frames. What is on screen is what is written: a layer the reader turned
+/// off does not come back in the file, and trails are read from the track's recorded positions,
+/// as the viewport reads them.
 pub struct ExportFrames {
     track: Arc<Track>,
     layers: ExportLayers,
     /// The first baked frame the export covers.
     first: FrameIndex,
-    /// The game time of the first written frame, how much game time the export covers, and the
-    /// game time between written frames.
-    start: f32,
-    duration: f32,
+    window: ExportWindow,
+    timing: ExportTiming,
+    /// How many frames the export writes, the game time between them, and the game time each
+    /// second of video covers.
+    count: usize,
     step: f32,
+    rate: PlaybackRate,
     written: usize,
     /// How the baked frame the last written frame was drawn from moves, kept for the frames
     /// written from it after.
@@ -212,31 +230,52 @@ pub struct ExportFrames {
 
 impl ExportFrames {
     /// `None` for a track with no frames to export.
-    pub fn new(track: Arc<Track>, include_pre_battle: bool, layers: ExportLayers) -> Option<Self> {
-        if track.is_empty() {
-            return None;
-        }
+    pub fn new(
+        track: Arc<Track>,
+        include_pre_battle: bool,
+        timing: ExportTiming,
+        layers: ExportLayers,
+    ) -> Option<Self> {
+        let window = track.export_window(include_pre_battle)?;
         let first = track.export_start(include_pre_battle);
-        let start = track.seconds_at(first);
-        let end = track.seconds_at(track.last());
-        let duration = (end - start).max(0.0);
-        let step = duration / (EXPORT_FRAME_COUNT - 1) as f32;
+        let seconds = window.seconds();
 
-        Some(Self { track, layers, first, start, duration, step, written: 0, motion: None })
+        Some(Self {
+            track,
+            layers,
+            first,
+            window,
+            timing,
+            count: timing.frame_count(seconds),
+            step: timing.frame_step(seconds),
+            rate: timing.rate(seconds),
+            written: 0,
+            motion: None,
+        })
     }
 
     /// How many frames the export writes.
     pub fn len(&self) -> usize {
-        EXPORT_FRAME_COUNT
+        self.count
     }
 
     pub fn is_empty(&self) -> bool {
         false
     }
 
+    /// The stretch of the battle the export covers.
+    pub fn window(&self) -> ExportWindow {
+        self.window
+    }
+
+    /// How the window maps onto the video.
+    pub fn timing(&self) -> ExportTiming {
+        self.timing
+    }
+
     /// How much game time the export covers, in seconds.
     pub fn duration_seconds(&self) -> f32 {
-        self.duration
+        self.window.seconds()
     }
 }
 
@@ -244,10 +283,10 @@ impl Iterator for ExportFrames {
     type Item = Vec<DrawCommand>;
 
     fn next(&mut self) -> Option<Vec<DrawCommand>> {
-        if self.written >= EXPORT_FRAME_COUNT {
+        if self.written >= self.count {
             return None;
         }
-        let at = self.start + self.step * self.written as f32;
+        let at = self.window.start().seconds() + self.step * self.written as f32;
         self.written += 1;
 
         let base = self.track.frame_at(at).max(self.first);
@@ -257,7 +296,7 @@ impl Iterator for ExportFrames {
         let motion = self.motion.as_ref()?;
 
         let layers = &self.layers;
-        Some(raster_commands(
+        let mut commands = raster_commands(
             &self.track,
             motion,
             GameClock(at),
@@ -265,7 +304,23 @@ impl Iterator for ExportFrames {
             layers.show_dead_ships,
             &layers.choices,
             layers.drawn_on.clone(),
-        ))
+        );
+        pace_activity_feed(&mut commands, GameClock(at), self.rate);
+
+        Some(commands)
+    }
+}
+
+/// Eases each activity feed row in over the video's own time rather than the bake's.
+///
+/// The bake draws at real time, so a row it recorded settles within a few game seconds, which at
+/// an export's speed is a frame or two of video.
+fn pace_activity_feed(commands: &mut [DrawCommand], clock: GameClock, rate: PlaybackRate) {
+    for command in commands {
+        let DrawCommand::StatsActivityFeed { entries, .. } = command else { continue };
+        for entry in entries {
+            entry.reveal = activity_feed::reveal(clock - entry.clock, rate);
+        }
     }
 }
 
@@ -319,7 +374,7 @@ pub fn encode_track(
     let Some(path) = output.to_str() else {
         return Err(ExportError::UnusablePath { path: output.to_path_buf() });
     };
-    let mut encoder = VideoEncoder::new(Some(path), None, false, frames.duration_seconds(), width, height);
+    let mut encoder = VideoEncoder::new(Some(path), None, false, frames.timing(), frames.window(), width, height);
     encoder.set_prefer_cpu(must_use_cpu(&settings, encoder_status()));
     encoder.set_codec(match settings.codec {
         Some(codec) => CodecChoice::Explicit(codec),
@@ -405,7 +460,8 @@ pub fn batch_export(
         let output = out_dir.join(suggested_name(&track.video_stem));
 
         let layers = batch_layers(&options, show_dead_ships, &track);
-        let Some(frames) = ExportFrames::new(Arc::new(track), settings.include_pre_battle, layers) else {
+        let Some(frames) = ExportFrames::new(Arc::new(track), settings.include_pre_battle, settings.timing, layers)
+        else {
             outcome.failed.push(path);
             continue;
         };

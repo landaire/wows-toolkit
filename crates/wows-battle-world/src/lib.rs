@@ -2,6 +2,7 @@
 //! packet streams. Replaces wows-replays' BattleController.
 
 pub mod components;
+pub mod countdown;
 pub mod ids;
 pub mod merged;
 pub mod process;

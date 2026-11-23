@@ -11,11 +11,13 @@ use std::collections::HashMap;
 
 use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::timer_countdown;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::PlaneId;
+use wows_replays::types::TimeRemaining;
 
 use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
@@ -49,6 +51,9 @@ pub struct FrameMotion {
     /// the last frame, or between frames a catch-up burst drew at one clock.
     from: f32,
     span: f32,
+    /// Game time the timer counts on past the base frame: to the next frame, or on the last frame
+    /// to the end of the export. Never past the battle's end, where the count stopped.
+    counts_for: f32,
 
     /// One per command of the base frame.
     steps: Vec<Step>,
@@ -61,11 +66,20 @@ impl FrameMotion {
     pub fn between(track: &Track, base: FrameIndex) -> Option<Self> {
         let commands = track.commands(base)?;
         let from = track.seconds_at(base);
-        let mut motion = Self { base, from, span: 0.0, steps: vec![Step::Stays; commands.len()], arrivals: Vec::new() };
+        let to_battle_end = track.battle_end.map_or(f32::INFINITY, |end| (end.seconds() - from).max(0.0));
+        let mut motion = Self {
+            base,
+            from,
+            span: 0.0,
+            counts_for: to_battle_end,
+            steps: vec![Step::Stays; commands.len()],
+            arrivals: Vec::new(),
+        };
 
         let following = FrameIndex::new(base.get() + 1);
         let Some(next) = track.commands(following) else { return Some(motion) };
-        let span = track.seconds_at(following) - from;
+        let span = (track.seconds_at(following) - from).max(0.0);
+        motion.counts_for = span.min(to_battle_end);
         if span <= 0.0 {
             return Some(motion);
         }
@@ -90,7 +104,8 @@ impl FrameMotion {
     /// The base frame's commands that `keep` lets through, as they stand at `clock`.
     ///
     /// `clock` is held to the stretch between the base frame and the next, so a clock outside it
-    /// draws the nearer end. Filtered before anything is copied, so a hidden layer costs nothing.
+    /// draws the nearer end; on the last frame the timer still counts on, to the battle's end.
+    /// Filtered before anything is copied, so a hidden layer costs nothing.
     pub fn commands_at<'a>(
         &'a self,
         track: &'a Track,
@@ -102,6 +117,7 @@ impl FrameMotion {
         let next = track.commands(FrameIndex::new(self.base.get() + 1)).unwrap_or_default();
         let past = (clock.seconds() - self.from).clamp(0.0, self.span);
         let fraction = if self.span > 0.0 { past / self.span } else { 0.0 };
+        let counted = (clock.seconds() - self.from).clamp(0.0, self.counts_for);
         let arrived = fraction >= HALFWAY;
 
         (0..=commands.len()).flat_map(move |index| {
@@ -115,7 +131,7 @@ impl FrameMotion {
                 .get(index)
                 .zip(self.steps.get(index))
                 .filter(|(command, _)| keep(command))
-                .and_then(move |(command, step)| placed(command, *step, fraction, past));
+                .and_then(move |(command, step)| placed(command, *step, fraction, counted));
             arriving.chain(own)
         })
     }
@@ -526,12 +542,11 @@ fn shift_by(command: &mut DrawCommand, shift: Shift, fraction: f32) {
 
 /// The game timer `past` seconds on from where the base frame read it.
 fn count_on(command: &mut DrawCommand, past: f32) {
-    let DrawCommand::Timer { time_remaining, elapsed } = command else { return };
-    let counted = elapsed.seconds() + past;
-    // The game's countdown loses a second each time its clock passes one.
-    let ticks = (counted.floor() - elapsed.seconds().floor()) as i64;
-    *time_remaining = time_remaining.map(|left| (left - ticks).max(0));
-    *elapsed = ElapsedClock(counted);
+    let DrawCommand::Timer { time_remaining, elapsed, remaining } = command else { return };
+    let countdown = timer_countdown(*time_remaining, *remaining).map(|left| left.counted_down(past));
+    *time_remaining = countdown.map(TimeRemaining::shown_seconds);
+    *remaining = countdown;
+    *elapsed = ElapsedClock(elapsed.seconds() + past);
 }
 
 /// Every shell tracer of a frame, with the tip drawn right after each.

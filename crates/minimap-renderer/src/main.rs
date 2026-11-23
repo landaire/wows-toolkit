@@ -37,6 +37,9 @@ use wows_minimap_renderer::config::RendererConfig;
 use wows_minimap_renderer::drawing::ImageTarget;
 use wows_minimap_renderer::encoder::Mode as EncoderMode;
 use wows_minimap_renderer::renderer::MinimapRenderer;
+use wows_minimap_renderer::timing::ExportSpeed;
+use wows_minimap_renderer::timing::ExportWindow;
+use wows_minimap_renderer::timing::VideoLength;
 use wows_minimap_renderer::video::CodecChoice;
 use wows_minimap_renderer::video::DumpMode;
 use wows_minimap_renderer::video::RenderStage;
@@ -157,6 +160,17 @@ struct Args {
     #[arg(long)]
     include_pre_battle: bool,
 
+    /// Fit the rendered stretch of the replay into a video this many seconds
+    /// long, from 1 to 600. The default is 60. Mutually exclusive with --speed.
+    #[arg(long, value_name = "SECONDS", conflicts_with = "speed")]
+    video_length: Option<f32>,
+
+    /// Play the replay at this many game seconds per video second instead of
+    /// fitting it to a length. At least 1; the live playback speeds are 1, 5,
+    /// 10, 20, 40 and 60. Mutually exclusive with --video-length.
+    #[arg(long, value_name = "MULTIPLIER")]
+    speed: Option<f32>,
+
     /// Path to TOML config file
     #[arg(long)]
     config: Option<PathBuf>,
@@ -185,8 +199,8 @@ struct Args {
     bitrate_kbps: Option<u32>,
 
     /// Target a maximum encoded file size in MiB. The bitrate is derived from
-    /// the match duration with a small safety margin. Mutually exclusive with
-    /// --bitrate-kbps.
+    /// the video's length with a small safety margin. A size too small for the
+    /// video's length is refused. Mutually exclusive with --bitrate-kbps.
     #[arg(long, conflicts_with = "bitrate_kbps")]
     max_size_mib: Option<u32>,
 
@@ -336,8 +350,6 @@ fn main() -> Result<(), Report> {
     let map_image = load_map_image(map_name, vfs);
     let map_info = load_map_info(map_name, vfs);
 
-    let game_duration = replay_file.meta.duration as f32;
-
     // Load config: --config path > exe-adjacent minimap_renderer.toml > defaults
     let mut config = if let Some(config_path) = &args.config {
         RendererConfig::load(config_path)?
@@ -375,8 +387,11 @@ fn main() -> Result<(), Report> {
         stats_panel: args.stats_panel,
         no_stats_panel: args.no_stats_panel,
         include_pre_battle: args.include_pre_battle,
+        video_length: args.video_length.map(VideoLength::try_from).transpose()?,
+        speed: args.speed.map(ExportSpeed::try_from).transpose()?,
     });
     let include_pre_battle = config.include_pre_battle;
+    let export_timing = config.export_timing()?;
     let mut options = config.into_render_options();
     options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::SelfOnly;
 
@@ -410,8 +425,53 @@ fn main() -> Result<(), Report> {
         renderer.set_self_silhouette(sil);
     }
 
+    let mut session = MergedReplays::new(
+        &specs,
+        &controller_game_params,
+        &game_constants,
+        replay_version,
+        &replay_file,
+        &merge_replays,
+    )
+    .map_err(|e| report!("{e}"))?;
+    BattleScans::gather(&controller_game_params, &game_constants, replay_version, &replay_file, &merge_replays)
+        .install(&mut renderer, &session);
+    let vehicle_facts = session.vehicle_facts().clone();
+    wows_replay_insights::build::seed_consumable_inventories_from_facts(
+        session.world_mut(),
+        &vehicle_facts,
+        &controller_game_params,
+        replay_version,
+    );
+
+    if session.replays().len() > 1 {
+        for (i, r) in session.replays().iter().enumerate() {
+            match session.self_teams()[i] {
+                Some(team) => info!(replay = i, player = %r.meta.playerName, team = %team, "Self team"),
+                None => {
+                    warn!(replay = i, player = %r.meta.playerName, "Failed to detect self team; merge filtering disabled for this perspective")
+                }
+            }
+        }
+    }
+
+    // By default the video starts at battle start, skipping the pre-battle
+    // spawn and countdown. --include-pre-battle renders from the replay start.
+    let render_start = if include_pre_battle {
+        wows_replays::types::GameClock(0.0)
+    } else {
+        session.battle_start_clock().unwrap_or(wows_replays::types::GameClock(0.0))
+    };
+    if render_start.seconds() > 0.0 {
+        info!(start = %render_start, "Skipping pre-battle phase");
+    }
+
+    let Some(window) = ExportWindow::new(render_start, session.total_duration()) else {
+        bail!("the replay ends at {} before the video would start at {render_start}", session.total_duration());
+    };
+
     let (cw, ch) = target.canvas_size();
-    let mut encoder = VideoEncoder::new(output, dump_mode, args.dump_frames, game_duration, cw, ch);
+    let mut encoder = VideoEncoder::new(output, dump_mode, args.dump_frames, export_timing, window, cw, ch);
     let mode = if args.cpu { EncoderMode::ForceCpu } else { EncoderMode::Auto };
     encoder.set_mode(mode);
     let codec_choice = match args.codec {
@@ -438,13 +498,9 @@ fn main() -> Result<(), Report> {
     encoder.set_codec(codec_choice);
     if let Some(kbps) = args.bitrate_kbps {
         let bps = kbps.saturating_mul(1000);
-        encoder.set_encoder_config(wows_minimap_renderer::EncoderConfig {
-            target_bitrate_bps: Some(bps),
-            max_bitrate_bps: Some(bps.saturating_mul(2)),
-            av1_quantizer: None,
-        });
+        encoder.set_encoder_config(wows_minimap_renderer::EncoderConfig::from_bitrate(bps));
     } else if let Some(mib) = args.max_size_mib {
-        encoder.target_max_file_size((mib as u64) * 1024 * 1024);
+        encoder.target_max_file_size((mib as u64) * 1024 * 1024)?;
     }
     if args.dump_frame.is_none() {
         encoder.init()?;
@@ -488,52 +544,6 @@ fn main() -> Result<(), Report> {
         });
         None
     };
-
-    let mut session = MergedReplays::new(
-        &specs,
-        &controller_game_params,
-        &game_constants,
-        replay_version,
-        &replay_file,
-        &merge_replays,
-    )
-    .map_err(|e| report!("{e}"))?;
-    BattleScans::gather(&controller_game_params, &game_constants, replay_version, &replay_file, &merge_replays)
-        .install(&mut renderer, &session);
-    let vehicle_facts = session.vehicle_facts().clone();
-    wows_replay_insights::build::seed_consumable_inventories_from_facts(
-        session.world_mut(),
-        &vehicle_facts,
-        &controller_game_params,
-        replay_version,
-    );
-
-    if session.replays().len() > 1 {
-        for (i, r) in session.replays().iter().enumerate() {
-            match session.self_teams()[i] {
-                Some(team) => info!(replay = i, player = %r.meta.playerName, team = %team, "Self team"),
-                None => {
-                    warn!(replay = i, player = %r.meta.playerName, "Failed to detect self team; merge filtering disabled for this perspective")
-                }
-            }
-        }
-    }
-
-    // By default the video starts at battle start, skipping the pre-battle
-    // spawn and countdown. --include-pre-battle renders from the replay start.
-    let render_start = if include_pre_battle {
-        wows_replays::types::GameClock(0.0)
-    } else {
-        session.battle_start_clock().unwrap_or(wows_replays::types::GameClock(0.0))
-    };
-    if render_start.seconds() > 0.0 {
-        info!(start = %render_start, "Skipping pre-battle phase");
-    }
-    encoder.set_render_start(render_start);
-
-    if session.total_duration().seconds() > 0.0 {
-        encoder.set_battle_duration(session.total_duration());
-    }
 
     let mut prev_render_clock = wows_replays::types::GameClock(0.0);
     let mut arena_logged = false;

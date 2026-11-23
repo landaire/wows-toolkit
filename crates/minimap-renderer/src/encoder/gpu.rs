@@ -31,7 +31,7 @@ use crate::encoder::CodecSupport;
 use crate::encoder::EncoderConfig;
 use crate::encoder::EncoderStatus;
 use crate::error::VideoError;
-use crate::video::FPS;
+use crate::timing::FPS;
 
 enum CodecEncoder {
     H264(BytesEncoderH264),

@@ -1444,6 +1444,29 @@ impl From<f32> for ElapsedClock {
     }
 }
 
+/// Seconds left in the match, counting down continuously at game rate. Shown
+/// as whole seconds rounded up.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TimeRemaining(pub f32);
+
+impl TimeRemaining {
+    pub fn seconds(self) -> f32 {
+        self.0
+    }
+
+    /// Whole seconds as the game shows them: rounded up, never below zero.
+    pub fn shown_seconds(self) -> i64 {
+        self.0.max(0.0).ceil() as i64
+    }
+
+    /// The countdown `seconds` of game time later, stopping at zero.
+    pub fn counted_down(self, seconds: f32) -> Self {
+        Self((self.0 - seconds).max(0.0))
+    }
+}
+
 // =============================================================================
 // Game Event Enums
 // =============================================================================

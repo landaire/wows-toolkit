@@ -1198,4 +1198,78 @@ mod tests {
                 .is_ok()
         );
     }
+
+    /// A frame holding one timer, with `remaining` as given.
+    fn timer_frame(remaining: Option<wowsunpack::game_types::TimeRemaining>) -> PeerMessage {
+        PeerMessage::Frame {
+            replay_id: 7,
+            clock: 100.0,
+            frame_index: 1,
+            total_frames: 2,
+            game_duration: 1200.0,
+            commands: vec![DrawCommand::Timer {
+                time_remaining: Some(600),
+                elapsed: wowsunpack::game_types::ElapsedClock(42.5),
+                remaining,
+            }],
+        }
+    }
+
+    /// The archived bytes of [`timer_frame`] as a peer sends it whose timer
+    /// predates `remaining`.
+    fn older_peers_timer_frame() -> rkyv::util::AlignedVec<16> {
+        let mut sent = [0_u8; 232];
+        // The timer: variant, `time_remaining` Some(600), `elapsed` 42.5.
+        sent[0] = 0x17;
+        sent[8] = 1;
+        sent[16..18].copy_from_slice(&[0x58, 0x02]);
+        sent[26..28].copy_from_slice(&[0x2a, 0x42]);
+        // The frame around it, its command list pointing back at the timer.
+        sent[104] = 0x15;
+        sent[112] = 7;
+        sent[122..126].copy_from_slice(&[0xc8, 0x42, 1, 0]);
+        sent[128] = 2;
+        sent[134..141].copy_from_slice(&[0x96, 0x44, 0x78, 0xff, 0xff, 0xff, 1]);
+
+        let mut aligned = rkyv::util::AlignedVec::<16>::new();
+        aligned.extend_from_slice(&sent);
+        aligned
+    }
+
+    #[test]
+    fn an_older_peers_timer_decodes_without_remaining() {
+        let msg = rkyv::from_bytes::<PeerMessage, rkyv::rancor::Error>(&older_peers_timer_frame()).unwrap();
+
+        let PeerMessage::Frame { commands, .. } = msg else { panic!("a frame, got {msg:?}") };
+        let [DrawCommand::Timer { time_remaining, elapsed, remaining }] = &commands[..] else {
+            panic!("one timer, got {commands:?}");
+        };
+        assert_eq!(*time_remaining, Some(600));
+        assert_eq!(elapsed.seconds(), 42.5);
+        assert_eq!(*remaining, None);
+    }
+
+    /// A timer with no `remaining` archives exactly as an older peer's does.
+    #[test]
+    fn a_timer_without_remaining_archives_as_older_peers_do() {
+        let sent = rkyv::to_bytes::<rkyv::rancor::Error>(&timer_frame(None)).unwrap();
+
+        assert_eq!(&sent[..], &older_peers_timer_frame()[..]);
+    }
+
+    /// `remaining` lands past the fields an older peer reads, which end at
+    /// byte 28 of the timer, so that peer reads the rest unchanged.
+    #[test]
+    fn remaining_leaves_what_older_peers_read_alone() {
+        let remaining = Some(wowsunpack::game_types::TimeRemaining(599.25));
+        let sent = rkyv::to_bytes::<rkyv::rancor::Error>(&timer_frame(remaining)).unwrap();
+        let older = older_peers_timer_frame();
+
+        assert_eq!(sent.len(), older.len());
+        let changed: Vec<usize> = (0..sent.len()).filter(|&at| sent[at] != older[at]).collect();
+        assert!(!changed.is_empty() && changed.iter().all(|at| (28..36).contains(at)), "changed bytes {changed:?}");
+
+        let PeerMessage::Frame { commands, .. } = round_trip(&timer_frame(remaining)) else { panic!("a frame") };
+        assert!(matches!(commands[..], [DrawCommand::Timer { remaining: received, .. }] if received == remaining));
+    }
 }

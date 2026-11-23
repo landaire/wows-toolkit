@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::config::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::timing::ExportWindow;
 use wows_minimap_renderer::trail::BakedTrails;
 use wows_replays::types::GameClock;
 use wowsunpack::data::Version;
@@ -61,6 +62,9 @@ pub struct Track {
     pub battle_start: GameClock,
     /// When the battle ended, if the replay ran that far.
     pub battle_end: Option<GameClock>,
+    /// The clock of the replay's last packet, where an export ends. The kept
+    /// frames are decimated, so the last of them can fall short of it.
+    pub replay_end: GameClock,
     /// How wide the map is in the game's own world units, which is what
     /// turns a ship's range in metres into a distance on the minimap.
     pub space_size: f32,
@@ -148,6 +152,19 @@ impl Track {
         if include_pre_battle { FrameIndex::FIRST } else { self.frame_at(self.battle_start.seconds()) }
     }
 
+    /// The stretch of the battle an export covers: from [`export_start`](Self::export_start) to
+    /// the replay's end, as the CLI and the egui renderer export it. `None` for a track with no
+    /// frames.
+    pub fn export_window(&self, include_pre_battle: bool) -> Option<ExportWindow> {
+        if self.is_empty() {
+            return None;
+        }
+        let start = self.seconds_at(self.export_start(include_pre_battle));
+        let end = self.replay_end.seconds().max(start);
+
+        ExportWindow::new(GameClock(start), GameClock(end))
+    }
+
     /// The game time of the last frame, in seconds.
     pub fn duration_seconds(&self) -> f32 {
         self.seconds_at(self.last())
@@ -188,6 +205,7 @@ pub fn bake(
         clocks: baked.clocks,
         battle_start: baked.battle_start,
         battle_end: baked.battle_end,
+        replay_end: baked.replay_end,
         space_size: baked.space_size,
         version: baked.version,
         map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),

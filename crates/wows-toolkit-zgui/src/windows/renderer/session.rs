@@ -1792,7 +1792,9 @@ impl RendererSession {
             drawn_on,
         });
         let suggested = suggested_name(&track.video_stem);
-        let Some(frames) = ExportFrames::new(track, settings.include_pre_battle, layers) else { return };
+        let Some(frames) = ExportFrames::new(track, settings.include_pre_battle, settings.timing, layers) else {
+            return;
+        };
         // Held for the whole encode, which is why the transport refuses while one runs.
         let Some((renderer, generation)) = self
             .with_run(|run| {

@@ -52,7 +52,7 @@ use yuvutils_rs::YuvRange;
 use yuvutils_rs::YuvStandardMatrix;
 
 use crate::error::VideoError;
-use crate::video::FPS;
+use crate::timing::FPS;
 
 /// NV12 pixel format type (420YpCbCr8BiPlanarFullRange)
 const K_CV_PIXEL_FORMAT_TYPE_420_YP_CB_CR8_BI_PLANAR_FULL_RANGE: u32 = 0x34323066; // '420f'

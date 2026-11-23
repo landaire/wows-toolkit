@@ -75,10 +75,12 @@ use crate::windows::renderer::watched::WatchedPlaybackProps;
 /// Wide enough that the whole transport is on one row.
 const VIEWPORT: WindowSize = WindowSize { width: 1400.0, height: 700.0 };
 
-/// A track holding `clocks`' worth of empty frames, with the battle starting at the first.
+/// A track holding `clocks`' worth of empty frames, with the battle starting at the first and the
+/// replay ending at the last.
 fn track(clocks: Vec<f32>) -> Track {
     Track {
         frames: vec![Vec::new(); clocks.len()],
+        replay_end: GameClock(clocks.last().copied().unwrap_or(0.0)),
         clocks: clocks.into_iter().map(GameClock).collect(),
         battle_start: GameClock(0.0),
         battle_end: None,

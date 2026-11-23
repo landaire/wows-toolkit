@@ -272,7 +272,7 @@ mod filter_tests {
     use wows_replays::types::ElapsedClock;
 
     fn timer() -> DrawCommand {
-        DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(42.0) }
+        DrawCommand::Timer { time_remaining: Some(600), elapsed: ElapsedClock(42.0), remaining: None }
     }
 
     fn torpedo() -> DrawCommand {

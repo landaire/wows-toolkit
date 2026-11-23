@@ -6,6 +6,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use rust_i18n::t;
+use wows_minimap_renderer::timing::SPEED_LADDER;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
@@ -14,7 +15,6 @@ use wows_toolkit_replay_data::replay_render::annotate::PointerLook;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::playback::SEEK_STEP;
-use wows_toolkit_replay_data::replay_render::playback::SPEEDS;
 use wows_toolkit_replay_data::replay_render::playback::speed_index;
 use wows_toolkit_replay_data::replay_render::playback::speed_label;
 use wows_toolkit_replay_data::replay_render::track::FrameIndex;
@@ -518,7 +518,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 box(class = "wt-renderer__speed", attr:data-testid = "replay-renderer-speed") {
                     Select(
                         value = zgui_ui_primitives::Binding::controlled(Signal::derive_local(speed), move |index: String| {
-                            if let Some(speed) = index.parse::<usize>().ok().and_then(|index| SPEEDS.get(index)) {
+                            if let Some(speed) = index.parse::<usize>().ok().and_then(|index| SPEED_LADDER.get(index)) {
                                 session.set_speed(*speed);
                             }
                         })
@@ -527,8 +527,8 @@ fn Transport(session: RendererSession) -> impl IntoView {
                             SelectValue()
                         }
                         SelectContent {
-                            for index in move || (0..SPEEDS.len()).collect::<Vec<_>>(), key = |index: &usize| *index {
-                                SelectItem(value = index.to_string()) {{speed_label(SPEEDS[index])}}
+                            for index in move || (0..SPEED_LADDER.len()).collect::<Vec<_>>(), key = |index: &usize| *index {
+                                SelectItem(value = index.to_string()) {{speed_label(SPEED_LADDER[index])}}
                             }
                         }
                     }

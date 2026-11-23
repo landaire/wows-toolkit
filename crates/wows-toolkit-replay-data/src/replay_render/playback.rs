@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use wows_minimap_renderer::video::FPS;
+use wows_minimap_renderer::timing::FPS;
+use wows_minimap_renderer::timing::PlaybackRate;
+use wows_minimap_renderer::timing::SPEED_LADDER;
 use wows_replays::types::GameClock;
 
 use crate::replay_render::track::FrameIndex;
@@ -13,15 +15,9 @@ use crate::replay_render::track::Track;
 /// around its clock, so playback moves at this rate rather than at the bake's.
 pub const FRAME_INTERVAL: Duration = Duration::from_nanos((1_000_000_000.0 / FPS) as u64);
 
-/// The speeds the transport offers, which are the egui renderer's own
-/// (`PLAYBACK_SPEEDS`). A battle runs twenty minutes, so the useful range is
-/// well above real time.
-pub const SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
-
-/// The speed a viewport opens at, as the egui renderer opens at
-/// (`SharedRendererState::speed`). Real time is too slow to watch a battle
-/// through.
-pub const DEFAULT_SPEED: f32 = 20.0;
+/// The speed a viewport opens at, as the egui renderer opens at. Real time is
+/// too slow to watch a battle through.
+pub const DEFAULT_SPEED: f32 = PlaybackRate::DEFAULT_SPEED.game_seconds_per_second();
 
 /// How far the skip controls and the left and right keys move, in seconds of
 /// game time. The egui renderer's own step.
@@ -141,9 +137,9 @@ impl Playback {
     /// Nothing happens at either end: the ladder is what the transport
     /// offers, and there is no speed past its ends to move to.
     pub fn step_speed(&mut self, step: i32) -> bool {
-        let here = SPEEDS.iter().position(|speed| (speed - self.speed).abs() < f32::EPSILON);
+        let here = SPEED_LADDER.iter().position(|speed| (speed - self.speed).abs() < f32::EPSILON);
         let Some(here) = here else { return false };
-        let Some(next) = here.checked_add_signed(step as isize).and_then(|index| SPEEDS.get(index)) else {
+        let Some(next) = here.checked_add_signed(step as isize).and_then(|index| SPEED_LADDER.get(index)) else {
             return false;
         };
 
@@ -228,7 +224,7 @@ impl Default for Playback {
 /// A speed off the ladder reads as its first rung, which is what a dropdown
 /// over the ladder can show for it.
 pub fn speed_index(speed: f32) -> usize {
-    SPEEDS.iter().position(|offered| (offered - speed).abs() < f32::EPSILON).unwrap_or_default()
+    SPEED_LADDER.iter().position(|offered| (offered - speed).abs() < f32::EPSILON).unwrap_or_default()
 }
 
 /// A speed as the transport labels it: no trailing zero on a whole one.

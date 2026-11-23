@@ -4,6 +4,10 @@ use wows_core::pseudonym::NameDisplay;
 
 use crate::draw_command::DrawCommand;
 use crate::draw_command::ShipConfigVisibility;
+use crate::error::TimingError;
+use crate::timing::ExportSpeed;
+use crate::timing::ExportTiming;
+use crate::timing::VideoLength;
 
 /// Configurable rendering options.
 #[derive(Clone, Debug, PartialEq)]
@@ -119,6 +123,11 @@ pub struct CliOverrides {
     pub stats_panel: bool,
     pub no_stats_panel: bool,
     pub include_pre_battle: bool,
+    /// `--video-length`. Replaces the config file's export timing when it or
+    /// `speed` is given.
+    pub video_length: Option<VideoLength>,
+    /// `--speed`.
+    pub speed: Option<ExportSpeed>,
 }
 
 /// Renderer configuration, loadable from a TOML file.
@@ -157,6 +166,12 @@ pub struct RendererConfig {
     /// Include the pre-battle phase (spawn and countdown) at the start of the
     /// video. When false, rendering begins at battle start.
     pub include_pre_battle: bool,
+    /// Fit the exported stretch of the replay into a video this many seconds
+    /// long. Exclusive with `speed`.
+    pub video_length: Option<VideoLength>,
+    /// Play the export at this many game seconds per video second. Exclusive
+    /// with `video_length`.
+    pub speed: Option<ExportSpeed>,
 }
 
 impl Default for RendererConfig {
@@ -190,6 +205,8 @@ impl Default for RendererConfig {
             show_stats_panel: true,
             show_team_rosters: false,
             include_pre_battle: false,
+            video_length: None,
+            speed: None,
         }
     }
 }
@@ -202,6 +219,20 @@ impl RendererConfig {
         let contents = std::fs::read_to_string(path).context("Failed to read config file")?;
         let config: Self = toml::from_str(&contents).context("Failed to parse config file")?;
         Ok(config)
+    }
+
+    /// How the export maps game time onto video time. With neither a length
+    /// nor a speed it is the default length.
+    pub fn export_timing(&self) -> Result<ExportTiming, TimingError> {
+        match (self.video_length, self.speed) {
+            (Some(length), Some(speed)) => Err(TimingError::LengthAndSpeed {
+                seconds: length.seconds(),
+                multiplier: speed.game_seconds_per_second(),
+            }),
+            (Some(length), None) => Ok(ExportTiming::Length(length)),
+            (None, Some(speed)) => Ok(ExportTiming::Speed(speed)),
+            (None, None) => Ok(ExportTiming::default()),
+        }
     }
 
     /// Convert into RenderOptions for the renderer.
@@ -324,6 +355,17 @@ show_team_rosters = false
 # When false, rendering begins at battle start.
 include_pre_battle = false
 
+# Video timing. Set at most one of these; with neither, the video is 60 seconds.
+
+# Fit the exported stretch of the replay into a video this many seconds long,
+# from 1 to 600.
+video_length = 60
+
+# Or play the replay at this many game seconds per video second, at least 1
+# (the live playback speeds are 1, 5, 10, 20, 40 and 60). Remove video_length
+# to use it.
+# speed = 20
+
 "#
         .to_string()
     }
@@ -389,6 +431,10 @@ include_pre_battle = false
         if overrides.include_pre_battle {
             self.include_pre_battle = true;
         }
+        if overrides.video_length.is_some() || overrides.speed.is_some() {
+            self.video_length = overrides.video_length;
+            self.speed = overrides.speed;
+        }
     }
 }
 
@@ -451,5 +497,57 @@ pub fn hide_command_parts(cmd: &mut DrawCommand, opts: &RenderOptions) {
     {
         *team0_timer = None;
         *team1_timer = None;
+    }
+}
+
+#[cfg(all(test, feature = "bin"))]
+mod tests {
+    use super::*;
+
+    fn timing_of(toml_text: &str) -> Result<ExportTiming, TimingError> {
+        let config: RendererConfig = toml::from_str(toml_text).expect("the config parses");
+
+        config.export_timing()
+    }
+
+    #[test]
+    fn the_default_config_fits_a_minute() {
+        let timing = timing_of(&RendererConfig::generate_default_toml());
+
+        assert_eq!(timing, Ok(ExportTiming::Length(VideoLength::DEFAULT)));
+        assert_eq!(timing_of(""), Ok(ExportTiming::default()));
+    }
+
+    #[test]
+    fn a_speed_alone_plays_at_that_speed() {
+        let timing = timing_of("speed = 40");
+
+        assert_eq!(timing, Ok(ExportTiming::Speed(ExportSpeed::new(40.0).expect("an export speed"))));
+    }
+
+    #[test]
+    fn a_length_and_a_speed_together_are_refused() {
+        let timing = timing_of("video_length = 30\nspeed = 20");
+
+        assert_eq!(timing, Err(TimingError::LengthAndSpeed { seconds: 30.0, multiplier: 20.0 }));
+    }
+
+    #[test]
+    fn a_timing_out_of_range_does_not_parse() {
+        assert!(toml::from_str::<RendererConfig>("speed = 0").is_err());
+        assert!(toml::from_str::<RendererConfig>("speed = 0.5").is_err());
+        assert!(toml::from_str::<RendererConfig>("video_length = -1").is_err());
+        assert!(toml::from_str::<RendererConfig>("video_length = 601").is_err());
+    }
+
+    /// A timing flag replaces the config file's timing rather than joining it.
+    #[test]
+    fn a_cli_speed_replaces_a_configured_length() {
+        let mut config: RendererConfig = toml::from_str("video_length = 30").expect("the config parses");
+        let speed = ExportSpeed::new(10.0).expect("an export speed");
+
+        config.apply_cli_overrides(&CliOverrides { speed: Some(speed), ..CliOverrides::default() });
+
+        assert_eq!(config.export_timing(), Ok(ExportTiming::Speed(speed)));
     }
 }

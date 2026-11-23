@@ -116,6 +116,7 @@ pub fn defaults_to_save(
     saved.prefer_cpu_encoder = export.prefer_cpu;
     saved.video_codec = export.codec;
     saved.include_pre_battle = export.include_pre_battle;
+    saved.export_timing = export.timing;
     if let Some(ranges) = self_ranges {
         saved.set_self_range_filter(&ranges);
     }

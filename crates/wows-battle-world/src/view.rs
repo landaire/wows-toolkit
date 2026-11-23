@@ -41,6 +41,7 @@ use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_replays::types::TimeRemaining;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::BattleType;
@@ -476,9 +477,22 @@ impl<'w> BattleView<'w> {
         self.world.resource::<MatchState>().battle_stage
     }
 
-    /// Seconds remaining in the match.
+    /// Seconds remaining in the match, as the server last sent them.
     pub fn time_left(&self) -> Option<i64> {
-        self.world.resource::<MatchState>().time_left.map(|s| s.0)
+        self.world.resource::<MatchState>().countdown.map(|countdown| countdown.latest().remaining.0)
+    }
+
+    /// The match countdown at `clock`, which may fall between packets. Stops
+    /// at the battle end. `None` before the first `timeLeft` sample.
+    pub fn time_remaining_at(&self, clock: GameClock) -> Option<TimeRemaining> {
+        let state = self.world.resource::<MatchState>();
+        let countdown = state.countdown?;
+        let clock = match state.battle_end_clock {
+            Some(end) => clock.min(end),
+            None => clock,
+        };
+
+        countdown.remaining_at(clock)
     }
 
     /// Clock when the battle stage first became `Battle` (pre-battle countdown end).

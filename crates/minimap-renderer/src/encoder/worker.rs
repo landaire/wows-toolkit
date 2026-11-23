@@ -16,7 +16,7 @@ use crate::encoder::EncoderBackend;
 use crate::encoder::EncoderConfig;
 use crate::encoder::Mode;
 use crate::error::VideoError;
-use crate::video::FPS;
+use crate::timing::FPS;
 
 /// Bounded channel depth between the producer and the encoder thread. Small on
 /// purpose: it provides backpressure (the producer blocks instead of buffering

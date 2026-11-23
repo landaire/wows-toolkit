@@ -7,6 +7,7 @@ use std::borrow::Cow;
 
 use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::KillFeedEntry;
+use crate::timing::PlaybackRate;
 
 /// Seconds of displayed time a row takes to ease into place when a newer
 /// entry pushes it.
@@ -33,34 +34,10 @@ pub const KILL_MARKER_RGB: [u8; 3] = [140, 140, 140];
 pub const BANDED_ROW_RGB: [u8; 3] = [70, 80, 100];
 pub const BANDED_ROW_ALPHA: f32 = 0.35;
 
-/// Game seconds that pass per second of displayed time.
-///
-/// Video export and playback speed-ups run the game clock faster than the
-/// viewer's, and the reflow animation is paced in the viewer's time.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlaybackRate(f32);
-
-impl PlaybackRate {
-    pub const REAL_TIME: Self = Self(1.0);
-
-    /// `None` unless the rate is finite and positive.
-    pub const fn new(game_seconds_per_second: f32) -> Option<Self> {
-        if game_seconds_per_second.is_finite() && game_seconds_per_second > 0.0 {
-            Some(Self(game_seconds_per_second))
-        } else {
-            None
-        }
-    }
-
-    pub fn game_seconds_per_second(self) -> f32 {
-        self.0
-    }
-}
-
 /// How far an entry `age_seconds` of game time old has eased into place,
 /// from 0 (just arrived) to 1 (settled).
 pub fn reveal(age_seconds: f32, rate: PlaybackRate) -> f32 {
-    let span = REFLOW_SECONDS * rate.0;
+    let span = REFLOW_SECONDS * rate.game_seconds_per_second();
     let progress = (age_seconds / span).clamp(0.0, 1.0);
 
     // Cubic ease-out: fast start, gentle stop.

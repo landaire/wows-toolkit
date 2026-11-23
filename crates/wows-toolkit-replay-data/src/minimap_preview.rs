@@ -451,6 +451,9 @@ pub struct BakedTrack {
     /// When `BattleEnd` arrived, if it did. Absent on a replay that was cut
     /// short.
     pub battle_end: Option<GameClock>,
+    /// The clock of the replay's last packet. The kept frames are decimated,
+    /// so the last of them can fall short of it.
+    pub replay_end: GameClock,
     /// How wide the map is in the game's own world units, which is what
     /// turns a range in metres into a distance on the minimap.
     pub space_size: f32,
@@ -619,6 +622,7 @@ pub fn bake_track(
         let start = view.battle_start_clock().unwrap_or(GameClock(0.0));
         (start, view.battle_end_clock(), renderer.take_trails(view.dead_ships()))
     };
+    let replay_end = session.total_duration();
     session.finish();
 
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -633,6 +637,7 @@ pub fn bake_track(
         renderer: target,
         battle_start,
         battle_end,
+        replay_end,
         space_size,
         map_name: map_name.clone(),
         version,

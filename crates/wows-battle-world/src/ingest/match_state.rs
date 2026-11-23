@@ -16,6 +16,8 @@ use wowsunpack::data::Version;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::rpc::typedefs::ArgValue;
 
+use crate::countdown::Countdown;
+use crate::countdown::TimeLeftSample;
 use crate::resources::EntityIndex;
 use crate::resources::KillLog;
 use crate::resources::MatchState;
@@ -41,7 +43,16 @@ pub fn handle_entity_property_match(
     match property {
         "timeLeft" => {
             if let Some(v) = value.as_i64() {
-                world.resource_mut::<MatchState>().time_left = Some(SecondsRemaining(v));
+                let sample = TimeLeftSample { remaining: SecondsRemaining(v), clock };
+                let mut ms = world.resource_mut::<MatchState>();
+                let countdown = match ms.countdown {
+                    Some(mut countdown) => {
+                        countdown.observe(sample);
+                        countdown
+                    }
+                    None => Countdown::new(sample),
+                };
+                ms.countdown = Some(countdown);
             }
         }
         "battleStage" => {

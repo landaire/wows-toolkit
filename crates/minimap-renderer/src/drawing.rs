@@ -49,7 +49,9 @@ use crate::draw_command::LabelAnchor;
 use crate::draw_command::RenderTarget;
 use crate::draw_command::RowShade;
 use crate::draw_command::ShipVisibility;
+use crate::draw_command::timer_countdown;
 use wows_replays::types::ElapsedClock;
+use wows_replays::types::TimeRemaining;
 use wt_translations::DefaultTextResolver;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
@@ -783,14 +785,21 @@ fn draw_score_bar(
 }
 
 /// Draw the game timer.
-fn draw_timer(pm: &mut Surface, time_remaining: Option<i64>, elapsed: ElapsedClock, fonts: &GameFonts, map_width: u32) {
+fn draw_timer(
+    pm: &mut Surface,
+    countdown: Option<TimeRemaining>,
+    elapsed: ElapsedClock,
+    fonts: &GameFonts,
+    map_width: u32,
+) {
     let font = &fonts.primary;
     let center_x = map_width as i32 / 2;
     let main_scale = fonts.scale(16.0);
     let small_scale = fonts.scale(11.0);
 
-    if let Some(remaining) = time_remaining {
+    if let Some(countdown) = countdown {
         // Show time remaining as main timer (centered)
+        let remaining = countdown.shown_seconds();
         let r_mins = remaining / 60;
         let r_secs = remaining % 60;
         let remaining_text = format!("{:02}:{:02}", r_mins, r_secs);
@@ -2796,8 +2805,9 @@ impl RenderTarget for ImageTarget {
                 // Advantage is now rendered inline in the score bar;
                 // this command is retained for consumers that want the breakdown data.
             }
-            DrawCommand::Timer { time_remaining, elapsed } => {
-                draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts, self.hud_width);
+            DrawCommand::Timer { time_remaining, elapsed, remaining } => {
+                let countdown = timer_countdown(*time_remaining, *remaining);
+                draw_timer(&mut self.canvas, countdown, *elapsed, &self.fonts, self.hud_width);
             }
             DrawCommand::PreBattleCountdown { seconds } => {
                 draw_pre_battle_countdown(

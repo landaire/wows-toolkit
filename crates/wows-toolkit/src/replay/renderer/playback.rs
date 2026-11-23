@@ -9,11 +9,11 @@ use parking_lot::Mutex;
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
-use wows_minimap_renderer::activity_feed::PlaybackRate;
 use wows_minimap_renderer::battle_scans::BattleScans;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
+use wows_minimap_renderer::timing::PlaybackRate;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
@@ -338,7 +338,6 @@ pub(super) fn playback_thread(
         state.battle_start = battle_start;
         state.viewer_team = viewer_team;
         state.battle_end = battle_end;
-        state.actual_game_duration = Some(actual_game_duration);
         state.self_player_name = Some(replay_file.meta.playerName.clone());
     }
     {

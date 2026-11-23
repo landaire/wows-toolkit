@@ -249,8 +249,8 @@ fn normalize(cmd: &DrawCommand) -> String {
         DrawCommand::TeamAdvantage { level, color, breakdown: _ } => {
             format!("TeamAdvantage level={level:?} color={color:?}")
         }
-        DrawCommand::Timer { time_remaining, elapsed } => {
-            format!("Timer tr={time_remaining:?} el={elapsed:?}")
+        DrawCommand::Timer { time_remaining, elapsed, remaining } => {
+            format!("Timer tr={time_remaining:?} el={elapsed:?} rem={remaining:?}")
         }
         DrawCommand::PreBattleCountdown { seconds } => {
             format!("PreBattleCountdown s={seconds}")

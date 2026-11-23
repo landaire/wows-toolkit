@@ -263,6 +263,9 @@ pub fn build_frame_track<G: ResourceLoader>(
             }
 
             let target_frame = (prev_clock.seconds() / frame_duration) as i64;
+            // The world has already taken the first packet at `step`; drawing at the clock the
+            // frame is labelled with keeps the timer and positions on one base across frames.
+            renderer.set_render_clock(prev_clock);
             while last_rendered_frame < target_frame {
                 if cancel.load(Ordering::Relaxed) {
                     return snapshots;
@@ -311,7 +314,11 @@ mod track_tests {
     }
 
     fn tagged(index: usize) -> Vec<DrawCommand> {
-        vec![DrawCommand::Timer { time_remaining: Some(index as i64), elapsed: ElapsedClock(index as f32) }]
+        vec![DrawCommand::Timer {
+            time_remaining: Some(index as i64),
+            elapsed: ElapsedClock(index as f32),
+            remaining: None,
+        }]
     }
 
     #[test]

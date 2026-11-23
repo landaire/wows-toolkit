@@ -9,6 +9,7 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::PlaneId;
+use wows_replays::types::TimeRemaining;
 use wowsunpack::game_types::AdvantageLevel;
 use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::FinishType;
@@ -640,10 +641,16 @@ pub enum DrawCommand {
     },
     /// Game timer (during battle)
     Timer {
-        /// Seconds remaining in the match (from BattleLogic timeLeft), if available
+        /// Whole seconds remaining as shown, rounded up from `remaining`. A
+        /// collab peer that predates `remaining` draws only this.
         time_remaining: Option<i64>,
         /// Seconds elapsed since battle started (excludes pre-battle countdown)
         elapsed: ElapsedClock,
+        /// Seconds remaining at this frame's clock, counting down at game
+        /// rate, so a viewer drawing between frames can count it on. `None`
+        /// from a collab peer that predates it. Last, so the fields before it
+        /// keep their archived offsets for such peers.
+        remaining: Option<TimeRemaining>,
     },
     /// Pre-battle countdown overlay (large centered number before battle starts)
     PreBattleCountdown { seconds: i64 },
@@ -1001,6 +1008,12 @@ impl DrawCommand {
                 | Self::TeamRoster { .. }
         )
     }
+}
+
+/// The countdown a [`DrawCommand::Timer`] shows: `remaining`, or for a collab
+/// peer that predates it, the whole seconds it sent.
+pub fn timer_countdown(time_remaining: Option<i64>, remaining: Option<TimeRemaining>) -> Option<TimeRemaining> {
+    remaining.or_else(|| time_remaining.map(|seconds| TimeRemaining(seconds as f32)))
 }
 
 /// Trait for rendering backends that consume `DrawCommand`s.

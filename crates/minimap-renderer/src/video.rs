@@ -14,7 +14,6 @@ use tracing::info;
 use wows_battle_world::view::BattleView;
 use wows_replays::types::GameClock;
 
-use crate::activity_feed::PlaybackRate;
 use crate::codec::VideoCodec;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
@@ -24,10 +23,10 @@ use crate::encoder::worker::EncoderOutput;
 use crate::encoder::worker::EncoderWorker;
 use crate::error::VideoError;
 use crate::renderer::MinimapRenderer;
-
-pub const FPS: f64 = 30.0;
-/// Target output video duration in seconds. The game is compressed to fit this length.
-pub const OUTPUT_DURATION: f64 = 60.0;
+use crate::timing::ExportTiming;
+use crate::timing::ExportWindow;
+use crate::timing::FPS;
+use crate::timing::PlaybackRate;
 
 #[derive(Clone, Debug)]
 pub enum DumpMode {
@@ -67,12 +66,18 @@ pub struct VideoEncoder {
     output_path: Option<String>,
     dump_mode: Option<DumpMode>,
     dump_all_mode: bool,
-    game_duration: f32,
-    /// Clock at which the output video begins. Packets before this are processed
-    /// into controller state but produce no frames, so the rendered window is
-    /// `[start_clock, game_duration]`. Defaults to the replay start (no skip).
-    start_clock: GameClock,
-    last_rendered_frame: i64,
+
+    /// The stretch of the replay the video covers. Packets before its start
+    /// still build up controller state but produce no frames.
+    window: ExportWindow,
+    frame_count: usize,
+    /// Game seconds between frames.
+    frame_step: f32,
+    rate: PlaybackRate,
+    output_seconds: f32,
+    /// Frames drawn or submitted so far, which is also the next frame's index.
+    frames_done: usize,
+
     worker: Option<EncoderWorker>,
     encoder_error: Option<rootcause::Report<VideoError>>,
     codec_choice: CodecChoice,
@@ -80,40 +85,57 @@ pub struct VideoEncoder {
     encoder_config: crate::encoder::EncoderConfig,
     /// Codec resolved at encoder-init time; `None` until init().
     active_codec: Option<VideoCodec>,
-    expected_frames: u64,
     progress_callback: Option<Box<dyn Fn(RenderProgress)>>,
     canvas_width: u32,
     canvas_height: u32,
 }
 
 impl VideoEncoder {
+    /// An encoder for a video of `window`, framed by `timing`.
+    ///
+    /// The window is fixed up front because `timing` places every frame
+    /// relative to it: a caller streaming packets learns the end of the replay
+    /// before drawing the first frame (`MergedReplays::total_duration`).
     pub fn new(
         output_path: Option<&str>,
         dump_mode: Option<DumpMode>,
         dump_all_mode: bool,
-        match_time_limit: f32,
+        timing: ExportTiming,
+        window: ExportWindow,
         canvas_width: u32,
         canvas_height: u32,
     ) -> Self {
-        let total_frames = (OUTPUT_DURATION * FPS) as usize;
+        let seconds = window.seconds();
         Self {
             output_path: output_path.map(String::from),
             dump_mode,
             dump_all_mode,
-            game_duration: match_time_limit,
-            start_clock: GameClock(0.0),
-            last_rendered_frame: -1,
+            window,
+            frame_count: timing.frame_count(seconds),
+            frame_step: timing.frame_step(seconds),
+            rate: timing.rate(seconds),
+            output_seconds: timing.output_seconds(seconds),
+            frames_done: 0,
             worker: None,
             encoder_error: None,
             codec_choice: CodecChoice::Auto,
             mode: Mode::Auto,
             encoder_config: crate::encoder::EncoderConfig::default(),
             active_codec: None,
-            expected_frames: total_frames as u64,
             progress_callback: None,
             canvas_width,
             canvas_height,
         }
+    }
+
+    /// Frames the finished video holds.
+    pub fn frame_count(&self) -> usize {
+        self.frame_count
+    }
+
+    /// Seconds the finished video runs.
+    pub fn output_seconds(&self) -> f32 {
+        self.output_seconds
     }
 
     /// Force the CPU encoder (Mode::ForceCpu). When combined with a CodecChoice
@@ -141,45 +163,30 @@ impl VideoEncoder {
     }
 
     /// Convenience: pick a target bitrate that should keep the encoded file
-    /// under `target_size_bytes`. Sizing is based on `OUTPUT_DURATION` (the
-    /// renderer's hard cap on output video length), not the match's time
-    /// limit, so the chosen bitrate is the worst-case rate that still hits
-    /// the target even for a maximum-length clip.
-    pub fn target_max_file_size(&mut self, target_size_bytes: u64) {
-        self.encoder_config =
-            crate::encoder::EncoderConfig::from_target_size(target_size_bytes, OUTPUT_DURATION as f32);
-    }
-
-    /// Begin the output video at `start`, skipping everything before it. Packets
-    /// earlier than `start` still build up controller state but emit no frames.
-    /// Pass `GameClock(0.0)` to render the full replay including the pre-battle
-    /// phase.
-    pub fn set_render_start(&mut self, start: GameClock) {
-        self.start_clock = start;
-    }
-
-    /// Seconds of replay time the output window spans, i.e. from the render
-    /// start to the end of the match.
-    fn window_duration(&self) -> f32 {
-        (self.game_duration - self.start_clock.seconds()).max(0.0)
-    }
-
-    pub fn set_battle_duration(&mut self, duration: GameClock) {
-        let total_frames = self.total_frames();
-        let frame_duration = self.window_duration() / total_frames as f32;
-        if frame_duration <= 0.0 {
-            return;
-        }
-        let window_end = (duration.seconds() - self.start_clock.seconds()).max(0.0);
-        self.expected_frames = (window_end / frame_duration) as u64;
+    /// under `target_size_bytes` for this video's length. Fails, leaving the
+    /// tunables as they were, when the video cannot be made that small.
+    pub fn target_max_file_size(&mut self, target_size_bytes: u64) -> Result<(), crate::error::TargetSizeError> {
+        self.encoder_config = crate::encoder::EncoderConfig::from_target_size(target_size_bytes, self.output_seconds)?;
+        Ok(())
     }
 
     pub fn set_progress_callback<F: Fn(RenderProgress) + 'static>(&mut self, callback: F) {
         self.progress_callback = Some(Box::new(callback));
     }
 
-    fn total_frames(&self) -> i64 {
-        (OUTPUT_DURATION * FPS) as i64
+    /// How many frames show a game clock at or before `clock`.
+    fn frames_due(&self, clock: GameClock) -> usize {
+        let into_window = clock - self.window.start();
+        if into_window < 0.0 {
+            return 0;
+        }
+
+        // An empty window is one frame, due as soon as the window starts.
+        if self.frame_step <= 0.0 {
+            return self.frame_count;
+        }
+
+        ((into_window / self.frame_step).floor() as usize).saturating_add(1).min(self.frame_count)
     }
 
     pub fn init(&mut self) -> rootcause::Result<(), VideoError> {
@@ -195,15 +202,18 @@ impl VideoEncoder {
             CodecChoice::Explicit(c) => c,
             CodecChoice::Auto => status.best_codec(matches!(self.mode, Mode::ForceCpu)),
         };
+        let config = self.encoder_config.sized_for(self.output_seconds);
         let (worker, resolved_codec, kind) =
-            EncoderWorker::spawn(self.canvas_width, self.canvas_height, codec, self.mode, self.encoder_config)?;
+            EncoderWorker::spawn(self.canvas_width, self.canvas_height, codec, self.mode, config)?;
         self.active_codec = Some(resolved_codec);
         self.worker = Some(worker);
         info!(
-            frames = self.total_frames(),
+            frames = self.frame_count,
             width = self.canvas_width,
             height = self.canvas_height,
-            duration = self.game_duration,
+            window = self.window.seconds(),
+            output = self.output_seconds,
+            rate = self.rate.game_seconds_per_second(),
             codec = %resolved_codec,
             kind = %kind,
             fps = FPS,
@@ -212,6 +222,8 @@ impl VideoEncoder {
         Ok(())
     }
 
+    /// Draws every frame whose game clock is at or before `new_clock`, from
+    /// the battle state as it stands.
     pub fn advance_clock(
         &mut self,
         new_clock: GameClock,
@@ -219,32 +231,32 @@ impl VideoEncoder {
         renderer: &mut MinimapRenderer,
         target: &mut ImageTarget,
     ) {
-        if self.window_duration() <= 0.0 || self.encoder_error.is_some() {
+        let due = self.frames_due(new_clock);
+        self.draw_frames(due, controller, renderer, target);
+    }
+
+    /// Draws frames until `until` of them are done.
+    fn draw_frames(
+        &mut self,
+        until: usize,
+        controller: &BattleView<'_>,
+        renderer: &mut MinimapRenderer,
+        target: &mut ImageTarget,
+    ) {
+        if self.encoder_error.is_some() || self.frames_done >= until {
             return;
         }
 
-        // Clocks before the render start are pre-battle; skip them entirely so
-        // frame 0 lands at the battle-start clock.
-        if new_clock.seconds() < self.start_clock.seconds() {
-            return;
-        }
-
-        let total_frames = self.total_frames();
-        let frame_duration = self.window_duration() / total_frames as f32;
-        let target_frame = ((new_clock.seconds() - self.start_clock.seconds()) / frame_duration) as i64;
-        // A zero-length window returned above, so the rate is positive.
-        if let Some(rate) = PlaybackRate::new(frame_duration * FPS as f32) {
-            renderer.set_playback_rate(rate);
-        }
-
+        renderer.set_playback_rate(self.rate);
         let mut writer = BufWriter::new(stdout().lock());
 
-        while self.last_rendered_frame < target_frame {
-            self.last_rendered_frame += 1;
+        while self.frames_done < until {
+            let index = self.frames_done;
+            self.frames_done += 1;
 
             // Continuous per-frame time so positions interpolate and tracers /
             // torpedoes (paced by the render clock) animate between packets.
-            let frame_seconds = self.start_clock.seconds() + self.last_rendered_frame as f32 * frame_duration;
+            let frame_seconds = self.window.start().seconds() + index as f32 * self.frame_step;
             renderer.set_render_clock(GameClock(frame_seconds));
 
             renderer.populate_players(controller);
@@ -268,7 +280,7 @@ impl VideoEncoder {
                         }
                     }
                     Some(path) => {
-                        let png_path = format!("{}{}{}.png", path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
+                        let png_path = format!("{}{}{}.png", path, std::path::MAIN_SEPARATOR, index);
                         if let Err(e) = target.frame().save(&png_path) {
                             error!(error = %e, "Failed to save frame");
                             return;
@@ -276,20 +288,23 @@ impl VideoEncoder {
                     }
                 }
 
-                if let Some(ref cb) = self.progress_callback {
+                if let Some(cb) = &self.progress_callback {
                     cb(RenderProgress {
                         stage: RenderStage::Encoding,
-                        current: (self.last_rendered_frame + 1) as u64,
-                        total: self.expected_frames,
+                        current: self.frames_done as u64,
+                        total: self.frame_count as u64,
                     });
                 }
-            } else if let Some(ref dump_mode) = self.dump_mode {
+            } else if let Some(dump_mode) = &self.dump_mode {
                 let dump_frame = match dump_mode {
-                    DumpMode::Frame(n) => *n as i64,
-                    DumpMode::Midpoint => total_frames / 2,
-                    DumpMode::Last => -1,
+                    DumpMode::Frame(n) => Some(*n),
+                    DumpMode::Midpoint => Some(self.frame_count / 2),
+                    // Drawn by `finish` from the final battle state.
+                    DumpMode::Last => None,
                 };
-                if dump_frame >= 0 && self.last_rendered_frame == dump_frame {
+                if let Some(dump_frame) = dump_frame
+                    && index == dump_frame
+                {
                     target.begin_frame();
                     for cmd in &commands {
                         target.draw(cmd);
@@ -337,9 +352,13 @@ impl VideoEncoder {
                     return;
                 }
 
-                if let Some(ref cb) = self.progress_callback {
+                if let Some(cb) = &self.progress_callback {
                     let encoded = self.worker.as_ref().map(|w| w.encoded_count()).unwrap_or(0);
-                    cb(RenderProgress { stage: RenderStage::Encoding, current: encoded, total: self.expected_frames });
+                    cb(RenderProgress {
+                        stage: RenderStage::Encoding,
+                        current: encoded,
+                        total: self.frame_count as u64,
+                    });
                 }
             }
         }
@@ -377,11 +396,11 @@ impl VideoEncoder {
             let error = self.encoder_error.as_ref().expect("just set");
             return Err(report!(VideoError::EncodeFailed).attach(format!("frame submission failed: {error}")));
         }
-        self.last_rendered_frame += 1;
+        self.frames_done += 1;
 
-        if let Some(ref cb) = self.progress_callback {
+        if let Some(cb) = &self.progress_callback {
             let encoded = self.worker.as_ref().map(|w| w.encoded_count()).unwrap_or(0);
-            cb(RenderProgress { stage: RenderStage::Encoding, current: encoded, total: self.expected_frames });
+            cb(RenderProgress { stage: RenderStage::Encoding, current: encoded, total: self.frame_count as u64 });
         }
         Ok(())
     }
@@ -399,29 +418,26 @@ impl VideoEncoder {
             None => EncoderOutput { samples: Vec::new(), codec: self.active_codec.unwrap_or(VideoCodec::H264) },
         };
 
-        if let Some(ref cb) = self.progress_callback {
+        if let Some(cb) = &self.progress_callback {
             cb(RenderProgress {
                 stage: RenderStage::Encoding,
                 current: output.samples.len() as u64,
-                total: self.expected_frames,
+                total: self.frame_count as u64,
             });
         }
 
         self.mux_to_mp4(&output.samples, output.codec)
     }
 
+    /// Draws the frames not yet drawn from the final battle state, then
+    /// writes the file.
     pub fn finish(
         &mut self,
         controller: &BattleView<'_>,
         renderer: &mut MinimapRenderer,
         target: &mut ImageTarget,
     ) -> rootcause::Result<(), VideoError> {
-        let end_clock = controller.battle_end_clock().unwrap_or(controller.clock());
-        if end_clock.seconds() > self.game_duration {
-            self.game_duration = end_clock.seconds();
-        }
-
-        self.advance_clock(end_clock, controller, renderer, target);
+        self.draw_frames(self.frame_count, controller, renderer, target);
 
         let mut writer = BufWriter::new(stdout().lock());
 
@@ -441,7 +457,8 @@ impl VideoEncoder {
                     }
                 }
                 Some(path) => {
-                    let png_path = format!("{}{}{}.png", path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
+                    let last = self.frames_done.saturating_sub(1);
+                    let png_path = format!("{}{}{}.png", path, std::path::MAIN_SEPARATOR, last);
                     if let Err(e) = target.frame().save(&png_path) {
                         error!(error = %e, "Failed to save frame");
                     }
@@ -451,7 +468,7 @@ impl VideoEncoder {
             return Ok(());
         }
 
-        if let Some(ref dump_mode) = self.dump_mode {
+        if let Some(dump_mode) = &self.dump_mode {
             if matches!(dump_mode, DumpMode::Last) {
                 let commands = renderer.draw_frame(controller);
                 target.begin_frame();
@@ -486,17 +503,16 @@ impl VideoEncoder {
 
         let output = match self.worker.take() {
             Some(worker) => worker.finish()?,
-            None => {
-                // No frames were ever submitted (for example window_duration <= 0).
-                EncoderOutput { samples: Vec::new(), codec: self.active_codec.unwrap_or(VideoCodec::H264) }
-            }
+            // The encoder failed to start, so no frame reached it; the mux
+            // below reports the failure.
+            None => EncoderOutput { samples: Vec::new(), codec: self.active_codec.unwrap_or(VideoCodec::H264) },
         };
 
-        if let Some(ref cb) = self.progress_callback {
+        if let Some(cb) = &self.progress_callback {
             cb(RenderProgress {
                 stage: RenderStage::Encoding,
                 current: output.samples.len() as u64,
-                total: self.expected_frames,
+                total: self.frame_count as u64,
             });
         }
 
@@ -534,7 +550,7 @@ impl VideoEncoder {
                 .context(VideoError::MuxFailed)
                 .attach_with(|| format!("writing video frame {idx}"))?;
 
-            if let Some(ref cb) = self.progress_callback {
+            if let Some(cb) = &self.progress_callback {
                 cb(RenderProgress { stage: RenderStage::Muxing, current: (idx + 1) as u64, total });
             }
         }
@@ -554,14 +570,22 @@ fn map_codec(c: VideoCodec) -> MuxideCodec {
 }
 
 #[cfg(test)]
-mod submitted_frame_tests {
+mod tests {
     use super::*;
+
+    fn window(start: f32, end: f32) -> ExportWindow {
+        ExportWindow::new(GameClock(start), GameClock(end)).expect("a window")
+    }
+
+    fn encoder(timing: ExportTiming, window: ExportWindow) -> VideoEncoder {
+        VideoEncoder::new(Some("unused.mp4"), None, false, timing, window, 64, 32)
+    }
 
     /// A frame of the wrong size is refused before the encoder is started, so
     /// the check costs nothing and needs no encode backend to exercise.
     #[test]
     fn a_frame_of_the_wrong_size_is_refused() {
-        let mut encoder = VideoEncoder::new(Some("unused.mp4"), None, false, 60.0, 64, 32);
+        let mut encoder = encoder(ExportTiming::default(), window(0.0, 60.0));
 
         let wrong = RgbImage::new(32, 64);
         let refused = encoder.submit_frame(&wrong);
@@ -573,11 +597,47 @@ mod submitted_frame_tests {
 
     #[test]
     fn a_stream_that_was_fed_nothing_reports_no_frames_to_mux() {
-        let mut encoder = VideoEncoder::new(Some("unused.mp4"), None, false, 60.0, 64, 32);
+        let mut encoder = encoder(ExportTiming::default(), window(0.0, 60.0));
 
         let finished = encoder.finish_submitted();
 
         // An empty track is a failure to report, not a zero-byte file.
         assert!(finished.is_err());
+    }
+
+    /// Frames fall due as the clock passes each one's place in the window,
+    /// and never beyond the frame count.
+    #[test]
+    fn frames_fall_due_by_the_window_clock() {
+        let timing = ExportTiming::Speed(crate::timing::ExportSpeed::new(30.0).expect("an export speed"));
+        let encoder = encoder(timing, window(10.0, 13.5));
+
+        assert_eq!(encoder.frame_count(), 4);
+        assert_eq!(encoder.frames_due(GameClock(9.0)), 0, "before the window");
+        assert_eq!(encoder.frames_due(GameClock(10.0)), 1);
+        assert_eq!(encoder.frames_due(GameClock(10.99)), 1);
+        assert_eq!(encoder.frames_due(GameClock(11.0)), 2);
+        assert_eq!(encoder.frames_due(GameClock(100.0)), 4, "after the window");
+    }
+
+    #[test]
+    fn an_empty_window_is_one_frame_at_its_start() {
+        let encoder = encoder(ExportTiming::default(), window(20.0, 20.0));
+
+        assert_eq!(encoder.frames_due(GameClock(19.0)), 0);
+        assert_eq!(encoder.frames_due(GameClock(20.0)), 1800);
+    }
+
+    /// A size the video cannot be made to fit is refused rather than
+    /// exceeded, and leaves the encoder's tunables as they were.
+    #[test]
+    fn a_maximum_size_below_what_the_length_allows_is_refused() {
+        let real_time = ExportTiming::Speed(crate::timing::ExportSpeed::new(1.0).expect("an export speed"));
+        let mut encoder = encoder(real_time, window(0.0, 3600.0));
+
+        let refused = encoder.target_max_file_size(crate::encoder::DEFAULT_TARGET_FILE_SIZE_BYTES);
+
+        assert_eq!(refused.map_err(|error| error.minimum_bytes), Err(31_304_348));
+        assert_eq!(encoder.encoder_config.target_bitrate_bps, None);
     }
 }

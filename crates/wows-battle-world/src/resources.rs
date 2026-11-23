@@ -35,9 +35,9 @@ use wowsunpack::game_types::Ribbon;
 use wowsunpack::game_types::ShotId;
 use wowsunpack::models::fire_nodes::BurnNodeIndex;
 
+use crate::countdown::Countdown;
 use crate::units::MatchWinner;
 use crate::units::Seconds;
-use crate::units::SecondsRemaining;
 
 /// Current replay clock.
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -59,8 +59,8 @@ pub struct MatchState {
     pub battle_result_clock: Option<GameClock>,
     pub winning_team: Option<MatchWinner>,
     pub finish_type: Option<Recognized<FinishType>>,
-    /// Seconds remaining, from BattleLogic `timeLeft`.
-    pub time_left: Option<SecondsRemaining>,
+    /// The match countdown, from BattleLogic `timeLeft`.
+    pub countdown: Option<Countdown>,
     pub match_finished: bool,
     /// Serialized battle results blob.
     pub battle_results: Option<String>,

@@ -56,6 +56,7 @@ fn track() -> Track {
         clocks: vec![GameClock(0.0), GameClock(0.5)],
         battle_start: GameClock(0.0),
         battle_end: None,
+        replay_end: GameClock(0.5),
         space_size: 1400.0,
         version: Version::base(99, 0, 0),
         map_origin: DEFAULT_MAP_ORIGIN,

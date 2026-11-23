@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::codec::VideoCodec;
 use crate::config::RenderOptions;
 use crate::draw_command::ShipConfigFilter;
+use crate::timing::ExportTiming;
 
 const fn yes() -> bool {
     true
@@ -98,6 +99,9 @@ pub struct SavedRenderOptions {
     /// Start an exported video at the loading screen rather than at the battle.
     #[serde(default)]
     pub include_pre_battle: bool,
+    /// How an export maps game time onto video time.
+    #[serde(default, deserialize_with = "tolerant_timing::deserialize")]
+    pub export_timing: ExportTiming,
 }
 
 impl Default for SavedRenderOptions {
@@ -142,6 +146,7 @@ impl Default for SavedRenderOptions {
             prefer_cpu_encoder: false,
             video_codec: None,
             include_pre_battle: false,
+            export_timing: ExportTiming::default(),
         }
     }
 }
@@ -270,10 +275,40 @@ mod tolerant_codec {
     }
 }
 
+/// Reads the stored export timing, treating one this build refuses -- an
+/// unknown mode, or a value outside the bounds [`ExportTiming`] holds -- as
+/// the default timing.
+///
+/// The default is what a row saved before export timing existed loads as, so
+/// a refused timing exports as an unconfigured one does. The whole row would
+/// otherwise fail to deserialize, losing every layer choice with it.
+mod tolerant_timing {
+    use serde::Deserialize as _;
+
+    use super::ExportTiming;
+
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Known(ExportTiming),
+        Refused(serde::de::IgnoredAny),
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(input: D) -> Result<ExportTiming, D::Error> {
+        Ok(match Stored::deserialize(input)? {
+            Stored::Known(timing) => timing,
+            Stored::Refused(_) => ExportTiming::default(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SavedRenderOptions;
     use crate::config::RenderOptions;
+    use crate::timing::ExportSpeed;
+    use crate::timing::ExportTiming;
+    use crate::timing::VideoLength;
 
     /// Every layer written out comes back, so a reader's choices survive a
     /// round trip through the options the renderer actually draws with.
@@ -325,11 +360,13 @@ mod tests {
     /// the options back does not clear them.
     #[test]
     fn the_ranges_and_the_export_settings_are_left_alone() {
+        let speed = ExportTiming::Speed(ExportSpeed::new(40.0).expect("an export speed"));
         let mut saved = SavedRenderOptions {
             show_self_radar_range: true,
             prefer_cpu_encoder: true,
             include_pre_battle: true,
             video_codec: Some(crate::codec::VideoCodec::Av1),
+            export_timing: speed,
             ..SavedRenderOptions::default()
         };
 
@@ -340,6 +377,51 @@ mod tests {
         assert!(saved.prefer_cpu_encoder);
         assert!(saved.include_pre_battle);
         assert_eq!(saved.video_codec, Some(crate::codec::VideoCodec::Av1));
+        assert_eq!(saved.export_timing, speed);
+    }
+
+    /// Every export setting written to the stored row comes back.
+    #[test]
+    fn the_export_settings_survive_the_stored_row() {
+        let saved = SavedRenderOptions {
+            prefer_cpu_encoder: true,
+            include_pre_battle: true,
+            video_codec: Some(crate::codec::VideoCodec::H265),
+            export_timing: ExportTiming::Length(VideoLength::new(120.0).expect("a video length")),
+            ..SavedRenderOptions::default()
+        };
+
+        let written = serde_json::to_string(&saved).expect("the row is written");
+        let read: SavedRenderOptions = serde_json::from_str(&written).expect("the row parses");
+
+        assert_eq!(read, saved);
+    }
+
+    /// A row from a build before export timing was saved exports as that
+    /// build did: the battle fitted into a minute.
+    #[test]
+    fn a_row_without_export_timing_loads_the_default() {
+        let saved: SavedRenderOptions =
+            serde_json::from_str(r#"{"include_pre_battle":true,"video_codec":"h264"}"#).expect("the row parses");
+
+        assert_eq!(saved.export_timing, ExportTiming::default());
+        assert_eq!(saved.export_timing, ExportTiming::Length(VideoLength::DEFAULT));
+        assert!(saved.include_pre_battle);
+    }
+
+    /// A stored timing outside the bounds this build holds an export to reads
+    /// as the default and costs nothing else.
+    #[test]
+    fn a_refused_export_timing_does_not_take_the_row_with_it() {
+        for timing in
+            [r#"{"mode":"speed","value":0.5}"#, r#"{"mode":"length","value":900}"#, r#"{"mode":"pace","value":3}"#]
+        {
+            let row = format!(r#"{{"show_hp_bars":false,"export_timing":{timing}}}"#);
+            let saved: SavedRenderOptions = serde_json::from_str(&row).expect("the row parses");
+
+            assert_eq!(saved.export_timing, ExportTiming::default(), "{timing}");
+            assert!(!saved.show_hp_bars, "{timing}: the layers around it are kept");
+        }
     }
 
     /// A codec name this build does not know costs the codec choice and nothing

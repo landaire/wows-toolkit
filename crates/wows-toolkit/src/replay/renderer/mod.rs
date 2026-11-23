@@ -52,11 +52,6 @@ use crate::data::settings::SavedRenderOptions;
 use crate::data::wows_data::SharedBuildData;
 use crate::icons;
 
-/// Approximate number of frame snapshots per second of game time.
-/// Controls the granularity of seeking in the replay.
-pub(crate) use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
-use wows_toolkit_viewmodel::controls::CommandGroup;
-const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
 use crate::replay::minimap_view::MapTransform;
@@ -78,6 +73,16 @@ use crate::replay::timeline::ui::timeline_filter_bar;
 use crate::replay::timeline::ui::timeline_list;
 use crate::util::file_dialog::DialogKind;
 use crate::util::file_dialog::FileDialogSlot;
+use wows_minimap_renderer::ExportSpeed;
+use wows_minimap_renderer::ExportTiming;
+use wows_minimap_renderer::ExportWindow;
+use wows_minimap_renderer::VideoLength;
+/// Approximate number of frame snapshots per second of game time.
+/// Controls the granularity of seeking in the replay.
+pub(crate) use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
+use wows_minimap_renderer::timing::SPEED_LADDER;
+use wows_minimap_renderer::timing::VIDEO_LENGTH_LADDER;
+use wows_toolkit_viewmodel::controls::CommandGroup;
 
 /// Fill behind the map, shared by the renderer window and the hover preview
 /// so the two minimap surfaces cannot drift apart.
@@ -887,8 +892,6 @@ pub struct SharedRendererState {
     /// Absolute game clock at which the battle ended (from the BattleEnd packet).
     /// None when the replay ends before the result is decided.
     pub battle_end: Option<GameClock>,
-    /// Actual game duration from the last packet's clock (may differ from metadata duration).
-    pub actual_game_duration: Option<f32>,
     /// The replay owner's player name (from replay metadata).
     pub self_player_name: Option<String>,
     /// The replay owner's entity ID (resolved from draw commands).
@@ -972,18 +975,18 @@ enum PendingVideoExport {
         options: RenderOptions,
         prefer_cpu: bool,
         codec: Option<wows_minimap_renderer::VideoCodec>,
-        actual_game_duration: Option<f32>,
         encoder_config: wows_minimap_renderer::EncoderConfig,
         include_pre_battle: bool,
+        timing: ExportTiming,
     },
     /// Render to a temporary file and copy to clipboard.
     CopyToClipboard {
         options: RenderOptions,
         prefer_cpu: bool,
         codec: Option<wows_minimap_renderer::VideoCodec>,
-        actual_game_duration: Option<f32>,
         encoder_config: wows_minimap_renderer::EncoderConfig,
         include_pre_battle: bool,
+        timing: ExportTiming,
     },
 }
 
@@ -1032,6 +1035,8 @@ pub struct ReplayRendererViewer {
     video_codec: Arc<Mutex<Option<wows_minimap_renderer::VideoCodec>>>,
     /// User preference: include the pre-battle phase in exported video.
     include_pre_battle: Arc<AtomicBool>,
+    /// User preference: how the exported video's length or speed is chosen.
+    export_timing: Arc<Mutex<ExportTiming>>,
     /// Shared window settings tracker for persisting viewport geometry.
     window_settings: crate::tab_state::SharedWindowSettings,
     /// Notify handle to trigger an immediate settings save.
@@ -1060,7 +1065,6 @@ struct VideoExportData {
     map_name: String,
     /// Default file name (without extension) for an exported video.
     video_file_stem: String,
-    game_duration: f32,
     wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
 }
@@ -1110,7 +1114,6 @@ pub fn launch_replay_renderer(
         battle_start: GameClock(0.0),
         viewer_team: None,
         battle_end: None,
-        actual_game_duration: None,
         self_player_name: None,
         self_entity_id: None,
         game_fonts: None,
@@ -1149,7 +1152,6 @@ pub fn launch_replay_renderer(
         alt_replays: alt_replays.clone(),
         map_name: map_name.clone(),
         video_file_stem,
-        game_duration,
         wows_data: wows_data.clone(),
         asset_cache: Arc::clone(&asset_cache),
     });
@@ -1182,6 +1184,7 @@ pub fn launch_replay_renderer(
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
         video_codec: Arc::new(Mutex::new(saved_options.video_codec)),
         include_pre_battle: Arc::new(AtomicBool::new(saved_options.include_pre_battle)),
+        export_timing: Arc::new(Mutex::new(saved_options.export_timing)),
         window_settings,
         save_notify,
         saved_defaults: saved_options.clone(),
@@ -1314,7 +1317,6 @@ pub fn launch_client_renderer(
         battle_start: GameClock(0.0),
         viewer_team: None,
         battle_end: None,
-        actual_game_duration: None,
         self_player_name: None,
         self_entity_id: None,
         game_fonts,
@@ -1375,6 +1377,7 @@ pub fn launch_client_renderer(
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
         video_codec: Arc::new(Mutex::new(None)),
         include_pre_battle: Arc::new(AtomicBool::new(false)),
+        export_timing: Arc::new(Mutex::new(saved_options.export_timing)),
         window_settings,
         save_notify,
         saved_defaults: saved_options.clone(),
@@ -1443,6 +1446,7 @@ impl ReplayRendererViewer {
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let video_codec = self.video_codec.clone();
         let include_pre_battle = self.include_pre_battle.clone();
+        let export_timing = self.export_timing.clone();
         let window_settings = self.window_settings.clone();
         let save_notify = self.save_notify.clone();
         let parent_ctx = ctx.clone();
@@ -1517,7 +1521,6 @@ impl ReplayRendererViewer {
             let show_dead_ships = state.show_dead_ships;
             let battle_start = state.battle_start;
             let battle_end = state.battle_end;
-            let actual_game_duration = state.actual_game_duration;
             let frame_data = state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock, f.game_duration));
             // Resolve self entity ID from draw commands (once)
             let self_entity_id = if state.self_entity_id.is_some() {
@@ -2231,7 +2234,7 @@ impl ReplayRendererViewer {
                     {
                         if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                             let current = shared_state.lock().speed;
-                            if let Some(&next) = PLAYBACK_SPEEDS.iter().find(|&&s| s > current + 0.1) {
+                            if let Some(&next) = SPEED_LADDER.iter().find(|&&s| s > current + 0.1) {
                                 let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
                                 shared_state.lock().speed = next;
                                 toasts.lock().info(format!("{:.0}x", next));
@@ -2239,7 +2242,7 @@ impl ReplayRendererViewer {
                         }
                         if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
                             let current = shared_state.lock().speed;
-                            if let Some(&next) = PLAYBACK_SPEEDS.iter().rev().find(|&&s| s < current - 0.1) {
+                            if let Some(&next) = SPEED_LADDER.iter().rev().find(|&&s| s < current - 0.1) {
                                 let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
                                 shared_state.lock().speed = next;
                                 toasts.lock().info(format!("{:.0}x", next));
@@ -2858,7 +2861,7 @@ impl ReplayRendererViewer {
                                                 .selected_text(format!("{:.0}x", current_speed))
                                                 .width(60.0)
                                                 .show_ui(ui, |ui| {
-                                                    for s in PLAYBACK_SPEEDS {
+                                                    for s in SPEED_LADDER {
                                                         if ui
                                                             .selectable_value(
                                                                 &mut current_speed,
@@ -2983,9 +2986,9 @@ impl ReplayRendererViewer {
                                                         options: opts,
                                                         prefer_cpu,
                                                         codec: codec_pref,
-                                                        actual_game_duration,
                                                         encoder_config: wows_minimap_renderer::EncoderConfig::default(),
                                                         include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
+                                                        timing: *export_timing.lock(),
                                                     };
                                                     if prefer_cpu
                                                         || status.gpu_available()
@@ -3385,6 +3388,15 @@ impl ReplayRendererViewer {
                                                     {
                                                         include_pre_battle.store(pre_battle, Ordering::Relaxed);
                                                     }
+                                                    export_timing_ui(
+                                                        ui,
+                                                        &export_timing,
+                                                        frame_data.and_then(|(_, _, _, game_duration)| {
+                                                            let start =
+                                                                if pre_battle { GameClock(0.0) } else { battle_start };
+                                                            ExportWindow::new(start, GameClock(game_duration))
+                                                        }),
+                                                    );
                                                     let status = cached_encoder_status(ui.ctx());
                                                     let default_codec = status.best_codec(cpu);
                                                     let mut current = *video_codec.lock();
@@ -3450,6 +3462,7 @@ impl ReplayRendererViewer {
                                             saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
                                             saved.video_codec = *video_codec.lock();
                                             saved.include_pre_battle = include_pre_battle.load(Ordering::Relaxed);
+                                            saved.export_timing = *export_timing.lock();
                                             // Persist self range flags from annotation overrides
                                             if let Some(self_eid) = self_entity_id {
                                                 let ann = annotation_arc.lock();
@@ -3573,9 +3586,9 @@ impl ReplayRendererViewer {
                         options: opts,
                         prefer_cpu,
                         codec: codec_pref,
-                        actual_game_duration,
                         encoder_config: wows_minimap_renderer::EncoderConfig::default(),
                         include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
+                        timing: *export_timing.lock(),
                     };
                     if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                         execute_video_export(
@@ -3804,6 +3817,62 @@ fn draw_build_section(
             ui.image((tex.id(), Vec2::splat(28.0))).on_hover_text(tooltip);
         }
     });
+}
+
+/// `m:ss`, the form video lengths are shown in.
+fn format_video_seconds(seconds: f32) -> String {
+    let total = seconds.round().max(0.0) as u32;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// Export timing mode and value, with the speed or length it yields for
+/// `window`. The result line is omitted until the replay's window is known.
+fn export_timing_ui(ui: &mut egui::Ui, export_timing: &Mutex<ExportTiming>, window: Option<ExportWindow>) {
+    let mut timing = *export_timing.lock();
+    ui.label(t!("ui.renderer.settings.export_timing"));
+    ui.indent("export_timing", |ui| {
+        ui.horizontal(|ui| {
+            let is_length = matches!(timing, ExportTiming::Length(_));
+            if ui.selectable_label(is_length, t!("ui.renderer.settings.export_timing_length")).clicked() && !is_length {
+                timing = ExportTiming::Length(VideoLength::DEFAULT);
+            }
+            if ui.selectable_label(!is_length, t!("ui.renderer.settings.export_timing_speed")).clicked() && is_length {
+                timing = ExportTiming::Speed(ExportSpeed::DEFAULT);
+            }
+        });
+        ui.horizontal_wrapped(|ui| match timing {
+            ExportTiming::Length(_) => {
+                for length in VIDEO_LENGTH_LADDER.into_iter().filter_map(|s| VideoLength::new(s as f32)) {
+                    let choice = ExportTiming::Length(length);
+                    ui.selectable_value(&mut timing, choice, format_video_seconds(length.seconds()));
+                }
+            }
+            ExportTiming::Speed(_) => {
+                for speed in SPEED_LADDER.into_iter().filter_map(ExportSpeed::new) {
+                    let choice = ExportTiming::Speed(speed);
+                    ui.selectable_value(&mut timing, choice, format!("{:.0}x", speed.game_seconds_per_second()));
+                }
+            }
+        });
+        if let Some(window) = window {
+            let seconds = window.seconds();
+            let result = match timing {
+                ExportTiming::Length(_) => t!(
+                    "ui.renderer.settings.export_timing_result_speed",
+                    speed = {
+                        let rate = timing.rate(seconds).game_seconds_per_second();
+                        if rate >= 1.0 { format!("{rate:.0}") } else { format!("{rate:.1}") }
+                    }
+                ),
+                ExportTiming::Speed(_) => t!(
+                    "ui.renderer.settings.export_timing_result_length",
+                    length = format_video_seconds(timing.output_seconds(seconds))
+                ),
+            };
+            ui.label(egui::RichText::new(result.as_ref()).weak());
+        }
+    });
+    *export_timing.lock() = timing;
 }
 
 /// Map an absolute clock value (seconds) to an x pixel on a seek-slider rect,

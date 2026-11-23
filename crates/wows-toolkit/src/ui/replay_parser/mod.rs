@@ -5734,6 +5734,7 @@ impl ToolkitTabViewer<'_> {
                 prefer_cpu,
                 codec: renderer_settings.video_codec,
                 include_pre_battle: renderer_settings.include_pre_battle,
+                timing: renderer_settings.export_timing,
             },
             egui_ctx: self.tab_state.egui_ctx.clone(),
         }

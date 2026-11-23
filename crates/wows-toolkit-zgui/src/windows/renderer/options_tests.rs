@@ -10,9 +10,13 @@ use std::time::Duration;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use rust_i18n::t;
 use wows_minimap_renderer::CANVAS_HEIGHT;
+use wows_minimap_renderer::ExportSpeed;
+use wows_minimap_renderer::ExportTiming;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::ShipVisibility;
+use wows_minimap_renderer::VideoLength;
 use wows_minimap_renderer::advantage::AdvantageBreakdown;
 use wows_minimap_renderer::draw_command::ConsumableLines;
 use wows_minimap_renderer::draw_command::DrawCommand;
@@ -47,13 +51,15 @@ use crate::windows::renderer::session::RendererSession;
 use crate::windows::renderer::session::Status;
 use crate::windows::renderer::view::ReplayRendererProps;
 
-/// A track of empty frames drawn at `clocks`, with the battle starting at `battle_start`.
+/// A track of empty frames drawn at `clocks`, with the battle starting at `battle_start` and the
+/// replay ending at the last frame.
 fn track(clocks: &[f32], battle_start: f32) -> Track {
     Track {
         frames: vec![Vec::new(); clocks.len()],
         clocks: clocks.iter().copied().map(GameClock).collect(),
         battle_start: GameClock(battle_start),
         battle_end: None,
+        replay_end: GameClock(clocks.last().copied().unwrap_or(0.0)),
         space_size: 1400.0,
         version: Version::base(99, 0, 0),
         map_origin: DEFAULT_MAP_ORIGIN,
@@ -203,6 +209,42 @@ fn the_export_settings_reach_the_next_export() {
 
     assert!(shown(&window, "replay-renderer-codec-auto"), "the encoder's own pick is always offered");
     assert!(shown(&window, "replay-renderer-save-defaults"));
+}
+
+/// The video timing under the export settings reaches the next export, and says what it comes to
+/// for the open replay over the stretch an export would cover.
+#[test]
+fn the_video_timing_reaches_the_next_export_and_says_what_it_comes_to() {
+    // Ten minutes of recording, the last eight of them the battle.
+    let (mut window, session) = open(track(&half_seconds(600), 119.5));
+    click(&mut window, "replay-renderer-settings-toggle");
+    let timing = || session.export.with_untracked(|export| export.settings.timing);
+    let said = |window: &HeadlessWindow| window.texts_by_class("wt-renderer-options__timing-result").concat();
+    let plays_at = |speed: &str| t!("ui.renderer.settings.export_timing_result_speed", speed = speed).into_owned();
+    let runs = |length: &str| t!("ui.renderer.settings.export_timing_result_length", length = length).into_owned();
+
+    assert_eq!(timing(), ExportTiming::Length(VideoLength::DEFAULT));
+    assert_eq!(said(&window), plays_at("8"), "eight minutes of battle fitted into one");
+
+    tab_to(&mut window, "replay-renderer-include-pre-battle");
+    click(&mut window, "replay-renderer-include-pre-battle");
+    assert_eq!(said(&window), plays_at("10"), "and the two minutes before it with it");
+
+    tab_to(&mut window, "replay-renderer-timing-length-30");
+    click(&mut window, "replay-renderer-timing-length-30");
+    assert_eq!(timing(), ExportTiming::Length(VideoLength::new(30.0).expect("a positive length")));
+    assert_eq!(said(&window), plays_at("20"));
+
+    tab_to(&mut window, "replay-renderer-timing-speed");
+    click(&mut window, "replay-renderer-timing-speed");
+    assert_eq!(timing(), ExportTiming::Speed(ExportSpeed::DEFAULT), "at the speed playback opens at");
+    assert_eq!(said(&window), runs("0:30"));
+
+    tab_to(&mut window, "replay-renderer-timing-speed-40");
+    click(&mut window, "replay-renderer-timing-speed-40");
+    assert_eq!(timing(), ExportTiming::Speed(ExportSpeed::new(40.0).expect("an export speed")));
+    assert_eq!(said(&window), runs("0:15"));
+    assert!(!shown(&window, "replay-renderer-timing-length-30"), "the lengths give way to the speeds");
 }
 
 /// The gear is refused until the bake lands, so the options it is baking under are never saved

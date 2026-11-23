@@ -38,6 +38,59 @@ impl fmt::Display for VideoError {
 
 impl std::error::Error for VideoError {}
 
+/// Why a requested export timing was refused.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TimingError {
+    /// An export speed that is not finite or is below `min`.
+    SpeedOutOfRange { multiplier: f32, min: f32 },
+    /// A video length outside `min..=max` seconds.
+    VideoLengthOutOfRange { seconds: f32, min: f32, max: f32 },
+    /// Both a video length and a speed were given; an export takes one.
+    LengthAndSpeed { seconds: f32, multiplier: f32 },
+}
+
+impl fmt::Display for TimingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SpeedOutOfRange { multiplier, min } => {
+                write!(f, "speed {multiplier} is not a finite number of at least {min}")
+            }
+            Self::VideoLengthOutOfRange { seconds, min, max } => {
+                write!(f, "video length {seconds} s is not between {min} s and {max} s")
+            }
+            Self::LengthAndSpeed { seconds, multiplier } => {
+                write!(f, "video length {seconds} s and speed {multiplier} were both given; choose one")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TimingError {}
+
+/// A target file size smaller than a video of `output_seconds` can be made at
+/// the lowest bitrate the encoder is given.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TargetSizeError {
+    pub requested_bytes: u64,
+    pub minimum_bytes: u64,
+    pub output_seconds: f32,
+}
+
+impl fmt::Display for TargetSizeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const MIB: f64 = 1024.0 * 1024.0;
+        write!(
+            f,
+            "a {:.2} MiB file cannot hold {:.1} s of video; the smallest achievable is {:.2} MiB",
+            self.requested_bytes as f64 / MIB,
+            self.output_seconds,
+            self.minimum_bytes as f64 / MIB
+        )
+    }
+}
+
+impl std::error::Error for TargetSizeError {}
+
 /// Why a track file could not be written or read.
 #[cfg(feature = "track-file")]
 #[derive(Debug, thiserror::Error)]

@@ -30,6 +30,7 @@ use wows_minimap_renderer::draw_command::CameraDirectionWedge;
 use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::RowShade;
+use wows_minimap_renderer::draw_command::timer_countdown;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
 
@@ -1024,7 +1025,7 @@ pub fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::Timer { time_remaining, elapsed } => {
+        DrawCommand::Timer { time_remaining, elapsed, remaining } => {
             if elapsed.seconds() <= 0.0 {
                 return shapes;
             }
@@ -1036,8 +1037,8 @@ pub fn draw_command_to_shapes(
             let pill_rounding = CornerRadius::same((3.0 * ws) as u8);
 
             let hud_h = HUD_HEIGHT as f32 * ws;
-            if let Some(remaining) = time_remaining {
-                let r = (*remaining).max(0) as u32;
+            if let Some(countdown) = timer_countdown(*time_remaining, *remaining) {
+                let r = countdown.shown_seconds() as u32;
                 let remaining_text = format!("{:02}:{:02}", r / 60, r % 60);
                 let small_font = game_font(11.0 * ws);
                 let e = elapsed.seconds().max(0.0) as u32;

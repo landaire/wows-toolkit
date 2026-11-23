@@ -18,7 +18,7 @@ use yuvutils_rs::YuvStandardMatrix;
 
 use crate::encoder::EncoderConfig as Cfg;
 use crate::error::VideoError;
-use crate::video::FPS;
+use crate::timing::FPS;
 
 /// One emitted AV1 frame as OBUs, ready for muxing as a single MP4 sample.
 pub struct Av1Packet {
@@ -68,15 +68,15 @@ impl CpuAv1Encoder {
         //   - explicit `av1_quantizer`      -> quantizer-based CQP
         //   - neither -> match H.264/H.265 by targeting the size-derived
         //     default bitrate. Quantizer-only mode (q=60) hits ~10.5 MiB
-        //     on a maximum-length 60 s clip, which blows past Discord's
-        //     cap; using ABR with the shared default keeps AV1 under the
-        //     same 10 MiB target the other codecs aim for.
+        //     on a 60 s clip, which blows past Discord's cap; using ABR
+        //     with the shared default keeps AV1 under the same 10 MiB
+        //     target the other codecs aim for.
         if let Some(target_bps) = config.target_bitrate_bps {
             cfg.bitrate = target_bps as i32;
         } else if let Some(quant) = config.av1_quantizer {
             cfg.quantizer = quant as usize;
         } else {
-            cfg.bitrate = crate::encoder::DEFAULT_BITRATE_BPS as i32;
+            cfg.bitrate = config.default_bitrate_bps() as i32;
         }
         // Workaround for muxide 0.2.5: its AV1 sequence-header parser reads
         // `decoder_model_info_present_flag` unconditionally instead of guarding
