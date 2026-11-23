@@ -82,6 +82,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Film the saved self ranges on the recording player's ship in a render to a file or the clipboard from the replay list or Search, as the renderer opens with them, rather than every ship's ranges
+- *(egui)* Leave sunk ships out of an exported video when the renderer hides them, and film the saved self ranges in a batch render as the renderer opens with them
 - *(toolkit)* Wait up to a minute for the player stats service to answer, rather than 30 seconds, and send a request that timed out once more while the service's budget allows
 - *(zgui)* Draw up to three renderer frames at once while a replay plays, so a large or high-density window shows the battle moving every frame rather than repeating a frame while the next is drawn
 - *(zgui)* List the nations, classes and ships an armor viewer search names best first, so a ship searched by its name is not listed below loose matches in other nations

@@ -5718,24 +5718,14 @@ impl ToolkitTabViewer<'_> {
         build_cache: crate::data::wows_data::BuildDataCache,
     ) -> crate::replay::renderer::BatchRenderContext {
         let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
-        let options = crate::replay::renderer::render_options_from_saved(&renderer_settings);
-        let status = wows_minimap_renderer::check_encoder();
-        let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
-            renderer_settings.prefer_cpu_encoder,
-            renderer_settings.video_codec,
-            &status,
-        );
+        let (layers, export) =
+            crate::replay::renderer::batch_render_settings(&renderer_settings, &wows_minimap_renderer::check_encoder());
         crate::replay::renderer::BatchRenderContext {
             build_cache,
-            options,
+            layers,
             asset_cache: self.tab_state.renderer_asset_cache.clone(),
             toasts: self.tab_state.toasts.clone(),
-            encode: crate::replay::renderer::BatchEncodeOptions {
-                prefer_cpu,
-                codec: renderer_settings.video_codec,
-                include_pre_battle: renderer_settings.include_pre_battle,
-                timing: renderer_settings.export_timing,
-            },
+            export,
             egui_ctx: self.tab_state.egui_ctx.clone(),
         }
     }

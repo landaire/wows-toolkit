@@ -84,6 +84,8 @@ pub use map_data::MinimapPos;
 pub use render_scale::RenderScale;
 #[cfg(feature = "rendering")]
 pub use renderer::MinimapRenderer;
+pub use saved_options::ExportSettings;
+pub use saved_options::SavedRender;
 pub use saved_options::SavedRenderOptions;
 pub use timing::ExportSpeed;
 pub use timing::ExportTiming;

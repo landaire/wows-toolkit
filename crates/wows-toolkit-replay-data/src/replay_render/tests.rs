@@ -7,12 +7,14 @@ use std::time::Duration;
 
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::EncoderKind;
+use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::ExportSpeed;
 use wows_minimap_renderer::ExportTiming;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::PlaybackRate;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::RenderScale;
+use wows_minimap_renderer::SavedRender;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::ShipVisibility;
 use wows_minimap_renderer::VideoCodec;
@@ -102,20 +104,16 @@ use crate::replay_render::export::BatchStep;
 use crate::replay_render::export::ExportFrames;
 use crate::replay_render::export::ExportLayers;
 use crate::replay_render::export::ExportProgress;
-use crate::replay_render::export::ExportSettings;
 use crate::replay_render::export::ExportStage;
 use crate::replay_render::export::approximate_speed;
 use crate::replay_render::export::batch_export;
 use crate::replay_render::export::batch_layers;
-use crate::replay_render::export::export_settings_of;
 use crate::replay_render::export::must_use_cpu;
 use crate::replay_render::export::video_length_label;
 use crate::replay_render::hover::advantage_hover;
 use crate::replay_render::hover::consumable_at;
 use crate::replay_render::motion::FrameMotion;
-use crate::replay_render::options::adopt_saved_defaults;
 use crate::replay_render::options::adopt_saved_self_ranges;
-use crate::replay_render::options::batch_options;
 use crate::replay_render::options::defaults_to_save;
 use crate::replay_render::options::playback_options;
 use crate::replay_render::options::playback_options_hidden;
@@ -444,11 +442,7 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
         show_self_radar_range: true,
         ..SavedRenderOptions::default()
     };
-    let mut options = playback_options_hidden();
-    let mut show_dead_ships = true;
-
-    adopt_saved_defaults(&stored, &mut options, &mut show_dead_ships);
-    let export = export_settings_of(&stored);
+    let SavedRender { mut options, show_dead_ships, export, .. } = stored.render(playback_options_hidden());
 
     assert!(!options.show_torpedoes, "a layer turned off stays off");
     assert!(options.show_player_names, "and one turned on comes back on");
@@ -484,10 +478,11 @@ fn the_saved_self_ranges_follow_the_recording_players_ship() {
     track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), drawn_ship(2, "me", 20.0, true)];
     let own = self_player(&track.frames);
     assert_eq!(own.as_deref(), Some("me"));
-    let mut options = playback_options_hidden();
+    let SavedRender { mut options, self_ranges, .. } = stored.render(playback_options_hidden());
+    let ranges = self_ranges.expect("the saved self ranges");
     let mut choices = ShipChoices::new();
 
-    adopt_saved_self_ranges(&stored, own.as_deref(), &mut choices, &mut options);
+    adopt_saved_self_ranges(ranges, own.as_deref(), &mut choices, &mut options);
 
     let mine = choices.ranges_for("me");
     assert!(mine.detection && mine.main_battery, "the saved ranges are on the recording player's ship");
@@ -682,7 +677,7 @@ fn a_batch_draws_the_saved_layers() {
         show_dead_ships: false,
         ..SavedRenderOptions::default()
     };
-    let (options, show_dead_ships) = batch_options(&saved);
+    let SavedRender { options, show_dead_ships, .. } = saved.render(playback_options());
 
     assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
     assert!(!show_dead_ships);
@@ -695,8 +690,8 @@ fn a_batch_draws_the_saved_layers() {
     );
 }
 
-/// A batch with range circles saved on films every ship's, as the egui batch does, and one with
-/// them off films none.
+/// A batch with range circles saved on and no self ranges films every ship's, as the egui batch
+/// does, and one with them off films none.
 #[test]
 fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
     // The last written frame sits a frame's step before the window's end, so the second ship is
@@ -705,25 +700,103 @@ fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
     track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
     track.frames[1] = vec![drawn_ship(2, "me", 20.0, true), range_circle(2, "me")];
     track.frames[2] = track.frames[1].clone();
-    let (on, show_dead_ships) = batch_options(&SavedRenderOptions { show_ship_config: true, ..Default::default() });
+    let on = SavedRenderOptions { show_ship_config: true, ..Default::default() };
+    let SavedRender { options, show_dead_ships, self_ranges, .. } = on.render(playback_options());
 
-    let layers = batch_layers(&on, show_dead_ships, &track);
+    let layers = batch_layers(&options, show_dead_ships, self_ranges, &track);
     assert!(layers.choices.ranges_for("someone").detection && layers.choices.ranges_for("me").detection);
     let frames: Vec<_> =
         ExportFrames::new(Arc::new(track), true, ExportTiming::default(), layers).expect("there are frames").collect();
-    let circles = |frame: &[DrawCommand]| {
-        frame.iter().filter(|command| matches!(command, DrawCommand::ShipConfigCircle { .. })).count()
-    };
-    assert_eq!(circles(&frames[0]), 1, "the first ship's ranges are filmed");
-    assert_eq!(circles(frames.last().expect("a last frame")), 1, "and the second's");
+    assert_eq!(range_circles(&frames[0]), ["someone"], "the first ship's ranges are filmed");
+    assert_eq!(range_circles(frames.last().expect("a last frame")), ["me"], "and the second's");
 
     let mut off_track = self::track(vec![0.0]);
     off_track.frames[0] = vec![drawn_ship(1, "someone", 10.0, false), range_circle(1, "someone")];
-    let (off, show_dead_ships) = batch_options(&SavedRenderOptions::default());
-    let layers = batch_layers(&off, show_dead_ships, &off_track);
+    let SavedRender { options, show_dead_ships, self_ranges, .. } =
+        SavedRenderOptions::default().render(playback_options());
+    let layers = batch_layers(&options, show_dead_ships, self_ranges, &off_track);
     let first = ExportFrames::new(Arc::new(off_track), true, ExportTiming::default(), layers)
         .and_then(|mut frames| frames.next());
-    assert_eq!(first.map(|frame| circles(&frame)), Some(0), "none while they are saved off");
+    assert_eq!(first.map(|frame| range_circles(&frame).len()), Some(0), "none while they are saved off");
+}
+
+/// A default written to the settings store reaches a batch export, the path every render to a
+/// file or the clipboard from the listing and Search takes, while a hover preview of the same
+/// frame paints as it did.
+#[test]
+fn a_saved_default_reaches_a_batch_export_but_not_a_hover_preview() {
+    let frame = vec![
+        drawn_ship(1, "me", 10.0, true),
+        range_circle(1, "me"),
+        drawn_ship(2, "someone", 20.0, false),
+        range_circle(2, "someone"),
+        dead_ship(3, "sunk"),
+        torpedo((30.0, 30.0)),
+    ];
+    let film = |saved: &SavedRenderOptions| {
+        let mut track = track(vec![0.0, 0.5]);
+        track.frames = vec![frame.clone(), frame.clone()];
+        let SavedRender { options, show_dead_ships, self_ranges, export } = saved.render(playback_options());
+        let layers = batch_layers(&options, show_dead_ships, self_ranges, &track);
+        ExportFrames::new(Arc::new(track), export.include_pre_battle, export.timing, layers)
+            .and_then(|mut frames| frames.next())
+            .expect("a first frame")
+    };
+    let is_torpedo = |command: &DrawCommand| matches!(command, DrawCommand::Torpedo { .. });
+    let is_dead = |command: &DrawCommand| matches!(command, DrawCommand::DeadShip { .. });
+
+    let before = film(&SavedRenderOptions { show_ship_config: true, ..SavedRenderOptions::default() });
+    assert!(before.iter().any(is_torpedo) && before.iter().any(is_dead), "the built-in defaults film both");
+    assert_eq!(range_circles(&before), ["me", "someone"], "and every ship's ranges");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a tokio runtime");
+    let pool = runtime.block_on(wows_toolkit_config::test_pool());
+    let changed = SavedRenderOptions {
+        show_torpedoes: false,
+        show_dead_ships: false,
+        show_ship_config: true,
+        show_self_detection_range: true,
+        ..SavedRenderOptions::default()
+    };
+    let json = crate::render_defaults::serialize(&changed).expect("the row serializes");
+    runtime.block_on(crate::render_defaults::save(&pool, &json)).expect("the row is written");
+    let stored = runtime.block_on(crate::render_defaults::load(&pool));
+
+    let after = film(&stored);
+    assert!(!after.iter().any(is_torpedo), "a layer saved off is not filmed");
+    assert!(!after.iter().any(is_dead), "nor are sunk ships once they are saved off");
+    assert_eq!(range_circles(&after), ["me"], "and only the saved self ranges are");
+
+    let options = wows_minimap_renderer::frame_track::paint_options();
+    let previewed: Vec<&DrawCommand> =
+        frame.iter().filter(|command| crate::minimap_preview::preview_paints(command, &options)).collect();
+    assert!(previewed.iter().any(|command| is_torpedo(command)), "a hover preview still paints torpedoes");
+    assert!(previewed.iter().any(|command| is_dead(command)), "and sunk ships");
+}
+
+/// Whose range circles a frame draws, in the order drawn.
+fn range_circles(frame: &[DrawCommand]) -> Vec<&str> {
+    frame
+        .iter()
+        .filter_map(|command| match command {
+            DrawCommand::ShipConfigCircle { player_name, .. } => Some(player_name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A sunk ship at the middle of the map.
+fn dead_ship(entity: u32, player: &str) -> DrawCommand {
+    DrawCommand::DeadShip {
+        entity_id: EntityId::from(entity),
+        pos: MinimapPos { x: 50.0, y: 50.0 },
+        yaw: 0.0,
+        species: None,
+        color: None,
+        is_self: false,
+        player_name: Some(player.to_owned()),
+        ship_name: None,
+    }
 }
 
 fn range_circle(entity: u32, player: &str) -> DrawCommand {

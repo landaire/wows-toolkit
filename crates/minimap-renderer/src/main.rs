@@ -393,7 +393,7 @@ fn main() -> Result<(), Report> {
     let include_pre_battle = config.include_pre_battle;
     let export_timing = config.export_timing()?;
     let mut options = config.into_render_options();
-    options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::SelfOnly;
+    options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::default();
 
     let mut target = ImageTarget::with_side_panel(
         map_image,

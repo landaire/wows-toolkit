@@ -9,13 +9,15 @@ use std::sync::atomic::Ordering;
 
 use rust_i18n::t;
 use wows_minimap_renderer::EncoderKind;
+use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::PlaybackRate;
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::SavedRender;
 use wows_minimap_renderer::SavedRenderOptions;
-use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::VideoEncoder;
 use wows_minimap_renderer::activity_feed;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::error::VideoError;
@@ -29,27 +31,14 @@ use crate::minimap_preview::SharedPreviewRenderer;
 use crate::minimap_preview::layout_for;
 use crate::minimap_preview::renderer_for_replay;
 use crate::replay_render::motion::FrameMotion;
-use crate::replay_render::options::batch_options;
+use crate::replay_render::options::adopt_saved_self_ranges;
 use crate::replay_render::raster::raster_commands;
 use crate::replay_render::ships::ShipChoices;
+use crate::replay_render::ships::self_player;
 use crate::replay_render::ships::track_players;
 use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
 use crate::replay_render::track::bake;
-
-/// What an export is encoded with.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ExportSettings {
-    /// Encode in software even where the GPU could do it.
-    pub prefer_cpu: bool,
-    /// Start the video at the loading screen rather than at the battle.
-    pub include_pre_battle: bool,
-    /// The codec to encode with. `None` lets the encoder pick the best one it
-    /// can, which is what most readers want.
-    pub codec: Option<VideoCodec>,
-    /// How the exported stretch of the battle maps onto the video's length.
-    pub timing: ExportTiming,
-}
 
 /// How far an export has got, in frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,16 +150,6 @@ pub fn must_use_cpu(settings: &ExportSettings, status: &EncoderStatus) -> bool {
     match settings.codec {
         Some(codec) => !status.supports(EncoderKind::Gpu, codec),
         None => false,
-    }
-}
-
-/// What an export is encoded with, as the reader last saved it.
-pub fn export_settings_of(saved: &SavedRenderOptions) -> ExportSettings {
-    ExportSettings {
-        prefer_cpu: saved.prefer_cpu_encoder,
-        codec: saved.video_codec,
-        include_pre_battle: saved.include_pre_battle,
-        timing: saved.export_timing,
     }
 }
 
@@ -412,10 +391,11 @@ pub fn encode_track(
 /// reported and the rest still run, since one unreadable file in a marked set
 /// should not lose the other forty.
 ///
-/// `defaults` is what the reader saved as what a renderer opens with, so a
-/// batch writes what a viewport would have shown rather than the built-in set.
-/// `bake_options` is what each replay is baked with, normally
-/// [`playback_options`](crate::replay_render::options::playback_options).
+/// `defaults` is what the reader saved as what a renderer opens with, read through
+/// [`SavedRenderOptions::render`] as a renderer reads it, so a batch writes what a viewport would
+/// have opened showing rather than the built-in set. `bake_options` is what each replay is baked
+/// with, normally [`playback_options`](crate::replay_render::options::playback_options), and the
+/// saved layers go on top of it.
 /// `report` is told which replay the batch has reached before it is read, and
 /// then how far its encode has got after every frame.
 pub fn batch_export(
@@ -426,8 +406,7 @@ pub fn batch_export(
     bake_options: RenderOptions,
     mut report: impl FnMut(BatchStep),
 ) -> BatchOutcome {
-    let settings = export_settings_of(defaults);
-    let (options, show_dead_ships) = batch_options(defaults);
+    let SavedRender { options, show_dead_ships, self_ranges, export: settings } = defaults.render(bake_options.clone());
     let mut outcome = BatchOutcome::default();
     // A batch runs to the end: nothing asks it to stop part-way.
     let cancel = AtomicBool::new(false);
@@ -459,7 +438,7 @@ pub fn batch_export(
         };
         let output = out_dir.join(suggested_name(&track.video_stem));
 
-        let layers = batch_layers(&options, show_dead_ships, &track);
+        let layers = batch_layers(&options, show_dead_ships, self_ranges, &track);
         let Some(frames) = ExportFrames::new(Arc::new(track), settings.include_pre_battle, settings.timing, layers)
         else {
             outcome.failed.push(path);
@@ -484,12 +463,20 @@ pub fn batch_export(
 /// What a batch draws of `track` under its saved `options`.
 ///
 /// The bake holds every layer it could; which of them are drawn is what the saved defaults
-/// decide, as they do in a viewport. Saved range circles are every ship's, as the egui batch draws
-/// them, since a batch has no per-ship choices of its own.
-pub(crate) fn batch_layers(options: &RenderOptions, show_dead_ships: bool, track: &Track) -> ExportLayers {
+/// decide, as they do in a viewport. Saved self ranges go on the recording player's ship, as a
+/// viewport opens with them. Without them, saved range circles are every ship's, as the egui batch
+/// draws them: the per-ship choices that narrow them in a viewport are made by hand and not saved.
+pub(crate) fn batch_layers(
+    options: &RenderOptions,
+    show_dead_ships: bool,
+    self_ranges: Option<ShipConfigFilter>,
+    track: &Track,
+) -> ExportLayers {
     let mut options = options.clone();
     let mut choices = ShipChoices::new();
-    if options.show_ship_config {
+    if let Some(ranges) = self_ranges {
+        adopt_saved_self_ranges(ranges, self_player(&track.frames).as_deref(), &mut choices, &mut options);
+    } else if options.show_ship_config {
         choices.all_ranges(&track_players(&track.frames), &mut options);
     }
 

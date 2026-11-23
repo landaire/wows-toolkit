@@ -222,19 +222,28 @@ impl ShipConfigFilter {
 /// The callback in `Filtered` receives an entity ID and returns:
 /// - `Some(filter)` to show circles matching the filter for that entity
 /// - `None` to hide all circles for that entity
-#[derive(Default)]
 pub enum ShipConfigVisibility {
-    /// Only show the replay owner's config circles (all range types). Default.
-    #[default]
-    SelfOnly,
+    /// Only the replay owner's circles, of the kinds the filter allows.
+    SelfOnly(ShipConfigFilter),
     /// Use a callback to determine per-ship visibility and per-range filtering.
     /// The callback receives the entity ID and returns an optional filter.
     Filtered(Arc<dyn Fn(EntityId) -> Option<ShipConfigFilter> + Send + Sync>),
 }
 
+impl Default for ShipConfigVisibility {
+    /// Every one of the replay owner's circles.
+    fn default() -> Self {
+        Self::SelfOnly(ShipConfigFilter::all_enabled())
+    }
+}
+
 impl PartialEq for ShipConfigVisibility {
     fn eq(&self, other: &Self) -> bool {
-        matches!((self, other), (Self::SelfOnly, Self::SelfOnly) | (Self::Filtered(_), Self::Filtered(_)))
+        match (self, other) {
+            (Self::SelfOnly(mine), Self::SelfOnly(theirs)) => mine == theirs,
+            (Self::Filtered(_), Self::Filtered(_)) => true,
+            _ => false,
+        }
     }
 }
 
@@ -242,13 +251,7 @@ impl ShipConfigVisibility {
     /// Returns the filter for a ship, or None if circles should be hidden.
     pub fn filter_for(&self, is_self: bool, entity_id: EntityId) -> Option<ShipConfigFilter> {
         match self {
-            ShipConfigVisibility::SelfOnly => {
-                if is_self {
-                    Some(ShipConfigFilter::all_enabled())
-                } else {
-                    None
-                }
-            }
+            ShipConfigVisibility::SelfOnly(filter) => is_self.then_some(*filter),
             ShipConfigVisibility::Filtered(cb) => cb(entity_id),
         }
     }
@@ -257,7 +260,7 @@ impl ShipConfigVisibility {
 impl Clone for ShipConfigVisibility {
     fn clone(&self) -> Self {
         match self {
-            Self::SelfOnly => Self::SelfOnly,
+            Self::SelfOnly(filter) => Self::SelfOnly(*filter),
             Self::Filtered(cb) => Self::Filtered(Arc::clone(cb)),
         }
     }
@@ -266,7 +269,7 @@ impl Clone for ShipConfigVisibility {
 impl std::fmt::Debug for ShipConfigVisibility {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SelfOnly => write!(f, "SelfOnly"),
+            Self::SelfOnly(filter) => f.debug_tuple("SelfOnly").field(filter).finish(),
             Self::Filtered(_) => write!(f, "Filtered(<callback>)"),
         }
     }

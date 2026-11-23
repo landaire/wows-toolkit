@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::draw_command::ShipConfigVisibility;
 
-use crate::replay_render::export::ExportSettings;
 use crate::replay_render::ships::ShipChoices;
 
 /// What a playback viewport draws when it opens.
@@ -52,15 +52,6 @@ pub fn playback_options() -> RenderOptions {
     }
 }
 
-/// What a batch draws of what it baked, and whether dead ships are among it:
-/// the reader's saved layers.
-pub fn batch_options(defaults: &SavedRenderOptions) -> (RenderOptions, bool) {
-    let mut options = playback_options();
-    defaults.apply_to(&mut options);
-
-    (options, defaults.show_dead_ships)
-}
-
 /// Applies what the reader last saved as the defaults to a viewport's
 /// options and its dead-ship flag.
 ///
@@ -79,22 +70,18 @@ pub fn open_merged_on_rosters(options: &mut RenderOptions) {
     options.show_team_rosters = true;
 }
 
-/// Puts the saved self ranges on the recording player's ship, `self_player`, which is where the
+/// Puts the saved self `ranges` on the recording player's ship, `self_player`, which is where the
 /// egui renderer's saved self range filter applies. Nothing changes for a recording with no ship
 /// of its own.
 pub fn adopt_saved_self_ranges(
-    saved: &SavedRenderOptions,
+    ranges: ShipConfigFilter,
     self_player: Option<&str>,
     choices: &mut ShipChoices,
     options: &mut RenderOptions,
 ) {
     let Some(player) = self_player else { return };
-    let filter = saved.self_range_filter();
-    if !filter.any_enabled() {
-        return;
-    }
 
-    choices.set_ranges_for(player, |ranges| *ranges = filter, options);
+    choices.set_ranges_for(player, |chosen| *chosen = ranges, options);
 }
 
 /// What a viewport showing `options` saves as the defaults, over what is

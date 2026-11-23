@@ -15,6 +15,7 @@ use wows_battle_world::view::BattleView;
 use wows_replays::types::GameClock;
 
 use crate::codec::VideoCodec;
+use crate::draw_command::DrawCommand;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
 use crate::encoder::Mode;
@@ -88,6 +89,9 @@ pub struct VideoEncoder {
     progress_callback: Option<Box<dyn Fn(RenderProgress)>>,
     canvas_width: u32,
     canvas_height: u32,
+    /// Whether sunk ships are drawn. The renderer emits them regardless, as
+    /// a viewer filters them at paint time.
+    show_dead_ships: bool,
 }
 
 impl VideoEncoder {
@@ -125,6 +129,7 @@ impl VideoEncoder {
             progress_callback: None,
             canvas_width,
             canvas_height,
+            show_dead_ships: true,
         }
     }
 
@@ -172,6 +177,21 @@ impl VideoEncoder {
 
     pub fn set_progress_callback<F: Fn(RenderProgress) + 'static>(&mut self, callback: F) {
         self.progress_callback = Some(Box::new(callback));
+    }
+
+    /// Whether sunk ships are drawn into the video. They are by default.
+    pub fn set_show_dead_ships(&mut self, show: bool) {
+        self.show_dead_ships = show;
+    }
+
+    /// The commands one frame draws from the battle state as it stands.
+    fn frame_commands(&self, controller: &BattleView<'_>, renderer: &mut MinimapRenderer) -> Vec<DrawCommand> {
+        let mut commands = renderer.draw_frame(controller);
+        if !self.show_dead_ships {
+            commands.retain(|command| !matches!(command, DrawCommand::DeadShip { .. }));
+        }
+
+        commands
     }
 
     /// How many frames show a game clock at or before `clock`.
@@ -262,7 +282,7 @@ impl VideoEncoder {
             renderer.populate_players(controller);
             renderer.update_squadron_info(controller);
 
-            let commands = renderer.draw_frame(controller);
+            let commands = self.frame_commands(controller, renderer);
 
             if self.dump_all_mode {
                 target.begin_frame();
@@ -442,7 +462,7 @@ impl VideoEncoder {
         let mut writer = BufWriter::new(stdout().lock());
 
         if self.dump_all_mode {
-            let commands = renderer.draw_frame(controller);
+            let commands = self.frame_commands(controller, renderer);
             target.begin_frame();
             for cmd in &commands {
                 target.draw(cmd);
@@ -470,7 +490,7 @@ impl VideoEncoder {
 
         if let Some(dump_mode) = &self.dump_mode {
             if matches!(dump_mode, DumpMode::Last) {
-                let commands = renderer.draw_frame(controller);
+                let commands = self.frame_commands(controller, renderer);
                 target.begin_frame();
                 for cmd in &commands {
                     target.draw(cmd);

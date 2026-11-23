@@ -20,6 +20,9 @@ const fn yes() -> bool {
 ///
 /// Every field carries a serde default so a row written by an older build still
 /// loads, with the layers it did not know about at their own defaults.
+///
+/// A render made from this row, to a viewport, a file or the clipboard, reads
+/// it through [`SavedRenderOptions::render`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedRenderOptions {
     #[serde(default = "yes")]
@@ -179,6 +182,29 @@ impl SavedRenderOptions {
         self.self_range_filter().any_enabled()
     }
 
+    /// Everything this row says about a render: `base` with the saved layers on it, the dead-ship
+    /// flag, the self ranges and the export settings.
+    ///
+    /// The one place a render made from the saved row reads it, so a field added here reaches
+    /// every such render. Callers destructure the result in full for the same reason.
+    pub fn render(&self, base: RenderOptions) -> SavedRender {
+        let mut options = base;
+        self.apply_to(&mut options);
+        let self_ranges = self.self_range_filter();
+
+        SavedRender {
+            options,
+            show_dead_ships: self.show_dead_ships,
+            self_ranges: self_ranges.any_enabled().then_some(self_ranges),
+            export: ExportSettings {
+                prefer_cpu: self.prefer_cpu_encoder,
+                include_pre_battle: self.include_pre_battle,
+                codec: self.video_codec,
+                timing: self.export_timing,
+            },
+        }
+    }
+
     /// Writes these layers onto `options`.
     ///
     /// `show_dead_ships` has no field in [`RenderOptions`] and is read from
@@ -250,6 +276,33 @@ impl SavedRenderOptions {
         self.show_stats_panel = options.show_stats_panel;
         self.show_team_rosters = options.show_team_rosters;
     }
+}
+
+/// What an export is encoded with.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ExportSettings {
+    /// Encode in software even where the GPU could do it.
+    pub prefer_cpu: bool,
+    /// Start the video at the loading screen rather than at the battle.
+    pub include_pre_battle: bool,
+    /// The codec to encode with. `None` lets the encoder pick the best one it
+    /// can, which is what most readers want.
+    pub codec: Option<VideoCodec>,
+    /// How the exported stretch of the battle maps onto the video's length.
+    pub timing: ExportTiming,
+}
+
+/// A render as the saved row describes it. See [`SavedRenderOptions::render`].
+#[derive(Clone, Debug)]
+pub struct SavedRender {
+    pub options: RenderOptions,
+    /// Whether sunk ships are drawn. Not one of [`RenderOptions`]: it gates a
+    /// command rather than a layer.
+    pub show_dead_ships: bool,
+    /// The range circles the recording player's ship shows. `None` when the
+    /// reader saved none.
+    pub self_ranges: Option<ShipConfigFilter>,
+    pub export: ExportSettings,
 }
 
 /// Reads the stored codec name, treating one this build does not know as no

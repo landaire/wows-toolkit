@@ -5,11 +5,16 @@ use std::sync::atomic::Ordering;
 
 use parking_lot::Mutex;
 use rootcause::report;
+use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::RenderProgress;
+use wows_minimap_renderer::SavedRender;
+use wows_minimap_renderer::SavedRenderOptions;
+use wows_minimap_renderer::ShipConfigFilter;
+use wows_minimap_renderer::ShipConfigVisibility;
 use wows_minimap_renderer::battle_scans::BattleScans;
+use wows_minimap_renderer::encoder::EncoderStatus;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
-use wows_minimap_renderer::timing::ExportTiming;
 use wows_minimap_renderer::timing::ExportWindow;
 
 use wows_battle_world::merged::MergedReplays;
@@ -25,6 +30,13 @@ use super::VideoExportData;
 use crate::data::wows_data::BuildDataCache;
 use crate::data::wows_data::SharedBuildData;
 
+/// What an export draws: the layers, and whether sunk ships are among them.
+#[derive(Clone, Debug)]
+pub struct DrawnLayers {
+    pub options: RenderOptions,
+    pub show_dead_ships: bool,
+}
+
 /// Execute a pending video export action.
 pub(super) fn execute_video_export(
     action: PendingVideoExport,
@@ -37,55 +49,34 @@ pub(super) fn execute_video_export(
     *video_export_progress.lock() = None;
 
     match action {
-        PendingVideoExport::SaveToFile {
-            output_path,
-            options,
-            prefer_cpu,
-            codec,
-            encoder_config,
-            include_pre_battle,
-            timing,
-        } => {
+        PendingVideoExport::SaveToFile { output_path, layers, export, encoder_config } => {
             save_as_video(
                 output_path,
                 video_export_data.raw_meta.clone(),
                 video_export_data.packet_data.clone(),
                 video_export_data.alt_replays.clone(),
                 video_export_data.map_name.clone(),
-                options,
+                layers,
                 video_export_data.wows_data.clone(),
                 Arc::clone(&video_export_data.asset_cache),
                 Arc::clone(toasts),
                 Arc::clone(video_exporting),
                 Arc::clone(video_export_progress),
-                prefer_cpu,
-                codec,
+                export,
                 encoder_config,
-                include_pre_battle,
-                timing,
             );
         }
-        PendingVideoExport::CopyToClipboard {
-            options,
-            prefer_cpu,
-            codec,
-            encoder_config,
-            include_pre_battle,
-            timing,
-        } => {
+        PendingVideoExport::CopyToClipboard { layers, export, encoder_config } => {
             let file_name = format!("{}.mp4", video_export_data.video_file_stem);
             render_video_to_clipboard(
                 file_name,
                 Arc::clone(video_export_data),
-                options,
+                layers,
                 Arc::clone(toasts),
                 Arc::clone(video_exporting),
                 Arc::clone(video_export_progress),
-                prefer_cpu,
-                codec,
+                export,
                 encoder_config,
-                include_pre_battle,
-                timing,
             );
         }
     }
@@ -100,17 +91,14 @@ pub(super) fn save_as_video(
     packet_data: Vec<u8>,
     alt_replays: Vec<super::AltReplayBytes>,
     map_name: String,
-    options: RenderOptions,
+    layers: DrawnLayers,
     wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     video_exporting: Arc<AtomicBool>,
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
-    prefer_cpu: bool,
-    codec: Option<wows_minimap_renderer::VideoCodec>,
+    export: ExportSettings,
     encoder_config: wows_minimap_renderer::EncoderConfig,
-    include_pre_battle: bool,
-    timing: ExportTiming,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -121,15 +109,12 @@ pub(super) fn save_as_video(
             &packet_data,
             &alt_replays,
             &map_name,
-            options,
+            layers,
             &wows_data,
             &asset_cache,
             &video_export_progress,
-            prefer_cpu,
-            codec,
+            export,
             encoder_config,
-            include_pre_battle,
-            timing,
         );
 
         match result {
@@ -151,15 +136,12 @@ pub(super) fn save_as_video(
 pub(super) fn render_video_to_clipboard(
     file_name: String,
     export_data: Arc<VideoExportData>,
-    options: RenderOptions,
+    layers: DrawnLayers,
     toasts: crate::tab_state::SharedToasts,
     video_exporting: Arc<AtomicBool>,
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
-    prefer_cpu: bool,
-    codec: Option<wows_minimap_renderer::VideoCodec>,
+    export: ExportSettings,
     encoder_config: wows_minimap_renderer::EncoderConfig,
-    include_pre_battle: bool,
-    timing: ExportTiming,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -182,15 +164,12 @@ pub(super) fn render_video_to_clipboard(
             &export_data.packet_data,
             &export_data.alt_replays,
             &export_data.map_name,
-            options,
+            layers,
             &export_data.wows_data,
             &export_data.asset_cache,
             &video_export_progress,
-            prefer_cpu,
-            codec,
+            export,
             encoder_config,
-            include_pre_battle,
-            timing,
         );
 
         match result {
@@ -280,23 +259,38 @@ pub fn replay_render_input(path: &std::path::Path, build_cache: &BuildDataCache)
     })
 }
 
-/// Encoding/output preferences shared by the batch render entry points.
-#[derive(Clone, Copy)]
-pub struct BatchEncodeOptions {
-    pub prefer_cpu: bool,
-    pub codec: Option<wows_minimap_renderer::VideoCodec>,
-    pub include_pre_battle: bool,
-    pub timing: ExportTiming,
-}
-
 /// Everything a batch render needs beyond the replay list and destination.
 pub struct BatchRenderContext {
     pub build_cache: BuildDataCache,
-    pub options: RenderOptions,
+    pub layers: DrawnLayers,
     pub asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     pub toasts: crate::tab_state::SharedToasts,
-    pub encode: BatchEncodeOptions,
+    pub export: ExportSettings,
     pub egui_ctx: egui::Context,
+}
+
+/// What a batch draws and encodes: the saved renderer defaults, read through
+/// [`SavedRenderOptions::render`] as a viewer opening reads them, with the CPU preference
+/// resolved against what this machine can encode.
+///
+/// A batch has no per-ship choices, which are made by hand in a viewer and not saved. The saved
+/// self ranges go on the recording player's ship, as a viewer opens with them; without them the
+/// range layer is every ship's.
+pub fn batch_render_settings(saved: &SavedRenderOptions, status: &EncoderStatus) -> (DrawnLayers, ExportSettings) {
+    let SavedRender { mut options, show_dead_ships, self_ranges, mut export } = saved.render(RenderOptions::default());
+    match self_ranges {
+        Some(ranges) => {
+            options.show_ship_config = true;
+            options.ship_config_visibility = ShipConfigVisibility::SelfOnly(ranges);
+        }
+        None => {
+            options.ship_config_visibility =
+                ShipConfigVisibility::Filtered(Arc::new(|_| Some(ShipConfigFilter::all_enabled())));
+        }
+    }
+    export.prefer_cpu = super::resolve_prefer_cpu(export.prefer_cpu, export.codec, status);
+
+    (DrawnLayers { options, show_dead_ships }, export)
 }
 
 /// Shared helper: render a list of replays sequentially, updating progress.
@@ -366,15 +360,12 @@ fn render_batch(
             &replay.packet_data,
             &[], // batch rendering doesn't propagate per-replay merge state
             &replay.map_name,
-            ctx.options.clone(),
+            ctx.layers.clone(),
             &replay.wows_data,
             &ctx.asset_cache,
             &per_replay_progress,
-            ctx.encode.prefer_cpu,
-            ctx.encode.codec,
+            ctx.export,
             wows_minimap_renderer::EncoderConfig::default(),
-            ctx.encode.include_pre_battle,
-            ctx.encode.timing,
         );
 
         stop_flag.store(true, Ordering::Relaxed);
@@ -475,18 +466,18 @@ pub(super) fn render_video_blocking(
     packet_data: &[u8],
     alt_replays: &[super::AltReplayBytes],
     map_name: &str,
-    options: RenderOptions,
+    layers: DrawnLayers,
     wows_data: &SharedBuildData,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<Option<RenderProgress>>>,
-    prefer_cpu: bool,
-    codec: Option<wows_minimap_renderer::VideoCodec>,
+    export: ExportSettings,
     encoder_config: wows_minimap_renderer::EncoderConfig,
-    include_pre_battle: bool,
-    timing: ExportTiming,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
+
+    let DrawnLayers { options, show_dead_ships } = layers;
+    let ExportSettings { prefer_cpu, include_pre_battle, codec, timing } = export;
 
     // Get game metadata and load assets for the software renderer
     let (vfs, version, game_metadata, game_constants, dump_dir) = {
@@ -654,6 +645,7 @@ pub(super) fn render_video_blocking(
         None => wows_minimap_renderer::video::CodecChoice::Auto,
     });
     encoder.set_encoder_config(encoder_config);
+    encoder.set_show_dead_ships(show_dead_ships);
     {
         let progress = Arc::clone(progress);
         encoder.set_progress_callback(move |p| {
@@ -693,4 +685,73 @@ pub(super) fn render_video_blocking(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_minimap_renderer::ExportSettings;
+    use wows_minimap_renderer::SavedRenderOptions;
+    use wows_minimap_renderer::ShipConfigFilter;
+    use wows_minimap_renderer::VideoCodec;
+    use wows_minimap_renderer::encoder::CodecSupport;
+    use wows_minimap_renderer::encoder::EncoderStatus;
+    use wows_replays::types::EntityId;
+
+    use super::batch_render_settings;
+
+    /// A machine whose GPU encodes H.264 and nothing else.
+    fn h264_gpu() -> EncoderStatus {
+        let mut status = EncoderStatus {
+            gpu_adapter_name: Some("test".into()),
+            gpu_error: None,
+            gpu_codecs: Default::default(),
+            cpu_codecs: Default::default(),
+        };
+        status.gpu_codecs.insert(VideoCodec::H264, CodecSupport::Supported);
+        status.cpu_codecs.insert(VideoCodec::Av1, CodecSupport::Supported);
+
+        status
+    }
+
+    /// A batch from the listing draws and encodes what the renderer saved: a layer and sunk ships
+    /// turned off stay off, the saved self ranges are the recording player's alone, and the
+    /// export settings come through, a codec the GPU cannot encode falling back to software.
+    #[test]
+    fn a_batch_renders_with_the_saved_renderer_defaults() {
+        let saved = SavedRenderOptions {
+            show_torpedoes: false,
+            show_dead_ships: false,
+            show_self_detection_range: true,
+            include_pre_battle: true,
+            video_codec: Some(VideoCodec::Av1),
+            ..SavedRenderOptions::default()
+        };
+
+        let (layers, export) = batch_render_settings(&saved, &h264_gpu());
+
+        assert!(!layers.options.show_torpedoes, "a layer saved off is not filmed");
+        assert!(!layers.show_dead_ships, "nor are sunk ships");
+        assert!(layers.options.show_ship_config, "the saved self ranges are drawn");
+        let visibility = &layers.options.ship_config_visibility;
+        let detection_only = ShipConfigFilter { detection: true, ..ShipConfigFilter::default() };
+        assert_eq!(visibility.filter_for(true, EntityId::from(1u32)), Some(detection_only), "on the recording ship");
+        assert_eq!(visibility.filter_for(false, EntityId::from(2u32)), None, "and nobody else's");
+        let expected = ExportSettings {
+            prefer_cpu: true,
+            include_pre_battle: true,
+            codec: Some(VideoCodec::Av1),
+            timing: saved.export_timing,
+        };
+        assert_eq!(export, expected);
+
+        let every_ship = SavedRenderOptions { show_ship_config: true, ..SavedRenderOptions::default() };
+        let (layers, export) = batch_render_settings(&every_ship, &h264_gpu());
+        let visibility = &layers.options.ship_config_visibility;
+        assert_eq!(
+            visibility.filter_for(false, EntityId::from(2u32)),
+            Some(ShipConfigFilter::all_enabled()),
+            "without self ranges the range layer is every ship's"
+        );
+        assert!(!export.prefer_cpu, "the GPU encodes the codec it would pick");
+    }
 }

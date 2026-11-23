@@ -19,6 +19,7 @@ use parking_lot::Mutex;
 use crate::LocalizedTextResolver;
 use crate::tab_state::WindowSettingsEguiExt;
 use wows_minimap_renderer::CANVAS_HEIGHT;
+use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
@@ -972,21 +973,15 @@ enum PendingVideoExport {
     /// Save to a user-chosen file path.
     SaveToFile {
         output_path: String,
-        options: RenderOptions,
-        prefer_cpu: bool,
-        codec: Option<wows_minimap_renderer::VideoCodec>,
+        layers: DrawnLayers,
+        export: ExportSettings,
         encoder_config: wows_minimap_renderer::EncoderConfig,
-        include_pre_battle: bool,
-        timing: ExportTiming,
     },
     /// Render to a temporary file and copy to clipboard.
     CopyToClipboard {
-        options: RenderOptions,
-        prefer_cpu: bool,
-        codec: Option<wows_minimap_renderer::VideoCodec>,
+        layers: DrawnLayers,
+        export: ExportSettings,
         encoder_config: wows_minimap_renderer::EncoderConfig,
-        include_pre_battle: bool,
-        timing: ExportTiming,
     },
 }
 
@@ -1027,8 +1022,8 @@ pub struct ReplayRendererViewer {
     pub suppress_gpu_warning: Arc<AtomicBool>,
     /// Active GPU encoder warning dialog, if any.
     gpu_encoder_warning: Arc<Mutex<Option<GpuEncoderWarning>>>,
-    /// Save dialog for "Save as video", carrying the options captured on click.
-    video_save_dialog: Arc<Mutex<FileDialogSlot<RenderOptions>>>,
+    /// Save dialog for "Save as video", carrying the layers captured on click.
+    video_save_dialog: Arc<Mutex<FileDialogSlot<DrawnLayers>>>,
     /// User preference: prefer CPU (software) encoder for video export.
     prefer_cpu_encoder: Arc<AtomicBool>,
     /// User preference: codec for video export. `None` means "best available".
@@ -1392,8 +1387,9 @@ mod playback;
 use playback::playback_thread;
 
 mod video_export;
-pub use video_export::BatchEncodeOptions;
 pub use video_export::BatchRenderContext;
+use video_export::DrawnLayers;
+pub use video_export::batch_render_settings;
 pub use video_export::batch_render_to_clipboard;
 pub use video_export::batch_render_to_folder;
 use video_export::execute_video_export;
@@ -2941,7 +2937,7 @@ impl ReplayRendererViewer {
                                                         &ctx,
                                                         DialogKind::SaveFile,
                                                         dialog,
-                                                        opts,
+                                                        DrawnLayers { options: opts, show_dead_ships },
                                                     );
                                                 }
                                             }
@@ -2982,13 +2978,16 @@ impl ReplayRendererViewer {
                                                         codec_pref,
                                                         &status,
                                                     );
-                                                    let action = PendingVideoExport::CopyToClipboard {
-                                                        options: opts,
+                                                    let export = ExportSettings {
                                                         prefer_cpu,
-                                                        codec: codec_pref,
-                                                        encoder_config: wows_minimap_renderer::EncoderConfig::default(),
                                                         include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
+                                                        codec: codec_pref,
                                                         timing: *export_timing.lock(),
+                                                    };
+                                                    let action = PendingVideoExport::CopyToClipboard {
+                                                        layers: DrawnLayers { options: opts, show_dead_ships },
+                                                        export,
+                                                        encoder_config: wows_minimap_renderer::EncoderConfig::default(),
                                                     };
                                                     if prefer_cpu
                                                         || status.gpu_available()
@@ -3574,7 +3573,7 @@ impl ReplayRendererViewer {
                 {
                     tracing::warn!(path = %path.display(), "video export already active; dropping picked save path");
                     toasts.lock().warning("Another video export is already running");
-                } else if let Some((opts, path)) = picked_video_path
+                } else if let Some((layers, path)) = picked_video_path
                     && let Some(video_export_data) = &video_export_data
                 {
                     let status = cached_encoder_status(&ctx);
@@ -3583,12 +3582,14 @@ impl ReplayRendererViewer {
                         resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
                     let action = PendingVideoExport::SaveToFile {
                         output_path: path.to_string_lossy().to_string(),
-                        options: opts,
-                        prefer_cpu,
-                        codec: codec_pref,
+                        layers,
+                        export: ExportSettings {
+                            prefer_cpu,
+                            include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
+                            codec: codec_pref,
+                            timing: *export_timing.lock(),
+                        },
                         encoder_config: wows_minimap_renderer::EncoderConfig::default(),
-                        include_pre_battle: include_pre_battle.load(Ordering::Relaxed),
-                        timing: *export_timing.lock(),
                     };
                     if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                         execute_video_export(

@@ -872,12 +872,19 @@ fn rasterise(
         if cancel.load(Ordering::Relaxed) {
             return Err(PreviewError::Cancelled);
         }
-        // Dead ships are shown, as the egui popup shows them.
-        let painted = commands.iter().filter(|command| should_draw_command(command, &options, true));
+        let painted = commands.iter().filter(|command| preview_paints(command, &options));
         let canvas = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).render(painted);
         on_frame(to_frame(&canvas, edge));
     }
     Ok(())
+}
+
+/// Whether a hover preview painting through `options`, the paint preset, draws `command`.
+///
+/// Dead ships are shown, as the egui popup shows them. The reader's saved renderer defaults play
+/// no part: a preview is a glance at the battle rather than a render the reader set up.
+pub(crate) fn preview_paints(command: &DrawCommand, options: &RenderOptions) -> bool {
+    should_draw_command(command, options, true)
 }
 
 /// The map `renderer` draws, with nothing over it, as a track of one frame.

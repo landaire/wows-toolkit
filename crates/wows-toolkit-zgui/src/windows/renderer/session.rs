@@ -13,7 +13,9 @@ use landaire_ui::ToastKey;
 use landaire_ui::Toasts;
 use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
+use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::SavedRender;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::drawing::DrawnRegion;
@@ -50,12 +52,10 @@ use wows_toolkit_replay_data::replay_render::collab::track_silhouette;
 use wows_toolkit_replay_data::replay_render::export::ExportFrames;
 use wows_toolkit_replay_data::replay_render::export::ExportLayers;
 use wows_toolkit_replay_data::replay_render::export::ExportProgress;
-use wows_toolkit_replay_data::replay_render::export::ExportSettings;
 use wows_toolkit_replay_data::replay_render::export::ExportStage;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
 use wows_toolkit_replay_data::replay_render::export::encode_track;
 use wows_toolkit_replay_data::replay_render::export::encoder_status;
-use wows_toolkit_replay_data::replay_render::export::export_settings_of;
 use wows_toolkit_replay_data::replay_render::export::must_use_cpu;
 use wows_toolkit_replay_data::replay_render::export::suggested_name;
 use wows_toolkit_replay_data::replay_render::export::temporary_output;
@@ -63,7 +63,6 @@ use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
 use wows_toolkit_replay_data::replay_render::hover::consumable_at;
 use wows_toolkit_replay_data::replay_render::hover::hover_changed;
 use wows_toolkit_replay_data::replay_render::motion::FrameMotion;
-use wows_toolkit_replay_data::replay_render::options::adopt_saved_defaults;
 use wows_toolkit_replay_data::replay_render::options::adopt_saved_self_ranges;
 use wows_toolkit_replay_data::replay_render::options::defaults_to_save;
 use wows_toolkit_replay_data::replay_render::options::open_merged_on_rosters;
@@ -659,15 +658,20 @@ impl RendererSession {
     /// Opens showing what the reader last saved as the defaults, and a merged replay on the
     /// rosters, before the first frame of `track` is drawn.
     fn adopt_saved_defaults(self, saved: &SavedRenderOptions, track: &Track, merged: bool) {
-        self.export.update(|export| export.settings = export_settings_of(saved));
+        let shown = self.layers.with_untracked(|layers| layers.options.clone());
+        let SavedRender { options, show_dead_ships, self_ranges, export } = saved.render(shown);
+        self.export.update(|state| state.settings = export);
         self.set_layers(|layers| {
-            adopt_saved_defaults(saved, &mut layers.options, &mut layers.show_dead_ships);
+            layers.options = options;
+            layers.show_dead_ships = show_dead_ships;
             if merged {
                 open_merged_on_rosters(&mut layers.options);
             }
         });
+        let Some(ranges) = self_ranges else { return };
+
         let own = self_player(&track.frames);
-        self.change_choices(|choices, _, options| adopt_saved_self_ranges(saved, own.as_deref(), choices, options));
+        self.change_choices(|choices, _, options| adopt_saved_self_ranges(ranges, own.as_deref(), choices, options));
     }
 
     /// Writes what this viewport shows back as what a viewport opens with. Resolves to whether it

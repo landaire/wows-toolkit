@@ -269,7 +269,7 @@ fn export(args: &Args) -> Result<(), ExportError> {
     // ranges rather than every ship's, which would bury the map.
     options.show_team_rosters = false;
     options.show_stats_panel = false;
-    options.ship_config_visibility = ShipConfigVisibility::SelfOnly;
+    options.ship_config_visibility = ShipConfigVisibility::default();
     options.player_names = NameDisplay::Pseudonym;
     options.show_chat = false;
 
