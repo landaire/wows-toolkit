@@ -132,6 +132,7 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Direct total side armor questions to full citadel plate stacks
 - *(toolkit)* Offer beta updates only to beta builds, and on Windows only once the release's archive is uploaded
 - *(wows-query)* Describe torpedo damage falloff as linear between distanceOfDamage points
+- *(build)* Link the macOS app against the system libiconv rather than a Nix store copy, so it starts on a Mac without Nix
 
 ### Performance
 

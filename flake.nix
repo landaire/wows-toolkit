@@ -140,6 +140,21 @@
               buildInputs = guiBuildInputs;
               meta.mainProgram = "wows_toolkit";
             });
+
+          # Rust's libc links libiconv on macOS. nixpkgs removes the SDK's stub
+          # for it in favor of a store build, which a binary linked against it
+          # loads from its store path. The SDK's own stubs name /usr/lib, which
+          # every Mac has. libcharset is a re-export of libiconv.
+          macosSystemLibStubs = stdenvNoCC.mkDerivation {
+            pname = "macos-system-lib-stubs";
+            inherit (apple-sdk) version src;
+            dontConfigure = true;
+            dontBuild = true;
+            installPhase = ''
+              mkdir -p $out/lib
+              cp -d usr/lib/libiconv*.tbd usr/lib/libcharset*.tbd $out/lib
+            '';
+          };
         in {
           wows-toolkit =
             if stdenv.hostPlatform.isLinux
@@ -169,7 +184,6 @@
               nasm
               bash
               coreutils
-              libiconv
               python3
               # Unpacking the downloaded crate archives. GNU tar spawns its
               # decompressor as a separate process, so each one is needed too.
@@ -182,7 +196,8 @@
               # wt-web's site: wasm-bindgen and wasm-opt.
               wasmBindgenCli
               binaryen
-            ];
+            ]
+            ++ lib.optionals stdenv.hostPlatform.isDarwin [macosSystemLibStubs];
             nativeBuildInputs = [makeWrapper];
             # The wrapper's hardening flags (e.g. -fzero-call-used-regs) are
             # invalid for wasm32, so C compiled for wt-web uses the unwrapped

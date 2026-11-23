@@ -330,7 +330,14 @@ jobs:
           mkdir -p dist
           cp "$rel" dist/wows_toolkit
           chmod +w dist/wows_toolkit
-          otool -L dist/wows_toolkit | head -20
+          otool -L dist/wows_toolkit
+          # A Mac has only what is under /usr/lib and /System/Library. Any other
+          # library, such as one in the Nix store, is missing where the app runs.
+          foreign=$(otool -L dist/wows_toolkit | tail -n +2 | awk '{ print $1 }' | grep -vE '^(/usr/lib/|/System/Library/)' || true)
+          if [ -n "$foreign" ]; then
+            echo "::error::wows_toolkit loads libraries that macOS does not provide: $foreign"
+            exit 1
+          fi
           # The binary is staged, and the runner does not have room for
           # buck-out plus the nix store plus a disk image.
           df -h / | tail -1
