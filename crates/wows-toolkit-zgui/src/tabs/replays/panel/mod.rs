@@ -474,7 +474,7 @@ impl PanelControl {
     pub fn read_game(self) -> ReadGame {
         self.state.with_untracked(|state| match state {
             LoadState::Loading => ReadGame::Reading,
-            LoadState::Loaded(loaded) => ReadGame::Landed(loaded.session_game.clone()),
+            LoadState::Loaded(loaded) => ReadGame::Landed(loaded.session_game.clone().map(Box::new)),
             LoadState::Failed(_) => ReadGame::Landed(None),
         })
     }
@@ -538,7 +538,7 @@ pub enum ReadGame {
     /// No read has landed yet.
     Reading,
     /// The latest read's game; `None` when the read failed or found no game to count.
-    Landed(Option<PerGameStat>),
+    Landed(Option<Box<PerGameStat>>),
 }
 
 /// The recording player's ship, as its tab marks it.

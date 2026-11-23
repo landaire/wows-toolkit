@@ -872,12 +872,6 @@ pub(super) fn StatPicker(
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let open = RwSignal::new_local(false);
-    // Keyed by the translated name, so the options and what they are searched by follow the
-    // language.
-    let entries = move || {
-        locale.track();
-        stats.get().into_iter().map(|stat| (stat, stat.label())).collect::<Vec<(ChartableStat, String)>>()
-    };
     let label = locale.text(label);
     let option = move |(stat, name): (ChartableStat, String)| {
         let choose = UnsyncCallback::new(move |()| {
@@ -904,7 +898,12 @@ pub(super) fn StatPicker(
                         CommandInput(placeholder = t!("ui.stats.search_statistics").into_owned(), label = label())
                     }}
                     CommandList(label = label()) {
-                        for entry in move || entries(), key = |entry: &(ChartableStat, String)| entry.1.clone() {
+                        // Keyed by the translated name, so the options and what they are searched
+                        // by follow the language.
+                        for entry in move || {
+                            locale.track();
+                            stats.get().into_iter().map(|stat| (stat, stat.label())).collect::<Vec<(ChartableStat, String)>>()
+                        }, key = |entry: &(ChartableStat, String)| entry.1.clone() {
                             {option(entry)}
                         }
                         CommandEmpty {{tr(locale, || t!("ui.stats.no_statistic_matches"))}}

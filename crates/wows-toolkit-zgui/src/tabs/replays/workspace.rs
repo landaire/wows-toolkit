@@ -415,7 +415,7 @@ impl ReplayWorkspace {
             ReadGame::Reading => self.uncounted.update_value(|uncounted| {
                 uncounted.insert(path);
             }),
-            ReadGame::Landed(game) => session_stats::count_opened(self.services.session, &path, game),
+            ReadGame::Landed(game) => session_stats::count_opened(self.services.session, &path, game.map(|game| *game)),
         }
     }
 

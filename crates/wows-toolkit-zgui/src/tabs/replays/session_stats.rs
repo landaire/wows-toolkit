@@ -53,7 +53,7 @@ pub fn record(workspace: ReplayWorkspace, paths: Vec<PathBuf>, replace: bool) {
             for path in paths {
                 let (reading, cache) = (path.clone(), game_data.clone());
                 let stat = match long_job(move || read_played_game(&reading, &cache)).await {
-                    GameRead::Game(stat) => stat,
+                    GameRead::Game(stat) => *stat,
                     GameRead::NoResults => {
                         tracing::warn!(path = %path.display(), "session stats: the replay holds no results to record");
                         continue;
@@ -133,7 +133,7 @@ impl SessionReads {
     /// Takes what the landing's read of `path` found.
     pub fn landed_read(self, path: &Path, landing: SessionLanding, read: GameRead) {
         #[cfg(test)]
-        let read = simulated::game(path).map_or(read, GameRead::Game);
+        let read = simulated::game(path).map_or(read, |game| GameRead::Game(Box::new(game)));
 
         self.take(path, landing.generation, ReadCause::Played { scope: landing.scope }, read);
     }
@@ -204,8 +204,8 @@ impl SessionReads {
         let services = self.workspace.services;
         match read {
             GameRead::Game(game) => match cause {
-                ReadCause::Played { scope } => services.session.played(game, scope),
-                ReadCause::Listed => services.session.listed(game),
+                ReadCause::Played { scope } => services.session.played(*game, scope),
+                ReadCause::Listed => services.session.listed(*game),
             },
             // Read again when the game writes the results into the file.
             GameRead::NoResults => {
@@ -251,7 +251,7 @@ pub fn count_opened(session: Session, path: &Path, game: Option<PerGameStat>) {
 fn read_played_game(path: &Path, game_data: &GameDataCache) -> GameRead {
     #[cfg(test)]
     if let Some(game) = simulated::game(path) {
-        return GameRead::Game(game);
+        return GameRead::Game(Box::new(game));
     }
 
     read_game(path, game_data)

@@ -44,7 +44,7 @@ impl DirectoryStatsUpdate {
 
 /// What reading one replay produced.
 enum GameRead {
-    Game(PerGameStat),
+    Game(Box<PerGameStat>),
     NoResults,
     MissingBuild,
     Unreadable,
@@ -120,7 +120,7 @@ fn run_directory_stats(
         let flow = read_group(deps, group, workers, |read| {
             progress.done += 1;
             let game = match read {
-                GameRead::Game(game) => Some(Box::new(game)),
+                GameRead::Game(game) => Some(game),
                 GameRead::NoResults => {
                     skips.no_results += 1;
                     None
@@ -223,7 +223,7 @@ fn read_game(deps: &ReplayDependencies, path: &Path) -> GameRead {
     replay.build_ui_report(deps);
 
     match crate::data::session_stats::PerGameStat::from_replay(&replay, &replay.resource_loader) {
-        Some(game) => GameRead::Game(game.to_shared()),
+        Some(game) => GameRead::Game(Box::new(game.to_shared())),
         None => GameRead::NoResults,
     }
 }

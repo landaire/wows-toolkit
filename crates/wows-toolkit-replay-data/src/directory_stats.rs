@@ -56,7 +56,7 @@ impl DirectoryStatsUpdate {
 /// What reading one replay produced.
 #[derive(Debug)]
 pub enum GameRead {
-    Game(PerGameStat),
+    Game(Box<PerGameStat>),
     NoResults,
     MissingBuild,
     Unreadable,
@@ -72,7 +72,7 @@ impl GameRead {
         }
 
         match session_stat {
-            Some(game) => Self::Game(game),
+            Some(game) => Self::Game(Box::new(game)),
             None => Self::NoResults,
         }
     }
@@ -161,7 +161,7 @@ pub fn read_directory(
             |_index, read| {
                 progress.done += 1;
                 let game = match read {
-                    Some(GameRead::Game(game)) => Some(Box::new(game)),
+                    Some(GameRead::Game(game)) => Some(game),
                     Some(GameRead::NoResults) => {
                         skips.no_results += 1;
                         None
