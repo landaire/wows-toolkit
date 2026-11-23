@@ -1,9 +1,0 @@
-{"run_id":"1794828632-14549241","line":115,"new":{"module_name":"codec","snapshot_name":"huge_vector_count_is_reported_as_truncation","metadata":{"source":"crates/wgc-ipc/tests/codec.rs","assertion_line":115,"expression":"Message::decode(&bytes).unwrap_err()"},"snapshot":"Truncated {\n    offset: 136,\n    needed: 18446744073709551615,\n}"},"old":{"module_name":"codec","metadata":{},"snapshot":""}}
-{"run_id":"1794828642-489413636","line":115,"new":null,"old":null}
-{"run_id":"1794828642-489413636","line":182,"new":null,"old":null}
-{"run_id":"1794828642-489413636","line":85,"new":null,"old":null}
-{"run_id":"1794828642-489413636","line":68,"new":null,"old":null}
-{"run_id":"1795406802-843215728","line":115,"new":null,"old":null}
-{"run_id":"1795406802-843215728","line":182,"new":null,"old":null}
-{"run_id":"1795406802-843215728","line":68,"new":null,"old":null}
-{"run_id":"1795406802-843215728","line":85,"new":null,"old":null}

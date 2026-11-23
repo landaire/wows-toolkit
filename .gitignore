@@ -55,3 +55,7 @@ profile.json.gz
 **/tests/snapshots/**/*.diff.png
 **/tests/snapshots/**/*.new.png
 **/tests/snapshots/**/*.old.png
+
+# insta writes these when a snapshot assertion runs without accepting it.
+*.pending-snap
+*.snap.new
