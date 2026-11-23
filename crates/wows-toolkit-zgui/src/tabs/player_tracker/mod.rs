@@ -208,6 +208,7 @@ const CSS: &str = css!(
     [data-tint=\"abuser\"] { color: var(--wt-color-abuser); }
     .wt-tracker-chip { padding: 0 4px; border-radius: 3px; background-color: color-mix(in srgb, var(--wt-pr-band-hue) 18%, transparent); color: var(--wt-pr-band-text); }
     .wt-tracker-band { display: flex; align-items: center; color: var(--wt-pr-band-text); }
+    .wt-tracker-team__average[data-band] { color: var(--wt-pr-band-text); }
     [data-band=\"bad\"] { --wt-pr-band-hue: var(--wt-pr-bad-hue); --wt-pr-band-text: var(--wt-pr-bad-text); }
     [data-band=\"below-average\"] { --wt-pr-band-hue: var(--wt-pr-below-average-hue); --wt-pr-band-text: var(--wt-pr-below-average-text); }
     [data-band=\"average\"] { --wt-pr-band-hue: var(--wt-pr-average-hue); --wt-pr-band-text: var(--wt-pr-average-text); }

@@ -196,6 +196,11 @@ impl TrackerWindow {
         self.window.a11y(element).and_then(|state| state.label).unwrap_or_else(|| panic!("{test_id} has a label"))
     }
 
+    fn band(&self, test_id: &str) -> Option<String> {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.attribute(element, "data-band")
+    }
+
     fn seed_two_players(&mut self) {
         let facet = |id: i64, name: &str, count: i64| PlayerFacet {
             account_id: AccountId(id),
@@ -551,6 +556,26 @@ fn detailed_stacks_ship_figures_under_overall_and_compact_shows_one_scope() {
     tracker.press("tracker-view-mode-Detailed");
     assert!(tracker.has("tracker-win-rate-mode-Overall"), "Detailed keeps the scope selector");
     assert!(tracker.has(OVERALL_PR) && tracker.has(SHIP_PR), "and still shows both scopes");
+}
+
+/// The team averages take the band, and so the colour, a player's figure of that value takes.
+#[test]
+fn team_averages_carry_the_band_of_a_player_with_the_same_figures() {
+    let _modes = VIEW_MODES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut tracker = TrackerWindow::open_on_battle();
+    tracker.press("tracker-view-mode-Compact");
+    tracker.press("tracker-win-rate-mode-Overall");
+
+    // Harvey635 is the only ally with figures, so the ally averages are his.
+    let rate_band = tracker.band("tracker-team-ally-avg-wr");
+    assert!(rate_band.is_some(), "the average win rate is banded");
+    assert_eq!(rate_band, tracker.band("tracker-roster-ally-0"), "as his win rate is");
+    let rating_band = tracker.band("tracker-team-ally-avg-pr");
+    assert!(rating_band.is_some(), "the average rating is banded");
+    assert_eq!(rating_band, tracker.band(OVERALL_PR), "as his rating is");
+
+    assert!(!tracker.has("tracker-team-enemy-avg-wr"), "no enemy figures, no average win rate");
+    assert!(!tracker.has("tracker-team-enemy-avg-pr"), "and no average rating");
 }
 
 /// The view chosen is saved where the egui app keeps its own, and the tab opens on it.

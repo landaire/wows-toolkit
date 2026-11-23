@@ -471,12 +471,20 @@ fn TeamColumn(
                 text(class = "wt-tracker-team__title") {{title}}
                 text(class = "wt-tracker-small wt-tracker-dim") {{players}}
                 {win_rate.map(|rate| view! {
-                    text(class = "wt-tracker-small", attr:data-band = rating_band_name(PersonalRatingCategory::from_win_rate(rate))) {
+                    text(
+                        class = "wt-tracker-small wt-tracker-team__average",
+                        attr:data-band = rating_band_name(PersonalRatingCategory::from_win_rate(rate)),
+                        attr:data-testid = format!("tracker-team-{side}-avg-wr")
+                    ) {
                         {t!("ui.player_tracker.team_average_win_rate", rate = format!("{rate:.1}%")).into_owned()}
                     }
                 }.into_view())}
                 {rating.map(|pr| view! {
-                    text(class = "wt-tracker-small", attr:data-band = rating_band_name(PersonalRatingCategory::from_pr(pr))) {
+                    text(
+                        class = "wt-tracker-small wt-tracker-team__average",
+                        attr:data-band = rating_band_name(PersonalRatingCategory::from_pr(pr)),
+                        attr:data-testid = format!("tracker-team-{side}-avg-pr")
+                    ) {
                         {format!("{}: {pr:.0}", t!("stat.avg_pr"))}
                     }
                 }.into_view())}

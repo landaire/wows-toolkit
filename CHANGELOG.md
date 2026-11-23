@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
 - *(egui)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
 - *(zgui)* Count only Random and Ranked battles in a replay group header's win rate, colored by its account win rate band, with a listing option to count every game mode instead
+- *(zgui)* Color each team's average win rate and personal rating in the Player Tracker's Current Match by the band the value falls in, as a player's figures are colored
 - *(wows-query)* Summarize `quantity_values` over every class when its group names no class, with each class's own statistics in `by_class`, so the slowest shells of a tier can be found across classes
 - *(wows-query)* Name the ships that do not defeat the plate in `penetration_search` as `failing`, each with its strongest weapon of that ammo and its penetration
 - *(wows-query)* Run jq filters over JSON values in the sandboxed worker with `jq_worker::evaluate_json`, alongside stored GameParams entries with `jq_worker::evaluate`
