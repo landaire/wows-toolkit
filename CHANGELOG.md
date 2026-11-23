@@ -83,6 +83,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(toolkit)* Translate the strings that every language other than English was missing, such as the replay folder tabs, the rating breakdown and the texture export, and translate a few strings that were left in English
 - *(zgui)* Show messages at the bottom right of the main window, above the status bar, so they no longer cover the Play button and the tab strip
 - *(zgui)* Keep the Play button's size and place while the game starts and runs, and show the keyring note under it rather than beside it
 - *(zgui)* Film the saved self ranges on the recording player's ship in a render to a file or the clipboard from the replay list or Search, as the renderer opens with them, rather than every ship's ranges
