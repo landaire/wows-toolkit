@@ -163,16 +163,19 @@ pub fn open_sign_in(shell: Shell, model: LauncherModel, target: LoginTarget) {
 #[component]
 pub fn KeyringHint(model: LauncherModel) -> impl IntoView {
     let locale = Services::current().locale;
-    let ahead = Memo::new(move |_| {
-        model
-            .with(|state| state.settings.as_ref().is_some_and(|settings| state.launcher.keyring_prompt_ahead(settings)))
-    });
+    let ahead = Memo::new(move |_| keyring_prompt_ahead(model));
 
     view! {
         Show(when = move || ahead.get()) {
             text(class = "wt-launcher__dim", attr:data-testid = "launcher-keyring-hint") {{locale.text("ui.launcher.keyring.unlock_hint")}}
         }
     }
+}
+
+/// Whether the system keyring may still ask to unlock before the store first answers,
+/// subscribing to changes.
+pub fn keyring_prompt_ahead(model: LauncherModel) -> bool {
+    model.with(|state| state.settings.as_ref().is_some_and(|settings| state.launcher.keyring_prompt_ahead(settings)))
 }
 
 /// The sign-in form for `target`, at whichever step the attempt has reached.

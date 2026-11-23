@@ -82,6 +82,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(zgui)* Show messages at the bottom right of the main window, above the status bar, so they no longer cover the Play button and the tab strip
+- *(zgui)* Keep the Play button's size and place while the game starts and runs, and show the keyring note under it rather than beside it
 - *(zgui)* Film the saved self ranges on the recording player's ship in a render to a file or the clipboard from the replay list or Search, as the renderer opens with them, rather than every ship's ranges
 - *(egui)* Leave sunk ships out of an exported video when the renderer hides them, and film the saved self ranges in a batch render as the renderer opens with them
 - *(toolkit)* Wait up to a minute for the player stats service to answer, rather than 30 seconds, and send a request that timed out once more while the service's budget allows

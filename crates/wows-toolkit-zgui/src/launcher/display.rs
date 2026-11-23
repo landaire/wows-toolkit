@@ -102,14 +102,15 @@ pub enum PlayState {
         install: PathBuf,
     },
     Play(AccountLabel),
+    /// The game is starting, for the account it was started for when that is a saved one.
     Starting {
-        realm: Option<wgc_auth::AccountRealm>,
+        account: Option<AccountLabel>,
     },
     Running {
-        realm: Option<wgc_auth::AccountRealm>,
+        account: Option<AccountLabel>,
     },
     InBattle {
-        realm: Option<wgc_auth::AccountRealm>,
+        account: Option<AccountLabel>,
     },
 }
 
@@ -121,13 +122,12 @@ impl PlayState {
         };
         let launcher = &state.launcher;
 
-        let realm =
-            |game: &GameState| game.account().and_then(|key| settings.account(key)).map(|account| account.key.realm);
+        let played = |game: &GameState| game.account().and_then(|key| settings.account(key)).map(AccountLabel::of);
         match launcher.game_state() {
             GameState::Idle => {}
-            game @ GameState::Starting { .. } => return Self::Starting { realm: realm(game) },
-            game @ GameState::Running { .. } if in_battle => return Self::InBattle { realm: realm(game) },
-            game @ GameState::Running { .. } => return Self::Running { realm: realm(game) },
+            game @ GameState::Starting { .. } => return Self::Starting { account: played(game) },
+            game @ GameState::Running { .. } if in_battle => return Self::InBattle { account: played(game) },
+            game @ GameState::Running { .. } => return Self::Running { account: played(game) },
         }
 
         let account = settings.default_account().or_else(|| settings.accounts.first());
@@ -183,7 +183,9 @@ impl PlayState {
         match self {
             Self::Restoring(account) | Self::SignInAgain(account) | Self::Play(account) => Some(account.key.realm),
             Self::Update { account, .. } => Some(account.key.realm),
-            Self::Starting { realm } | Self::Running { realm } | Self::InBattle { realm } => *realm,
+            Self::Starting { account } | Self::Running { account } | Self::InBattle { account } => {
+                account.as_ref().map(|account| account.key.realm)
+            }
             _ => None,
         }
     }
@@ -193,6 +195,9 @@ impl PlayState {
         match self {
             Self::Restoring(account) | Self::SignInAgain(account) | Self::Play(account) => Some(&account.nickname),
             Self::Update { account, .. } => Some(&account.nickname),
+            Self::Starting { account } | Self::Running { account } | Self::InBattle { account } => {
+                account.as_ref().map(|account| account.nickname.as_str())
+            }
             _ => None,
         }
     }

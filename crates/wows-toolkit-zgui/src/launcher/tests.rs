@@ -34,6 +34,10 @@ use wows_toolkit_launcher::WgcLayerState;
 use wows_toolkit_launcher::test_support;
 use wows_toolkit_launcher::test_support::ScriptedSignIn;
 use wows_toolkit_launcher::test_support::TestSession;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Rect;
+use zgui::reactive::prelude::Set;
 use zgui::view;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
@@ -116,6 +120,12 @@ impl LauncherWindow {
         self.window.by_test_id(test_id).is_some()
     }
 
+    /// Where the element with `test_id` is, in device pixels.
+    pub(crate) fn bounds_of(&self, test_id: &str) -> Rect<DevicePx, Device> {
+        let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
+        self.window.bounds(element).unwrap_or_else(|| panic!("{test_id} has a box"))
+    }
+
     pub(crate) fn press(&mut self, test_id: &str) {
         let element = self.window.by_test_id(test_id).unwrap_or_else(|| panic!("{test_id} is shown"));
         self.window.click(element).unwrap_or_else(|err| panic!("{test_id} can be pressed: {err}"));
@@ -182,6 +192,19 @@ impl LauncherWindow {
 
     fn set_game(&mut self, state: GameState) {
         self.model.update_launcher(|launcher| test_support::set_game_state(launcher, state));
+        self.settle();
+    }
+
+    /// Has the live match watcher see a battle.
+    fn enter_battle(&mut self) {
+        let replay = wows_replays::ReplayFile::from_decrypted_parts(
+            crate::tabs::player_tracker::tests::ARENA_INFO.as_bytes().to_vec(),
+            Vec::new(),
+        )
+        .expect("the arena info parses");
+        let live =
+            wows_toolkit_viewmodel::player_tracker::live::LiveMatch::from_meta(&replay.meta).expect("it has a date");
+        self.shell.live.seed(live);
         self.settle();
     }
 
@@ -479,14 +502,7 @@ fn the_play_control_follows_the_launcher_through_its_states() {
     assert_eq!(launcher.play_state(), "running");
     assert_eq!(launcher.text_of("wt-play__realm"), "EU");
 
-    let replay = wows_replays::ReplayFile::from_decrypted_parts(
-        crate::tabs::player_tracker::tests::ARENA_INFO.as_bytes().to_vec(),
-        Vec::new(),
-    )
-    .expect("the arena info parses");
-    let live = wows_toolkit_viewmodel::player_tracker::live::LiveMatch::from_meta(&replay.meta).expect("it has a date");
-    launcher.shell.live.seed(live);
-    launcher.settle();
+    launcher.enter_battle();
     assert_eq!(launcher.play_state(), "in-battle");
 }
 
@@ -931,25 +947,106 @@ fn the_keyring_is_read_only_once_the_popover_opens() {
 }
 
 #[test]
-fn play_waits_for_an_unread_session_beside_the_keyring_hint() {
+fn play_waits_for_an_unread_session_under_the_keyring_hint() {
     let mut launcher = LauncherWindow::open();
     let store = testing::store();
     let settings = launcher.enabled_settings(&[(eu(), "Captain_Ahab")]);
     launcher.adopt(settings);
     launcher.found(up_to_date());
+    let idle = launcher.bounds_of("launcher-play-control");
 
     store.close();
     launcher.press("launcher-play");
     crate::interaction_tests::settle_in_real_time(&mut launcher.window);
     assert_eq!(store.reads(), 1);
     assert_eq!(launcher.play_state(), "restoring", "the press waits on the read");
-    assert!(launcher.has("launcher-keyring-hint"), "the hint is beside the Play control");
+    assert!(launcher.has("launcher-keyring-hint"), "the hint is up while the read waits");
+    let waiting = launcher.bounds_of("launcher-play-control");
+    assert_eq!(waiting.origin.x, idle.origin.x, "the control does not move: {idle:?} then {waiting:?}");
+    assert_eq!(waiting.size.width, idle.size.width, "nor change its width: {idle:?} then {waiting:?}");
+    let hint = launcher.bounds_of("launcher-play-hint");
+    assert!(
+        hint.origin.y.0 >= waiting.origin.y.0 + waiting.size.height.0,
+        "the hint is under the control: {hint:?} under {waiting:?}"
+    );
 
     store.open();
     crate::interaction_tests::settle_in_real_time(&mut launcher.window);
     assert!(!launcher.has("launcher-keyring-hint"), "the hint goes once the keyring answers");
+    assert!(!launcher.has("launcher-play-hint"), "and its surface with it");
     assert_eq!(launcher.play_state(), "sign-in-again", "the store held no session");
     assert!(launcher.has("launcher-sign-in-dialog"), "the waiting press asks for a sign-in");
+}
+
+/// The main part keeps its box from Play through the game starting and running to a battle: the
+/// spinner takes the glyph's place and the words keep theirs.
+#[test]
+fn the_play_control_keeps_its_place_through_a_launch() {
+    let launcher = ready();
+    let path = launcher.install.path().to_path_buf();
+    keeps_place_through_launch(launcher, Some(eu()), path);
+}
+
+/// The Steam route, which starts the game with no account, keeps the box as well.
+#[test]
+fn the_play_control_keeps_its_place_through_a_steam_launch() {
+    let launcher = LauncherWindow::open();
+    let layer = ready_layer(&launcher);
+    let launcher = steam_window(launcher, true, false, Some(layer));
+    assert_eq!(launcher.play_state(), "play-through-steam");
+    let path = launcher.install.path().to_path_buf();
+    keeps_place_through_launch(launcher, None, path);
+}
+
+/// Moves the game for `account` at `install` through starting, running and a battle, asserting
+/// at each step that the main part and its words stay where they were before the press.
+fn keeps_place_through_launch(mut launcher: LauncherWindow, account: Option<AccountKey>, install: PathBuf) {
+    let idle = launcher.bounds_of("launcher-play");
+    let idle_words = launcher.bounds_of("launcher-play-label");
+    let in_place = |launcher: &LauncherWindow, name: &str| {
+        assert_eq!(launcher.play_state(), name);
+        let shown = launcher.bounds_of("launcher-play");
+        assert_eq!(shown, idle, "{name}: the button keeps its box");
+        let words = launcher.bounds_of("launcher-play-label");
+        assert_eq!(words.origin, idle_words.origin, "{name}: the words keep their place");
+    };
+
+    launcher.set_game(GameState::Starting { account, install: install.clone() });
+    in_place(&launcher, "starting");
+    launcher.set_game(GameState::Running { account, install });
+    in_place(&launcher, "running");
+    launcher.enter_battle();
+    in_place(&launcher, "in-battle");
+}
+
+/// A message is put in the bottom corner, clear of the Play control at the end of the tab strip and
+/// above the status bar, and of the debug notice under the bar once it is shown.
+#[test]
+fn a_message_leaves_the_play_control_and_the_status_bar_uncovered() {
+    let mut launcher = ready();
+    launcher.shell.toasts().ok("Successfully loaded game data");
+    launcher.window.advance(Duration::from_secs(1));
+
+    let toast_box = |launcher: &LauncherWindow| {
+        let toast = launcher.window.by_class("zui-toast").expect("the message is up");
+        launcher.window.bounds(toast).expect("the message has a box")
+    };
+    let above = |toast: &Rect<DevicePx, Device>, band: &Rect<DevicePx, Device>| {
+        toast.origin.y.0 + toast.size.height.0 <= band.origin.y.0
+    };
+    let toast = toast_box(&launcher);
+    let play = launcher.bounds_of("launcher-play-control");
+    let status = launcher.bounds_of("app-status-strip");
+    assert!(toast.origin.y.0 > play.origin.y.0 + play.size.height.0, "below the strip: {toast:?} and {play:?}");
+    assert!(above(&toast, &status), "above the status bar: {toast:?} and {status:?}");
+
+    launcher.shell.debug_mode.set(true);
+    launcher.settle();
+    let toast = toast_box(&launcher);
+    let status = launcher.bounds_of("app-status-strip");
+    let notice = launcher.bounds_of("app-debug-notice");
+    assert!(notice.origin.y.0 >= status.origin.y.0 + status.size.height.0, "the notice is under the bar");
+    assert!(above(&toast, &status), "still above the status bar over the notice: {toast:?} and {status:?}");
 }
 
 /// The launcher with EU and NA accounts, a Play press for the default EU account waiting on a

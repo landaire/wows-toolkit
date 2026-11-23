@@ -34,12 +34,14 @@ use zgui::view::IntoView;
 use zgui::view::NodeRef;
 use zgui::view::ShowProps;
 use zgui::view::install_stylesheet;
+use zgui_ui::AnchoredSurfaceProps;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
 use zgui_ui::CheckboxProps;
 use zgui_ui::Checked;
 use zgui_ui::LabelProps;
+use zgui_ui::OverlayState;
 use zgui_ui::PopoverContentProps;
 use zgui_ui::PopoverProps;
 use zgui_ui::PopoverTriggerProps;
@@ -53,6 +55,7 @@ use crate::icons::AppIconProps;
 use crate::launcher::CSS;
 use crate::launcher::SHEET;
 use crate::launcher::account::KeyringHintProps;
+use crate::launcher::account::keyring_prompt_ahead;
 use crate::launcher::account::open_sign_in;
 use crate::launcher::display::PlayState;
 use crate::launcher::display::realm_badge;
@@ -115,11 +118,32 @@ const PLAY_CSS: &str = zgui::css!(
         height: 12px;
         flex: none;
     }
+    .wt-play__lead {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        width: 1.15em;
+        height: 1.15em;
+    }
+    .wt-play__words {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        flex: none;
+        white-space: nowrap;
+    }
+    .wt-play__reserve {
+        height: 0;
+        overflow: hidden;
+        visibility: hidden;
+    }
     .zui-popover.wt-account-popover {
         width: 400px;
     }
     .wt-play__hint {
         max-width: 320px;
+        padding: 6px 8px;
         font-size: 11px;
     }"
 );
@@ -168,7 +192,8 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
         }
     });
     on_cleanup_local(move || drop(resuming));
-    let waiting = Memo::new(move |_| model.pending_play().is_some());
+    let waiting = Memo::new(move |_| model.pending_play().is_some() && keyring_prompt_ahead(model));
+    let anchor = NodeRef::new();
     let open = RwSignal::new_local(false);
     let primary = move || state.with(PlayState::is_primary);
     let tip = move || {
@@ -180,7 +205,7 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
     };
 
     view! {
-        row(class = "wt-play", attr:data-testid = "launcher-play-control") {
+        row(class = "wt-play", node_ref = anchor, attr:data-testid = "launcher-play-control") {
             Tooltip {
                 TooltipTrigger {
                     Button(
@@ -219,10 +244,61 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
                 }
             }
             Show(when = move || waiting.get()) {
-                box(class = "wt-play__hint") {
-                    KeyringHint(model = model)
-                }
+                PendingHint(model = model, anchor = anchor)
             }
+        }
+    }
+}
+
+/// Says, under the control rather than beside it so the strip does not move, that the system
+/// keyring may ask to unlock while a Play press waits on it.
+#[component]
+fn PendingHint(model: LauncherModel, anchor: NodeRef) -> impl IntoView {
+    let state = OverlayState::uncontrolled(true, None).anchored_to(anchor);
+
+    view! {
+        AnchoredSurface(
+            state = state,
+            placement = Placement::new(Side::Bottom, Align::End),
+            dismiss_on_outside_press = false,
+            dismiss_on_escape = false,
+            class = "wt-play__hint",
+            attr:data-testid = "launcher-play-hint"
+        ) {
+            KeyringHint(model = model)
+        }
+    }
+}
+
+/// What stands before the main part's words, in one slot of fixed size so a change of state does
+/// not move the words.
+#[derive(Clone, Copy)]
+enum Lead {
+    Glyph(Glyph),
+    Busy,
+    Live,
+}
+
+impl Lead {
+    fn of(state: &PlayState) -> Option<Self> {
+        match state {
+            PlayState::Loading | PlayState::Play(_) | PlayState::AddAccount | PlayState::PlayThroughSteam { .. } => {
+                Some(Self::Glyph(Glyph::Play))
+            }
+            PlayState::Update { .. } => Some(Self::Glyph(Glyph::Download)),
+            PlayState::SetUpGame | PlayState::SetUpRunner => Some(Self::Glyph(Glyph::Settings)),
+            PlayState::Paused { .. } => Some(Self::Glyph(Glyph::Pause)),
+            PlayState::Starting { .. } | PlayState::Updating { .. } | PlayState::Restoring(_) => Some(Self::Busy),
+            PlayState::Running { .. } | PlayState::InBattle { .. } => Some(Self::Live),
+            PlayState::SignInAgain(_) => None,
+        }
+    }
+
+    fn view(self) -> AnyView {
+        match self {
+            Self::Glyph(glyph) => AnyView::new(view! { AppIcon(glyph = glyph) }),
+            Self::Busy => AnyView::new(view! { Spinner() }),
+            Self::Live => AnyView::new(view! { box(class = "wt-play__live") }),
         }
     }
 }
@@ -230,31 +306,50 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
 /// What the main part shows for `state`; collapsed keeps the glyph and the realm badge.
 fn content(state: PlayState, collapsed: bool) -> AnyView {
     let realm = state.realm();
-    let glyph = match &state {
-        PlayState::Play(_) | PlayState::AddAccount => Some(Glyph::Play),
-        PlayState::Update { .. } => Some(Glyph::Download),
-        PlayState::SetUpGame | PlayState::SetUpRunner => Some(Glyph::Settings),
-        PlayState::Paused { .. } => Some(Glyph::Pause),
-        _ => None,
-    };
-    let busy = matches!(state, PlayState::Starting { .. } | PlayState::Updating { .. } | PlayState::Restoring(_));
-    let live = matches!(state, PlayState::Running { .. } | PlayState::InBattle { .. });
+    let lead = Lead::of(&state);
     let words = (!collapsed).then(|| label(&state));
     let nickname = (!collapsed).then(|| state.nickname().map(str::to_owned)).flatten();
+    // The words a press moves through take the room of the widest of them, so the button keeps
+    // its width and its left edge from Play to the battle.
+    let reserved: Vec<AnyView> = launch_route_words(&state)
+        .into_iter()
+        .map(|words| AnyView::new(view! { text(class = "wt-play__reserve", a11y:hidden = true) {{words}} }))
+        .collect();
 
     AnyView::new(view! {
-        if move || busy {
-            Spinner()
-        } else {}
-        if move || live {
-            box(class = "wt-play__live")
-        } else {}
-        {optional(glyph.map(|glyph| AnyView::new(view! { AppIcon(glyph = glyph) })))}
-        {optional(words.map(|words| AnyView::new(view! { text(class = "wt-play__label", attr:data-testid = "launcher-play-label") {{words}} })))}
+        // Held empty in a state with nothing to show, so the words never move sideways.
+        box(class = "wt-play__lead") {{optional(lead.map(Lead::view))}}
+        {optional(words.map(|words| AnyView::new(view! {
+            column(class = "wt-play__words") {
+                text(class = "wt-play__label", attr:data-testid = "launcher-play-label") {{words}}
+                {reserved}
+            }
+        })))}
         {optional(realm.map(|realm| AnyView::new(view! { RealmGlyph(realm = realm, attr:data-testid = "launcher-play-realm-glyph") })))}
         {optional(realm.map(|realm| AnyView::new(view! { text(class = "wt-play__realm", attr:data-testid = "launcher-play-realm") {{realm_badge(realm)}} })))}
         {optional(nickname.map(|nickname| AnyView::new(view! { text(class = "wt-play__nickname") {{nickname}} })))}
     })
+}
+
+/// The words of every state a Play press passes through, for a state on that route. A launch
+/// with no saved account is the Steam route, which starts the game with none.
+fn launch_route_words(state: &PlayState) -> Vec<String> {
+    let steam = match state {
+        PlayState::Loading | PlayState::Play(_) | PlayState::Restoring(_) => false,
+        PlayState::PlayThroughSteam { .. } => true,
+        PlayState::Starting { account } | PlayState::Running { account } | PlayState::InBattle { account } => {
+            account.is_none()
+        }
+        _ => return Vec::new(),
+    };
+    let first = if steam { t!("ui.launcher.play.play_through_steam") } else { t!("ui.launcher.play.play") };
+
+    vec![
+        first.into_owned(),
+        t!("ui.launcher.play.starting").into_owned(),
+        t!("ui.launcher.play.running").into_owned(),
+        t!("ui.launcher.play.in_battle").into_owned(),
+    ]
 }
 
 /// `view`, or nothing.
@@ -330,7 +425,7 @@ pub fn play(shell: Shell, model: LauncherModel, account: AccountKey, origin: Pla
 
 /// [`play`] with safe mode as it was when the press was made.
 fn launch(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bool, origin: PlayOrigin) {
-    // An unread session is read first. The press waits on it beside the keyring hint, and the
+    // An unread session is read first. The press waits on it under the keyring hint, and the
     // Play control plays once the read answers.
     let unread = model.with_untracked(|state| {
         matches!(state.launcher.account_status(account), AccountStatus::NotLoaded | AccountStatus::Restoring)

@@ -89,6 +89,7 @@ use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::Key;
 use zgui::vocab::Modifiers;
+use zgui_ui::ToastCorner;
 use zgui_ui::prelude::Binding;
 
 use crate::i18n::LanguageCode;
@@ -196,6 +197,11 @@ const CSS: &str = css!(
         flex: 1 1 auto;
         min-width: 0;
         min-height: 0;
+    }
+    .wt-shell__foot {
+        display: flex;
+        flex-direction: column;
+        flex: none;
     }
     /* A band of its own under the status bar, so it reads as a notice about the build rather
        than as part of the status. */
@@ -654,7 +660,8 @@ pub fn AppRoot(
     view! {
         ThemeRoot(choice = choice, motion = motion, zoom = zoom) {
             SemanticTokens(choice = shown)
-            ToastHost {
+            // Clear of the controls at the end of the tab strip, which a launch is pressed from.
+            ToastHost(corner = ToastCorner::BottomRight) {
                 DecoratedWindow(title = main_window_title()) {
                     ShellFrame(appearance = appearance)
                 }
@@ -677,7 +684,7 @@ pub(crate) fn ShellHarness(theme: ThemeChoice, children: zgui::view::Children) -
     view! {
         ThemeRoot(choice = choice) {
             SemanticTokens(choice = shown)
-            ToastHost {
+            ToastHost(corner = ToastCorner::BottomRight) {
                 HarnessShell(appearance = appearance) {{children.into_view_once()}}
             }
         }
@@ -719,6 +726,9 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
     shell.begin_mcp();
     follow_selection(shell);
     let root = NodeRef::new();
+    // Messages stand above the status bar and the debug notice under it.
+    let foot = NodeRef::new();
+    toasts.stand_above(foot);
     hear_unfocused_keys(root);
     follow_held_modifiers(shell, root);
     crate::zoom::hear_zoom_keys(root, services, appearance, toasts);
@@ -813,12 +823,14 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                 }
                 SettingsDrawer(shell = shell)
             }
-            ShellStatusBar(shell = shell)
-            Show(when = move || shell.debug_mode.get()) {
-                row(class = "wt-debug-notice", attr:data-testid = "app-debug-notice") {
-                    AppIcon(glyph = wows_toolkit_icons::Glyph::TriangleAlert)
-                    text {{locale.text("ui.app.debug_build")}}
-                    AppIcon(glyph = wows_toolkit_icons::Glyph::TriangleAlert)
+            column(class = "wt-shell__foot", node_ref = foot) {
+                ShellStatusBar(shell = shell)
+                Show(when = move || shell.debug_mode.get()) {
+                    row(class = "wt-debug-notice", attr:data-testid = "app-debug-notice") {
+                        AppIcon(glyph = wows_toolkit_icons::Glyph::TriangleAlert)
+                        text {{locale.text("ui.app.debug_build")}}
+                        AppIcon(glyph = wows_toolkit_icons::Glyph::TriangleAlert)
+                    }
                 }
             }
             DropScrim(state = shell.drop_scrim)

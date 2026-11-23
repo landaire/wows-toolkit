@@ -5,16 +5,21 @@ use std::collections::HashMap;
 
 use zgui::component;
 use zgui::css;
+use zgui::geom::CssPx;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::provide_local_context;
 use zgui::reactive::use_local_context;
 use zgui::view;
 use zgui::view::Children;
 use zgui::view::IntoView;
+use zgui::view::NodeRef;
 use zgui::view::install_stylesheet;
 use zgui_ui::Toast;
 use zgui_ui::ToastAction;
@@ -31,7 +36,8 @@ const SHEET: &str = "landaire-ui-toasts";
 /// wraps; the title's line is one and a half times its size. The stack stays a list, each message
 /// readable, rather than collapsing into a deck while the pointer is elsewhere: a message the
 /// reader has to hover to read is one they miss. The region declares its own duration rather than
-/// reading a motion token, so reduced motion zeroes it here.
+/// reading a motion token, so reduced motion zeroes it here. A bottom stack keeps its usual margin
+/// above the band [`Toasts::stand_above`] measures.
 const CSS: &str = css!(
     ".lui-toasts .zui-toast {
         align-items: flex-start;
@@ -52,6 +58,10 @@ const CSS: &str = css!(
     }
     :root[reduced-motion] .lui-toasts.zui-toast__region {
         --zui-toast-move: 0ms;
+    }
+    .lui-toasts.zui-toast__region[data-corner=\"bottom-right\"],
+    .lui-toasts.zui-toast__region[data-corner=\"bottom-left\"] {
+        margin-bottom: calc(var(--zui-space-base) * 6 + var(--lui-toasts-clearance, 0px));
     }"
 );
 
@@ -179,6 +189,8 @@ impl Notice {
 pub struct Toasts {
     queue: ToastQueue,
     keyed: StoredValue<HashMap<ToastKey, ToastId>, LocalStorage>,
+    /// The height of the band along the window's bottom edge a bottom stack stands above.
+    clearance: RwSignal<Option<CssPx>, LocalStorage>,
 }
 
 impl Toasts {
@@ -186,6 +198,21 @@ impl Toasts {
     /// [`ToastHost`].
     pub fn current() -> Option<Self> {
         use_local_context::<Self>()
+    }
+
+    /// Keeps a bottom corner's stack above `band`, a strip along the window's bottom edge such as
+    /// a [`StatusBar`](crate::StatusBar) and whatever is under it, at the height it is laid out
+    /// at. Called from a component's body; holds until that component goes.
+    pub fn stand_above(self, band: NodeRef) {
+        let size = band.observe_border_size();
+        let clearance = self.clearance;
+        let following = RenderEffect::new(move |_| {
+            clearance.set(size.get().map(|size| CssPx(size.height.0 / band.scale())));
+        });
+        on_cleanup_local(move || {
+            drop(following);
+            clearance.try_set(None);
+        });
     }
 
     pub fn ok(self, message: impl Into<String>) -> ToastId {
@@ -277,10 +304,13 @@ pub fn ToastHost(
     /// How many messages may be up at once; the oldest leave to make room.
     #[prop(default = 10)]
     limit: usize,
-    #[prop(default = ToastCorner::TopRight)] corner: ToastCorner,
+    /// Which corner the messages stack in.
+    #[prop(default = ToastCorner::TopRight)]
+    corner: ToastCorner,
     children: Children,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
+    let clearance = RwSignal::new_local(None);
 
     view! {
         Toaster(
@@ -288,9 +318,10 @@ pub fn ToastHost(
             limit = limit,
             label = label,
             dismiss_label = dismiss_label,
-            class = "lui-toasts"
+            class = "lui-toasts",
+            style:--lui-toasts-clearance = move || clearance.get().map(|clearance: CssPx| format!("{}px", clearance.0))
         ) {
-            Publish {
+            Publish(clearance = clearance) {
                 {children.into_view_once()}
             }
         }
@@ -307,10 +338,10 @@ pub fn withdraw_everywhere(key: &ToastKey) {
 
 /// Publishes the queue the enclosing toaster made, as [`Toasts`], to what it holds.
 #[component]
-fn Publish(children: Children) -> impl IntoView {
+fn Publish(clearance: RwSignal<Option<CssPx>, LocalStorage>, children: Children) -> impl IntoView {
     if let Some(queue) = use_toaster() {
         let keyed = StoredValue::new_local(HashMap::new());
-        let toasts = Toasts { queue, keyed };
+        let toasts = Toasts { queue, keyed, clearance };
         provide_local_context(toasts);
 
         // A message that expires, is dismissed or is pushed out leaves the queue on its own.
