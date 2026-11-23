@@ -78,6 +78,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(toolkit)* Wait up to a minute for the player stats service to answer, rather than 30 seconds, and send a request that timed out once more while the service's budget allows
 - *(zgui)* Draw up to three renderer frames at once while a replay plays, so a large or high-density window shows the battle moving every frame rather than repeating a frame while the next is drawn
 - *(zgui)* List the nations, classes and ships an armor viewer search names best first, so a ship searched by its name is not listed below loose matches in other nations
 - *(zgui)* Open a ship in the armor viewer sidebar with a click that leaves its parts folded. Its chevron unfolds them

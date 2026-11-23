@@ -19,8 +19,10 @@ pub use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
 pub use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 pub use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 pub use wows_toolkit_viewmodel::match_stats::RATE_LIMIT_WINDOW;
+use wows_toolkit_viewmodel::match_stats::RESPONSE_TIMEOUT;
 pub use wows_toolkit_viewmodel::match_stats::RateLimiter;
 pub use wows_toolkit_viewmodel::match_stats::Region;
+pub use wows_toolkit_viewmodel::match_stats::TIMEOUT_RETRIES;
 
 /// Fetches match stats, at most once per arena and within the service's
 /// budget.
@@ -87,8 +89,9 @@ impl MatchStatsClient {
             .header("X-API-Key", API_KEY)
             .header(reqwest::header::CONTENT_TYPE, CONTENT_TYPE)
             .body(body)
+            .timeout(RESPONSE_TIMEOUT)
             .send()
-            .map_err(|e| MatchStatsError::Transport(crate::util::http::error_chain(&e)))?;
+            .map_err(transport_error)?;
 
         let status = response.status();
         debug!(status = status.as_u16(), body_len = ?response.content_length(), "match_stats response received");
@@ -110,7 +113,7 @@ impl MatchStatsClient {
             return Err(err);
         }
 
-        let bytes = response.bytes().map_err(|e| MatchStatsError::Transport(crate::util::http::error_chain(&e)))?;
+        let bytes = response.bytes().map_err(transport_error)?;
         let decoded: MatchStatsResponse = match ciborium::from_reader(bytes.as_ref()) {
             Ok(decoded) => decoded,
             Err(e) => {
@@ -122,6 +125,16 @@ impl MatchStatsClient {
 
         self.cache.insert(request.arena_id, decoded.clone());
         Ok(decoded)
+    }
+}
+
+/// A failure on the wire, told apart as [`MatchStatsError::TimedOut`] when the service did not
+/// answer in time, so the caller can send the request again.
+fn transport_error(error: reqwest::Error) -> MatchStatsError {
+    if error.is_timeout() {
+        MatchStatsError::TimedOut
+    } else {
+        MatchStatsError::Transport(crate::util::http::error_chain(&error))
     }
 }
 

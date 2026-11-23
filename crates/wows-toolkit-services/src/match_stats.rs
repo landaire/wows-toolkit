@@ -31,6 +31,13 @@ pub enum StatsError {
     Transport(#[source] reqwest::Error),
 }
 
+impl StatsError {
+    /// Whether the service did not answer within [`match_stats::RESPONSE_TIMEOUT`].
+    pub fn timed_out(&self) -> bool {
+        matches!(self, Self::Transport(err) if err.is_timeout())
+    }
+}
+
 /// The stats lookups this session has made.
 ///
 /// Holds what the service's own client would: one answer per arena, the
@@ -137,7 +144,12 @@ pub async fn fetch_stats(
 
     // No redirects: a 3xx is classified rather than followed, so the API key
     // is never forwarded to whatever a redirect names.
-    let client = crate::http::client(agent, proxy_url, reqwest::redirect::Policy::none())?;
+    let client = crate::http::client_with_read_timeout(
+        agent,
+        proxy_url,
+        reqwest::redirect::Policy::none(),
+        match_stats::RESPONSE_TIMEOUT,
+    )?;
 
     let response = client
         .post(match_stats::ENDPOINT)

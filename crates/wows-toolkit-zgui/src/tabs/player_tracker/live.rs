@@ -35,6 +35,7 @@ use wows_toolkit_services::match_stats::StatsBudget;
 use wows_toolkit_services::match_stats::StatsError;
 #[cfg(not(test))]
 use wows_toolkit_services::match_stats::fetch_stats;
+use wows_toolkit_viewmodel::match_stats;
 use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
@@ -569,17 +570,30 @@ impl LiveModel {
         // The proxy as the settings hold it; `http::client` decides what an unset one means.
         let proxy_url = services.settings.read_untracked(|settings| settings.proxy_url.clone()).unwrap_or_default();
         let task = self.spawn(async move {
-            let fetched = request_stats(services, state, proxy_url).await;
-            if self.started_at() != Some(started_at) {
-                return;
-            }
-            let shown = match fetched {
-                Ok(fetched) => {
-                    let mut shown = StatsState::Idle;
-                    self.budget.update_value(|budget| shown = budget.finish(arena_id, fetched, Instant::now()));
-                    shown
+            let mut retries_left = match_stats::TIMEOUT_RETRIES;
+            let shown = loop {
+                let fetched = request_stats(services, state.clone(), proxy_url.clone()).await;
+                if self.started_at() != Some(started_at) {
+                    return;
                 }
-                Err(err) => StatsState::Failed(err.to_string()),
+                match fetched {
+                    // The service may have counted the request that timed out, so the retry is
+                    // cleared against the budget like the first.
+                    Ok(Err(err)) if err.timed_out() && retries_left > 0 => {
+                        retries_left -= 1;
+                        let mut begun = Ok(());
+                        self.budget.update_value(|budget| begun = budget.begin(arena_id, Instant::now()));
+                        if let Err(refused) = begun {
+                            break refused;
+                        }
+                    }
+                    Ok(fetched) => {
+                        let mut shown = StatsState::Idle;
+                        self.budget.update_value(|budget| shown = budget.finish(arena_id, fetched, Instant::now()));
+                        break shown;
+                    }
+                    Err(err) => break StatsState::Failed(err.to_string()),
+                }
             };
             self.stats.set(shown);
         });

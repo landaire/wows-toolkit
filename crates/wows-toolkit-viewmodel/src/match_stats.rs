@@ -124,6 +124,12 @@ pub const MAX_PLAYERS: usize = 24;
 /// The service's published budget, enforced here so a refusal costs no request.
 pub const MAX_REQUESTS_PER_WINDOW: usize = 5;
 pub const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(20 * 60);
+/// How long a request may wait for the service's answer. The service gathers a whole roster's
+/// statistics before it answers, which can take longer than a client's usual read timeout.
+pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+/// How many times a request that timed out is sent again. The service may have counted the
+/// request that timed out, so each retry spends the budget as any request does.
+pub const TIMEOUT_RETRIES: usize = 1;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MatchStatsError {
@@ -139,6 +145,8 @@ pub enum MatchStatsError {
     RecentlyFailed { retry_after: Duration },
     #[error("the stats service answered {status}")]
     Http { status: u16 },
+    #[error("the stats service did not answer within {}s", RESPONSE_TIMEOUT.as_secs())]
+    TimedOut,
     #[error("could not reach the stats service: {0}")]
     Transport(String),
     #[error("could not encode the request: {0}")]

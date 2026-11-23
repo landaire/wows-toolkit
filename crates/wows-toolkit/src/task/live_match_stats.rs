@@ -21,6 +21,7 @@ use wowsunpack::data::Version;
 
 use crate::data::match_stats::MatchStatsClient;
 use crate::data::match_stats::MatchStatsError;
+use crate::data::match_stats::TIMEOUT_RETRIES;
 use crate::data::wows_data::BuildDataCache;
 use crate::ui::player_tracker::MatchStatsState;
 use crate::ui::player_tracker::PlayerTracker;
@@ -136,12 +137,25 @@ pub(crate) fn fetch(lookup: StatsLookup, tracker: &Arc<RwLock<PlayerTracker>>, c
         debug!("live roster scan: lookup dropped before sending, the match already changed");
         return;
     }
-    let next = match client.fetch(&lookup.request) {
-        Ok(response) => {
-            let by_account = response.players.into_iter().map(|player| (player.account_id, player)).collect();
-            MatchStatsState::Ready(by_account)
+    // The battle can change while a request waits out its timeout, so it is checked again before
+    // the retry spends the budget.
+    let mut retries_left = TIMEOUT_RETRIES;
+    let next = loop {
+        match client.fetch(&lookup.request) {
+            Err(MatchStatsError::TimedOut) if retries_left > 0 => {
+                retries_left -= 1;
+                if !tracker.read().is_current_match(lookup.started_at) {
+                    debug!("live roster scan: retry dropped, the match already changed");
+                    return;
+                }
+                debug!("live roster scan: the stats service timed out, sending the lookup again");
+            }
+            Ok(response) => {
+                let by_account = response.players.into_iter().map(|player| (player.account_id, player)).collect();
+                break MatchStatsState::Ready(by_account);
+            }
+            Err(error) => break MatchStatsState::Failed(failure_reason(error)),
         }
-        Err(error) => MatchStatsState::Failed(failure_reason(error)),
     };
     if !tracker.write().set_match_stats_for(lookup.started_at, next) {
         debug!("live roster scan: result dropped, the match already changed");

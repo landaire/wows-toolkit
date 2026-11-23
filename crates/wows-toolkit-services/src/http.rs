@@ -43,10 +43,20 @@ pub fn client(
     proxy_url: &str,
     redirects: reqwest::redirect::Policy,
 ) -> Result<reqwest::Client, HttpError> {
+    client_with_read_timeout(agent, proxy_url, redirects, READ_TIMEOUT)
+}
+
+/// [`client`], waiting up to `read_timeout` for each read, for a service known to answer slowly.
+pub fn client_with_read_timeout(
+    agent: UserAgent,
+    proxy_url: &str,
+    redirects: reqwest::redirect::Policy,
+    read_timeout: Duration,
+) -> Result<reqwest::Client, HttpError> {
     let mut builder = reqwest::Client::builder()
         .user_agent(agent.get())
         .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT)
+        .read_timeout(read_timeout)
         .redirect(redirects);
 
     let manual = (!proxy_url.trim().is_empty()).then_some(proxy_url);
