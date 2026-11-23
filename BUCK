@@ -1,7 +1,6 @@
 load("//build-support/buck:workspace_rules.bzl", "native_binary_alias")
 
-native_binary_alias("wows_toolkit_egui", "//crates/wows-toolkit:wows_toolkit_bin")
-native_binary_alias("wows_toolkit_zgui", "//crates/wows-toolkit-zgui:zgui_bin")
+native_binary_alias("wows_toolkit", "//crates/wows-toolkit:zgui_bin")
 native_binary_alias("wowsunpack", "//crates/wowsunpack:wowsunpack_bin")
 native_binary_alias("wows_data_mgr", "//crates/wows-data-mgr:wows_data_mgr_bin")
 native_binary_alias("replayshark", "//crates/replayshark:replayshark_bin")

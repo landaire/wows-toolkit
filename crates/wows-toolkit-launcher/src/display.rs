@@ -1,4 +1,4 @@
-//! Text both front ends show for launcher state.
+//! Text the app shows for launcher state.
 
 use wgc_catalog::models::PartName;
 use wgc_catalog::update::LatestBuild;

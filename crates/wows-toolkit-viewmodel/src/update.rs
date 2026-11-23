@@ -1,8 +1,8 @@
 //! Updating the app, and cleaning up after an update.
 //!
-//! Shared, because the finalize step is a delete driven by an argument one
+//! Kept apart from the UI because the finalize step is a delete driven by an argument one
 //! process hands another: one implementation of what may be deleted, with its
-//! tests, rather than one per front end.
+//! tests.
 
 use std::path::Path;
 use std::path::PathBuf;

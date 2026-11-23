@@ -1,4 +1,4 @@
-//! Leaf settings types shared between the egui and zgui apps.
+//! Leaf settings types.
 
 use serde::Deserialize;
 use serde::Serialize;

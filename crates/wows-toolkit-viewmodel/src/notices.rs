@@ -1,19 +1,16 @@
 //! Warnings that stand in front of something, and the ones a reader may switch
 //! off.
 //!
-//! The egui app puts the same two questions: hosting or joining a session
-//! reveals this machine's address (`app.rs`'s `show_ip_warning_dialog`), and an
-//! export with no GPU encoder behind it will encode in software
-//! (`replay/renderer/mod.rs`'s `GpuEncoderWarning`). Both are suppressible, in
-//! the rows the egui app writes, so a reader who switched one off there does not
-//! meet it here.
+//! Two questions: hosting or joining a session reveals this machine's address,
+//! and an export with no GPU encoder behind it will encode in software. Both are
+//! suppressible, in the settings rows earlier releases wrote, so a
+//! reader who switched one off does not meet it again.
 
 use wt_translations::t;
 
 use crate::settings::keys;
 
-/// Where the networking note lives, which the address warning links as the egui
-/// dialog does.
+/// Where the networking note lives, which the address warning links.
 pub const NETWORKING_URL: &str = "https://landaire.github.io/wows-toolkit/networking";
 
 /// One of the two warnings.

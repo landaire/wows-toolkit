@@ -7,8 +7,7 @@ use wows_replays::analyzer::battle_controller::Player;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
-/// Matches the egui app's `TOOLKIT_REFERRER` constant (`util/formatting.rs`),
-/// passed through to wowssb build URLs unchanged.
+/// The referrer passed through to wowssb build URLs unchanged.
 const TOOLKIT_REFERRER: &str = "landaire";
 
 pub fn build_wows_numbers_url(player: &Player) -> Option<String> {

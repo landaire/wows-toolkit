@@ -1,5 +1,5 @@
-//! Reading the session's saved charts, including the one-time import of the charts the egui app
-//! keeps in its own table.
+//! Reading the session's saved charts, including the one-time import of the charts kept in the
+//! legacy `chart_configs` table.
 
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -22,12 +22,12 @@ pub enum LoadChartsError {
     Store(#[source] sqlx::Error),
 }
 
-/// The serialized shape of one egui `chart_configs` row.
+/// The serialized shape of one legacy `chart_configs` row.
 #[derive(Debug, Deserialize)]
 struct EguiChartConfig {
     selected_stat: ChartableStat,
     mode: ChartMode,
-    /// Ship names, which name no ship id and are dropped, as egui drops them.
+    /// Ship names, which name no ship id and are dropped.
     #[serde(default)]
     selected_ships: Vec<serde_json::Value>,
     selected_ships_manually_changed: bool,
@@ -55,8 +55,8 @@ impl From<EguiChartConfig> for ChartSettings {
 
 /// The session's saved charts, or `None` when none were saved.
 ///
-/// Without a saved list, the egui app's charts are read in the order egui made them and stored
-/// as the list, so later launches read the list and never the egui table again.
+/// Without a saved list, the legacy charts are read in the order they were made and stored as
+/// the list, so later launches read the list and never the legacy table again.
 pub async fn load(pool: &SqlitePool) -> Result<Option<Vec<ChartSettings>>, LoadChartsError> {
     let saved = queries::try_get_setting::<Vec<ChartSettings>>(pool, CHARTS_SETTINGS_KEY)
         .await
@@ -75,7 +75,7 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<Vec<ChartSettings>>, LoadC
         .into_iter()
         .map(|(chart_id, json)| match serde_json::from_str::<EguiChartConfig>(&json) {
             Ok(config) => config.into(),
-            // egui shows an unreadable row as a default chart, so the pane is kept the same way.
+            // An unreadable row becomes a default chart.
             Err(err) => {
                 tracing::warn!("egui chart {chart_id} is imported as a default chart: {err}");
                 ChartSettings::default()
@@ -83,7 +83,7 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<Vec<ChartSettings>>, LoadC
         })
         .collect();
 
-    // A list saved while this ran, by this front end or another, wins over the import.
+    // A list saved while this ran wins over the import.
     let inserted =
         queries::insert_setting_if_absent(pool, CHARTS_SETTINGS_KEY, &charts).await.map_err(LoadChartsError::Store)?;
     if inserted {

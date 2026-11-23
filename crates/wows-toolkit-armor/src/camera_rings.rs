@@ -6,8 +6,8 @@
 //! on. Seeing them against the armor is what says which plates a shell is
 //! actually aimed at from a given view.
 //!
-//! The resolution itself is `wowsunpack`'s (`CameraTrajectory::resolve`), so
-//! both apps ride the same orbits; this is the geometry that draws them.
+//! The resolution itself is `wowsunpack`'s (`CameraTrajectory::resolve`);
+//! this is the geometry that draws them.
 
 use nalgebra::Vector3;
 use wowsunpack::game_params::types::CameraRing;

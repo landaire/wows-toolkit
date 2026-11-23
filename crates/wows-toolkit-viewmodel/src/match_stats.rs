@@ -1,7 +1,7 @@
 //! The shipbuilds `match_stats` protocol: the request and response shapes,
 //! the service's own limits, and the budget tracked against them.
 //!
-//! Both front ends speak this; each supplies its own HTTP client.
+//! The caller supplies its own HTTP client.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -114,7 +114,7 @@ pub struct MatchStatsResponse {
 }
 
 /// Where the service answers, and how a request identifies itself. Part of
-/// the protocol rather than of either front end's client.
+/// the protocol rather than of the client.
 pub const ENDPOINT: &str = "https://shipbuilds.com/api/match_stats";
 pub const API_KEY: &str = "WTK-PleaseDontAbuseMyServer";
 pub const CONTENT_TYPE: &str = "application/cbor";

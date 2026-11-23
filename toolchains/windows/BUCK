@@ -15,7 +15,7 @@ cxx_tools_info_toolchain(
     cxx_flags = ["/nologo", "/Brepro"],
     # rustc already passes /DEBUG to link.exe, so a PDB is written regardless.
     # Naming the flag here is what makes the prelude declare that PDB as an
-    # output, which is the only way to reach it as //:wows_toolkit_egui[pdb].
+    # output, which is the only way to reach it as //:wows_toolkit[pdb].
     link_flags = ["/Brepro", "/INCREMENTAL:NO", "/DEBUG"],
     visibility = ["PUBLIC"],
 )
@@ -41,10 +41,7 @@ windows_resource(
     visibility = ["PUBLIC"],
 )
 
-_APP_BINARY = {
-    "egui": "root//crates/wows-toolkit:wows_toolkit_bin",
-    "zgui": "root//crates/wows-toolkit-zgui:zgui_bin",
-}[read_root_config("release", "frontend", "egui")]
+_APP_BINARY = "root//crates/wows-toolkit:zgui_bin"
 
 wix_msi(
     name = "wows_toolkit_msi",

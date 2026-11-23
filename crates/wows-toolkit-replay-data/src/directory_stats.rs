@@ -184,7 +184,7 @@ pub fn read_directory(
     }
 }
 
-/// Every replay at or below `root`, matching the egui app's directory stats:
+/// Every replay at or below `root`:
 /// symlinks are not followed, and the live recording is left out because it
 /// has no results yet.
 fn replays_beneath(root: &Path) -> Vec<PathBuf> {

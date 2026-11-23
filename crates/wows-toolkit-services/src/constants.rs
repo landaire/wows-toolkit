@@ -7,10 +7,8 @@
 //! published mapping, the fetch of a build's own mapping, and the reader's own
 //! file when they have one the repository does not.
 //!
-//! The egui app does the same three things from its networking thread
-//! (`task/networking.rs`'s `FetchLatestConstants` and `FetchVersionedConstants`,
-//! and `app.rs`'s import), through the same commit row, so a fetch by either app
-//! serves both.
+//! Fetches and imports share one commit row with earlier releases, so a
+//! fetch made by either serves both.
 
 use std::path::Path;
 use std::path::PathBuf;

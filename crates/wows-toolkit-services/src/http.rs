@@ -1,6 +1,6 @@
-//! The HTTP client every network call of the desktop front ends shares.
+//! The HTTP client every network call of the desktop app shares.
 //!
-//! Both want the same policy: connect and read timeouts rather than a total
+//! The policy: connect and read timeouts rather than a total
 //! request timeout, so a large download is not cut off while a stalled
 //! connection still fails instead of hanging forever, and an explicit
 //! redirect policy rather than reqwest's default.
@@ -12,10 +12,7 @@ use wows_toolkit_viewmodel::proxy;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The name and version a front end sends as its `User-Agent`.
-///
-/// Each front end names itself: they are separate clients of the same services,
-/// and a log that cannot tell them apart is less useful.
+/// The name and version the app sends as its `User-Agent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UserAgent(&'static str);
 
@@ -34,7 +31,7 @@ impl UserAgent {
 /// `proxy_url` is the reader's own setting and wins; failing that the standard
 /// environment variables and then the Windows configuration are read, which is
 /// what makes the app work on a managed network nobody configured it for
-/// (`wows_toolkit_viewmodel::proxy`, shared with the egui app). A proxy URL the
+/// (`wows_toolkit_viewmodel::proxy`). A proxy URL the
 /// client rejects is reported rather than swallowed: sending direct because a
 /// proxy setting was malformed is exactly what a reader who set one does not
 /// want.

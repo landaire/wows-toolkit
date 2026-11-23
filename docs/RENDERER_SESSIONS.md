@@ -19,9 +19,8 @@ participant maintains a direct connection to every other participant.
 
 ## Module layout
 
-Protocol types live in shared crates; desktop-specific code stays in the main
-crate. The desktop `collab/` modules re-export from the shared crates for
-backward compatibility.
+Protocol types live in shared crates. The session state and the peer task live
+in `wt-collab-client`, which the desktop app drives.
 
 ```
 crates/wt-collab-protocol/src/
@@ -37,12 +36,12 @@ crates/wt-collab-egui/src/
   rendering.rs    Map background drawing
   draw_commands.rs DrawCommand → epaint shape conversion
 
-crates/wows-toolkit/src/collab/
-  mod.rs          SessionState, PeerRole, events, commands (desktop)
-  protocol.rs     Re-exports from wt-collab-protocol + desktop conversion helpers
+crates/wt-collab-client/src/
+  lib.rs          SessionState, PeerRole, events, commands
   peer.rs         Background peer task, PeerSessionHandle, start_peer_session
-  types.rs        Re-exports from wt-collab-protocol::types
-  validation.rs   Re-exports from wt-collab-protocol::validation
+
+crates/wows-toolkit-services/src/collab.rs   Session start and join for the desktop app
+crates/wows-toolkit/src/shell/collab/        Session controls in the desktop app
 ```
 
 ## Threading model
@@ -50,7 +49,7 @@ crates/wows-toolkit/src/collab/
 ```
 ┌──────────────┐   Arc<Mutex<SessionState>>   ┌───────────────┐
 │  UI thread   │◄────────────────────────────►│  peer_task     │
-│  (egui)      │  mpsc channels (events,      │  (tokio spawn) │
+│  (UI)        │  mpsc channels (events,      │  (tokio spawn) │
 │              │   commands, frames, cursors)  │                │
 └──────────────┘                              └───────────────┘
 ```
@@ -280,9 +279,8 @@ validation first, then the receiver checks the sender's role.
 | `wt-collab-protocol::validation` | `validate_peer_message`, `validate_annotation` |
 | `wt-collab-egui::types` | `UserCursor`, `Permissions`, `ViewportZoomPan`, `MapTransform` |
 | `wt-collab-egui::toolbar` | Shared annotation toolbar UI |
-| `collab/mod.rs` | `SessionState`, `PeerRole`, `SessionEvent`, `SessionCommand` |
-| `collab/peer.rs` | `start_peer_session`, `PeerSessionHandle`, background task |
-| `collab/protocol.rs` | Re-exports + desktop-specific conversion helpers |
-| `replay_renderer.rs` | `RendererSessionAccess`, `launch_client_renderer`, pending field consumption |
-| `app.rs` | IP warning dialog, `do_join_session`, client event polling |
-| `ui/replay_parser/mod.rs` | "Session" popover in replay inspector header (host + join + active controls) |
+| `wt-collab-client` | `SessionState`, `PeerRole`, `SessionEvent`, `SessionCommand` |
+| `wt-collab-client::peer` | `start_peer_session`, `PeerSessionHandle`, background task |
+| `wows-toolkit-services::collab` | Hosting and joining a session from the desktop app |
+| `wows-toolkit/src/shell/collab/` | Session controls, IP warning, client event polling |
+| `wows-toolkit/src/windows/renderer/session.rs` | The renderer's side of a session |

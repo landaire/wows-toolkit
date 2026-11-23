@@ -1,8 +1,7 @@
 //! What a shell cast through an armor model ended up doing.
 //!
 //! The simulation itself is `wowsunpack::ballistics`; this reads its result back
-//! as a sentence both front ends can put beside the drawn arc, so the armor
-//! viewers say the same thing about the same cast.
+//! as a sentence the armor viewer puts beside the drawn arc.
 
 use std::collections::HashMap;
 
@@ -17,7 +16,7 @@ use wowsunpack::game_params::types::Millimeters;
 
 /// One plate along the cast, as far as reading the outcome is concerned.
 ///
-/// Neither front end's own hit type reaches here: each carries a position in its
+/// The UI's own hit type does not reach here: it carries a position in its
 /// own vector type, and none of that says anything about the outcome.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArcPlate {
@@ -210,7 +209,7 @@ pub enum SimOutcome {
 }
 
 impl SimOutcome {
-    /// The key naming this outcome, for a front end that translates it.
+    /// The key naming this outcome, for a caller that translates it.
     pub const fn label_key(self) -> &'static str {
         match self {
             Self::Citadel => "ui-armor-outcome-citadel",
@@ -248,7 +247,7 @@ pub enum SimVerdict {
 }
 
 impl SimVerdict {
-    /// The key naming this verdict, for a front end that translates it. An
+    /// The key naming this verdict, for a caller that translates it. An
     /// outcome names itself, so that case reads the outcome's own key.
     pub const fn label_key(self) -> &'static str {
         match self {

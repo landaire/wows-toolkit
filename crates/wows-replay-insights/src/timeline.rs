@@ -1,8 +1,7 @@
 //! Battle timeline events derived from a replay: what happened, and when.
 //!
-//! Lives here rather than in a front end because both of them show it: the
-//! egui renderer's event list and the port's previous/next-event controls read
-//! the same events.
+//! Lives here rather than in the app so the event list and the
+//! previous/next-event controls read the same events.
 
 use std::collections::HashMap;
 use std::collections::HashSet;

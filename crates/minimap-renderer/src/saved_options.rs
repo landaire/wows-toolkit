@@ -1,8 +1,7 @@
 //! The persisted form of [`RenderOptions`].
 //!
-//! Both front ends read and write the same `render_options` row, so the stored
-//! shape and its mapping onto [`RenderOptions`] live beside the options
-//! themselves rather than in either app.
+//! The stored shape of the `render_options` row and its mapping onto
+//! [`RenderOptions`] live beside the options themselves rather than in the app.
 
 use serde::Deserialize;
 use serde::Serialize;

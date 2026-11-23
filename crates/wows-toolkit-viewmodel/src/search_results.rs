@@ -48,8 +48,7 @@ impl ResultColumn {
         columns
     }
 
-    /// The translation key the header reads, the same `ui.search.column.*` key the egui header
-    /// reads.
+    /// The `ui.search.column.*` translation key the header reads.
     pub fn label_key(self) -> &'static str {
         match self {
             Self::Sortable(SortColumn::Date) => "ui-search-column-date",
@@ -270,7 +269,7 @@ mod tests {
         assert_eq!(columns.len(), SortColumn::ALL.len() + 1);
     }
 
-    /// Each header reads its egui translation, in the reader's language.
+    /// Each header reads its translation, in the reader's language.
     #[test]
     fn headers_read_the_translated_column_names() {
         let german = wt_translations::Language::from_code("de").expect("de is supported");

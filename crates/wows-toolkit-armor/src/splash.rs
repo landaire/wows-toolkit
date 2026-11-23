@@ -5,8 +5,7 @@
 //! game sizes that burst from the shell's own calibre and tests it against
 //! named boxes shipped with the hull, which is what this reproduces: the
 //! boxes come from `wowsunpack::models::geometry::parse_splash_file` and the
-//! zones they belong to from GameParams' own hit locations, so the egui
-//! viewer and this one answer from the same data.
+//! zones they belong to from GameParams' own hit locations.
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;

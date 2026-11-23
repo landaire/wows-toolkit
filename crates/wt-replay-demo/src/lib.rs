@@ -1,7 +1,7 @@
 //! Replay playback demo for the WoWs Toolkit website.
 //!
-//! Plays a clip written by `export_demo_track` through the egui renderer the
-//! desktop viewer uses, with its transport and layer switches.
+//! Plays a clip written by `export_demo_track` through the shared egui
+//! renderer, with its transport and layer switches.
 
 // The app runs only in the browser; a host build compiles the pure playback
 // logic so its tests run under `cargo test`.

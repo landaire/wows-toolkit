@@ -2,8 +2,7 @@
 //! where that table is cached.
 //!
 //! The rating itself is `wows_replay_insights::personal_rating`. This names
-//! the cache both front ends share, so the port reads the table the egui app
-//! already downloaded rather than fetching a second copy.
+//! the cache the downloaded table is kept in.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -53,7 +52,7 @@ pub fn validate_expected_values(bytes: &[u8]) -> Result<(), InvalidExpectedValue
     Ok(())
 }
 
-/// Caches a validated payload for both front ends to read.
+/// Caches a validated payload.
 pub fn save_cached(bytes: &[u8]) -> Result<(), ExpectedValuesError> {
     validate_expected_values(bytes)?;
     std::fs::write(expected_values_path(), bytes).map_err(ExpectedValuesError::Write)
@@ -83,8 +82,7 @@ pub fn chip_hue(category: PersonalRatingCategory) -> u32 {
 ///
 /// Solved against the composited chip over card, striped and selected rows.
 /// Several sit just above the contrast floor to keep the chips quiet;
-/// retuning any of those row colors requires re-solving this table, which the
-/// egui app's contrast test catches.
+/// retuning any of those row colors requires re-solving this table.
 pub fn chip_text(category: PersonalRatingCategory, dark_mode: bool) -> u32 {
     if dark_mode {
         match category {
@@ -145,8 +143,8 @@ pub const EXPECTED_VALUES_FIXTURE: &[u8] = include_bytes!("../tests/fixtures/pr_
 
 /// Where the expected values are cached.
 ///
-/// Falls back to a bare relative name when there is no storage directory,
-/// which is what the egui app does; a caller with no storage directory has
+/// Falls back to a bare relative name when there is no storage directory;
+/// a caller with no storage directory has
 /// bigger problems than the rating table.
 pub fn expected_values_path() -> PathBuf {
     match wows_toolkit_config::storage_dir() {

@@ -1,4 +1,4 @@
-//! SQLite persistence plumbing shared between the egui and zgui apps.
+//! SQLite persistence plumbing.
 //!
 //! Opens the application database, runs embedded migrations, and exposes the
 //! synchronous window-geometry read used at startup.
@@ -19,7 +19,7 @@ use crate::window::WindowSettings;
 
 /// Open (or create) the application database and run pending migrations.
 ///
-/// The database lives alongside other app data in the eframe storage directory.
+/// The database lives alongside other app data in the storage directory.
 /// We use WAL journal mode for better read concurrency (although this is a
 /// single-writer desktop app, WAL is still faster for mixed read/write).
 pub async fn open_db() -> Result<SqlitePool, sqlx::Error> {

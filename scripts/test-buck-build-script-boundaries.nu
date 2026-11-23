@@ -45,12 +45,7 @@ def main [] {
     }
 
     let toolkit_build = (open --raw "crates/wows-toolkit/build.rs")
-    if not ($toolkit_build | str contains 'EMBEDDED_CONSTANTS') or not ($toolkit_build | str contains 'WOWS_TOOLKIT_ICON') or not ($toolkit_build | str contains 'OUT_DIR') {
+    if not ($toolkit_build | str contains 'WOWS_TOOLKIT_ICON') or not ($toolkit_build | str contains 'OUT_DIR') {
         error make {msg: "The toolkit build script does not stage its declared embedded resources."}
-    }
-
-    let toolkit_fixup = (open --raw "third-party/rust/fixups/wows_toolkit/fixups.toml")
-    if ($toolkit_fixup | str trim) != "buildscript.run = false" {
-        error make {msg: "The wows-toolkit build script must be disabled for native Buck actions."}
     }
 }

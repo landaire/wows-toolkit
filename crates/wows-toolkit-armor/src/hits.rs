@@ -61,8 +61,7 @@ pub fn build_markers(
 /// A cross at the model's own origin.
 ///
 /// Where the game measures a ship from, which is not where the hull's middle
-/// looks to be: the egui viewer draws the same three axes for the same reason
-/// (`armor_viewer/ui/tab.rs`'s `show_ship_center`).
+/// looks to be.
 pub fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
     let (min, max) = bounds;
     let extent = max - min;

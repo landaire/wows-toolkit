@@ -1,6 +1,6 @@
-//! Pure personal-rating (PR) computation, egui-free and IO-free. The toolkit
-//! keeps the disk/network fetch helpers and the egui color mapping; this
-//! module owns only the data model and the `calculate_pr` formula.
+//! Pure personal-rating (PR) computation, UI-free and IO-free. The toolkit
+//! keeps the disk/network fetch helpers and the color mapping; this module
+//! owns only the data model and the `calculate_pr` formula.
 
 use std::collections::HashMap;
 

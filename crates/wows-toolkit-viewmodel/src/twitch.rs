@@ -3,8 +3,8 @@
 //! Someone who was in a streamer's chat minutes before meeting you in a
 //! battle may have been watching your stream. Deciding which logins plausibly
 //! name which player, and which observations are close enough in time to
-//! count, is the same rule in both front ends; where the observations come
-//! from is not.
+//! count, is decided here; where the observations come from is the caller's
+//! concern.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -24,8 +24,8 @@ pub const WINDOW_BEFORE_MINUTES: f64 = -2.0;
 
 /// A Twitch credential, as the helper that produces it writes it out.
 ///
-/// Stored as JSON under [`keys::TOKEN`], which is what the egui app already
-/// wrote, so both front ends read one credential.
+/// Stored as JSON under [`keys::TOKEN`], the key earlier releases
+/// also wrote.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Token {
     username: String,
@@ -54,7 +54,7 @@ impl Token {
 
 /// Why a pasted credential is not one.
 ///
-/// Carries the offending field rather than a message, so a front end can say
+/// Carries the offending field rather than a message, so the UI can say
 /// which part of the paste was wrong instead of showing the whole string
 /// back.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -133,9 +133,8 @@ pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(12
 /// The chunk arm compares `chunk.len() > 5`, a byte count against a chunk of
 /// at most 5 characters: a chunk clears it only if one of those characters is
 /// multi-byte, so an all-ASCII name never matches on a chunk while a name
-/// carrying one accent or one Cyrillic letter can. That asymmetry is the rule
-/// as the egui app has always applied it, and changing it here would change
-/// which players it chips.
+/// carrying one accent or one Cyrillic letter can. That asymmetry is
+/// intended; changing it would change which players it chips.
 ///
 /// Carries no time-window filtering; callers apply that separately.
 pub fn login_matches_ign(login: &str, ign: &str) -> bool {
@@ -175,8 +174,8 @@ pub fn potential_stream_snipers<'a>(
 /// One chat login that plausibly names a player, and when it was seen.
 ///
 /// `minutes` is each sighting measured from the battle start, so a negative
-/// figure is someone who was in chat before the battle began. Both front ends
-/// show these in the chip's hover text; the wording is each one's own.
+/// figure is someone who was in chat before the battle began. The UI shows
+/// these in the chip's hover text in its own wording.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SniperCandidate {
     pub login: String,
@@ -261,7 +260,7 @@ mod tests {
         assert_eq!("username".parse::<Token>(), Err(TokenParseError::ValueMissing { key: "username".to_string() }));
     }
 
-    /// Pinned against what the egui app already stored.
+    /// Pinned against the stored form earlier releases wrote.
     #[test]
     fn the_stored_credential_is_json_with_the_field_names() {
         let token: Token = "username=harvey;user_id=42;client_id=abc;oauth_token=def".parse().expect("it parses");

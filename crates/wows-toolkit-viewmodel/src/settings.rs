@@ -1,7 +1,7 @@
-//! Settings both front ends read and write.
+//! Settings the app reads and writes.
 //!
 //! The keys live here rather than as string literals at each call site, so a
-//! setting one front end writes is the one the other reads, and renaming
+//! setting written in one place is the one read in another, and renaming
 //! one is a single edit that the compiler checks.
 
 use serde::Deserialize;
@@ -17,8 +17,8 @@ pub mod keys {
     pub const DEBUG_MODE: &str = "debug_mode";
     pub const DATA_SHARING_MODE: &str = "data_sharing_mode";
     /// The older, coarser form of the same consent: whether anything is shared at
-    /// all. A build that knew only this row still reads it, so both apps write it
-    /// beside the mode and reconcile the two on load
+    /// all. A build that knew only this row still reads it, so the app writes it
+    /// beside the mode and reconciles the two on load
     /// (`DataSharingMode::reconcile_with_compat_bool`).
     pub const SEND_REPLAY_DATA: &str = "send_replay_data";
     pub const PROXY_URL: &str = "proxy_url";
@@ -94,7 +94,7 @@ pub fn normalize_proxy_url(raw: &str) -> Option<String> {
 
 /// Which theme the app renders in.
 ///
-/// Stored as the variant name, which is what the egui app already wrote to
+/// Stored as the variant name, which is what earlier releases wrote to
 /// the database; renaming a variant would silently read back as `System`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeChoice {
@@ -241,14 +241,14 @@ impl DataSharingMode {
 pub struct ZoomFactor(f32);
 
 impl ZoomFactor {
-    /// The range the egui settings tab's slider offers.
+    /// The range the settings slider offers.
     pub const MIN: Self = Self(0.5);
     pub const MAX: Self = Self(2.0);
 
-    /// A never-saved setting and the Reset button, as the egui app has it.
+    /// A never-saved setting and the Reset button.
     pub const DEFAULT: Self = Self(1.15);
 
-    /// Unscaled, which the reset shortcut returns to, as egui's own does.
+    /// Unscaled, which the reset shortcut returns to.
     pub const ACTUAL_SIZE: Self = Self(1.0);
 
     /// Shortcut steps per unit of zoom: each step is a tenth.
@@ -292,7 +292,7 @@ impl ZoomFactor {
 pub enum XrayHighlight {
     #[default]
     Always,
-    /// Only while the front end's x-ray key is held.
+    /// Only while the x-ray key is held.
     WhileHeld,
     Off,
 }
@@ -366,7 +366,7 @@ mod tests {
         );
     }
 
-    /// Pinned against what the egui app already wrote: the database holds
+    /// Pinned against what earlier releases wrote: the database holds
     /// the variant names, and reading anything else would quietly put every
     /// user back on the system theme.
     #[test]

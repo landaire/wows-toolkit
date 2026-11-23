@@ -1,6 +1,6 @@
 //! Playing a replay's battle back on the minimap at whatever speed the reader
 //! asks for, drawing over it, and encoding it to video, as plain state and
-//! blocking functions a front end drives with its own widgets and executor.
+//! blocking functions the app drives with its own widgets and executor.
 //!
 //! The bake keeps the draw commands of a bounded number of frames rather than
 //! images, and one frame is rasterised at a time through

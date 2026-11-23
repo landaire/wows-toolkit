@@ -1,7 +1,5 @@
 //! Uploads a [`LoadedShipArmor`]'s armor plates into a [`Viewport3D`] and
-//! frames the camera on it. Ports the egui app's `upload_armor_to_viewport`
-//! (`armor_viewer/ui/tab.rs:1147-1335`) and the camera-framing half of
-//! `init_armor_viewport` (`tab.rs:1445-1495`).
+//! frames the camera on it.
 //!
 //! [`upload_armor_to_viewport`] is the initial-load path: it uploads and
 //! frames the camera. [`reupload_armor_plates`] rebuilds the plates after a
@@ -88,7 +86,7 @@ impl Default for DisplaySettings {
 
 impl DisplaySettings {
     /// Seeds from the persisted `armor_viewer_defaults` row, falling back to
-    /// the egui defaults above when there is no row yet (fresh DB). Mirrors
+    /// the defaults above when there is no row yet (fresh DB). Mirrors
     /// `legend::LegendState::from_defaults`'s same fallback shape.
     pub fn from_defaults(row: Option<&ArmorViewerDefaultsRow>) -> Self {
         let Some(row) = row else { return Self::default() };
@@ -97,9 +95,8 @@ impl DisplaySettings {
             show_zero_mm: row.show_zero_mm,
             armor_opacity: row.armor_opacity as f32,
             hull_opaque: row.hull_opaque,
-            // The egui viewer keeps the first two on the pane rather than in
-            // the shared `armor_viewer_defaults` row, and has no grid or
-            // length marks, so none is restored.
+            // The shared `armor_viewer_defaults` row has no columns for
+            // these, so none is restored.
             show_ship_center: Self::default().show_ship_center,
             marker_opacity: Self::default().marker_opacity,
             show_grid: Self::default().show_grid,
@@ -118,14 +115,13 @@ const PLATE_EDGE_NORMAL_OFFSET: f32 = 0.005;
 const EDGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
 /// Skip an armor triangle whose thickness rounds to (effectively) 0mm, unless
-/// `show_zero_mm` is on. Matches the egui app's own `0.05` epsilon.
+/// `show_zero_mm` is on.
 pub fn is_zero_mm(thickness_mm: f32) -> bool {
     thickness_mm.abs() < 0.05
 }
 
 /// Derives a triangle's [`PlateKey`] (zone, material_name, thickness rounded
-/// to tenths of mm). Matches the egui app's own inline key derivation at
-/// every `plate_visibility` check site (`tab.rs:1180`, `2911`, `4025`, ...).
+/// to tenths of mm), the key every `plate_visibility` check uses.
 pub fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
     PlateKey {
         zone: info.zone.clone(),
@@ -232,8 +228,7 @@ fn upload_armor_meshes(
 }
 
 /// Initial-load upload: builds `armor`'s meshes (see [`upload_armor_meshes`])
-/// and frames the camera on `armor.bounds`, matching the egui app's
-/// `init_armor_viewport` (`tab.rs:1445-1495`). Use [`reupload_armor_plates`]
+/// and frames the camera on `armor.bounds`. Use [`reupload_armor_plates`]
 /// instead when only `visibility`/`display` changed and the camera should
 /// stay put.
 pub fn upload_armor_to_viewport(

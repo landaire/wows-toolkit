@@ -334,7 +334,7 @@ impl PlotView {
     }
 
     /// Zooms `axis` alone for a pointer pressed on its gutter at `anchor` that moved `delta`
-    /// canvas pixels along it. Right or down zooms in, by egui_plot's axis drag factor.
+    /// canvas pixels along it. Right or down zooms in, by a factor of 0.02 per pixel.
     pub fn drag_axis(&mut self, axis: PlotAxis, delta: f32, anchor: PlotPoint, layout: &PlotLayout) {
         let factor = 1.0 + (0.02 * f64::from(delta)).clamp(-1.0, 1.0);
         self.zoom_axis(axis, factor, anchor, layout);
@@ -491,7 +491,7 @@ pub fn draw(plot: &Plot<'_>, bounds: PlotRect, colors: PlotColors, canvas: &mut 
     Some(PlotLayout { area, window: frame.window, fit })
 }
 
-/// A plotted number, at the precision the egui charts label points with.
+/// A plotted number, at the precision chart points are labeled with.
 pub fn format_value(value: f64) -> String {
     let magnitude = value.abs();
     if magnitude >= 1000.0 {
@@ -574,7 +574,7 @@ fn longest_line(plot: &Plot<'_>) -> usize {
 
 /// Where the `index`th of a line's `count` games sits on the game axis of a plot whose longest
 /// line has `longest`. Every line is drawn across the whole width, each against its own games,
-/// which is how the egui chart plots a ship that played fewer of them.
+/// so a ship that played fewer of them still spans the chart.
 fn game_position(index: usize, count: usize, longest: usize) -> f64 {
     let last = longest.saturating_sub(1) as f64;
     if count <= 1 {

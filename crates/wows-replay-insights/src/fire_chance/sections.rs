@@ -2,10 +2,9 @@
 //! result built on it.
 //!
 //! Resolution is the expensive half of the statistic: it means parsing a
-//! ~178 MB `assets.bin` out of the game install. Both front ends want the
-//! same answer for the same build, so the source, the on-disk cache, the
-//! record of what did not resolve, and the analysis call that ties them
-//! together all live here rather than in either app.
+//! ~178 MB `assets.bin` out of the game install. The source, the on-disk
+//! cache, the record of what did not resolve, and the analysis call that ties
+//! them together live here so every caller gets the same answer for a build.
 
 use std::collections::HashMap;
 use std::collections::HashSet;

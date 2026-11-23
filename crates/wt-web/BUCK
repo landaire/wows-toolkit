@@ -19,7 +19,7 @@ workspace_library(
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
         "//crates/wt-collab-egui:wt_collab_egui",
-        "//crates/wt-collab-protocol:wt_collab_protocol",
+        "//crates/wt-collab-protocol:wt_collab_protocol_egui",
         "//crates/wt-translations:wt_translations",
         "//third-party/rust:eframe",
         "//third-party/rust:egui",

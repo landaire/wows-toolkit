@@ -1,10 +1,10 @@
-//! Launcher state and background work shared by the front ends: install discovery, catalog
+//! Launcher state and background work for the app: install discovery, catalog
 //! update checks, downloads, saved accounts and their WGNI sessions, the game runner, and the
 //! game session.
 //!
 //! [`Launcher`]'s operations spawn work on a tokio runtime and report back as
-//! [`LauncherEvent`]s; a front end drains [`LauncherEvents`] and hands each one to
-//! [`Launcher::apply`]. Settings stay with the front end, which passes them in and saves them
+//! [`LauncherEvent`]s; the app drains [`LauncherEvents`] and hands each one to
+//! [`Launcher::apply`]. Settings stay with the app, which passes them in and saves them
 //! when an operation reports a change.
 
 mod accounts;

@@ -20,8 +20,8 @@ WoWs Toolkit builds on the work of other people. This file credits the projects 
 
 ## User interface
 
-- [egui](https://github.com/emilk/egui) and eframe by Emil Ernerfeldt draw the stable desktop app.
-- [zgui](https://github.com/zortax/zgui) by Leonard Seibold draws the beta desktop app.
+- [zgui](https://github.com/zortax/zgui) by Leonard Seibold draws the desktop app.
+- [egui](https://github.com/emilk/egui) and eframe by Emil Ernerfeldt draw the web tactics board and replay demo.
 - The icons come from [Lucide](https://lucide.dev), [Phosphor Icons](https://phosphoricons.com), [Simple Icons](https://simpleicons.org) and [Font Awesome Free](https://fontawesome.com).
 
 ## Trademarks

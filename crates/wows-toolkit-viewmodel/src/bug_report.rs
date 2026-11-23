@@ -1,4 +1,4 @@
-//! Support information copied from either desktop front end.
+//! Support information copied from the desktop app.
 
 use std::path::Path;
 use std::sync::Mutex;

@@ -131,8 +131,7 @@ impl Default for PlacedRangesReport {
 
 /// How a ping `age` old is drawn, or `None` once its ripple has run out.
 ///
-/// A ring that grows and fades over its first second, as the egui renderer's
-/// ripple does.
+/// A ring that grows and fades over its first second.
 pub fn ping_ring(age: Duration) -> Option<PingRing> {
     let age = age.as_secs_f32();
     if age > PING_SECONDS {
@@ -146,7 +145,7 @@ pub fn ping_ring(age: Duration) -> Option<PingRing> {
 /// once it has stood still long enough to be taken down.
 ///
 /// A peer whose app froze, or that left without saying its pointer had left the map, would
-/// otherwise leave its name on the map for good. The egui renderer's timings.
+/// otherwise leave its name on the map for good.
 pub fn cursor_opacity(age: Duration) -> Option<f32> {
     const FADES_AFTER: Duration = Duration::from_secs(3);
     const GONE_AFTER: Duration = Duration::from_secs(5);
@@ -165,7 +164,7 @@ pub fn cursor_opacity(age: Duration) -> Option<f32> {
 ///
 /// Draw commands rather than pixels, so each peer draws the battle with its own art at its own
 /// size. The trails `options` ask for go behind it: a watcher has no track to read trails from,
-/// and a baked frame holds none, so they travel with it as the egui host sends them. Every ship's
+/// and a baked frame holds none, so they travel with it. Every ship's
 /// trail is sent; a watcher hides the ones the session hides.
 pub fn moment_broadcast(
     replay_id: ReplayId,
@@ -247,7 +246,7 @@ pub fn ranges_by_player(
 }
 
 /// Takes up the ranges a session says each ship shows, in place of every ship's own. The range
-/// layer goes on when any ship shows one, as the egui renderer does.
+/// layer goes on when any ship shows one.
 pub fn adopt_range_overrides(
     overrides: &[(EntityId, ShipConfigFilter)],
     names: &HashMap<EntityId, String>,
@@ -261,7 +260,7 @@ pub fn adopt_range_overrides(
 }
 
 /// Takes up whose trails a session hides. The trail layer goes on when some are hidden, since
-/// the rest are still meant to be drawn, as the egui renderer does.
+/// the rest are still meant to be drawn.
 pub fn adopt_trail_overrides(hidden: &[String], choices: &mut ShipChoices, options: &mut RenderOptions) {
     choices.replace_trail_hidden(hidden.iter().cloned().collect());
     if !hidden.is_empty() {

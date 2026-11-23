@@ -57,7 +57,7 @@ This is not considered a World of Warships mod and does not modify your World of
 
 ## License
 
-WoWs Toolkit is distributed under the [MIT License](LICENSE). The app shows its license and the third-party notices in the settings drawer under "About and licenses" in the beta, and under File, Licenses in the stable release.
+WoWs Toolkit is distributed under the [MIT License](LICENSE). The app shows its license and the third-party notices in the settings drawer under "About and licenses".
 
 The releases include software by other authors. [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) holds their license notices, and [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) credits the projects WoWs Toolkit builds on.
 
@@ -69,7 +69,7 @@ You can build with either Cargo or Buck2. Cargo is fine for day-to-day work; CI 
 
 ### Building with Cargo
 
-Make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
+Make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows-toolkit` from the source code directory.
 
 To build the CLI tools:
 
@@ -121,11 +121,11 @@ One-time setup, then build any root alias:
 ./bootstrap.sh                                          # macOS and Linux, needs nix
 powershell -ExecutionPolicy Bypass -File bootstrap.ps1  # Windows, from an elevated shell
 
-bin/buck2 build //:wows_toolkit_egui
-bin/buck2 build //:wows_toolkit_egui?release
+bin/buck2 build //:wows_toolkit
+bin/buck2 build //:wows_toolkit?release
 ```
 
-The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. `wows_toolkit_egui` and `wows_toolkit_zgui` build the two desktop apps, and `buck2 build root//:` builds everything.
+The bootstrap installs the pinned Buck2 and toolchain. `bin/buck2` runs that Buck2, so you do not need one installed. `wows_toolkit` builds the desktop app, and `buck2 build root//:` builds everything.
 
 See [DEVELOPING.md](DEVELOPING.md#buck) for the hermeticity check, dependency updates, fixups, and troubleshooting.
 

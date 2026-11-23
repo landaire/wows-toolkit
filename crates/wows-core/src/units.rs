@@ -79,7 +79,6 @@ pub struct Meters(f32);
 ///
 /// - `wows-battle-world/src/ingest/entities.rs` (smoke radius from `EntityCreate`)
 /// - `wows-replays/src/analyzer/decoder/decode.rs` (`WardAdded` radius)
-/// - `wows-toolkit/src/replay/minimap_view/tactics.rs` (`space_size * 30.0`)
 /// - `minimap-renderer/src/renderer.rs` (`m / 30.0 / space_size`)
 ///
 /// Until someone measures a drawn radius against a known in-game one, treat a

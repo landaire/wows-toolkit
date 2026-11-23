@@ -60,7 +60,7 @@ impl RealtimeArmorFeed {
     ///
     /// What the incoming-fire log lists, as against what the hull draws: the log
     /// is a reading of the battle and does not shrink as playback is scrubbed
-    /// back, which is how the egui panel reads it.
+    /// back.
     pub fn whole_battle(&self) -> &[PreExtractedHit] {
         &self.timeline.hits
     }
@@ -354,7 +354,7 @@ pub fn resolve_incoming_shells(context: &mut IncomingContext, game_data: &GameDa
             continue;
         }
         let Some(shell) = provider.resolve_shell_from_param_id(salvo.params_id) else { continue };
-        // The internal name stands in for a shell the build has no translation for, as egui named it.
+        // The internal name stands in for a shell the build has no translation for.
         let key = TranslationKey::new(format!("IDS_{}", shell.name.to_uppercase()));
         let named = wowsunpack::data::ResourceLoader::localized_name_from_id(provider.as_ref(), &key)
             .unwrap_or_else(|| shell.name.clone());

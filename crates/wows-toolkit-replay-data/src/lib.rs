@@ -1,6 +1,6 @@
 //! Game-data loading, replay parsing into the presentation model and the
-//! replay index pass, shared by the desktop front ends. Blocking functions and
-//! plain data only: each front end schedules them on its own executor.
+//! replay index pass for the desktop app. Blocking functions and plain data
+//! only: the app schedules them on its own executor.
 
 pub mod browser_tree;
 pub mod cap_layout_store;

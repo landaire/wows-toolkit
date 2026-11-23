@@ -25,6 +25,11 @@ name = "dhat_parse"
 path = "src/bin/dhat_parse.rs"
 required-features = ["dhat-heap"]
 
+[[bin]]
+name = "dhat_load"
+path = "src/bin/dhat_load.rs"
+required-features = ["dhat-heap"]
+
 [dependencies]
 wows-core = { workspace = true }
 clap = { workspace = true, optional = true }

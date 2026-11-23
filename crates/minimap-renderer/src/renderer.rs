@@ -2628,8 +2628,8 @@ impl<'a> MinimapRenderer<'a> {
                     .unwrap_or_else(|| player.vehicle().name().to_string())
             });
             let ship_param_id = Some(player.vehicle().id());
-            // Ship-class icon key: the species name (e.g. "Destroyer"). The
-            // egui side uses this to look up the same icon the minimap draws
+            // Ship-class icon key: the species name (e.g. "Destroyer"). A
+            // viewer uses this to look up the same icon the minimap draws
             // beside a ship.
             let species = player.vehicle().species().and_then(|s| s.known()).copied();
             let class_icon_key = species.map(|s| s.name().to_string());

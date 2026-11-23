@@ -146,7 +146,7 @@ impl ShipChoices {
     /// Turns all of one ship's ranges on, or all of them off.
     ///
     /// The six switches one at a time is six clicks to ask a question that
-    /// is usually all-or-nothing, which is why the egui menu offers both.
+    /// is usually all-or-nothing, which is why the menu offers both.
     pub fn set_every_range_for(&mut self, player: &str, on: bool, options: &mut RenderOptions) {
         self.set_ranges_for(player, |filter| *filter = if on { ALL_RANGES } else { NO_RANGES }, options);
     }

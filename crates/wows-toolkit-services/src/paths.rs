@@ -8,8 +8,8 @@ use std::path::PathBuf;
 /// `\\server\share`. A path the plain spelling would name differently, and any other path, is
 /// returned as it is.
 ///
-/// Only for those uses: the replay index keys folders by the verbatim spelling, which the other
-/// front ends write too.
+/// Only for those uses: the replay index keys folders by the verbatim spelling, which earlier
+/// releases wrote.
 pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
     path.to_str().and_then(plain_spelling).map_or_else(|| path.to_path_buf(), PathBuf::from)
 }

@@ -1,33 +1,24 @@
-//! Ship-armor load: ports the egui app's `load_ship_armor`
-//! (`armor_viewer/common.rs:137-315`) plus the default-hull option building
-//! from `load_ship_for_pane_with_lod` (`armor_viewer/ui/tab.rs:2374`).
+//! Ship-armor load and the default-hull option building.
 //!
 //! **Default load.** [`load_ship_armor_by_param`]
-//! load the DEFAULT hull at the DEFAULT (highest-detail) LOD -- `hull_lod: 0`
-//! and `selected_hull: None` both match the egui app's own per-pane defaults
-//! (`ArmorPane::with_defaults`, `armor_viewer/state.rs`), and
-//! `ShipExportOptions::hull: None` resolves to the first/stock hull the same
-//! way the egui app's own default load does.
+//! loads the default hull at the highest-detail LOD (`hull_lod: 0`,
+//! `selected_hull: None`); `ShipExportOptions::hull: None` resolves to the
+//! first (stock) hull.
 //!
 //! **Reload.** [`load_ship_armor_with_options`]/
 //! [`build_reload_options`] instead take an explicit hull/LOD/module
-//! selection from the host's hull and LOD selectors, which the
-//! egui app's own incremental `start_hull_lod_reload`/`start_upgrade_reload`
-//! (`tab.rs:2472`/`2568`) mutate an existing `LoadedShipArmor` in place for;
-//! this port's `LoadedShipArmor` is an immutable `Arc`, so a reload always
-//! produces a brand new one via the same `load_ship_armor` this module's
-//! default load uses, rather than a second, narrower load path.
+//! selection from the host's hull and LOD selectors. [`LoadedShipArmor`] is
+//! an immutable `Arc`, so a reload always produces a new one via the same
+//! `load_ship_armor` the default load uses, rather than a second, narrower
+//! load path.
 //!
-//! **Deferred fields.** The egui `LoadedShipArmor` also carries splash-box
-//! data, hit-location data, and camera orbit trajectories -- all
-//! analysis-only, consumed by UI this milestone does not build yet (splash
-//! analysis, camera ellipse overlay). This port's [`LoadedShipArmor`] omits
-//! them outright rather than carrying `None`/empty placeholders, keeping the
-//! struct to exactly what the sidebar/load/reload/upload path this milestone
-//! builds produces or consumes.
+//! **Omitted fields.** Splash-box data, hit-location data, and camera orbit
+//! trajectories are analysis-only and not carried by [`LoadedShipArmor`],
+//! keeping the struct to exactly what the sidebar/load/reload/upload path
+//! produces or consumes.
 //!
 //! **Kept fields.** `hull_meshes`/`hull_part_groups`/`hull_textures`/
-//! `hull_lod_count` are loaded (mirroring the egui core). `hull_upgrade_names`
+//! `hull_lod_count` are loaded. `hull_upgrade_names`
 //! and `module_alternatives` are cheap to derive alongside a load/reload (same
 //! source data, no extra ship export), so they are populated for the hull
 //! popover's selectors to consume directly.
@@ -91,8 +82,7 @@ use crate::upload::DisplaySettings;
 
 /// Which plate a triangle belongs to.
 ///
-/// Carries the same three values the egui app's `PlateKey`
-/// (`armor_viewer/state.rs`) does, named rather than positional: the two
+/// Zone, material and thickness, named rather than positional: the two
 /// strings are interchangeable to the compiler and only the field name says
 /// which is the zone. The thickness discriminator is what makes a
 /// plate-boundary edge stop at a real thickness change.
@@ -768,9 +758,7 @@ pub fn scene_bounds(armor: &[InteractiveArmorMesh], hull: &[InteractiveHullMesh]
     (Vec3::new(min[0], min[1], min[2]), Vec3::new(max[0], max[1], max[2]))
 }
 
-/// Default LOD level for a fresh ship load: 0 = highest detail, matching the
-/// egui app's own per-pane default (`ArmorPane::with_defaults`'s `hull_lod: 0`,
-/// `armor_viewer/state.rs`).
+/// Default LOD level for a fresh ship load: 0 = highest detail.
 pub const DEFAULT_LOD: usize = 0;
 
 /// Resolves `param_index`'s `Vehicle` from `ship_assets`. Shared by
@@ -821,10 +809,8 @@ pub fn load_ship_armor_with_options(
 /// Resolves `param_index`'s `Vehicle` from `ship_assets` and builds the
 /// [`ShipLoadOptions`] a Task 8c reload needs (see [`reload_load_options`]'s
 /// doc). Runs synchronously on the UI thread -- a `GameParams` lookup plus a
-/// small hashmap scan, mirroring the sync prep the egui app's own
-/// `load_ship_for_pane_with_lod` runs before spawning its background reload
-/// (`armor_viewer/ui/tab.rs:2427-2444`) -- so the caller can build this right
-/// before handing it to [`load_ship_armor_with_options`] on a background task.
+/// small hashmap scan -- so the caller can build this right before handing it
+/// to [`load_ship_armor_with_options`] on a background task.
 pub fn build_reload_options(
     ship_assets: &ShipAssets,
     param_index: &str,
@@ -837,9 +823,7 @@ pub fn build_reload_options(
     Ok(reload_load_options(&vehicle, display_name, lod, selected_hull, module_overrides))
 }
 
-/// Default save-file name for a GLB export (Milestone 5 Task 10), matching
-/// the egui app's own `format!("{}.glb", display_name)` default
-/// (`armor_viewer/ui/tab.rs:1057`).
+/// Default save-file name for a GLB export.
 pub fn default_export_filename(display_name: &str) -> String {
     format!("{display_name}.glb")
 }
@@ -847,9 +831,7 @@ pub fn default_export_filename(display_name: &str) -> String {
 /// Builds [`ShipExportOptions`] for a GLB export of the ship as currently
 /// DISPLAYED in a viewport pane: the pane's current hull/LOD/module
 /// selection, with textures embedded (`textures: true`) and the intact hull
-/// (`damaged: false`), matching the egui app's own Export handler
-/// (`armor_viewer/ui/tab.rs:1057-1097`) so exported GLBs are textured on both
-/// UIs. A pure function, split out from [`export_ship_glb`] so it is
+/// (`damaged: false`). A pure function, split out from [`export_ship_glb`] so it is
 /// unit-testable without a `ShipAssets`/`Vehicle`.
 pub fn export_options_from_selection(
     lod: usize,
@@ -912,7 +894,7 @@ mod tests {
         assert_eq!(options.lod, 2);
         assert_eq!(options.hull, Some("B_Hull".to_string()));
         assert_eq!(options.module_overrides, modules);
-        assert!(options.textures, "a GLB export should embed textures, matching the egui app's Export handler");
+        assert!(options.textures, "a GLB export should embed textures");
         assert!(!options.damaged, "export always targets the intact hull, matching load_ship_armor");
     }
 

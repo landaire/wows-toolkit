@@ -1,7 +1,6 @@
 //! Annotation tool interaction, selection, and movement.
 //!
-//! Moved from the desktop `minimap_view/shapes.rs` to share between desktop
-//! and web clients. All functions use shared egui types only.
+//! All functions use shared egui types only.
 
 use egui::Color32;
 use egui::Vec2;
@@ -516,13 +515,13 @@ use wows_minimap_renderer::MINIMAP_SIZE;
 /// Configuration for viewport zoom/pan behavior.
 pub struct ZoomPanConfig {
     /// Whether left-click drag can pan (when no tool/selection is active).
-    /// Desktop tactics/replay: `true`. Web: `false` (middle-drag only).
+    /// Web: `false` (middle-drag only).
     pub allow_left_drag_pan: bool,
     /// HUD height in logical pixels. Affects cursor-centered zoom math.
     /// 0 for tactics boards; `HUD_HEIGHT` for replay/web replay views.
     pub hud_height: f32,
     /// Whether to route scroll events to tool yaw rotation when a PlacingShip
-    /// tool is active. Desktop tactics/replay: `true`. Web: `false`.
+    /// tool is active. Web: `false`.
     pub handle_tool_yaw: bool,
     /// Logical width of the zoomable map area. When set, pan clamping uses this
     /// instead of the full canvas width, preventing the map from panning into

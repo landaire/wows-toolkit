@@ -56,7 +56,7 @@ pub fn renderers_for_playback(renderer: SharedPreviewRenderer) -> Vec<SharedPrev
 /// Filtered here rather than at bake time: a toggle then costs one frame
 /// rather than another walk of the battle. Trails are read from the track's
 /// recorded positions up to the clock, end at their ships and go first, so
-/// they sit behind everything, as the egui renderer draws them. `drawn_on` is
+/// they sit behind everything. `drawn_on` is
 /// what is drawn over the battle rather than by it (annotations, placed
 /// ranges): it is not filtered and goes on after the battle's own map layers,
 /// so a drawn line is not buried under a ship.

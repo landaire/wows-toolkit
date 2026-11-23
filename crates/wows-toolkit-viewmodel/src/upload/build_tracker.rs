@@ -1,6 +1,6 @@
 //! The per-player build payload `/api/ship_builds` takes.
 //!
-//! Shared by both front ends: the service reads one shape, so both apps send it.
+//! The one shape the service reads.
 
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::Player;

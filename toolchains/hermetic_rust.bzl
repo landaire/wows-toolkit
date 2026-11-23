@@ -92,7 +92,7 @@ windows_cross_resource = rule(
 )
 
 # The build mode is the `toolchains//:native_build_mode` constraint, which the
-# `release` modifier sets (`buck2 build //:wows_toolkit_egui?release`). Debug is the
+# `release` modifier sets (`buck2 build //:wows_toolkit?release`). Debug is the
 # configuration without it.
 _RELEASE = "toolchains//:release"
 

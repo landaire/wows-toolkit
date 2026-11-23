@@ -1,5 +1,5 @@
 //! The inks and nib widths a drawing tool offers, shared by the replay viewport and the tactics
-//! board so both match the egui toolbar.
+//! board.
 
 /// One preset ink a swatch offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10,7 +10,7 @@ pub struct Ink {
     pub label_key: &'static str,
 }
 
-/// The egui toolbar's `PRESET_COLORS`, in its order.
+/// The preset inks, in swatch order.
 pub const INKS: [Ink; 9] = [
     Ink { rgba: [255, 255, 255, 255], name: "white", label_key: "ui-tactics-ink_white" },
     Ink { rgba: [160, 160, 160, 255], name: "gray", label_key: "ui-tactics-ink_gray" },
@@ -23,11 +23,11 @@ pub const INKS: [Ink; 9] = [
     Ink { rgba: [255, 130, 180, 255], name: "pink", label_key: "ui-tactics-ink_pink" },
 ];
 
-/// What a tool draws with until the reader picks an ink: egui's `Color32::YELLOW`, which is none
+/// What a tool draws with until the reader picks an ink: yellow, which is none
 /// of the presets, so no swatch reads as chosen at first.
 pub const DEFAULT_INK: [u8; 4] = [255, 255, 0, 255];
 
-/// The nib width egui opens on, and the span its slider and bracket keys hold it to.
+/// The nib width a tool opens on, and the span its slider and bracket keys hold it to.
 pub const DEFAULT_NIB: f32 = 2.0;
 pub const MIN_NIB: f32 = 1.0;
 pub const MAX_NIB: f32 = 8.0;

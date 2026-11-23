@@ -1,9 +1,7 @@
 //! Polling a Twitch channel's chat for who is watching.
 //!
 //! The roster's possible-stream-sniper chip is drawn from observations in the
-//! shared config database. The egui app writes them from its own poll; this is
-//! the same poll, so the port fills the table rather than only reading what
-//! the other app happened to collect.
+//! shared config database, which this poll writes.
 //!
 //! Who a login plausibly names, and how long an observation counts for, are
 //! `wows_toolkit_viewmodel::twitch`; this module is only the fetching.
@@ -45,9 +43,8 @@ pub struct Session {
 impl Session {
     /// Validates `token` against Twitch and resolves which channel to watch.
     ///
-    /// An empty `channel` watches the credential's own, which is what the
-    /// egui app does: the common case is streaming under the account the
-    /// credential belongs to.
+    /// An empty `channel` watches the credential's own: the common case is
+    /// streaming under the account the credential belongs to.
     pub async fn open(token: &Token, channel: &str, client: reqwest::Client) -> Result<Self, PollError> {
         let client: HelixClient<'static, reqwest::Client> = HelixClient::with_client(client);
         let access = AccessToken::new(token.oauth_token().to_string());
@@ -56,7 +53,7 @@ impl Session {
         let channel = if channel.is_empty() {
             token.user_id.clone()
         } else {
-            // A channel that cannot be found watches the credential's own, as the egui app does.
+            // A channel that cannot be found watches the credential's own.
             match client.get_user_from_login(channel, &token).await {
                 Ok(Some(user)) => user.id,
                 Ok(None) => {
@@ -96,9 +93,7 @@ impl Session {
 
         // The table only grows otherwise: a channel of a few hundred chatters
         // polled every two minutes is tens of thousands of rows a day, and a
-        // sighting from last year says nothing about who is in this battle. The
-        // window is the egui app's (`task/networking.rs:657`), so both apps keep
-        // the same history.
+        // sighting from last year says nothing about who is in this battle.
         let pruned = query::prune_twitch_observations(pool, seen_at - OBSERVATION_RETENTION_SECS).await?;
         if pruned > 0 {
             tracing::debug!(pruned, "twitch: dropped observations older than the retention window");
@@ -121,7 +116,7 @@ where
     }
 }
 
-/// How long a sighting is kept. Thirty days, as the egui app keeps them.
+/// How long a sighting is kept: thirty days.
 const OBSERVATION_RETENTION_SECS: i64 = 30 * 24 * 60 * 60;
 
 /// How long to wait before polling again.

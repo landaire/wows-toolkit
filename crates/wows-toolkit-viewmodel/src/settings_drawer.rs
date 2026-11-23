@@ -8,7 +8,7 @@ use wt_translations::t;
 
 use crate::text_filter::FilterQuery;
 
-/// The formats a battle can be auto-exported in, in the order the egui combo lists them.
+/// The formats a battle can be auto-exported in, in the order the combo lists them.
 pub const EXPORT_FORMATS: [ReplayExportFormat; 3] =
     [ReplayExportFormat::Json, ReplayExportFormat::Csv, ReplayExportFormat::Cbor];
 

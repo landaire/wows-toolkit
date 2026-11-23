@@ -1,7 +1,6 @@
 //! Shared annotation rendering, hit testing, and geometry helpers.
 //!
-//! These functions are used by both the desktop replay renderer / tactics board
-//! and the WASM web client.
+//! Used by the WASM web client.
 
 use std::collections::HashMap;
 

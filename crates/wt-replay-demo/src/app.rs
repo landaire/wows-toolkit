@@ -1,5 +1,5 @@
-//! The demo: a baked clip drawn by the desktop viewer's egui renderer, with
-//! its transport and layer switches.
+//! The demo: a baked clip drawn by the shared egui renderer, with its
+//! transport and layer switches.
 
 use std::cell::RefCell;
 use std::rc::Rc;

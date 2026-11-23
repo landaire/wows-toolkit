@@ -1,10 +1,9 @@
 //! Collaborative replay sessions: hosting one, joining one, and what the
 //! session is doing while it runs.
 //!
-//! The session itself is `wt-collab-client`, shared with the egui app, so
-//! both front ends run one implementation of the mesh. What is here is the
-//! state a desktop front end keeps around it, and the link a viewport talks to
-//! the session through. The peer task runs on the tokio runtime; a front end
+//! The session itself is `wt-collab-client`. What is here is the state the
+//! app keeps around it, and the link a viewport talks to the session
+//! through. The peer task runs on the tokio runtime; the app
 //! learns of its changes through [`CollabState::wakes`].
 
 use std::sync::Arc;
@@ -39,10 +38,10 @@ use wt_collab_client::types::PlacedShipRanges;
 /// Where the web client is served. The session token rides in the fragment.
 const WEB_CLIENT_URL: &str = wt_collab_client::WEB_CLIENT_URL;
 
-/// Wakes a front end when the peer task changes the session.
+/// Wakes the app when the peer task changes the session.
 ///
 /// A wake arrives on a tokio worker, so it is a nudge down a channel that the
-/// front end reads on its own executor and turns into a redraw. Unbounded and
+/// app reads on its own executor and turns into a redraw. Unbounded and
 /// non-blocking: the peer task must never wait on a redraw.
 struct ChannelWaker {
     nudge: futures::channel::mpsc::UnboundedSender<()>,
@@ -73,8 +72,8 @@ pub struct CollabState {
     pub token_revealed: bool,
     /// What went wrong starting or joining, for the line under the controls.
     pub failure: Option<SessionFailure>,
-    /// Where the asset bundle for web clients is kept once built. The port
-    /// builds none yet, so a web client joining sees no map art.
+    /// Where the asset bundle for web clients is kept once built. None is
+    /// built yet, so a web client joining sees no map art.
     bundle: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
@@ -122,7 +121,7 @@ impl CollabState {
     }
 
     /// The link to the session on this machine, for a web client being worked on
-    /// beside the app. Debug builds only, as the egui popover offers it.
+    /// beside the app. Debug builds only.
     #[cfg(debug_assertions)]
     pub fn localhost_link(&self) -> Option<String> {
         self.token().map(|token| format!("http://localhost:8080/#{token}"))
@@ -227,7 +226,7 @@ impl CollabState {
         let params = HostParams {
             toolkit_version,
             display_name: self.display_name.trim().to_string(),
-            // What the egui host starts a session with, so a peer joining either draws the same.
+            // The default render options, so every peer starts drawing the same.
             initial_render_options: CollabRenderOptions::from_saved(&SavedRenderOptions::default()),
             web_asset_bundle: Arc::clone(&self.bundle),
         };
@@ -336,9 +335,9 @@ impl CollabState {
     /// Takes what the peer task has raised since the last look and acts on
     /// it.
     ///
-    /// Called as the session is drawn, as the egui app polls its inbox every
-    /// frame. It has to be called: the inbox is unbounded, so an undrained
-    /// session's events would accumulate for as long as it runs.
+    /// Called each frame the session is drawn. It has to be called: the inbox
+    /// is unbounded, so an undrained session's events would accumulate for as
+    /// long as it runs.
     ///
     /// Returns what the reader should be told: in a running session nothing
     /// else reports who joined, who left, or that the host has opened something.
@@ -348,8 +347,7 @@ impl CollabState {
         let mut notices = Vec::new();
         for event in events {
             match event {
-                // Hosting announces a session; joining announces a connection,
-                // which is the split the egui app makes between its two pollers.
+                // Hosting announces a session; joining announces a connection.
                 SessionEvent::Started => {
                     notices.push(if self.hosting { SessionNotice::Started } else { SessionNotice::Connected })
                 }
@@ -364,7 +362,7 @@ impl CollabState {
                 SessionEvent::PeerPromoted { .. }
                 | SessionEvent::FrameSourceChanged { .. }
                 | SessionEvent::SessionInfoReceived { .. } => {}
-                // A replay opened on the host may need a viewport a front end
+                // A replay opened on the host may need a viewport the app
                 // does not build, so the reader is told rather than left to
                 // wonder why nothing appeared.
                 SessionEvent::ReplayOpened { replay_name, .. } => {
@@ -771,7 +769,7 @@ impl CollabLink {
     ///
     /// For a session starting or ending under an open viewport: what was drawn
     /// before stays on the map, and a session hears about it as though it had
-    /// just been drawn, which is how the egui host pushes what it already had.
+    /// just been drawn, which is how a host pushes what it already had.
     pub fn adopt(&self, held: Vec<wt_collab_client::drawing::Held>) {
         if let Some(tx) = &self.local_tx {
             // Under the ids they already carry, so a step remembered for an undo
@@ -1378,8 +1376,7 @@ impl CollabLink {
     /// Forgets the pings whose ripple has finished.
     ///
     /// The session collects them and nothing else takes them out, so a
-    /// session left running carries every ping anyone has dropped in it. The
-    /// egui renderer sheds them in the same place, as it draws.
+    /// session left running carries every ping anyone has dropped in it.
     pub fn drop_stale_pings(&self, life: std::time::Duration) {
         self.alone_pings.lock().retain(|ping| ping.time.elapsed() < life);
         let Some(state) = &self.state else { return };

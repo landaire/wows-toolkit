@@ -1,9 +1,9 @@
 //! The files a parse could not read, remembered so they are not retried every
 //! launch.
 //!
-//! Shared, because the ledger is one row in the settings table and both front
-//! ends walk the same directory: a replay the egui app gave up on is one this one
-//! gives up on too, and neither should re-read it a hundred times.
+//! Shared, because the ledger is one row in the settings table: a replay one
+//! process gave up on is one every other gives up on too, and none should
+//! re-read it a hundred times.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -156,7 +156,7 @@ mod tests {
         assert!(!ledger.contains(&path));
     }
 
-    /// It round-trips through the row both apps read.
+    /// It round-trips through the settings row.
     #[tokio::test]
     async fn the_ledger_round_trips() {
         let pool = crate::test_pool().await;

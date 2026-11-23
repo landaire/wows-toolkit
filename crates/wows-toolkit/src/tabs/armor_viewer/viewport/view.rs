@@ -1,0 +1,958 @@
+//! The viewport element: the scene's surface, the overlay over it, what stands in the scene's
+//! place while there is none, the hover tooltips, the readouts and the context menu.
+
+use std::time::Duration;
+use std::time::Instant;
+
+use landaire_ui::LoadingPace;
+use landaire_ui::LoadingProps;
+use landaire_ui::OverlaySurfaceProps;
+use landaire_ui::PointerTipProps;
+use landaire_ui::TipClearance;
+use wows_toolkit_armor::catalog::translate_name;
+use wows_toolkit_armor::hull_picking::MeshTooltip;
+use wows_toolkit_armor::load_ship::ArmorTriangleTooltip;
+use wows_toolkit_armor::load_ship::PlateKey;
+use wows_toolkit_armor::viewport::types::Vec2;
+use wowsunpack::export::gltf_export::thickness_to_color;
+use wt_translations::t;
+use zgui::component;
+use zgui::css;
+use zgui::custom::CustomHandle;
+use zgui::elements::Focus;
+use zgui::elements::surface;
+use zgui::geom::Css;
+use zgui::geom::CssPx;
+use zgui::geom::Device;
+use zgui::geom::DevicePx;
+use zgui::geom::Point;
+use zgui::prelude::Fonts;
+use zgui::reactive::Callable;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RenderEffect;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
+use zgui::reactive::StoredValue;
+use zgui::reactive::UnsyncCallback;
+use zgui::reactive::on_cleanup_local;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::WithValue;
+use zgui::reactive::use_context;
+use zgui::reactive::use_local_context;
+use zgui::surface::SurfaceElementExt;
+use zgui::view;
+use zgui::view::AnyView;
+use zgui::view::EventCx;
+use zgui::view::IntoView;
+use zgui::view::NodeRef;
+use zgui::view::ShowProps;
+use zgui::view::TimeoutHandle;
+use zgui::view::Timers;
+use zgui::view::events;
+use zgui::view::install_stylesheet;
+use zgui::vocab::Key;
+use zgui::vocab::NamedKey;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
+use zgui_ui::ContextMenuContentProps;
+use zgui_ui::ContextMenuProps;
+use zgui_ui::ContextMenuTriggerProps;
+use zgui_ui::MenuItemProps;
+use zgui_ui::MenuSeparatorProps;
+
+use crate::i18n::Locale;
+use crate::services::Services;
+use crate::shell::Shell;
+use crate::shell::tabs::ModifierKey;
+use crate::tabs::armor_viewer::shortcut::ViewerShortcut;
+
+use super::casts::CastMiss;
+use super::host::ViewportRenderer;
+use super::input::KeyOutcome;
+use super::input::ViewKey;
+use super::model::GpuState;
+use super::model::ViewportModel;
+use super::overlay::OverlayElement;
+use super::state::ArmorViewportState;
+
+const SHEET: &str = "wt-armor-viewport";
+
+/// Where the hover tooltip stands: clear of the cursor glyph, which covers a tip at the pointer,
+/// and off the window's edge. The GPUI viewer's offsets.
+const TOOLTIP_CLEARANCE: TipClearance = TipClearance { gap: 16.0, margin: 8.0 };
+
+const CSS: &str = css!(
+    ".wt-armor-viewport__trigger {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 0;
+    }
+    .wt-armor-viewport {
+        position: relative;
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .wt-armor-viewport[data-aiming] { cursor: crosshair; }
+    .wt-armor-viewport__scene {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    .wt-armor-viewport__overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+    .wt-armor-viewport__shade {
+        position: absolute;
+        pointer-events: none;
+    }
+    .wt-armor-viewport__shade--left {
+        left: 0; top: 0; bottom: 0; width: 10px;
+        background: linear-gradient(90deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0));
+    }
+    .wt-armor-viewport__shade--right {
+        right: 0; top: 0; bottom: 0; width: 10px;
+        background: linear-gradient(270deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0));
+    }
+    .wt-armor-viewport__shade--top {
+        left: 0; right: 0; top: 0; height: 10px;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0));
+    }
+    .wt-armor-viewport__shade--bottom {
+        left: 0; right: 0; bottom: 0; height: 10px;
+        background: linear-gradient(0deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0));
+    }
+    .wt-armor-viewport__said {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        font-size: var(--zui-type-size-sm);
+        pointer-events: none;
+    }
+    .wt-armor-viewport__dim {
+        color: var(--wt-color-text-dim);
+    }
+    .wt-armor-viewport__readout {
+        position: absolute;
+        left: 8px;
+        padding: 4px 8px;
+        border-radius: var(--zui-radius-md);
+        background-color: color-mix(in srgb, var(--zui-color-background) 85%, transparent);
+        border: 1px solid var(--zui-color-border);
+        font-size: var(--zui-type-size-xs);
+        pointer-events: none;
+    }
+    .wt-armor-viewport__readout--top { top: 8px; }
+    .wt-armor-viewport__readout--log {
+        top: 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .wt-armor-viewport__readout--bottom { bottom: 8px; }
+    /* Above the length readout in the bottom left, which a narrow pane would put it over. */
+    .wt-armor-viewport__cast-strip {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 40px;
+        padding: 0 8px;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+    }
+    .wt-armor-viewport__cast-hint {
+        padding: 4px 12px;
+        border-radius: 12px;
+        background-color: color-mix(in srgb, var(--zui-color-background) 70%, transparent);
+        border: 1px solid var(--zui-color-border);
+        color: var(--wt-color-text-dim);
+        font-size: var(--zui-type-size-xs);
+    }
+    .wt-armor-viewport__cast-hint[data-miss] {
+        background-color: color-mix(in srgb, var(--zui-color-background) 90%, transparent);
+        color: var(--wt-color-text-strong);
+    }
+    .wt-armor-viewport__log-line {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+    }
+    /* Bottom right, clear of the length readout in the bottom left. */
+    .wt-armor-viewport__disclaimer {
+        position: absolute;
+        right: 8px;
+        bottom: 4px;
+        font-size: 11px;
+        color: var(--wt-color-text-dim);
+        opacity: 0.8;
+        pointer-events: none;
+    }
+    .wt-armor-viewport__tooltip {
+        padding: 4px 8px;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-width: 320px;
+    }
+    .wt-armor-viewport__tooltip-head {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+        font-size: 14px;
+        font-weight: var(--zui-type-weight-bold);
+    }
+    .wt-armor-viewport__tooltip-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+        font-size: var(--zui-type-size-sm);
+    }
+    .wt-armor-viewport__tooltip-row[data-this] {
+        font-weight: var(--zui-type-weight-bold);
+    }
+    .wt-armor-viewport__tooltip-text {
+        font-size: var(--zui-type-size-sm);
+    }
+    .wt-armor-viewport__tooltip-muted {
+        font-size: var(--zui-type-size-xs);
+        color: var(--zui-color-muted-foreground);
+    }
+    .wt-armor-viewport__tooltip-rule {
+        height: 1px;
+        background-color: var(--zui-color-border);
+    }
+    .wt-armor-viewport__swatch {
+        flex: none;
+        border-radius: 2px;
+    }
+    .wt-armor-viewport__backdrop {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(0, 0, 0, 0.35);
+    }
+    .wt-armor-viewport__confirm {
+        width: 360px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+    }
+    .wt-armor-viewport__confirm-title {
+        font-weight: var(--zui-type-weight-bold);
+    }
+    .wt-armor-viewport__confirm-body {
+        font-size: var(--zui-type-size-sm);
+    }
+    .wt-armor-viewport__confirm-actions {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        justify-content: flex-end;
+    }"
+);
+
+/// How long the reason a cast missed stays over the viewport.
+const MISS_SHOWN_FOR: Duration = Duration::from_millis(3000);
+
+/// The viewport showing `state`: the scene with its gizmo and labels, the pointer and keyboard
+/// driving its camera, hover tooltips and the plate menu.
+#[component]
+pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
+    let locale = Services::current().locale;
+    // Absent outside the main window, where nothing can be exported to.
+    let shell = use_local_context::<Shell>();
+    let area = NodeRef::new();
+    let overlay = overlay_element(state);
+
+    // Where `position`, in window CSS pixels, sits in the viewport.
+    let local = move |position: Point<CssPx, Css>| -> Option<Vec2> {
+        let bounds = area.window_bounds()?;
+        Some(viewport_point(position, bounds.origin, device_scale(area)))
+    };
+    // Where the pointer the tooltip stands beside is in the window. None while the export panel
+    // covers the view, which keeps the pointer's moves from it.
+    let pointer = Signal::derive_local(move || {
+        let cursor = state
+            .read_overlay(|model| model.export_confirm.is_none().then(|| hovered(model)).flatten())
+            .flatten()
+            .map(|(_, cursor)| cursor)?;
+        let bounds = area.window_bounds()?;
+        Some(window_point(cursor, bounds.origin, device_scale(area)))
+    });
+    let shift_held = RwSignal::new_local(false);
+    let hold_shift = move |held: bool| {
+        if shift_held.get_untracked() != held {
+            shift_held.set(held);
+        }
+    };
+    // The crosshair says a Shift-click here casts: Shift is held over a plate that can be cast at.
+    let aiming = move || {
+        let over_plate = state.read_overlay(|model| model.hovered.is_some() && model.can_cast()).unwrap_or(false);
+        (shift_held.get() && over_plate).then(String::new)
+    };
+    let miss_note = MissNote::new();
+
+    let on_down = move |ev: &mut EventCx<'_, events::PointerDown>| {
+        hold_shift(ev.modifiers.shift());
+        let Some(button) = ev.button else { return };
+        let Some(at) = local(ev.position) else { return };
+        area.focus();
+        let when = ev.timestamp;
+        let clicks = ev.click_settings();
+        let drag = state.update(|model, cx| model.pointer_down(at, button, when, clicks, cx)).unwrap_or(false);
+        if drag {
+            ev.capture_pointer();
+        }
+    };
+    let on_move = move |ev: &mut EventCx<'_, events::PointerMove>| {
+        hold_shift(ev.modifiers.shift());
+        let Some(at) = local(ev.position) else { return };
+        state.update(|model, cx| model.pointer_move(at, cx));
+    };
+    let on_up = move |ev: &mut EventCx<'_, events::PointerUp>| {
+        let Some(button) = ev.button else { return };
+        ev.release_pointer();
+        let shift = ev.modifiers.shift();
+        hold_shift(shift);
+        let cast = match local(ev.position) {
+            Some(at) => state.update(|model, cx| model.pointer_up(at, button, shift, cx)).flatten(),
+            None => {
+                state.update(|model, _| model.pointer_cancelled());
+                None
+            }
+        };
+        match cast {
+            Some(Ok(_)) => miss_note.clear(),
+            Some(Err(miss)) => miss_note.show(miss, state.scene_key()),
+            None => {}
+        }
+    };
+    let on_key_down = move |ev: &mut EventCx<'_, events::KeyDown>| {
+        hold_shift(ev.modifiers.shift() || matches!(ev.key_without_modifiers, Key::Named(NamedKey::Shift)));
+        // The chord acts on this pane, which a middle press focuses without making it active.
+        if let Some(shortcut) = ViewerShortcut::from_key(&ev.key_without_modifiers, ev.modifiers) {
+            if !ev.repeat {
+                shortcut.run(state, || {
+                    if let Some(menu) = state.pane_menu() {
+                        menu.toggle_options.run(());
+                    }
+                });
+            }
+            ev.prevent_default();
+            ev.stop_propagation();
+            return;
+        }
+        let lowered;
+        let key = match &ev.key_without_modifiers {
+            Key::Named(NamedKey::ArrowUp) => ViewKey::Up,
+            Key::Named(NamedKey::ArrowDown) => ViewKey::Down,
+            Key::Named(NamedKey::ArrowLeft) => ViewKey::Left,
+            Key::Named(NamedKey::ArrowRight) => ViewKey::Right,
+            Key::Character(text) => {
+                lowered = text.to_lowercase();
+                ViewKey::Character(&lowered)
+            }
+            _ => return,
+        };
+        let shift = ev.modifiers.shift();
+        let outcome = state.update(|model, _| model.key_down(key, shift)).unwrap_or(KeyOutcome::Ignored);
+        if outcome == KeyOutcome::Handled {
+            ev.prevent_default();
+        }
+    };
+    let on_key_up = move |ev: &mut EventCx<'_, events::KeyUp>| {
+        hold_shift(ev.modifiers.shift() && !matches!(ev.key_without_modifiers, Key::Named(NamedKey::Shift)));
+        let lowered;
+        let key = match &ev.key_without_modifiers {
+            Key::Named(NamedKey::ArrowUp) => ViewKey::Up,
+            Key::Named(NamedKey::ArrowDown) => ViewKey::Down,
+            Key::Named(NamedKey::ArrowLeft) => ViewKey::Left,
+            Key::Named(NamedKey::ArrowRight) => ViewKey::Right,
+            Key::Character(text) => {
+                lowered = text.to_lowercase();
+                ViewKey::Character(&lowered)
+            }
+            _ => return,
+        };
+        state.update(|model, _| model.key_up(key));
+    };
+
+    let renderer = ViewportRenderer::new(state);
+    let invalidator = state.invalidator().unwrap_or_default();
+    let scene = surface().class("wt-armor-viewport__scene").renderer_with_invalidator(renderer, &invalidator);
+
+    view! {
+        ContextMenu {
+            ContextMenuTrigger(class = "wt-armor-viewport__trigger") {
+                box(
+                    class = SHEET,
+                    node_ref = area,
+                    attr:data-testid = "armor-viewport",
+                    attr:data-aiming = aiming,
+                    tabindex = {Focus::Programmatic},
+                    on:pointer_down = on_down,
+                    on:pointer_move = on_move,
+                    on:pointer_up = on_up,
+                    on:pointer_cancel = move |ev| {
+                        ev.release_pointer();
+                        state.update(|model, _| model.pointer_cancelled());
+                    },
+                    on:pointer_enter = move |ev| {
+                        if let Some(at) = local(ev.position) {
+                            state.update(|model, _| model.pointer_entered(at));
+                        }
+                    },
+                    on:pointer_leave = move |_| {
+                        state.update(|model, _| model.pointer_left());
+                    },
+                    on:wheel = move |ev| {
+                        let Some(line) = ev.line_height() else { return };
+                        let notches = ev.delta.to_pixels(line).height.0;
+                        if notches != 0.0 {
+                            // A wheel turned away from the reader reports a negative delta, which
+                            // brings the camera closer.
+                            state.update(|model, cx| model.wheel(-notches, cx));
+                            ev.prevent_default();
+                        }
+                    },
+                    on:key_down = on_key_down,
+                    on:key_up = on_key_up,
+                    on:focus_out = move |_| {
+                        hold_shift(false);
+                        state.update(|model, _| model.release_keys());
+                    }
+                ) {
+                    {scene}
+                    Show(when = move || state.read(|model| model.scene_is_shown()).unwrap_or(false)) {
+                        box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--left")
+                        box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--right")
+                        box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--top")
+                        box(class = "wt-armor-viewport__shade wt-armor-viewport__shade--bottom")
+                        text(class = "wt-armor-viewport__disclaimer", attr:data-testid = "armor-viewport-disclaimer") {{
+                            move || {
+                                locale.track();
+                                t!("ui-armor-ballistic_disclaimer").into_owned()
+                            }
+                        }}
+                    }
+                    {overlay.class("wt-armor-viewport__overlay")}
+                    {move || stand_in(state, locale)}
+                    {move || readouts(state, locale)}
+                    {move || cast_hint(state, locale, miss_note)}
+                    PointerTip(pointer = pointer, clearance = TOOLTIP_CLEARANCE) {
+                        {move || tooltip(state, locale)}
+                    }
+                    {move || export_confirm(state, locale, shell)}
+                }
+            }
+            ContextMenuContent {
+                {move || menu_items(state)}
+            }
+        }
+    }
+}
+
+/// The overlay element, handed the scene to draw whenever the viewport changes.
+fn overlay_element(state: ArmorViewportState) -> zgui::elements::Element<zgui::custom::Custom> {
+    let fonts = use_context::<Fonts>().expect("every window provides its fonts");
+    let (element, handle) = zgui::custom::custom(OverlayElement::new(fonts.shaper()));
+    let handle: StoredValue<CustomHandle<OverlayElement>, LocalStorage> = StoredValue::new_local(handle);
+    let effect = RenderEffect::new(move |_| {
+        let Some(scene) = state.read_overlay(|model| model.overlay_scene(Instant::now())) else { return };
+        handle.with_value(|handle| {
+            let changed = handle.update(|element| {
+                let changed = element.scene != scene;
+                element.scene = scene;
+                changed
+            });
+            if changed {
+                handle.repaint();
+            }
+        });
+    });
+    on_cleanup_local(move || drop(effect));
+
+    element
+}
+
+/// What stands where the scene would be: the subject loading, the device being prepared, why the
+/// scene cannot be drawn, or the invitation to pick something.
+#[derive(Clone, Debug, PartialEq)]
+enum StandIn {
+    Loading(String),
+    Initializing,
+    Problem { headline: String, explanation: String },
+    Message(String),
+}
+
+fn stand_in(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
+    locale.track();
+    let said = state
+        .read(|model| {
+            let status = match &model.gpu {
+                GpuState::Waiting => Some(t!("ui-armor-initializing").into_owned()),
+                GpuState::Failed(reason) => Some(t!("ui-armor-init_failed", reason = reason).into_owned()),
+                GpuState::Ready(_) => None,
+            };
+            // A load in flight replaces whatever is drawn, so the subject on screen is never
+            // mistaken for the one being loaded.
+            if let Some(name) = &model.ship_loading {
+                return Some(StandIn::Loading(name.clone()));
+            }
+            if matches!(model.gpu, GpuState::Waiting) {
+                return Some(StandIn::Initializing);
+            }
+            if let Some(problem) = model.scene_problem.as_ref().filter(|_| status.is_none()) {
+                return Some(StandIn::Problem {
+                    headline: problem.headline(),
+                    explanation: problem.reason.explanation(),
+                });
+            }
+            if model.current_armor.is_none() {
+                return Some(StandIn::Message(status.unwrap_or_else(|| t!("ui-armor-select_ship").into_owned())));
+            }
+            status.map(StandIn::Message)
+        })
+        .flatten()?;
+
+    Some(match said {
+        StandIn::Loading(name) => {
+            let label = t!("ui-armor-loading_named_ship", ship = name).into_owned();
+            AnyView::new(view! {
+                Loading(label = label, class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-loading")
+            })
+        }
+        StandIn::Initializing => {
+            let label = t!("ui-armor-initializing").into_owned();
+            AnyView::new(view! {
+                Loading(
+                    label = label,
+                    pace = LoadingPace::Unbounded,
+                    class = "wt-armor-viewport__said",
+                    attr:data-testid = "armor-viewport-initializing"
+                )
+            })
+        }
+        StandIn::Problem { headline, explanation } => AnyView::new(view! {
+            box(class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-problem") {
+                text {{headline}}
+                text(class = "wt-armor-viewport__dim") {{explanation}}
+            }
+        }),
+        StandIn::Message(message) => AnyView::new(view! {
+            box(class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-message") {
+                text(class = "wt-armor-viewport__dim") {{message}}
+            }
+        }),
+    })
+}
+
+/// The readouts over the hull: the replay's health and hits, its shot log, and the model's size.
+fn readouts(state: ArmorViewportState, locale: Locale) -> Vec<AnyView> {
+    locale.track();
+    let Some((health, log, length)) = state.read(|model| {
+        let log = if model.hits.is_empty() { Vec::new() } else { model.shot_log() };
+        let length = model.length_readout().filter(|_| model.scene_is_shown());
+        (model.hit_readout(), log, length)
+    }) else {
+        return Vec::new();
+    };
+
+    let mut views = Vec::new();
+    if let Some(readout) = health {
+        views.push(AnyView::new(view! {
+            box(class = "wt-armor-viewport__readout wt-armor-viewport__readout--top", attr:data-testid = "armor-hit-readout") {
+                text {{readout}}
+            }
+        }));
+    }
+    if !log.is_empty() {
+        let lines: Vec<AnyView> = log
+            .into_iter()
+            .map(|line| {
+                AnyView::new(view! {
+                    row(class = "wt-armor-viewport__log-line") {
+                        text(class = "wt-armor-viewport__dim") {{line.at}}
+                        text {{line.outcome}}
+                    }
+                })
+            })
+            .collect();
+        views.push(AnyView::new(view! {
+            box(class = "wt-armor-viewport__readout wt-armor-viewport__readout--log", attr:data-testid = "armor-shot-log") {
+                {lines}
+            }
+        }));
+    }
+    if let Some(readout) = length {
+        views.push(AnyView::new(view! {
+            box(class = "wt-armor-viewport__readout wt-armor-viewport__readout--bottom", attr:data-testid = "armor-length-readout") {
+                text {{readout}}
+            }
+        }));
+    }
+    views
+}
+
+/// Why the last Shift-click cast nothing, said over the viewport for [`MISS_SHOWN_FOR`].
+#[derive(Clone, Copy)]
+struct MissNote {
+    /// The miss, with the scene it was made on: another scene does not say it.
+    miss: RwSignal<Option<(CastMiss, Option<usize>)>, LocalStorage>,
+    /// Takes the note down. Replaced, and so cancelled, by a later miss.
+    fading: StoredValue<Option<TimeoutHandle>, LocalStorage>,
+    timers: StoredValue<Option<Timers>, LocalStorage>,
+}
+
+impl MissNote {
+    /// Called in a component's body, where the window's clock is found.
+    fn new() -> Self {
+        Self {
+            miss: RwSignal::new_local(None),
+            fading: StoredValue::new_local(None),
+            timers: StoredValue::new_local(Timers::current()),
+        }
+    }
+
+    fn show(self, miss: CastMiss, scene: Option<usize>) {
+        let Some(timers) = self.timers.get_value() else { return };
+
+        self.miss.set(Some((miss, scene)));
+        let shown = self.miss;
+        self.fading.set_value(Some(timers.set_timeout(MISS_SHOWN_FOR, move || {
+            shown.try_set(None);
+        })));
+    }
+
+    /// Takes the note down at once: a cast landed.
+    fn clear(self) {
+        self.fading.set_value(None);
+        if self.miss.get_untracked().is_some() {
+            self.miss.set(None);
+        }
+    }
+}
+
+/// The pill along the bottom of the scene: why the last cast missed while that is fresh, else how
+/// to cast while the armor shown has no arc yet.
+fn cast_hint(state: ArmorViewportState, locale: Locale, note: MissNote) -> Option<AnyView> {
+    locale.track();
+    let shown = state.read(ViewportModel::scene_is_shown).unwrap_or(false);
+    if !shown {
+        return None;
+    }
+
+    let miss = note.miss.get().filter(|(_, scene)| *scene == state.scene_key()).map(|(miss, _)| miss);
+    let (said, test_id) = match miss {
+        Some(miss) => {
+            let said = match miss {
+                CastMiss::NothingUnderPointer => t!("ui-armor-cast-miss_nothing_under_pointer"),
+                CastMiss::ThicknessUnknown => t!("ui-armor-cast-miss_thickness_unknown"),
+                CastMiss::NoPlateOnPath => t!("ui-armor-cast-miss_no_plate_on_path"),
+            };
+            (said, "armor-viewport-cast-miss")
+        }
+        None => {
+            let invite = state.read(|model| model.arcs.is_empty() && model.can_cast()).unwrap_or(false);
+            if !invite {
+                return None;
+            }
+            (t!("ui-armor-cast-prompt", key = ModifierKey::Shift.label()), "armor-viewport-cast-hint")
+        }
+    };
+    let said = said.into_owned();
+
+    // One shape for both, so a rebuild from one to the other rewrites every attribute.
+    Some(AnyView::new(view! {
+        box(class = "wt-armor-viewport__cast-strip") {
+            text(
+                class = "wt-armor-viewport__cast-hint",
+                attr:data-miss = miss.map(|_| String::new()),
+                attr:data-testid = test_id
+            ) {{said}}
+        }
+    }))
+}
+
+/// What a tooltip shows.
+#[derive(Clone)]
+enum Hover {
+    /// A camera orbit, which takes the tooltip from the plate behind it.
+    Ring(String),
+    Plate {
+        tooltip: ArmorTriangleTooltip,
+        zone: String,
+        material: String,
+    },
+    Mesh(MeshTooltip),
+}
+
+/// What the pointer rests on, with where it was in the viewport when that was picked. An orbit
+/// takes the tooltip from the plate behind it.
+fn hovered(model: &ViewportModel) -> Option<(Hover, Vec2)> {
+    if let Some((label, cursor)) = model.ring_hover() {
+        return Some((Hover::Ring(label), cursor));
+    }
+    if let Some((tooltip, cursor)) = model.plate_hover() {
+        // A zone is named the way the game names it.
+        let zone = match model.scene_source.as_ref() {
+            Some(source) => translate_name(source.assets().metadata(), &tooltip.zone),
+            None => tooltip.zone.clone(),
+        };
+        let material = model.material_label(tooltip.material);
+        return Some((Hover::Plate { tooltip, zone, material }, cursor));
+    }
+    let (tooltip, cursor) = model.mesh_hover()?;
+
+    Some((Hover::Mesh(tooltip), cursor))
+}
+
+/// The tooltip for what the pointer rests on.
+fn tooltip(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
+    locale.track();
+    let (hover, _) = state.read_overlay(hovered).flatten()?;
+
+    Some(match hover {
+        Hover::Ring(label) => {
+            let lines: Vec<AnyView> = label
+                .lines()
+                .map(|line| AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-text") {{line.to_owned()}} }))
+                .collect();
+            AnyView::new(view! {
+                OverlaySurface(class = "wt-armor-viewport__tooltip", attr:data-testid = "armor-ring-tooltip") {
+                    {lines}
+                }
+            })
+        }
+        Hover::Plate { tooltip, zone, material } => {
+            let hint = t!("ui-armor-cast_here_hint", key = ModifierKey::Shift.label()).into_owned();
+            plate_tooltip(&tooltip, &zone, &material, &hint)
+        }
+        Hover::Mesh(tooltip) => {
+            let mut lines = vec![
+                AnyView::new(
+                    view! { box(class = "wt-armor-viewport__tooltip-head") { text {{tooltip.name.clone()}} } },
+                ),
+                AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-text") {{tooltip.group_label()}} }),
+            ];
+            for muted in [tooltip.model_label(), tooltip.hardpoint_label()].into_iter().flatten() {
+                lines.push(AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-muted") {{muted}} }));
+            }
+            AnyView::new(view! {
+                OverlaySurface(class = "wt-armor-viewport__tooltip", attr:data-testid = "armor-mesh-tooltip") {
+                    {lines}
+                }
+            })
+        }
+    })
+}
+
+/// A small filled colour swatch, `size` pixels square.
+fn swatch(color: [f32; 4], size: f32) -> AnyView {
+    // Truncated to bytes as the legend's swatches are.
+    let byte = |channel: f32| (channel * 255.0) as u8;
+    let alpha = f32::from(byte(color[3])) / 255.0;
+    let fill = format!("rgba({}, {}, {}, {alpha})", byte(color[0]), byte(color[1]), byte(color[2]));
+    let side = format!("{size}px");
+    AnyView::new(view! {
+        box(class = "wt-armor-viewport__swatch", style:width = side.clone(), style:height = side, style:background-color = fill)
+    })
+}
+
+/// The thickness tooltip: a swatch and the
+/// thickness, the zone and material, the layers of the part when there are several, and what a
+/// click there can do.
+fn plate_tooltip(tooltip: &ArmorTriangleTooltip, zone: &str, material: &str, hint: &str) -> AnyView {
+    let mut lines = vec![
+        AnyView::new(view! {
+            box(class = "wt-armor-viewport__tooltip-head") {
+                {swatch(tooltip.color, 12.0)}
+                text {{format!("{:.0} mm", tooltip.thickness_mm)}}
+            }
+        }),
+        AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-text") {{format!("{zone} / {material}")}} }),
+    ];
+    if tooltip.layers.len() > 1 {
+        lines.push(AnyView::new(view! { box(class = "wt-armor-viewport__tooltip-rule") }));
+        lines.push(AnyView::new(view! {
+            text(class = "wt-armor-viewport__tooltip-muted") {{format!("{} layers for this part:", tooltip.layers.len())}}
+        }));
+        for &layer_mm in &tooltip.layers {
+            let this = ((layer_mm - tooltip.thickness_mm).abs() < 0.1).then(String::new);
+            lines.push(AnyView::new(view! {
+                box(class = "wt-armor-viewport__tooltip-row", attr:data-this = this) {
+                    {swatch(thickness_to_color(layer_mm), 10.0)}
+                    text {{format!("{layer_mm:.0} mm")}}
+                }
+            }));
+        }
+    }
+    lines.push(AnyView::new(view! { text(class = "wt-armor-viewport__tooltip-muted") {{hint.to_owned()}} }));
+
+    AnyView::new(view! {
+        OverlaySurface(class = "wt-armor-viewport__tooltip", attr:data-testid = "armor-plate-tooltip") {
+            {lines}
+        }
+    })
+}
+
+/// The export-confirm panel, over the viewport while it is open.
+fn export_confirm(state: ArmorViewportState, locale: Locale, shell: Option<Shell>) -> Option<AnyView> {
+    locale.track();
+    let display_name =
+        state.read(|model| model.export_confirm.as_ref().map(|confirm| confirm.display_name.clone())).flatten()?;
+    let body = format!(
+        "Export {display_name} to a glTF Binary (.glb) file. These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws."
+    );
+
+    Some(AnyView::new(view! {
+        box(
+            class = "wt-armor-viewport__backdrop",
+            attr:data-testid = "armor-export-confirm",
+            on:pointer_down = move |ev| ev.stop_propagation(),
+            on:pointer_up = move |ev| ev.stop_propagation(),
+            on:pointer_move = move |ev| ev.stop_propagation(),
+            on:wheel = move |ev| ev.stop_propagation()
+        ) {
+            OverlaySurface(class = "wt-armor-viewport__confirm") {
+                text(class = "wt-armor-viewport__confirm-title") {{t!("ui-armor-export_model").into_owned()}}
+                text(class = "wt-armor-viewport__confirm-body") {{body}}
+                row(class = "wt-armor-viewport__confirm-actions") {
+                    Button(
+                        variant = ButtonVariant::Outline,
+                        size = ButtonSize::Sm,
+                        attr:data-testid = "armor-export-confirm-cancel",
+                        on:click = move |_| state.cancel_export()
+                    ) {
+                        {t!("ui-buttons-cancel").into_owned()}
+                    }
+                    Button(
+                        size = ButtonSize::Sm,
+                        attr:data-testid = "armor-export-confirm-export",
+                        on:click = move |_| {
+                            if let Some(shell) = shell {
+                                state.confirm_export(shell);
+                            }
+                        }
+                    ) {
+                        {t!("ui-armor-export_button").into_owned()}
+                    }
+                }
+            }
+        }
+    }))
+}
+
+/// The context menu: hide or show the plate under the pointer, show every hidden plate, disable
+/// the plate's material, then the pane's quick toggles.
+fn menu_items(state: ArmorViewportState) -> Vec<AnyView> {
+    let item = |label: String, test_id: &'static str, run: Box<dyn Fn()>| {
+        AnyView::new(view! {
+            MenuItem(on_select = UnsyncCallback::new(move |()| run()), attr:data-testid = test_id) {
+                {label}
+            }
+        })
+    };
+    let separator = || AnyView::new(view! { MenuSeparator() });
+    let quick = state.pane_menu().map(|menu| menu.quick_toggles.run(())).unwrap_or_default();
+
+    let hovered = state
+        .read_untracked(|model| {
+            let hover = model.hovered.clone()?;
+            let label = model.material_label(hover.tooltip.material);
+            let hidden = model.plate_visibility.get(&hover.key).copied().unwrap_or(false);
+            Some((hover.key, label, hidden, model.plate_visibility.len()))
+        })
+        .flatten();
+    let Some((key, label, hidden, hidden_count)) = hovered else { return quick };
+
+    let PlateKey { zone, material_name, thickness_tenths } = key.clone();
+    let thickness_mm = thickness_tenths as f32 / 10.0;
+    let toggle_label = if hidden {
+        format!("Show {thickness_mm:.0} mm {label}")
+    } else {
+        format!("Hide {thickness_mm:.0} mm {label}")
+    };
+
+    let mut items =
+        vec![item(toggle_label, "armor-menu-toggle-plate", Box::new(move || state.toggle_plate(key.clone())))];
+    if hidden_count > 0 {
+        items.push(item(
+            format!("Show all hidden plates ({hidden_count})"),
+            "armor-menu-show-all",
+            Box::new(move || state.show_all_plates()),
+        ));
+    }
+    items.push(separator());
+    items.push(item(
+        format!("Disable {label}"),
+        "armor-menu-disable-material",
+        Box::new(move || state.disable_material(&zone, &material_name)),
+    ));
+    if !quick.is_empty() {
+        items.push(separator());
+        items.extend(quick);
+    }
+    items
+}
+
+/// How many device pixels one CSS pixel is on `area`'s surface, the window's zoom included. One
+/// where the surface reports no usable scale.
+fn device_scale(area: NodeRef) -> f32 {
+    let scale = area.scale();
+    if scale.is_finite() && scale > 0.0 { scale } else { 1.0 }
+}
+
+/// Where `position`, in window CSS pixels, sits in a viewport whose box starts at `origin` on a
+/// surface of `scale` device pixels to the CSS pixel.
+fn viewport_point(position: Point<CssPx, Css>, origin: Point<DevicePx, Device>, scale: f32) -> Vec2 {
+    Vec2::new(position.x.0 - origin.x.0 / scale, position.y.0 - origin.y.0 / scale)
+}
+
+/// Where `local`, a point in a viewport whose box starts at `origin`, sits in the window, in CSS
+/// pixels on a surface of `scale` device pixels to the CSS pixel.
+fn window_point(local: Vec2, origin: Point<DevicePx, Device>, scale: f32) -> Point<CssPx, Css> {
+    Point::new(CssPx(local.x + origin.x.0 / scale), CssPx(local.y + origin.y.0 / scale))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pointer_in_a_zoomed_window_maps_into_an_offset_viewport_and_back() {
+        // A viewport 300 by 90 CSS pixels into a window zoomed to 1.5.
+        let origin = Point::new(DevicePx(450.0), DevicePx(135.0));
+        let pointer = Point::new(CssPx(410.0), CssPx(200.0));
+
+        let local = viewport_point(pointer, origin, 1.5);
+        assert_eq!(local, Vec2::new(110.0, 110.0));
+        assert_eq!(window_point(local, origin, 1.5), pointer);
+    }
+}

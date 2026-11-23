@@ -243,7 +243,7 @@ fn each_tool_has_its_own_chord() {
     assert_eq!(BoardTool::for_shortcut("9"), None);
 }
 
-/// A fresh board draws in egui's `Color32::YELLOW` at its opening width.
+/// A fresh board draws in yellow at its opening width.
 #[test]
 fn a_fresh_board_draws_in_the_egui_default_ink() {
     let board = drawn_board();

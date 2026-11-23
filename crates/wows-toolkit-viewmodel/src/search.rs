@@ -1,7 +1,7 @@
 //! Naming a search result's ship.
 //!
-//! Which name a result row carries is the same decision in both front ends;
-//! where the loaded game data comes from is not.
+//! Which name a result row carries is decided here; where the loaded game
+//! data comes from is the caller's concern.
 
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::index::query_ast::Expr;
@@ -134,7 +134,7 @@ pub fn references_game_mode(expr: &MatchExpr) -> bool {
 /// Both conditions matter: some indexed match must be missing its game mode,
 /// *and* the query on screen must filter on it. A gap the query never asked
 /// about is not this user's problem right now, so it stays quiet. What the
-/// hint then says is each front end's own wording.
+/// hint then says is the UI's own wording.
 pub fn game_mode_gap_applies(missing_count: i64, expr: &MatchExpr) -> bool {
     missing_count > 0 && references_game_mode(expr)
 }

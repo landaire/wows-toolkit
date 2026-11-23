@@ -1,6 +1,6 @@
 //! Content search across the game VFS.
 //!
-//! Mirrors the egui app's `start_content_search`: the query is a regex when it
+//! The query is a regex when it
 //! compiles and a literal otherwise, an optional glob narrows which paths are
 //! read, and every match reports a short snippet of surrounding text.
 
@@ -50,8 +50,7 @@ pub fn compile_query(query: &str) -> Option<regex::bytes::Regex> {
 }
 
 /// Which files a scan will read, narrowed by `path_filter` when it is a usable
-/// glob. An unparsable filter is ignored rather than matching nothing, matching
-/// the egui app. The list holds only files, so there is nothing else to reject.
+/// glob. An unparsable filter is ignored rather than matching nothing. The list holds only files, so there is nothing else to reject.
 pub fn files_to_scan(files: &FileList, path_filter: &str) -> Vec<FileIndex> {
     let glob = (!path_filter.is_empty()).then(|| glob::Pattern::new(path_filter).ok()).flatten();
     files

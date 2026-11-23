@@ -1,7 +1,7 @@
 //! Turning session games into chart series.
 //!
 //! A line chart walks the games in order; a bar chart compares per-ship
-//! averages. Which statistic either plots is the same list in both front ends.
+//! averages. Which statistic either plots is listed here.
 
 use std::collections::HashMap;
 
@@ -294,7 +294,7 @@ pub fn bar_series(ships: &[(String, PerformanceInfo)], stat: ChartableStat) -> V
     points
 }
 
-/// A colour on a chart, as the eight bits per channel both front ends take.
+/// A colour on a chart, eight bits per channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb {
     pub r: u8,
@@ -305,7 +305,7 @@ pub struct Rgb {
 /// The colour drawn for one ship.
 ///
 /// Hue from the identifier's hash, at a fixed saturation and value, so a ship
-/// keeps the same colour across sessions and across the two front ends. Two
+/// keeps the same colour across sessions. Two
 /// ships can still hash near each other; what a chart draws goes through
 /// [`spread_colors`], which pulls those apart.
 pub fn ship_color(id: GameParamId) -> Rgb {
@@ -605,7 +605,7 @@ pub struct ChartSettings {
 ///
 /// Personal rating is offered only with the expected-values table to rate against. Win rate and
 /// personal rating carry no meaning for a single game, so a line plots them only as a running
-/// figure, the same rule the egui pane applies.
+/// figure.
 pub fn selectable_stats(mode: ChartMode, running: bool, combined: bool, personal_rating: bool) -> Vec<ChartableStat> {
     ChartableStat::ALL
         .into_iter()

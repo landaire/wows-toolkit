@@ -1,17 +1,14 @@
 //! File-browser grouping model: `ReplayLite` (a replay's minimal, cheaply
 //! read summary) and `build_browser_tree`, which groups replay files by
 //! Date/Ship/None and builds the group/leaf display labels. Pure: no
-//! UI toolkit types. Mirrors `ui/replay_parser/mod.rs`'s
-//! `build_file_listing_grouped`/`build_file_listing_ungrouped`
-//! (`mod.rs:3267-3448`), `win_rate_label` (`mod.rs:150`), and `colorize_label`
-//! (`mod.rs:136`, whose win/loss/draw color is resolved by the render layer
-//! from `battle_result`, not stored as text here). Unlike the egui listing, a
+//! UI toolkit types. The win/loss/draw color of a label is resolved by the
+//! render layer from `battle_result`, not stored as text here. A
 //! group's record counts only Random and Ranked battles unless asked to count
 //! every mode.
 //!
 //! A row's own two lines and its outcome come from the shared assembly
 //! (`wows_toolkit_viewmodel::listing_row`), so the listing reads the same in
-//! both apps; this module only decides which rows sit under which group.
+//! every view; this module only decides which rows sit under which group.
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -136,7 +133,7 @@ pub struct GroupRecord {
 
 impl GroupRecord {
     /// The record of the battles in `replays` that `scope` counts. Draws and
-    /// unknown outcomes are left out, matching the egui `_ =>` arm. `None`
+    /// unknown outcomes are left out. `None`
     /// when no counted battle was won or lost.
     fn tally(replays: &[&ReplayLite], scope: RecordScope) -> Option<Self> {
         let mut wins = 0;
@@ -191,7 +188,7 @@ pub enum BrowserNode {
         /// "Ship - Map", whatever the grouping drops from `label`.
         battle: String,
         /// The second line: damage, kills and the timestamp. In pieces, since
-        /// this front end draws its glyphs as icons.
+        /// the app draws its glyphs as icons.
         stats: Vec<LinePart>,
         path: PathBuf,
         /// The map as the replay names it, for the hover preview's art.
@@ -247,9 +244,9 @@ pub fn group_label(title: &str, record: Option<GroupRecord>) -> String {
     }
 }
 
-/// One replay's leaf, both lines assembled the way the egui listing assembles
-/// them (`ui/replay_parser/listing_row.rs`): the grouping decides which field
-/// the identity line drops, since the group above already states it.
+/// One replay's leaf, both lines assembled by `listing_row`: the grouping
+/// decides which field the identity line drops, since the group above
+/// already states it.
 fn leaf(r: &ReplayLite, grouping: ReplayGrouping, locale: Option<&str>) -> BrowserNode {
     BrowserNode::Leaf {
         label: identity_line(&r.identity, grouping),
@@ -572,7 +569,7 @@ mod tests {
 
     /// The row's second line is what the index knows, and it carries the
     /// timestamp the identity line drops -- only the time of day under a
-    /// date group, the whole stamp otherwise, matching the egui listing.
+    /// date group, the whole stamp otherwise.
     #[test]
     fn the_stats_line_carries_the_timestamp_the_identity_line_drops() {
         let files = vec![replay("a", "Yamato", "Ocean", "01.01.2026 14:45:00", MatchOutcome::Win)];

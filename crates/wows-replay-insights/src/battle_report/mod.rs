@@ -291,7 +291,7 @@ impl NormalizedBattleReport {
     /// Rates every player against `table`, from this battle alone. An
     /// unrated battle is left without ratings.
     ///
-    /// Written into the report itself rather than into each front end's rows,
+    /// Written into the report itself rather than into a view's rows,
     /// so the table, the badge and the export all read one value. A player
     /// already rated, or one whose damage the results never carried, is left
     /// alone: a rating computed from an unknown damage would be a real number

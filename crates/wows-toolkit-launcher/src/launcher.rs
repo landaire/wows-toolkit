@@ -35,13 +35,13 @@ use crate::settings::AccountKey;
 use crate::settings::LauncherSettings;
 use crate::steam::WgcLayerState;
 
-/// What a front end supplies for background work.
+/// What the app supplies for background work.
 #[derive(Clone)]
 pub struct LauncherEnv {
     pub runtime: tokio::runtime::Handle,
     /// The resolved proxy URL, if the app uses one.
     pub proxy_url: Option<String>,
-    /// Called after every event is sent, so a front end that polls can redraw.
+    /// Called after every event is sent, so an app that polls can redraw.
     pub wake: Arc<dyn Fn() + Send + Sync>,
     /// Where the game runner keeps its prefixes and overlays, under the app's data directory.
     /// `None` when the app has none, which leaves the game unlaunchable.
@@ -131,7 +131,7 @@ pub(crate) enum Event {
 pub struct LauncherEvents(tokio::sync::mpsc::UnboundedReceiver<LauncherEvent>);
 
 impl LauncherEvents {
-    /// The next event already delivered, for a front end that polls per frame.
+    /// The next event already delivered, for an app that polls per frame.
     pub fn try_next(&mut self) -> Option<LauncherEvent> {
         self.0.try_recv().ok()
     }
@@ -187,7 +187,7 @@ pub struct Launcher {
 
     sender: tokio::sync::mpsc::UnboundedSender<LauncherEvent>,
 
-    /// Sign-in answers a front end's test scripted, which stand in for WGNI.
+    /// Sign-in answers a test scripted, which stand in for WGNI.
     #[cfg(feature = "test-support")]
     pub(crate) script: crate::test_support::SignInScript,
 }
@@ -567,7 +567,7 @@ pub(crate) struct EventSender {
 
 impl EventSender {
     pub(crate) fn send(&self, event: Event) {
-        // A closed channel means the front end dropped its Launcher; there is
+        // A closed channel means the app dropped its Launcher; there is
         // no one left to tell.
         let _ = self.sender.send(LauncherEvent(event));
         (self.wake)();

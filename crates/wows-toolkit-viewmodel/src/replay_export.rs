@@ -1,7 +1,6 @@
 //! The replay export: one match as a serializable document.
 //!
-//! Both front ends write this, and ShipBuilds.com reads it, so the shape is
-//! fixed and lives in one place rather than being rebuilt per front end.
+//! ShipBuilds.com reads this, so the shape is fixed and lives in one place.
 
 use std::collections::HashMap;
 
@@ -646,8 +645,7 @@ impl Message {
 /// spaces become dashes, because a file name carrying them is awkward on one
 /// platform or another.
 ///
-/// Shared so the two apps name the same battle the same file
-/// (`ui/replay_parser/mod.rs`'s `better_file_name`).
+/// Names the file a battle is exported to.
 pub fn exported_file_stem(
     meta: &wows_replays::ReplayMeta,
     metadata: &wowsunpack::game_params::provider::GameMetadataProvider,

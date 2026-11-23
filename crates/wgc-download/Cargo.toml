@@ -17,7 +17,7 @@ serde_bencode = "0.2"
 # deserialize as raw Vec<u8> instead of requiring valid UTF-8.
 serde_bytes = "0.11"
 data-encoding = { workspace = true }
-# TLS features mirror crates/wows-toolkit/Cargo.toml's reqwest line: rustls
+# TLS features mirror wows-toolkit-services' reqwest line: rustls
 # with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
 # "stream" enables Response::bytes_stream() for the webseed downloader.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "gzip"] }

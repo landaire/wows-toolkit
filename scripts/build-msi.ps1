@@ -25,13 +25,12 @@ if (-not $wixCmd) {
 $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' |
     Select-Object -First 1).Matches.Groups[1].Value
 $msiVersion = ($version -split '-', 2)[0]
-$package = if ($version.Contains('-')) { 'wows-toolkit-zgui' } else { 'wows_toolkit' }
-$binaryName = "$package.exe"
-Write-Host "Version: $version ($package)"
+$binaryName = "wows_toolkit.exe"
+Write-Host "Version: $version"
 
 if (-not $SkipBuild) {
     Write-Host "Building release binary..."
-    cargo build --release --target x86_64-pc-windows-msvc -p $package
+    cargo build --release --target x86_64-pc-windows-msvc -p wows-toolkit
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -61,7 +60,6 @@ $licenseText = (Get-Content -Raw "$PWD\LICENSE").Replace("`r`n", "`n").Replace("
 $rtf = "{\rtf1\ansi\deff0{\fonttbl{\f0\fswiss Segoe UI;}}\viewkind4\uc1\pard\f0\fs20 \b MIT License\b0\par\par $licenseText}"
 Set-Content -Path "$PWD\wix\license.rtf" -Value $rtf -Encoding ASCII
 
-# Cargo uses the package name for each frontend's executable.
 $binary = "target\x86_64-pc-windows-msvc\release\$binaryName"
 if (-not (Test-Path -LiteralPath $binary)) {
     $binary = "target\release\$binaryName"

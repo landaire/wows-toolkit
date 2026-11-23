@@ -1,8 +1,7 @@
-//! The players met across indexed battles, as both front ends hold them.
+//! The players met across indexed battles.
 //!
 //! The rows behind this live in the `tracked_player*` tables, which
-//! [`super::store`] reads and writes, so a note written in one app is the note
-//! the other reads.
+//! [`super::store`] reads and writes.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -269,8 +268,8 @@ impl TrackedPlayer {
 ///
 /// The tracker used to be written whole on a timer; a save now states its
 /// changes, so what it costs is what moved rather than what is held. Kept apart
-/// by kind because both front ends write these rows: a save that restated a note
-/// it had not edited would put its own stale copy over the other app's edit.
+/// by kind because more than one writer may hold these rows: a save that restated
+/// a note it had not edited would put its own stale copy over another writer's edit.
 #[derive(Debug, Default, Clone)]
 pub struct Pending {
     everything: bool,

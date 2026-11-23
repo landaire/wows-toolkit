@@ -1,4 +1,4 @@
-//! Events and state changes a front end's tests use to put the launcher in a state that
+//! Events and state changes the app's tests use to put the launcher in a state that
 //! otherwise needs the network, the OS keyring, a scan of this machine or a running game.
 
 use std::path::PathBuf;
@@ -193,7 +193,7 @@ pub enum ScriptedSignIn {
     Fail(wgc_auth::AuthError),
 }
 
-/// One sign-in a front end sent while scripted.
+/// One sign-in sent while scripted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignInAttempt {
     pub realm: wgc_auth::AccountRealm,

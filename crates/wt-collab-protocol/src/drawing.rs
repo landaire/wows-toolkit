@@ -350,8 +350,7 @@ pub enum Change {
 /// differs is returned, so undoing a change nobody made sends nothing.
 ///
 /// The snapshot is restored exactly, which takes off anything added since,
-/// a peer's drawing included. That is what an undo means in the egui app
-/// too, where it sends its whole list back as a full sync.
+/// a peer's drawing included.
 pub fn undo_plan(was: &[Held], current: &[Held]) -> Vec<Change> {
     let mut changes = Vec::new();
     for held in was {
@@ -474,7 +473,7 @@ impl Selection {
     /// Picks out whatever is under `at`, if anything is near enough.
     ///
     /// `add` is whether the reader is building a selection up rather than
-    /// replacing it, which is ctrl-click in both front ends. A click on
+    /// replacing it, which is ctrl-click. A click on
     /// nothing clears the selection, unless they were adding to it.
     pub fn click(&mut self, annotations: &[Annotation], at: [f32; 2], add: bool) {
         let Some(found) = nearest_within(annotations, at, PICK_REACH) else {
@@ -677,7 +676,7 @@ mod tests {
 
     /// Undoing works by id, so a peer adding one of their own in between
     /// does not make the undo move the wrong shape. Restoring the snapshot
-    /// exactly also takes the peer's off, as the egui full sync does.
+    /// exactly also takes the peer's off, as a full sync does.
     #[test]
     fn undoing_is_not_thrown_off_by_what_a_peer_did() {
         let mine = held(1, line([0.0, 0.0], [10.0, 0.0]));

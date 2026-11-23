@@ -1,8 +1,7 @@
 //! Uploads a [`LoadedShipArmor`]'s hull meshes into a [`Viewport3D`],
 //! separately from the armor upload (`upload.rs`) so a hull-only visibility
 //! or opacity change never rebuilds the (typically much larger) armor mesh
-//! set. Ports the egui app's `upload_hull_meshes_to_viewport`
-//! (`armor_viewer/ui/tab.rs:1339-1442`).
+//! set.
 //!
 //! **Camo compositing.** The active camo's decoded
 //! textures/UV transforms are not carried on `armor` (an `Arc<LoadedShipArmor>`
@@ -42,27 +41,23 @@ use crate::load_ship::transform_normal;
 use crate::surface_maps::SurfaceTextures;
 
 /// Hull-mesh brightness boost for a mesh with no texture; the lighting
-/// shader multiplies this base by `(flat + key*halfLambert)`. Matches the
-/// egui original's `hull_brightness` constant (`tab.rs:1374`).
+/// shader multiplies this base by `(flat + key*halfLambert)`.
 const HULL_BRIGHTNESS: f32 = 2.0;
 
 /// Fallback per-texture brightness when a hull mesh has no texture data (or a
-/// texture with no sampled pixels). Matches the egui original's
-/// `unwrap_or(3.5)` (`tab.rs:1395`).
+/// texture with no sampled pixels).
 const FALLBACK_TEX_BRIGHTNESS: f32 = 3.5;
 
-/// Target P95 luma [`tex_brightness`] scales toward. Matches the egui
-/// original's `TARGET_HI` constant (`tab.rs:1392`).
+/// Target P95 luma [`tex_brightness`] scales toward.
 const TARGET_HI: f32 = 0.85;
 
 /// Sample every 37th RGBA pixel when computing a texture's P95 luma -- cheap
-/// enough to run per-upload, dense enough for a stable percentile. Matches
-/// the egui original's `step_by(37)` (`tab.rs:1384`).
+/// enough to run per-upload, dense enough for a stable percentile.
 const LUMA_SAMPLE_STRIDE: usize = 37;
 
 /// Extracts the file stem (no directory, no `.mfm` extension) from an mfm
 /// path, for matching a hull mesh's texture against `active_camo_textures`'s
-/// keys. Ports `armor_viewer::common::mfm_stem` verbatim.
+/// keys.
 pub fn mfm_stem(mfm_path: &str) -> &str {
     let base = mfm_path.rsplit(['/', '\\']).next().unwrap_or(mfm_path);
     base.strip_suffix(".mfm").unwrap_or(base)
@@ -71,8 +66,7 @@ pub fn mfm_stem(mfm_path: &str) -> &str {
 /// Computes a texture's brightness boost from the 95th-percentile luma of a
 /// sampled subset of its pixels, scaling that percentile toward `TARGET_HI`
 /// and clamping to `[1.0, 4.0]`. Pure function of `rgba` so it is testable
-/// without a GPU. Matches the egui original's inline computation
-/// (`tab.rs:1380-1395`) exactly, including the luma weights and stride: a
+/// without a GPU. Keyed off a percentile rather than the mean: a
 /// mean-based factor over-boosts a mostly-dark texture that has bright spots
 /// (e.g. a camo with light stripes on a dark base); keying off the P95 bright
 /// pixels caps the boost by the brightest regions directly, so they do not
@@ -207,8 +201,7 @@ fn upload(
 
 /// Re-uploads `armor`'s hull meshes: removes every previously-uploaded hull
 /// mesh (`hull_mesh_ids`, drained and replaced in place) and re-adds only the
-/// ones `hull_visibility` marks visible (absent/false = hidden, matching the
-/// egui app's own default). `hull_opaque` selects the alpha/layer: opaque
+/// ones `hull_visibility` marks visible (absent/false = hidden). `hull_opaque` selects the alpha/layer: opaque
 /// hulls draw depth-written on [`LAYER_DEFAULT`] under the armor, which
 /// tints them; translucent ones draw on [`LAYER_HULL`] (no depth write, over
 /// the armor).

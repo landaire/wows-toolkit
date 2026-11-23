@@ -1,6 +1,6 @@
 //! Where an app's HTTP clients should send their traffic on a managed network.
 //!
-//! Shared, so both front ends resolve a proxy the same way: the reader's own
+//! A proxy resolves from the reader's own
 //! setting, then the standard environment variables, then the Windows
 //! configuration.
 

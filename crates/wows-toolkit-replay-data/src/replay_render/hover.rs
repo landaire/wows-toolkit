@@ -15,7 +15,7 @@ pub struct ConsumableHover {
 }
 
 impl ConsumableHover {
-    /// Whether two hovers read the same icon, which is when a front end can
+    /// Whether two hovers read the same icon, which is when the app can
     /// leave the reading on screen as it is.
     pub fn is_same_icon(&self, other: &Self) -> bool {
         self.player == other.player && self.lines.name == other.lines.name

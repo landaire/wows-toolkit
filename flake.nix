@@ -136,7 +136,7 @@
           unwrapped = craneLib.buildPackage (commonArgs
             // {
               inherit cargoArtifacts;
-              cargoExtraArgs = "-p wows_toolkit";
+              cargoExtraArgs = "-p wows-toolkit";
               buildInputs = guiBuildInputs;
               meta.mainProgram = "wows_toolkit";
             });

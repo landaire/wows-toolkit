@@ -1,5 +1,5 @@
-//! Label-and-value listings, shared so a breakdown names and orders its lines
-//! the same in both front ends.
+//! Label-and-value listings, so a breakdown names and orders its lines in one
+//! place.
 
 use wows_replay_insights::battle_report::DamageBreakdown;
 

@@ -1,8 +1,8 @@
-//! The replay loader: one supervised thread that reads the replays a front end opens, those the
+//! The replay loader: one supervised thread that reads the replays the app opens, those the
 //! reader waits on first, then the rest in the order asked.
 //!
 //! Opening a replay only queues a [`LoadRequest`]; the answer arrives through a future, so the
-//! front end never blocks on the loader or joins it. A panic in one parse is that replay's
+//! app never blocks on the loader or joins it. A panic in one parse is that replay's
 //! [`ReplayLoadError::Panicked`]. Anything that stops the thread anyway is the watchdog's: it
 //! answers the replay being read with [`ReplayLoadError::LoaderStopped`] and starts another
 //! thread, which reads the replays still waiting.

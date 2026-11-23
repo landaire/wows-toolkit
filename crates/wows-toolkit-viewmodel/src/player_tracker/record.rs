@@ -1,5 +1,5 @@
-//! Folding one battle's roster into the tracked players. Every front end and the replay index
-//! record through these rules, so a battle recorded by any of them leaves the same rows.
+//! Folding one battle's roster into the tracked players. The app and the replay index record
+//! through these rules, so a battle recorded by either leaves the same rows.
 
 use std::collections::HashMap;
 

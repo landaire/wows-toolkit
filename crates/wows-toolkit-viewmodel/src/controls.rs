@@ -1,8 +1,7 @@
 //! The replay keyboard reference, read from the game's own
 //! `system/data/commands.scheme.xml`.
 //!
-//! Both front ends show the same groups, so the parse lives here and neither
-//! re-derives which commands a replay viewer can actually use.
+//! The parse lives here so the UI does not re-derive which commands a replay viewer can actually use.
 
 use std::collections::HashMap;
 use std::collections::HashSet;

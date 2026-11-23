@@ -1,22 +1,32 @@
 load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
 
+PROTOCOL_DEPS = [
+    "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:data-encoding",
+    "//third-party/rust:flate2",
+    "//third-party/rust:iroh",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:web-time",
+]
+
 workspace_library(
     name = "wt_collab_protocol",
     crate = "wt_collab_protocol",
     package = "wt-collab-protocol",
     version = "1.1.0-beta6",
+    deps = PROTOCOL_DEPS,
+)
+
+# With the egui conversion helpers, for the web clients. Separate so the
+# desktop app does not link egui.
+workspace_library(
+    name = "wt_collab_protocol_egui",
+    crate = "wt_collab_protocol",
+    package = "wt-collab-protocol",
+    version = "1.1.0-beta6",
     features = ["egui"],
-    deps = [
-        "//crates/minimap-renderer:wows_minimap_renderer",
-        "//crates/wowsunpack:wowsunpack",
-        "//third-party/rust:data-encoding",
-        "//third-party/rust:eframe",
-        "//third-party/rust:egui",
-        "//third-party/rust:flate2",
-        "//third-party/rust:iroh",
-        "//third-party/rust:rkyv",
-        "//third-party/rust:web-time",
-    ],
+    deps = PROTOCOL_DEPS + ["//third-party/rust:egui"],
 )
 
 workspace_test(
@@ -30,15 +40,5 @@ workspace_test(
     package = "wt-collab-protocol",
     version = "1.1.0-beta6",
     features = ["egui"],
-    deps = [
-        "//crates/minimap-renderer:wows_minimap_renderer",
-        "//crates/wowsunpack:wowsunpack",
-        "//third-party/rust:data-encoding",
-        "//third-party/rust:eframe",
-        "//third-party/rust:egui",
-        "//third-party/rust:flate2",
-        "//third-party/rust:iroh",
-        "//third-party/rust:rkyv",
-        "//third-party/rust:web-time",
-    ],
+    deps = PROTOCOL_DEPS + ["//third-party/rust:egui"],
 )

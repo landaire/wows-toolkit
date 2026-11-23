@@ -35,7 +35,7 @@ language-tags = "0.3"
 levenshtein = "1.0.5"
 regex = "1"
 # The query bar's pill labels and completions are user-facing strings, so the
-# shared half translates them rather than handing keys to each front end.
+# view model translates them rather than handing keys to the UI.
 wt-translations = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
@@ -43,7 +43,7 @@ serde_json.workspace = true
 semver = "1.0"
 thiserror.workspace = true
 thousands = "0.2.0"
-# ASCII folding for typed-text filters, the version the egui app pins.
+# ASCII folding for typed-text filters.
 unidecode = "0.3"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }

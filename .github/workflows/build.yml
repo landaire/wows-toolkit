@@ -17,10 +17,6 @@ jobs:
   create-release:
     name: Create release
     runs-on: ubuntu-latest
-    outputs:
-      binary: ${{ steps.desktop.outputs.binary }}
-      target: ${{ steps.desktop.outputs.target }}
-      frontend: ${{ steps.desktop.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,8 +24,7 @@ jobs:
           # without its own notes is described against.
           fetch-depth: 0
 
-      - name: Select desktop frontend
-        id: desktop
+      - name: Check the tag matches the workspace version
         run: |
           python3 - <<'PY'
           import os
@@ -41,14 +36,6 @@ jobs:
               tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
               if tag_version != version:
                   raise SystemExit(f"Release tag {tag_version} does not match workspace version {version}")
-          frontend = "zgui" if "-" in version else "egui"
-          # The alias names the front end; the binary keeps its crate's name.
-          binary = "wows_toolkit_zgui" if frontend == "zgui" else "wows_toolkit"
-          target = f"//:wows_toolkit_{frontend}"
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              print(f"frontend={frontend}", file=output)
-              print(f"binary={binary}", file=output)
-              print(f"target={target}", file=output)
           PY
 
       - name: Extract release notes for this tag
@@ -100,9 +87,8 @@ jobs:
     needs: create-release
     runs-on: windows-latest
     env:
-      APP_BINARY: ${{ needs.create-release.outputs.binary }}
-      APP_TARGET: ${{ needs.create-release.outputs.target }}
-      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
+      APP_BINARY: wows_toolkit
+      APP_TARGET: //:wows_toolkit
     environment: release-signing
     defaults:
       run:
@@ -126,7 +112,7 @@ jobs:
         run: |
           $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
           $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
-          $common = @("-m", "release", "-c", "release.frontend=$env:APP_FRONTEND", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
+          $common = @("-m", "release", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
 
           $slug = "${{ github.ref_name }}" -replace "/", "-"
           $msiName = "wows-toolkit-$slug-windows-x86_64.msi"
@@ -207,9 +193,8 @@ jobs:
     needs: create-release
     runs-on: ubuntu-22.04
     env:
-      APP_BINARY: ${{ needs.create-release.outputs.binary }}
-      APP_TARGET: ${{ needs.create-release.outputs.target }}
-      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
+      APP_BINARY: wows_toolkit
+      APP_TARGET: //:wows_toolkit
     steps:
       - uses: actions/checkout@v4
 
@@ -302,9 +287,8 @@ jobs:
     needs: create-release
     runs-on: macos-15
     env:
-      APP_BINARY: ${{ needs.create-release.outputs.binary }}
-      APP_TARGET: ${{ needs.create-release.outputs.target }}
-      APP_FRONTEND: ${{ needs.create-release.outputs.frontend }}
+      APP_BINARY: wows_toolkit
+      APP_TARGET: //:wows_toolkit
     steps:
       - uses: actions/checkout@v4
 

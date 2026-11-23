@@ -1,12 +1,11 @@
 //! The maths behind an annotation: how near a point is to one, which way an
 //! arrow points, and how a freehand stroke is tidied.
 //!
-//! Here rather than in a front end because both of them need it and neither
-//! owns it. The egui app keeps its own mirror of [`Annotation`] in egui's
-//! vector types and dispatches on that; a front end with no painter holds the
-//! wire type directly. Both reach the same formulas through this module, so a
-//! stroke cannot be hit-tested one way in one app and another way in the
-//! other.
+//! Here rather than in a front end because the desktop app and the web client
+//! both need it. The web client keeps its own mirror of [`Annotation`] in
+//! egui's vector types; the desktop app holds the wire type directly. Both
+//! reach the same formulas through this module, so a stroke cannot be
+//! hit-tested one way in one client and another way in the other.
 
 use crate::types::Annotation;
 use crate::types::PlacedShipRanges;

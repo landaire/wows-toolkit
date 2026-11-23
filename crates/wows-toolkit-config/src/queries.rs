@@ -97,11 +97,11 @@ pub async fn delete_setting(pool: &SqlitePool, key: &str) -> Result<(), sqlx::Er
     Ok(())
 }
 
-/// Puts what the egui app keeps as its persisted state back to its defaults: every setting but
+/// Puts the app's persisted state back to its defaults: every setting but
 /// those named in `kept`, the session stats and their charts, the armor viewer defaults, the render
 /// options, the dock layouts and the mod manager's record. The recovery the crash window offers.
 ///
-/// Tracked players, sent replays and the replay index are kept, as the egui reset keeps them. So is
+/// Tracked players, sent replays and the replay index are kept. So is
 /// the migration flag, without which the next start would migrate `app.ron` over the cleared state.
 pub async fn clear_settings(pool: &SqlitePool, kept: &[&str]) -> Result<(), sqlx::Error> {
     const CLEARED_TABLES: [&str; 6] = [
@@ -218,9 +218,8 @@ pub async fn session_stat_keys(pool: &SqlitePool) -> Result<Vec<SessionStatKey>,
 /// Records one game, replacing an earlier record of the same battle.
 ///
 /// A battle is the same battle when it was played at the same moment by the
-/// same account, which is the rule the egui app's own `add_game` dedupes on:
-/// re-adding a replay refreshes its row rather than counting the battle
-/// twice.
+/// same account: re-adding a replay refreshes its row rather than counting
+/// the battle twice.
 pub async fn add_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM session_stats WHERE game_time = ?1 AND player_id = ?2")

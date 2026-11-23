@@ -10,17 +10,16 @@ use wows_replays::types::GameClock;
 use crate::replay_render::track::FrameIndex;
 use crate::replay_render::track::Track;
 
-/// How often a playing viewport draws, at every speed: the rate a video is written at, and the
-/// rate the egui renderer's playback loop ran at. Each draw is placed between the two baked frames
-/// around its clock, so playback moves at this rate rather than at the bake's.
+/// How often a playing viewport draws, at every speed: the rate a video is written at. Each draw
+/// is placed between the two baked frames around its clock, so playback moves at this rate rather
+/// than at the bake's.
 pub const FRAME_INTERVAL: Duration = Duration::from_nanos((1_000_000_000.0 / FPS) as u64);
 
-/// The speed a viewport opens at, as the egui renderer opens at. Real time is
-/// too slow to watch a battle through.
+/// The speed a viewport opens at. Real time is too slow to watch a battle through.
 pub const DEFAULT_SPEED: f32 = PlaybackRate::DEFAULT_SPEED.game_seconds_per_second();
 
 /// How far the skip controls and the left and right keys move, in seconds of
-/// game time. The egui renderer's own step.
+/// game time.
 pub const SEEK_STEP: f32 = 10.0;
 
 /// Where playback is on a [`Track`], whether it is running, and how fast.
@@ -67,7 +66,7 @@ impl Playback {
 
     /// Moves playback to `at`, held to the track. Returns whether it moved.
     ///
-    /// A front end with no frame on screen yet draws one even when this
+    /// A viewport with no frame on screen yet draws one even when this
     /// returns `false`.
     pub fn go_to(&mut self, track: &Track, at: FrameIndex) -> bool {
         let at = at.min(track.last());
@@ -236,8 +235,7 @@ pub fn speed_label(speed: f32) -> String {
     }
 }
 
-/// Seconds of game time as the clock the game shows, zero-padded as the egui
-/// renderer pads it.
+/// Seconds of game time as the clock the game shows, zero-padded.
 pub fn mmss(seconds: f32) -> String {
     let seconds = seconds.max(0.0) as u32;
     format!("{:02}:{:02}", seconds / 60, seconds % 60)

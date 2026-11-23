@@ -1,7 +1,4 @@
 //! Annotation toolbar and context menu UI.
-//!
-//! Moved from the desktop `minimap_view/shapes.rs` to share between desktop
-//! and web clients.
 
 use std::collections::HashMap;
 

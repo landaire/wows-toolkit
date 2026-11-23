@@ -1,8 +1,7 @@
 //! Keeping the personal-rating expected values current.
 //!
-//! The table is cached on disk under the toolkit's storage directory and
-//! shared with the egui app, so whichever app refreshes it last is the one
-//! both read. The policy -- where it lives, when it is stale, what counts as
+//! The table is cached on disk under the toolkit's storage directory. The
+//! policy -- where it lives, when it is stale, what counts as
 //! a usable payload -- is `wows_toolkit_viewmodel::personal_rating`; this
 //! module is only the fetch, a future for the tokio runtime.
 

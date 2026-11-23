@@ -1,8 +1,7 @@
 //! How a tracked player's encounter history reads: how many of them fall in
 //! the period on screen, when the last one was, and how long ago that is.
 //!
-//! Both front ends draw these, so they are counted and worded here rather
-//! than twice.
+//! The UI draws these; they are counted and worded here.
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;

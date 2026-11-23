@@ -1,8 +1,5 @@
-//! Persisted window geometry shared between the egui and zgui apps.
-//!
-//! The egui-specific constructors/appliers live in the egui app as an
-//! extension trait; this crate holds the serializable data and the read and
-//! write of the one settings row both apps keep it in.
+//! Persisted window geometry: the serializable data and the read and write
+//! of the one settings row it is kept in.
 
 use std::collections::HashMap;
 
@@ -19,7 +16,7 @@ pub enum WindowKind {
     ArmorViewer,
 }
 
-/// Persisted window geometry, modeled after `egui_winit::WindowSettings`.
+/// Persisted window geometry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindowSettings {
@@ -29,7 +26,7 @@ pub struct WindowSettings {
     pub maximized: bool,
 }
 
-/// The settings row both apps keep every window's geometry in.
+/// The settings row every window's geometry is kept in.
 const KEY: &str = "window_sizes";
 
 /// What is remembered about each kind of window.
@@ -80,9 +77,8 @@ pub async fn store(pool: &SqlitePool, kind: WindowKind, settings: WindowSettings
 mod tests {
     use super::*;
 
-    /// A write remembers one kind without forgetting the kinds this app never
-    /// opens: the row is shared with the other front end, which opens windows
-    /// this one has no equivalent of.
+    /// A write remembers one kind without forgetting the other kinds already
+    /// stored in the row.
     #[tokio::test]
     async fn storing_one_kind_keeps_the_others() {
         let pool = crate::test_pool().await;

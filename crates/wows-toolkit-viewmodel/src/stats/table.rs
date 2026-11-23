@@ -1,9 +1,8 @@
 //! One ship's session statistics as a table, and the text a copy produces.
 //!
-//! Both front ends show the same rows and copy the same text, so a figure
-//! cannot read one way on screen and another in the clipboard. Labels stay as
-//! enums: the egui app translates them and the port does not, and neither
-//! choice can be made here.
+//! The same rows are shown and copied, so a figure cannot read one way on
+//! screen and another in the clipboard. Labels stay as enums so the caller
+//! chooses how to translate them.
 
 use std::collections::BTreeMap;
 
@@ -30,7 +29,7 @@ pub enum StatLabel {
 }
 
 impl StatLabel {
-    /// The key the egui app looks this label up under.
+    /// The key this label is translated under.
     pub const fn translation_key(self) -> &'static str {
         match self {
             Self::PersonalRating => "stat-personal_rating",
@@ -43,7 +42,7 @@ impl StatLabel {
         }
     }
 
-    /// The untranslated text, which is what the port renders.
+    /// The untranslated English text.
     pub const fn english(self) -> &'static str {
         match self {
             Self::PersonalRating => "Personal Rating",
@@ -96,11 +95,11 @@ pub const COLUMNS: [Column; 4] = [Column::Min, Column::Max, Column::Total, Colum
 ///
 /// `text` is already formatted: the columns mix thousands-separated counts
 /// and two-decimal averages, and which is which belongs with the statistic
-/// rather than with each front end's renderer. Empty text is a figure that
+/// rather than with the renderer. Empty text is a figure that
 /// has no meaning here (a rating does not sum), not a missing one.
 ///
 /// `rating` is the figure itself when the cell reports a personal rating, so
-/// a front end that colours ratings by band reads the band off the cell
+/// a caller that colours ratings by band reads the band off the cell
 /// rather than deriving it again from the text it was formatted into.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Cell {
@@ -165,7 +164,7 @@ fn average_i64(value: Option<f64>, locale: Option<&str>) -> Cell {
     Cell::text(value.map(|value| separate_number(value as i64, locale)).unwrap_or_default())
 }
 
-/// The rows for one ship, in the order the egui table lists them.
+/// The rows for one ship, in table order.
 ///
 /// `rating` is this ship's rating across the games in view when one could be
 /// computed; it leads the table because it is the figure the rest are read
@@ -272,9 +271,8 @@ pub fn to_markdown(
 /// The table as CSV, its first column unlabelled like the Markdown one.
 ///
 /// Cells are written unquoted, so a locale that groups thousands with a comma
-/// splits a figure across two fields. That is what the egui app has always
-/// written and what anything already consuming this expects, so it is not
-/// changed here.
+/// splits a figure across two fields. That is what anything already
+/// consuming this expects.
 pub fn to_csv(rows: &[StatRow], column: impl Fn(Column) -> String, label: impl Fn(StatLabel) -> String) -> String {
     let headings: Vec<String> = COLUMNS.iter().map(|c| column(*c)).collect();
     let mut out = format!(",{}\n", headings.join(","));
@@ -363,8 +361,8 @@ pub fn ship_summaries(
     summaries
 }
 
-/// A ship's collapsed line, as every front end shows and copies it, split so a
-/// front end can colour the win rate.
+/// A ship's collapsed line, as it is shown and copied, split so the caller
+/// can colour the win rate.
 pub struct ShipHeader {
     /// The ship name and, with Random or Ranked battles, the record.
     pub lead: String,
@@ -582,8 +580,7 @@ mod tests {
         assert!(markdown.contains("| | Min | Max | Total | Average |"));
         assert!(markdown.contains("| Damage | 10,000 | 10,000 | 10,000 | **10,000** |"));
 
-        // Unquoted, so the grouped figures split across fields. That is what
-        // the egui app writes; see `to_csv`.
+        // Unquoted, so the grouped figures split across fields; see `to_csv`.
         let csv = to_csv(&rows, english_column, english);
         assert!(csv.starts_with(",Min,Max,Total,Average"));
         assert!(csv.contains("Damage,10,000,10,000,10,000,10,000"));

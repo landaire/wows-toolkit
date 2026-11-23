@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 
-/// The `settings` row both front ends store [`LauncherSettings`] under.
+/// The `settings` row [`LauncherSettings`] is stored under.
 pub const SETTINGS_KEY: &str = "launcher";
 
 /// Identifies a saved account and its keyring entry (`realm:account_id`). A WG account exists on
@@ -53,7 +53,7 @@ impl InstallChoice {
 pub struct TermsVersion(u32);
 
 impl TermsVersion {
-    /// The notice the front ends show now.
+    /// The notice the app shows now.
     pub const CURRENT: TermsVersion = TermsVersion(1);
 }
 

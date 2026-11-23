@@ -1,7 +1,7 @@
 //! The layer switches a playback viewer offers over [`RenderOptions`].
 //!
 //! Beside the options rather than in a front end, so every viewer (the
-//! desktop front ends and the web demo) offers the same switches with the same
+//! desktop app and the web demo) offers the same switches with the same
 //! meaning.
 
 use crate::config::RenderOptions;
@@ -182,8 +182,7 @@ pub const TOGGLES: &[Toggle] = &[
         label_key: "ui-renderer-settings-team_rosters",
         read: |o, _| o.show_team_rosters,
         // The rosters sit in gutters either side of the map, which the
-        // stats panel wants for itself, so turning one on clears the other
-        // as the egui checkboxes do.
+        // stats panel wants for itself, so turning one on clears the other.
         write: |o, _, v| {
             o.show_team_rosters = v;
             if v {
@@ -195,7 +194,7 @@ pub const TOGGLES: &[Toggle] = &[
         id: "renderer-opt-stats-panel",
         label_key: "ui-renderer-settings-stats_panel",
         read: |o, _| o.show_stats_panel,
-        // Shares the rosters' gutter, as the egui checkboxes do.
+        // Shares the rosters' gutter.
         write: |o, _, v| {
             o.show_stats_panel = v;
             if v {

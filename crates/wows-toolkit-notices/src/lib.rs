@@ -1,4 +1,4 @@
-//! The license notices the desktop front ends show: the project's own license and the notices of
+//! The license notices the desktop app shows: the project's own license and the notices of
 //! the third-party components the release artifacts contain.
 
 mod notices;

@@ -1,8 +1,7 @@
 //! Reading and writing the tracked players.
 //!
 //! The rows live in the `tracked_player*` tables and the model this builds from
-//! them is [`TrackedPlayer`]. Both front ends go through here, so neither can
-//! write a shape the other cannot read.
+//! them is [`TrackedPlayer`].
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -285,8 +284,7 @@ pub enum PopulateError {
 }
 
 /// Records every encounter the index holds into the stored tracker and marks
-/// the division ones. The egui tracker's Populate (`ui/player_tracker/model.rs`'s
-/// `populate_from_index`).
+/// the division ones.
 ///
 /// A player's name and clan are taken from the index only where its latest
 /// battle with them is the tracker's latest too, so a name a newer replay
@@ -396,7 +394,7 @@ pub enum ImportError {
 /// one transaction: an import that did not land rolls away and leaves the blob as
 /// the only copy, so the next launch tries again. It folds into whatever is
 /// already stored rather than replacing it, so a battle written in the first
-/// seconds of a launch, or the other front end importing the same blob, costs
+/// seconds of a launch, or another process importing the same blob, costs
 /// nothing.
 ///
 /// The space the blob held is reclaimed on a best-effort basis, since a `VACUUM`
@@ -591,7 +589,7 @@ mod tests {
         assert_eq!(import_blob_once(&pool).await.expect("the import runs"), Imported::NothingStored);
     }
 
-    /// Rows already stored -- the other front end's import, or a battle the save
+    /// Rows already stored -- another process's import, or a battle the save
     /// task wrote in the first seconds of a launch -- do not stop the import and
     /// are not replaced by it. Refusing would strand the blob: the rows that
     /// made it refuse would still be there on the next launch.

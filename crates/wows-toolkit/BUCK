@@ -1,272 +1,132 @@
-load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "LINUX_WINE_HELPER_RESOURCES", "os_select", "workspace_binary", "workspace_buildscript", "workspace_integration_tests", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "LINUX_GUI_RUSTC_FLAGS", "LINUX_WINE_HELPER_RESOURCES", "os_select", "workspace_binary", "workspace_buildscript", "workspace_test")
 
 buildscript = workspace_buildscript(
-    name = "wows_toolkit_build",
+    name = "zgui_build",
     crate = "wows_toolkit",
-    package = "wows_toolkit",
+    package = "wows-toolkit",
     version = "1.1.0-beta6",
-    deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
     rustc_flags = ["--cfg=wows_buck_build"],
-    env = {"EMBEDDED_CONSTANTS": "$(location //embedded_resources:constants_json)", "WOWS_TOOLKIT_ICON": "$(location //assets:wows_toolkit_png)"},
+    env = {"WOWS_TOOLKIT_ICON": "$(location //assets:wows_toolkit_256_png)"},
 )
 
-# Without the crates whose test-support variants the tests link instead.
-TOOLKIT_COMMON_DEPS = [
+ZGUI_DEPS = [
+    "//crates/landaire-ui:landaire_ui",
     "//crates/minimap-renderer:wows_minimap_renderer",
-    "//crates/wows-battle-world:wows_battle_world",
-    "//crates/wows-data-mgr:wows_data_mgr",
-    "//crates/wows-replay-insights:wows_replay_insights",
-    "//crates/wows-replays:wows_replays",
-    "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
-    "//crates/wows-toolkit-notices:wows_toolkit_notices",
-    "//crates/wowsunpack:wowsunpack",
-    "//crates/wt-collab-egui:wt_collab_egui",
-    "//crates/wt-collab-client:wt_collab_client",
-    "//crates/wt-collab-protocol:wt_collab_protocol",
-    "//crates/wt-translations:wt_translations",
-    "//third-party/rust:arboard",
-    "//third-party/rust:bytemuck",
-    "//third-party/rust:ciborium",
-    "//third-party/rust:clap",
-    "//third-party/rust:convert_case",
-    "//third-party/rust:csv",
-    "//third-party/rust:eframe",
-    "//third-party/rust:egui",
-    "//third-party/rust:egui-notify",
-    "//third-party/rust:egui-palette",
-    "//third-party/rust:egui-phosphor",
-    "//third-party/rust:egui_commonmark",
-    "//third-party/rust:egui_dock",
-    "//third-party/rust:egui_extras",
-    "//third-party/rust:egui_inbox",
-    "//third-party/rust:egui_ltreeview",
-    "//third-party/rust:egui_plot",
-    "//third-party/rust:egui_table",
-    "//third-party/rust:egui_taffy",
-    "//third-party/rust:escaper",
-    "//third-party/rust:flate2",
-    "//third-party/rust:gettext",
-    "//third-party/rust:glob",
-    "//third-party/rust:home",
-    "//third-party/rust:http",
-    "//third-party/rust:http-body",
-    "//third-party/rust:http-body-util",
-    "//third-party/rust:humansize",
-    "//third-party/rust:hyper-http-proxy",
-    "//third-party/rust:hyper-rustls",
-    "//third-party/rust:hyper-timeout",
-    "//third-party/rust:hyper-util",
-    "//third-party/rust:image",
-    "//third-party/rust:image_dds",
-    "//third-party/rust:iroh",
-    "//third-party/rust:itertools",
-    "//third-party/rust:jiff",
-    "//third-party/rust:language-tags",
-    "//third-party/rust:levenshtein",
-    "//third-party/rust:memmap2",
-    "//third-party/rust:nalgebra",
-    "//third-party/rust:notify",
-    "//third-party/rust:octocrab",
-    "//third-party/rust:parking_lot",
-    "//third-party/rust:pickled",
-    "//third-party/rust:pollster",
-    "//third-party/rust:rand",
-    "//third-party/rust:regex",
-    "//third-party/rust:reqwest",
-    "//third-party/rust:rfd",
-    "//third-party/rust:rkyv",
-    "//third-party/rust:ron",
-    "//third-party/rust:rootcause",
-    "//third-party/rust:roxmltree",
-    "//third-party/rust:rustls",
-    "//third-party/rust:semver",
-    "//third-party/rust:serde",
-    "//third-party/rust:serde_json",
-    "//third-party/rust:sqlx",
-    "//third-party/rust:sys-locale",
-    "//third-party/rust:tempfile",
-    "//third-party/rust:thiserror",
-    "//third-party/rust:thousands",
-    "//third-party/rust:tokio",
-    "//third-party/rust:toml",
-    "//third-party/rust:tower",
-    "//third-party/rust:tower-http",
-    "//third-party/rust:tracing",
-    "//third-party/rust:tracing-appender",
-    "//third-party/rust:tracing-subscriber",
-    "//third-party/rust:twitch_api",
-    "//third-party/rust:unidecode",
-    "//third-party/rust:walkdir",
-    "//third-party/rust:web-time",
-    "//third-party/rust:wgpu",
-    "//third-party/rust:zip",
-]
-
-TOOLKIT_LAUNCHER_DEPS = [
+    "//crates/replayshark:replayshark",
     "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-download:wgc-download",
+    "//crates/wgc-install:wgc-install",
     "//crates/wgc-launch:wgc-launch",
-    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
-]
-
-TOOLKIT_PLATFORM_DEPS = os_select(
-    macos = [],
-    linux = [],
-    # The cfg(windows) dependency section of Cargo.toml.
-    windows = [
-        "//third-party/rust:windows-registry",
-        "//third-party/rust:windows-sys",
-    ],
-)
-
-TOOLKIT_DEPS = TOOLKIT_COMMON_DEPS + [
+    "//crates/wows-core:wows_core",
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//crates/wows-game-settings:wows-game-settings",
+    "//crates/wows-mcp:wows_mcp",
+    "//crates/wows-query:wows_query",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-armor:wows_toolkit_armor",
     "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
+    "//crates/wows-toolkit-icons:wows_toolkit_icons",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher",
+    "//crates/wows-toolkit-notices:wows_toolkit_notices",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data",
     "//crates/wows-toolkit-services:wows_toolkit_services",
     "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
-] + TOOLKIT_PLATFORM_DEPS
-
-TOOLKIT_FEATURES = ["logging"]
-
-workspace_library(
-    name = "wows_toolkit",
-    crate = "wows_toolkit",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    features = TOOLKIT_FEATURES,
-    deps = TOOLKIT_DEPS,
-    buildscript = buildscript,
-    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
-)
-
-workspace_library(
-    name = "wows_toolkit_dhat",
-    crate = "wows_toolkit",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    features = TOOLKIT_FEATURES + ["dhat-heap"],
-    deps = TOOLKIT_DEPS + ["//third-party/rust:dhat"],
-    buildscript = buildscript,
-    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
-)
-
-workspace_library(
-    name = "wows_toolkit_profile",
-    crate = "wows_toolkit",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    features = TOOLKIT_FEATURES + ["profile-bins"],
-    deps = TOOLKIT_DEPS,
-    buildscript = buildscript,
-    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
-)
-
-
-# build.rs cannot emit these under Buck: winresource and the link-arg directives
-# run only under Cargo, and winresource additionally discovers rc.exe from host
-# state. The icon resource is linked from //toolchains/windows:app_resource.
-GUI_LINK_FLAGS = os_select(
-    macos = [],
-    linux = LINUX_GUI_RUSTC_FLAGS,
-    # The vendor hybrid-graphics shims look these up in the export table by name.
-    # Defining the statics is not enough; an executable exports nothing unless
-    # the linker is told to. Scoped to the GUI binary, which is where the statics
-    # are defined and the only target that opens a surface.
-    windows = [
-        "-Clink-arg=/EXPORT:NvOptimusEnablement,DATA",
-        "-Clink-arg=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA",
-        "-Clink-arg=$(location toolchains//windows:app_resource)",
-    ],
-)
-
-TOOLKIT_RESOURCES = {
-    "constants.json": "//embedded_resources:constants_json",
-    "wows_toolkit.png": "//assets:wows_toolkit_png",
-}
-
-workspace_binary(
-    name = "wows_toolkit_bin",
-    crate = "wows_toolkit",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    crate_root = "src/main.rs",
-    features = TOOLKIT_FEATURES,
-    deps = [":wows_toolkit"] + TOOLKIT_DEPS,
-    buildscript = buildscript,
-    resources = os_select(
-        macos = TOOLKIT_RESOURCES,
-        linux = TOOLKIT_RESOURCES | LINUX_WINE_HELPER_RESOURCES,
-        windows = TOOLKIT_RESOURCES,
-    ),
-    rustc_flags = GUI_LINK_FLAGS,
-)
-
-workspace_binary(
-    name = "dhat_load_bin",
-    crate = "dhat_load",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    crate_root = "src/bin/dhat_load.rs",
-    features = TOOLKIT_FEATURES + ["dhat-heap"],
-    deps = [":wows_toolkit_dhat"] + TOOLKIT_DEPS + ["//third-party/rust:dhat"],
-)
-
-workspace_binary(
-    name = "profile_replay_bin",
-    crate = "profile_replay",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    crate_root = "src/bin/profile_replay.rs",
-    features = TOOLKIT_FEATURES + ["profile-bins"],
-    deps = [":wows_toolkit_profile"] + TOOLKIT_DEPS,
-)
-
-# The tests build against the test-support variants: ZoneGuard for the query
-# bar's date assertions, and the shipped rating table. Services takes its own
-# so it links the same config and viewmodel builds as the tests.
-TOOLKIT_TEST_SUPPORT_DEPS = TOOLKIT_COMMON_DEPS + [
-    "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
-    "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
-    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
-] + TOOLKIT_PLATFORM_DEPS
-
-TOOLKIT_LAUNCHER_TEST_DEPS = TOOLKIT_TEST_SUPPORT_DEPS + TOOLKIT_LAUNCHER_DEPS
-
-TOOLKIT_TEST_DEPS = [
-    "//third-party/rust:egui_kittest",
-    "//third-party/rust:insta",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-collab-client:wt_collab_client",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:arboard",
+    "//third-party/rust:ciborium",
+    "//third-party/rust:csv",
+    "//third-party/rust:data-encoding",
+    "//third-party/rust:clap",
+    "//third-party/rust:futures",
+    "//third-party/rust:image",
+    "//third-party/rust:humansize",
+    "//third-party/rust:jiff",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:rmcp",
+    "//third-party/rust:resvg",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:rustls",
+    "//third-party/rust:schemars",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
+    "//third-party/rust:syntect",
+    "//third-party/rust:sys-locale",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tokio-util",
+    "//third-party/rust:tracing",
+    "//third-party/rust:unicase",
+    "//third-party/rust:wowsdeob",
+    "//third-party/rust:zgui",
+    "//third-party/rust:zgui-css",
+    "//third-party/rust:zgui-image",
+    "//third-party/rust:zgui-render-wgpu",
+    "//third-party/rust:zgui-ui",
+    "//third-party/rust:zgui-ui-icons",
+    "//third-party/rust:zgui-ui-primitives",
+    "//third-party/rust:zgui-ui-tokens",
 ]
 
-# The library the integration tests link, built against the same variants.
-workspace_library(
-    name = "wows_toolkit_test_support",
-    crate = "wows_toolkit",
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    features = TOOLKIT_FEATURES,
-    deps = TOOLKIT_TEST_SUPPORT_DEPS,
-    buildscript = buildscript,
-    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
+# The cfg(windows) dependency section of Cargo.toml. Kept apart from ZGUI_DEPS because the test
+# target maps that list, and a select cannot be iterated.
+ZGUI_PLATFORM_DEPS = os_select(
+    macos = [],
+    linux = [],
+    windows = ["//third-party/rust:windows-sys"],
 )
+
+# Not wows_toolkit_bin: the target name is a path component of every object file a release
+# build writes, and the longest of those already sits near the 260 link.exe accepts.
+workspace_binary(
+    name = "zgui_bin",
+    crate = "wows_toolkit",
+    package = "wows-toolkit",
+    version = "1.1.0-beta6",
+    crate_root = "src/main.rs",
+    buildscript = buildscript,
+    deps = ZGUI_DEPS + ZGUI_PLATFORM_DEPS,
+    resources = os_select(macos = {}, linux = LINUX_WINE_HELPER_RESOURCES, windows = {}),
+    rustc_flags = os_select(
+        macos = [],
+        linux = LINUX_GUI_RUSTC_FLAGS,
+        # The release ships this binary and its PDB as wows_toolkit.exe and wows_toolkit.pdb. The
+        # debug directory must name the shipped PDB, or a crash backtrace on a user's machine finds
+        # no symbols beside the executable.
+        windows = [
+            "-Clink-arg=$(location toolchains//windows:app_resource)",
+            "-Clink-arg=/PDBALTPATH:wows_toolkit.pdb",
+        ],
+    ),
+)
+
+_TEST_SUPPORT_VARIANTS = {
+    "//crates/landaire-ui:landaire_ui": "//crates/landaire-ui:landaire_ui_test_support",
+    "//crates/wows-toolkit-config:wows_toolkit_config": "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+    "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data": "//crates/wows-toolkit-replay-data:wows_toolkit_replay_data_test_support",
+    "//crates/wows-toolkit-services:wows_toolkit_services": "//crates/wows-toolkit-services:wows_toolkit_services_test_support",
+    "//crates/wows-toolkit-launcher:wows_toolkit_launcher": "//crates/wows-toolkit-launcher:wows_toolkit_launcher_test_support",
+    "//crates/wows-toolkit-armor:wows_toolkit_armor": "//crates/wows-toolkit-armor:wows_toolkit_armor_test_support",
+    "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel": "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel_test_support",
+}
 
 workspace_test(
-    name = "wows_toolkit_test",
+    name = "zgui_test",
     crate = "wows_toolkit",
-    crate_root = "src/lib.rs",
-    package = "wows_toolkit",
+    package = "wows-toolkit",
     version = "1.1.0-beta6",
-    features = TOOLKIT_FEATURES + ["launcher"],
-    deps = TOOLKIT_LAUNCHER_TEST_DEPS,
-    test_deps = TOOLKIT_TEST_DEPS,
+    crate_root = "src/main.rs",
     buildscript = buildscript,
-    resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
-)
-
-workspace_integration_tests(
-    package = "wows_toolkit",
-    version = "1.1.0-beta6",
-    library = ":wows_toolkit_test_support",
-    features = TOOLKIT_FEATURES,
-    deps = TOOLKIT_TEST_SUPPORT_DEPS,
-    test_deps = TOOLKIT_TEST_DEPS,
+    # test-support lets the tests point `storage_dir` at a temporary directory and open the shell
+    # headlessly.
+    deps = [_TEST_SUPPORT_VARIANTS.get(d, d) for d in ZGUI_DEPS] + ZGUI_PLATFORM_DEPS,
+    test_deps = ["//third-party/rust:tempfile"],
+    # Each test opens a window. One thread per core wedges the run on a machine with many of them.
+    run_env = {"RUST_TEST_THREADS": "4"},
+    gui = True,
 )

@@ -91,7 +91,7 @@ fn locates_binaries_beside_the_executable() {
 #[test]
 fn locates_binaries_through_the_buck_resource_database() {
     let out = tempfile::tempdir().unwrap();
-    let exe_dir = out.path().join("crates/wows-toolkit-zgui/__zgui_bin__");
+    let exe_dir = out.path().join("crates/wows-toolkit/__zgui_bin__");
     let relay_dir = out.path().join("crates/wgc-relay/__wgc_relay_bin__");
     let placeholder_dir = out.path().join("crates/wgc-placeholder/__wgc_placeholder_bin__");
     for dir in [&exe_dir, &relay_dir, &placeholder_dir] {
@@ -104,8 +104,8 @@ fn locates_binaries_through_the_buck_resource_database() {
     std::fs::write(
         exe_dir.join("zgui_bin.resources.json"),
         r#"{
-            "crates/wows-toolkit-zgui/wgc-placeholder.exe": "../../wgc-placeholder/__wgc_placeholder_bin__/wgc_placeholder.exe",
-            "crates/wows-toolkit-zgui/wgc-relay.exe": "../../wgc-relay/__wgc_relay_bin__/wgc_relay.exe"
+            "crates/wows-toolkit/wgc-placeholder.exe": "../../wgc-placeholder/__wgc_placeholder_bin__/wgc_placeholder.exe",
+            "crates/wows-toolkit/wgc-relay.exe": "../../wgc-relay/__wgc_relay_bin__/wgc_relay.exe"
         }"#,
     )
     .unwrap();

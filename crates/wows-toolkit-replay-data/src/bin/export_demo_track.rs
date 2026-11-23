@@ -42,7 +42,7 @@ const USAGE: &str = "usage: export_demo_track <replay> <game dir> <output> \
 /// demo does not draw, and chat is not baked.
 const WITHHELD_TOGGLES: &[&str] = &["renderer-opt-team-rosters", "renderer-opt-stats-panel", "renderer-opt-chat"];
 
-/// The size the desktop egui viewer loads these icon sets at.
+/// The size the desktop viewer loads these icon sets at.
 const SMALL_ICON_SIZE: u32 = 16;
 
 #[derive(Debug, thiserror::Error)]

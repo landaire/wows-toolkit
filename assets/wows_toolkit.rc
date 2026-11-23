@@ -3,7 +3,7 @@
 // with the rc.exe pinned in toolchains/windows/toolchain-manifest.json instead.
 //
 // Keep FILEVERSION, PRODUCTVERSION and the two version strings in step with the
-// wows_toolkit package version; scripts/test-workspace-package-metadata.nu checks it.
+// wows-toolkit package version; scripts/test-workspace-package-metadata.nu checks it.
 
 #include <winver.h>
 

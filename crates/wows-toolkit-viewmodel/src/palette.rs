@@ -1,4 +1,4 @@
-//! The command palette's parts both desktop front ends share: its cascading modes and the rows
+//! The command palette's parts: its cascading modes and the rows
 //! the replay index offers.
 
 use sqlx::sqlite::SqlitePool;
@@ -31,7 +31,7 @@ pub enum PaletteMode {
 impl PaletteMode {
     /// The modes the root list leads into from its searches. The version list is offered beside
     /// the other re-index command instead, the directory list beside opening a file, and the
-    /// ShipTool list only by a front end that opens it.
+    /// ShipTool list only where the app opens it.
     pub const ALL: [Self; 3] = [Self::Players, Self::MyShips, Self::ArmorShips];
 
     /// What the root entry that enters this mode is called.

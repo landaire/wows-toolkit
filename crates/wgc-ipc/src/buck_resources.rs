@@ -33,7 +33,7 @@ impl BuckResources {
         Ok(Some(BuckResources { dir: dir.to_path_buf(), entries }))
     }
 
-    /// Names carry the declaring package (`crates/wows-toolkit-zgui/wgc-relay.exe`),
+    /// Names carry the declaring package (`crates/wows-toolkit/wgc-relay.exe`),
     /// so only the final component is matched.
     pub(crate) fn path(&self, file_name: &str) -> Option<PathBuf> {
         self.entries

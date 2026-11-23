@@ -1,225 +1,311 @@
+//! What this process was asked to do on the command line.
+//!
+//! `finalize-update --replaced <path>` is what an update spawns to delete the executable it
+//! replaced, and the bare-path form is the same thing as every released version emits it: those
+//! versions cannot be changed, so the form is accepted for as long as one of them can still update
+//! into this binary.
+//!
+//! `replayshark <args>` runs a replayshark command, as the `replayshark` tool takes it, and exits
+//! without opening the window.
+//!
+//! `--gpu-adapter`, `--cpu-renderer` and `--list-gpus` steer and report the adapter zgui draws the
+//! window with. `--no-hardening` skips the process mitigations. `--gpu-safe-mode` names a rung of
+//! the renderer ladder of older releases, which has no counterpart here, so it is refused rather
+//! than parsed and ignored.
+
 use std::ffi::OsString;
-use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
 use clap::Subcommand;
+use zgui::AdapterPreference;
 
-/// What a finalize step may delete, and why a path was refused.
-///
-/// Defined in `wows_toolkit_viewmodel::update` so both front ends gate the same
-/// delete the same way; this is the path the rest of this crate uses.
-pub use wows_toolkit_viewmodel::update::FinalizeError;
-pub use wows_toolkit_viewmodel::update::validate_finalize_target;
-
-/// Subcommand names that must not be mistaken for a legacy path argument.
-const SUBCOMMAND_NAMES: &[&str] = &["finalize-update", "help"];
-
-/// Recognise the argument form used by every released version:
-/// `wows_toolkit.exe <replaced.exe.old>`.
-///
-/// Those versions cannot be changed, so this form is accepted for as long as
-/// any of them can still update into this binary. Classification is syntactic
-/// only; `validate_finalize_target` decides whether the path may be deleted.
-pub fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
-    let [_program, single] = args else {
-        return None;
-    };
-
-    let text = single.to_str()?;
-    if text.starts_with('-') || SUBCOMMAND_NAMES.contains(&text) {
-        return None;
-    }
-
-    Some(PathBuf::from(single))
-}
-
-#[derive(Debug, Default, Parser)]
+#[derive(Clone, Debug, Default, Parser)]
 #[command(name = "wows_toolkit", version, about)]
 pub struct Cli {
-    /// Render with WARP, the Microsoft software rasterizer, loading no vendor
-    /// driver code at all.
-    #[arg(long, conflicts_with_all = ["gpu_adapter", "gpu_safe_mode"])]
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
+    /// Draw the window on the CPU (WARP, llvmpipe) rather than a graphics card.
+    #[arg(long, conflicts_with = "gpu_adapter")]
     pub cpu_renderer: bool,
 
-    /// Pin rendering to the adapter whose name contains NAME, matched
-    /// case-insensitively.
-    #[arg(long, value_name = "NAME", conflicts_with = "gpu_safe_mode")]
+    /// Draw the window on the adapter whose name contains NAME.
+    #[arg(long, value_name = "NAME")]
     pub gpu_adapter: Option<String>,
 
-    /// Skip adapter pinning and enumerate every backend, as before pinning
-    /// existed. This also turns off the process mitigations, because it selects
-    /// the one render mode that leaves the process unhardened.
-    #[arg(long)]
-    pub gpu_safe_mode: bool,
-
-    /// Print the display adapters found in the driver registry, then exit.
+    /// List the adapters the window can be drawn on, and exit.
     #[arg(long)]
     pub list_gpus: bool,
 
-    /// Skip the process mitigations that keep third-party DLLs from loading
-    /// into this process.
+    /// Start without the process mitigations.
+    ///
+    /// For a machine the policies break: the app starts at all, and says in the log that it was
+    /// asked to skip them.
     #[arg(long)]
     pub no_hardening: bool,
-
-    #[command(subcommand)]
-    pub command: Option<Command>,
 }
 
 impl Cli {
-    /// The render overrides these arguments express.
-    pub fn render_overrides(&self) -> crate::gpu::select::Overrides {
-        crate::gpu::select::Overrides {
-            cpu_renderer: self.cpu_renderer,
-            gpu_safe_mode: self.gpu_safe_mode,
-            gpu_adapter: self.gpu_adapter.clone(),
+    /// Which adapter the renderer should try first.
+    pub fn adapter_preference(&self) -> AdapterPreference {
+        if self.cpu_renderer {
+            return AdapterPreference::Software;
+        }
+
+        match &self.gpu_adapter {
+            Some(named) => AdapterPreference::NameContains(named.clone()),
+            None => AdapterPreference::Automatic,
         }
     }
 
-    /// Whether to harden a launch running `mode`.
-    ///
-    /// `--no-hardening` overrides the mode, because it exists so a user whose
-    /// machine the policies break can start the app at all without first
-    /// descending to the one mode that skips them.
-    pub fn hardening(&self, mode: crate::gpu::select::RenderMode) -> crate::hardening::Hardening {
-        use crate::hardening::Hardening;
-        use crate::hardening::SkipReason;
+    /// The adapter preference as a crash report names it.
+    pub fn render_mode(&self) -> String {
+        match self.adapter_preference() {
+            AdapterPreference::Software => "software renderer (--cpu-renderer)".to_owned(),
+            AdapterPreference::NameContains(named) => format!("adapter named like {named:?} (--gpu-adapter)"),
+            AdapterPreference::Automatic => "automatic adapter".to_owned(),
+            AdapterPreference::LowPower => "low-power adapter".to_owned(),
+        }
+    }
 
+    /// Whether the process mitigations are applied.
+    pub fn hardening(&self) -> wows_toolkit_hardening::Hardening {
         if self.no_hardening {
-            Hardening::Skip(SkipReason::CommandLine)
-        } else if !mode.hardens() {
-            Hardening::Skip(SkipReason::RenderMode)
+            wows_toolkit_hardening::Hardening::Skip(wows_toolkit_hardening::SkipReason::CommandLine)
         } else {
-            Hardening::Apply
+            wows_toolkit_hardening::Hardening::Apply
         }
     }
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum Command {
     /// Delete the binary this process replaced during an update.
     FinalizeUpdate {
         #[arg(long)]
         replaced: PathBuf,
     },
+    /// Parse and analyze World of Warships replay files, as the replayshark tool does.
+    Replayshark(replayshark::cli::Args),
 }
 
 /// What this process was asked to do.
 #[derive(Debug)]
 pub enum Invocation {
-    FinalizeUpdate {
-        replaced: PathBuf,
-    },
-    /// Report the adapter probe and exit without creating a window.
-    ListGpus,
-    Run(Cli),
+    /// Delete the named binary, then carry on and open the window.
+    FinalizeUpdate(PathBuf),
+    /// Run a replayshark command and exit.
+    Replayshark(Box<replayshark::cli::Args>),
+    /// Say which adapters the window can be drawn on, and exit.
+    ListGpus(Box<Cli>),
+    /// Open the window.
+    Run(Box<Cli>),
 }
 
-/// Decide what to do with the raw process arguments.
-///
-/// The legacy check runs before clap because a bare filesystem path is
-/// ambiguous with a subcommand name, and resolving that inside clap's grammar
-/// would make the contract harder to see and to test.
-pub fn resolve<I>(args: I) -> Result<Invocation, clap::Error>
-where
-    I: IntoIterator<Item = OsString>,
-{
-    let args: Vec<OsString> = args.into_iter().collect();
+/// Subcommand names a bare path must not be mistaken for.
+const SUBCOMMANDS: &[&str] = &["finalize-update", "replayshark", "help"];
 
+/// The argument form every released version emits: the app, and the path of the binary it
+/// replaced.
+///
+/// Recognised before clap, because a bare filesystem path is ambiguous with a subcommand name and
+/// resolving that inside clap's grammar would hide the contract. Syntactic only:
+/// `wows_toolkit_services::update::finalize` decides whether the path may actually be deleted.
+fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
+    let [_program, single] = args else { return None };
+    let text = single.to_str()?;
+    if text.starts_with('-') || SUBCOMMANDS.contains(&text) {
+        return None;
+    }
+
+    Some(PathBuf::from(single))
+}
+
+/// Reads the process arguments.
+///
+/// Prints and exits on `--help`, `--version`, and on an argument this build does not take. The
+/// message goes through [`report_startup_message`] rather than clap's own printing, because a
+/// release build has no console of its own: clap would write into a handle nothing reads and the
+/// process would exit looking like it had crashed.
+pub fn parse() -> Invocation {
+    let args: Vec<OsString> = std::env::args_os().collect();
     if let Some(replaced) = legacy_finalize_target(&args) {
-        return Ok(Invocation::FinalizeUpdate { replaced });
+        return Invocation::FinalizeUpdate(replaced);
     }
 
-    let cli = Cli::try_parse_from(&args)?;
-    match &cli.command {
-        Some(Command::FinalizeUpdate { replaced }) => Ok(Invocation::FinalizeUpdate { replaced: replaced.clone() }),
-        None if cli.list_gpus => Ok(Invocation::ListGpus),
-        None => Ok(Invocation::Run(cli)),
+    match Cli::try_parse_from(&args) {
+        Ok(cli) => match cli.command {
+            Some(Command::FinalizeUpdate { replaced }) => Invocation::FinalizeUpdate(replaced),
+            Some(Command::Replayshark(args)) => Invocation::Replayshark(Box::new(args)),
+            None if cli.list_gpus => Invocation::ListGpus(Box::new(cli)),
+            None => Invocation::Run(Box::new(cli)),
+        },
+        Err(err) => {
+            let title = format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION"));
+            report_startup_message(&title, &err.render().to_string(), err.use_stderr());
+            std::process::exit(err.exit_code());
+        }
     }
 }
 
-/// Render the adapter probe for `--list-gpus`.
+/// The `--list-gpus` report: every adapter the renderer chooses from, in the order it tries them
+/// under `asked`'s preference.
+pub fn adapter_report(asked: &Cli) -> String {
+    format_adapters(&adapters(asked))
+}
+
+/// Warns, on a thread of its own, when `--gpu-adapter` names no adapter, since the renderer then
+/// falls back to its usual order without saying so. The adapter it opens is logged by the
+/// renderer.
 ///
-/// Reports the manifests the probe passed over as well as the one it pinned, so
-/// a machine that picked the wrong driver can be diagnosed without a registry
-/// dump.
-pub fn describe_adapters(adapters: &[crate::gpu::probe::AdapterRecord]) -> String {
+/// Listing the adapters loads every driver, so it is called only when `--gpu-adapter` was given,
+/// and once the window is up.
+pub fn check_unmatched_adapter(asked: Cli) {
+    let spawned = std::thread::Builder::new().name("gpu-adapter-check".to_owned()).spawn(move || {
+        let Some(named) = &asked.gpu_adapter else { return };
+
+        let adapters = adapters(&asked);
+        let wanted = named.to_lowercase();
+        if adapters.iter().any(|adapter| adapter.name.to_lowercase().contains(&wanted)) {
+            return;
+        }
+
+        tracing::warn!("--gpu-adapter {named:?} matched no adapter; the adapters are:\n{}", format_adapters(&adapters));
+    });
+    if let Err(err) = spawned {
+        tracing::warn!("could not start the --gpu-adapter check: {err}");
+    }
+}
+
+struct AdapterLine {
+    name: String,
+    line: String,
+}
+
+fn adapters(asked: &Cli) -> Vec<AdapterLine> {
+    zgui::app::adapters(&asked.adapter_preference())
+        .into_iter()
+        .map(|info| AdapterLine {
+            line: format!(
+                "{} ({:?}, {:?}, driver {} {})\n",
+                info.name, info.device_type, info.backend, info.driver, info.driver_info
+            ),
+            name: info.name,
+        })
+        .collect()
+}
+
+fn format_adapters(adapters: &[AdapterLine]) -> String {
     if adapters.is_empty() {
-        return "No display adapters with a Vulkan driver were found.\n".to_string();
+        return "No display adapter this build can draw on.\n".to_owned();
     }
 
-    let mut out = String::new();
-    for adapter in adapters {
-        out.push_str(&format!("{}\n", adapter.description));
-        match adapter.memory {
-            Some(memory) => out.push_str(&format!("  memory: {memory}\n")),
-            None => out.push_str("  memory: not reported by the driver\n"),
-        }
-        out.push_str(&format!("  driver: {}\n", adapter.icd));
-        for discarded in &adapter.discarded_icds {
-            out.push_str(&format!("  unused: {discarded}\n"));
-        }
-    }
-    out
+    adapters.iter().map(|adapter| adapter.line.as_str()).collect()
 }
 
-/// Obtain a writer for the console that launched this process.
+/// Attaches this process to the console that launched it, if there was one.
 ///
-/// Release builds are a windows subsystem binary with no console of their own,
-/// so stdout and stderr go nowhere. `AttachConsole` borrows the parent's
-/// console and `CONOUT$` opens it directly, which avoids depending on whether
-/// the standard handles were inherited.
-///
-/// `CONOUT$` writes to the console screen buffer directly, not to this
-/// process's stdout handle, so it bypasses redirection: running
-/// `wows_toolkit.exe --help > out.txt` shows the message in the console and
-/// leaves `out.txt` empty.
+/// The single `AttachConsole` call site, so that call happens at most once per process.
 #[cfg(windows)]
-pub fn console_writer() -> Option<std::fs::File> {
+fn attach_parent_console() {
     use windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS;
     use windows_sys::Win32::System::Console::AttachConsole;
 
-    // SAFETY: AttachConsole has no preconditions beyond a valid process
-    // context; it either attaches to the parent's console or fails, and
-    // failure is handled below via the CONOUT$ open result.
-    // Fails when the parent has no console, in which case CONOUT$ will not
-    // open either and the caller gets None.
-    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    static ATTACH: std::sync::Once = std::sync::Once::new();
+    ATTACH.call_once(|| {
+        // SAFETY: AttachConsole has no preconditions beyond a valid process context. It either
+        // attaches to the parent's console or fails.
+        unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    });
+}
 
-    std::fs::OpenOptions::new().write(true).open("CONOUT$").ok()
+/// Whether the standard handle `which` leads anywhere.
+///
+/// Rust's stdout and stderr report a write to a missing handle as successful, so this is the only
+/// way to tell that output would be lost.
+#[cfg(windows)]
+fn std_handle_is_open(which: windows_sys::Win32::System::Console::STD_HANDLE) -> bool {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::GetStdHandle;
+
+    // SAFETY: GetStdHandle only reads the process's standard handle table.
+    let handle = unsafe { GetStdHandle(which) };
+    !handle.is_null() && handle != INVALID_HANDLE_VALUE
+}
+
+/// Points stdout and stderr at the console that launched this process where they lead nowhere,
+/// so command-line output reaches it.
+///
+/// A release build is a GUI program, which Windows starts with no standard handles even from a
+/// console. A handle redirected to a file or a pipe is left alone. Rust's stdout and stderr look
+/// the handle up on every write, so they follow the change.
+#[cfg(windows)]
+pub fn attach_console_output() {
+    use std::os::windows::io::IntoRawHandle;
+
+    use windows_sys::Win32::System::Console::STD_ERROR_HANDLE;
+    use windows_sys::Win32::System::Console::STD_OUTPUT_HANDLE;
+    use windows_sys::Win32::System::Console::SetStdHandle;
+
+    for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        if std_handle_is_open(which) {
+            continue;
+        }
+
+        // Attaching may itself fill the empty handles.
+        attach_parent_console();
+        if std_handle_is_open(which) {
+            continue;
+        }
+
+        let Ok(console) = std::fs::OpenOptions::new().write(true).open("CONOUT$") else { return };
+        // SAFETY: the handle is an open console handle this process owns. The standard handle
+        // table takes it over for the rest of the process, so it is never closed.
+        unsafe { SetStdHandle(which, console.into_raw_handle()) };
+    }
 }
 
 #[cfg(not(windows))]
-pub fn console_writer() -> Option<std::fs::File> {
-    None
-}
+pub fn attach_console_output() {}
 
-/// Report a startup-time message (a parse error, `--help`, or `--version`)
-/// through whichever channel the launching context can actually show.
+/// Puts a startup-time message where the launching context can show it.
 ///
-/// A release build has no console of its own, so a double-click or a
-/// drag-and-drop launch that fails to parse would otherwise exit silently
-/// with nothing visible anywhere: logging only starts once `eframe::run_native`
-/// is reached, which a parse error never gets to. `console_writer` is the
-/// single call site for `AttachConsole`, so routing the fallback through here
-/// keeps that call to at most once per process.
+/// A release build has no console, so a launch that fails to parse would otherwise exit silently:
+/// logging only starts once the window is being opened, which a parse error never reaches. Own
+/// handle or the parent's console first, then a message box. An error goes to stderr and anything
+/// else to stdout, as clap would print them.
 pub fn report_startup_message(title: &str, message: &str, is_error: bool) {
-    if let Some(mut console) = console_writer() {
-        let _ = write!(console, "{message}");
+    fn write_flushed(mut out: impl std::io::Write, message: &str) -> bool {
+        write!(out, "{message}").is_ok() && out.flush().is_ok()
+    }
+
+    attach_console_output();
+
+    #[cfg(windows)]
+    let reachable = std_handle_is_open(if is_error {
+        windows_sys::Win32::System::Console::STD_ERROR_HANDLE
+    } else {
+        windows_sys::Win32::System::Console::STD_OUTPUT_HANDLE
+    });
+    #[cfg(not(windows))]
+    let reachable = true;
+
+    let written = reachable
+        && if is_error { write_flushed(std::io::stderr(), message) } else { write_flushed(std::io::stdout(), message) };
+    if written {
         return;
     }
 
     #[cfg(windows)]
     show_message_box(title, message, is_error);
 
+    // A failed write to a Unix stream has nowhere left to be reported.
     #[cfg(not(windows))]
-    {
-        let _ = (title, is_error);
-        eprint!("{message}");
-    }
+    let _ = title;
 }
 
-/// Win32 message box fallback for a launch with no console to write to.
+/// The fallback for a launch with no console to write to.
 #[cfg(windows)]
 fn show_message_box(title: &str, message: &str, is_error: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR;
@@ -229,14 +315,14 @@ fn show_message_box(title: &str, message: &str, is_error: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::MB_TOPMOST;
     use windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW;
 
-    // MessageBoxW wants null-terminated UTF-16, not the Rust &str form.
+    // MessageBoxW wants NUL-terminated UTF-16, not the Rust form.
     let to_wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
     let title = to_wide(title);
     let message = to_wide(message);
     let icon = if is_error { MB_ICONERROR } else { MB_ICONINFORMATION };
 
-    // SAFETY: `title` and `message` are NUL-terminated UTF-16 buffers that
-    // outlive this synchronous call, and the window handle is null.
+    // SAFETY: both buffers are NUL-terminated UTF-16 that outlive this synchronous call, and the
+    // owner window is null.
     unsafe {
         MessageBoxW(
             std::ptr::null_mut(),
@@ -250,326 +336,80 @@ fn show_message_box(title: &str, message: &str, is_error: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
-    use std::ffi::OsString;
-    use std::fs::File;
-
-    use tempfile::tempdir;
-
+    /// A flag older releases took and this build does not is refused, not swallowed.
     #[test]
-    fn accepts_sibling_dot_old_file_that_exists() {
-        let dir = tempdir().expect("tempdir");
-        let current = dir.path().join("wows_toolkit.exe");
-        let replaced = dir.path().join("wows_toolkit.exe.old");
-        File::create(&replaced).expect("create replaced");
-
-        assert_eq!(validate_finalize_target(&current, &replaced), Ok(replaced.clone()));
+    fn a_flag_this_build_does_not_have_is_refused() {
+        assert!(Cli::try_parse_from(["wows_toolkit", "--gpu-safe-mode"]).is_err());
     }
 
     #[test]
-    fn rejects_path_in_another_directory() {
-        let dir = tempdir().expect("tempdir");
-        let other = tempdir().expect("other tempdir");
-        let current = dir.path().join("wows_toolkit.exe");
-        let replaced = other.path().join("wows_toolkit.exe.old");
-        File::create(&replaced).expect("create replaced");
+    fn the_renderer_flags_steer_the_adapter() {
+        let bare = Cli::try_parse_from(["wows_toolkit"]).expect("a bare launch");
+        assert_eq!(bare.adapter_preference(), AdapterPreference::Automatic);
+        assert_eq!(bare.hardening(), wows_toolkit_hardening::Hardening::Apply);
 
+        let on_cpu = Cli::try_parse_from(["wows_toolkit", "--cpu-renderer"]).expect("--cpu-renderer");
+        assert_eq!(on_cpu.adapter_preference(), AdapterPreference::Software);
+
+        let named = Cli::try_parse_from(["wows_toolkit", "--gpu-adapter", "nvidia"]).expect("--gpu-adapter");
+        assert_eq!(named.adapter_preference(), AdapterPreference::NameContains("nvidia".into()));
+
+        let unhardened = Cli::try_parse_from(["wows_toolkit", "--no-hardening"]).expect("--no-hardening");
         assert_eq!(
-            validate_finalize_target(&current, &replaced),
-            Err(FinalizeError::DifferentDirectory { replaced, current })
+            unhardened.hardening(),
+            wows_toolkit_hardening::Hardening::Skip(wows_toolkit_hardening::SkipReason::CommandLine)
         );
+
+        // Naming an adapter and asking for the CPU are different answers to the same question.
+        assert!(Cli::try_parse_from(["wows_toolkit", "--cpu-renderer", "--gpu-adapter", "nvidia"]).is_err());
     }
 
     #[test]
-    fn rejects_path_without_dot_old_extension() {
-        let dir = tempdir().expect("tempdir");
-        let current = dir.path().join("wows_toolkit.exe");
-        let replaced = dir.path().join("something.exe");
-        File::create(&replaced).expect("create replaced");
+    fn the_finalize_step_is_taken_in_both_forms() {
+        let named = Cli::try_parse_from(["wows_toolkit", "finalize-update", "--replaced", "old.exe"])
+            .expect("the subcommand parses");
+        assert!(matches!(named.command, Some(Command::FinalizeUpdate { .. })));
 
-        assert_eq!(validate_finalize_target(&current, &replaced), Err(FinalizeError::UnexpectedName { replaced }));
+        let legacy = legacy_finalize_target(&["app".into(), "C:/x/wows_toolkit.exe.old".into()]);
+        assert_eq!(legacy, Some(PathBuf::from("C:/x/wows_toolkit.exe.old")));
     }
 
     #[test]
-    fn rejects_path_that_does_not_exist() {
-        let dir = tempdir().expect("tempdir");
-        let current = dir.path().join("wows_toolkit.exe");
-        let replaced = dir.path().join("wows_toolkit.exe.old");
-
-        assert_eq!(validate_finalize_target(&current, &replaced), Err(FinalizeError::Missing { replaced }));
-    }
-
-    /// Regression test for versions up to v0.1.40: they spawned the
-    /// replacement with a relative `argv[0]` and passed a relative `.old`
-    /// path alongside it. `current_exe()` (always absolute) must still match
-    /// that relative form once both are normalized.
-    ///
-    /// This does not use `std::env::set_current_dir`: unit tests in this
-    /// binary run concurrently on shared threads, and changing the process
-    /// working directory is global state that could affect unrelated tests
-    /// running at the same time elsewhere in this crate. Instead this drops a
-    /// uniquely-named file directly into the real (unmodified) current
-    /// directory and passes it as a bare relative name, which exercises the
-    /// exact same normalization path (`std::path::absolute` resolving a
-    /// relative path against the process's actual cwd) without mutating
-    /// global state.
-    #[test]
-    fn accepts_relative_replaced_against_absolute_current_exe() {
-        let cwd = std::env::current_dir().expect("current dir");
-        let name = format!("wows_toolkit_test_{}.exe.old", std::process::id());
-        let replaced_absolute = cwd.join(&name);
-        File::create(&replaced_absolute).expect("create replaced");
-
-        struct RemoveOnDrop(PathBuf);
-        impl Drop for RemoveOnDrop {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
-        let expected = replaced_absolute.clone();
-        let _cleanup = RemoveOnDrop(replaced_absolute);
-
-        let current_exe = cwd.join("wows_toolkit.exe");
-        let replaced_relative = PathBuf::from(&name);
-
-        assert_eq!(validate_finalize_target(&current_exe, &replaced_relative), Ok(expected));
-    }
-
-    /// Widening check: a relative `replaced` must still be rejected when it
-    /// normalizes into a directory other than `current_exe`'s, even though
-    /// normalization is what makes the sibling case above pass. Without this
-    /// test only the accepting side of the normalization change is covered.
-    #[test]
-    fn rejects_relative_replaced_that_normalizes_outside_current_exe_directory() {
-        let dir = tempdir().expect("tempdir");
-        let current = dir.path().join("wows_toolkit.exe");
-
-        let cwd = std::env::current_dir().expect("current dir");
-        let name = format!("wows_toolkit_test_{}_outside.exe.old", std::process::id());
-        let replaced_absolute = cwd.join(&name);
-        File::create(&replaced_absolute).expect("create replaced");
-
-        struct RemoveOnDrop(PathBuf);
-        impl Drop for RemoveOnDrop {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
-        let _cleanup = RemoveOnDrop(replaced_absolute.clone());
-
-        let replaced_relative = PathBuf::from(&name);
-        let expected_current = current.clone();
-
-        assert_eq!(
-            validate_finalize_target(&current, &replaced_relative),
-            Err(FinalizeError::DifferentDirectory { replaced: replaced_absolute, current: expected_current })
-        );
-    }
-
-    fn args(values: &[&str]) -> Vec<OsString> {
-        values.iter().map(OsString::from).collect()
+    fn a_subcommand_or_a_flag_is_not_a_legacy_path() {
+        assert_eq!(legacy_finalize_target(&["app".into(), "finalize-update".into()]), None);
+        assert_eq!(legacy_finalize_target(&["app".into(), "replayshark".into()]), None);
+        assert_eq!(legacy_finalize_target(&["app".into(), "--help".into()]), None);
+        assert_eq!(legacy_finalize_target(&["app".into()]), None);
     }
 
     #[test]
-    fn treats_lone_path_argument_as_legacy_form() {
-        let parsed = legacy_finalize_target(&args(&["wows_toolkit.exe", "C:\\app\\wows_toolkit.exe.old"]));
-
-        assert_eq!(parsed, Some(PathBuf::from("C:\\app\\wows_toolkit.exe.old")));
-    }
-
-    #[test]
-    fn bare_launch_is_not_legacy_form() {
-        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe"])), None);
-    }
-
-    #[test]
-    fn flag_is_not_legacy_form() {
-        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "--help"])), None);
-    }
-
-    #[test]
-    fn subcommand_name_is_not_legacy_form() {
-        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "finalize-update"])), None);
-    }
-
-    #[test]
-    fn multiple_arguments_are_not_legacy_form() {
-        assert_eq!(legacy_finalize_target(&args(&["wows_toolkit.exe", "a", "b"])), None);
-    }
-
-    #[test]
-    fn resolves_legacy_form_to_finalize_update() {
-        let resolved = resolve(args(&["wows_toolkit.exe", "C:\\app\\wows_toolkit.exe.old"])).expect("resolve");
-
+    fn replayshark_takes_the_tools_own_arguments() {
+        let cli = Cli::try_parse_from([
+            "wows_toolkit",
+            "replayshark",
+            "-e",
+            "/data",
+            "query",
+            "players",
+            "--json",
+            "a.wowsreplay",
+        ])
+        .expect("a replayshark command");
+        let Some(Command::Replayshark(args)) = cli.command else {
+            panic!("expected replayshark, got {:?}", cli.command);
+        };
+        assert_eq!(args.game_data.extracted_dir, Some(PathBuf::from("/data")));
         assert!(matches!(
-            resolved,
-            Invocation::FinalizeUpdate { replaced } if replaced == Path::new("C:\\app\\wows_toolkit.exe.old")
+            args.command,
+            replayshark::cli::Command::Query {
+                command: replayshark::cli::QueryCommand::Players { json: true, ref replay, .. }
+            } if replay == &PathBuf::from("a.wowsreplay")
         ));
-    }
 
-    #[test]
-    fn resolves_subcommand_form_to_finalize_update() {
-        let resolved =
-            resolve(args(&["wows_toolkit.exe", "finalize-update", "--replaced", "C:\\app\\wows_toolkit.exe.old"]))
-                .expect("resolve");
-
-        assert!(matches!(
-            resolved,
-            Invocation::FinalizeUpdate { replaced } if replaced == Path::new("C:\\app\\wows_toolkit.exe.old")
-        ));
-    }
-
-    #[test]
-    fn resolves_bare_launch_to_run() {
-        let resolved = resolve(args(&["wows_toolkit.exe"])).expect("resolve");
-
-        assert!(matches!(resolved, Invocation::Run(_)));
-    }
-
-    #[test]
-    fn rejects_unknown_flag() {
-        assert!(resolve(args(&["wows_toolkit.exe", "--nonsense"])).is_err());
-    }
-
-    fn run_overrides(argv: &[&str]) -> crate::gpu::select::Overrides {
-        match resolve(args(argv)).expect("resolve") {
-            Invocation::Run(cli) => cli.render_overrides(),
-            other => panic!("expected Run, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_bare_launch_expresses_no_render_override() {
-        let overrides = run_overrides(&["wows_toolkit.exe"]);
-
-        assert!(!overrides.cpu_renderer);
-        assert!(!overrides.gpu_safe_mode);
-        assert_eq!(overrides.gpu_adapter, None);
-    }
-
-    #[test]
-    fn cpu_renderer_flag_parses() {
-        assert!(run_overrides(&["wows_toolkit.exe", "--cpu-renderer"]).cpu_renderer);
-    }
-
-    #[test]
-    fn gpu_safe_mode_flag_parses() {
-        assert!(run_overrides(&["wows_toolkit.exe", "--gpu-safe-mode"]).gpu_safe_mode);
-    }
-
-    #[test]
-    fn gpu_adapter_flag_carries_its_value() {
-        let overrides = run_overrides(&["wows_toolkit.exe", "--gpu-adapter", "nvidia"]);
-
-        assert_eq!(overrides.gpu_adapter.as_deref(), Some("nvidia"));
-    }
-
-    #[test]
-    fn contradictory_render_flags_are_rejected_by_the_parser() {
-        assert!(resolve(args(&["wows_toolkit.exe", "--cpu-renderer", "--gpu-adapter", "nvidia"])).is_err());
-        assert!(resolve(args(&["wows_toolkit.exe", "--cpu-renderer", "--gpu-safe-mode"])).is_err());
-        assert!(resolve(args(&["wows_toolkit.exe", "--gpu-adapter", "nvidia", "--gpu-safe-mode"])).is_err());
-    }
-
-    fn run_cli(argv: &[&str]) -> Cli {
-        match resolve(args(argv)).expect("resolve") {
-            Invocation::Run(cli) => cli,
-            other => panic!("expected Run, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_bare_launch_hardens_every_mode_but_the_one_that_restores_old_behaviour() {
-        use crate::gpu::select::RenderMode;
-        use crate::hardening::Hardening;
-        use crate::hardening::SkipReason;
-
-        let cli = run_cli(&["wows_toolkit.exe"]);
-
-        assert_eq!(cli.hardening(RenderMode::PinnedVulkan), Hardening::Apply);
-        assert_eq!(cli.hardening(RenderMode::CpuRenderer), Hardening::Apply);
-        assert_eq!(cli.hardening(RenderMode::Unpinned), Hardening::Skip(SkipReason::RenderMode));
-    }
-
-    #[test]
-    fn no_hardening_overrides_the_mode() {
-        use crate::gpu::select::RenderMode;
-        use crate::hardening::Hardening;
-        use crate::hardening::SkipReason;
-
-        let cli = run_cli(&["wows_toolkit.exe", "--no-hardening"]);
-
-        assert_eq!(cli.hardening(RenderMode::PinnedVulkan), Hardening::Skip(SkipReason::CommandLine));
-        // The reason has to survive: a crash report must not confuse a flag
-        // with a render mode that demoted itself.
-        assert_eq!(cli.hardening(RenderMode::Unpinned), Hardening::Skip(SkipReason::CommandLine));
-    }
-
-    /// The flag must not disturb adapter selection: a user turning off the
-    /// policies is not asking for a different GPU.
-    #[test]
-    fn no_hardening_expresses_no_render_override() {
-        let overrides = run_overrides(&["wows_toolkit.exe", "--no-hardening"]);
-
-        assert!(!overrides.cpu_renderer);
-        assert!(!overrides.gpu_safe_mode);
-        assert_eq!(overrides.gpu_adapter, None);
-    }
-
-    #[test]
-    fn list_gpus_resolves_without_constructing_a_window() {
-        assert!(matches!(resolve(args(&["wows_toolkit.exe", "--list-gpus"])).expect("resolve"), Invocation::ListGpus));
-    }
-
-    #[test]
-    fn render_flags_do_not_disturb_the_updater_contract() {
-        let legacy = resolve(args(&["wows_toolkit.exe", "C:\\app\\wows_toolkit.exe.old"])).expect("resolve");
-        assert!(matches!(legacy, Invocation::FinalizeUpdate { .. }));
-
-        let subcommand =
-            resolve(args(&["wows_toolkit.exe", "finalize-update", "--replaced", "C:\\app\\wows_toolkit.exe.old"]))
-                .expect("resolve");
-        assert!(matches!(subcommand, Invocation::FinalizeUpdate { .. }));
-    }
-
-    #[test]
-    fn adapter_listing_reports_memory_and_discarded_manifests() {
-        use crate::gpu::probe::AdapterDescription;
-        use crate::gpu::probe::AdapterRecord;
-        use crate::gpu::probe::IcdManifestPath;
-        use crate::gpu::probe::VideoMemoryBytes;
-
-        let listing = describe_adapters(&[AdapterRecord {
-            description: AdapterDescription::new("NVIDIA GeForce RTX 5080"),
-            icd: IcdManifestPath::new(r"C:\nvidia\nv-vk64.json"),
-            discarded_icds: vec![IcdManifestPath::new(r"C:\nvidia\old\nv-vk64.json")],
-            memory: VideoMemoryBytes::new(17_094_934_528),
-        }]);
-
-        assert!(listing.contains("NVIDIA GeForce RTX 5080"));
-        assert!(listing.contains("15.9 GiB"));
-        assert!(listing.contains(r"unused: C:\nvidia\old\nv-vk64.json"));
-    }
-
-    #[test]
-    fn adapter_listing_distinguishes_an_unreported_memory_size() {
-        use crate::gpu::probe::AdapterDescription;
-        use crate::gpu::probe::AdapterRecord;
-        use crate::gpu::probe::IcdManifestPath;
-
-        let listing = describe_adapters(&[AdapterRecord {
-            description: AdapterDescription::new("Mystery Display Adapter"),
-            icd: IcdManifestPath::new(r"C:\mystery\vk.json"),
-            discarded_icds: Vec::new(),
-            memory: None,
-        }]);
-
-        assert!(listing.contains("not reported by the driver"));
-    }
-
-    #[test]
-    fn adapter_listing_says_so_when_nothing_was_found() {
-        assert!(describe_adapters(&[]).contains("No display adapters"));
+        // The window's flags are not replayshark's.
+        assert!(Cli::try_parse_from(["wows_toolkit", "replayshark", "--cpu-renderer", "chat", "a"]).is_err());
+        assert!(Cli::try_parse_from(["wows_toolkit", "replayshark", "no-such-command"]).is_err());
+        assert!(Cli::try_parse_from(["wows_toolkit", "replayshark"]).is_err());
     }
 }

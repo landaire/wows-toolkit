@@ -1,4 +1,4 @@
-//! The board driven as a front end drives it, in a session with no peer task behind it.
+//! The board driven as the app drives it, in a session with no peer task behind it.
 
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
@@ -89,7 +89,7 @@ fn announced(sent: &Receiver<LocalEvent>) -> Vec<u64> {
         .collect()
 }
 
-/// Hands the board the art an announcement asked for, as the front end does off the UI thread.
+/// Hands the board the art an announcement asked for, as the app does off the UI thread.
 fn finish_announcing(board: &mut Board) {
     if let Some(request) = board.take_announcement() {
         board.finish_announce(request.load());

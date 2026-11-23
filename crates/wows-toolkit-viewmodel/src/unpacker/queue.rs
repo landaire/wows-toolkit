@@ -1,7 +1,7 @@
 //! The extraction queue.
 //!
 //! Queueing is a decision about what the user asked for, not a rendering
-//! concern, so both front ends share it: the same de-duplication, the same
+//! concern: the de-duplication and the
 //! rule about what "extract everything listed" means.
 
 use wowsunpack::vfs::VfsPath;

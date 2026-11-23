@@ -15,7 +15,7 @@ def main [] {
     }
 
     let tools = (open build-support/release-tools.json | get tools.target)
-    let targets = (["//:wows_toolkit_zgui" "//:wows_toolkit_egui"] | append $tools | str join " ")
+    let targets = (["//:wows_toolkit"] | append $tools | str join " ")
     let query = $"kind\('rust_library', deps\(set\(($targets)\)\)\)"
 
     # Each crate of an entry's "Used by:" list is on its own indented line.

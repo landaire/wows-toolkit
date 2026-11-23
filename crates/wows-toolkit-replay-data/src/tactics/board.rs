@@ -1,10 +1,10 @@
-//! The board as a front end drives it: what is on it, what the pointer and keyboard do to it, and
+//! The board as the app drives it: what is on it, what the pointer and keyboard do to it, and
 //! how it follows a collab session.
 //!
 //! The board does no work of its own off the thread it lives on. What it needs done elsewhere it
 //! leaves as a request: a redraw ([`Board::take_redraw`]), the art a session is told about
 //! ([`Board::take_announcement`]), and messages for the reader ([`Board::take_notices`]). The
-//! front end drains them after each change and hands the results back.
+//! app drains them after each change and hands the results back.
 
 mod edit;
 
@@ -126,7 +126,7 @@ pub struct PickedShip {
     pub hulls: Vec<String>,
 }
 
-/// A message for the reader, which the front end words and shows.
+/// A message for the reader, which the app words and shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BoardNotice {
     PresetNeedsName,
@@ -175,7 +175,7 @@ pub struct RotationHandle {
     pub anchor: ElementPos,
 }
 
-/// A key the board reads, as a front end names it.
+/// A key the board reads, as the app names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoardKey<'a> {
     /// A key that types `text`, already lower-cased.
@@ -271,7 +271,7 @@ pub struct Board {
     /// board draws on its own end until the announcement has gone over and only then starts
     /// speaking to the session.
     joining: Option<CollabLink>,
-    /// The art an announcement needs, until the front end takes it.
+    /// The art an announcement needs, until the app takes it.
     pending_art: Option<ArtRequest>,
     /// The map an announcement is waiting for its art for.
     announcing: Option<MapChoice>,
@@ -649,8 +649,7 @@ impl Board {
     pub fn picked_ship(&self) -> Option<PickedShip> {
         let index = self.picked.single()?;
         let Annotation::Ship { config: Some(config), .. } = self.collab.annotation_at(index)? else { return None };
-        // A ship this build cannot resolve offers no hull choice, which is how the egui board
-        // shows it.
+        // A ship this build cannot resolve offers no hull choice.
         let mut hulls: Vec<String> = self
             .game_data
             .as_ref()
@@ -686,8 +685,7 @@ impl Board {
         let saved = preset::TacticsPreset {
             name: name.clone(),
             map_name: map.space,
-            // The file states a map with no recorded layout as the id zero, which is the form the
-            // egui board writes and reads.
+            // The file states a map with no recorded layout as the id zero.
             map_id: map.map_id.unwrap_or(0),
             cap_points: self.caps.iter().map(BoardCapPoint::to_preset).collect(),
             annotations: self.shapes().iter().map(preset::PresetAnnotation::from_annotation).collect(),
@@ -888,7 +886,7 @@ impl Board {
     /// Where a shape's turning handle sits, and where the line to it starts.
     ///
     /// Above the shape by a fixed number of pixels rather than a map distance, so the handle keeps
-    /// its size and its reach at every zoom, as the egui board's does.
+    /// its size and its reach at every zoom.
     fn handle_of(&self, annotation: &Annotation) -> Option<RotationHandle> {
         let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(annotation);
         let anchor = self.element_point(((left + right) / 2.0, top))?;
@@ -1109,7 +1107,7 @@ impl Board {
         self.changed();
     }
 
-    /// Whether a session is running for this board, which is what the front end's tick follows.
+    /// Whether a session is running for this board, which is what the app's tick follows.
     pub fn in_session(&self) -> bool {
         self.collab.is_active() || self.joining.is_some()
     }
@@ -1192,8 +1190,7 @@ impl Board {
         session.announce_board(BoardMap {
             space: map.space,
             label: map.label,
-            // The wire states a map with no recorded layout as the id zero, which is the form the
-            // egui board sends and reads.
+            // The wire states a map with no recorded layout as the id zero.
             map_id: map.map_id.unwrap_or(0),
             art_png: art.png,
             info: art.info,
@@ -1580,7 +1577,7 @@ impl Board {
         if let Annotation::Ship { config, .. } = &mut annotation
             && let Some(placed) = self.placing.clone()
         {
-            // Stock hull and no modifiers, which is where the egui chooser leaves it.
+            // Stock hull and no modifiers.
             *config = Some(AnnotationShipConfig {
                 range_filter: self.range_filter.clone(),
                 ..AnnotationShipConfig::new(placed.param_id, placed.name)
@@ -1959,7 +1956,7 @@ impl Board {
         }
     }
 
-    /// The board's keyboard: the chords the egui board takes.
+    /// The board's keyboard chords.
     ///
     /// The modifier with Z takes a change back and with Y or Shift+Z puts it back; with 1..7 and M
     /// it selects drawing tools. Escape puts the tool down, or with no tool in hand puts down the
@@ -1991,8 +1988,8 @@ impl Board {
         true
     }
 
-    /// Puts down the tool in hand, or with none in hand whatever is picked out or selected, as the
-    /// egui board's Escape does.
+    /// Puts down the tool in hand, or with none in hand whatever is picked out or selected, as
+    /// Escape does.
     fn escape(&mut self) {
         if self.has_tool() {
             self.set_tool(Tool::None);
@@ -2041,7 +2038,7 @@ impl Board {
 
     /// Sets the board on one of the chosen map's modes.
     ///
-    /// Picking the mode already set puts it down, which is the egui board's own blank entry: an
+    /// Picking the mode already set puts it down, which is the board's blank entry: an
     /// empty map to place capture points on from nothing.
     pub fn set_mode(&mut self, key: CapLayoutKey) {
         if !self.collab.may_steer() {

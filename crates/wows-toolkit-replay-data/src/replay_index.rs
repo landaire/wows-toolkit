@@ -2,8 +2,7 @@
 //! one, and storing what it says.
 //!
 //! The mapping is `wows_toolkit_viewmodel::index_rows` and the writes are
-//! `wows_toolkit_config::index::query`, both shared with the egui app, so a
-//! replay indexed here and the same one indexed there produce identical rows.
+//! `wows_toolkit_config::index::query`.
 //! What is here is the pass itself: which files to walk, and reporting how
 //! far it has got.
 
@@ -53,8 +52,7 @@ pub enum SourceScope {
     /// The install's replays directory: the single Live source, which the
     /// Player Tracker's clan list reads alone.
     Live,
-    /// A directory the reader opened, under a source of its own, as the egui
-    /// app indexes each directory workspace.
+    /// A directory the reader opened, under a source of its own.
     Folder(PathBuf),
 }
 
@@ -192,8 +190,8 @@ pub fn replays_under(root: &Path) -> Vec<PathBuf> {
                 return None;
             }
             // The live recording, which grows for as long as the battle runs: it
-            // has no results yet and is rewritten as the next battle's. Counting
-            // it as a failure is how the port used to report an open battle.
+            // has no results yet and is rewritten as the next battle's, so it
+            // is not counted as a failure.
             if path.file_name().is_some_and(|name| name == LIVE_REPLAY) {
                 return None;
             }
@@ -218,8 +216,7 @@ pub enum IndexMode {
     /// Index button asks for, and what makes a second run cheap.
     FillGaps,
     /// Read everything again, whatever the index already holds. For rows an
-    /// earlier pass decoded through constants that did not fit: the egui app's
-    /// own `ReindexMode::RefreshAll` (`task/replays.rs:1370`).
+    /// earlier pass decoded through constants that did not fit.
     RefreshAll,
 }
 
@@ -426,8 +423,8 @@ async fn store_battle(
     )
     .await?;
 
-    // Every path a replay enters the index by records who it met, as the egui app records each
-    // replay it parses. The rows are in, so a tracker write that fails costs only the tracker.
+    // Every path a replay enters the index by records who it met. The rows are in, so a
+    // tracker write that fails costs only the tracker.
     let roster = BattleRoster::from_report(&battle.normalized, battle.arena_id);
     if let Err(err) = tracker_store::record_battle(pool, &roster).await {
         tracing::warn!("replay index: {} was indexed but its players were not tracked: {err}", stored.path.display());
@@ -507,8 +504,7 @@ pub fn build_folder_index(
     mut on_read: impl FnMut(&Path, &ParsedReplay),
 ) -> Result<IndexProgress, IndexError> {
     // What is already in, so a second run costs a directory listing rather than
-    // a re-parse of every replay in it. The egui app skips on the same ledger
-    // (`task/replays.rs:1434`).
+    // a re-parse of every replay in it.
     let rateable_mc = rateable_match_contribution(personal_rating);
     let indexed: std::collections::HashSet<String> = match mode {
         IndexMode::FillGaps => {

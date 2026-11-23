@@ -6,12 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- *(toolkit)* Ship the new desktop app to everyone. It replaces the egui app and keeps the settings saved by earlier versions
 - *(renderer)* Choose a CLI export's video length with `--video-length` (1 to 600 seconds) or play it at a speed with `--speed` (at least 1x), or with `video_length` or `speed` in the config. The length is fitted to the rendered stretch of the replay rather than the match time limit, and the default bitrate follows the video's length. `--max-size-mib` refuses a size the video cannot be made to fit
 - *(renderer)* Count the battle clock down once per game second instead of jumping when the server's time update arrives
-- *(zgui)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
-- *(egui)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
-- *(zgui)* Count only Random and Ranked battles in a replay group header's win rate, colored by its account win rate band, with a listing option to count every game mode instead
-- *(zgui)* Color each team's average win rate and personal rating in the Player Tracker's Current Match by the band the value falls in, as a player's figures are colored
+- *(toolkit)* Fit an exported video to a length or play it at a speed from the renderer's export settings, which say how fast or how long the open replay's video comes out. Saved with the other defaults, and batch renders use it too
+- *(toolkit)* Count only Random and Ranked battles in a replay group header's win rate, colored by its account win rate band, with a listing option to count every game mode instead
+- *(toolkit)* Color each team's average win rate and personal rating in the Player Tracker's Current Match by the band the value falls in, as a player's figures are colored
 - *(wows-query)* Summarize `quantity_values` over every class when its group names no class, with each class's own statistics in `by_class`, so the slowest shells of a tier can be found across classes
 - *(wows-query)* Name the ships that do not defeat the plate in `penetration_search` as `failing`, each with its strongest weapon of that ammo and its penetration
 - *(wows-query)* Run jq filters over JSON values in the sandboxed worker with `jq_worker::evaluate_json`, alongside stored GameParams entries with `jq_worker::evaluate`
@@ -20,48 +20,48 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Name the build link action in a player's menu Open Build in WoWs SB, after the site it opens
 - *(toolkit)* Start replay hover previews at the battle start rather than the pre-battle countdown
 - *(toolkit)* Color the Stats tab's Random and Ranked win rates, in the session record, the per-ship headers and the Ships panel, by the band the rate falls in, as the Player Tracker does
-- *(zgui)* Choose whether session stats hold a saved session or every battle since the app opened, from the replay listing's options or the Stats tab's filter bar. The saved session is kept while the other is shown, and an empty session says what fills it
-- *(zgui)* Choose which elements a replay listing row shows from the listing's options: personal rating, match contribution, division, damage, kills and battle time. A row whose stats line is hidden centres its name on the map. The choices are saved
-- *(zgui)* Mark a replay listing row with the Twitch logo when another player of the battle was seen in the monitored Twitch chat, and name each player and their Twitch login on the row's hover card. The listing's options can hide the mark
-- *(zgui)* Add battles played to the session stats as the game writes them to its replays folder, and show set, added and cleared session battles in the Stats tab at once
-- *(zgui)* Add a replay opened from the game's replays folder listing to the saved session stats, as the egui app does
-- *(zgui)* Bring the Stats tab forward on its Overview after Set as Session Stats, as the egui app does
-- *(zgui)* Mark players seen in Twitch chat during a battle with you in the Player Tracker's Players list with a Twitch glyph naming the login, and narrow the list to them with the Seen in Twitch chat box. The choice is saved
-- *(zgui)* Leave ships, single games and days out of the stats. The Stats tab's filter bar picks the ships counted and a span of days, a Matches panel lists every game with a box that keeps it or leaves it out, the Ships panel can leave a ship out, and Reset filters shows every game again. The session's choices are saved
-- *(zgui)* Drag a stats line chart's value or game axis to stretch or squeeze that axis alone, or scroll over it, as the egui chart allowed
-- *(zgui)* Chart potential damage, damage received, hits, fires, floods, citadels, critical hits, distance traveled, capture points, planes shot down, anti-air damage, time lived, survival rate, torpedoes spotted, heals and match contribution in the Stats tab, each picked from a list that narrows as its name is typed. Battles stored without these figures are left out of them rather than counted as zero. A win rate in a chart's tooltip is colored by its band
-- *(zgui)* List each plate a cast arc struck in the armor viewer's trajectory editor, with its thickness, strike angle, zone and material and what the shell did there, and say how the shell arrived. Click a salvo or shell in the incoming fire log to draw its path through the hull and list the plates it struck
-- *(zgui)* Offer the replay renderer's drawing tools and undo without a collab session, as the egui renderer does
-- *(zgui)* Fill a circle, rectangle or triangle in the replay renderer by pressing its tool's button again, as the egui toolbar does
-- *(zgui)* Add Clear All to the replay renderer's drawing tools, taken back by one undo
-- *(zgui)* Edit a picked drawing in the replay renderer from a popup beside it: its size, ink and fill, a placed ship's side, and a button that erases it, as in egui
-- *(zgui)* Mark a measurement in the replay renderer and its exports with a tick every half kilometre, the kilometres every two and its whole length, as in egui
-- *(zgui)* Refuse the replay renderer's drawing tools with a lock while the collab host has locked annotations, as egui does
-- *(zgui)* List a ship's splash boxes by group in the armor viewer's Layers tab, with a checkbox for each box and group, and outline the boxes of a hovered row on the hull
-- *(zgui)* Show how to Shift+click the hull to cast a shell in the armor viewport and the Trajectory section while no arc is cast, show a crosshair while Shift is held over the hull, and say why a Shift+click cast nothing
-- *(zgui)* Group the armor viewer options into Ship, Layers, Analysis and Display tabs on the panel's edge. The search covers every tab, counts the matches on each and shows the first tab holding one, and the chosen tab and open sections are remembered. Ctrl+Tab moves between the tabs
+- *(toolkit)* Choose whether session stats hold a saved session or every battle since the app opened, from the replay listing's options or the Stats tab's filter bar. The saved session is kept while the other is shown, and an empty session says what fills it
+- *(toolkit)* Choose which elements a replay listing row shows from the listing's options: personal rating, match contribution, division, damage, kills and battle time. A row whose stats line is hidden centres its name on the map. The choices are saved
+- *(toolkit)* Mark a replay listing row with the Twitch logo when another player of the battle was seen in the monitored Twitch chat, and name each player and their Twitch login on the row's hover card. The listing's options can hide the mark
+- *(toolkit)* Add battles played to the session stats as the game writes them to its replays folder, and show set, added and cleared session battles in the Stats tab at once
+- *(toolkit)* Add a replay opened from the game's replays folder listing to the saved session stats
+- *(toolkit)* Bring the Stats tab forward on its Overview after Set as Session Stats
+- *(toolkit)* Mark players seen in Twitch chat during a battle with you in the Player Tracker's Players list with a Twitch glyph naming the login, and narrow the list to them with the Seen in Twitch chat box. The choice is saved
+- *(toolkit)* Leave ships, single games and days out of the stats. The Stats tab's filter bar picks the ships counted and a span of days, a Matches panel lists every game with a box that keeps it or leaves it out, the Ships panel can leave a ship out, and Reset filters shows every game again. The session's choices are saved
+- *(toolkit)* Drag a stats line chart's value or game axis to stretch or squeeze that axis alone, or scroll over it
+- *(toolkit)* Chart potential damage, damage received, hits, fires, floods, citadels, critical hits, distance traveled, capture points, planes shot down, anti-air damage, time lived, survival rate, torpedoes spotted, heals and match contribution in the Stats tab, each picked from a list that narrows as its name is typed. Battles stored without these figures are left out of them rather than counted as zero. A win rate in a chart's tooltip is colored by its band
+- *(toolkit)* List each plate a cast arc struck in the armor viewer's trajectory editor, with its thickness, strike angle, zone and material and what the shell did there, and say how the shell arrived. Click a salvo or shell in the incoming fire log to draw its path through the hull and list the plates it struck
+- *(toolkit)* Offer the replay renderer's drawing tools and undo without a collab session
+- *(toolkit)* Fill a circle, rectangle or triangle in the replay renderer by pressing its tool's button again
+- *(toolkit)* Add Clear All to the replay renderer's drawing tools, taken back by one undo
+- *(toolkit)* Edit a picked drawing in the replay renderer from a popup beside it: its size, ink and fill, a placed ship's side, and a button that erases it
+- *(toolkit)* Mark a measurement in the replay renderer and its exports with a tick every half kilometre, the kilometres every two and its whole length
+- *(toolkit)* Refuse the replay renderer's drawing tools with a lock while the collab host has locked annotations
+- *(toolkit)* List a ship's splash boxes by group in the armor viewer's Layers tab, with a checkbox for each box and group, and outline the boxes of a hovered row on the hull
+- *(toolkit)* Show how to Shift+click the hull to cast a shell in the armor viewport and the Trajectory section while no arc is cast, show a crosshair while Shift is held over the hull, and say why a Shift+click cast nothing
+- *(toolkit)* Group the armor viewer options into Ship, Layers, Analysis and Display tabs on the panel's edge. The search covers every tab, counts the matches on each and shows the first tab holding one, and the chosen tab and open sections are remembered. Ctrl+Tab moves between the tabs
 - *(armor)* Start the armor viewer with the water off and the grid showing. A saved choice to show the water is kept
-- *(zgui)* Choose a placed ship's hull, Concealment Expert and range mods, and its own range circles on the tactics board when it is picked alone
-- *(zgui)* Follow the collab host's layers, per-ship ranges and hidden trails in the renderer and the watched window, tell the session of layer and per-ship changes made here, and send web peers the recording player's silhouette and watchers the host's trails. A peer locked out of the settings keeps the host's layers, and a peer that joins late is sent what the host shows now
-- *(zgui)* Choose which layers a watched collab playback draws from its own display toggles
-- *(zgui)* Draw a placed ship's range circles in a watched collab playback and in the web client. The host sends the ranges it reads from the battle's game data, which a watcher does not have
-- *(zgui)* Draw trails in the replay renderer and exported videos from every recorded position, as the egui renderer does, rather than from the frames the bake kept
-- *(zgui)* Offer the stats panel in the replay renderer, drawn with the recording player's ship silhouette, and film it in exports. A merged replay opens on the team rosters, as in egui
-- *(zgui)* Open a Match Timeline window from the replay panel's Actions menu, with event filters, search, copy and save to file
-- *(zgui)* Warn once the game data loads when the install folder lists no replays
-- *(zgui)* Autoload and announce a battle that lands in the folder on screen as well as the install folder, and only count one landing in a folder that is not on screen
-- *(zgui)* Render a date or ship group to video or the clipboard, and set or add it as session stats, from its header's context menu
-- *(zgui)* Render a single replay to video or the clipboard from its row's context menu
-- *(zgui)* Contribute battles whose results never arrive once the grace window lapses, and replays recorded while the app was closed
-- *(zgui)* Apply the saved self range filter when a renderer opens, and save it with the defaults
-- *(zgui)* Film saved range circles in batch exports and show each replay's encode progress
-- *(zgui)* Export every video at 60 seconds and 30 frames per second, moving ships between the frames the bake kept
-- *(zgui)* Write trails, annotations and placed ranges into exported videos
+- *(toolkit)* Choose a placed ship's hull, Concealment Expert and range mods, and its own range circles on the tactics board when it is picked alone
+- *(toolkit)* Follow the collab host's layers, per-ship ranges and hidden trails in the renderer and the watched window, tell the session of layer and per-ship changes made here, and send web peers the recording player's silhouette and watchers the host's trails. A peer locked out of the settings keeps the host's layers, and a peer that joins late is sent what the host shows now
+- *(toolkit)* Choose which layers a watched collab playback draws from its own display toggles
+- *(toolkit)* Draw a placed ship's range circles in a watched collab playback and in the web client. The host sends the ranges it reads from the battle's game data, which a watcher does not have
+- *(toolkit)* Draw trails in the replay renderer and exported videos from every recorded position, rather than from the frames the bake kept
+- *(toolkit)* Offer the stats panel in the replay renderer, drawn with the recording player's ship silhouette, and film it in exports. A merged replay opens on the team rosters
+- *(toolkit)* Open a Match Timeline window from the replay panel's Actions menu, with event filters, search, copy and save to file
+- *(toolkit)* Warn once the game data loads when the install folder lists no replays
+- *(toolkit)* Autoload and announce a battle that lands in the folder on screen as well as the install folder, and only count one landing in a folder that is not on screen
+- *(toolkit)* Render a date or ship group to video or the clipboard, and set or add it as session stats, from its header's context menu
+- *(toolkit)* Render a single replay to video or the clipboard from its row's context menu
+- *(toolkit)* Contribute battles whose results never arrive once the grace window lapses, and replays recorded while the app was closed
+- *(toolkit)* Apply the saved self range filter when a renderer opens, and save it with the defaults
+- *(toolkit)* Film saved range circles in batch exports and show each replay's encode progress
+- *(toolkit)* Export every video at 60 seconds and 30 frames per second, moving ships between the frames the bake kept
+- *(toolkit)* Write trails, annotations and placed ranges into exported videos
 - *(renderer)* Add speed trail, dead ship trail and score timer toggles
 - *(renderer)* Name exported videos by battle start, player, map and ship so they sort chronologically
-- *(zgui)* Flag players seen in the monitored Twitch chat around a battle in the replay panel
+- *(toolkit)* Flag players seen in the monitored Twitch chat around a battle in the replay panel
 - *(renderer)* Draw the camera direction as a translucent wedge that tapers from the ship icon's center to a point one icon length out, beneath every ship icon
-- *(zgui)* Generate a build's game constants from the installed client when GitHub has none for it, with the status bar and a notice saying when it runs and how it went
+- *(toolkit)* Generate a build's game constants from the installed client when GitHub has none for it, with the status bar and a notice saying when it runs and how it went
 - *(toolkit)* Add an "Anonymize player names" listing option that shows generated names and clan tags everywhere the app displays players, while exports keep the real ones
 - *(wows-query)* Add searchable computed quantities for ballistics, torpedoes, underwater weapons, and comparison factors
 - *(wows-query)* Expand battle impact with fixed-range accuracy, ammo, overmatch, secondaries, maneuverability, consumables, funny buttons, and commander talents
@@ -72,73 +72,69 @@ All notable changes to this project will be documented in this file.
 - *(wows-query)* Compare a ship's main battery gun modules as the attacker against a class and tier of targets
 - *(insights)* Rate each player's match contribution (MC) on the PR scale and store it, with its formula version, in the replay index. It weighs damage and kills against expected values, the share of the team's damage, fire drawn against class peers and the team, spotting, objectives, anti-air, torpedo warnings and critical bursts that remove half an enemy's hit points within 10 s. Only Random and Ranked battles are rated
 - *(toolkit)* Show MC beside PR in the replay table, search results and stats, and break either rating into its parts on hover, each part marked static (a fixed expectation) or dynamic (expected values or this battle's players)
-- *(zgui)* Show a ship's value when the pointer rests on a point or bar in a stats chart, with the game for a point, and mark it on the plot
+- *(toolkit)* Show a ship's value when the pointer rests on a point or bar in a stats chart, with the game for a point, and mark it on the plot
 - *(wows-query)* List the F key special ability in ship_overview
 - *(wows-query)* Resolve ship names written with a leading "the", and September as Sete de Setembro
 - *(wows-query)* List AP raw penetration every 5 km out to firing range in ship_shells
 - *(wows-query)* Compare the main battery guns of several ships in gun_module_matchups
-- *(egui)* Keep open folders at the top of the armor viewer ship list, the file unpacker folder tree and the grouped replay listing while their contents scroll past
-- *(zgui)* Keep open folders at the top of the armor viewer sidebar, the unpacker folder tree and the replay listing while their contents scroll past, as the egui app does
+- *(toolkit)* Keep open folders at the top of the armor viewer sidebar, the unpacker folder tree and the replay listing while their contents scroll past
 - *(toolkit)* Re-indexing replays fills in the chart statistics of saved session battles recorded before those statistics were kept
-- *(zgui)* Faintly mark a replay's row in the listing while its tab title in the Replay Inspector is hovered, and date the match in the replay header, with how long ago it was on hover
+- *(toolkit)* Faintly mark a replay's row in the listing while its tab title in the Replay Inspector is hovered, and date the match in the replay header, with how long ago it was on hover
 - *(toolkit)* Keep translations in [Fluent](https://projectfluent.org) files. A `translations/<language>.ftl` file next to the app overrides the messages it names
 
 ### Bug Fixes
 
 - *(toolkit)* Translate the strings that every language other than English was missing, such as the replay folder tabs, the rating breakdown and the texture export, and translate a few strings that were left in English
-- *(zgui)* Show messages at the bottom right of the main window, above the status bar, so they no longer cover the Play button and the tab strip
-- *(zgui)* Keep the Play button's size and place while the game starts and runs, and show the keyring note under it rather than beside it
-- *(zgui)* Film the saved self ranges on the recording player's ship in a render to a file or the clipboard from the replay list or Search, as the renderer opens with them, rather than every ship's ranges
-- *(egui)* Leave sunk ships out of an exported video when the renderer hides them, and film the saved self ranges in a batch render as the renderer opens with them
+- *(toolkit)* Show messages at the bottom right of the main window, above the status bar, so they no longer cover the Play button and the tab strip
+- *(toolkit)* Keep the Play button's size and place while the game starts and runs, and show the keyring note under it rather than beside it
+- *(toolkit)* Film the saved self ranges on the recording player's ship in a render to a file or the clipboard from the replay list or Search, as the renderer opens with them, rather than every ship's ranges
 - *(toolkit)* Wait up to a minute for the player stats service to answer, rather than 30 seconds, and send a request that timed out once more while the service's budget allows
-- *(zgui)* Draw up to three renderer frames at once while a replay plays, so a large or high-density window shows the battle moving every frame rather than repeating a frame while the next is drawn
-- *(zgui)* List the nations, classes and ships an armor viewer search names best first, so a ship searched by its name is not listed below loose matches in other nations
-- *(zgui)* Open a ship in the armor viewer sidebar with a click that leaves its parts folded. Its chevron unfolds them
-- *(zgui)* Draw the ship class icons in the Player Tracker's Current Match roster at their own proportions rather than squeezed into a square
-- *(zgui)* Add the folder picked for an install, a game or a Proton build after the launcher popover or drawer that asked has closed
-- *(zgui)* Stop a popped-out replay renderer, the tactics board and other secondary windows from reading the main window's closed state while the app exits
-- *(zgui)* Undo, redo and open the options rail with Ctrl+Z, Ctrl+Shift+Z and Ctrl+S from anywhere in the armor viewer, as in egui, and leave Ctrl+Z to a focused text field
-- *(zgui)* Take the double-click time and distance and the wheel's line height in the armor viewer from the desktop settings
-- *(egui)* Keep the replays the zgui app recorded as shared when egui saves its own list
-- *(zgui)* Skip replays on the unreadable list when sharing, and add a replay that will not parse to it, as in egui
-- *(zgui)* Record a shared replay as sent only when ShipBuilds accepts it, so a refused or failed upload is sent again later, as in egui
+- *(toolkit)* Draw up to three renderer frames at once while a replay plays, so a large or high-density window shows the battle moving every frame rather than repeating a frame while the next is drawn
+- *(toolkit)* List the nations, classes and ships an armor viewer search names best first, so a ship searched by its name is not listed below loose matches in other nations
+- *(toolkit)* Open a ship in the armor viewer sidebar with a click that leaves its parts folded. Its chevron unfolds them
+- *(toolkit)* Draw the ship class icons in the Player Tracker's Current Match roster at their own proportions rather than squeezed into a square
+- *(toolkit)* Add the folder picked for an install, a game or a Proton build after the launcher popover or drawer that asked has closed
+- *(toolkit)* Stop a popped-out replay renderer, the tactics board and other secondary windows from reading the main window's closed state while the app exits
+- *(toolkit)* Undo, redo and open the options rail with Ctrl+Z, Ctrl+Shift+Z and Ctrl+S from anywhere in the armor viewer, and leave Ctrl+Z to a focused text field
+- *(toolkit)* Take the double-click time and distance and the wheel's line height in the armor viewer from the desktop settings
+- *(toolkit)* Skip replays on the unreadable list when sharing, and add a replay that will not parse to it
+- *(toolkit)* Record a shared replay as sent only when ShipBuilds accepts it, so a refused or failed upload is sent again later
 - *(collab)* Show a peer's pointer only on the replay or tactics board it is over, in the desktop apps and the web client
 - *(collab)* Show another peer's pointer under that peer's name in a desktop app that joined a session, rather than as the host's pointer
 - Keep the replay index matching when the install folder is picked through another path to the same directory, such as a symlinked mount point
 - *(launcher)* End the Wine processes left in the toolkit's prefix when a game signed in through the toolkit exits or is stopped, so the session does not stay running after the game
-- *(zgui)* Read the Player Tracker tables again when a battle is recorded while the tab is open, and run a search again when a battle that lands in a watched folder is indexed. A battle recorded during an indexing pass is read once the pass ends
-- *(egui)* Record the players met in a replay by the rules the zgui app and the replay index share, so reading an older replay no longer puts back a name or clan the player has since changed
-- *(zgui)* Keep the player table's scroll position, selection and keyboard row when a column filter or the language changes
-- *(zgui)* Keep the player table's other rows and their open tooltips when a rating table, Twitch lookup or stat hide changes one row
-- *(zgui)* Leave a player table row open or closed on a double click on its figures, chips or detail, and selected as it was on a press on a chip or in the detail
-- *(zgui)* Read open replays again after a language change, so their ship names, classes, bot names, builds, achievements and ribbons are in the new language
-- *(zgui)* Draw a replay's icons and tab flag from the build it was read through, and from the newest build only what that build lacks, so old replays keep retired module and skill icons
-- *(zgui)* Keep the replay listing scrolled where it was, with its keyboard cursor and shift anchor, when a battle lands, the folder is read again or game data loads
-- *(zgui)* Keep a replay listing group closed and selected when its count or results change, and keep the rows' index facts while a listing is read again rather than showing them unindexed
-- *(zgui)* Fade a landed battle's row glow once from its arrival, rather than glowing again when the row is built again before the glow is over
-- *(zgui)* List, index and watch the replays in the subfolders of an opened or dropped replay folder
-- *(zgui)* Index the battles played while the app was closed as it starts, and export those with results when auto-export is on, rather than waiting for a manual index build
-- *(zgui)* Read a battle that lands once for its index rows, export, data-sharing contribution and session stats rather than once for each, and read it again after a wait when the game is still writing it
-- *(zgui)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
-- *(zgui)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state
-- *(zgui)* Finish a renderer video export when its viewport or window is closed, and say where the video was saved or that it was copied
-- *(zgui)* Say a replay renderer's timeline has no events when they cannot be read, rather than reading for ever
-- *(zgui)* Refresh the renderer's Previous and Next event buttons as playback passes an event
-- *(zgui)* Give the replay renderer the keyboard as it opens and after it is popped out
-- *(zgui)* Show your own pings in the replay renderer, also without a collab session
-- *(zgui)* Keep the battle on screen and playing while the replay renderer bakes it again, and draw the first frame with the saved defaults
-- *(zgui)* Build the replay renderer's roster and stats canvas off the UI thread
-- *(zgui)* Bring forward a popped-out replay renderer when its replay is rendered again, rather than baking it a second time
-- *(zgui)* Withdraw the replay renderer's export buttons during a collab session, as in egui
-- *(zgui)* Draw the replay renderer's frame at the screen's own pixels, so its text, lines and shapes stay sharp in a large window or on a HiDPI screen, and draw it again when the window is resized while paused
-- *(zgui)* Play replays in the renderer at thirty frames a second at every speed, with ships, planes, shells, torpedoes, smoke and capture progress moved between the stored frames, and keep 1x at real time on long battles. Seeks and event jumps land on the exact time, so Next event moves on from an event between stored frames. Exported videos move the same things between frames
-- *(zgui)* Pace the hover preview by the window's clock, so it no longer falls behind 15 frames a second
-- *(zgui)* Record the players in every replay put in the index in the Player Tracker, mark division mates, and make the tracker's Populate button fill it from the replay index
-- *(zgui)* Keep dragging an arc's range slider in the armor viewer past the first step
-- *(zgui)* Rate replays indexed without a personal rating table once the table arrives
-- *(zgui)* Show a newly landed battle's personal rating and match contribution without a relist
-- *(zgui)* Stop treating every enemy icon as spotted in a playback merged with another team's recording
-- *(zgui)* Keep folder checks, listings and thumbnails responsive while replay bakes, indexing passes, downloads and other long jobs run
+- *(toolkit)* Read the Player Tracker tables again when a battle is recorded while the tab is open, and run a search again when a battle that lands in a watched folder is indexed. A battle recorded during an indexing pass is read once the pass ends
+- *(toolkit)* Keep the player table's scroll position, selection and keyboard row when a column filter or the language changes
+- *(toolkit)* Keep the player table's other rows and their open tooltips when a rating table, Twitch lookup or stat hide changes one row
+- *(toolkit)* Leave a player table row open or closed on a double click on its figures, chips or detail, and selected as it was on a press on a chip or in the detail
+- *(toolkit)* Read open replays again after a language change, so their ship names, classes, bot names, builds, achievements and ribbons are in the new language
+- *(toolkit)* Draw a replay's icons and tab flag from the build it was read through, and from the newest build only what that build lacks, so old replays keep retired module and skill icons
+- *(toolkit)* Keep the replay listing scrolled where it was, with its keyboard cursor and shift anchor, when a battle lands, the folder is read again or game data loads
+- *(toolkit)* Keep a replay listing group closed and selected when its count or results change, and keep the rows' index facts while a listing is read again rather than showing them unindexed
+- *(toolkit)* Fade a landed battle's row glow once from its arrival, rather than glowing again when the row is built again before the glow is over
+- *(toolkit)* List, index and watch the replays in the subfolders of an opened or dropped replay folder
+- *(toolkit)* Index the battles played while the app was closed as it starts, and export those with results when auto-export is on, rather than waiting for a manual index build
+- *(toolkit)* Read a battle that lands once for its index rows, export, data-sharing contribution and session stats rather than once for each, and read it again after a wait when the game is still writing it
+- *(toolkit)* Zoom the tactics board toward the reader's wheel turn at the replay renderer's rate
+- *(toolkit)* Stop a seek from the armor viewer's incoming fire into a closed replay renderer from reading its closed state
+- *(toolkit)* Finish a renderer video export when its viewport or window is closed, and say where the video was saved or that it was copied
+- *(toolkit)* Say a replay renderer's timeline has no events when they cannot be read, rather than reading for ever
+- *(toolkit)* Refresh the renderer's Previous and Next event buttons as playback passes an event
+- *(toolkit)* Give the replay renderer the keyboard as it opens and after it is popped out
+- *(toolkit)* Show your own pings in the replay renderer, also without a collab session
+- *(toolkit)* Keep the battle on screen and playing while the replay renderer bakes it again, and draw the first frame with the saved defaults
+- *(toolkit)* Build the replay renderer's roster and stats canvas off the UI thread
+- *(toolkit)* Bring forward a popped-out replay renderer when its replay is rendered again, rather than baking it a second time
+- *(toolkit)* Withdraw the replay renderer's export buttons during a collab session
+- *(toolkit)* Draw the replay renderer's frame at the screen's own pixels, so its text, lines and shapes stay sharp in a large window or on a HiDPI screen, and draw it again when the window is resized while paused
+- *(toolkit)* Play replays in the renderer at thirty frames a second at every speed, with ships, planes, shells, torpedoes, smoke and capture progress moved between the stored frames, and keep 1x at real time on long battles. Seeks and event jumps land on the exact time, so Next event moves on from an event between stored frames. Exported videos move the same things between frames
+- *(toolkit)* Pace the hover preview by the window's clock, so it no longer falls behind 15 frames a second
+- *(toolkit)* Record the players in every replay put in the index in the Player Tracker, mark division mates, and make the tracker's Populate button fill it from the replay index
+- *(toolkit)* Keep dragging an arc's range slider in the armor viewer past the first step
+- *(toolkit)* Rate replays indexed without a personal rating table once the table arrives
+- *(toolkit)* Show a newly landed battle's personal rating and match contribution without a relist
+- *(toolkit)* Stop treating every enemy icon as spotted in a playback merged with another team's recording
+- *(toolkit)* Keep folder checks, listings and thumbnails responsive while replay bakes, indexing passes, downloads and other long jobs run
 - *(toolkit)* Keep replay export ship data attached after roster sorting
 - *(toolkit)* Show personal rating only for Random and Ranked battles: other battle types show a dash that explains why, and ratings stored for them are cleared from the replay index
 - *(wowsunpack)* Apply the historical IFHE penetration coefficient in archived builds
@@ -149,7 +145,7 @@ All notable changes to this project will be documented in this file.
 
 ### Performance
 
-- *(renderer)* Composite the map layer onto each rendered frame in about a tenth of the time, which takes a third to nearly half off each frame of the zgui replay renderer and of exported videos
+- *(renderer)* Composite the map layer onto each rendered frame in about a tenth of the time, which takes a third to nearly half off each frame of the replay renderer and of exported videos
 
 ## [1.0.1] - 2026-08-12
 

@@ -2,8 +2,7 @@
 //! the index and an in-memory parse have an opinion, and how the two lines read
 //! for each grouping mode.
 //!
-//! Shared so the listing reads the same in both front ends; each draws the
-//! assembled lines with its own text layout.
+//! The UI draws the assembled lines with its own text layout.
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
@@ -276,7 +275,7 @@ pub fn stats_line(identity: &RowIdentity, stats: &RowStats, grouping: ReplayGrou
 
 /// One piece of an assembled line.
 ///
-/// A front end whose text font carries the icon glyphs draws the joined
+/// A caller whose text font carries the icon glyphs draws the joined
 /// [`stats_line`] and is done; one that draws its icons apart draws the
 /// parts, mapping each [`LineGlyph`] to its own icon.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,7 +293,7 @@ pub enum LineGlyph {
 }
 
 impl LineGlyph {
-    /// The Phosphor codepoint for a front end whose text font carries them.
+    /// The Phosphor codepoint for a caller whose text font carries them.
     pub fn codepoint(self) -> &'static str {
         match self {
             Self::Clock => crate::glyphs::CLOCK,
@@ -468,7 +467,7 @@ pub fn hover_facts(identity: &RowIdentity, stats: &RowStats, locale: Option<&str
 /// battle reads the same whether it was found by browsing or by searching.
 ///
 /// `ship` is passed in because naming one needs the build's game data, which only
-/// a front end has. The mode reads as the index stored it, which is the raw match
+/// the caller has. The mode reads as the index stored it, which is the raw match
 /// type rather than the translated name a listing row shows.
 pub fn hover_facts_for_match(hit: &MatchHit, ship: String, locale: Option<&str>) -> Vec<HoverFact> {
     let identity = RowIdentity {

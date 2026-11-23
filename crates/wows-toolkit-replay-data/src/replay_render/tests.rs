@@ -259,7 +259,7 @@ fn window_point(view: &MapView, at: (f32, f32)) -> Option<WindowPoint> {
     view.to_window(view.element_point(at, DEFAULT_MAP_ORIGIN)?)
 }
 
-/// A press on the map as a front end handles it: the annotator first, and a
+/// A press on the map as the app handles it: the annotator first, and a
 /// pan when nothing there wants it.
 fn press(annotator: &mut Annotator, link: &CollabLink, view: &mut MapView, at: WindowPoint) -> PointerDown {
     let down = annotator.pointer_down(link, view, DEFAULT_MAP_ORIGIN, at);
@@ -286,8 +286,7 @@ fn feed() -> RealtimeArmorFeed {
     RealtimeArmorFeed::new(ShipShotTimeline { hits: Vec::new(), health_history, hull: None })
 }
 
-/// The drawing tools answer to the keys the egui board uses, so a reader who
-/// learned them there does not learn them again.
+/// The drawing tools answer to the number keys and `m`.
 #[test]
 fn the_tool_shortcuts_are_the_egui_boards() {
     assert_eq!(tool_for_key("1"), Some(Tool::Arrow));
@@ -314,8 +313,8 @@ fn game_time_reads_as_minutes_and_seconds() {
     assert_eq!(mmss(-3.0), "00:00");
 }
 
-/// The transport opens at the speed the egui renderer opens at, over the
-/// ladder it offers. Real time is too slow to watch a battle through, so a
+/// The transport opens at 20x, one of the speeds the ladder offers. Real
+/// time is too slow to watch a battle through, so a
 /// viewport that opens at 1x reads as broken.
 #[test]
 fn the_transport_opens_at_the_speed_the_egui_renderer_does() {
@@ -329,8 +328,8 @@ fn the_transport_opens_at_the_speed_the_egui_renderer_does() {
 /// The clock reads the battle's own time, not the recording's.
 ///
 /// A replay starts recording on the loading screen, so the raw clock of the
-/// first frame is already a good half-minute in. The egui renderer subtracts
-/// the battle's start; a port that did not would open a battle at 00:40.
+/// first frame is already a good half-minute in. Without subtracting the
+/// battle's start, a battle would open at 00:40.
 #[test]
 fn the_clock_counts_from_the_battle_rather_than_the_recording() {
     let mut track = track((0..40).map(|frame| frame as f32 * 5.0).collect());
@@ -437,8 +436,7 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
         prefer_cpu_encoder: true,
         export_timing: ExportTiming::Speed(ExportSpeed::new(40.0).expect("an export speed")),
         show_stats_panel: true,
-        // Kept for the egui renderer rather than read here, so a save from
-        // this app must not clear it.
+        // Not read here, so a save must not clear it.
         show_self_radar_range: true,
         ..SavedRenderOptions::default()
     };
@@ -465,7 +463,7 @@ fn a_viewport_opens_showing_what_was_saved_as_the_defaults() {
     assert_eq!(saved.export_timing, thirty_seconds, "and the video timing chosen since is saved");
 }
 
-/// The self ranges the egui renderer saves go on the recording player's ship when a viewport
+/// The saved self ranges go on the recording player's ship when a viewport
 /// opens, and what that ship shows is saved back as them.
 #[test]
 fn the_saved_self_ranges_follow_the_recording_players_ship() {
@@ -582,8 +580,7 @@ fn a_watched_moment_is_moved_on_to_the_hosts_clock() {
     assert!(!sent.commands.iter().any(|command| matches!(command, DrawCommand::PositionTrail { .. })));
 }
 
-/// The bracket keys widen and narrow the nib, within the range the egui
-/// board holds it to.
+/// The bracket keys widen and narrow the nib, within its range.
 #[test]
 fn the_bracket_keys_move_the_nib_within_its_range() {
     let mut annotator = Annotator::new();
@@ -620,7 +617,7 @@ fn the_cheat_sheet_lists_the_chords_that_work() {
     }
 }
 
-/// A fresh viewport draws in egui's `Color32::YELLOW` at its opening width.
+/// A fresh viewport draws in yellow at its opening width.
 #[test]
 fn a_fresh_annotator_draws_in_the_egui_default_ink() {
     let annotator = Annotator::new();
@@ -690,8 +687,8 @@ fn a_batch_draws_the_saved_layers() {
     );
 }
 
-/// A batch with range circles saved on and no self ranges films every ship's, as the egui batch
-/// does, and one with them off films none.
+/// A batch with range circles saved on and no self ranges films every ship's, and one with them
+/// off films none.
 #[test]
 fn a_batch_films_every_ships_ranges_when_they_are_saved_on() {
     // The last written frame sits a frame's step before the window's end, so the second ship is
@@ -838,8 +835,8 @@ fn a_display_toggle_changes_what_is_drawn_without_rebaking() {
     assert_eq!(track.len(), baked, "the track is untouched; only what is drawn of it moved");
 }
 
-/// Dead ships are gated beside the options rather than in them, as the egui
-/// viewer gates them, so the toggle has to reach its own flag.
+/// Dead ships are gated beside the options rather than in them, so the
+/// toggle has to reach its own flag.
 #[test]
 fn the_dead_ship_toggle_reaches_its_own_flag() {
     let dead_ships = toggle("renderer-opt-dead-ships");
@@ -911,8 +908,8 @@ fn the_whole_map_does_not_drag() {
 /// The event controls step to the next thing that happened, and stop at each
 /// end of the battle.
 ///
-/// Stepping back looks half a second behind the clock, as the egui renderer
-/// does: without that, landing on an event and pressing back again would find
+/// Stepping back looks half a second behind the clock:
+/// without that, landing on an event and pressing back again would find
 /// the same one and never move.
 #[test]
 fn the_event_controls_step_between_what_happened() {
@@ -1071,7 +1068,7 @@ fn an_export_at_a_speed_runs_as_long_as_the_battle_takes() {
 }
 
 /// An export runs to the replay's end rather than to the last frame the track kept, so a
-/// decimated track exports as many frames as the CLI and the egui renderer write for the replay.
+/// decimated track exports as many frames as the CLI writes for the replay.
 #[test]
 fn an_export_runs_to_the_replay_end_past_the_last_kept_frame() {
     let layers = || ExportLayers {
@@ -2100,7 +2097,7 @@ fn a_roster_icon_reads_what_the_frame_drew() {
 }
 
 /// The rosters and the stats panel compete for the same gutters, so turning
-/// one on clears the other, as the egui checkboxes do.
+/// one on clears the other.
 #[test]
 fn the_rosters_and_the_stats_panel_do_not_share_the_gutters() {
     let rosters = toggle("renderer-opt-team-rosters");
@@ -2235,7 +2232,7 @@ fn what_a_session_has_drawn_is_put_on_the_frame() {
 }
 
 /// A measurement reaches the frame with its distance read off in kilometres on the battle's own
-/// map, as the egui renderer marks one.
+/// map.
 #[test]
 fn a_measurement_reaches_the_frame_with_its_distance() {
     let link = CollabLink::default();
@@ -2484,8 +2481,7 @@ fn drawing_without_a_session_still_puts_a_shape_on_the_map() {
     assert_eq!(link.annotations().len(), 1, "the line a reader drew with nobody connected");
 }
 
-/// With nobody connected a drawing and an erasure are each taken back by an undo, as the egui
-/// board's are.
+/// With nobody connected a drawing and an erasure are each taken back by an undo.
 #[test]
 fn drawing_alone_is_undone() {
     let link = CollabLink::default();
@@ -2508,8 +2504,8 @@ fn drawing_alone_is_undone() {
     assert!(!annotator.can_undo());
 }
 
-/// The button of the shape already in hand fills it, and the next press empties it again, as the
-/// egui toolbar's second click does; what is drawn then carries the fill.
+/// The button of the shape already in hand fills it, and the next press empties it again; what
+/// is drawn then carries the fill.
 #[test]
 fn a_second_press_of_a_shape_button_toggles_its_fill() {
     let link = CollabLink::default();
@@ -2616,7 +2612,7 @@ fn an_edit_changes_the_picked_shape() {
     assert!(matches!(link.annotation_at(1), Some(Annotation::Ship { friendly: false, .. })), "it changed sides");
 }
 
-/// A circle's size is read in kilometres on a map whose size is known, as the egui popup reads it:
+/// A circle's size is read in kilometres on a map whose size is known:
 /// the whole minimap across is the map's width, at 30 metres a world unit.
 #[test]
 fn a_circle_is_sized_in_kilometres() {

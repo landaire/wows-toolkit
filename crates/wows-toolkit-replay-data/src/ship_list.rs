@@ -44,7 +44,7 @@ impl ShipChoice {
 
 /// Every playable ship in a build, clan rentals left out since they duplicate a real ship.
 ///
-/// In the order the egui armor viewer's tree lists them, which egui's ship search walks: nation by
+/// In the order the armor viewer's tree lists them and the ship search walks them: nation by
 /// nation in the order their names read, class by class, then by tier and name. A search ranks its
 /// matches by how well they match, so this order decides only between equal matches.
 pub struct ShipList {
@@ -137,7 +137,7 @@ mod tests {
         ListedShip { nation_name: nation.to_owned(), nation: nation.to_lowercase(), ship }
     }
 
-    /// Nation first, then class in display order, then tier and name, as the egui tree lists
+    /// Nation first, then class in display order, then tier and name, as the tree lists
     /// them; tier alone does not lead.
     #[test]
     fn ships_list_by_nation_class_tier_and_name() {

@@ -1,4 +1,4 @@
-//! Number and age formatting, shared so a figure reads the same in both front ends.
+//! Number and age formatting, so a figure reads the same on every surface.
 
 use jiff::Timestamp;
 use jiff::Unit;
@@ -25,8 +25,7 @@ pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
 
 /// A byte count in the largest binary unit that keeps it under four digits.
 ///
-/// Matches what the egui app prints through `humansize`'s `BINARY` format,
-/// so the two apps report the same size for the same file.
+/// Matches `humansize`'s `BINARY` format.
 pub fn byte_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut size = bytes as f64;

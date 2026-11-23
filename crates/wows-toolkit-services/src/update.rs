@@ -1,7 +1,7 @@
 //! Release discovery, archive download, executable replacement, and cleanup.
 //!
 //! [`check`] is async and runs on the shared tokio runtime. [`install`] blocks:
-//! a front end runs it on a worker thread.
+//! the app runs it on a worker thread.
 
 use std::io::Read;
 use std::io::Seek;
@@ -37,7 +37,7 @@ pub enum UpdateError {
 }
 
 /// The newest published release, when it is newer than `running`, the version
-/// of the front end asking.
+/// of the running app.
 pub async fn check(agent: UserAgent, proxy: &str, running: &str) -> Result<Option<Release>, rootcause::Report> {
     let client = crate::http::client(agent, proxy, reqwest::redirect::Policy::default())
         .context("Could not create the update HTTP client")?;
@@ -205,8 +205,7 @@ pub fn finalize(replaced: &Path) {
     match wows_toolkit_viewmodel::update::validate_finalize_target(&current, replaced) {
         Ok(target) => {
             // The old process may still be exiting, so a first delete can fail on
-            // a file still mapped. A handful of tries over a second is what the
-            // egui app's own finalize does.
+            // a file still mapped. A handful of tries over a second covers it.
             for attempt in 0..RETRIES {
                 match std::fs::remove_file(&target) {
                     Ok(()) => return,

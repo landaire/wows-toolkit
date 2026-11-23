@@ -23,7 +23,7 @@ pub enum SessionNotice {
     UserTimedOut {
         name: String,
     },
-    /// The host opened a replay this front end may not be able to show.
+    /// The host opened a replay this client may not be able to show.
     HostOpenedReplay {
         name: String,
     },

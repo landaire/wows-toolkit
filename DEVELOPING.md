@@ -40,10 +40,10 @@ This means you can skip the manual Rust installation, skip the DepotDownloader i
 
 ```bash
 nix develop
-cargo build -p wows_toolkit --release
+cargo build -p wows-toolkit --release
 ```
 
-On Linux, Buck links the GUI binaries against your system's dynamic loader, so they start directly, the same way the release build does. Tests that draw on the graphics device, such as the zgui screenshot tests, are linked the same way. That needs glibc 2.39 or newer and, on NixOS, [nix-ld](https://github.com/nix-community/nix-ld). A GUI built with Cargo in the dev shell uses the Nix loader instead and cannot find your system's graphics drivers. Start it through `bin/with-host-graphics`, which adds their directory to `LD_LIBRARY_PATH` for that one command. The dev shell does not add it for everything, because Nix-built tools, `nix` included, break when they load the system's copies of their libraries.
+On Linux, Buck links the GUI binaries against your system's dynamic loader, so they start directly, the same way the release build does. Tests that draw on the graphics device, such as the app's screenshot tests, are linked the same way. That needs glibc 2.39 or newer and, on NixOS, [nix-ld](https://github.com/nix-community/nix-ld). A GUI built with Cargo in the dev shell uses the Nix loader instead and cannot find your system's graphics drivers. Start it through `bin/with-host-graphics`, which adds their directory to `LD_LIBRARY_PATH` for that one command. The dev shell does not add it for everything, because Nix-built tools, `nix` included, break when they load the system's copies of their libraries.
 
 ```bash
 bin/with-host-graphics target/release/wows_toolkit
@@ -61,7 +61,7 @@ If you prefer not to use Nix on Linux or macOS:
 ## Building
 
 ```bash
-cargo build -p wows_toolkit --release
+cargo build -p wows-toolkit --release
 ```
 
 ## Buck
@@ -119,17 +119,17 @@ No crate source is committed. Buck downloads each registry crate and checks it a
 Builds default to debug. The `release` configuration modifier builds release:
 
 ```bash
-buck2 build //:wows_toolkit_egui
-buck2 build //:wows_toolkit_egui?release
+buck2 build //:wows_toolkit
+buck2 build //:wows_toolkit?release
 ```
 
 `-m release` does the same for every target on the command line, which is the form queries take (`buck2 aquery -m release ...`).
 
-Aliases: `wows_toolkit_egui`, `wows_toolkit_zgui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `wt_web_site`, `replay_demo_site`. `buck2 build root//:` builds all of them. CI builds the affected aliases on every push, so the profiling tools have none and are built by label, for example `buck2 build //crates/wows-toolkit:profile_replay_bin?release`. The others are `//crates/wows-toolkit:dhat_load_bin` and `//crates/wowsunpack:dhat_parse_bin`.
+Aliases: `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `wt_web_site`, `replay_demo_site`. `buck2 build root//:` builds all of them. CI builds the affected aliases on every push, so the profiling tools have none and are built by label, for example `buck2 build //crates/wowsunpack:dhat_load_bin?release`. The other is `//crates/wowsunpack:dhat_parse_bin`.
 
-The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). The desktop app aliases name their front end, so `//:wows_toolkit_egui` builds `wows_toolkit`. `build-support/release-tools.json` holds the CLI tool mapping and `scripts/package-tools.*` checks the finished archive against it.
+The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). `build-support/release-tools.json` holds the CLI tool mapping and `scripts/package-tools.*` checks the finished archive against it.
 
-The zgui desktop app also runs every `replayshark` command, so a user with only the app installed can run them as `wows_toolkit replayshark <args>`. From Buck, that is `buck2 run //:wows_toolkit_zgui -- replayshark --help`. On Windows the release app is a GUI program, so `cmd` prints its output but returns to the prompt before the command finishes. Use `start /wait wows_toolkit replayshark <args>` there, or the standalone `replayshark`.
+The desktop app also runs every `replayshark` command, so a user with only the app installed can run them as `wows_toolkit replayshark <args>`. From Buck, that is `buck2 run //:wows_toolkit -- replayshark --help`. On Windows the release app is a GUI program, so `cmd` prints its output but returns to the prompt before the command finishes. Use `start /wait wows_toolkit replayshark <args>` there, or the standalone `replayshark`.
 
 The host platform is selected automatically. Pass `--target-platforms` only to be explicit:
 
@@ -152,7 +152,7 @@ Then open <http://localhost:8000/wows-toolkit/tactics/>. Asset names carry a has
 
 ### The site's replay demo
 
-`wt-replay-demo` plays a baked replay clip in the browser through the same egui renderer the desktop viewer uses. GitHub Pages serves `//:replay_demo_site` under `/wows-toolkit/replay-demo/`, and the demo fetches its clip from `site/assets/replay-demo.bin`. The page can pass `?theme=light` or `?theme=dark`.
+`wt-replay-demo` plays a baked replay clip in the browser, drawn with egui. GitHub Pages serves `//:replay_demo_site` under `/wows-toolkit/replay-demo/`, and the demo fetches its clip from `site/assets/replay-demo.bin`. The page can pass `?theme=light` or `?theme=dark`.
 
 ```bash
 buck2 build -m release //:replay_demo_site --out site/replay-demo
@@ -167,29 +167,15 @@ cargo run -p wows-toolkit-replay-data --bin export_demo_track -- \
     --from 90 --to 300 --interval 0.25
 ```
 
-### Desktop release channels
+### Desktop releases
 
-Suffixed versions such as `1.1.0-beta1` ship the zgui frontend. Stable versions
-ship egui. The release tag must match `[workspace.package].version` in
-`Cargo.toml`. Manual and `ci/**` builds select the frontend from that version.
+The release tag must match `[workspace.package].version` in `Cargo.toml`.
 
-Both frontends ship as `wows_toolkit.exe` on Windows and `wows_toolkit` on Linux
-and macOS. The installer retains the same application identity and replaces the
-existing installation. Windows version resources retain the full beta version;
-MSI ProductVersion uses the numeric core, such as `1.1.0`. Installers with the
-same numeric version replace each other in either direction, including beta
-and stable builds.
+The app ships as `wows_toolkit.exe` on Windows and `wows_toolkit` on Linux and macOS. The installer keeps the same application identity and replaces the existing installation. Windows version resources keep the full version, including a suffix such as `-beta1`. MSI ProductVersion uses the numeric core, such as `1.1.0`. Installers with the same numeric version replace each other in either direction, including beta and stable builds.
 
-The release body is the tag's section of `RELEASE_NOTES.md`, such as
-`## 1.1.0-beta5`. A pre-release without one uses the `## 1.1.0` section, and
-without that the `CHANGELOG.md` entries added since the release before it by
-version (`scripts/changelog_since.py`). Write the section before tagging a beta
-whose changes players should read about.
+The release body is the tag's section of `RELEASE_NOTES.md`, such as `## 1.1.0-beta5`. A pre-release without one uses the `## 1.1.0` section, and without that the `CHANGELOG.md` entries added since the release before it by version (`scripts/changelog_since.py`). Write the section before tagging a beta whose changes players should read about.
 
-For a local Buck beta installer, use
-`buck2 build -m release -c release.frontend=zgui toolchains//windows:wows_toolkit_msi`.
-The Cargo installer script, `scripts/build-msi.ps1`, selects the frontend from
-the workspace version and stages it under the installed executable name.
+For a local Buck installer, use `buck2 build -m release toolchains//windows:wows_toolkit_msi`. The Cargo installer script, `scripts/build-msi.ps1`, stages the app under the installed executable name.
 
 ### Remote action cache
 
@@ -291,7 +277,7 @@ Cargo resolves `[target.'cfg(...)'.dependencies]` on its own. Buck does not. A `
 )
 ```
 
-The same applies to features that are only valid on one platform. `crates/minimap-renderer/BUCK` and `crates/wows-toolkit/BUCK` are the examples. A library that `wt-web` reaches carries the features Cargo resolves for `wasm32` through `wasm_select`; see `crates/wowsunpack/BUCK`.
+The same applies to features that are only valid on one platform. `crates/minimap-renderer/BUCK` is the example. A library that `wt-web` reaches carries the features Cargo resolves for `wasm32` through `wasm_select`; see `crates/wowsunpack/BUCK`.
 
 ### Re-vendoring the prelude
 
@@ -417,7 +403,7 @@ cargo run -p wows-data-mgr -- extract-scripts --build 13533378 --game-dir /path/
 
 The client obfuscates its bytecode differently in every build, so no file is shared between builds and each zip is kept whole. Programs that need scripts fetch them per build with `wows_data_mgr::scripts::fetch`. Downloading a dump does not fetch them.
 
-[wowsdeob](https://github.com/landaire/wowsdeob) writes `constants.json` for an installed build by running the client scripts in an emulated CPython 2.7, so no Python install is needed. The zgui app does this itself, in the background, when neither its cache nor GitHub has current constants for a build. To run it by hand:
+[wowsdeob](https://github.com/landaire/wowsdeob) writes `constants.json` for an installed build by running the client scripts in an emulated CPython 2.7, so no Python install is needed. The desktop app does this itself, in the background, when neither its cache nor GitHub has current constants for a build. To run it by hand:
 
 ```bash
 wowsdeob /path/to/World_of_Warships ./output constants --build 13533378

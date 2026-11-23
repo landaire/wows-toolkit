@@ -1,6 +1,6 @@
 [package]
 name = "wows-toolkit-launcher"
-description = "Launcher state and background work shared by the egui and zgui apps"
+description = "Launcher state and background work for the desktop app"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -31,7 +31,7 @@ tokio = { version = "1", features = ["rt", "sync", "time"] }
 tracing.workspace = true
 
 [features]
-# Event constructors for a front end's tests.
+# Event constructors for the app's tests.
 test-support = []
 
 [dev-dependencies]

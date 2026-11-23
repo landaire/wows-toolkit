@@ -1,9 +1,6 @@
 //! Ship selector catalog: every playable ship in the loaded build, grouped
-//! by nation then class then sorted by tier/name. Ports the egui app's
-//! `ShipCatalog` (`crates/wows-toolkit/src/armor_viewer/ship_selector.rs`)
-//! verbatim -- same struct shapes, same filters (ship species only, no clan
-//! rentals), same sort order -- so the sidebar/tree Task 4 builds on top of
-//! this shows the exact same ship list the egui armor viewer does.
+//! by nation then class then sorted by tier/name. Ship species only, no clan
+//! rentals.
 
 use std::collections::HashMap;
 
@@ -119,8 +116,7 @@ fn group_ships(ships: impl IntoIterator<Item = (String, String, Species, ShipEnt
         })
         .collect();
 
-    // By the name shown, not the key behind it, matching the egui tree
-    // (`armor_viewer/ui/tab.rs:377`).
+    // By the name shown, not the key behind it.
     nations.sort_by(|a, b| a.display_name.cmp(&b.display_name));
 
     nations
@@ -193,8 +189,7 @@ pub fn species_name(s: &Species) -> &'static str {
 
 /// A nation or armor zone name in the current locale.
 ///
-/// The game keys both as `IDS_<NAME>`; an unknown one shows its raw key, as
-/// the egui app's own `translate_name` does. The raw key stays the identity
+/// The game keys both as `IDS_<NAME>`; an unknown one shows its raw key. The raw key stays the identity
 /// everywhere else, so this is only for what is drawn.
 pub fn translate_name(metadata: &GameMetadataProvider, name: &str) -> String {
     let key = format!("IDS_{}", name.to_uppercase());

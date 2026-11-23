@@ -2,8 +2,7 @@
 //! runs over, what the listing shows for a directory, and how a file's name
 //! decides its icon, type label and viewer.
 //!
-//! Pure functions over a `VfsPath`, shared by both front ends so the listing
-//! rules have one implementation, and unit-testable against an in-memory
+//! Pure functions over a `VfsPath`, unit-testable against an in-memory
 //! filesystem rather than a game install.
 
 use std::cmp::Reverse;
@@ -32,7 +31,7 @@ pub struct FolderTreeNode {
 /// A position in the list that issued it. Distinct from the `PathId` the list
 /// keeps internally so the two cannot be crossed, but an index and the list it
 /// came from still travel together: read against a different list it names a
-/// different file. Both front ends hold the pair rather than the index alone.
+/// different file. Callers hold the pair rather than the index alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileIndex(u32);
 
@@ -297,7 +296,7 @@ pub fn build_folder_tree(dir: &VfsPath, path_prefix: &str) -> Vec<FolderTreeNode
 /// only files are listed: a directory is reached through the folder tree.
 ///
 /// Paths are relative to `root`, so a list walked from somewhere other than a
-/// VFS root labels its rows from there. Both front ends pass a root.
+/// VFS root labels its rows from there. Callers pass a root.
 ///
 /// The path buffer grows by doubling and is shrunk once at the end: a VFS
 /// states no file count, so there is nothing to size it from up front.

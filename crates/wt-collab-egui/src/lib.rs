@@ -1,8 +1,8 @@
 //! Shared egui types, coordinate transforms, and rendering functions for
 //! WoWs Toolkit collaborative sessions.
 //!
-//! Used by both the desktop app (`wows-toolkit`) and the WASM web client
-//! (`wt-web`) to avoid duplicating annotation types and minimap rendering.
+//! Used by the WASM web client (`wt-web`) and the replay demo
+//! (`wt-replay-demo`).
 
 pub mod draw_commands;
 pub mod interaction;

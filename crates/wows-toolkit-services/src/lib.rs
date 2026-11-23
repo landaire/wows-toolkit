@@ -1,9 +1,10 @@
-//! Process-level services the desktop front ends share: the HTTP client, the
+//! Process-level services of the desktop app: the HTTP client, the
 //! tokio runtime, file dialogs, logging, settings storage, release updates and
 //! the Twitch chat poll. Blocking
-//! functions, futures and plain data only: each front end schedules them on its
+//! functions, futures and plain data only: the app schedules them on its
 //! own executor.
 
+pub mod app_ron;
 pub mod child_process;
 pub mod collab;
 pub mod constants;

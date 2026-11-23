@@ -184,7 +184,7 @@ impl BattleEvents {
 
     /// The event before `elapsed` seconds into the battle, if there is one.
     ///
-    /// Half a second back, as the egui renderer looks: without it, landing on
+    /// Half a second back: without it, landing on
     /// an event and pressing back again would find the same one.
     pub fn previous(&self, elapsed: f32) -> Option<&TimelineEvent> {
         self.events.iter().rev().find(|event| event.clock.seconds() < elapsed - 0.5)

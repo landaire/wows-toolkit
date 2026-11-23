@@ -18,7 +18,7 @@ pub enum ViewerContent {
         text: String,
     },
     Image {
-        /// Undecoded bytes: each front end decodes into its own image type.
+        /// Undecoded bytes: the UI decodes into its own image type.
         bytes: Vec<u8>,
     },
 }
@@ -193,7 +193,7 @@ pub fn highlight_language(extension: &str) -> Option<&'static str> {
     }
 }
 
-/// Whether the file viewer has anything to show for this name: the extensions the egui listing
+/// Whether the file viewer has anything to show for this name: the extensions the listing
 /// offers "View Contents" for. The viewer itself decides what it makes of the bytes.
 pub fn is_viewable(file_name: &str) -> bool {
     matches!(
@@ -202,7 +202,7 @@ pub fn is_viewable(file_name: &str) -> bool {
     )
 }
 
-/// The kind of glyph a listing row draws for a file, from the four the egui listing tells apart.
+/// The kind of glyph a listing row draws for a file, from the four the listing tells apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileGlyph {
     Image,

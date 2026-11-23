@@ -3,10 +3,9 @@
 //!
 //! The rules -- which battles are eligible, which payload each mode sends, and
 //! how long a raw upload waits for the battle's results -- are
-//! `wows_toolkit_viewmodel::upload`, shared with the egui app so both decide the
-//! same thing about the same replay. What is here is the HTTP and the ledger
-//! read: the `sent_replays` table both apps write, so a replay is sent once
-//! however it was read.
+//! `wows_toolkit_viewmodel::upload`. What is here is the HTTP and the ledger
+//! read: the `sent_replays` table, so a replay is sent once however it was
+//! read.
 //!
 //! Every function is a future for the tokio runtime: the store and the client
 //! both need its reactor.
@@ -51,9 +50,8 @@ pub enum Outcome {
 
 /// Whether the sent-replay ledger decides what is skipped.
 ///
-/// The egui app's `SendReplayCachePolicy`: a bulk pass is normally over what has
-/// not been sent, but a reader told the service lost what they sent needs a pass
-/// that sends it all again.
+/// A bulk pass is normally over what has not been sent, but a reader told the
+/// service lost what they sent needs a pass that sends it all again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LedgerUse {
     /// Skip what the ledger says was already sent, which is every ordinary send.
@@ -90,8 +88,8 @@ const SHIP_BUILDS: Endpoints<'static> = Endpoints { builds: SHIP_BUILDS_URL, raw
 /// When this replay was first seen, which is what the grace window is measured
 /// from.
 ///
-/// Recorded on the first sight, in the row the egui app's own uploader keeps, so
-/// the two apps agree about how long a battle has been waiting for its results.
+/// Recorded on the first sight, so later passes agree about how long a battle
+/// has been waiting for its results.
 /// A battle first seen under one of `other_paths` keeps that anchor. Without the
 /// anchor the window cannot be measured, so a caller tries again rather than
 /// sending.

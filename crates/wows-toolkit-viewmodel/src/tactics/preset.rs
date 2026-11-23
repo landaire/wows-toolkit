@@ -1,8 +1,7 @@
 //! A tactics board as it is saved and read back.
 //!
-//! The board itself is drawn by each front end; what is on it -- the map, the
-//! capture points and the annotations -- is one format on disk, so a board set
-//! up in either app opens in the other.
+//! The board itself is drawn by the UI; what is on it -- the map, the capture
+//! points and the annotations -- is one format on disk.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;

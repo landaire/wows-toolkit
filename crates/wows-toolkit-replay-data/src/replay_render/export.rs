@@ -74,8 +74,7 @@ pub enum ExportStage {
 }
 
 impl ExportStage {
-    /// The translation key of what the progress overlay calls it, worded as
-    /// the egui renderer words it.
+    /// The translation key of what the progress overlay calls it.
     pub const fn label_key(self) -> &'static str {
         match self {
             Self::Encoding => "ui-renderer-encoding",
@@ -184,7 +183,7 @@ pub struct ExportLayers {
 /// The frames an export writes, drawn one at a time as the encoder takes them.
 ///
 /// Frame `n` shows the clock `window start + n * step`, as [`ExportTiming`] places it for the CLI
-/// and the egui renderer. A track keeps fewer frames than that, and a long battle's are further
+/// and the viewport. A track keeps fewer frames than that, and a long battle's are further
 /// apart, so each written frame is placed between the two baked frames around its clock, as
 /// playback places its frames. What is on screen is what is written: a layer the reader turned
 /// off does not come back in the file, and trails are read from the track's recorded positions,
@@ -464,8 +463,8 @@ pub fn batch_export(
 ///
 /// The bake holds every layer it could; which of them are drawn is what the saved defaults
 /// decide, as they do in a viewport. Saved self ranges go on the recording player's ship, as a
-/// viewport opens with them. Without them, saved range circles are every ship's, as the egui batch
-/// draws them: the per-ship choices that narrow them in a viewport are made by hand and not saved.
+/// viewport opens with them. Without them, saved range circles are every ship's: the per-ship
+/// choices that narrow them in a viewport are made by hand and not saved.
 pub(crate) fn batch_layers(
     options: &RenderOptions,
     show_dead_ships: bool,

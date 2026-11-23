@@ -2,14 +2,13 @@
 //!
 //! The cache holds one dumped build per game version, so a replay recorded
 //! against a build the live install no longer has can still be opened. The
-//! operations here run the same maintenance as the egui app against the
-//! published repository, through `wows_data_mgr::download_repo`, so both apps
-//! act on one cache.
+//! operations here maintain the cache against the published repository,
+//! through `wows_data_mgr::download_repo`.
 //!
 //! Every operation reaches the network or walks a directory of several
 //! gigabytes. The jobs are futures that are not `Send`: some of
 //! `wows_data_mgr`'s download futures hold state across an await that cannot
-//! cross threads, so a front end builds and drives each one on a single worker
+//! cross threads, so the app builds and drives each one on a single worker
 //! thread with the tokio reactor entered. [`maintain`] blocks.
 
 use std::path::Path;
@@ -160,8 +159,8 @@ pub fn measure(base: &Path) -> CacheStats {
 
 /// Brings an older cache layout up to date and drops what nothing references.
 ///
-/// Three passes the egui app runs at startup for the same reasons
-/// (`app.rs`'s game-data-cache-maintenance thread): a cache written before the
+/// Three passes run at startup:
+/// a cache written before the
 /// content store was renamed still has its old directory, a cache written before
 /// the store existed holds whole build directories that can be deduplicated into
 /// it, and a build directory deleted by hand leaves objects nothing points at.
@@ -237,7 +236,7 @@ pub async fn plan(client: &reqwest::Client, base: &Path, builds: &[(u32, Option<
 
 /// Re-fetches the named builds, whether they are stale or damaged.
 ///
-/// Forced, as the egui app forces both of its own: the builds named here are
+/// Forced: the builds named here are
 /// exactly those already found to differ from the repository, so the check
 /// that would skip an unchanged one has already been made.
 pub async fn download(

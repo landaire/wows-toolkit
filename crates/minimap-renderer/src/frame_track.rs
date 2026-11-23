@@ -2,8 +2,7 @@
 //!
 //! The sampling (a bounded, evenly spaced subset of a battle), the render
 //! options a preview bakes under, and the pass that drives the world forward
-//! emitting draw commands. Shared so both front ends bake the same track;
-//! what each wraps around the frames is its own.
+//! emitting draw commands. What a caller wraps around the frames is its own.
 //!
 //! Drawing those frames is [`crate::preview`].
 
@@ -208,7 +207,7 @@ pub trait FrameSink {
 }
 
 /// Whether the forward pass records every ship's position at each packet step for trails, as
-/// the egui playback does, rather than only at the frames it draws.
+/// replay playback does, rather than only at the frames it draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrailRecording {
     /// The frames drawn are all the pass keeps.
@@ -256,7 +255,7 @@ pub fn build_frame_track<G: ResourceLoader>(
                 renderer.populate_players(&view);
                 renderer.update_squadron_info(&view);
                 renderer.update_ship_abilities(&view);
-                // As the egui playback steps: from the first nonzero clock, labelled with it.
+                // As playback steps: from the first nonzero clock, labelled with it.
                 if trails == TrailRecording::EveryStep && prev_clock.seconds() > 0.0 {
                     renderer.record_visible_positions(&view, prev_clock);
                 }

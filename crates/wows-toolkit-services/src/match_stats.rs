@@ -184,7 +184,7 @@ pub async fn fetch_stats(
 /// A refusal in the words a view shows.
 ///
 /// A wait is reported in whole minutes rather than the raw seconds the error
-/// carries, which is what the egui app tells the user too.
+/// carries.
 pub fn refusal_text(error: &StatsError) -> String {
     match error {
         StatsError::Refused(MatchStatsError::RateLimited { retry_after })

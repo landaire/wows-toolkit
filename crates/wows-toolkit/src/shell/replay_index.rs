@@ -1,0 +1,525 @@
+//! Building the replay index over the install's replays folder, as the settings drawer and the
+//! palette start it.
+//!
+//! The build outlives the drawer, which is rebuilt each time it opens, so its state is the shell's
+//! and its task is detached.
+
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+
+use landaire_ui::Toasts;
+use wows_replay_insights::match_contribution::MatchContributionVersion;
+use wows_toolkit_config::index::rows::IndexError;
+use wows_toolkit_replay_data::recording;
+use wows_toolkit_replay_data::recording::RecordingRevision;
+use wows_toolkit_replay_data::replay_folder::ReplayFolder;
+use wows_toolkit_replay_data::replay_index::IndexMode;
+use wows_toolkit_replay_data::replay_index::IndexProgress;
+use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
+use wows_toolkit_viewmodel::personal_rating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wt_translations::t;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
+use zgui::reactive::StoredValue;
+use zgui::reactive::blocking;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::GetUntracked;
+use zgui::reactive::prelude::GetValue;
+use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::SetValue;
+use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::UpdateValue;
+use zgui::reactive::prelude::With;
+use zgui::reactive::prelude::WithUntracked;
+use zgui::task::spawn_detached;
+use zgui::task::spawn_local;
+
+use crate::long_job::long_job;
+use crate::services::Job;
+use crate::services::Progress;
+use crate::services::progress;
+use crate::shell::Shell;
+use crate::tabs::replays::arrivals::AutoExport;
+use crate::tabs::replays::arrivals::say_export_failed;
+use crate::tabs::replays::arrivals::say_exported;
+use crate::tabs::replays::panel::ExportError;
+
+/// Counts the indexing passes that finished having written rows, so a view that read the index can
+/// tell it changed since.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IndexWrites(u64);
+
+/// A reading of [`ReplayIndexJobs::changes`], against which a view that read the index tells
+/// whether it has changed since.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexChanges {
+    writes: IndexWrites,
+    recorded: RecordingRevision,
+    /// Whether a pass is writing rows. Its battles count once, as it ends.
+    busy: bool,
+}
+
+impl IndexChanges {
+    /// Whether the index holds rows it did not at `seen`, the reading the view last read it at.
+    pub fn is_newer_than(self, seen: Self) -> bool {
+        !self.busy && (self.writes != seen.writes || self.recorded != seen.recorded)
+    }
+
+    /// The reading to remember in place of `seen`. A pass's battles leave `seen` standing, so
+    /// they still differ from it when the pass ends.
+    pub fn settled(self, seen: Self) -> Self {
+        if self.busy { seen } else { self }
+    }
+}
+
+/// Where the replays tab's forced re-index stands, as the Settings drawer shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForcedPass {
+    /// Asking for or fetching the game data its replays are read through.
+    Fetching,
+    Reading(IndexProgress),
+}
+
+/// The running build or forced re-index, how far it has got, and what the last one said.
+#[derive(Clone, Copy)]
+pub struct ReplayIndexJobs {
+    /// How far the running build has got. `None` while none runs.
+    progress: RwSignal<Option<IndexProgress>, LocalStorage>,
+    /// What the last build or forced re-index said when it stopped. Cleared when the next starts.
+    outcome: RwSignal<Option<String>, LocalStorage>,
+    /// The Stop flag the running build or forced re-index checks.
+    cancel: StoredValue<Option<Arc<AtomicBool>>>,
+    /// The replays tab's forced re-index. `None` while none runs.
+    forced: RwSignal<Option<ForcedPass>, LocalStorage>,
+    /// Whether a pass the replays tab started is reading replays.
+    folder_pass: RwSignal<bool, LocalStorage>,
+    /// Whether the last build stored its rows without a rating table, until the replays tab
+    /// takes it to rate them.
+    wrote_unrated: StoredValue<bool>,
+    /// Passes of this build or the replays tab's that wrote rows.
+    writes: RwSignal<IndexWrites, LocalStorage>,
+    /// The battles written to the index by any path, one at a time.
+    recorded: RwSignal<RecordingRevision, LocalStorage>,
+}
+
+impl ReplayIndexJobs {
+    /// Called from a component's body: the task following the index's recordings lives as long as
+    /// the calling scope.
+    pub fn new() -> Self {
+        let mut announcements = recording::subscribe();
+        let recorded = RwSignal::new_local(*announcements.borrow_and_update());
+        if follows_recordings() {
+            spawn_local(async move {
+                while announcements.changed().await.is_ok() {
+                    let revision = *announcements.borrow_and_update();
+                    if recorded.try_set(revision).is_some() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        Self {
+            progress: RwSignal::new_local(None),
+            outcome: RwSignal::new_local(None),
+            cancel: StoredValue::new(None),
+            forced: RwSignal::new_local(None),
+            folder_pass: RwSignal::new_local(false),
+            wrote_unrated: StoredValue::new(false),
+            writes: RwSignal::new_local(IndexWrites::default()),
+            recorded,
+        }
+    }
+
+    pub fn is_running(self) -> bool {
+        self.progress.with(Option::is_some)
+    }
+
+    pub fn is_running_untracked(self) -> bool {
+        self.progress.with_untracked(Option::is_some)
+    }
+
+    /// Whether the build or a directory's own pass is reading replays, which refuses another.
+    /// Subscribes to both.
+    pub fn is_busy(self) -> bool {
+        self.progress.with(Option::is_some) || self.folder_pass.get()
+    }
+
+    pub fn progress(self) -> Option<IndexProgress> {
+        self.progress.get()
+    }
+
+    /// Whether the build or a forced re-index is running, for the Settings drawer's controls.
+    pub fn is_indexing(self) -> bool {
+        self.is_running() || self.forced.with(Option::is_some)
+    }
+
+    /// How far the build or the forced re-index reading replays has got.
+    pub fn shown_progress(self) -> Option<IndexProgress> {
+        let forced = self.forced.with(|forced| match forced {
+            Some(ForcedPass::Reading(progress)) => Some(*progress),
+            Some(ForcedPass::Fetching) | None => None,
+        });
+
+        self.progress().or(forced)
+    }
+
+    pub fn outcome(self) -> Option<String> {
+        self.outcome.get()
+    }
+
+    /// Asks the running build or forced re-index to stop after the replay or download under way.
+    pub fn stop(self) {
+        if let Some(cancel) = self.cancel.get_value() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Tells the shell whether a pass the replays tab started is reading replays, so its own
+    /// build waits for it.
+    pub fn set_folder_pass(self, running: bool) {
+        if self.folder_pass.get_untracked() != running {
+            self.folder_pass.set(running);
+        }
+    }
+
+    /// Forgets the replays tab's passes, as the tab goes. `try_`, since the shell may be going too.
+    pub fn clear_folder_pass(self) {
+        let _ = self.folder_pass.try_set(false);
+        if self.forced.try_get_untracked().flatten().is_some() {
+            let _ = self.forced.try_set(None);
+            let _ = self.cancel.try_set_value(None);
+        }
+    }
+
+    /// Shows the replays tab's forced re-index under the Settings drawer's index controls, whose
+    /// Stop sets `cancel`.
+    pub fn begin_forced(self, cancel: Arc<AtomicBool>) {
+        self.cancel.set_value(Some(cancel));
+        self.outcome.set(None);
+        self.forced.set(Some(ForcedPass::Fetching));
+    }
+
+    /// How far the forced re-index has got. `try_`, as the shell may be gone by the time it reports.
+    pub fn report_forced(self, pass: ForcedPass) {
+        let _ = self.forced.try_set(Some(pass));
+    }
+
+    /// Ends the forced re-index with what it said. `try_`, as for [`Self::report_forced`].
+    pub fn finish_forced(self, said: String) {
+        if self.forced.try_with_untracked(|_| ()).is_none() {
+            return;
+        }
+        self.forced.set(None);
+        self.cancel.set_value(None);
+        self.outcome.set(Some(said));
+    }
+
+    /// Whether the last build stored its rows unrated, clearing it.
+    pub fn take_wrote_unrated(self) -> bool {
+        self.wrote_unrated.try_update_value(std::mem::take).unwrap_or(false)
+    }
+
+    /// The passes that wrote rows so far, subscribing to the next.
+    #[cfg(test)]
+    pub fn writes(self) -> IndexWrites {
+        self.writes.get()
+    }
+
+    /// What the index has learned so far, subscribing to the next pass that wrote rows, to each
+    /// battle recorded, and to a pass starting or ending.
+    pub fn changes(self) -> IndexChanges {
+        IndexChanges {
+            writes: self.writes.get(),
+            recorded: self.recorded.get(),
+            busy: self.progress.with(Option::is_some) || self.folder_pass.get(),
+        }
+    }
+
+    /// Notes a finished pass that wrote `indexed` replays' rows. `try_`, since the shell may be
+    /// gone by the time a pass answers.
+    pub fn note_written(self, indexed: u64) {
+        if indexed > 0 {
+            let _ = self.writes.try_update(|writes| writes.0 += 1);
+        }
+    }
+}
+
+impl Default for ReplayIndexJobs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Whether an index build that was asked for started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildStart {
+    Started,
+    /// Another pass is reading replays.
+    Busy,
+    /// There is no game directory, settings database, runtime or game data to build with.
+    Unready,
+}
+
+impl Shell {
+    /// Walks the install's replays folder and indexes what is in it.
+    ///
+    /// The whole folder rather than what changed: this is the control for building an index that
+    /// is not there, or rebuilding one whose rows an older parse got wrong. Refused without a game
+    /// directory, since the replays are under it, and while another build runs.
+    pub fn build_replay_index(self, mode: IndexMode) {
+        // Refused, it says so itself.
+        self.run_index_build(mode, None);
+    }
+
+    /// Indexes the replays of the install's folder the index lacks, and writes each battle read
+    /// that has its results to `export`: the battles played while the app was closed.
+    pub fn catch_up_replay_index(self, export: Option<AutoExport>) -> BuildStart {
+        self.run_index_build(IndexMode::FillGaps, export)
+    }
+
+    fn run_index_build(self, mode: IndexMode, export: Option<AutoExport>) -> BuildStart {
+        let index = self.replay_index;
+        // Two passes at once would each load and save the unreadable-file ledger over the other's.
+        if index.progress.with_untracked(Option::is_some) || index.folder_pass.get_untracked() {
+            self.toasts().warn(t!("ui-reindex-busy_index").into_owned());
+            return BuildStart::Busy;
+        }
+
+        let services = self.services();
+        let Some(wows_dir) = services.settings.read_untracked(|settings| settings.wows_dir.clone()) else {
+            return BuildStart::Unready;
+        };
+        if wows_dir.is_empty() {
+            return BuildStart::Unready;
+        }
+        let (Some(pool), Some(runtime), Some(game_data)) =
+            (services.settings.pool(), services.runtime(), services.game_data.cache_untracked())
+        else {
+            return BuildStart::Unready;
+        };
+        let Some(proxy) = services.settings.read_untracked(|settings| settings.proxy_url.clone()) else {
+            return BuildStart::Unready;
+        };
+        let debug = self.debug_mode.get_untracked();
+
+        let wows_dir = PathBuf::from(wows_dir);
+        // Roots the Live source when this pass creates it; the replays are read from the folder.
+        let root = wows_dir.join("replays");
+        let cancel = Arc::new(AtomicBool::new(false));
+        index.cancel.set_value(Some(Arc::clone(&cancel)));
+        index.outcome.set(None);
+        index.progress.set(Some(IndexProgress::default()));
+
+        let named = t!("ui-app-status_indexing").into_owned();
+        let held = services.jobs.start(Job { name: named.clone(), progress: None });
+        let (reports, received) = futures::channel::mpsc::unbounded::<IndexProgress>();
+
+        spawn_detached(async move {
+            let working = long_job(move || {
+                let folder = ReplayFolder::from_app_install(&wows_dir);
+                let live =
+                    wows_toolkit_config::index::query::ensure_default_source(&pool, &root, jiff::Timestamp::now());
+                let source = runtime.block_on(live)?;
+                let rating = owner_rating(&runtime, &proxy);
+                let mut exported = Exported::default();
+                let progress = wows_toolkit_replay_data::replay_index::build_folder_index(
+                    &runtime,
+                    &pool,
+                    source,
+                    &folder,
+                    &game_data,
+                    rating.as_ref(),
+                    &cancel,
+                    mode,
+                    |step| {
+                        let _ = reports.unbounded_send(step);
+                    },
+                    |path, parsed| {
+                        if let Some(target) = &export {
+                            exported.note(path, target.write_read(parsed, debug));
+                        }
+                    },
+                )?;
+                Ok::<_, IndexError>(Built { progress, rated: rating.is_some(), exported })
+            });
+            let mut reached = IndexProgress::default();
+            let built = progress::follow(working, received, |step| {
+                reached = step;
+                index.progress.set(Some(step));
+                held.report(Job { name: named.clone(), progress: Progress::new(step.done, step.total) });
+            })
+            .await;
+            drop(held);
+            // `try_`, as the shell may be gone by the time the build answers.
+            if index.progress.try_with_untracked(|_| ()).is_none() {
+                return;
+            }
+
+            // Before the progress clears, since the replays tab reads it as the build ends.
+            if let Ok(built) = &built {
+                index.wrote_unrated.set_value(!built.rated);
+                built.exported.say(self.toasts());
+            }
+            index.progress.set(None);
+            // Read off the last step rather than the outcome, which a late error leaves without it.
+            self.services().session.index_updated(reached.session_games_updated);
+            index.cancel.set_value(None);
+            let said = match built {
+                Ok(Built { progress, .. }) => {
+                    index.note_written(progress.indexed);
+                    let said = if progress.skipped > 0 {
+                        t!(
+                            "ui-settings-index-built_with_skipped",
+                            indexed = progress.indexed,
+                            skipped = progress.skipped,
+                            failed = progress.failed
+                        )
+                        .into_owned()
+                    } else {
+                        t!("ui-settings-index-built", indexed = progress.indexed, failed = progress.failed).into_owned()
+                    };
+                    if progress.failed > 0 {
+                        self.toasts().warn(said.clone());
+                    } else {
+                        self.toasts().ok(said.clone());
+                    }
+                    said
+                }
+                Err(err) => {
+                    let said = err.to_string();
+                    self.say_failure(said.clone());
+                    said
+                }
+            };
+            // Said as well as written under the button: a build started from the palette finishes
+            // while the reader is somewhere else.
+            index.outcome.set(Some(said));
+        });
+
+        BuildStart::Started
+    }
+
+    /// Indexes the install's replays again when their MC is from an older formula or missing and
+    /// `table` can rate them. For a table that loads after the startup check, which had none to
+    /// rate with when no cache existed yet. Skipped while a pass runs, since it would refuse this
+    /// one.
+    pub fn rebuild_stale_match_contribution(self, table: &PersonalRatingData) {
+        let Some(rateable_mc) = rateable_match_contribution(Some(table)) else { return };
+        let index = self.replay_index;
+        let busy = move || index.is_running_untracked() || index.folder_pass.get_untracked();
+        if busy() {
+            return;
+        }
+
+        let services = self.services();
+        if services.game_data.cache_untracked().is_none() {
+            return;
+        }
+        let Some(wows_dir) = services.settings.read_untracked(|settings| settings.wows_dir.clone()) else { return };
+        if wows_dir.is_empty() {
+            return;
+        }
+        let Some(pool) = services.settings.pool() else { return };
+
+        let wows_dir = PathBuf::from(wows_dir);
+        spawn_local(async move {
+            let dirs = blocking(move || ReplayFolder::from_app_install(&wows_dir).content_dirs()).await;
+            let stale = services
+                .on_tokio(async move {
+                    wows_toolkit_replay_data::replay_index::has_stale_records_in(&pool, &dirs, Some(rateable_mc)).await
+                })
+                .await;
+            match stale {
+                Ok(Ok(true)) if !busy() => self.build_replay_index(IndexMode::FillGaps),
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => tracing::warn!(%err, "replay index MC revision could not be checked"),
+                Err(err) => tracing::warn!(%err, "replay index MC revision check did not complete"),
+            }
+        });
+    }
+}
+
+/// Whether a shell built on this thread follows the battles the index records.
+#[cfg(not(test))]
+fn follows_recordings() -> bool {
+    true
+}
+
+// The announcements are process-wide, and a test's index writes would otherwise reload the views
+// another test seeded.
+#[cfg(test)]
+thread_local! {
+    static FOLLOWS_RECORDINGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn follows_recordings() -> bool {
+    FOLLOWS_RECORDINGS.with(std::cell::Cell::get)
+}
+
+/// Has the shells this test thread builds follow the battles the index records.
+#[cfg(test)]
+pub fn follow_recordings_in_this_test() {
+    FOLLOWS_RECORDINGS.with(|follows| follows.set(true));
+}
+
+/// What a finished build read and wrote.
+struct Built {
+    progress: IndexProgress,
+    /// Whether its rows were rated, which they are not without a rating table.
+    rated: bool,
+    exported: Exported,
+}
+
+/// What a build exported of the battles it read: the last file written, and the last export that
+/// failed, which are what the reader is told.
+#[derive(Default)]
+struct Exported {
+    written: Option<PathBuf>,
+    failed: Option<ExportError>,
+}
+
+impl Exported {
+    fn note(&mut self, path: &Path, written: Result<Option<PathBuf>, ExportError>) {
+        match written {
+            Ok(Some(out)) => {
+                tracing::info!(path = %path.display(), "auto-export: the battle was written");
+                self.written = Some(out);
+            }
+            Ok(None) => {
+                tracing::debug!(path = %path.display(), "auto-export: no battle results, so nothing is written");
+            }
+            Err(err) => {
+                tracing::warn!(path = %path.display(), %err, "auto-export failed");
+                self.failed = Some(err);
+            }
+        }
+    }
+
+    fn say(&self, toasts: Toasts) {
+        if let Some(out) = &self.written {
+            say_exported(toasts, out);
+        }
+        if let Some(err) = &self.failed {
+            say_export_failed(toasts, err.to_string());
+        }
+    }
+}
+
+/// The expected-values table each indexed row's owner rating is computed from, read from the
+/// cache and refreshed when stale. Run on an indexing thread, since a refresh is a download.
+pub fn owner_rating(runtime: &tokio::runtime::Runtime, proxy_url: &str) -> Option<PersonalRatingData> {
+    runtime.block_on(wows_toolkit_services::personal_rating::load_refreshed(crate::http::USER_AGENT, proxy_url))
+}
+
+/// The MC revision a pass rating against [`owner_rating`] writes, for the staleness queries that
+/// decide whether to start one. Read from the cache without a refresh, which the pass itself makes;
+/// no usable cache means no table to rate with.
+pub fn cached_rateable_mc() -> Option<MatchContributionVersion> {
+    rateable_match_contribution(personal_rating::load_cached().ok().as_ref())
+}

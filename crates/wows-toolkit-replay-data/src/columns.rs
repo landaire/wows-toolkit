@@ -1,6 +1,4 @@
-//! Column set, cell formatting, and number formatting. Mirrors
-//! `ui/replay_parser/sorting.rs` (`ReplayColumn`, declaration order) and the
-//! per-cell mapping in `ui/replay_parser/mod.rs`'s `TableDelegate::cell_ui`.
+//! Column set, cell formatting, and number formatting.
 //! Colors are represented as `ColorRole`, resolved to real colors by the
 //! render layer (Milestone 2); no UI toolkit color type appears here.
 
@@ -14,12 +12,10 @@ use wt_translations::t;
 
 use crate::model::PlayerRow;
 
-/// All displayable columns in the replay player list, in the same
-/// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`) minus
-/// its `Actions` column: a row's actions are on the row itself here, revealed
+/// All displayable columns in the replay player list, in declaration order.
+/// There is no Actions column: a row's actions are on the row itself, revealed
 /// on hover and on a right-click, so they need no column of their own.
-/// `default_columns` re-sorts to this order after filtering, matching
-/// `update_visible_columns`.
+/// `default_columns` re-sorts to this order after filtering.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ReplayColumn {
     Name,
@@ -134,7 +130,7 @@ impl ReplayColumn {
     }
 
     /// What a press on the column's header sorts by. `None` for the columns
-    /// the egui app renders as plain headers: Skills and Time Lived.
+    /// with plain headers: Skills and Time Lived.
     pub const fn sort_column(self) -> Option<SortColumn> {
         match self {
             ReplayColumn::Skills | ReplayColumn::TimeLived => None,
@@ -206,8 +202,7 @@ pub struct ColumnArrangement {
 }
 
 impl ColumnArrangement {
-    /// The player and the ship, which say whose row it is, as the egui
-    /// table's frozen columns do.
+    /// The player and the ship, which say whose row it is.
     const DEFAULT_PINNED: [ReplayColumn; 2] = [ReplayColumn::Name, ReplayColumn::ShipName];
 
     pub fn new() -> Self {
@@ -362,8 +357,7 @@ pub enum ColorRole {
 
 /// Team/division/abuse-relative player color. Self = white, ally = light
 /// green, enemy = light red, division-mate (not self) = gold, abuser = pink.
-/// Mirrors `player_color_for_team_relation` plus the division/abuser
-/// overrides in `ui/replay_parser/mod.rs`.
+/// Division and abuser colors override the team relation color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerColorKind {
     SelfPlayer,
@@ -454,11 +448,8 @@ fn captain_points_tier(row: &PlayerRow) -> CaptainPointsTier {
 
 /// Cell text/color/hover for one column of one row. `debug` mirrors the
 /// app's debug-mode flag, which lifts NDA hiding and the enemy-only Skills
-/// gate (the brief's sketch omits this parameter, but NDA gating and the
-/// egui source both key off it alongside `should_hide_stats()`). Mirrors the
-/// per-column mapping in `ui/replay_parser/mod.rs`'s `TableDelegate::cell_ui`
-/// (values only; icons, menus, and multi-segment name coloring are
-/// Milestone 2).
+/// gate, alongside `should_hide_stats()`. Values only: icons, menus, and
+/// multi-segment name coloring are applied by the render layer.
 pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue {
     let nda_active = row.should_hide_stats() && !debug;
 
@@ -501,7 +492,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
         ReplayColumn::PersonalRating if !row.rating_scope.is_rated() => {
             CellValue::plain(DASH).with_hover(t!("ui-personal_rating-unrated_hover").into_owned())
         }
-        // The band name only: the breakdown is built by the front end's own
+        // The band name only: the breakdown is built by the app's own
         // hover when it opens, and is withheld for a row hiding its stats.
         ReplayColumn::PersonalRating => match row.personal_rating.as_ref() {
             Some(pr) => CellValue::colored(format!("{:.0}", pr.pr), ColorRole::PrTier(pr.category))

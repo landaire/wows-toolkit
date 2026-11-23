@@ -2,8 +2,7 @@
 //! and where its fuse goes off.
 //!
 //! The flight solver and the per-plate penetration chain are
-//! `wowsunpack::ballistics`, which the egui viewer also casts through, so both
-//! draw the same shell. What is here is the geometry around it: turning a
+//! `wowsunpack::ballistics`. What is here is the geometry around it: turning a
 //! click and a camera ray into an approach, a ray cast into plate hits, and
 //! the result into lines and markers the viewport can draw.
 
@@ -30,8 +29,7 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShipModelDistance;
 
-/// How many points the drawn arc is sampled at. The egui viewer's own count,
-/// so the two draw the same curve.
+/// How many points the drawn arc is sampled at.
 const ARC_POINT_COUNT: usize = 60;
 
 /// The least the arc is allowed to rise, as a fraction of its drawn length.

@@ -635,7 +635,7 @@ impl Launcher {
         settings.remove_account(key)
     }
 
-    /// Marks a signed-in account's session expired after WGNI refused it, so the front ends
+    /// Marks a signed-in account's session expired after WGNI refused it, so the app can
     /// offer to sign in again.
     pub(crate) fn expire_session(&mut self, key: AccountKey) {
         if !matches!(self.sessions.get(&key), Some(AccountSession::SignedIn { .. })) {

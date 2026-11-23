@@ -1,6 +1,6 @@
 [package]
 name = "wows-toolkit-services"
-description = "Network, runtime, logging and update services shared by the desktop front ends"
+description = "Network, runtime, logging and update services for the desktop app"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -22,11 +22,13 @@ ciborium = { workspace = true }
 # The update download reports its progress over a channel.
 futures = "0.3"
 jiff = { workspace = true }
-# The collab session state the peer task and the front end both hold.
+# The collab session state the peer task and the app both hold.
 parking_lot = "0.12.5"
-# Matches the egui app's feature set so both resolve one copy.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+# The settings file releases before the SQLite database kept their state in.
+ron = "0.12.2"
 rootcause = { workspace = true }
+serde = { workspace = true }
 # The constants mapping a sweep writes.
 serde_json = { workspace = true }
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
@@ -38,8 +40,7 @@ tracing = { workspace = true }
 # The rotated log file a bug report is copied from.
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "time"] }
-# The chat poll behind the roster's possible-stream-sniper chip. Same version
-# and features as the egui app, so the two resolve one Twitch client.
+# The chat poll behind the roster's possible-stream-sniper chip.
 twitch_api = { version = "0.7.2", features = ["helix", "client", "reqwest"] }
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
 wows-toolkit-config = { workspace = true }
@@ -51,7 +52,7 @@ wows_minimap_renderer = { workspace = true }
 wows_replays = { workspace = true }
 # A ping's clock, which a test ages.
 web-time = { workspace = true }
-# The collaborative session mesh, shared with the egui app.
+# The collaborative session mesh.
 wt-collab-client = { workspace = true }
 # The release archive the update is read out of.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

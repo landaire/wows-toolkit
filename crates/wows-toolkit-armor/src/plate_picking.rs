@@ -1,8 +1,5 @@
 //! CPU plate picking support: maps a [`HitResult`] to its tooltip data, and
-//! ports the egui app's hover-highlight overlay upload
-//! (`upload_plate_highlight`, `armor_viewer/ui/tab.rs:2889-2960`) and the
-//! sidebar-hover highlight uploads (`upload_zone_highlight`/
-//! `upload_part_highlight`, `tab.rs:2959-3080`).
+//! uploads the hover-highlight overlay and the sidebar-hover highlights.
 
 use wowsunpack::export::armor_ray::transform_point;
 
@@ -19,8 +16,7 @@ use crate::viewport::types::MeshId;
 use crate::viewport::types::Vertex;
 use crate::visibility::VisibilityFilter;
 
-/// Fixed highlight overlay color/opacity, matching the egui call site
-/// (`tab.rs:5427`: `upload_plate_highlight(pane, &armor, key, device, [1.0, 1.0, 1.0, 0.35])`).
+/// Fixed highlight overlay color/opacity.
 pub const HOVER_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.35];
 
 /// What asked for a highlight, which decides its color and whether it shows
@@ -53,7 +49,7 @@ impl HighlightOrigin {
 
 /// Looks up the tooltip for a pick hit: finds the `(MeshId, Vec<ArmorTriangleTooltip>)`
 /// entry whose id matches the hit's mesh, then indexes by `triangle_index`.
-/// Mirrors the egui app's own lookup (`tab.rs:5327-5331`).
+/// Returns `None` when no entry matches or the index is out of range.
 pub fn tooltip_for_hit<'a>(
     hit: &HitResult,
     mesh_triangle_info: &'a [(MeshId, Vec<ArmorTriangleTooltip>)],
@@ -64,7 +60,7 @@ pub fn tooltip_for_hit<'a>(
 /// Derives a triangle's `PlateKey` (zone, material_name, thickness rounded to
 /// tenths of mm) from its tooltip. Matches `upload.rs`'s `derive_plate_key`
 /// (same formula, different source struct: a tooltip instead of the raw
-/// `ArmorTriangleInfo`) and the egui app's own inline derivation (`tab.rs:5334-5335`).
+/// `ArmorTriangleInfo`).
 pub fn plate_key_of(tooltip: &ArmorTriangleTooltip) -> PlateKey {
     PlateKey {
         zone: tooltip.zone.clone(),
@@ -93,8 +89,7 @@ pub fn upload_plate_highlight(
 }
 
 /// Fixed color for the sidebar-hover highlight (a popover row's Zone/Part/
-/// Plate hover), matching the egui call site's own constant
-/// (`ui::tab::SIDEBAR_HIGHLIGHT_COLOR`, `tab.rs:2956`) -- same value as
+/// Plate hover) -- same value as
 /// `HOVER_HIGHLIGHT_COLOR` (the two highlights never overlap: one is
 /// raycast-driven, the other popover-hover-driven, tracked separately in
 /// `viewport_view.rs` as `hover_highlight`/`sidebar_highlight`).

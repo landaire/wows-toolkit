@@ -4,10 +4,7 @@
 # the features of the whole workspace, as Buck resolves them. Without `targets`,
 # a root is resolved for the targets about.toml names.
 
-# The beta (zgui) and stable (egui) desktop apps.
-[[root]]
-manifest = "crates/wows-toolkit-zgui/Cargo.toml"
-
+# The desktop app.
 [[root]]
 manifest = "crates/wows-toolkit/Cargo.toml"
 
@@ -338,12 +335,6 @@ license = "MIT"
 files = ["third-party/licenses/texts/image-dds.txt"]
 
 [[crate_license]]
-name = "egui_inbox"
-version = "0.14.0"
-license = "MIT"
-files = ["third-party/licenses/texts/hello-egui.txt"]
-
-[[crate_license]]
 name = "levenshtein"
 version = "1.0.5"
 license = "MIT"
@@ -354,12 +345,6 @@ name = "number_prefix"
 version = "0.4.0"
 license = "MIT"
 files = ["third-party/licenses/texts/rust-number-prefix.txt"]
-
-[[crate_license]]
-name = "taffy"
-version = "0.15.0"
-license = "MIT"
-files = ["third-party/licenses/texts/taffy.txt"]
 
 # The release tag has no license file. LICENSE-MIT on the default branch states
 # the project's copyright.

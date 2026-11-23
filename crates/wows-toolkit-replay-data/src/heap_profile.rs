@@ -1,8 +1,7 @@
 //! Live-heap totals sampled out of the running app.
 //!
 //! What this answers is how much of the process's memory is the Rust heap, and
-//! across how many blocks, so this port's footprint can be set beside the egui
-//! app's (`wows_toolkit`'s `main.rs` samples the same way, into the same file).
+//! across how many blocks.
 //!
 //! [`start`] samples on a timer, which says how the heap moves. [`mark`]
 //! samples on demand at a named point, which says what moved it: a timed
@@ -15,7 +14,7 @@
 //! written; `HeapStats::get` needs no symbolization and is where the totals
 //! come from.
 //!
-//! A front end built with its `dhat-heap` feature installs dhat's allocator and
+//! The app built with its `dhat-heap` feature installs dhat's allocator and
 //! enables the feature of the same name here; run it, then read
 //! `dhat-markers.log`. Both functions compile to nothing without it, so call
 //! sites need no `cfg`.

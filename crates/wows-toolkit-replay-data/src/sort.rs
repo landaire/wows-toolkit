@@ -1,6 +1,5 @@
-//! Sorting the player table's rows. Mirrors `SortKey` in `ui/replay_parser/sorting.rs` and the
-//! sort-key tuple built by `UiReport::sort_players` in `ui/replay_parser/mod.rs:899-975`
-//! (allies-before-enemies, the per-column key, then a stable db_id tiebreak).
+//! Sorting the player table's rows: allies before enemies, then the
+//! per-column key, then a stable db_id tiebreak.
 
 use std::borrow::Borrow;
 use std::cmp::Reverse;
@@ -13,7 +12,6 @@ use wowsunpack::game_params::types::Species;
 use crate::model::PlayerRow;
 
 /// Internal sort key that allows comparison across different value types.
-/// Mirrors `sorting.rs::SortKey`.
 #[derive(Clone, PartialEq)]
 enum SortKey {
     String(String),

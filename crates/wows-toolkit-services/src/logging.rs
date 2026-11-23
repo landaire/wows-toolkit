@@ -1,11 +1,10 @@
 //! Where this session's log goes, and what a crash leaves behind for the next
 //! one to report.
 //!
-//! The egui app keeps an hourly-rotated log beside the executable, writes a
-//! panic log into the shared storage directory, and shows what the last run left
-//! there on the next launch (`app.rs`'s `init_logging`, `panic_log_path` and the
-//! Crash Detected window). Both apps read the same two places, so a report from
-//! either names the same files.
+//! An hourly-rotated log is kept beside the executable, a panic log is written
+//! into the shared storage directory, and what the last run left there is shown
+//! on the next launch (the Crash Detected window). These locations match
+//! earlier releases, so a report from any version names the same files.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -17,8 +16,8 @@ use wows_toolkit_hardening::modules::Inventory;
 
 static RENDER_MODE: OnceLock<String> = OnceLock::new();
 
-/// The crates whose events are kept, at the levels the egui app keeps them. Each target is a
-/// prefix, so `wows_toolkit` keeps every `wows_toolkit_*` crate, the front end among them.
+/// The crates whose events are kept, and at which levels. Each target is a
+/// prefix, so `wows_toolkit` keeps every `wows_toolkit_*` crate, the app among them.
 fn targets() -> tracing_subscriber::filter::Targets {
     tracing_subscriber::filter::Targets::new()
         .with_target("wows_toolkit", tracing::Level::DEBUG)
@@ -31,8 +30,7 @@ fn targets() -> tracing_subscriber::filter::Targets {
         .with_target("zgui", tracing::Level::INFO)
 }
 
-/// Where the rotated log files live: beside the executable, as the egui app
-/// writes them, so one Copy Latest Log finds either app's.
+/// Where the rotated log files live: beside the executable.
 pub fn log_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -86,8 +84,7 @@ pub fn init(to_file: bool) -> Option<tracing_appender::non_blocking::WorkerGuard
     guard
 }
 
-/// The name every rotated log file starts with. Shared with the egui app, whose
-/// files this one sits beside.
+/// The name every rotated log file starts with.
 const LOG_PREFIX: &str = "wows_toolkit.log";
 
 /// The newest rotated log file, by name.
@@ -115,8 +112,7 @@ fn newest_log_in(dir: &Path) -> Option<PathBuf> {
 
 /// The file a panic is written to, which the next launch reports.
 ///
-/// In the shared storage directory, which is where the egui app writes it, so
-/// either app reports a crash in the other.
+/// In the shared storage directory.
 pub fn panic_log_path() -> PathBuf {
     let name = PathBuf::from("wows_toolkit_panic.log");
     match wows_toolkit_config::storage_dir() {
@@ -211,7 +207,7 @@ mod tests {
 
         let targets = super::targets();
         let kept = [
-            ("wows_toolkit_zgui::shell", Level::DEBUG),
+            ("wows_toolkit::shell", Level::DEBUG),
             ("wows_toolkit_services::update", Level::DEBUG),
             ("wows_toolkit_replay_data::load", Level::DEBUG),
             ("wows_toolkit_config::db", Level::DEBUG),

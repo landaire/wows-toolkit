@@ -6,7 +6,7 @@ Guidance for agents working in the wows-toolkit repository. These rules override
 
 Cargo workspace, edition 2024, rust 1.100. Crates under `crates/`:
 
-- `wows-toolkit` main desktop app (egui + eframe + glow)
+- `wows-toolkit` main desktop app (zgui)
 - `wowsunpack` game data unpacking, models, game params
 - `wows-replays` replay file parsing and packet decode
 - `minimap-renderer` minimap draw command generation

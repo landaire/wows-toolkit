@@ -2,7 +2,7 @@
 //! the table is sorted, and how a typed filter narrows it.
 //!
 //! The rows come from the shared replay index; this decides what the table
-//! shows of them, the same way in both front ends.
+//! shows of them.
 
 pub mod clans;
 pub mod history;
@@ -14,10 +14,8 @@ pub mod store;
 /// How loudly a number of encounters reads.
 ///
 /// Meeting someone twice is worth a glance, four times worth a colour, six
-/// times worth the colour a loss is drawn in. The bands are the egui
-/// tracker's (`ui/player_tracker/model.rs`'s `encounter_severity_color`);
-/// which tone each band resolves to is the front end's own, since the two
-/// draw on different surfaces.
+/// times worth the colour a loss is drawn in. Which tone each band
+/// resolves to belongs to the UI theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncounterSeverity {
     /// Once or never: nothing worth marking.
@@ -90,8 +88,7 @@ pub const TRACKER_SETTINGS_KEY: &str = "player_tracker";
 /// back over, how each table is ordered, and what the filter box and the
 /// Twitch chat toggle hold.
 ///
-/// The egui tracker keeps the same view under keys of its own, which
-/// [`saved_view::load`] imports once.
+/// Legacy keys hold the same view; [`saved_view::load`] imports them once.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackerSettings {
     #[serde(default)]
@@ -169,7 +166,7 @@ pub enum SortColumn {
 }
 
 impl SortColumn {
-    /// Header order, clan first as in the egui historical table.
+    /// Header order, clan first.
     pub const ALL: [SortColumn; 5] =
         [Self::Clan, Self::Name, Self::TotalEncounters, Self::Encounters, Self::LastEncountered];
 
@@ -307,8 +304,7 @@ pub struct PlayerRowFilter<'a> {
     /// The period's resolved boundary.
     pub since: Option<Timestamp>,
     /// The toggle above the table. While it is off, a player met inside the
-    /// period only as a division mate leaves the table entirely, which is
-    /// what the egui tracker does.
+    /// period only as a division mate leaves the table entirely.
     pub show_division_mates: bool,
     /// Keeps only the players matched to a Twitch chat login in the period.
     pub seen_in_twitch_chat: bool,

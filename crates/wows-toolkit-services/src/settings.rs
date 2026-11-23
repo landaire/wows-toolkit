@@ -1,7 +1,6 @@
 //! Settings snapshot loaded from the shared SQLite config DB at startup.
 //!
-//! An edit is written back through [`crate::settings_writer`], to the same row
-//! the egui app reads, so a setting changed in either app holds in both.
+//! An edit is written back through [`crate::settings_writer`].
 
 use std::path::PathBuf;
 
@@ -25,12 +24,10 @@ use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 /// Settings read from the shared config DB, applied once at startup.
 pub struct StartupSettings {
     pub zoom: ZoomFactor,
-    /// Which palette to render in. The egui app writes the same setting, so
-    /// the two open in the theme the user last chose in either.
+    /// Which palette to render in.
     pub theme: ThemeChoice,
     /// The Twitch credential the chat poll runs under, and the channel it
-    /// watches. Both written by the egui app under the same keys; an empty
-    /// channel watches the credential's own.
+    /// watches. An empty channel watches the credential's own.
     pub twitch_token: Option<TwitchToken>,
     pub twitch_channel: String,
     pub wows_dir: String,
@@ -39,23 +36,23 @@ pub struct StartupSettings {
     pub locale: Option<String>,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
-    /// The player table's sort, shared by every table and with the egui app.
+    /// The player table's sort, shared by every table.
     pub replay_sort: SortOrder,
-    /// `AppPreferences.debug_mode` in the egui app: unhides NDA-hidden stats
+    /// Unhides NDA-hidden stats
     /// in the Replay Inspector and reveals its raw-metadata/raw-results
     /// viewers. Seed for the inspector's session debug toggle.
     pub debug_mode: bool,
     /// `check_for_updates` in the shared database: whether the app looks for a
-    /// new release at startup. Defaults on, as the egui app does.
+    /// new release at startup. Defaults on.
     pub check_for_updates: bool,
     /// `enable_logging`: whether the session is written to the rotated log file
-    /// beside the executable. Defaults on, as the egui app does.
+    /// beside the executable. Defaults on.
     pub enable_logging: bool,
     pub data_sharing: DataSharingMode,
     /// Empty means no proxy, which is the absence this setting has always
     /// used rather than a separate enabled flag.
     pub proxy_url: String,
-    /// `TabState.persisted.auto_load_latest_replay` in the egui app: a
+    /// `auto_load_latest_replay`: a
     /// top-level setting, not part of `ReplaySettings`. Backs the
     /// inspector header's "Autoload Latest Replay" checkbox.
     pub auto_load_latest_replay: bool,
@@ -104,8 +101,7 @@ pub struct StartupSettings {
     /// has been read, which makes the first check a full one.
     pub constants_commit: Option<String>,
     /// Whether Code Integrity Guard is applied. Read at startup before any window
-    /// exists; a front end's settings control writes it for the next launch, as
-    /// the egui settings tab's own does.
+    /// exists; the settings control writes it for the next launch.
     pub code_integrity: wows_toolkit_hardening::CodeIntegrityPreference,
     /// Whether the MCP server runs and where it listens.
     pub mcp: McpSettings,
@@ -118,7 +114,7 @@ impl StartupSettings {
         // Clamped: the slider and the shortcuts only offer this range.
         let zoom =
             queries::get_setting::<f32>(pool, keys::ZOOM_FACTOR).await.map_or(ZoomFactor::DEFAULT, ZoomFactor::new);
-        // Never chosen means follow the desktop, which is the egui default.
+        // Never chosen means follow the desktop.
         let theme = queries::get_setting::<ThemeChoice>(pool, keys::THEME).await.unwrap_or_default();
         let twitch_token = queries::get_setting::<TwitchToken>(pool, twitch_keys::TOKEN).await;
         let twitch_channel =
@@ -128,14 +124,14 @@ impl StartupSettings {
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, keys::CURRENT_REPLAY_PATH).await.unwrap_or_default();
         let replay = queries::get_setting::<ReplaySettings>(pool, keys::REPLAY_SETTINGS).await.unwrap_or_default();
-        // Never sorted is the egui app's default order.
+        // Never sorted is the default order.
         let replay_sort = queries::get_setting::<SortOrder>(pool, keys::REPLAY_SORT).await.unwrap_or_default();
         let debug_mode = queries::get_setting::<bool>(pool, keys::DEBUG_MODE).await.unwrap_or(false);
         let check_for_updates = queries::get_setting::<bool>(pool, keys::CHECK_FOR_UPDATES).await.unwrap_or(true);
-        // On, as the egui app defaults it: the log file is what a bug report is
+        // On by default: the log file is what a bug report is
         // copied from, and a reader who has never touched the setting still gets one.
         let enable_logging = queries::get_setting::<bool>(pool, keys::ENABLE_LOGGING).await.unwrap_or(true);
-        // Two rows, as the egui app keeps them: the mode, and the older bool that
+        // Two rows: the mode, and the older bool that
         // says only whether anything is shared. A build that knows only the bool
         // writes just that, so a disagreement means the bool is the newer word on
         // it; reading the mode alone would report a consent the reader has since

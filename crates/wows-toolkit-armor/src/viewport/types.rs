@@ -9,7 +9,7 @@ pub type Vec3 = na::Vector3<f32>;
 pub type Vec2 = na::Vector2<f32>;
 
 /// A plain axis-aligned viewport rectangle in screen space (top-left origin,
-/// Y-down), replacing `egui::Rect` at the module boundary. `x`/`y` is the
+/// Y-down), independent of any UI toolkit's rectangle type. `x`/`y` is the
 /// top-left corner; `w`/`h` are the extents.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewRect {

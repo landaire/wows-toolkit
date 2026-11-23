@@ -4,7 +4,7 @@
 //! An armor model is a triangle soup, so a hole in it shows up as an edge
 //! belonging to exactly one triangle. Most such edges are not holes: they are
 //! the rim of a plate that simply ends, or a seam too narrow for a shell. The
-//! two filters here are the egui app's (`ui/tab.rs`'s `upload_gap_edges`):
+//! two filters here:
 //! an edge longer than [`MAX_GAP_EDGE_LENGTH`] is model structure rather than
 //! a gap, and an edge with another boundary edge within [`MIN_GAP_WIDTH`] is
 //! one side of a seam rather than an opening.
@@ -289,8 +289,7 @@ mod tests {
     /// The rule is therefore asymmetric, which is what this pins: the short
     /// edge is refused because the long one passes close by it, while the
     /// long one is kept because its own midpoint is nowhere near the short
-    /// one. That is the egui app's rule, kept as it is so the two apps report
-    /// the same count.
+    /// one.
     #[test]
     fn an_edge_is_measured_from_its_midpoint_to_the_whole_of_another() {
         let close = MIN_GAP_WIDTH * 0.5;

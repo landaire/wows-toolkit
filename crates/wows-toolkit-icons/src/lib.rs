@@ -1,10 +1,10 @@
-//! The icons the desktop front ends draw: Lucide's (ISC, `icons/LICENSE-LUCIDE`), brand logos
+//! The icons the desktop app draws: Lucide's (ISC, `icons/LICENSE-LUCIDE`), brand logos
 //! from Simple Icons (CC0, `icons/LICENSE-SIMPLE-ICONS`), and regional globes from Font Awesome
 //! Free (CC BY 4.0, `icons/LICENSE-FONT-AWESOME`), which Lucide does not draw.
 //!
 //! Every document paints in `currentColor`, so an icon takes the colour of the text around it.
 
-/// Invokes `$callback!` with every icon as `Variant => "file-stem",`, so a front end can declare
+/// Invokes `$callback!` with every icon as `Variant => "file-stem",`, so a caller can declare
 /// a type of its own over the same list.
 #[macro_export]
 macro_rules! glyph_list {

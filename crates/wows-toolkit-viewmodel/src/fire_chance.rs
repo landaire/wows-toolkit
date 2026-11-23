@@ -1,8 +1,7 @@
 //! Reading an effective-fire-chance result out loud.
 //!
 //! The analysis itself is `wows_replay_insights::fire_chance`; this is the
-//! wording both front ends put around it, so the same result reads the same
-//! way in either app.
+//! wording put around it.
 //!
 //! The translation layer carries no plural machinery, so every count that can
 //! be one takes a separate key, the way the session-stats labels do.

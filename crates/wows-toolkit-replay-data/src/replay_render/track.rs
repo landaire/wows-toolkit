@@ -153,8 +153,7 @@ impl Track {
     }
 
     /// The stretch of the battle an export covers: from [`export_start`](Self::export_start) to
-    /// the replay's end, as the CLI and the egui renderer export it. `None` for a track with no
-    /// frames.
+    /// the replay's end, as the CLI exports it. `None` for a track with no frames.
     pub fn export_window(&self, include_pre_battle: bool) -> Option<ExportWindow> {
         if self.is_empty() {
             return None;

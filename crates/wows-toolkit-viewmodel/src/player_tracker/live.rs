@@ -1,8 +1,8 @@
 //! The roster of the match currently in progress.
 //!
 //! Read from the game's own `tempArenaInfo.json` and joined to game data,
-//! tracked history, and the identities a packet scan recovers. All of that is
-//! the same work in both front ends; only the drawing differs.
+//! tracked history, and the identities a packet scan recovers. The UI only
+//! draws it.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -59,7 +59,7 @@ pub struct LiveMatchPlayer {
 
 /// How a roster entry is coloured: by relation, with the two stronger
 /// classifications layered over it by the caller. The colours themselves
-/// belong to each front end's theme.
+/// belong to the UI theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerTint {
     SelfPlayer,
@@ -463,7 +463,7 @@ pub struct ResolvedRoster {
 ///
 /// `name_index` is the tracked-player lookup [`build_name_index`] produces;
 /// taking the index rather than the tracker keeps this free of whatever shape
-/// each front end stores its tracked players in.
+/// the UI stores its tracked players in.
 pub fn resolve_roster(
     live: &LiveMatch,
     tracked: &TrackedIndex,

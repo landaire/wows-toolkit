@@ -1,11 +1,8 @@
 //! What a renderer viewport opens showing.
 //!
-//! The egui app's Save Defaults writes the reader's display choices to the
-//! shared `render_options` row (`wows_toolkit_config::queries`); this reads that
-//! row at startup and writes it back, so a default saved in either app is what
-//! the other opens with next time it starts. Both apps read the row once and the
-//! egui app rewrites the whole of it from that copy on its periodic save, so with
-//! both running at once the last save wins rather than the two merging.
+//! Save Defaults writes the reader's display choices to the `render_options`
+//! row (`wows_toolkit_config::queries`); this reads that row at startup and
+//! writes it back.
 //!
 //! Both functions are futures for the tokio runtime the store runs on.
 
@@ -46,7 +43,7 @@ pub async fn load(pool: &SqlitePool) -> SavedRenderOptions {
 }
 
 /// The row [`save`] writes for `defaults`. Serialized apart from the write so
-/// a front end can refuse a value that will not serialize before queueing it.
+/// the app can refuse a value that will not serialize before queueing it.
 pub fn serialize(defaults: &SavedRenderOptions) -> Result<String, SaveError> {
     serde_json::to_string(defaults).map_err(SaveError::Serialize)
 }

@@ -1,5 +1,5 @@
 //! Reading the tracker's saved view, including the one-time import of the
-//! keys the egui tracker keeps it under.
+//! legacy keys it was kept under.
 
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -14,7 +14,7 @@ use crate::player_tracker::TRACKER_SETTINGS_KEY;
 use crate::player_tracker::TimePeriod;
 use crate::player_tracker::TrackerSettings;
 
-/// The egui tracker's player table sort, one setting apiece.
+/// Legacy tracker keys, one setting apiece.
 pub const EGUI_SORT_ORDER_KEY: &str = "player_tracker.sort_order";
 pub const EGUI_CLAN_SORT_ORDER_KEY: &str = "player_tracker.clan_sort_order";
 pub const EGUI_PLAYER_FILTER_KEY: &str = "player_tracker.player_filter";
@@ -28,7 +28,7 @@ pub enum LoadViewError {
     Store(#[source] sqlx::Error),
 }
 
-/// The serialized shape of the egui tracker's sort direction.
+/// The serialized shape of the legacy sort direction.
 #[derive(Debug, Clone, Copy, Deserialize)]
 enum EguiOrder {
     Asc,
@@ -44,7 +44,7 @@ impl From<EguiOrder> for SortOrder {
     }
 }
 
-/// The serialized shape of the egui player table's sort.
+/// The serialized shape of the legacy player table sort.
 #[derive(Debug, Clone, Copy, Deserialize)]
 enum EguiSort {
     Name(EguiOrder),
@@ -68,7 +68,7 @@ impl From<EguiSort> for Sort {
     }
 }
 
-/// The serialized shape of the egui clans table's sort.
+/// The serialized shape of the legacy clans table sort.
 #[derive(Debug, Clone, Copy, Deserialize)]
 enum EguiClanSort {
     Clan(EguiOrder),
@@ -96,9 +96,9 @@ impl From<EguiClanSort> for ClanSort {
 
 /// The tracker's saved view, or `None` when nothing was saved.
 ///
-/// Without a saved view, the egui tracker's keys are read and the view built
-/// from them is stored, so later launches read the stored view and never the
-/// egui keys again.
+/// Without a saved view, the legacy keys are read and the view built from
+/// them is stored, so later launches read the stored view and never the
+/// legacy keys again.
 pub async fn load(pool: &SqlitePool) -> Result<Option<TrackerSettings>, LoadViewError> {
     let saved =
         queries::try_get_setting::<TrackerSettings>(pool, TRACKER_SETTINGS_KEY).await.map_err(LoadViewError::Read)?;
@@ -106,7 +106,7 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<TrackerSettings>, LoadView
         return Ok(saved);
     }
 
-    // An unreadable egui key costs that field only, as it does in egui.
+    // An unreadable legacy key costs that field only.
     let sort = queries::get_setting::<EguiSort>(pool, EGUI_SORT_ORDER_KEY).await;
     let clan_sort = queries::get_setting::<EguiClanSort>(pool, EGUI_CLAN_SORT_ORDER_KEY).await;
     let filter = queries::get_setting::<String>(pool, EGUI_PLAYER_FILTER_KEY).await;
@@ -115,8 +115,8 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<TrackerSettings>, LoadView
         return Ok(None);
     }
 
-    // A key egui never wrote stands for egui's default, which is the same view as this one's. Egui
-    // has no Twitch chat toggle, so the import leaves it off.
+    // An absent legacy key stands for the default view. The legacy keys have no Twitch chat
+    // toggle, so the import leaves it off.
     let settings = TrackerSettings {
         period: period.unwrap_or_default(),
         sort: sort.map(Sort::from).unwrap_or_default(),
@@ -124,7 +124,7 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<TrackerSettings>, LoadView
         filter: filter.unwrap_or_default(),
         seen_in_twitch_chat: false,
     };
-    // A view saved while this ran, by this front end or another, wins over the import.
+    // A view saved while this ran wins over the import.
     let inserted =
         queries::insert_setting_if_absent(pool, TRACKER_SETTINGS_KEY, &settings).await.map_err(LoadViewError::Store)?;
     if inserted {

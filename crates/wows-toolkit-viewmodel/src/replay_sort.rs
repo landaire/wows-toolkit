@@ -1,5 +1,5 @@
-//! The player table's sort order, kept under [`crate::settings::keys::REPLAY_SORT`] in the same
-//! form the egui app writes, so a sort chosen in either front end holds in both.
+//! The player table's sort order, kept under [`crate::settings::keys::REPLAY_SORT`] in the
+//! form earlier releases wrote, so a saved sort still reads back.
 
 use serde::Deserialize;
 use serde::Serialize;

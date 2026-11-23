@@ -1,8 +1,7 @@
 //! What was fired at one ship, grouped by the salvo it came from.
 //!
 //! The armor viewers draw the hits; this is the log beside them, which says who
-//! fired, when, and what each shell did. Both front ends read the same grouping,
-//! so the same replay reads the same way in either.
+//! fired, when, and what each shell did.
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -102,7 +101,7 @@ impl ServerOutcome {
         }
     }
 
-    /// The key naming this outcome, for a front end that translates it.
+    /// The key naming this outcome, for a caller that translates it.
     pub const fn label_key(&self) -> &'static str {
         match self {
             Self::Penetration => "ui-armor-outcome-penetration",
@@ -148,8 +147,7 @@ pub fn group_incoming(
             continue;
         }
         // Only gunfire: a hit the parser could not match back to a salvo is a
-        // torpedo, a bomb or a rocket, which this log has nothing to say about
-        // and which the egui panel drops for the same reason.
+        // torpedo, a bomb or a rocket, which this log has nothing to say about.
         let Some(salvo) = hit.salvo.as_ref() else { continue };
         if !filter.secondaries && !main_battery.is_empty() && !main_battery.contains(&salvo.params_id) {
             continue;

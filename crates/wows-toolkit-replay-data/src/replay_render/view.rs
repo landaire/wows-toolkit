@@ -12,8 +12,7 @@ use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderScale;
 use wows_minimap_renderer::viewport::MapViewport;
 
-/// How much of a zoom one pixel of wheel travel is. The egui renderer's own
-/// rate, so the wheel feels the same in both.
+/// How much of a zoom one pixel of wheel travel is.
 pub const ZOOM_PER_PIXEL: f32 = 0.01;
 
 /// How many pixels one line of wheel travel is, for a wheel that reports lines rather than
@@ -284,8 +283,8 @@ impl MapView {
         if self.set_view(self.shaped_view().zoomed_about(zoom, at)) { Wheel::Zoomed } else { Wheel::Unchanged }
     }
 
-    /// Zooms to `zoom` about the middle of what is on screen, as the egui
-    /// renderer's zoom control does: there is no pointer to zoom about.
+    /// Zooms to `zoom` about the middle of what is on screen, as the zoom
+    /// control does: there is no pointer to zoom about.
     pub fn zoom_to(&mut self, zoom: f32) -> bool {
         let middle = MINIMAP_SIZE as f32 / 2.0;
         self.set_view(self.view.zoomed_about(zoom, (middle, middle)))

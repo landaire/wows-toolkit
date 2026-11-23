@@ -1,8 +1,8 @@
 //! Aggregating tracked encounters by clan.
 //!
-//! Both front ends show a clans table over the same tracked history, so the
-//! counting rule -- which encounters a clan gets credit for, and which the
-//! division-mate toggle hides -- lives here rather than in either of them.
+//! The counting rule for the clans table -- which encounters a clan gets credit
+//! for, and which the division-mate toggle hides -- lives here rather than in
+//! the UI.
 
 use std::collections::HashMap;
 use std::collections::HashSet;

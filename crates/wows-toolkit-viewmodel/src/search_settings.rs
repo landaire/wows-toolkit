@@ -1,8 +1,8 @@
-//! The Search tab's saved state: the `search` settings row both desktop front ends and the egui
-//! app keep the query bar's query, history, sort and operator choices in.
+//! The Search tab's saved state: the `search` settings row that keeps the query bar's query,
+//! history, sort and operator choices.
 //!
-//! Each field is written on its own, read-modify-write, so the fields another front end keeps in
-//! the row survive.
+//! Each field is written on its own, read-modify-write, so other fields in the row, including
+//! legacy ones, survive.
 
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;

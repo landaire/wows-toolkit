@@ -208,7 +208,7 @@ impl Launcher {
         self.last_exit.as_ref()
     }
 
-    /// Why the last launch failed after Play or a replay returned, once. A front end takes it
+    /// Why the last launch failed after Play or a replay returned, once. The app takes it
     /// after applying events to tell the user.
     pub fn take_launch_failure(&mut self) -> Option<LaunchFailure> {
         self.launch_failure.take()

@@ -143,7 +143,7 @@ pub struct ShellArrival {
     /// `WorldDistance` measures the same coordinates at 15 for an offset against
     /// a hull, and says the two are unreconciled. This follows the firing range
     /// the ballistics solver is already run on, so a shell reads the same here
-    /// as it does in the egui viewer.
+    /// as it does in the replay viewer.
     pub travelled: Meters,
     /// The way it was going, flattened and normalised: the fall angle belongs
     /// to the solve rather than to the record.

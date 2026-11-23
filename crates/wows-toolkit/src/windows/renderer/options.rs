@@ -1,0 +1,439 @@
+//! The gear on the transport: what the viewport draws, what an export is encoded with, and saving both as the defaults.
+
+use landaire_ui::Toasts;
+use landaire_ui::TooltipContentProps;
+use landaire_ui::TooltipProps;
+use landaire_ui::TooltipTriggerProps;
+use wows_minimap_renderer::ExportSpeed;
+use wows_minimap_renderer::ExportTiming;
+use wows_minimap_renderer::VideoCodec;
+use wows_minimap_renderer::VideoLength;
+use wows_minimap_renderer::timing::SPEED_LADDER;
+use wows_minimap_renderer::timing::VIDEO_LENGTH_LADDER;
+use wows_minimap_renderer::toggles::TOGGLES;
+use wows_minimap_renderer::toggles::Toggle;
+use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::replay_render::export::approximate_speed;
+use wows_toolkit_replay_data::replay_render::export::encoder_status;
+use wows_toolkit_replay_data::replay_render::export::video_length_label;
+use wows_toolkit_replay_data::replay_render::playback::speed_label;
+use wt_translations::t;
+use zgui::component;
+use zgui::css;
+use zgui::reactive::Callable;
+use zgui::reactive::LocalStorage;
+use zgui::reactive::RwSignal;
+use zgui::reactive::Signal;
+use zgui::reactive::UnsyncCallback;
+use zgui::reactive::prelude::Get;
+use zgui::reactive::prelude::Update;
+use zgui::reactive::prelude::With;
+use zgui::view;
+use zgui::view::AnyView;
+use zgui::view::ForProps;
+use zgui::view::IntoView;
+use zgui::view::NodeRef;
+use zgui::view::ScrollBehavior;
+use zgui::view::ScrollTarget;
+use zgui::view::ShowProps;
+use zgui::view::install_stylesheet;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
+use zgui_ui::CheckboxProps;
+use zgui_ui::Checked;
+use zgui_ui::LabelProps;
+use zgui_ui::PopoverContentProps;
+use zgui_ui::PopoverProps;
+use zgui_ui::PopoverTriggerProps;
+use zgui_ui::ToggleProps;
+use zgui_ui::ToggleSize;
+use zgui_ui_primitives::Align;
+use zgui_ui_primitives::Binding;
+use zgui_ui_primitives::Placement;
+use zgui_ui_primitives::Side;
+
+use crate::icons::AppIconProps;
+use crate::windows::renderer::session::Layers;
+use crate::windows::renderer::session::RendererSession;
+use crate::windows::renderer::view::TransportButtonProps;
+
+/// The sheet every popover and reading of this slice installs: they share the check rows and the
+/// panel look.
+pub(super) const SHEET: &str = "wt-renderer-options";
+
+pub(super) const CSS: &str = css!(
+    ".wt-renderer-options__panel { width: 240px; max-height: 420px; overflow-y: auto; padding: 8px; }
+    .wt-renderer-options__list { display: flex; flex-direction: column; gap: 2px; }
+    .wt-renderer-options__check { display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; }
+    .wt-renderer-options__heading { padding-top: 12px; font-size: 11px; font-weight: 700; color: var(--wt-color-text-dim); }
+    .wt-renderer-options__caption { padding-top: 4px; font-size: 11px; color: var(--wt-color-text-dim); }
+    .wt-renderer-options__codecs { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
+    .wt-renderer-options__choices { display: flex; flex-direction: row; flex-wrap: wrap; gap: 2px; }
+    .wt-renderer-options__save { padding-top: 8px; }"
+);
+
+/// One length or speed the video timing offers.
+#[derive(Clone)]
+struct Rung {
+    test_id: String,
+    label: String,
+    timing: ExportTiming,
+}
+
+/// The gear. Refused until the bake lands: the options until then are the ones it is baking
+/// under, not the reader's, and saving them as the defaults would store those over what they chose.
+#[component]
+pub fn OptionsPopover(session: RendererSession) -> impl IntoView {
+    install_stylesheet(SHEET, CSS);
+
+    view! {
+        if move || session.is_ready() {
+            OptionsGear(session = session)
+        } else {
+            // Refused, so it is never pressed: only the gear's place and look are wanted.
+            TransportButton(glyph = Glyph::Settings, label_key = "ui-renderer-settings-title",
+                test_id = "replay-renderer-settings-toggle", disabled = Signal::stored_local(true),
+                on_press = UnsyncCallback::new(|()| {}))
+        }
+    }
+}
+
+/// The gear once the track is here, and what it opens.
+#[component]
+fn OptionsGear(session: RendererSession) -> impl IntoView {
+    let label = t!("ui-renderer-settings-title").into_owned();
+    let named = label.clone();
+
+    view! {
+        Popover {
+            PopoverTrigger(
+                variant = ButtonVariant::Outline,
+                size = ButtonSize::IconXs,
+                attr:data-testid = "replay-renderer-settings-toggle",
+                a11y:label = label.clone()
+            ) {
+                Tooltip {
+                    TooltipTrigger {
+                        AppIcon(glyph = Glyph::Settings)
+                    }
+                    TooltipContent {{named.clone()}}
+                }
+            }
+            PopoverContent(
+                placement = Placement::new(Side::Top, Align::End),
+                class = "wt-renderer-options__panel",
+                attr:data-testid = "replay-renderer-settings-list"
+            ) {
+                LayerList(
+                    layers = session.layers,
+                    toggles = TOGGLES.iter().collect(),
+                    set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| session.toggle_layer(toggle, on))
+                )
+                ExportSettingsSection(session = session)
+                SaveDefaultsButton(session = session)
+            }
+        }
+    }
+}
+
+/// The display toggles in `toggles`, each read off `layers` and changed through `set`.
+#[component]
+pub(super) fn LayerList(
+    layers: RwSignal<Layers, LocalStorage>,
+    toggles: Vec<&'static Toggle>,
+    set: UnsyncCallback<(&'static Toggle, bool)>,
+) -> impl IntoView {
+    view! {
+        column(class = "wt-renderer-options__list") {
+            for toggle in move || toggles.clone(), key = |toggle: &&Toggle| toggle.id {
+                LayerToggle(layers = layers, toggle = toggle, set = set)
+            }
+        }
+    }
+}
+
+/// One of the display toggles.
+#[component]
+fn LayerToggle(
+    layers: RwSignal<Layers, LocalStorage>,
+    toggle: &'static Toggle,
+    set: UnsyncCallback<(&'static Toggle, bool)>,
+) -> impl IntoView {
+    let checked =
+        Signal::derive_local(move || layers.with(|layers| (toggle.read)(&layers.options, layers.show_dead_ships)));
+    let on_change = UnsyncCallback::new(move |on: bool| set.run((toggle, on)));
+
+    view! {
+        CheckRow(label = t!(toggle.label_key).into_owned(), test_id = toggle.id.to_owned(), checked = checked, on_change = on_change)
+    }
+}
+
+/// What an export is encoded with, under the display toggles.
+#[component]
+fn ExportSettingsSection(session: RendererSession) -> impl IntoView {
+    let settings = move || session.export.with(|export| export.settings);
+    let prefer_cpu = Signal::derive_local(move || settings().prefer_cpu);
+    let pre_battle = Signal::derive_local(move || settings().include_pre_battle);
+    let codecs: Vec<VideoCodec> = encoder_status().supported_codecs().collect();
+
+    view! {
+        column {
+            text(class = "wt-renderer-options__heading") {{t!("ui-renderer-settings-export_settings").into_owned()}}
+            CheckRow(
+                label = t!("ui-renderer-settings-prefer_cpu").into_owned(),
+                test_id = "replay-renderer-prefer-cpu".to_owned(),
+                tooltip = t!("ui-renderer-settings-prefer_cpu_tooltip").into_owned(),
+                checked = prefer_cpu,
+                on_change = UnsyncCallback::new(move |on: bool| session.export.update(|export| export.settings.prefer_cpu = on))
+            )
+            CheckRow(
+                label = t!("ui-renderer-settings-include_pre_battle").into_owned(),
+                test_id = "replay-renderer-include-pre-battle".to_owned(),
+                tooltip = t!("ui-renderer-settings-include_pre_battle_tooltip").into_owned(),
+                checked = pre_battle,
+                on_change = UnsyncCallback::new(move |on: bool| {
+                    session.export.update(|export| export.settings.include_pre_battle = on);
+                })
+            )
+            VideoTiming(session = session)
+            text(class = "wt-renderer-options__caption") {{t!("ui-renderer-settings-codec").into_owned()}}
+            column(class = "wt-renderer-options__codecs") {
+                CodecChoice(session = session, codec = None, test_id = "replay-renderer-codec-auto".to_owned())
+                // Only what this machine can actually encode with.
+                for codec in move || codecs.clone(), key = |codec: &VideoCodec| *codec {
+                    CodecChoice(session = session, codec = Some(codec), test_id = format!("replay-renderer-codec-{}", codec as usize))
+                }
+            }
+        }
+    }
+}
+
+/// One codec to encode with, or `None` for the encoder's own pick.
+#[component]
+fn CodecChoice(session: RendererSession, codec: Option<VideoCodec>, test_id: String) -> impl IntoView {
+    let picked = Signal::derive_local(move || session.export.with(|export| export.settings.codec == codec));
+    let label = move || match codec {
+        Some(codec) => codec.display_name().to_owned(),
+        // Auto names the codec it would pick, so the choice is not blind.
+        None => {
+            let prefer_cpu = session.export.with(|export| export.settings.prefer_cpu);
+            format!(
+                "{} ({})",
+                t!("ui-renderer-settings-codec_auto"),
+                encoder_status().best_codec(prefer_cpu).display_name()
+            )
+        }
+    };
+    let named = label();
+    let place = NodeRef::new();
+
+    view! {
+        box(node_ref = place, on:focus_in = move |_| reveal(place)) {
+            Toggle(
+                // Pressing the chosen one again leaves it chosen: one codec is always picked.
+                pressed = Binding::controlled(picked, move |_| session.export.update(|export| export.settings.codec = codec)),
+                size = ToggleSize::Sm,
+                label = named,
+                attr:data-testid = test_id
+            ) {
+                {label}
+            }
+        }
+    }
+}
+
+/// How the exported stretch of the battle maps onto the video: fitted into a length or played at a
+/// speed, the length or speed itself, and what that comes to for the open replay.
+#[component]
+fn VideoTiming(session: RendererSession) -> impl IntoView {
+    let timing = move || session.export.with(|export| export.settings.timing);
+    let set = move |next: fn(ExportTiming) -> ExportTiming| {
+        UnsyncCallback::new(move |()| {
+            session.export.update(|export| export.settings.timing = next(export.settings.timing))
+        })
+    };
+    let result = move || {
+        let settings = session.export.with(|export| export.settings);
+        let window = session.track()?.export_window(settings.include_pre_battle)?.seconds();
+        let said = match settings.timing {
+            ExportTiming::Length(_) => t!(
+                "ui-renderer-settings-export_timing_result_speed",
+                speed = approximate_speed(settings.timing.rate(window))
+            ),
+            ExportTiming::Speed(_) => t!(
+                "ui-renderer-settings-export_timing_result_length",
+                length = video_length_label(settings.timing.output_seconds(window))
+            ),
+        };
+
+        Some(said.into_owned())
+    };
+
+    view! {
+        column {
+            text(class = "wt-renderer-options__caption") {{t!("ui-renderer-settings-export_timing").into_owned()}}
+            row(class = "wt-renderer-options__choices") {
+                // A mode already chosen keeps the length or speed chosen in it.
+                TimingChoice(
+                    label = t!("ui-renderer-settings-export_timing_length").into_owned(),
+                    test_id = "replay-renderer-timing-length".to_owned(),
+                    picked = Signal::derive_local(move || matches!(timing(), ExportTiming::Length(_))),
+                    on_press = set(|timing| match timing {
+                        ExportTiming::Length(_) => timing,
+                        ExportTiming::Speed(_) => ExportTiming::Length(VideoLength::DEFAULT),
+                    })
+                )
+                TimingChoice(
+                    label = t!("ui-renderer-settings-export_timing_speed").into_owned(),
+                    test_id = "replay-renderer-timing-speed".to_owned(),
+                    picked = Signal::derive_local(move || matches!(timing(), ExportTiming::Speed(_))),
+                    on_press = set(|timing| match timing {
+                        ExportTiming::Speed(_) => timing,
+                        ExportTiming::Length(_) => ExportTiming::Speed(ExportSpeed::DEFAULT),
+                    })
+                )
+            }
+            row(class = "wt-renderer-options__choices") {
+                for rung in move || ladder(timing()), key = |rung: &Rung| rung.test_id.clone() {
+                    TimingChoice(
+                        label = rung.label,
+                        test_id = rung.test_id,
+                        picked = Signal::derive_local(move || timing() == rung.timing),
+                        on_press = UnsyncCallback::new(move |()| {
+                            session.export.update(|export| export.settings.timing = rung.timing);
+                        })
+                    )
+                }
+            }
+            text(class = "wt-renderer-options__caption wt-renderer-options__timing-result", attr:data-testid = "replay-renderer-timing-result") {{result}}
+        }
+    }
+}
+
+/// One of the video timing's choices, pressed while it is what the next export is timed by.
+#[component]
+fn TimingChoice(
+    label: String,
+    test_id: String,
+    picked: Signal<bool, LocalStorage>,
+    on_press: UnsyncCallback<()>,
+) -> impl IntoView {
+    let place = NodeRef::new();
+    let named = label.clone();
+
+    view! {
+        box(node_ref = place, on:focus_in = move |_| reveal(place)) {
+            Toggle(
+                // Pressing the chosen one again leaves it chosen: the video is always timed somehow.
+                pressed = Binding::controlled(picked, move |_| on_press.run(())),
+                size = ToggleSize::Sm,
+                label = named,
+                attr:data-testid = test_id
+            ) {
+                {label.clone()}
+            }
+        }
+    }
+}
+
+/// The lengths or the speeds the video timing offers, in the mode `timing` is in.
+fn ladder(timing: ExportTiming) -> Vec<Rung> {
+    match timing {
+        ExportTiming::Length(_) => VIDEO_LENGTH_LADDER
+            .iter()
+            .filter_map(|seconds| VideoLength::new(*seconds as f32))
+            .map(|length| Rung {
+                test_id: format!("replay-renderer-timing-length-{}", length.seconds()),
+                label: video_length_label(length.seconds()),
+                timing: ExportTiming::Length(length),
+            })
+            .collect(),
+        ExportTiming::Speed(_) => SPEED_LADDER
+            .iter()
+            .filter_map(|speed| ExportSpeed::new(*speed))
+            .map(|speed| Rung {
+                test_id: format!("replay-renderer-timing-speed-{}", speed.game_seconds_per_second()),
+                label: speed_label(speed.game_seconds_per_second()),
+                timing: ExportTiming::Speed(speed),
+            })
+            .collect(),
+    }
+}
+
+/// Keeps what this viewport is showing as what the next one opens with.
+#[component]
+fn SaveDefaultsButton(session: RendererSession) -> impl IntoView {
+    let toasts = Toasts::current();
+    let place = NodeRef::new();
+
+    view! {
+        box(class = "wt-renderer-options__save", node_ref = place, on:focus_in = move |_| reveal(place)) {
+            Button(
+                variant = ButtonVariant::Outline,
+                size = ButtonSize::Sm,
+                attr:data-testid = "replay-renderer-save-defaults",
+                on:click = move |_| session.spawn(async move {
+                    let saved = session.save_defaults().await;
+                    // A window with no message host has nowhere to say it.
+                    let Some(toasts) = toasts else { return };
+                    if saved {
+                        toasts.ok(t!("ui-renderer-settings-save_defaults_done").into_owned());
+                    } else {
+                        toasts.failed(t!("ui-renderer-settings-save_defaults_failed").into_owned());
+                    }
+                })
+            ) {
+                {t!("ui-renderer-settings-save_defaults").into_owned()}
+            }
+        }
+    }
+}
+
+/// A checkbox and its name, either of which toggles it, with an optional hover explaining it.
+#[component]
+pub(super) fn CheckRow(
+    label: String,
+    test_id: String,
+    #[prop(into, optional)] tooltip: Option<String>,
+    #[prop(into)] checked: Signal<bool, LocalStorage>,
+    on_change: UnsyncCallback<bool>,
+) -> impl IntoView {
+    let place = NodeRef::new();
+    let name = NodeRef::new();
+    let control = NodeRef::new();
+    let ticked = Signal::derive_local(move || Checked::from(checked.get()));
+    let row = move || {
+        view! {
+            row(class = "wt-renderer-options__check", node_ref = place, on:focus_in = move |_| reveal(place)) {
+                Checkbox(
+                    checked = Binding::controlled(ticked, move |next: Checked| on_change.run(next.is_checked())),
+                    node_ref = control,
+                    labelled_by = name,
+                    attr:data-testid = test_id.clone()
+                )
+                Label(node_ref = name, control = control) {
+                    {label.clone()}
+                }
+            }
+        }
+    };
+
+    match tooltip {
+        None => AnyView::new(row()),
+        Some(tooltip) => AnyView::new(view! {
+            Tooltip {
+                TooltipTrigger {
+                    {row()}
+                }
+                TooltipContent {{tooltip.clone()}}
+            }
+        }),
+    }
+}
+
+/// Scrolls a control the keyboard moved to into its scrolled panel's view, which focus alone does
+/// not do.
+fn reveal(place: NodeRef) {
+    place.scroll_to(ScrollTarget::IntoView, ScrollBehavior::Instant);
+}

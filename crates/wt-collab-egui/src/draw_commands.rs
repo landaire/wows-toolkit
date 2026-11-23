@@ -1,7 +1,4 @@
-//! Shared rendering of replay DrawCommands for both the desktop app and the web client.
-//!
-//! The desktop's `replay_renderer/shapes.rs` was the authoritative source; this module
-//! is a direct port. All consumers (desktop + web) call into here.
+//! Rendering of replay DrawCommands through egui's painter.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -42,10 +39,10 @@ use crate::transforms::MapTransform;
 
 /// Texture resources for DrawCommand rendering.
 ///
-/// Desktop provides all fields; web may leave desktop-only sets as `None`.
+/// Optional sets may be `None` when a caller does not draw those layers.
 pub struct DrawCommandTextures<'a> {
     pub ship_icons: &'a HashMap<String, TextureHandle>,
-    /// Gold icon-shaped outlines for detected-teammate highlight (desktop only).
+    /// Gold icon-shaped outlines for detected-teammate highlight.
     pub ship_icon_outlines: Option<&'a HashMap<String, TextureHandle>>,
     pub plane_icons: &'a HashMap<String, TextureHandle>,
     pub building_icons: Option<&'a HashMap<String, TextureHandle>>,
@@ -54,7 +51,7 @@ pub struct DrawCommandTextures<'a> {
     pub subribbon_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub death_cause_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub powerup_icons: Option<&'a HashMap<String, TextureHandle>>,
-    /// Ship silhouette for the stats panel HP overlay (desktop only).
+    /// Ship silhouette for the stats panel HP overlay.
     pub silhouette_texture: Option<&'a TextureHandle>,
 }
 
@@ -68,14 +65,13 @@ pub struct ConsumableHoverRegion {
     pub consumable: wows_minimap_renderer::draw_command::RosterConsumable,
 }
 
-/// A hoverable region over a roster row's player-name header. The desktop
-/// renderer uses this to attach a build popover; web clients can ignore it.
-/// The `entity_id` keys back into the per-player build snapshot the desktop
-/// maintains alongside the live BattleController.
+/// A hoverable region over a roster row's player-name header, for a caller
+/// that attaches a build popover. The `entity_id` keys back into that
+/// caller's per-player build snapshot.
 pub struct PlayerBuildHoverRegion {
     pub rect: Rect,
     pub entity_id: wows_replays::types::EntityId,
-    /// Raw arena-side team id, used by the desktop popover to decide whether
+    /// Raw arena-side team id, used by a build popover to decide whether
     /// to render the build (own team is always allowed; enemy teams require
     /// a merged replay from that team).
     pub team_id: i64,
@@ -86,7 +82,7 @@ pub struct PlayerBuildHoverRegion {
 
 /// Controls which labels are shown on ships and dead ships.
 ///
-/// Desktop constructs this from `RenderOptions`; web uses `Default` (show all).
+/// Built from `RenderOptions`, or `Default` (show all).
 pub struct DrawCommandLabelOptions {
     pub show_player_names: bool,
     pub show_ship_names: bool,
@@ -526,7 +522,7 @@ fn render_glow_text_overlay(
 /// to skip hover collection.
 ///
 /// `player_build_regions` collects one entry per roster row's player-name
-/// header for desktop build popovers. Pass `None` (web client) to skip.
+/// header for build popovers. Pass `None` to skip.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_command_to_shapes(
     cmd: &DrawCommand,

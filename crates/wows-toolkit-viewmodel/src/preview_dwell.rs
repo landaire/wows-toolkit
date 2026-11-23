@@ -1,12 +1,10 @@
 //! When a hovered row has been watched long enough to be worth previewing.
 //!
 //! Baking a minimap preview reads and parses a replay, so it is not something
-//! to start for every row the pointer crosses on its way somewhere else. Both
-//! front ends wait for the pointer to settle first, and they wait the same
-//! amount: a preview that appeared after a different delay in each app would
-//! be a different feature in each.
+//! to start for every row the pointer crosses on its way somewhere else. The
+//! app waits for the pointer to settle first.
 //!
-//! Pure on purpose. The front end reports hovers and leaves as its own event
+//! Pure on purpose. The UI reports hovers and leaves as its own event
 //! model produces them, and asks what to do; nothing here draws or measures a
 //! frame.
 
@@ -18,9 +16,9 @@ pub const DWELL: Duration = Duration::from_millis(300);
 
 /// Tracks how long the pointer has continuously dwelled on one row.
 ///
-/// `K` is whatever identifies a row to the caller; the egui app keys on the
-/// replay's path and mtime, so a file rewritten under the same name is a
-/// different preview.
+/// `K` is whatever identifies a row to the caller. Keying on the replay's
+/// path and mtime makes a file rewritten under the same name a different
+/// preview.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dwell<K> {
     /// The row currently under the pointer and how long it has been watched
@@ -130,7 +128,7 @@ mod tests {
         assert_eq!(dwell.pending_request(), None);
     }
 
-    /// Exactly the dwell counts, so a front end reporting one frame of
+    /// Exactly the dwell counts, so a caller reporting one frame of
     /// precisely that length is not made to wait for a second.
     #[test]
     fn the_boundary_itself_counts() {

@@ -177,8 +177,7 @@ pub struct RendererConfig {
 impl Default for RendererConfig {
     fn default() -> Self {
         Self {
-            // Mirrors `SavedRenderOptions::default()` on the desktop side
-            // (crates/wows-toolkit/src/data/settings.rs) so CLI and egui
+            // Mirrors `SavedRenderOptions::default()` so CLI and desktop
             // renders look the same out of the box.
             show_player_names: false,
             show_ship_names: true,
@@ -411,10 +410,9 @@ video_length = 60
         if overrides.no_chat {
             self.show_chat = false;
         }
-        // Team rosters vs stats panel: enforcing exclusivity here keeps the
-        // CLI behavior aligned with the egui checkboxes. When both arrive
-        // enabled (e.g. team_rosters via CLI plus stats_panel from a config
-        // file), team rosters win.
+        // Team rosters and the stats panel are exclusive, as the viewer's
+        // checkboxes are. When both arrive enabled (e.g. team_rosters via CLI
+        // plus stats_panel from a config file), team rosters win.
         if overrides.team_rosters {
             self.show_team_rosters = true;
             self.show_stats_panel = false;

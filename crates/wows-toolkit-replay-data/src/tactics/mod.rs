@@ -1,10 +1,9 @@
 //! A tactics board: a map with capture points on it, drawn away from any battle.
 //!
-//! The egui app calls this the Tactics Board (`replay/minimap_view/tactics.rs`). It is the same
-//! map the replay viewport draws, rasterised through the same renderer, with the capture points of
-//! one of the map's own game modes on it rather than a battle's.
+//! It is the same map the replay viewport draws, rasterised through the same renderer, with the
+//! capture points of one of the map's own game modes on it rather than a battle's.
 //!
-//! [`board::Board`] is the whole board as a front end drives it; the rest is what it is built
+//! [`board::Board`] is the whole board as the app drives it; the rest is what it is built
 //! from.
 
 pub mod board;
@@ -126,8 +125,7 @@ pub struct BoardCapPoint {
     pub team: Option<TeamId>,
     /// Whether it came from a recorded layout rather than from the reader.
     ///
-    /// A frozen cap is where the game put it, so it is not dragged or deleted: the egui board
-    /// holds its own the same way.
+    /// A frozen cap is where the game put it, so it is not dragged or deleted.
     pub frozen: bool,
 }
 
@@ -136,8 +134,8 @@ fn team_from_raw(raw: i64) -> Option<TeamId> {
     (raw >= 0).then(|| TeamId::new(raw))
 }
 
-/// The other way: a cap nobody holds is stated as a negative team, which is the form the egui
-/// board and the wire use.
+/// The other way: a cap nobody holds is stated as a negative team, which is the form the preset
+/// file and the wire use.
 fn team_to_raw(team: Option<TeamId>) -> i64 {
     team.map(|team| team.raw()).unwrap_or(-1)
 }
@@ -342,8 +340,8 @@ impl Letterbox {
     }
 }
 
-/// How big a turning handle is drawn and how far above the shape it sits. The egui board's own
-/// figures, in screen pixels at any zoom.
+/// How big a turning handle is drawn and how far above the shape it sits, in screen pixels at any
+/// zoom.
 pub const HANDLE_RADIUS: f32 = 5.0;
 pub const HANDLE_DISTANCE: f32 = 25.0;
 
@@ -479,12 +477,11 @@ pub enum CapDrag {
 pub const RESIZE_BAND_PX: f32 = 8.0;
 
 /// The smallest a zone can be made, in world units, so one cannot be shrunk to nothing and lost.
-/// The egui board holds its own to the same floor.
 pub const MIN_CAP_RADIUS: f32 = 0.1 * WORLD_UNITS_PER_KM;
 pub const MAX_CAP_RADIUS: f32 = 10.0 * WORLD_UNITS_PER_KM;
 
 /// What a capture point added by hand starts as. A cap circle is about 5 km, which is about 167
-/// world units; the egui board starts one at 150.
+/// world units; a new one starts at 150.
 pub const NEW_CAP_RADIUS: f32 = 150.0;
 
 /// A drawing tool the board offers.
@@ -501,7 +498,7 @@ pub enum BoardTool {
 }
 
 impl BoardTool {
-    /// The tools in the order the egui toolbar offers them.
+    /// The tools in the order the toolbar offers them.
     pub const ALL: [Self; 8] = [
         Self::Arrow,
         Self::Freehand,
@@ -627,7 +624,7 @@ pub const SHIP_MODIFIERS: [(ShipModifier, &str); 3] = [
 
 /// A captain skill or upgrade that moves one of a placed ship's circles.
 ///
-/// Each is on or off at the one coefficient the egui board applies, rather than a figure typed in.
+/// Each is on or off at one fixed coefficient, rather than a figure typed in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShipModifier {
     /// Shrinks the detection circle.
@@ -657,7 +654,7 @@ impl ShipModifier {
     }
 
     /// Whether this modifier is on, in a ship's config. Read as any departure from stock in the
-    /// modifier's direction, as the egui board reads it, so a peer's own figure still shows as on.
+    /// modifier's direction, so a peer's own figure still shows as on.
     pub fn is_on(self, config: &AnnotationShipConfig) -> bool {
         match self {
             Self::ConcealmentExpert => config.vis_coeff < 1.0,

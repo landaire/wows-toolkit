@@ -1,6 +1,6 @@
 [package]
 name = "wows-toolkit-replay-data"
-description = "Game-data loading, replay parsing and the replay model shared by the desktop front ends"
+description = "Game-data loading, replay parsing and the replay model for the desktop app"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -14,8 +14,8 @@ path = "src/lib.rs"
 [features]
 # Row and battle-report fixtures, for the tests of crates that render the model.
 test-support = []
-# Samples the live heap at named points of the game-data load. Enabled by a
-# front end that installs dhat's allocator.
+# Samples the live heap at named points of the game-data load. Enabled by an
+# app that installs dhat's allocator.
 dhat-heap = ["dep:dhat"]
 
 [dependencies]
@@ -42,7 +42,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # A clipboard export renders to a temporary file that outlives the process.
 tempfile = "3"
 thiserror = { workspace = true }
-# The index pass runs its store writes on the runtime the front end owns, and
+# The index pass runs its store writes on the runtime the app owns, and
 # announces each battle it records on a watch channel.
 tokio = { version = "1", features = ["rt", "sync"] }
 tracing = { workspace = true }

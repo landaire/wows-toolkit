@@ -1,7 +1,7 @@
 //! Games read from an explicit set of replays, such as every replay under one
 //! directory, rather than the games the session recorded as they were played.
 //!
-//! A front end reads each replay in the set into a [`PerGameStat`] however it
+//! The caller reads each replay in the set into a [`PerGameStat`] however it
 //! parses replays, feeds them here, and runs the result through the same
 //! filters and aggregates the session uses.
 

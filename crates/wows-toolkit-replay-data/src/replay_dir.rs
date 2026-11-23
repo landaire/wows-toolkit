@@ -2,7 +2,7 @@
 //!
 //! The scan reads every finished replay's header; the watch, on notify's own
 //! thread, reports what changes after it. Both report over `futures`
-//! channels, and every function here blocks, so a front end runs them on its
+//! channels, and every function here blocks, so the app runs them on its
 //! own workers and reads the channels on its own executor.
 
 use std::collections::HashSet;
@@ -98,9 +98,9 @@ pub fn scan_replay_files(
 }
 
 /// Lists every non-temp `*.wowsreplay` file in `folder` and reads each one's
-/// header-only metadata. Ports `task/replays.rs::replay_filepaths`'s filter
-/// (minus the creation-time sort, which `build_browser_tree` redoes by battle
-/// time) plus a per-file `ReplayFile::meta_from_file` read. A file that
+/// header-only metadata with a per-file `ReplayFile::meta_from_file` read.
+/// There is no creation-time sort: `build_browser_tree` sorts by battle time.
+/// A file that
 /// fails to parse (corrupt, mid-write, or from a format this parser does not
 /// understand) is logged and skipped rather than aborting the whole scan.
 pub fn scan_folder(
@@ -148,8 +148,8 @@ pub fn scan_folder(
 /// The listed builds nothing on this machine can read, with how many replays
 /// each one accounts for.
 ///
-/// Ports the set the egui app offers to download after a directory scan
-/// (`app.rs`'s `DirectoryScanned` arm). A replay whose header names no build is
+/// What the app offers to download after a directory scan. A replay whose
+/// header names no build is
 /// not counted: nothing could be fetched for it.
 pub fn missing_builds(files: &[ScannedReplay], cache: &GameDataCache) -> Vec<MissingBuild> {
     let mut counted: std::collections::BTreeMap<u32, MissingBuild> = std::collections::BTreeMap::new();
@@ -199,8 +199,7 @@ pub enum WatchStopCause {
 }
 
 impl WatchStopCause {
-    /// What the reader is shown. The two start failures read as the egui app
-    /// words them.
+    /// What the reader is shown.
     pub fn said(&self) -> String {
         match self {
             Self::NoWatcher { error } => t!("error-file_watcher_creation", error = error).into_owned(),

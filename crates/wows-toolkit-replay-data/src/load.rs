@@ -31,12 +31,11 @@
 //! is only called once per build ever, the first time any install parses it;
 //! the parsed params are then written to `game_params_{build}.bin` under
 //! [`wows_toolkit_config::storage_dir`] (see [`game_params_bin_path`]), and
-//! every later load -- this session or a future one, from either this app or
-//! the egui app, since both write the identical cache file -- deserializes
-//! that file instead of re-walking the VFS.
+//! every later load, this session or a future one, deserializes that file
+//! instead of re-walking the VFS.
 //!
 //! **Versioned constants.** Per-build `CONSUMABLE_IDS`/`BATTLE_STAGES`
-//! overrides (fetched from the wows-constants repo by the egui app and cached
+//! overrides (fetched from the wows-constants repo and cached
 //! on disk) are read fresh on every parse from the shared disk cache at
 //! `wows_toolkit_config::storage_dir()/constants_{build}.json`. A missing or
 //! unreadable cache file is not an error: it falls back to
@@ -87,9 +86,9 @@ use crate::fire_chance::FireChance;
 use crate::install::installed_version;
 use crate::model::ReplayReportModel;
 
-/// Path to the versioned GameParams cache for `build`, matching the egui
-/// app's `game_params_bin_path` (`util/game_params.rs`) exactly -- same file
-/// name, same directory -- so both apps share one on-disk cache.
+/// Path to the versioned GameParams cache for `build`. Releases before 1.1
+/// wrote the same file name in the same directory, so their caches are
+/// read as they are.
 fn game_params_bin_path(build: u32) -> PathBuf {
     let filename = format!("game_params_{build}.bin");
     if let Some(storage_dir) = wows_toolkit_config::storage_dir() {
@@ -339,10 +338,9 @@ impl LoadedGameData {
     /// Loads a build out of the game-data cache, for a replay recorded on one
     /// the install no longer has.
     ///
-    /// The cache is what the Settings drawer downloads, validates and repairs, and
-    /// what the egui app writes as it loads builds. Without this the port can
-    /// open only replays from the installed build, which is most of a week's
-    /// worth and none of last year's.
+    /// The cache is what the Settings drawer downloads, validates and repairs.
+    /// Without this only replays from the installed build open, which is most
+    /// of a week's worth and none of last year's.
     ///
     /// `build` is what the replay asked for; the dump that answers may be a
     /// different one of the same version, because build numbers are per server
@@ -554,9 +552,8 @@ impl GameDataCache {
         self.storage.write().unwrap_or_else(|poisoned| poisoned.into_inner()).auto_dump = auto_dump;
     }
 
-    /// Points the cache at the directory the reader chose for it, which is the
-    /// `game_data_cache_dir` row both apps share. An empty string is the
-    /// default location.
+    /// Points the cache at the directory the reader chose for it, the
+    /// `game_data_cache_dir` setting. An empty string is the default location.
     pub fn with_cache_dir(self, custom: &str) -> Self {
         self.set_cache_dir(custom);
         self
@@ -860,13 +857,11 @@ fn dump_for_build(dump_base: &Path, build: u32, version: Option<&str>) -> Option
 /// Drops the per-build caches for builds nothing can open any more.
 ///
 /// A `game_params_<build>.bin` is hundreds of megabytes and one is written per
-/// build ever opened, so a year of game updates leaves gigabytes behind
-/// (`util/game_params.rs`'s `cleanup_stale_caches` is the egui app's equivalent).
+/// build ever opened, so a year of game updates leaves gigabytes behind.
 ///
 /// A build is kept when the install has it or the game-data cache has a dump for
-/// it: this port opens both, and a dumped build's cache is as expensive to rebuild
-/// as an installed one's. The egui app keeps only installed builds, which is the
-/// one deliberate difference here.
+/// it: both open, and a dumped build's cache is as expensive to rebuild as an
+/// installed one's.
 pub fn prune_stale_caches(wows_dir: &Path, dump_base: Option<&Path>) {
     let Some(storage_dir) = wows_toolkit_config::storage_dir() else { return };
 
@@ -1039,11 +1034,10 @@ fn load_versioned_constants(build: u32) -> Value {
 /// The constants this build decodes its battle results through, and how far they
 /// can be trusted.
 ///
-/// The same three sources the egui app reads, in the same order (`data/
-/// build_data.rs`): the build's own dump, the versioned storage cache, and the
-/// copy embedded in this executable. Judging only the cache would call a replay
-/// mismatched on a machine that has simply never fetched one, and the two apps
-/// write the same index rows.
+/// Read from three sources, in order: the build's own dump, the versioned
+/// storage cache, and the copy embedded in this executable. Judging only the
+/// cache would call a replay mismatched on a machine that has simply never
+/// fetched one.
 fn resolve_constants(
     build: u32,
     version: &Version,
@@ -1137,16 +1131,13 @@ pub struct ParsedReplay {
     /// Whether other recordings of the battle were read with this one.
     pub perspectives: Perspectives,
     /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
-    /// for the debug-mode raw-metadata viewer (mirrors the egui app's
-    /// `ui-replay-debug-raw_metadata` button, `ui/replay_parser/mod.rs`
-    /// ~3018-3034). Falls back to the unparsed raw string when it does not
-    /// parse as JSON, rather than panicking like the egui app's `.expect()`.
+    /// for the debug-mode raw-metadata viewer. Falls back to the unparsed raw
+    /// string when it does not parse as JSON.
     pub raw_metadata_json: String,
     /// Pretty-printed battle-results JSON (`BattleReport::battle_results`),
-    /// for the debug-mode raw-results viewer (mirrors the egui app's
-    /// `ui.replay.debug.raw_json`, `mod.rs` ~3039-3060). `None` when the
-    /// replay carries no battle-results packet (e.g. the player left before
-    /// the server sent one).
+    /// for the debug-mode raw-results viewer. `None` when the replay carries
+    /// no battle-results packet (e.g. the player left before the server sent
+    /// one).
     pub raw_results_json: Option<String>,
     /// The same results with their positional arrays resolved to named
     /// fields, for the debug-mode mapped viewer. `None` for the same reason
@@ -1161,7 +1152,7 @@ pub struct ParsedReplay {
     /// no recording player.
     pub session_stat: Option<PerGameStat>,
     /// What an export of this battle is called, without its extension: ship,
-    /// map, scenario, mode and time, which is the name the egui app writes.
+    /// map, scenario, mode and time.
     /// Kept from the parse because it needs the build's own translations.
     pub export_stem: String,
 }
@@ -1192,17 +1183,15 @@ pub struct IndexableBattle {
 
 /// Where the fire-section cache lives for `build`.
 ///
-/// The same directory the egui app writes, so a build resolved by one app is
-/// not re-parsed by the other. `None` when there is no storage directory, in
-/// which case resolution still runs and simply is not persisted.
+/// Persisted so a build is resolved once. `None` when there is no storage
+/// directory, in which case resolution still runs and simply is not persisted.
 fn fire_section_cache_dir(build: u32) -> Option<std::path::PathBuf> {
     wows_toolkit_config::storage_dir().map(|dir| dir.join("game_data").join("fire_sections").join(build.to_string()))
 }
 
 /// Pretty-prints `raw` as JSON when it parses, falling back to the original
-/// string unchanged otherwise. Used for the debug-mode raw viewers; unlike
-/// the egui app's equivalent `serde_json::from_str(...).expect(...)` calls,
-/// this never panics on a malformed payload.
+/// string unchanged otherwise. Used for the debug-mode raw viewers; never
+/// panics on a malformed payload.
 fn pretty_json_or_raw(raw: &str) -> String {
     serde_json::from_str::<Value>(raw)
         .ok()
@@ -1232,9 +1221,8 @@ pub fn parse_replay(
 /// One replay records one player's view: what their team saw, when they saw it.
 /// Another player's recording of the same battle saw different things, and a
 /// battle read through both has no fog between them -- enemy positions, builds,
-/// torpedoes and consumables the primary never saw. The egui app calls this the
-/// other-team perspective (`ui/replay_parser/mod.rs`'s `load_alt_perspective`);
-/// what merges them is `wows_battle_world::merged::MergedReplays`, shared.
+/// torpedoes and consumables the primary never saw. What merges them is
+/// `wows_battle_world::merged::MergedReplays`.
 ///
 /// `alts` that do not belong to this battle are refused before anything is read
 /// (see [`alt_belongs`]).
@@ -1304,7 +1292,7 @@ fn read_replay_with_alts(
         merged_report(&replay_file, alts, &loaded, &constants, version)?
     };
     let raw_results_json = report.battle_results().map(pretty_json_or_raw);
-    // What the egui debug menu calls "Battle Results: Mapped JSON": the same
+    // The debug menu's "Battle Results: Mapped JSON": the same
     // resolution the normalized report reads its per-player figures through.
     let mapped_results_json = report
         .battle_results()
@@ -1497,7 +1485,7 @@ mod session_stat_tests {
     use wows_toolkit_viewmodel::stats::PerGameStat;
 
     /// The game writes `DD.MM.YYYY HH:MM:SS`, which the stored row carries
-    /// verbatim so both apps dedupe on the same string.
+    /// verbatim so rows dedupe on the same string.
     const GAME_TIME: &str = "28.12.2023 00:52:26";
 
     fn named(_name: &str) -> Option<GameParamId> {
@@ -1715,7 +1703,7 @@ dumped_at = "2026-01-01T00:00:00Z"
     /// Parses a real replay against a real game install. Needs local game
     /// data + a replay recorded on an installed build, which cannot be
     /// cheaply fabricated (see `model.rs`'s equivalent ignored test). Exercises
-    /// the exact `GameDataCache` path a front end's parse uses in production: the
+    /// the exact `GameDataCache` path the app's parse uses in production: the
     /// build is resolved from the replay's own `clientVersionFromExe`, not
     /// supplied by the test, so this also proves the per-build resolution
     /// works against a real install. Run with:

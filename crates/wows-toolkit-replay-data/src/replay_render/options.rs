@@ -55,7 +55,7 @@ pub fn playback_options() -> RenderOptions {
 /// Applies what the reader last saved as the defaults to a viewport's
 /// options and its dead-ship flag.
 ///
-/// A front end applies this once the bake has landed, because the rosters and
+/// The app applies this once the bake has landed, because the rosters and
 /// the stats panel are a wider canvas rather than a layer and there is nothing
 /// to widen before then.
 pub fn adopt_saved_defaults(saved: &SavedRenderOptions, options: &mut RenderOptions, show_dead_ships: &mut bool) {
@@ -63,16 +63,15 @@ pub fn adopt_saved_defaults(saved: &SavedRenderOptions, options: &mut RenderOpti
     *show_dead_ships = saved.show_dead_ships;
 }
 
-/// Switches a merged replay's viewport from the stats panel to the team rosters, as egui opens
-/// one: the rosters are what the alt perspectives add. The saved defaults are not changed.
+/// Switches a merged replay's viewport from the stats panel to the team rosters: the rosters are
+/// what the alt perspectives add. The saved defaults are not changed.
 pub fn open_merged_on_rosters(options: &mut RenderOptions) {
     options.show_stats_panel = false;
     options.show_team_rosters = true;
 }
 
-/// Puts the saved self `ranges` on the recording player's ship, `self_player`, which is where the
-/// egui renderer's saved self range filter applies. Nothing changes for a recording with no ship
-/// of its own.
+/// Puts the saved self `ranges` on the recording player's ship, `self_player`. Nothing changes
+/// for a recording with no ship of its own.
 pub fn adopt_saved_self_ranges(
     ranges: ShipConfigFilter,
     self_player: Option<&str>,

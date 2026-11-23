@@ -1,7 +1,7 @@
 //! Reading the session statistics out of the shared config database.
 //!
-//! The rows and the filter settings are the same ones the egui app writes, so
-//! the two apps show the same session without a migration between them.
+//! The rows and the filter settings are those earlier releases wrote, so
+//! their sessions show without a migration.
 
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::queries;
@@ -28,7 +28,7 @@ pub async fn load_filters(pool: &SqlitePool) -> StatsFilters {
     let game_count = queries::get_setting::<usize>(pool, setting_keys::GAME_COUNT).await;
     let limit = match (limit_enabled, game_count) {
         (true, Some(count)) if count > 0 => GameLimit::Recent(count),
-        // A saved count of zero would show nothing at all; the egui slider
+        // A saved count of zero would show nothing at all; the slider
         // cannot produce one, so treat it as the unlimited it means.
         _ => GameLimit::All,
     };

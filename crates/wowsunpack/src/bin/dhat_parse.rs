@@ -1,6 +1,6 @@
 //! Headless heap profile of the GameParams *parse* path (cold start, no cache).
 //!
-//! Where `dhat_load` in wows-toolkit measures the warm rkyv cache decode, this
+//! Where `dhat_load` measures the warm rkyv cache decode, this
 //! measures the expensive cold path: read `content/GameParams.data`, zlib
 //! decompress, unpickle to a `pickled::Value` tree, and convert that tree into
 //! the strongly-typed `Vec<Param>` (`params_from_data`). The pickled value tree

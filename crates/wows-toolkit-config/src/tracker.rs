@@ -1,7 +1,7 @@
 //! The players met across battles, as the database holds them.
 //!
 //! Rows rather than model types: the tracker's own shape (alias sets, encounter
-//! sets, the division marks over them) belongs to the front ends, and this
+//! sets, the division marks over them) belongs to the app, and this
 //! crate cannot see it. A reader builds its model from [`TrackerRows`] and a
 //! writer states what changed as a [`TrackerWrite`].
 //!
@@ -51,10 +51,11 @@ pub struct TrackerRows {
 
 /// Which of a player row's fields a write stands behind.
 ///
-/// Both front ends write these rows, and each holds its own copy of the tracker
-/// loaded when it started. A write must therefore restate only what its own
-/// reader actually changed: a row that restated everything would put this app's
-/// stale copy of a note, an alias set or a clan over an edit made in the other.
+/// Another running instance may write these rows, and each holds its own copy
+/// of the tracker loaded when it started. A write must therefore restate only
+/// what its own reader actually changed: a row that restated everything would
+/// put a stale copy of a note, an alias set or a clan over an edit made in
+/// another process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerFields {
     /// Every field, for the import and for a bulk rewrite: there is no other
@@ -287,7 +288,7 @@ pub async fn apply_tracker_write(pool: &SqlitePool, write: &TrackerWrite) -> Res
 /// blob.
 ///
 /// A union, never a replacement. The tables can already hold rows by the time
-/// this runs -- the other front end may have imported the same blob, and a
+/// this runs -- another process may have imported the same blob, and a
 /// battle that ended in the first seconds of a launch is written by the save
 /// task -- and an import that replaced them would drop whichever of the two it
 /// did not come from. Refusing instead would be worse still: the rows that made
@@ -529,8 +530,7 @@ pub async fn clear_tracker(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 /// Reclaims the space a dropped blob left behind.
 ///
 /// Best effort: `VACUUM` rewrites the whole file and cannot run while another
-/// process holds the database, which is the normal case when both front ends
-/// are open. A refusal costs only the space.
+/// process holds the database. A refusal costs only the space.
 pub async fn vacuum(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("VACUUM").execute(pool).await.map(|_| ())
 }
@@ -647,7 +647,7 @@ mod tests {
     }
 
     /// A row written only to carry an encounter leaves every stored field
-    /// alone: the other front end may have edited the note since this app read
+    /// alone: another process may have edited the note since this one read
     /// it.
     #[tokio::test]
     async fn a_carried_row_restates_nothing() {
@@ -678,7 +678,7 @@ mod tests {
     }
 
     /// A note write moves the note and nothing else, and an identity write the
-    /// other way round. Each front end edits one of the two.
+    /// other way round, so edits to one never overwrite the other.
     #[tokio::test]
     async fn a_note_and_an_identity_write_stay_out_of_each_others_columns() {
         let pool = crate::test_pool().await;
@@ -716,8 +716,8 @@ mod tests {
     }
 
     /// An import folds into rows that are already there rather than replacing
-    /// them: a battle written in the first seconds of a launch, or the other
-    /// front end importing the same blob, must cost neither side its rows.
+    /// them: a battle written in the first seconds of a launch, or another
+    /// process importing the same blob, must cost neither side its rows.
     #[tokio::test]
     async fn an_import_folds_into_what_is_already_stored() {
         let pool = crate::test_pool().await;
@@ -755,7 +755,7 @@ mod tests {
     }
 
     /// Importing the same blob twice is the same tables, which is what makes
-    /// two front ends racing each other harmless.
+    /// two processes racing each other harmless.
     #[tokio::test]
     async fn importing_twice_changes_nothing_the_second_time() {
         let pool = crate::test_pool().await;

@@ -33,9 +33,8 @@ pub fn detect(install: &mut GameInstall) {
     match wows_data_mgr::detect::detect_version_at_path(&install.path, build) {
         Ok(version_str) => {
             // `wowsunpack::data::Version` has no string constructor; split the
-            // "major.minor.patch" text the same way `build_requests_from_updates`
-            // (wows-toolkit/src/tab_state.rs) does. Version stays None if major
-            // does not parse; build is still recorded either way.
+            // "major.minor.patch" text. Version stays None if major does not
+            // parse; build is still recorded either way.
             let mut parts = version_str.split('.').filter_map(|p| p.trim().parse::<u32>().ok());
             install.version = parts.next().map(|major| wowsunpack::data::Version {
                 major,

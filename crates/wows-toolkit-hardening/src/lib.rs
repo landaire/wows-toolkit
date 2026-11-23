@@ -1,4 +1,4 @@
-//! Windows process mitigation policies, shared by both toolkit front ends.
+//! Windows process mitigation policies for the toolkit.
 //!
 //! Third-party software injects DLLs into this process and hooks graphics APIs.
 //! The observed result is deadlocks and crashes during rendering, usually

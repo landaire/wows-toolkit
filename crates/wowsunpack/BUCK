@@ -131,6 +131,16 @@ workspace_binary(
     deps = [":wowsunpack_dhat"] + WOWSUNPACK_DEPS + ["//third-party/rust:dhat"],
 )
 
+workspace_binary(
+    name = "dhat_load_bin",
+    crate = "dhat_load",
+    package = "wowsunpack",
+    version = "0.47.1",
+    crate_root = "src/bin/dhat_load.rs",
+    features = WOWSUNPACK_FEATURES + ["dhat-heap"],
+    deps = [":wowsunpack_dhat"] + WOWSUNPACK_DEPS + ["//third-party/rust:dhat"],
+)
+
 WOWSUNPACK_TEST_DEPS = [
     "//third-party/rust:insta",
     "//third-party/rust:sha2",

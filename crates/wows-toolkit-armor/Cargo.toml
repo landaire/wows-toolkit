@@ -13,15 +13,16 @@ path = "src/lib.rs"
 
 [features]
 # The headless test device, for the tests of crates that host the viewport.
-test-support = ["dep:pollster"]
+test-support = []
 
 [dependencies]
 bytemuck = { workspace = true }
 # Camouflage tiles arrive as PNG.
 image = { workspace = true, features = ["png"] }
 nalgebra = "0.34"
-# The headless test device's adapter and device requests.
-pollster = { version = "0.4", optional = true }
+# The headless test device's adapter and device requests. Not optional:
+# reindeer emits no Buck rule for an optional dependency no feature enables.
+pollster = "0.4"
 rootcause = { workspace = true }
 # The lighting settings a host persists.
 serde = { workspace = true }
@@ -45,5 +46,4 @@ wowsunpack = { workspace = true, features = ["arc", "parsing", "models"] }
 # The real-catalogue test names models in English.
 gettext = { workspace = true }
 insta = { workspace = true }
-pollster = "0.4"
 serde_json = { workspace = true }

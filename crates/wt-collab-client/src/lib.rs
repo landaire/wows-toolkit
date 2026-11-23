@@ -12,8 +12,7 @@
 //! The iroh networking runs in a background tokio task. It talks to whatever
 //! is drawing through `std::sync::mpsc` channels and an
 //! `Arc<Mutex<SessionState>>`, and wakes it through a [`SessionWaker`] the
-//! front end supplies: the task cannot know whether a repaint means an egui
-//! viewport or a zgui view.
+//! caller supplies, since the task does not know what a repaint means.
 
 pub mod peer;
 
@@ -39,15 +38,14 @@ pub use wt_collab_protocol::types::UserCursor;
 /// Wakes whatever is drawing the session when the peer task changes it.
 ///
 /// The task runs off the drawing thread, so a change it makes reaches the
-/// screen only when that thread comes round again. Each front end wakes
-/// itself its own way -- egui repaints a viewport, zgui wakes its view --
-/// so the session is handed one of these rather than knowing either.
+/// screen only when that thread comes round again. The caller decides how
+/// that wake happens, so the session is handed one of these.
 pub trait SessionWaker: Send + Sync {
     /// Wakes whatever shows the session as a whole: the roster, the token,
     /// the status line.
     ///
     /// A single window is woken through its own [`ViewportSink`] instead: a
-    /// front end names its windows its own way, so the session holds the wake
+    /// caller names its windows its own way, so the session holds the wake
     /// it was handed rather than deriving one from a window id.
     fn wake(&self);
 }
@@ -58,7 +56,7 @@ pub type WindowWake = Arc<dyn Fn() + Send + Sync>;
 /// Sends events from the peer task and wakes whatever reads them.
 ///
 /// The waker is bound when the session starts, so an event raised before a
-/// front end registered one still arrives; it is simply read on the next pass
+/// caller registered one still arrives; it is simply read on the next pass
 /// rather than waking anything.
 #[derive(Clone)]
 pub struct EventSender {

@@ -8,7 +8,7 @@ workspace_library(
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
         "//crates/wows-replays:wows_replays",
-        "//crates/wt-collab-protocol:wt_collab_protocol",
+        "//crates/wt-collab-protocol:wt_collab_protocol_egui",
         "//crates/wt-translations:wt_translations",
         "//third-party/rust:egui",
         "//third-party/rust:egui-phosphor",
@@ -25,7 +25,7 @@ workspace_test(
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
         "//crates/wows-replays:wows_replays",
-        "//crates/wt-collab-protocol:wt_collab_protocol",
+        "//crates/wt-collab-protocol:wt_collab_protocol_egui",
         "//crates/wt-translations:wt_translations",
         "//third-party/rust:egui",
         "//third-party/rust:egui-phosphor",

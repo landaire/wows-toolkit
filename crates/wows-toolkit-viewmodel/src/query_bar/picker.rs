@@ -2,8 +2,8 @@
 //! value segments, the edits its menu makes to the query's shape, and the completions for the
 //! fragment under the caret.
 //!
-//! The bar draws these; deciding them here keeps the front ends' bars from disagreeing about what
-//! a query may be changed to.
+//! The bar draws these; deciding them here keeps the rules for what a query may be changed to
+//! testable without a UI.
 
 use std::ops::Range;
 
@@ -26,8 +26,7 @@ use crate::query_bar::suggest::ValueRequest;
 use crate::query_bar::tokens::NodePath;
 use crate::text_filter::FilterQuery;
 
-/// How many completions the dropdown offers at once. The egui bar shows the same number before
-/// it scrolls.
+/// How many completions the dropdown offers at once.
 pub const MAX_SUGGESTIONS: usize = 8;
 
 /// Which part of a term a picker is editing.

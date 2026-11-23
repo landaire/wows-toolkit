@@ -1,9 +1,6 @@
 //! Camo compositing: bakes a decoded camo scheme's per-stem PNGs against the
-//! hull's base albedo into GPU-ready RGBA. Ports `armor_viewer::common::
-//! build_active_camo` (`common.rs:718-831`) and its pure pixel-math helpers
-//! (`smoothstep`, `bilinear_rgba`, `LowFreqLuma`/`downsampled_luminance`,
-//! `common.rs:625-707`) near-verbatim -- no egui involved, so this is testable
-//! with synthetic in-memory textures.
+//! hull's base albedo into GPU-ready RGBA. Pure pixel math with no UI
+//! dependency, so this is testable with synthetic in-memory textures.
 //!
 //! Three cases, keyed off a decoded camo texture's own alpha channel and UV
 //! transform (see `build_active_camo`'s doc for the full rationale):

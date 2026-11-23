@@ -1,5 +1,5 @@
 //! Selection over the token stream's node paths, and the tree edits a selection
-//! authorises. Pure so the boolean-editing rules are testable without egui.
+//! authorises. Pure so the boolean-editing rules are testable without a UI.
 
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;

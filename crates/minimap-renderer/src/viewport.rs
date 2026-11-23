@@ -10,16 +10,15 @@ use crate::MINIMAP_SIZE;
 /// The closest the map can be drawn to its own size, which is the whole map.
 pub const MIN_ZOOM: f32 = 1.0;
 
-/// How far in the map can be drawn. The egui viewer's own limit: past this a
-/// ship icon is larger than the island it is beside.
+/// How far in the map can be drawn. Past this a ship icon is larger than the
+/// island it is beside.
 pub const MAX_ZOOM: f32 = 10.0;
 
 /// The window onto the map a frame is drawn through.
 ///
 /// `zoom` is how much larger than [`MINIMAP_SIZE`] the drawn map is; `pan` is
 /// the window's top-left corner in those enlarged pixels. The default shows
-/// the whole map, which is what an export and the egui app's own target
-/// want.
+/// the whole map, which is what an export and a fitted viewer want.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MapViewport {
     zoom: f32,

@@ -1,9 +1,8 @@
 //! Extracting VFS entries to disk.
 //!
-//! Mirrors the egui app's `extract_files`: queued directories expand to their
-//! files, and each file is written under the output directory at its own VFS
-//! path. Unlike that version, an IO failure is reported rather than panicking
-//! the worker, so a read-only destination or a full disk surfaces in the UI.
+//! Queued directories expand to their files, and each file is written under
+//! the output directory at its own VFS path. An IO failure is reported rather
+//! than panicking the worker, so a read-only destination or a full disk surfaces in the UI.
 
 use std::collections::HashSet;
 use std::fs;
@@ -49,8 +48,8 @@ pub enum ExtractError {
 pub struct ExtractProgress {
     pub written: usize,
     pub total: usize,
-    /// The file that was just written, which is what the egui progress bar
-    /// carries as its text.
+    /// The file that was just written, which the progress bar carries as its
+    /// text.
     pub file: String,
 }
 

@@ -1,11 +1,10 @@
 //! The minimap hover preview: a replay's battle played back as a small
 //! animation while the pointer rests on its row.
 //!
-//! When the preview appears is [`wows_toolkit_viewmodel::preview_dwell`],
-//! shared with the egui app so both wait the same amount. What it draws is
-//! [`wows_minimap_renderer::preview`], the same command set the egui popup
-//! paints and the video export encodes, rasterised to an image here because
-//! a front end shows it as a stream of frames. Every function here blocks.
+//! When the preview appears is [`wows_toolkit_viewmodel::preview_dwell`].
+//! What it draws is [`wows_minimap_renderer::preview`], the same command set
+//! the video export encodes, rasterised to an image here because the app
+//! shows it as a stream of frames. Every function here blocks.
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -251,9 +250,8 @@ struct KeptTracks {
 
 static TRACKS: Mutex<KeptTracks> = Mutex::new(KeptTracks { tracks: Vec::new(), generation: TrackGeneration(0) });
 
-/// How many walked tracks are kept: the egui popup's own
-/// `PREVIEW_CACHE_CAPACITY`, so a reader moving back over the last few rows
-/// waits for neither app.
+/// How many walked tracks are kept, so a reader moving back over the last few
+/// rows does not wait.
 const TRACK_CACHE_SIZE: usize = 8;
 
 fn track_generation() -> TrackGeneration {
@@ -293,8 +291,7 @@ pub fn is_walked(path: &Path) -> bool {
 
 /// How long each baked frame is shown. The bake keeps an evenly spaced subset
 /// of the battle, so this is a display rate rather than the replay's own
-/// clock. Taken from the shared rate the egui popup repaints at, so the two
-/// play a track at the same speed.
+/// clock. Taken from the shared preview rate.
 pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_nanos((1_000_000_000.0 / PREVIEW_FPS) as u64);
 
 /// Why a preview could not be produced.
@@ -322,8 +319,7 @@ pub enum PreviewError {
 }
 
 impl PreviewError {
-    /// What a surface says instead of a map, in the egui popup's own words
-    /// (`replay/renderer/preview.rs`'s `PreviewError::key`).
+    /// What a surface says instead of a map.
     ///
     /// `None` for a superseded bake, which is not something to tell the reader:
     /// another bake is already running for the row they moved to.
@@ -357,9 +353,8 @@ impl PreviewError {
 /// again; only its rasterising is repeated.
 ///
 /// `on_map` is handed the map on its own, with nothing drawn over it, as soon
-/// as the art is loaded and before the battle is walked, the way the egui
-/// popup shows the map rather than an empty box
-/// (`ui/replay_parser/preview_popup.rs`).
+/// as the art is loaded and before the battle is walked, so the preview shows
+/// the map rather than an empty box.
 ///
 /// `on_frame` is handed each frame as it is rasterised rather than the track
 /// at the end: rasterising a whole track costs seconds, and a preview that
@@ -670,9 +665,8 @@ pub fn map_frame(map_name: &str, game_data: &GameDataCache, edge: PreviewEdge) -
     let loaded = game_data.newest_loaded()?;
     // The art alone, not a rendered frame of it: building a `PreviewRenderer`
     // reads this build's fonts and six icon sets and then runs a full render
-    // pass, none of which draws anything on an empty command slice. The egui
-    // popup does the same, uploading the decoded map straight as a texture
-    // (`RendererTextureCache::get_or_upload_map`). The art is the map itself
+    // pass, none of which draws anything on an empty command slice. The art is
+    // uploaded as decoded. The art is the map itself
     // rather than a canvas the renderer drew it into, so there is no HUD
     // strip to crop.
     let art = assets::load_map_image(map_name, loaded.vfs())?;
@@ -811,12 +805,12 @@ fn battle_frame(
 /// Walks `replay`'s battle once, keeping the commands of the frames a preview
 /// plays.
 ///
-/// One forward pass sampled by the shared [`TrackSink`], so the port plays the
-/// same frames the egui app does. Baked with the paint preset rather than
+/// One forward pass sampled by the shared [`TrackSink`]. Baked with the paint
+/// preset rather than
 /// [`bake_options`](wows_minimap_renderer::frame_track::bake_options): these
 /// commands are only ever rasterised through it, so a class it hides is not
-/// worth emitting, and the player names the egui popup drops at paint time
-/// never reach a ship's command, which this renderer would draw.
+/// worth emitting, and player names, which a preview does not show, never
+/// reach a ship's command, which this renderer would draw.
 fn walk(
     replay: &ReplayFile,
     loaded: &LoadedGameData,
@@ -881,7 +875,7 @@ fn rasterise(
 
 /// Whether a hover preview painting through `options`, the paint preset, draws `command`.
 ///
-/// Dead ships are shown, as the egui popup shows them. The reader's saved renderer defaults play
+/// Dead ships are shown. The reader's saved renderer defaults play
 /// no part: a preview is a glance at the battle rather than a render the reader set up.
 pub(crate) fn preview_paints(command: &DrawCommand, options: &RenderOptions) -> bool {
     should_draw_command(command, options, true)

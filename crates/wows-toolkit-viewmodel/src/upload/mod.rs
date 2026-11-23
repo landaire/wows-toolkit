@@ -1,13 +1,8 @@
 //! What a finished battle contributes to ShipBuilds, and when.
 //!
-//! Shared, so both front ends decide the same thing about the same replay: the
-//! data-sharing setting is one row, the sent-replay ledger is one table, and a
-//! replay the reader agreed to share must reach the service once, whichever app
-//! read it.
-//!
-//! The rules here are the egui app's (`task/replay_upload.rs`), moved so the port
-//! is not a second opinion on them. The HTTP is the egui app's blocking client
-//! and `wows_toolkit_services::upload`.
+//! The data-sharing setting is one row, the sent-replay ledger is one table,
+//! and a replay the reader agreed to share must reach the service once. The
+//! HTTP is `wows_toolkit_services::upload`.
 
 use jiff::SignedDuration;
 use jiff::Timestamp;
@@ -30,8 +25,8 @@ pub struct RawUploadDeadline(pub Timestamp);
 
 /// What a decision needs to know about the parsed battle.
 ///
-/// Taken as plain data rather than the report itself: the decision is shared and
-/// must not depend on either app's own types.
+/// Taken as plain data rather than the report itself: the decision must not
+/// depend on the UI's own types.
 pub struct Shareable {
     /// `ReplayMeta::gameType`, which says whether the service takes this battle.
     pub game_type: String,
@@ -156,7 +151,7 @@ pub const RAW_REPLAYS_URL: &str = "https://shipbuilds.com/api/replays";
 
 /// Whether the battle type is one the service takes.
 ///
-/// Random and ranked only, as the egui app gates it: a training room or an
+/// Random and ranked only: a training room or an
 /// operation says nothing about a build people play.
 pub fn is_eligible_game_type(game_type: &str, version: wowsunpack::data::Version) -> bool {
     let battle_type = wowsunpack::game_types::BattleType::from_value(game_type, version);

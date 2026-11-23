@@ -1,8 +1,7 @@
 //! Shared persistence and leaf settings types for WoWs Toolkit.
 //!
-//! This crate holds the egui-free portions of the app's SQLite persistence
-//! layer and the serializable settings/window types, so both the shipping
-//! egui app and the zgui app read the same on-disk database and formats.
+//! This crate holds the UI-free portions of the app's SQLite persistence
+//! layer and the serializable settings/window types.
 
 mod db;
 pub mod index;
@@ -35,8 +34,8 @@ pub use window::store as store_window_settings;
 /// Application name used to derive the on-disk storage directory.
 pub const APP_NAME: &str = "WoWs Toolkit";
 
-/// App data directory, matching eframe's `storage_dir()` layout so existing
-/// data is found after removing the `persistence` feature.
+/// App data directory, in eframe's `storage_dir()` layout, which earlier
+/// releases wrote their data under.
 ///
 /// A test build never answers with the platform directory: without a choice
 /// made through `storage_override`, it answers with a temporary directory of

@@ -2,8 +2,7 @@
 //! the filters the tab applies to them, and the per-ship aggregate the table
 //! shows.
 //!
-//! Ported from the egui app's `data/session_stats.rs`. The aggregate's
-//! minimums are `Option` here rather than sentinel `MAX` values reset to zero
+//! The aggregate's minimums are `Option` here rather than sentinel `MAX` values reset to zero
 //! after the fact, so "no games" is a state the type admits instead of a
 //! number that happens to mean nothing.
 
@@ -57,8 +56,7 @@ pub struct SerializableAchievement {
 
 /// Which games the division filter keeps.
 ///
-/// The serde shape matches what the egui app stores under
-/// `session_stats_division_filter`, so both front ends read one saved value.
+/// The serde shape matches the saved `session_stats_division_filter` value.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DivisionFilter {
     #[default]
@@ -255,8 +253,7 @@ impl PerGameStat {
     /// Reads one battle off a parsed report.
     ///
     /// `game_time` is the replay's own `dateTime` string rather than the
-    /// report's timestamp: it is what both apps store and dedupe on, so a
-    /// battle recorded by one is the same row to the other.
+    /// report's timestamp: it is what the store dedupes on.
     ///
     /// `achievement_id` resolves an achievement's internal name against the
     /// build the replay was recorded on, which is how the stored rows key
@@ -466,7 +463,7 @@ impl SessionSummary {
 
 /// Totals each achievement across the filtered games, most-earned first.
 ///
-/// The order the egui roundup lists them in: the one earned twenty times is
+/// Most-earned first: the one earned twenty times is
 /// what a reader looks at, not whichever game happened to be read first.
 pub fn aggregate_achievements(games: &[&PerGameStat]) -> Vec<SerializableAchievement> {
     let mut totals: Vec<SerializableAchievement> = Vec::new();
@@ -478,15 +475,13 @@ pub fn aggregate_achievements(games: &[&PerGameStat]) -> Vec<SerializableAchieve
             }
         }
     }
-    // Most-earned first, then by name, which is the order the egui roundup
-    // lists them in: the achievement earned twenty times is the one worth
-    // reading first.
+    // Most-earned first, then by name: the achievement earned twenty times is
+    // the one worth reading first.
     totals.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.display_name.cmp(&b.display_name)));
     totals
 }
 
-/// Keys the stored filter settings live under, shared so both front ends
-/// read and write the same rows.
+/// Keys the stored filter settings live under.
 pub mod setting_keys {
     pub const LIMIT_ENABLED: &str = "session_stats_limit_enabled";
     pub const GAME_COUNT: &str = "session_stats_game_count";
@@ -501,7 +496,7 @@ pub mod setting_keys {
 /// How many recent games the tab looks at.
 ///
 /// An enum rather than a count plus an `enabled` flag, which admits the
-/// meaningless "disabled, 25 games" pairing the egui settings carry.
+/// meaningless "disabled, 25 games" pairing the legacy settings carry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameLimit {
     #[default]
@@ -613,8 +608,7 @@ impl ExcludedGames {
 pub struct StatsFilters {
     pub limit: GameLimit,
     pub division: DivisionFilter,
-    /// Match groups to keep. Empty means every group, matching the egui app's
-    /// "All" state rather than meaning "none".
+    /// Match groups to keep. Empty means every group ("All"), not "none".
     pub game_modes: std::collections::BTreeSet<String>,
     #[serde(default)]
     pub dates: DateSpan,
@@ -668,10 +662,7 @@ pub fn filter_games<'a>(games: &'a [PerGameStat], filters: &StatsFilters) -> Vec
 /// over the session.
 ///
 /// What "last 25" means on the per-ship table and the charts: 25 battles in each
-/// ship, not the 25 most recent overall. The egui app draws those two surfaces
-/// from `per_ship_limited_games` and its summary line from the global count
-/// (`data/session_stats.rs:325`, used at `ui/stats_tab.rs:406` and `:541`), so a
-/// session filtered in one app reads the same in the other.
+/// ship, not the 25 most recent overall.
 ///
 /// `games` is expected in `sort_key` order, and the result keeps that order: a
 /// chart plots along it.
@@ -1088,8 +1079,7 @@ impl McStats {
     }
 }
 
-/// Groups filtered games by ship, newest-played ship first -- the order the
-/// egui table opens in.
+/// Groups filtered games by ship, newest-played ship first.
 pub fn per_ship_performance(games: &[&PerGameStat]) -> Vec<(String, PerformanceInfo)> {
     let mut by_ship: std::collections::BTreeMap<String, Vec<&PerGameStat>> = std::collections::BTreeMap::new();
     for game in games {

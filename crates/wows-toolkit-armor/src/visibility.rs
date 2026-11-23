@@ -2,23 +2,17 @@
 //! and the mesh uploaders (`upload.rs`, `plate_picking.rs`):
 //! the two override maps threaded through a triangle-visibility check
 //! (`VisibilityFilter`), the undo/redo snapshot type (`VisibilitySnapshot`,
-//! `VisibilityUndoStack` -- ports `armor_viewer::state.rs:115-159` verbatim),
-//! the sidebar-hover highlight key (`SidebarHighlightKey` -- ports
-//! `armor_viewer::state::SidebarHighlightKey`),
+//! `VisibilityUndoStack`), the sidebar-hover highlight key
+//! (`SidebarHighlightKey`),
 //! and the pure tri-state derivation the popover's tree renders from.
 //!
-//! **Convention note.** `part_visibility` uses the same boolean sense the
-//! egui app does: a present value is "is this part visible", absent means
-//! visible (default `true`). `plate_visibility` keeps this port's own Task 6
-//! sense instead: a present value is "is this plate explicitly HIDDEN",
+//! **Convention note.** In `part_visibility` a present value is "is this
+//! part visible", absent means visible (default `true`). In
+//! `plate_visibility` a present value is "is this plate explicitly HIDDEN",
 //! absent means not hidden (still default-visible). `upload.rs`'s
-//! `plate_is_visible` already committed to that shape, and changing it would
+//! `plate_is_visible` depends on that shape, and changing it would
 //! flip the meaning of every existing `#[test]` there. The two maps are
-//! therefore mirror images of each other's boolean sense; the tri-state
-//! helpers below (ported from `armor_viewer::ui::tab::draw_armor_visibility_popover`,
-//! `tab.rs:4403-4611`) translate egui's `plate_visibility.get(pk) == Some(false)`
-//! (explicitly hidden, in egui's sense) to this port's `== Some(true)`
-//! (explicitly hidden, in this port's sense) -- same meaning, flipped literal.
+//! therefore mirror images of each other's boolean sense.
 
 use std::collections::HashMap;
 
@@ -33,8 +27,7 @@ use crate::load_ship::ZonePart;
 pub struct VisibilityFilter<'a> {
     pub part: &'a HashMap<(String, String), bool>,
     pub plate: &'a HashMap<PlateKey, bool>,
-    /// Show only the plates the in-game armor viewer hides, which is how the
-    /// egui app's "Show Hidden" mode reads: the plates that are functional in
+    /// Show only the plates the in-game armor viewer hides: the plates that are functional in
     /// the combat model but never drawn in the game's own viewer.
     pub show_hidden_only: bool,
 }
@@ -115,8 +108,8 @@ pub fn part_on(part_visibility: &HashMap<(String, String), bool>, zone: &str, pa
     part_visibility.get(&(zone.to_string(), part.to_string())).copied().unwrap_or(true)
 }
 
-/// Whether `key` is explicitly hidden in `plate_visibility` (this port's
-/// sense: present + `true` = hidden, absent = visible). See the module doc's
+/// Whether `key` is explicitly hidden in `plate_visibility` (present +
+/// `true` = hidden, absent = visible). See the module doc's
 /// convention note.
 pub fn plate_explicitly_hidden(plate_visibility: &HashMap<PlateKey, bool>, key: &PlateKey) -> bool {
     plate_visibility.get(key).copied().unwrap_or(false)
@@ -172,8 +165,7 @@ pub fn part_any_plate_hidden(
 /// each of `thicknesses`, on a part checkbox toggle. Callers pass only the
 /// `show_zero_mm`-filtered thickness set (not every plate on the part), so an
 /// override on a thickness currently filtered out by `show_zero_mm` (e.g. a
-/// hidden 0mm plate while the filter is off) survives the toggle. Ports the
-/// egui original's clear scope (`tab.rs:4538-4540`, `4565-4567`).
+/// hidden 0mm plate while the filter is off) survives the toggle.
 pub fn clear_plate_overrides(
     plate_visibility: &mut HashMap<PlateKey, bool>,
     zone: &str,
@@ -208,9 +200,7 @@ pub fn hull_group_any_on(hull_visibility: &HashMap<String, bool>, names: &[Strin
 /// `hull_part_groups` (a Milestone 4 Task 8c hull-upgrade/LOD reload changed
 /// the mesh set), then inserts a default entry for every mesh name that
 /// doesn't already have one. The default is "on" if any surviving entry was
-/// on, else "off" -- matching the egui app's own `apply_hull_reload`/
-/// `apply_upgrade_reload` retain-plus-default-new-parts logic
-/// (`armor_viewer/ui/tab.rs:2547-2554`, `2737-2743`). The default-fill (not
+/// on, else "off". The default-fill (not
 /// just a retain) is necessary here specifically because `hull_visibility`'s
 /// convention is absent-means-HIDDEN (see the module doc's convention note,
 /// which is about `part_visibility`/`plate_visibility`, but `hull_visibility`
@@ -231,10 +221,7 @@ pub fn retain_hull_visibility(hull_visibility: &mut HashMap<String, bool>, hull_
 /// present in `zone_parts` (post-reload). No default-fill needed here, unlike
 /// [`retain_hull_visibility`]: `part_visibility`'s absent-means-visible
 /// convention already makes a newly appeared part visible with no entry at
-/// all, matching the egui app's own `apply_upgrade_reload`
-/// (`tab.rs:2719-2723`), whose explicit `or_insert(true)` fill is a no-op
-/// under this port's opposite default-boolean convention (see the module
-/// doc's convention note).
+/// all.
 pub fn retain_part_visibility(
     part_visibility: &mut HashMap<(String, String), bool>,
     zone_parts: &[(String, Vec<String>)],
@@ -244,8 +231,7 @@ pub fn retain_part_visibility(
 
 /// Drops `plate_visibility` entries for plate keys no longer present in
 /// `zone_part_plates` (post-reload). Same no-default-fill rationale as
-/// [`retain_part_visibility`]; matches the egui app's own `apply_upgrade_reload`
-/// plate retain (`tab.rs:2725-2729`), which likewise has no default-fill.
+/// [`retain_part_visibility`].
 pub fn retain_plate_visibility(plate_visibility: &mut HashMap<PlateKey, bool>, zone_part_plates: &[ArmorZone]) {
     plate_visibility.retain(|key, _| {
         zone_part_plates.iter().any(|zone| {

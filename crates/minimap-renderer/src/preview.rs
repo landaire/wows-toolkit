@@ -1,8 +1,7 @@
 //! Rasterising baked draw commands to an image.
 //!
-//! The hover preview shows a replay's minimap as a small animation. The egui
-//! app draws the same commands through egui's painter; a front end that has
-//! no painter of its own can render them here instead and display the
+//! The hover preview shows a replay's minimap as a small animation. A caller
+//! with no painter of its own renders the commands here and displays the
 //! resulting image, which is also what the video export does.
 //!
 //! Assets are loaded once per renderer rather than per frame: a preview plays

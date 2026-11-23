@@ -30,7 +30,7 @@ pub const NEUTRAL_COLOR: Color32 = Color32::from_rgb(158, 158, 158);
 /// Rendering-focused description of a capture point zone.
 ///
 /// Contains only the fields needed to draw a cap point on the minimap.
-/// Both `WireCapPoint` (protocol) and desktop `TacticsCapPoint` can convert to this.
+/// `WireCapPoint` (protocol) converts to this.
 #[derive(Clone, Debug)]
 pub struct CapPointView {
     /// World-space X position (BigWorld).
@@ -132,7 +132,7 @@ pub struct AnnotationSnapshot {
 
 // ─── Annotation State ────────────────────────────────────────────────────────
 
-/// Persistent annotation layer state used by both desktop and web clients.
+/// Persistent annotation layer state for a web client.
 pub struct AnnotationState {
     pub annotations: Vec<Annotation>,
     /// Unique ID for each annotation (parallel to `annotations`).

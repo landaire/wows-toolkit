@@ -1,10 +1,4 @@
 export_file(
-    name = "wows_toolkit_png",
-    src = "wows_toolkit.png",
-    visibility = ["PUBLIC"],
-)
-
-export_file(
     name = "wows_toolkit_256_png",
     src = "wows_toolkit_256.png",
     visibility = ["PUBLIC"],

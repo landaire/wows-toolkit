@@ -72,7 +72,7 @@ workspace_binary(
     deps = [":wows_toolkit_replay_data"] + REPLAY_DATA_DEPS,
 )
 
-# The heap-sampling build, for a front end built with dhat's allocator.
+# The heap-sampling build, for an app built with dhat's allocator.
 workspace_library(
     name = "wows_toolkit_replay_data_dhat",
     crate = "wows_toolkit_replay_data",

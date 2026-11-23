@@ -1,11 +1,7 @@
 //! Presentation row model built from `NormalizedBattleReport`. Pure: no
-//! UI toolkit types anywhere. Mirrors the field mapping in the egui app's
-//! `ui/replay_parser/mod.rs` (`PlayerReport` construction, lines 535-851) and
-//! `ui/replay_parser/models.rs` (`PlayerReport` field list), with
-//! `RichText`/`Color32`/texture fields dropped or replaced by plain
-//! strings/`ColorRole` (colors live in `columns.rs`, resolved by cell, not
-//! stored per-row). The Dazzle/Incoming Fire Alert skill markers
-//! (`util::colorize_captain_points`'s star/siren glyphs) are kept as plain
+//! UI toolkit types anywhere. Colors are `ColorRole` (colors live in
+//! `columns.rs`, resolved by cell, not stored per-row). The Dazzle/Incoming
+//! Fire Alert skill markers (star/siren glyphs) are kept as plain
 //! `has_dazzle`/`has_ifa` booleans rather than dropped, so the render layer
 //! can rebuild the glyphs without string-matching hover text. Personal
 //! Rating is left `None` here and filled in by a separate
@@ -77,8 +73,7 @@ pub struct PlayerRow {
     pub is_abuser: bool,
     pub is_test_ship: bool,
     /// User-toggleable per-row NDA override. Always `false` fresh out of
-    /// `from_normalized`; a later "hide stats" UI action (Milestone 2) flips
-    /// it, mirroring the egui app's `PlayerReport::manual_stat_hide_toggle`.
+    /// `from_normalized`; the "hide stats" UI action flips it.
     pub manual_stat_hide_toggle: bool,
 
     pub display_name: String,
@@ -107,8 +102,8 @@ pub struct PlayerRow {
     /// `None` for exactly when `player.vehicle_entity()` is `None`).
     /// `NormalizedPlayer` does not carry the raw flag directly.
     /// `TranslatedBuild::new` also requires a known species, which makes this
-    /// proxy narrower than the egui original's plain `vehicle.is_some()` in
-    /// theory; in practice they are equivalent, because
+    /// proxy narrower than `vehicle.is_some()` in theory; in practice they are
+    /// equivalent, because
     /// `NormalizedBattleReport::from_battle_report` already resolves and
     /// `.expect()`s a known species while building `NormalizedPlayer` (see
     /// `battle_report/mod.rs`), so a row with an unrecognized species never
@@ -194,9 +189,8 @@ pub struct PlayerRow {
     pub consumables: Vec<ConsumableResult>,
 
     /// Always `None` fresh out of `from_normalized`: PR reference data isn't
-    /// loaded at report-construction time, so the egui app computes PR in a
-    /// separate step (`UiReport::populate_personal_ratings`) once that data
-    /// is available. Call `ReplayReportModel::populate_personal_ratings`
+    /// loaded at report-construction time. Call
+    /// `ReplayReportModel::populate_personal_ratings`
     /// after loading PR data to fill this in. Stays `None` in an unrated
     /// battle.
     pub personal_rating: Option<PersonalRatingResult>,
@@ -217,7 +211,7 @@ pub struct PlayerRow {
     /// carries); filled in by `ReplayReportModel::populate_action_links`,
     /// which `None`s it back out whenever the build can't be resolved (no
     /// observed vehicle entity, unrecognized ship, etc.) rather than leaving
-    /// a stale value. A front end hides the menu item entirely when this is
+    /// a stale value. The app hides the menu item entirely when this is
     /// `None`.
     pub ship_config_url: Option<String>,
     /// The Actions column's "Copy short link" menu item's target URL, ported
@@ -232,12 +226,11 @@ pub struct PlayerRow {
     /// as `ship_config_url`, though this one only needs a resolvable realm
     /// (no ship build), so it is `Some` far more often.
     pub wows_numbers_url: Option<String>,
-    /// Pretty-printed JSON of this row's raw `Player` (mirrors the egui
-    /// app's debug-only "View Raw Player Metadata" button, which
-    /// `serde_json::to_string_pretty`s the same type). `None` until
+    /// Pretty-printed JSON of this row's raw `Player`, for the debug-only
+    /// "View Raw Player Metadata" menu item. `None` until
     /// `populate_action_links` runs, and also when serialization fails (never
     /// observed in practice; `Player`'s `Serialize` impl does not fail on any
-    /// data it accepts). A front end shows the debug menu item only when
+    /// data it accepts). The app shows the debug menu item only when
     /// this is set and debug mode is on.
     pub raw_metadata_json: Option<String>,
 
@@ -276,10 +269,9 @@ impl PlayerRow {
 /// One in-game chat message, presentation-ready: bot/no-relation sender name
 /// and message text are already translated, the message body is already
 /// HTML-decoded, and the clan tag/color are plain (no brackets, no
-/// `Rc<Player>`). Mirrors the field list the egui app reads off
-/// `wows_replays::analyzer::battle_controller::GameMessage` in
-/// `build_replay_chat_content` (`ui/replay_parser/mod.rs` ~4893-4960), minus
-/// `entity_id` (never read there) and the `Rc<Player>` handle itself (not
+/// `Rc<Player>`). Carries the fields of
+/// `wows_replays::analyzer::battle_controller::GameMessage` the chat view
+/// reads, minus `entity_id` (never read) and the `Rc<Player>` handle itself (not
 /// `Send`; every field the render layer needs is copied out of it here,
 /// during the background parse, before the model crosses back to the UI
 /// thread).
@@ -324,7 +316,7 @@ pub enum ClanColor {
     League(u32),
     /// Older replays omit the league colour; the tag takes the player's own
     /// team-relation colour (via `Player::relation`, not the message's
-    /// `sender_relation`, matching the egui original), which the front end
+    /// `sender_relation`), which the app
     /// resolves from its palette.
     Relation(Relation),
 }
@@ -341,9 +333,7 @@ fn clan_color_for_player(player: &Player) -> ClanColor {
 
 /// Builds the presentation-ready chat log from a battle report's raw
 /// `&[GameMessage]` (`wows_battle_world::report::BattleReport::game_chat`).
-/// Ports `build_replay_chat_content`'s translation/decode logic
-/// (`ui/replay_parser/mod.rs` ~4893-4933) field-for-field, dropping only the
-/// rendering itself (Milestone 6's `chat.rs`).
+/// Translates and decodes each message; rendering is left to the chat view.
 pub fn build_chat_messages(messages: &[GameMessage], metadata_provider: &GameMetadataProvider) -> Vec<ChatMessage> {
     messages.iter().map(|message| chat_message_from_game_message(message, metadata_provider)).collect()
 }
@@ -424,8 +414,7 @@ pub struct ReplayReportModel {
 
 /// The subdued line under the outcome: who was recording, and which match.
 ///
-/// Mirrors the egui app's Row 2 (`ui/replay_parser/mod.rs`), which reads the
-/// same fields off the battle report.
+/// Read off the battle report.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchContext {
     /// The recording player's clan tag, already bracketed. `None` when
@@ -600,8 +589,7 @@ impl ReplayReportModel {
     ///
     /// `observations` is every login seen and when, which is what the shared
     /// database holds; the window and the name match are
-    /// `wows_toolkit_viewmodel::twitch`, so both front ends flag the same
-    /// rows.
+    /// `wows_toolkit_viewmodel::twitch`.
     pub fn populate_twitch_candidates(&mut self, observations: &[(String, jiff::Timestamp)]) {
         for row in &mut self.rows {
             let seen = observations.iter().map(|(login, at)| (login.as_str(), *at));
@@ -714,9 +702,8 @@ fn captain_extras(build: Option<&TranslatedBuild>) -> (bool, bool) {
     (has_dazzle, has_ifa)
 }
 
-/// Comma-groups an integer for display (English/default grouping only; the
-/// egui app's French space-grouping locale branch is not carried forward
-/// here). `1234567 -> "1,234,567"`.
+/// Comma-groups an integer for display (English/default grouping only).
+/// `1234567 -> "1,234,567"`.
 pub fn separate_number<T: Into<i128>>(n: T) -> String {
     let n: i128 = n.into();
     let neg = n < 0;

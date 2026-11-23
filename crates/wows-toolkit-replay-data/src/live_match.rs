@@ -6,8 +6,8 @@
 //! carries, which is what `LiveMatch::from_meta` reads.
 //!
 //! **Polled, not watched.** A filesystem watcher reports changes only, so a
-//! battle already under way when the app starts raises no event; the egui app
-//! covers that with a separate startup check. One poll covers both, and at
+//! battle already under way when the app starts raises no event. A poll
+//! covers both cases, and at
 //! [`POLL_INTERVAL`] costs a `stat` per tick. [`LivePoll`] runs it on a thread
 //! the watchdog supervises; every function here blocks.
 

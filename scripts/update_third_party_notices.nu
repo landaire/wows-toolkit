@@ -196,7 +196,7 @@ def with-crate-licenses [entries: list, packages: list] {
     | append $overrides
 }
 
-# The front ends key their notice lists by title. Two texts of one license whose
+# The app keys its notice list by title. Two texts of one license whose
 # first crate is the same would otherwise share one.
 def unique-titles [] {
     let entries = $in

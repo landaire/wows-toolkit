@@ -47,11 +47,11 @@ use crate::replay_render::view::WindowPoint;
 pub const HISTORY_DEPTH: usize = 32;
 
 /// How big a rotation handle is drawn, and how far above the shape it sits.
-/// The egui renderer's own figures, in element pixels at any zoom.
+/// In element pixels at any zoom.
 pub const HANDLE_RADIUS: f32 = 5.0;
 pub const HANDLE_DISTANCE: f32 = 25.0;
 
-/// The ships that can be placed on the map, as the egui toolbar offers
+/// The ships that can be placed on the map, as the toolbar offers
 /// them: short name, then the species a placed ship carries.
 pub const SPECIES: &[(&str, &str)] =
     &[("DD", "Destroyer"), ("CA", "Cruiser"), ("BB", "Battleship"), ("CV", "AirCarrier"), ("SS", "Submarine")];
@@ -78,10 +78,10 @@ pub struct ToolButton {
     pub tool: fn() -> Tool,
 }
 
-/// The tools the toolbar offers, in the order the egui toolbar offers them.
+/// The tools the toolbar offers, in order.
 ///
 /// Selecting is `Tool::None`: nothing is being drawn, so the pointer goes to
-/// the map as it otherwise would. egui has no selector button, so it leads.
+/// the map as it otherwise would.
 pub const TOOLS: &[ToolButton] = &[
     ToolButton {
         id: "replay-renderer-tool-select",
@@ -152,7 +152,7 @@ pub const TOOLS: &[ToolButton] = &[
 ///
 /// Above the shape by a fixed number of element pixels rather than a map
 /// distance, so the handle stays the same size and the same reach away at
-/// every zoom, as the egui renderer's does. A front end draws it over the
+/// every zoom. The app draws it over the
 /// frame rather than into it, so it stays out of an exported video.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RotationHandle {
@@ -173,7 +173,7 @@ pub struct PickedShape {
     pub beside: ElementPoint,
 }
 
-/// A change the edit popup makes to the picked shape, as the egui popup offers them.
+/// A change the edit popup makes to the picked shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ShapeEdit {
     /// How big a circle, rectangle or triangle is, in minimap units, as [`shape_size`] reads it.
@@ -185,7 +185,7 @@ pub enum ShapeEdit {
 }
 
 /// What the edit popup reads a shape's size in: a circle in kilometres where the map's size is
-/// known, as the egui popup does, and anything else in minimap units.
+/// known, and anything else in minimap units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SizeUnit {
     /// `space_size` is the map's own, in world units.
@@ -204,7 +204,7 @@ impl SizeUnit {
         }
     }
 
-    /// What a size may be set to, in this unit: the egui popup's bounds.
+    /// What a size may be set to, in this unit.
     pub fn range(self) -> RangeInclusive<f32> {
         match self {
             Self::Km { .. } => 0.1..=20.0,
@@ -285,7 +285,7 @@ pub enum PointerUp {
 /// What a click on the map did.
 ///
 /// A click that cleared the selection reports `Ignored` or `ResetView`, so a
-/// front end reads [`Annotator::picked`] again after any click.
+/// caller reads [`Annotator::picked`] again after any click.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Click {
     /// The tool in hand placed or rubbed out a shape.
@@ -297,7 +297,7 @@ pub enum Click {
     Ignored,
 }
 
-/// What the pointer over the map says a press would do, as the egui renderer's cursor does.
+/// What the pointer over the map says a press would do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PointerLook {
     /// Nothing drawn wants the press, so the map has it.
@@ -406,7 +406,7 @@ impl Annotator {
     }
 
     /// Takes up `tool` as its toolbar button does: the button of the shape already in hand fills
-    /// it, or empties it again, as a second click on the egui toolbar does.
+    /// it, or empties it again.
     pub fn choose(&mut self, tool: Tool) {
         let chosen = match (self.drawing.tool(), tool) {
             (Tool::Circle { filled }, Tool::Circle { .. }) => Tool::Circle { filled: !filled },
@@ -417,8 +417,8 @@ impl Annotator {
         self.take_up(chosen);
     }
 
-    /// Puts down the tool in hand, or with none in hand what is picked out, as the egui
-    /// renderer's Escape does. Returns whether there was either.
+    /// Puts down the tool in hand, or with none in hand what is picked out, as Escape does.
+    /// Returns whether there was either.
     pub fn escape(&mut self) -> bool {
         if self.has_tool() {
             self.take_up(Tool::None);
@@ -436,10 +436,10 @@ impl Annotator {
         self.drawing.set_color(ink);
     }
 
-    /// Turns the ship in hand by a wheel turn of `delta_y` pixels, as the egui renderer does
+    /// Turns the ship in hand by a wheel turn of `delta_y` pixels
     /// rather than zooming while one is being placed. Returns whether a ship was in hand.
     pub fn turn_ship_in_hand(&mut self, delta_y: f32) -> bool {
-        // The egui renderer's rate.
+        // Radians of yaw per pixel of wheel travel.
         const RADIANS_PER_PIXEL: f32 = 0.005;
 
         let Tool::Ship { species, friendly, yaw } = self.drawing.tool() else { return false };
@@ -450,8 +450,8 @@ impl Annotator {
         true
     }
 
-    /// Widens or narrows the nib by `step`, within the range the egui board
-    /// offers. Returns whether it changed.
+    /// Widens or narrows the nib by `step`, within `MIN_NIB..=MAX_NIB`.
+    /// Returns whether it changed.
     pub fn step_nib(&mut self, step: f32) -> bool {
         let width = (self.drawing.width() + step).clamp(MIN_NIB, MAX_NIB);
         if (width - self.drawing.width()).abs() < f32::EPSILON {
@@ -475,7 +475,7 @@ impl Annotator {
     /// made. Returns whether there was one.
     ///
     /// This and every other change from here is refused while the session's
-    /// host has locked what is drawn, as the egui toolbar is.
+    /// host has locked what is drawn.
     pub fn undo(&mut self, link: &CollabLink) -> bool {
         if link.annotations_locked() {
             return false;
@@ -506,7 +506,7 @@ impl Annotator {
         true
     }
 
-    /// Erases everything drawn, as the egui toolbar's Clear All does, so one undo puts it all
+    /// Erases everything drawn as one change, so one undo puts it all
     /// back. Returns whether there was anything.
     pub fn clear_all(&mut self, link: &CollabLink) -> bool {
         if link.annotations_locked() || link.annotation_count() == 0 {
@@ -521,7 +521,7 @@ impl Annotator {
 
     /// Hands a pointer event to the tool and does what it drew.
     ///
-    /// The frame carries the part-drawn shape, so a front end redraws after
+    /// The frame carries the part-drawn shape, so the app redraws after
     /// every stroke.
     pub fn stroke(&mut self, link: &CollabLink, stroke: Stroke) {
         if link.annotations_locked() {
@@ -592,8 +592,7 @@ impl Annotator {
                 yaw,
                 species: format!("{species:?}"),
                 friendly,
-                // Stock hull and no modifiers until the reader says otherwise,
-                // which is where the egui chooser leaves it.
+                // Stock hull and no modifiers until the reader says otherwise.
                 config: Some(AnnotationShipConfig::new(param.id(), display_name)),
             },
         );
@@ -936,9 +935,7 @@ pub fn resolve_placed_ships(annotations: &[Annotation], track: &Track, game_data
     placed
 }
 
-/// The tool a key takes up with ctrl held, in the order the egui board numbers
-/// them (`replay/minimap_view/shapes.rs:88-104`): the two apps' readers learn
-/// one set of keys. `m` is the measurement, as it is there.
+/// The tool a key takes up with ctrl held. `m` is the measurement.
 pub fn tool_for_key(key: &str) -> Option<Tool> {
     Some(match key {
         "1" => Tool::Arrow,

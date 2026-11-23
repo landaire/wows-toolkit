@@ -1,8 +1,7 @@
 //! Turning a parsed battle into the rows the replay index stores.
 //!
-//! Reads [`NormalizedBattleReport`], which both front ends already build, so
-//! the index holds the same figures the tables show and neither app can drift
-//! from the other on what a replay meant. The damage fallbacks live on
+//! Reads [`NormalizedBattleReport`], which the app already builds, so the
+//! index holds the same figures the tables show. The damage fallbacks live on
 //! [`NormalizedPlayer`] itself, so a row here and a cell on screen come from
 //! one place.
 
@@ -82,7 +81,7 @@ pub fn constants_fit(
 
 /// Picks the constants a build decodes with, and judges them.
 ///
-/// Preference order is what both apps read from disk: the build's dump-local
+/// Preference order is what the app reads from disk: the build's dump-local
 /// copy, then the versioned storage cache, then the copy embedded in this
 /// executable. Approximate constants still decode stable result fields, but
 /// their positional roster maps are removed so the replay parser uses its
