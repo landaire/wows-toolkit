@@ -198,7 +198,7 @@ pub fn ArmorLegend(
                                 variant = ButtonVariant::Ghost,
                                 size = ButtonSize::IconSm,
                                 attr:data-testid = "armor-legend-collapse",
-                                a11y:label = locale.text("ui.armor.legend_collapse"),
+                                a11y:label = locale.text("ui-armor-legend_collapse"),
                                 on:click = move |_| {
                                     state.update(|state| state.collapsed = !state.collapsed);
                                     on_collapse();
@@ -207,7 +207,7 @@ pub fn ArmorLegend(
                                 Icon(icon = chevron)
                             }
                         }
-                        TooltipContent {{locale.text("ui.armor.legend_collapse")}}
+                        TooltipContent {{locale.text("ui-armor-legend_collapse")}}
                     }
                     text(
                         class = "wt-armor-legend__title",
@@ -238,7 +238,7 @@ pub fn ArmorLegend(
                             drag.set(None);
                         }
                     ) {
-                        {locale.text("ui.armor.armor_thickness_title")}
+                        {locale.text("ui-armor-armor_thickness_title")}
                     }
                     Tooltip {
                         TooltipTrigger {
@@ -246,7 +246,7 @@ pub fn ArmorLegend(
                                 variant = ButtonVariant::Ghost,
                                 size = ButtonSize::IconSm,
                                 attr:data-testid = "armor-legend-close",
-                                a11y:label = locale.text("ui.armor.legend_hide"),
+                                a11y:label = locale.text("ui-armor-legend_hide"),
                                 on:click = move |_| {
                                     state.update(|state| state.visible = false);
                                     on_close();
@@ -255,7 +255,7 @@ pub fn ArmorLegend(
                                 AppIcon(glyph = Glyph::X)
                             }
                         }
-                        TooltipContent {{locale.text("ui.armor.legend_hide")}}
+                        TooltipContent {{locale.text("ui-armor-legend_hide")}}
                     }
                 }
                 column(class = "wt-armor-legend__rows", attr:data-testid = "armor-legend-rows") {

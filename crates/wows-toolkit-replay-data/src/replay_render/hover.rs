@@ -1,12 +1,12 @@
 //! What a pointer resting on a frame reads: a roster's consumable icon, or
 //! the advantage label.
 
-use rust_i18n::t;
 use wows_minimap_renderer::draw_command::ConsumableLines;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::consumable_lines;
 use wows_minimap_renderer::drawing::DrawnRegion;
 use wows_minimap_renderer::drawing::RegionKind;
+use wt_translations::t;
 
 /// What a hover over a roster's consumable icon reads, and whose it is.
 pub struct ConsumableHover {
@@ -61,15 +61,15 @@ pub fn advantage_hover(commands: &[DrawCommand]) -> Option<Vec<String>> {
         _ => None,
     })?;
 
-    let mut lines = vec![t!("ui.renderer.advantage.breakdown").into_owned()];
+    let mut lines = vec![t!("ui-renderer-advantage-breakdown").into_owned()];
     match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
-        None => lines.push(t!("ui.renderer.advantage.team_eliminated").into_owned()),
+        None => lines.push(t!("ui-renderer-advantage-team_eliminated").into_owned()),
         Some(rows) => {
             for row in rows {
                 lines.push(format!("{}  {}", t!(row.label_key), row.contribution));
             }
             if !breakdown.hp_data_reliable {
-                lines.push(t!("ui.renderer.advantage.hp_incomplete").into_owned());
+                lines.push(t!("ui-renderer-advantage-hp_incomplete").into_owned());
             }
         }
     }

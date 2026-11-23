@@ -12,7 +12,6 @@ use std::time::Instant;
 use jiff::Timestamp;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
-use rust_i18n::t;
 use serde_json::Value;
 use serde_json::json;
 use wows_core::game_types::ArenaId;
@@ -25,6 +24,7 @@ use wows_toolkit_viewmodel::mcp::McpBindAddress;
 use wows_toolkit_viewmodel::mcp::McpPort;
 use wows_toolkit_viewmodel::mcp::McpSettings;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wt_translations::t;
 
 use crate::interaction_tests::REVIEW_SIZE;
 use crate::interaction_tests::open_shell;
@@ -123,13 +123,13 @@ fn a_busy_port_is_reported_and_kept() {
     wait_for(&mut window, "the start to fail", || matches!(status(), McpStatus::Failed { .. }));
 
     assert!(matches!(status(), McpStatus::Failed { failure: StartFailure::PortInUse { .. } }), "{:?}", status());
-    let said = t!("ui.mcp.port_in_use", port = held, address = "127.0.0.1").into_owned();
+    let said = t!("ui-mcp-port_in_use", port = held, address = "127.0.0.1").into_owned();
     assert!(toasts(&window).contains(&said), "the message says the port is taken: {}", toasts(&window));
     assert_eq!(saved().port, Some(port), "no other port is chosen in its place");
 
     shell().settings_drawer.open_at(Setting::McpPort);
     window.advance(Duration::from_millis(600));
-    assert!(notes(&window).contains(&t!("ui.settings.mcp.port_in_use").into_owned()), "the port row says so too");
+    assert!(notes(&window).contains(&t!("ui-settings-mcp-port_in_use").into_owned()), "the port row says so too");
 
     shell().set_mcp_enabled(false);
     drop(holder);
@@ -163,16 +163,16 @@ fn typed_addresses_and_ports_are_checked_inline() {
     window.advance(Duration::from_millis(200));
 
     let said = notes(&window);
-    assert!(said.contains(&t!("ui.settings.mcp.address_invalid", input = "localhost:80").into_owned()), "{said}");
-    assert!(said.contains(&t!("ui.settings.mcp.port_invalid", input = "70000").into_owned()), "{said}");
+    assert!(said.contains(&t!("ui-settings-mcp-address_invalid", input = "localhost:80").into_owned()), "{said}");
+    assert!(said.contains(&t!("ui-settings-mcp-port_invalid", input = "70000").into_owned()), "{said}");
     assert_eq!(saved(), McpSettings::new(), "refused text changes nothing");
 
     shell().commit_mcp_address("::1".to_owned());
     shell().commit_mcp_port("40123".to_owned());
     window.advance(Duration::from_millis(200));
     let said = notes(&window);
-    assert!(!said.contains(&t!("ui.settings.mcp.address_invalid", input = "localhost:80").into_owned()), "{said}");
-    assert!(!said.contains(&t!("ui.settings.mcp.port_invalid", input = "70000").into_owned()), "{said}");
+    assert!(!said.contains(&t!("ui-settings-mcp-address_invalid", input = "localhost:80").into_owned()), "{said}");
+    assert!(!said.contains(&t!("ui-settings-mcp-port_invalid", input = "70000").into_owned()), "{said}");
     assert_eq!(saved().port.map(McpPort::get), Some(40123));
 }
 
@@ -190,12 +190,12 @@ fn only_loopback_addresses_are_served() {
     shell().start_mcp();
     window.advance(Duration::from_millis(200));
     assert!(matches!(status(), McpStatus::Stopped), "no server listens on it: {:?}", status());
-    let saved_note = t!("ui.settings.mcp.address_not_loopback", input = "0.0.0.0").into_owned();
+    let saved_note = t!("ui-settings-mcp-address_not_loopback", input = "0.0.0.0").into_owned();
     assert!(notes(&window).contains(&saved_note), "{}", notes(&window));
 
     shell().commit_mcp_address("192.168.1.20".to_owned());
     window.advance(Duration::from_millis(200));
-    let typed_note = t!("ui.settings.mcp.address_not_loopback", input = "192.168.1.20").into_owned();
+    let typed_note = t!("ui-settings-mcp-address_not_loopback", input = "192.168.1.20").into_owned();
     assert!(notes(&window).contains(&typed_note), "{}", notes(&window));
     assert_eq!(saved().bind_address, exposed, "typed text is not adopted, and the saved row is not rewritten");
 

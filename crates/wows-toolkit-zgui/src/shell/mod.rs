@@ -783,7 +783,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                                     TabStripTab(
                                         value = tab.value(),
                                         on_close = on_close_tab(id),
-                                        close_label = Signal::derive_local(locale.text("ui.tabs.close_directory_stats")),
+                                        close_label = Signal::derive_local(locale.text("ui-tabs-close_directory_stats")),
                                         attr:data-testid = tab.value()
                                     ) {
                                         Tooltip {
@@ -828,7 +828,7 @@ fn ShellFrame(appearance: Appearance) -> impl IntoView {
                 Show(when = move || shell.debug_mode.get()) {
                     row(class = "wt-debug-notice", attr:data-testid = "app-debug-notice") {
                         AppIcon(glyph = wows_toolkit_icons::Glyph::TriangleAlert)
-                        text {{locale.text("ui.app.debug_build")}}
+                        text {{locale.text("ui-app-debug_build")}}
                         AppIcon(glyph = wows_toolkit_icons::Glyph::TriangleAlert)
                     }
                 }

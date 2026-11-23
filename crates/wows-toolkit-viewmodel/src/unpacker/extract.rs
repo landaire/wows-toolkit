@@ -12,8 +12,8 @@ use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
 
-use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
+use wt_translations::t;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractError {
@@ -172,16 +172,16 @@ impl ExtractState {
     pub fn status(&self) -> Option<String> {
         Some(match self {
             Self::Idle => return None,
-            Self::Counting => t!("ui.unpacker.counting_files").into_owned(),
+            Self::Counting => t!("ui-unpacker-counting_files").into_owned(),
             Self::Running(progress) => {
-                t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned()
+                t!("ui-unpacker-extracting", done = progress.written, total = progress.total).into_owned()
             }
-            Self::Failed(reason) => t!("ui.unpacker.extract_failed", reason = reason).into_owned(),
+            Self::Failed(reason) => t!("ui-unpacker-extract_failed", reason = reason).into_owned(),
             Self::Done(ExtractOutcome::Completed { written }) => {
-                t!("ui.unpacker.extracted", count = written).into_owned()
+                t!("ui-unpacker-extracted", count = written).into_owned()
             }
             Self::Done(ExtractOutcome::Stopped { written }) => {
-                t!("ui.unpacker.cancelled", count = written).into_owned()
+                t!("ui-unpacker-cancelled", count = written).into_owned()
             }
         })
     }

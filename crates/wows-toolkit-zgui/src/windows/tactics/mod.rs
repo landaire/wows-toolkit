@@ -13,11 +13,11 @@ mod toolbar;
 
 use std::path::Path;
 
-use rust_i18n::t;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_toolkit_config::WindowKind;
 use wows_toolkit_config::WindowSettings;
 use wows_toolkit_services::collab::CollabLink;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::prelude::WindowHandle;
@@ -97,7 +97,7 @@ impl TacticsHost {
         }
 
         let options = secondary_window_options(
-            t!("ui.windows.tactics_board").into_owned(),
+            t!("ui-windows-tactics_board").into_owned(),
             self.remembered.get_value(),
             DEFAULT_SIZE,
         )
@@ -247,7 +247,7 @@ fn TacticsWindow(host: TacticsHost) -> impl IntoView {
             if move || peers.get() {
                 // Says why zones and shapes this reader did not put there are on the board: it is
                 // a peer's, opened because the session is on it.
-                text(class = "wt-tactics__peer") {{locale.text("ui.tactics.a_peers_board")}}
+                text(class = "wt-tactics__peer") {{locale.text("ui-tactics-a_peers_board")}}
             } else {}
             box(class = "wt-tactics__rule")
             BoardMap(model = model)

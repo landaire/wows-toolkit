@@ -7,10 +7,10 @@ use egui::RichText;
 use egui::ScrollArea;
 use egui::TextEdit;
 use egui::Ui;
-use rust_i18n::t;
 use wows_toolkit_notices::Notices;
 use wows_toolkit_notices::PROJECT_LICENSE;
 use wows_toolkit_notices::PROJECT_LICENSE_ID;
+use wt_translations::t;
 
 #[derive(Default)]
 pub(crate) struct LicensesWindow {
@@ -29,7 +29,7 @@ impl LicensesWindow {
         }
 
         let query = &mut self.query;
-        egui::Window::new(t!("ui.windows.licenses")).open(&mut self.open).default_size([640.0, 560.0]).show(
+        egui::Window::new(t!("ui-windows-licenses")).open(&mut self.open).default_size([640.0, 560.0]).show(
             ctx,
             |ui| {
                 build_licenses_window(ui, query);
@@ -39,15 +39,15 @@ impl LicensesWindow {
 }
 
 fn build_licenses_window(ui: &mut Ui, query: &mut String) {
-    ui.label(t!("ui.labels.app_version", version = env!("CARGO_PKG_VERSION")));
-    ui.label(t!("ui.labels.project_license", license = PROJECT_LICENSE_ID));
+    ui.label(t!("ui-labels-app_version", version = env!("CARGO_PKG_VERSION")));
+    ui.label(t!("ui-labels-project_license", license = PROJECT_LICENSE_ID));
     CollapsingHeader::new(PROJECT_LICENSE_ID).id_salt("project_license").show(ui, |ui| {
         monospace_text(ui, PROJECT_LICENSE);
     });
 
     ui.separator();
-    ui.heading(t!("ui.labels.third_party_notices"));
-    ui.add(TextEdit::singleline(query).hint_text(t!("ui.labels.notices_search_hint")).desired_width(f32::INFINITY));
+    ui.heading(t!("ui-labels-third_party_notices"));
+    ui.add(TextEdit::singleline(query).hint_text(t!("ui-labels-notices_search_hint")).desired_width(f32::INFINITY));
 
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let mut any = false;
@@ -60,7 +60,7 @@ fn build_licenses_window(ui: &mut Ui, query: &mut String) {
         }
 
         if !any {
-            ui.label(t!("ui.labels.no_matching_notices"));
+            ui.label(t!("ui-labels-no_matching_notices"));
         }
     });
 }

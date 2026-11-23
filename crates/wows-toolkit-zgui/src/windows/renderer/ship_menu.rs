@@ -1,6 +1,5 @@
 //! The menu a right-click on a ship opens: its trail, its ranges, and its armor.
 
-use rust_i18n::t;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_replays::types::EntityId;
 use wows_toolkit_icons::Glyph;
@@ -8,6 +7,7 @@ use wows_toolkit_replay_data::replay_render::armor::has_armor_to_show;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::ships::ALL_RANGES;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Signal;
@@ -140,7 +140,7 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
     let only_ranges = move || session.choose(|choices, _, options| choices.only_ranges(&only_player, options));
     let all_ranges = move || session.choose(|choices, drawn, options| choices.all_ranges(drawn, options));
     let every_label = move || {
-        if all_on.get() { t!("ui.renderer.context.disable_all") } else { t!("ui.renderer.context.enable_all") }
+        if all_on.get() { t!("ui-renderer-context-disable_all") } else { t!("ui-renderer-context-enable_all") }
             .into_owned()
     };
     let switch = |test_id: &'static str,
@@ -174,7 +174,7 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
             }
         }
         CheckRow(
-            label = t!("ui.renderer.context.show_trail").into_owned(),
+            label = t!("ui-renderer-context-show_trail").into_owned(),
             test_id = "replay-renderer-ship-trail".to_owned(),
             checked = trail_shown,
             on_change = set_trail
@@ -186,7 +186,7 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
                 attr:data-testid = "replay-renderer-ship-armor",
                 on:click = move |_| session.show_armor(entity_id)
             ) {
-                {t!("ui.renderer.context.realtime_armor").into_owned()}
+                {t!("ui-renderer-context-realtime_armor").into_owned()}
             }
         }
         Button(
@@ -195,15 +195,15 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
             attr:data-testid = "replay-renderer-ship-only-trail",
             on:click = move |_| only_trail()
         ) {
-            {t!("ui.renderer.context.disable_other_trails").into_owned()}
+            {t!("ui-renderer-context-disable_other_trails").into_owned()}
         }
-        text(class = "wt-renderer-ship-menu__ranges") {{t!("ui.renderer.context.ranges").into_owned()}}
-        {switch("replay-renderer-range-detection", "ui.renderer.context.detection", |filter| filter.detection, |filter, on| filter.detection = on)}
-        {switch("replay-renderer-range-main", "ui.renderer.context.main_battery", |filter| filter.main_battery, |filter, on| filter.main_battery = on)}
-        {switch("replay-renderer-range-secondary", "ui.renderer.context.secondary", |filter| filter.secondary_battery, |filter, on| filter.secondary_battery = on)}
-        {switch("replay-renderer-range-torpedo", "ui.renderer.context.torpedo", |filter| filter.torpedo, |filter, on| filter.torpedo = on)}
-        {switch("replay-renderer-range-radar", "ui.renderer.context.radar", |filter| filter.radar, |filter, on| filter.radar = on)}
-        {switch("replay-renderer-range-hydro", "ui.renderer.context.hydro", |filter| filter.hydro, |filter, on| filter.hydro = on)}
+        text(class = "wt-renderer-ship-menu__ranges") {{t!("ui-renderer-context-ranges").into_owned()}}
+        {switch("replay-renderer-range-detection", "ui-renderer-context-detection", |filter| filter.detection, |filter, on| filter.detection = on)}
+        {switch("replay-renderer-range-main", "ui-renderer-context-main_battery", |filter| filter.main_battery, |filter, on| filter.main_battery = on)}
+        {switch("replay-renderer-range-secondary", "ui-renderer-context-secondary", |filter| filter.secondary_battery, |filter, on| filter.secondary_battery = on)}
+        {switch("replay-renderer-range-torpedo", "ui-renderer-context-torpedo", |filter| filter.torpedo, |filter, on| filter.torpedo = on)}
+        {switch("replay-renderer-range-radar", "ui-renderer-context-radar", |filter| filter.radar, |filter, on| filter.radar = on)}
+        {switch("replay-renderer-range-hydro", "ui-renderer-context-hydro", |filter| filter.hydro, |filter, on| filter.hydro = on)}
         Button(
             variant = ButtonVariant::Outline,
             size = ButtonSize::Sm,
@@ -218,7 +218,7 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
             attr:data-testid = "replay-renderer-only-ranges",
             on:click = move |_| only_ranges()
         ) {
-            {t!("ui.renderer.context.disable_other_ranges").into_owned()}
+            {t!("ui-renderer-context-disable_other_ranges").into_owned()}
         }
         Button(
             variant = ButtonVariant::Outline,
@@ -226,7 +226,7 @@ fn ShipMenuItems(session: RendererSession, entity_id: EntityId, player: String) 
             attr:data-testid = "replay-renderer-all-ranges",
             on:click = move |_| all_ranges()
         ) {
-            {t!("ui.renderer.context.enable_all_ranges").into_owned()}
+            {t!("ui-renderer-context-enable_all_ranges").into_owned()}
         }
     }
 }

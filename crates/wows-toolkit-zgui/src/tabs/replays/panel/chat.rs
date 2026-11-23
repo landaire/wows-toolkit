@@ -7,13 +7,13 @@ use landaire_ui::Rgb;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 use wows_toolkit_replay_data::model::ChatMessage;
 use wows_toolkit_replay_data::model::ClanColor;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -127,11 +127,11 @@ pub fn ChatPanel(messages: Rc<[ChatMessage]>, names: NameDisplay, title: String)
                     attr:data-testid = "chat-copy-all",
                     on:click = move |_| {
                         shell.copy_text(transcript(&all));
-                        shell.toasts().ok(t!("ui.replay.chat_copied").into_owned());
+                        shell.toasts().ok(t!("ui-replay-chat_copied").into_owned());
                     }
                 ) {
                     AppIcon(glyph = wows_toolkit_icons::Glyph::Copy)
-                    text {{t!("ui.replay.chat_copy_all").into_owned()}}
+                    text {{t!("ui-replay-chat_copy_all").into_owned()}}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -139,7 +139,7 @@ pub fn ChatPanel(messages: Rc<[ChatMessage]>, names: NameDisplay, title: String)
                     attr:data-testid = "chat-save",
                     on:click = move |_| save_to_file(shell, transcript(&saved), &title)
                 ) {
-                    {t!("ui.replay.chat_save_to_file").into_owned()}
+                    {t!("ui-replay-chat_save_to_file").into_owned()}
                 }
             }
             ScrollArea(class = "wt-rp-chat__log") {
@@ -160,7 +160,7 @@ fn message_row(message: &ChatMessage, shell: Shell, theme: Signal<landaire_ui::T
     let body = message.message.clone();
     let body_color = channel_color(&message.channel);
     let copied = copy_text(message);
-    let copy_label = t!("ui.replay.copy_message").into_owned();
+    let copy_label = t!("ui-replay-copy_message").into_owned();
     let copy_tip = copy_label.clone();
 
     AnyView::new(view! {
@@ -182,7 +182,7 @@ fn message_row(message: &ChatMessage, shell: Shell, theme: Signal<landaire_ui::T
                             a11y:label = copy_label.clone(),
                             on:click = move |_| {
                                 shell.copy_text(copied.clone());
-                                shell.toasts().ok(t!("ui.replay.chat_copied").into_owned());
+                                shell.toasts().ok(t!("ui-replay-chat_copied").into_owned());
                             }
                         ) {
                             AppIcon(glyph = wows_toolkit_icons::Glyph::Copy)
@@ -198,7 +198,7 @@ fn message_row(message: &ChatMessage, shell: Shell, theme: Signal<landaire_ui::T
 /// Asks where to write the log and writes it there.
 fn save_to_file(shell: Shell, transcript: String, title: &str) {
     let asked = wows_toolkit_services::dialog::save_file(
-        Some(t!("ui.replay.chat_save_title").as_ref()),
+        Some(t!("ui-replay-chat_save_title").as_ref()),
         &format!("{title} - Game Chat.txt"),
         None,
     );
@@ -207,18 +207,18 @@ fn save_to_file(shell: Shell, transcript: String, title: &str) {
             Ok(Some(path)) => path,
             Ok(None) => return,
             Err(err) => {
-                shell.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+                shell.toasts().failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
                 return;
             }
         };
         let shown = path.display().to_string();
         match blocking(move || std::fs::write(&path, transcript)).await {
             Ok(()) => {
-                shell.toasts().ok(t!("ui.replay.chat_saved", path = shown).into_owned());
+                shell.toasts().ok(t!("ui-replay-chat_saved", path = shown).into_owned());
             }
             Err(err) => {
                 tracing::warn!("replay chat: the log was not saved: {err}");
-                shell.toasts().failed(t!("ui.replay.chat_save_failed", error = err).into_owned());
+                shell.toasts().failed(t!("ui-replay-chat_save_failed", error = err).into_owned());
             }
         }
     });

@@ -4,13 +4,13 @@
 //! Colors are represented as `ColorRole`, resolved to real colors by the
 //! render layer (Milestone 2); no UI toolkit color type appears here.
 
-use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::breakdown;
 use wows_toolkit_viewmodel::replay_sort::SortColumn;
+use wt_translations::t;
 
 use crate::model::PlayerRow;
 
@@ -108,23 +108,23 @@ impl ReplayColumn {
     /// The translation key of the column's heading.
     pub const fn label_key(self) -> &'static str {
         match self {
-            ReplayColumn::Name => "ui.replay.column.player_name",
-            ReplayColumn::ShipName => "ui.replay.column.ship_name",
-            ReplayColumn::Skills => "ui.replay.column.skills",
-            ReplayColumn::PersonalRating => "ui.replay.column.personal_rating",
-            ReplayColumn::MatchContribution => "ui.replay.column.match_contribution",
-            ReplayColumn::BaseXp => "stat.base_xp",
-            ReplayColumn::RawXp => "stat.raw_xp",
-            ReplayColumn::Kills => "ui.replay.column.kills",
-            ReplayColumn::ObservedDamage => "ui.replay.column.observed_damage",
-            ReplayColumn::ActualDamage => "ui.replay.column.actual_damage",
-            ReplayColumn::ReceivedDamage => "ui.replay.column.received_damage",
-            ReplayColumn::SpottingDamage => "stat.spotting_damage",
-            ReplayColumn::PotentialDamage => "ui.replay.column.potential_damage",
-            ReplayColumn::Hits => "ui.replay.column.hits",
-            ReplayColumn::Heals => "ui.replay.column.heals",
-            ReplayColumn::DistanceTraveled => "ui.replay.column.distance_traveled",
-            ReplayColumn::TimeLived => "ui.replay.column.time_lived",
+            ReplayColumn::Name => "ui-replay-column-player_name",
+            ReplayColumn::ShipName => "ui-replay-column-ship_name",
+            ReplayColumn::Skills => "ui-replay-column-skills",
+            ReplayColumn::PersonalRating => "ui-replay-column-personal_rating",
+            ReplayColumn::MatchContribution => "ui-replay-column-match_contribution",
+            ReplayColumn::BaseXp => "stat-base_xp",
+            ReplayColumn::RawXp => "stat-raw_xp",
+            ReplayColumn::Kills => "ui-replay-column-kills",
+            ReplayColumn::ObservedDamage => "ui-replay-column-observed_damage",
+            ReplayColumn::ActualDamage => "ui-replay-column-actual_damage",
+            ReplayColumn::ReceivedDamage => "ui-replay-column-received_damage",
+            ReplayColumn::SpottingDamage => "stat-spotting_damage",
+            ReplayColumn::PotentialDamage => "ui-replay-column-potential_damage",
+            ReplayColumn::Hits => "ui-replay-column-hits",
+            ReplayColumn::Heals => "ui-replay-column-heals",
+            ReplayColumn::DistanceTraveled => "ui-replay-column-distance_traveled",
+            ReplayColumn::TimeLived => "ui-replay-column-time_lived",
         }
     }
 
@@ -486,7 +486,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 CellValue::plain(DASH)
             } else if !row.has_vehicle_entity {
                 CellValue::colored(DASH, ColorRole::CaptainPoints(CaptainPointsTier::Bad))
-                    .with_hover(t!("ui.replay.build.not_spotted").into_owned())
+                    .with_hover(t!("ui-replay-build-not_spotted").into_owned())
             } else {
                 let mut cell = CellValue::colored(
                     row.skill_label_text.clone(),
@@ -499,7 +499,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             }
         }
         ReplayColumn::PersonalRating if !row.rating_scope.is_rated() => {
-            CellValue::plain(DASH).with_hover(t!("ui.personal_rating.unrated_hover").into_owned())
+            CellValue::plain(DASH).with_hover(t!("ui-personal_rating-unrated_hover").into_owned())
         }
         // The band name only: the breakdown is built by the front end's own
         // hover when it opens, and is withheld for a row hiding its stats.
@@ -575,9 +575,9 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
         },
         ReplayColumn::Heals => match row.heal_count {
             Some(count) => {
-                CellValue::plain(count.to_string()).with_hover(t!("ui.replay.column.heals_tooltip").into_owned())
+                CellValue::plain(count.to_string()).with_hover(t!("ui-replay-column-heals_tooltip").into_owned())
             }
-            None => CellValue::plain(DASH).with_hover(t!("ui.replay.column.heals_no_repair_tooltip").into_owned()),
+            None => CellValue::plain(DASH).with_hover(t!("ui-replay-column-heals_no_repair_tooltip").into_owned()),
         },
         ReplayColumn::DistanceTraveled => match row.distance_traveled {
             Some(distance) => CellValue::plain(format!("{distance:.2}km")),

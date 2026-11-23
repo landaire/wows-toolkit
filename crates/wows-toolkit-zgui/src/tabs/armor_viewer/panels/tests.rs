@@ -363,7 +363,7 @@ fn a_second_export_is_refused_while_one_runs() {
     let assets = Arc::new(ShipAssets::from_parts(&vfs, Arc::new(metadata), Arc::new(Vec::new())));
     let request =
         || ExportRequest::Ship { param_index: "PASC001".to_owned(), display_name: "Erie".to_owned(), seed_hull: None };
-    let refusal = rust_i18n::t!("ui.armor.export.already_running").into_owned();
+    let refusal = wt_translations::t!("ui-armor-export-already_running").into_owned();
 
     let running = mounted.shell.armor.begin_export().expect("nothing is exporting yet");
     assert!(mounted.shell.armor.begin_export().is_none(), "a second export does not start");

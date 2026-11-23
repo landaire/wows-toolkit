@@ -1,8 +1,8 @@
 //! The first-run setup dialog: the game install, Proton, accounts and replays, one step each.
 //! Every step can be skipped.
 
-use rust_i18n::t;
 use wows_toolkit_launcher::LoginTarget;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -117,10 +117,10 @@ impl SetupStep {
 
     fn label(self) -> String {
         match self {
-            Self::Game => t!("ui.launcher.setup.game"),
-            Self::Proton => t!("ui.launcher.setup.proton"),
-            Self::Accounts => t!("ui.launcher.setup.accounts"),
-            Self::Replays => t!("ui.launcher.setup.replays"),
+            Self::Game => t!("ui-launcher-setup-game"),
+            Self::Proton => t!("ui-launcher-setup-proton"),
+            Self::Accounts => t!("ui-launcher-setup-accounts"),
+            Self::Replays => t!("ui-launcher-setup-replays"),
         }
         .into_owned()
     }
@@ -160,7 +160,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
             HostedDialog(handle = handle) {
                 DialogContent(attr:data-testid = "launcher-setup") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.launcher.setup.title").into_owned()}}
+                        DialogTitle {{t!("ui-launcher-setup-title").into_owned()}}
                     }
                     column(class = "wt-setup") {
                         Steps(step = step)
@@ -181,7 +181,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
                             attr:data-testid = "launcher-setup-skip",
                             on:click = move |_| handle.close()
                         ) {
-                            {t!("ui.launcher.setup.skip").into_owned()}
+                            {t!("ui-launcher-setup-skip").into_owned()}
                         }
                         Button(
                             variant = ButtonVariant::Outline,
@@ -194,7 +194,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
                                 }
                             }
                         ) {
-                            {t!("ui.launcher.setup.back").into_owned()}
+                            {t!("ui-launcher-setup-back").into_owned()}
                         }
                         Button(
                             size = ButtonSize::Sm,
@@ -204,7 +204,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
                                 None => handle.close(),
                             }
                         ) {
-                            {move || if is_last.get() { t!("ui.launcher.setup.done").into_owned() } else { t!("ui.launcher.setup.next").into_owned() }}
+                            {move || if is_last.get() { t!("ui-launcher-setup-done").into_owned() } else { t!("ui-launcher-setup-next").into_owned() }}
                         }
                     }
                 }
@@ -250,12 +250,12 @@ fn GameStep(shell: Shell, model: LauncherModel) -> impl IntoView {
     let installing = RwSignal::new_local(false);
 
     view! {
-        text {{t!("ui.launcher.setup.game_question").into_owned()}}
+        text {{t!("ui-launcher-setup-game_question").into_owned()}}
         for install in move || installs.get(), key = |install: &InstallView| install.clone() {
             InstallChoiceButton(shell = shell, model = model, install = install)
         }
         if move || installs.with(Vec::is_empty) && !discovering.get() {
-            text(class = "wt-launcher__dim", attr:data-testid = "launcher-setup-none-found") {{t!("ui.launcher.setup.none_found").into_owned()}}
+            text(class = "wt-launcher__dim", attr:data-testid = "launcher-setup-none-found") {{t!("ui-launcher-setup-none_found").into_owned()}}
         } else {}
         row(class = "wt-launcher__row") {
             Button(
@@ -264,7 +264,7 @@ fn GameStep(shell: Shell, model: LauncherModel) -> impl IntoView {
                 attr:data-testid = "launcher-setup-choose-folder",
                 on:click = move |_| add_install(model, shell)
             ) {
-                {t!("ui.launcher.setup.choose_folder").into_owned()}
+                {t!("ui-launcher-setup-choose_folder").into_owned()}
             }
             Button(
                 variant = ButtonVariant::Outline,
@@ -272,7 +272,7 @@ fn GameStep(shell: Shell, model: LauncherModel) -> impl IntoView {
                 attr:data-testid = "launcher-setup-install-new",
                 on:click = move |_| installing.set(true)
             ) {
-                {t!("ui.launcher.setup.install_new").into_owned()}
+                {t!("ui-launcher-setup-install_new").into_owned()}
             }
         }
         Show(when = move || installing.get()) {
@@ -290,7 +290,7 @@ fn InstallChoiceButton(shell: Shell, model: LauncherModel, install: InstallView)
     let version = match &install.version {
         Some(crate::launcher::display::InstallVersion::Known(version)) => version.clone(),
         Some(crate::launcher::display::InstallVersion::ManagedBySteam) => {
-            t!("ui.launcher.managed_by_steam").into_owned()
+            t!("ui-launcher-managed_by_steam").into_owned()
         }
         None => String::new(),
     };
@@ -317,11 +317,11 @@ fn ProtonStep(shell: Shell, model: LauncherModel) -> impl IntoView {
     let needed = Memo::new(move |_| model.with(|state| state.launcher.needs_runner_setup()));
 
     view! {
-        text {{t!("ui.launcher.setup.proton_explain").into_owned()}}
+        text {{t!("ui-launcher-setup-proton_explain").into_owned()}}
         if move || needed.get() {
-            text(class = "wt-launcher__warn", attr:data-testid = "launcher-setup-proton-needed") {{t!("ui.launcher.runner.needed").into_owned()}}
+            text(class = "wt-launcher__warn", attr:data-testid = "launcher-setup-proton-needed") {{t!("ui-launcher-runner-needed").into_owned()}}
         } else {
-            text(class = "wt-launcher__ok", attr:data-testid = "launcher-setup-proton-ready") {{t!("ui.launcher.setup.proton_ready").into_owned()}}
+            text(class = "wt-launcher__ok", attr:data-testid = "launcher-setup-proton-ready") {{t!("ui-launcher-setup-proton_ready").into_owned()}}
         }
         RunnerControl(model = model, shell = shell)
     }
@@ -336,7 +336,7 @@ fn AccountsStep(model: LauncherModel) -> impl IntoView {
     let generation = Memo::new(move |_| finished.get().map(|(key, _)| key));
 
     view! {
-        text {{t!("ui.launcher.setup.accounts_explain").into_owned()}}
+        text {{t!("ui-launcher-setup-accounts_explain").into_owned()}}
         for row in move || rows.get(), key = |row: &AccountRow| row.label.clone() {
             row(class = "wt-launcher__row", attr:data-testid = format!("launcher-setup-account-{}", row.label.key.account_id.get())) {
                 RealmGlyph(realm = row.label.key.realm)
@@ -355,7 +355,7 @@ fn AccountsStep(model: LauncherModel) -> impl IntoView {
 #[component]
 fn ReplaysStep(shell: Shell, model: LauncherModel) -> impl IntoView {
     view! {
-        text {{t!("ui.launcher.setup.replays_explain").into_owned()}}
+        text {{t!("ui-launcher-setup-replays_explain").into_owned()}}
         ReplayRetention(shell = shell, model = model)
     }
 }

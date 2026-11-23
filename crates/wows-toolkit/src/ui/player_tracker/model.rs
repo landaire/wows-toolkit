@@ -5,9 +5,9 @@ use std::hash::Hash;
 use egui::Color32;
 use jiff::Timestamp;
 use jiff::ToSpan;
-use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
+use wt_translations::t;
 
 use crate::icons;
 use crate::ui::theme::semantic::SemanticExt;
@@ -247,12 +247,12 @@ impl Default for SortedBy {
 impl TimePeriod {
     pub(crate) fn description(&self) -> String {
         match self {
-            TimePeriod::LastHour => t!("ui.player_tracker.period.past_hour").into(),
-            TimePeriod::LastSixHours => t!("ui.player_tracker.period.past_six_hours").into(),
-            TimePeriod::LastDay => t!("ui.player_tracker.period.past_day").into(),
-            TimePeriod::LastWeek => t!("ui.player_tracker.period.past_week").into(),
-            TimePeriod::LastMonth => t!("ui.player_tracker.period.past_month").into(),
-            TimePeriod::AllTime => t!("ui.player_tracker.period.all_time").into(),
+            TimePeriod::LastHour => t!("ui-player_tracker-period-past_hour").into(),
+            TimePeriod::LastSixHours => t!("ui-player_tracker-period-past_six_hours").into(),
+            TimePeriod::LastDay => t!("ui-player_tracker-period-past_day").into(),
+            TimePeriod::LastWeek => t!("ui-player_tracker-period-past_week").into(),
+            TimePeriod::LastMonth => t!("ui-player_tracker-period-past_month").into(),
+            TimePeriod::AllTime => t!("ui-player_tracker-period-all_time").into(),
         }
     }
 

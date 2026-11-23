@@ -12,7 +12,6 @@ use std::sync::Arc;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
@@ -32,6 +31,7 @@ use wows_toolkit_viewmodel::fire_chance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -221,7 +221,7 @@ enum DamageDirection {
 pub type Rows = Arc<[PlayerRow]>;
 
 /// The mode Alt puts the damage breakdowns in, as the status bar names it.
-pub const SHARE_MODE: ModeHint = ModeHint { key: ModifierKey::Alt, name_key: "ui.replay.damage_share.mode" };
+pub const SHARE_MODE: ModeHint = ModeHint { key: ModifierKey::Alt, name_key: "ui-replay-damage_share-mode" };
 
 /// Whether Alt changes anything in `row`'s detail: a shown damage column draws at least one share
 /// line, which takes a nonzero amount to a player `rows` names.
@@ -545,14 +545,14 @@ fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>, art: GameArt
 
     let mut parts: Vec<AnyView> = Vec::new();
     if has_achievements {
-        parts.push(heading(t!("ui.replay.sections.achievements").into_owned()));
+        parts.push(heading(t!("ui-replay-sections-achievements").into_owned()));
         parts.push(achievements_view(&row.achievements, art));
     }
     if has_ribbons {
         if has_achievements {
             parts.push(separator());
         }
-        parts.push(heading(t!("ui.replay.sections.ribbons").into_owned()));
+        parts.push(heading(t!("ui-replay-sections-ribbons").into_owned()));
         let mut ribbons: Vec<&RibbonResult> = row.ribbons.iter().collect();
         ribbons.sort_by(|a, b| a.name.cmp(&b.name));
         reorder_bulge_after_main_caliber(&mut ribbons);
@@ -562,7 +562,7 @@ fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>, art: GameArt
         if has_achievements || has_ribbons {
             parts.push(separator());
         }
-        parts.push(heading(t!("ui.replay.sections.damage_events").into_owned()));
+        parts.push(heading(t!("ui-replay-sections-damage_events").into_owned()));
         parts.push(if row.should_hide_stats() && !debug {
             nda_text()
         } else {
@@ -582,10 +582,10 @@ fn name_section(row: &PlayerRow, debug: bool, shell: Option<Shell>, art: GameArt
 /// The damage events a row records: one line per event kind the battle produced.
 fn damage_event_rows(row: &PlayerRow) -> Vec<BreakdownRow> {
     [
-        (t!("ui.replay.column.fires"), row.fires),
-        (t!("ui.replay.column.floods"), row.floods),
-        (t!("ui.replay.column.citadels"), row.citadels),
-        (t!("ui.replay.column.crits"), row.crits),
+        (t!("ui-replay-column-fires"), row.fires),
+        (t!("ui-replay-column-floods"), row.floods),
+        (t!("ui-replay-column-citadels"), row.citadels),
+        (t!("ui-replay-column-crits"), row.crits),
     ]
     .into_iter()
     .filter_map(|(label, count)| {
@@ -730,23 +730,23 @@ fn build_section(row: &PlayerRow, debug: bool, perspectives: Perspectives, art: 
             parts.push(separator());
         }
         if build.modernization_slots.is_empty() {
-            parts.push(text(t!("ui.replay.sections.modules_none").into_owned()));
+            parts.push(text(t!("ui-replay-sections-modules_none").into_owned()));
         } else {
-            parts.push(heading(t!("ui.replay.sections.modules").into_owned()));
+            parts.push(heading(t!("ui-replay-sections-modules").into_owned()));
             parts.push(modernization_slots_view(&build.modernization_slots, art));
         }
 
         if !build.signals.is_empty() {
             parts.push(separator());
-            parts.push(heading(t!("ui.replay.sections.signals").into_owned()));
+            parts.push(heading(t!("ui-replay-sections-signals").into_owned()));
             parts.push(signals_view(&build.signals, art));
         }
 
         parts.push(separator());
         if build.loadout.is_empty() {
-            parts.push(text(t!("ui.replay.sections.loadout_none").into_owned()));
+            parts.push(text(t!("ui-replay-sections-loadout_none").into_owned()));
         } else {
-            parts.push(heading(t!("ui.replay.sections.loadout").into_owned()));
+            parts.push(heading(t!("ui-replay-sections-loadout").into_owned()));
             for module in &build.loadout {
                 if let Some(name) = module.name.as_ref() {
                     parts.push(text_row(name.clone(), module.description.clone()));
@@ -757,14 +757,14 @@ fn build_section(row: &PlayerRow, debug: bool, perspectives: Perspectives, art: 
         parts.push(separator());
         match build.captain_skills.as_ref() {
             Some(skills) if !skills.is_empty() => {
-                parts.push(heading(t!("ui.replay.sections.captain_skills").into_owned()));
+                parts.push(heading(t!("ui-replay-sections-captain_skills").into_owned()));
                 parts.push(captain_skill_grid_view(skills, art));
             }
             Some(_) => {
-                parts.push(heading(t!("ui.replay.sections.captain_skills").into_owned()));
-                parts.push(text(t!("ui.replay.sections.captain_skills_none").into_owned()));
+                parts.push(heading(t!("ui-replay-sections-captain_skills").into_owned()));
+                parts.push(text(t!("ui-replay-sections-captain_skills_none").into_owned()));
             }
-            None => parts.push(text(t!("ui.replay.sections.captain_skills_none").into_owned())),
+            None => parts.push(text(t!("ui-replay-sections-captain_skills_none").into_owned())),
         }
     }
 
@@ -772,13 +772,13 @@ fn build_section(row: &PlayerRow, debug: bool, perspectives: Perspectives, art: 
         if !parts.is_empty() {
             parts.push(separator());
         }
-        parts.push(heading(t!("ui.replay.sections.consumables").into_owned()));
+        parts.push(heading(t!("ui-replay-sections-consumables").into_owned()));
         parts.push(consumables_view(&row.consumables, art));
     } else if let Some(build) = row.translated_build.as_ref()
         && !build.abilities.is_empty()
     {
         parts.push(separator());
-        parts.push(heading(t!("ui.replay.sections.consumables").into_owned()));
+        parts.push(heading(t!("ui-replay-sections-consumables").into_owned()));
         for ability in &build.abilities {
             if let Some(name) = ability.name.as_ref() {
                 parts.push(text_row(name.clone(), None));
@@ -880,8 +880,8 @@ fn skill_cell(skill: &SkillGridSkill, art: GameArt) -> AnyView {
 /// and the infinity mark under Total, as the egui inventory does.
 fn consumables_view(consumables: &[ConsumableResult], art: GameArt) -> AnyView {
     let rows: Vec<AnyView> = consumables.iter().map(|consumable| consumable_row(consumable, art)).collect();
-    let remaining = t!("ui.replay.consumable_header_remaining").into_owned();
-    let total = t!("ui.replay.consumable_header_total").into_owned();
+    let remaining = t!("ui-replay-consumable_header_remaining").into_owned();
+    let total = t!("ui-replay-consumable_header_total").into_owned();
     AnyView::new(view! {
         column(class = "wt-xr-table") {
             row(class = "wt-xr-table__row wt-xr-table__head") {
@@ -899,15 +899,15 @@ fn consumable_counts(consumable: &ConsumableResult) -> (String, String, String) 
     match consumable.total_charges {
         ChargeCount::Unlimited => (
             consumable.charges_used.to_string(),
-            t!("ui.replay.consumable_charges_infinite").into_owned(),
-            t!("ui.replay.consumable_charges_unlimited", used = consumable.charges_used).into_owned(),
+            t!("ui-replay-consumable_charges_infinite").into_owned(),
+            t!("ui-replay-consumable_charges_unlimited", used = consumable.charges_used).into_owned(),
         ),
         ChargeCount::Finite(total) => {
             let remaining = total.saturating_sub(consumable.charges_used);
             (
                 remaining.to_string(),
                 total.to_string(),
-                t!("ui.replay.consumable_charges_remaining", remaining = remaining, total = total).into_owned(),
+                t!("ui-replay-consumable_charges_remaining", remaining = remaining, total = total).into_owned(),
             )
         }
     }
@@ -936,14 +936,14 @@ fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Op
     let shown = row.fire_chance.as_ref()?;
     let FireChance { analysis: fire_chance, names } = shown;
 
-    let mut parts = vec![heading(t!("ui.replay.sections.fire_chance").into_owned())];
+    let mut parts = vec![heading(t!("ui-replay-sections-fire_chance").into_owned())];
     if row.should_hide_stats() && !debug {
-        parts.push(text(t!("ui.replay.nda").into_owned()));
+        parts.push(text(t!("ui-replay-nda").into_owned()));
         return Some(fire_column(parts));
     }
     if fire_chance.eligible_hits == 0 {
         // A total with nothing behind it would read as a real zero.
-        parts.push(classed_text("wt-xr-dim", t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned()));
+        parts.push(classed_text("wt-xr-dim", t!("ui-replay-sections-fire_chance_no_eligible_hits").into_owned()));
         return Some(fire_column(parts));
     }
 
@@ -982,7 +982,7 @@ fn fire_chance_section(row: &PlayerRow, debug: bool, shell: Option<Shell>) -> Op
     let ships = fire_chance::sorted_per_ship(fire_chance);
     if !ships.is_empty() {
         parts.push(separator());
-        parts.push(heading(t!("ui.replay.sections.fire_chance_per_ship").into_owned()));
+        parts.push(heading(t!("ui-replay-sections-fire_chance_per_ship").into_owned()));
         for ship in ships {
             parts.push(per_ship_line(ship, names));
         }
@@ -1000,10 +1000,10 @@ fn per_ship_line(ship: &PerShipFireChance, names: &FireChanceNames) -> AnyView {
     let name = names.ship(ship);
     let rate = match ship.rate() {
         Some(rate) => format!("{:.1}%", rate * 100.0),
-        None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
+        None => t!("ui-replay-sections-fire_chance_no_eligible_hits").into_owned(),
     };
     let expected = ship.expected_rate().map(|expected| {
-        let label = t!("ui.replay.sections.fire_chance_expected");
+        let label = t!("ui-replay-sections-fire_chance_expected");
         let text = format!("{label} {:.1}%", expected * 100.0);
         AnyView::new(view! { text(class = "wt-xr-dim") {{text}} })
     });
@@ -1059,7 +1059,7 @@ fn fire_chance_copy_text(fire_chance: &FireChance) -> String {
 
 /// Puts `copied` on the clipboard.
 fn copy_breakdown_button(copied: String, shell: Option<Shell>) -> AnyView {
-    let tip = t!("ui.replay.sections.fire_chance_click_to_copy").into_owned();
+    let tip = t!("ui-replay-sections-fire_chance_click_to_copy").into_owned();
     let button = AnyView::new(view! {
         Button(
             variant = ButtonVariant::Ghost,
@@ -1069,7 +1069,7 @@ fn copy_breakdown_button(copied: String, shell: Option<Shell>) -> AnyView {
             on:click = move |_| {
                 if let Some(shell) = shell {
                     shell.copy_text(copied.clone());
-                    shell.toasts().ok(t!("ui.replay.sections.fire_chance_copied").into_owned());
+                    shell.toasts().ok(t!("ui-replay-sections-fire_chance_copied").into_owned());
                 }
             }
         ) {
@@ -1164,21 +1164,21 @@ fn share_text(direction: DamageDirection, inverted: bool, share: f64, this: &str
     let key = ModifierKey::Alt.label();
     let pct = format!("{share:.0}%");
     let said = match (direction, inverted) {
-        (DamageDirection::Dealt, false) => t!("ui.replay.damage_share.dealt", pct = pct, ship = this, other = other),
+        (DamageDirection::Dealt, false) => t!("ui-replay-damage_share-dealt", pct = pct, ship = this, other = other),
         (DamageDirection::Dealt, true) => {
-            t!("ui.replay.damage_share.dealt_inverse", pct = pct, ship = this, other = other)
+            t!("ui-replay-damage_share-dealt_inverse", pct = pct, ship = this, other = other)
         }
         (DamageDirection::Received, false) => {
-            t!("ui.replay.damage_share.received", pct = pct, ship = this, other = other)
+            t!("ui-replay-damage_share-received", pct = pct, ship = this, other = other)
         }
         (DamageDirection::Received, true) => {
-            t!("ui.replay.damage_share.received_inverse", pct = pct, ship = this, other = other)
+            t!("ui-replay-damage_share-received_inverse", pct = pct, ship = this, other = other)
         }
     };
     let hint = if inverted {
-        t!("ui.replay.damage_share.release", key = key)
+        t!("ui-replay-damage_share-release", key = key)
     } else {
-        t!("ui.replay.damage_share.hold", key = key)
+        t!("ui-replay-damage_share-hold", key = key)
     };
     format!("{said}\n{hint}")
 }

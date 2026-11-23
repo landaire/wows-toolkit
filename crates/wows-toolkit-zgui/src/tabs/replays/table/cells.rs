@@ -9,7 +9,6 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::text_on;
-use rust_i18n::t;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::TimeOffline;
 use wows_toolkit_icons::Glyph;
@@ -27,6 +26,7 @@ use wows_toolkit_replay_data::model::SkillWarning;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_replay_data::team_totals::TeamSide;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
+use wt_translations::t;
 use zgui::prelude::AnyView;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
@@ -163,7 +163,7 @@ pub(super) fn team_heading(team: TeamHeading) -> AnyView {
     let label = team.side.label();
     let total = team.damage.side(team.side).map(|total| {
         let text = separate_number(total);
-        let hover = format!("{}{text}", t!("ui.replay.team_damage"));
+        let hover = format!("{}{text}", t!("ui-replay-team_damage"));
         with_hover(AnyView::new(view! { text(class = "wt-pt-text") {{text}} }), Some(hover))
     });
 
@@ -475,7 +475,7 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     let name_color = player.is_abuser.then(|| player_color(PlayerColorKind::Abuser).to_owned());
     let name = player.display_name.clone();
     let hidden = player.is_hidden_profile.then(|| {
-        let tip = t!("ui.replay.player.hidden_profile").into_owned();
+        let tip = t!("ui-replay-player-hidden_profile").into_owned();
         AnyView::new(view! {
             Tooltip {
                 TooltipTrigger { box(on:double_click = keep_double) { AppIcon(glyph = Glyph::EyeOff) } }
@@ -519,7 +519,7 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
 /// What a connection history says, in the egui app's own wording.
 fn connection_hover_text(note: &ConnectionNote) -> String {
     match note {
-        ConnectionNote::NeverConnected => t!("ui.replay.player.never_connected").into_owned(),
+        ConnectionNote::NeverConnected => t!("ui-replay-player-never_connected").into_owned(),
         ConnectionNote::Interrupted { events, .. } => format!("Player {}", events.join(", ")),
     }
 }
@@ -593,7 +593,7 @@ fn connection_chip(note: &ConnectionNote, cx: TableCx) -> AnyView {
     let offline = time.map(|time| AnyView::new(view! { text {{offline_label(time)}} }));
     let copy = move |ev: &mut EventCx<'_, events::Click>| {
         ev.stop_propagation();
-        cx.copy(copied.clone(), t!("ui.replay.context.copied").into_owned());
+        cx.copy(copied.clone(), t!("ui-replay-context-copied").into_owned());
     };
 
     AnyView::new(view! {
@@ -628,19 +628,19 @@ fn twitch_chip(candidates: &[SniperCandidate], cx: TableCx) -> Option<AnyView> {
             let minutes = candidate.minutes.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
             format!(
                 "{}\n{}",
-                t!("ui.twitch.possible_name", name = candidate.login),
-                t!("ui.twitch.seen_minutes", minutes = minutes)
+                t!("ui-twitch-possible_name", name = candidate.login),
+                t!("ui-twitch-seen_minutes", minutes = minutes)
             )
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    hover.push_str(&format!("\n\n{}", t!("ui.twitch.click_to_copy")));
+    hover.push_str(&format!("\n\n{}", t!("ui-twitch-click_to_copy")));
 
     if candidates.len() == 1 {
         let login = first.login.clone();
         let copy = move |ev: &mut EventCx<'_, events::Click>| {
             ev.stop_propagation();
-            cx.copy(login.clone(), t!("ui.twitch.copied", name = login).into_owned());
+            cx.copy(login.clone(), t!("ui-twitch-copied", name = login).into_owned());
         };
         return Some(with_hover(
             AnyView::new(view! {
@@ -667,7 +667,7 @@ fn twitch_chip(candidates: &[SniperCandidate], cx: TableCx) -> Option<AnyView> {
                     let login = login.clone();
                     let shown = login.clone();
                     let copy = UnsyncCallback::new(move |()| {
-                        cx.copy(login.clone(), t!("ui.twitch.copied", name = login).into_owned());
+                        cx.copy(login.clone(), t!("ui-twitch-copied", name = login).into_owned());
                     });
                     AnyView::new(view! {
                         MenuItem(on_select = copy) {

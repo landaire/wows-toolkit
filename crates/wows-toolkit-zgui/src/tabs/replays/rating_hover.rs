@@ -71,10 +71,10 @@ pub enum RatedFigure {
 impl RatedFigure {
     /// `None` for a PR read back from storage, which kept no parts.
     fn breakdown(&self) -> Option<RatingBreakdown> {
-        let locale = wows_toolkit_viewmodel::locale();
+        let locale = wt_translations::locale();
         match self {
-            Self::Personal(rating) => RatingBreakdown::personal_rating(rating, Some(&locale)),
-            Self::MatchContribution(rating) => Some(RatingBreakdown::match_contribution(rating, Some(&locale))),
+            Self::Personal(rating) => RatingBreakdown::personal_rating(rating, Some(locale)),
+            Self::MatchContribution(rating) => Some(RatingBreakdown::match_contribution(rating, Some(locale))),
         }
     }
 }

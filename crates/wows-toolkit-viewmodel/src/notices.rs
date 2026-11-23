@@ -8,7 +8,7 @@
 //! the rows the egui app writes, so a reader who switched one off there does not
 //! meet it here.
 
-use rust_i18n::t;
+use wt_translations::t;
 
 use crate::settings::keys;
 
@@ -36,15 +36,15 @@ impl Notice {
 
     pub fn title(self) -> String {
         match self {
-            Self::Address => t!("ui.windows.network_warning").into_owned(),
-            Self::SoftwareEncode => t!("ui.windows.software_encode").into_owned(),
+            Self::Address => t!("ui-windows-network_warning").into_owned(),
+            Self::SoftwareEncode => t!("ui-windows-software_encode").into_owned(),
         }
     }
 
     pub fn message(self) -> String {
         match self {
-            Self::Address => t!("ui.dialogs.p2p_warning").into_owned(),
-            Self::SoftwareEncode => t!("ui.dialogs.software_encode_message").into_owned(),
+            Self::Address => t!("ui-dialogs-p2p_warning").into_owned(),
+            Self::SoftwareEncode => t!("ui-dialogs-software_encode_message").into_owned(),
         }
     }
 

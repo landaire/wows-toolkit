@@ -3,13 +3,13 @@
 //! there, and whether it was measured against a fixed expectation or this
 //! battle's data, largest part first.
 
-use rust_i18n::t;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::match_contribution::FactorBasis;
 use wows_replay_insights::match_contribution::FactorScore;
 use wows_replay_insights::match_contribution::MatchContributionFactor;
 use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingTerm;
+use wt_translations::t;
 
 use crate::formatting::separate_number;
 use crate::personal_rating::PersonalRatingCategory;
@@ -26,8 +26,8 @@ impl RatingKind {
     /// The rating's full name, for the hover's title.
     pub fn title(self) -> String {
         match self {
-            Self::Personal => t!("ui.rating.personal_rating").into(),
-            Self::MatchContribution => t!("ui.rating.match_contribution").into(),
+            Self::Personal => t!("ui-rating-personal_rating").into(),
+            Self::MatchContribution => t!("ui-rating-match_contribution").into(),
         }
     }
 }
@@ -59,8 +59,8 @@ impl MatchContributionWithheld {
     /// The explanation an MC dash carries.
     pub fn explanation(self) -> String {
         match self {
-            Self::UnratedBattle => t!("ui.rating.mc_unrated_battle_type").into(),
-            Self::EarlyExit => t!("ui.rating.unrated_early_exit").into(),
+            Self::UnratedBattle => t!("ui-rating-mc_unrated_battle_type").into(),
+            Self::EarlyExit => t!("ui-rating-unrated_early_exit").into(),
         }
     }
 }
@@ -98,16 +98,16 @@ impl RatingLine {
 /// The short label shown beside a part.
 pub fn basis_badge(basis: FactorBasis) -> String {
     match basis {
-        FactorBasis::Static => t!("ui.rating.basis.static").into(),
-        FactorBasis::Dynamic => t!("ui.rating.basis.dynamic").into(),
+        FactorBasis::Static => t!("ui-rating-basis-static").into(),
+        FactorBasis::Dynamic => t!("ui-rating-basis-dynamic").into(),
     }
 }
 
 /// One line saying what a badge means.
 pub fn basis_explanation(basis: FactorBasis) -> String {
     match basis {
-        FactorBasis::Static => t!("ui.rating.basis.static_explained").into(),
-        FactorBasis::Dynamic => t!("ui.rating.basis.dynamic_explained").into(),
+        FactorBasis::Static => t!("ui-rating-basis-static_explained").into(),
+        FactorBasis::Dynamic => t!("ui-rating-basis-dynamic_explained").into(),
     }
 }
 
@@ -117,12 +117,12 @@ impl RatingBreakdown {
     pub fn personal_rating(result: &PersonalRatingResult, locale: Option<&str>) -> Option<Self> {
         let breakdown = result.breakdown?;
         let mut lines = vec![
-            pr_line(t!("ui.rating.damage").into(), &breakdown.damage, locale),
-            pr_line(t!("ui.rating.kills").into(), &breakdown.frags, locale),
+            pr_line(t!("ui-rating-damage").into(), &breakdown.damage, locale),
+            pr_line(t!("ui-rating-kills").into(), &breakdown.frags, locale),
             RatingLine {
-                label: t!("ui.rating.wins").into(),
+                label: t!("ui-rating-wins").into(),
                 detail: t!(
-                    "ui.rating.detail.wins",
+                    "ui-rating-detail-wins",
                     actual = format!("{:.0}", breakdown.wins.actual),
                     expected = format!("{:.2}", breakdown.wins.expected)
                 )
@@ -147,7 +147,7 @@ impl RatingBreakdown {
                 MatchContributionFactor::Damage,
                 parts.damage,
                 t!(
-                    "ui.rating.detail.weighted_damage",
+                    "ui-rating-detail-weighted_damage",
                     actual = whole(inputs.weighted_damage),
                     expected = whole(inputs.expected_damage)
                 )
@@ -157,7 +157,7 @@ impl RatingBreakdown {
                 MatchContributionFactor::Kills,
                 parts.kills,
                 t!(
-                    "ui.rating.detail.versus_expected",
+                    "ui-rating-detail-versus_expected",
                     actual = format!("{:.0}", inputs.kills),
                     expected = format!("{:.2}", inputs.expected_kills)
                 )
@@ -170,7 +170,7 @@ impl RatingBreakdown {
                 MatchContributionFactor::Tanking,
                 score,
                 t!(
-                    "ui.rating.detail.tanking",
+                    "ui-rating-detail-tanking",
                     potential = separate_number(inputs.potential_damage, locale),
                     class = format!("{:.2}", ratios.class.0),
                     team = format!("{:.2}", ratios.team.0)
@@ -184,7 +184,7 @@ impl RatingBreakdown {
                 MatchContributionFactor::TeamDamageShare,
                 score,
                 t!(
-                    "ui.rating.detail.team_damage_share",
+                    "ui-rating-detail-team_damage_share",
                     share = format!("{:.1}", share.share.0 * 100.0),
                     even = format!("{:.1}", share.even.0 * 100.0)
                 )
@@ -197,7 +197,7 @@ impl RatingBreakdown {
                 MatchContributionFactor::Spotting,
                 score,
                 t!(
-                    "ui.rating.detail.spotting",
+                    "ui-rating-detail-spotting",
                     damage = separate_number(spotting_damage, locale),
                     baseline = whole(inputs.spotting_baseline),
                     ships = format!("{:.2}", inputs.ships_spotted),
@@ -214,7 +214,7 @@ impl RatingBreakdown {
                 MatchContributionFactor::Objectives,
                 score,
                 t!(
-                    "ui.rating.detail.objectives",
+                    "ui-rating-detail-objectives",
                     capture = points(objective.capture),
                     block = points(objective.block),
                     reset = points(objective.drop),
@@ -230,10 +230,10 @@ impl RatingBreakdown {
             let planes = inputs.planes_killed.map(|planes| {
                 let strike = planes.rocket_planes + planes.bombers + planes.torpedo_bombers + planes.skip_bombers;
                 let support = planes.consumable_fighters + planes.scouts;
-                t!("ui.rating.detail.anti_air_planes", strike = strike, support = support).into_owned()
+                t!("ui-rating-detail-anti_air_planes", strike = strike, support = support).into_owned()
             });
             let damage = inputs.anti_air_damage.map(|damage| {
-                t!("ui.rating.detail.anti_air_damage", damage = separate_number(damage, locale)).into_owned()
+                t!("ui-rating-detail-anti_air_damage", damage = separate_number(damage, locale)).into_owned()
             });
             lines.push(mc_line(
                 MatchContributionFactor::AntiAir,
@@ -244,8 +244,8 @@ impl RatingBreakdown {
 
         if let (Some(score), Some(detection)) = (parts.torpedo_warnings, result.torpedo_detection) {
             let detail = match detection.threatening {
-                1 => t!("ui.rating.detail.torpedo_warnings_one"),
-                count => t!("ui.rating.detail.torpedo_warnings", threatening = count),
+                1 => t!("ui-rating-detail-torpedo_warnings_one"),
+                count => t!("ui-rating-detail-torpedo_warnings", threatening = count),
             };
             lines.push(mc_line(MatchContributionFactor::TorpedoWarnings, score, detail.into()));
         }
@@ -258,18 +258,18 @@ impl RatingBreakdown {
                     let share = format!("{:.0}", burst.share.0 * 100.0);
                     // A single salvo or torpedo spread lands within a second.
                     if burst.duration.value() < 1.0 {
-                        t!("ui.rating.detail.critical_burst_at_once", share = share, ship = ship).into_owned()
+                        t!("ui-rating-detail-critical_burst_at_once", share = share, ship = ship).into_owned()
                     } else {
                         let seconds = format!("{:.0}", burst.duration.value());
-                        t!("ui.rating.detail.critical_burst", share = share, ship = ship, seconds = seconds)
+                        t!("ui-rating-detail-critical_burst", share = share, ship = ship, seconds = seconds)
                             .into_owned()
                     }
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
             let detail = match bursts.len() {
-                1 => t!("ui.rating.detail.critical_bursts_one", bursts = listed),
-                count => t!("ui.rating.detail.critical_bursts", count = count, bursts = listed),
+                1 => t!("ui-rating-detail-critical_bursts_one", bursts = listed),
+                count => t!("ui-rating-detail-critical_bursts", count = count, bursts = listed),
             };
             lines.push(mc_line(MatchContributionFactor::CriticalBursts, score, detail.into()));
         }
@@ -303,7 +303,7 @@ impl RatingBreakdown {
         let mut text = format!("{} {:.0}", self.kind.title(), self.total);
         for line in &self.lines {
             let versus = match line.versus_average() {
-                Some(delta) => format!(" ({delta:+.0} {})", t!("ui.rating.versus_average")),
+                Some(delta) => format!(" ({delta:+.0} {})", t!("ui-rating-versus_average")),
                 None => String::new(),
             };
             text.push_str(&format!(
@@ -325,15 +325,15 @@ impl RatingBreakdown {
 
 fn mc_label(factor: MatchContributionFactor) -> String {
     match factor {
-        MatchContributionFactor::Damage => t!("ui.rating.damage").into(),
-        MatchContributionFactor::Kills => t!("ui.rating.kills").into(),
-        MatchContributionFactor::TeamDamageShare => t!("ui.rating.team_damage_share").into(),
-        MatchContributionFactor::Tanking => t!("ui.rating.tanking").into(),
-        MatchContributionFactor::Spotting => t!("ui.rating.spotting").into(),
-        MatchContributionFactor::Objectives => t!("ui.rating.objectives").into(),
-        MatchContributionFactor::AntiAir => t!("ui.rating.anti_air").into(),
-        MatchContributionFactor::TorpedoWarnings => t!("ui.rating.torpedo_warnings").into(),
-        MatchContributionFactor::CriticalBursts => t!("ui.rating.critical_bursts").into(),
+        MatchContributionFactor::Damage => t!("ui-rating-damage").into(),
+        MatchContributionFactor::Kills => t!("ui-rating-kills").into(),
+        MatchContributionFactor::TeamDamageShare => t!("ui-rating-team_damage_share").into(),
+        MatchContributionFactor::Tanking => t!("ui-rating-tanking").into(),
+        MatchContributionFactor::Spotting => t!("ui-rating-spotting").into(),
+        MatchContributionFactor::Objectives => t!("ui-rating-objectives").into(),
+        MatchContributionFactor::AntiAir => t!("ui-rating-anti_air").into(),
+        MatchContributionFactor::TorpedoWarnings => t!("ui-rating-torpedo_warnings").into(),
+        MatchContributionFactor::CriticalBursts => t!("ui-rating-critical_bursts").into(),
     }
 }
 
@@ -350,13 +350,13 @@ fn mc_line(factor: MatchContributionFactor, score: FactorScore, detail: String) 
 fn pr_line(label: String, term: &PersonalRatingTerm, locale: Option<&str>) -> RatingLine {
     let detail = if term.expected >= 100.0 {
         t!(
-            "ui.rating.detail.versus_expected",
+            "ui-rating-detail-versus_expected",
             actual = separate_number(term.actual.round() as i64, locale),
             expected = separate_number(term.expected.round() as i64, locale)
         )
     } else {
         t!(
-            "ui.rating.detail.versus_expected",
+            "ui-rating-detail-versus_expected",
             actual = format!("{:.0}", term.actual),
             expected = format!("{:.2}", term.expected)
         )

@@ -7,9 +7,9 @@ use std::time::Duration;
 use landaire_ui::TitleBarProps;
 use landaire_ui::TitleBarStrings;
 use landaire_ui::WindowFrameProps;
-use rust_i18n::t;
 use wows_toolkit_config::WindowKind;
 use wows_toolkit_config::WindowSettings;
+use wt_translations::t;
 use zgui::App;
 use zgui::component;
 use zgui::css;
@@ -62,10 +62,10 @@ pub fn DecoratedWindow(#[prop(into)] title: String, children: Children) -> impl 
     install_stylesheet(SHEET, CSS);
     let title = StoredValue::new_local(title);
     let strings = TitleBarStrings {
-        minimize: t!("ui.windows.minimize").into_owned(),
-        maximize: t!("ui.windows.maximize").into_owned(),
-        restore: t!("ui.windows.restore").into_owned(),
-        close: t!("ui.windows.close").into_owned(),
+        minimize: t!("ui-windows-minimize").into_owned(),
+        maximize: t!("ui-windows-maximize").into_owned(),
+        restore: t!("ui-windows-restore").into_owned(),
+        close: t!("ui-windows-close").into_owned(),
     };
 
     view! {

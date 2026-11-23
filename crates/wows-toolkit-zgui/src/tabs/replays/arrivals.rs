@@ -12,7 +12,6 @@ use futures::channel::oneshot;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_replay_data::directory_stats::GameRead;
@@ -28,6 +27,7 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use wows_toolkit_viewmodel::upload::Shareable;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
 use zgui::reactive::Task;
@@ -119,14 +119,14 @@ pub fn say_exported(toasts: Toasts, out: &Path) {
     let file = out.file_name().unwrap_or(out.as_os_str()).to_string_lossy().into_owned();
     toasts.withdraw(&ToastKey::new(AUTO_EXPORT_FAILED));
     toasts
-        .show(Notice::ok(t!("ui.replay.auto_exported", file = file).into_owned()).keyed(ToastKey::new(AUTO_EXPORTED)));
+        .show(Notice::ok(t!("ui-replay-auto_exported", file = file).into_owned()).keyed(ToastKey::new(AUTO_EXPORTED)));
 }
 
 /// Says that an export failed. Kept up: the reader asked for a file per battle and is not getting
 /// one.
 pub fn say_export_failed(toasts: Toasts, reason: String) {
     toasts.show(
-        Notice::failed(t!("ui.replay.auto_export_failed", error = reason).into_owned())
+        Notice::failed(t!("ui-replay-auto_export_failed", error = reason).into_owned())
             .keyed(ToastKey::new(AUTO_EXPORT_FAILED))
             .sticky(),
     );
@@ -195,9 +195,9 @@ impl Arrivals {
             workspace.services.settings.read_untracked(|settings| settings.auto_load_latest_replay).unwrap_or(false);
         let opened = autoload && workspace.open(path, OpenTarget::ShowingTab).is_some();
         let said = if opened {
-            t!("ui.replay.opened_new_battle", battle = battle)
+            t!("ui-replay-opened_new_battle", battle = battle)
         } else {
-            t!("ui.replay.new_battle_listed", battle = battle)
+            t!("ui-replay-new_battle_listed", battle = battle)
         };
         workspace.shell.toasts().show(Notice::info(said.into_owned()).keyed(ToastKey::new(NEW_BATTLE)));
     }

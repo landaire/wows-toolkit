@@ -4,7 +4,6 @@ use std::sync::Arc;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
@@ -19,6 +18,7 @@ use wows_toolkit_replay_data::test_support::named_fire_chance;
 use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wowsunpack::game_types::ChargeCount;
+use wt_translations::t;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
@@ -68,7 +68,7 @@ fn the_fire_chance_names_its_ships_and_states_their_rates() {
     assert!(window.by_label("Yamato").is_some(), "the ship reads by its name");
     assert!(window.by_label("PJSB018_Yamato_1944").is_none(), "not by its id");
     assert!(window.by_label("12.5%").is_some(), "one fire in eight hits");
-    let expected = format!("{} 25.0%", t!("ui.replay.sections.fire_chance_expected"));
+    let expected = format!("{} 25.0%", t!("ui-replay-sections-fire_chance_expected"));
     assert!(window.by_label(&expected).is_some(), "two expected in eight hits");
 
     let copied = super::fire_chance_copy_text(&fire_chance);
@@ -169,7 +169,7 @@ fn each_direction_reads_its_own_amount_and_share_and_alt_inverts_the_share() {
 /// Each mode says whose total the share is of, and the hint says how to reach the other mode.
 #[test]
 fn a_damage_share_explains_itself_in_each_mode() {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let said = |direction, inverted| share_text(direction, inverted, 34.4, "Yamato", "Iowa");
 
     assert_eq!(

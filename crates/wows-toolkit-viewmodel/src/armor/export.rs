@@ -40,19 +40,19 @@ impl TextureResolution {
 
     pub const fn label_key(self) -> &'static str {
         match self {
-            Self::Full => "ui.armor.export.res_full",
-            Self::Px2048 => "ui.armor.export.res_2048",
-            Self::Px1024 => "ui.armor.export.res_1024",
-            Self::Px512 => "ui.armor.export.res_512",
+            Self::Full => "ui-armor-export-res_full",
+            Self::Px2048 => "ui-armor-export-res_2048",
+            Self::Px1024 => "ui-armor-export-res_1024",
+            Self::Px512 => "ui-armor-export-res_512",
         }
     }
 }
 
 pub const fn contents_label_key(contents: ExportContents) -> &'static str {
     match contents {
-        ExportContents::Mesh => "ui.armor.export.contents_mesh",
-        ExportContents::Armor => "ui.armor.export.contents_armor",
-        ExportContents::MeshAndArmor => "ui.armor.export.contents_both",
+        ExportContents::Mesh => "ui-armor-export-contents_mesh",
+        ExportContents::Armor => "ui-armor-export-contents_armor",
+        ExportContents::MeshAndArmor => "ui-armor-export-contents_both",
     }
 }
 

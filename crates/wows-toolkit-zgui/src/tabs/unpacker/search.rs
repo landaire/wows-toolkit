@@ -6,10 +6,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use landaire_ui::TABULAR_CLASS;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
 use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -124,7 +124,7 @@ impl SearchResults {
     }
 
     pub fn title(self) -> String {
-        t!("ui.unpacker.search_title", query = self.query.get_value()).into_owned()
+        t!("ui-unpacker-search_title", query = self.query.get_value()).into_owned()
     }
 
     pub fn extend(self, hits: Vec<ContentSearchHit>) {
@@ -154,7 +154,7 @@ pub fn SearchPanel(model: UnpackerModel, results: SearchResults) -> impl IntoVie
         if results.hits.with(Vec::is_empty) && !results.running.get() {
             return AnyView::new(view! {
                 box(class = "wt-hits__empty", attr:data-testid = "unpacker-search-empty") {
-                    text {{t!("ui.search.no_matches").into_owned()}}
+                    text {{t!("ui-search-no_matches").into_owned()}}
                 }
             });
         }
@@ -175,7 +175,7 @@ pub fn SearchPanel(model: UnpackerModel, results: SearchResults) -> impl IntoVie
             row(class = "wt-hits__header") {
                 AppIcon(glyph = Glyph::Search)
                 text(class = "wt-hits__query") {{results.query.get_value()}}
-                text(class = "wt-hits__dim") {{t!("ui.unpacker.search_in", source = results.source.title()).into_owned()}}
+                text(class = "wt-hits__dim") {{t!("ui-unpacker-search_in", source = results.source.title()).into_owned()}}
                 text(class = format!("wt-hits__dim wt-hits__count {TABULAR_CLASS}")) {{count}}
                 Show(when = move || results.running.get() && fraction.get().is_some()) {
                     box(class = "wt-hits__progress") {
@@ -189,7 +189,7 @@ pub fn SearchPanel(model: UnpackerModel, results: SearchResults) -> impl IntoVie
                     attr:data-testid = "unpacker-search-stop",
                     on:click = move |_| results.stop()
                 ) {
-                    {t!("ui.buttons.stop").into_owned()}
+                    {t!("ui-buttons-stop").into_owned()}
                 }
             }
             {body}
@@ -214,7 +214,7 @@ fn hit_row(model: UnpackerModel, results: SearchResults, ix: usize) -> AnyView {
                 text(class = "wt-hit__path") {{hit.path.clone()}}
                 row(class = "wt-hit__line") {
                     text(class = format!("wt-hit__offset {TABULAR_CLASS}")) {
-                        {t!("ui.unpacker.hit_offset", offset = hit.offset).into_owned()}
+                        {t!("ui-unpacker-hit_offset", offset = hit.offset).into_owned()}
                     }
                     text(class = "wt-hit__context") {{hit.context.clone()}}
                 }
@@ -230,13 +230,13 @@ fn hit_row(model: UnpackerModel, results: SearchResults, ix: usize) -> AnyView {
                 }
                 DropdownMenuContent {
                     MenuItem(on_select = UnsyncCallback::new(move |()| model.open_viewer(path.get_value()))) {
-                        {t!("ui.unpacker.view_contents").into_owned()}
+                        {t!("ui-unpacker-view_contents").into_owned()}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| model.queue_path(path.get_value()))) {
-                        {t!("ui.unpacker.queue").into_owned()}
+                        {t!("ui-unpacker-queue").into_owned()}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| model.reveal(source, path.get_value()))) {
-                        {t!("ui.unpacker.reveal_in_tree").into_owned()}
+                        {t!("ui-unpacker-reveal_in_tree").into_owned()}
                     }
                 }
             }

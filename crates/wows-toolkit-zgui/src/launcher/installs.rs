@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
-use rust_i18n::t;
 use wows_toolkit_launcher::InstallChoice;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::Signal;
@@ -52,7 +52,7 @@ pub fn InstallsControl(model: LauncherModel, shell: Shell) -> impl IntoView {
                         false
                     })
                 ) {
-                    {locale.text("ui.launcher.rescan")}
+                    {locale.text("ui-launcher-rescan")}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -60,7 +60,7 @@ pub fn InstallsControl(model: LauncherModel, shell: Shell) -> impl IntoView {
                     attr:data-testid = "launcher-add-install",
                     on:click = move |_| add_install(model, shell)
                 ) {
-                    {locale.text("ui.launcher.add_install")}
+                    {locale.text("ui-launcher-add_install")}
                 }
                 if move || discovering.get() {
                     Spinner(attr:data-testid = "launcher-discovering")
@@ -68,7 +68,7 @@ pub fn InstallsControl(model: LauncherModel, shell: Shell) -> impl IntoView {
             }
             SafeModeCheck(model = model, test_id = "launcher-safe-mode")
             if move || installs.get().is_empty() && !discovering.get() {
-                text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-installs") {{locale.text("ui.launcher.no_installs")}}
+                text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-installs") {{locale.text("ui-launcher-no_installs")}}
             }
             for install in move || installs.get(), key = |install: &InstallView| install.clone() {
                 InstallRow(model = model, shell = shell, install = install)
@@ -110,7 +110,7 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
     });
     let version = version.map(|version| match version {
         InstallVersion::Known(version) => AnyView::new(view! { text {{version}} }),
-        InstallVersion::ManagedBySteam => AnyView::new(view! { text {{locale.text("ui.launcher.managed_by_steam")}} }),
+        InstallVersion::ManagedBySteam => AnyView::new(view! { text {{locale.text("ui-launcher-managed_by_steam")}} }),
     });
     let shown_path = path.display().to_string();
     let login_path = path.clone();
@@ -125,10 +125,10 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
             }
             row(class = "wt-launcher__row") {
                 if move || is_toolkit.get() {
-                    text(class = "wt-launcher__badge", attr:data-testid = format!("launcher-toolkit-{slot}")) {{locale.text("ui.launcher.installs.toolkit")}}
+                    text(class = "wt-launcher__badge", attr:data-testid = format!("launcher-toolkit-{slot}")) {{locale.text("ui-launcher-installs-toolkit")}}
                 } else {}
                 if move || played.get() {
-                    text(class = "wt-launcher__badge", attr:data-testid = format!("launcher-played-{slot}")) {{locale.text("ui.launcher.installs.played")}}
+                    text(class = "wt-launcher__badge", attr:data-testid = format!("launcher-played-{slot}")) {{locale.text("ui-launcher-installs-played")}}
                 } else {}
             }
             if move || !read_only {
@@ -146,7 +146,7 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
                             });
                         }
                     ) {
-                        {locale.text("ui.launcher.recheck")}
+                        {locale.text("ui-launcher-recheck")}
                     }
                 }
                 DownloadStatus(model = model, shell = shell, target = target)
@@ -158,9 +158,9 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
                             attr:data-testid = format!("launcher-download-{slot}"),
                             on:click = move |_| download(model, shell, path.get_value(), has_content)
                         ) {
-                            {move || if has_content { locale.text("ui.launcher.installs.update")() } else { locale.text("ui.launcher.download")() }}
+                            {move || if has_content { locale.text("ui-launcher-installs-update")() } else { locale.text("ui-launcher-download")() }}
                         }
-                        text(class = "wt-launcher__dim") {{locale.text("ui.launcher.download_hint")}}
+                        text(class = "wt-launcher__dim") {{locale.text("ui-launcher-download_hint")}}
                     }
                 }
             }
@@ -173,7 +173,7 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
                     attr:data-testid = format!("launcher-use-{slot}"),
                     on:click = move |_| shell.apply_wows_dir(path.get_value().to_string_lossy().into_owned())
                 ) {
-                    {locale.text("ui.launcher.use_for_toolkit")}
+                    {locale.text("ui-launcher-use_for_toolkit")}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -182,7 +182,7 @@ fn InstallRow(model: LauncherModel, shell: Shell, install: InstallView) -> impl 
                     attr:data-testid = format!("launcher-play-from-{slot}"),
                     on:click = move |_| play_from(model, path.get_value())
                 ) {
-                    {locale.text("ui.launcher.installs.play_from")}
+                    {locale.text("ui-launcher-installs-play_from")}
                 }
             }
         }
@@ -199,18 +199,18 @@ fn CatalogStatus(catalog: Memo<CatalogView>) -> impl IntoView {
             CatalogView::Checking => AnyView::new(view! {
                 row(class = "wt-launcher__row wt-launcher__row--tight") {
                     Spinner()
-                    text(class = "wt-launcher__dim") {{locale.text("ui.launcher.checking_updates")}}
+                    text(class = "wt-launcher__dim") {{locale.text("ui-launcher-checking_updates")}}
                 }
             }),
             CatalogView::Found { updates, not_installed } => {
                 let headline = if updates.is_empty() {
-                    AnyView::new(view! { text(class = "wt-launcher__text") {{locale.text("ui.launcher.up_to_date")}} })
+                    AnyView::new(view! { text(class = "wt-launcher__text") {{locale.text("ui-launcher-up_to_date")}} })
                 } else {
                     let parts = updates.join(", ");
                     AnyView::new(view! {
                         text(class = "wt-launcher__warn") {{move || {
                             locale.track();
-                            t!("ui.launcher.update_available", parts = parts.as_str()).into_owned()
+                            t!("ui-launcher-update_available", parts = parts.as_str()).into_owned()
                         }}}
                     })
                 };
@@ -219,7 +219,7 @@ fn CatalogStatus(catalog: Memo<CatalogView>) -> impl IntoView {
                     view! {
                         text(class = "wt-launcher__dim") {{move || {
                             locale.track();
-                            t!("ui.launcher.not_installed", parts = parts.as_str()).into_owned()
+                            t!("ui-launcher-not_installed", parts = parts.as_str()).into_owned()
                         }}}
                     }
                 });
@@ -233,7 +233,7 @@ fn CatalogStatus(catalog: Memo<CatalogView>) -> impl IntoView {
             CatalogView::Failed(detail) => AnyView::new(view! {
                 text(class = "wt-launcher__dim") {{move || {
                     locale.track();
-                    t!("ui.launcher.check_failed", error = detail.as_str()).into_owned()
+                    t!("ui-launcher-check_failed", error = detail.as_str()).into_owned()
                 }}}
             }),
             CatalogView::Nothing => AnyView::new(view! { box() }),
@@ -243,7 +243,7 @@ fn CatalogStatus(catalog: Memo<CatalogView>) -> impl IntoView {
 
 /// Asks for an install directory, adds it, and looks for installs again.
 pub(crate) fn add_install(model: LauncherModel, shell: Shell) {
-    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.add_install_title"));
+    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-launcher-add_install_title"));
     // Detached: the popover that asked can close before the reader answers.
     spawn_detached(async move {
         let Some(dir) = shell.chosen_path(asked).await else { return };
@@ -266,7 +266,7 @@ fn download(model: LauncherModel, shell: Shell, install: PathBuf, has_content: b
         return;
     }
     let start = wgc_download::default_install_dir();
-    let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &start);
+    let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui-launcher-download_title"), &start);
     // Detached: the popover that asked can close before the reader answers.
     spawn_detached(async move {
         let Some(dest) = shell.chosen_path(asked).await else { return };

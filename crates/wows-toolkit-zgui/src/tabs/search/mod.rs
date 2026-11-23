@@ -29,7 +29,6 @@ use landaire_ui::RowMode;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
@@ -47,6 +46,7 @@ use wows_toolkit_viewmodel::search_results::ResultColumn;
 use wows_toolkit_viewmodel::search_results::cell_hover;
 use wows_toolkit_viewmodel::search_results::cell_text;
 use wows_toolkit_viewmodel::search_results::game_mode_gap_hint;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -274,10 +274,10 @@ pub fn SearchTab() -> impl IntoView {
     };
     let count = move || match search.status.get() {
         Status::Done if search.results.with(|results| results.truncated) => {
-            t!("ui.search.match_count_truncated", count = RESULT_LIMIT).into_owned()
+            t!("ui-search-match_count_truncated", count = RESULT_LIMIT).into_owned()
         }
         Status::Done => {
-            t!("ui.search.match_count", count = search.results.with(|results| results.hits.len())).into_owned()
+            t!("ui-search-match_count", count = search.results.with(|results| results.hits.len())).into_owned()
         }
         _ => String::new(),
     };
@@ -290,7 +290,7 @@ pub fn SearchTab() -> impl IntoView {
                 row(class = "wt-search-strip wt-search-strip--error", attr:data-testid = "search-settings-save-error") {
                     text {{failed.message}}
                     Button(variant = ButtonVariant::Outline, size = ButtonSize::Xs, on:click = move |_| search.retry_save()) {
-                        {t!("ui.buttons.retry").into_owned()}
+                        {t!("ui-buttons-retry").into_owned()}
                     }
                 }
             })}
@@ -305,13 +305,13 @@ pub fn SearchTab() -> impl IntoView {
 /// What the status says in place of the results, or `None` when the results are shown.
 fn status_text(status: &Status, has_hits: bool) -> Option<String> {
     match status {
-        Status::Idle => Some(t!("ui.search.type_a_query").into_owned()),
+        Status::Idle => Some(t!("ui-search-type_a_query").into_owned()),
         // Said under the bar, not in place of the results.
         Status::Invalid { .. } if has_hits => None,
-        Status::Invalid { .. } => Some(t!("ui.search.type_a_query").into_owned()),
-        Status::Running => Some(t!("ui.search.searching").into_owned()),
-        Status::Failed(reason) => Some(t!("ui.search.failed", reason = reason).into_owned()),
-        Status::Done if !has_hits => Some(t!("ui.search.no_matches").into_owned()),
+        Status::Invalid { .. } => Some(t!("ui-search-type_a_query").into_owned()),
+        Status::Running => Some(t!("ui-search-searching").into_owned()),
+        Status::Failed(reason) => Some(t!("ui-search-failed", reason = reason).into_owned()),
+        Status::Done if !has_hits => Some(t!("ui-search-no_matches").into_owned()),
         Status::Done => None,
     }
 }
@@ -336,7 +336,7 @@ fn SearchBody(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) -> i
                     row(class = "wt-search-strip wt-search-strip--error", attr:data-testid = "search-settings-load-error") {
                         text {{error}}
                         Button(variant = ButtonVariant::Outline, size = ButtonSize::Xs, on:click = move |_| search.retry_load()) {
-                            {t!("ui.buttons.retry").into_owned()}
+                            {t!("ui-buttons-retry").into_owned()}
                         }
                     }
                 })}
@@ -352,7 +352,7 @@ fn SearchBody(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) -> i
                 text {{move || status.get().unwrap_or_default()}}
                 Show(when = move || search.load_error.with(Option::is_some)) {
                     Button(variant = ButtonVariant::Outline, size = ButtonSize::Xs, on:click = move |_| search.retry_load()) {
-                        {t!("ui.buttons.retry").into_owned()}
+                        {t!("ui-buttons-retry").into_owned()}
                     }
                 }
             }
@@ -585,14 +585,14 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                                 variant = ButtonVariant::Ghost,
                                 size = ButtonSize::IconXs,
                                 disabled = !exists,
-                                a11y:label = t!("ui.replay.context.render_to_clipboard").into_owned(),
+                                a11y:label = t!("ui-replay-context-render_to_clipboard").into_owned(),
                                 attr:data-testid = format!("search-row-render-clipboard-{position}"),
                                 on:click = move |_| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone()))
                             ) {
                                 AppIcon(glyph = Glyph::Copy)
                             }
                         }
-                        TooltipContent {{t!("ui.replay.context.render_to_clipboard").into_owned()}}
+                        TooltipContent {{t!("ui-replay-context-render_to_clipboard").into_owned()}}
                     }
                     Tooltip {
                         TooltipTrigger {
@@ -600,7 +600,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                                 DropdownMenuTrigger(
                                     variant = ButtonVariant::Ghost,
                                     size = ButtonSize::IconXs,
-                                    a11y:label = t!("ui.search.row_actions_hint").into_owned(),
+                                    a11y:label = t!("ui-search-row_actions_hint").into_owned(),
                                     attr:data-testid = format!("search-row-actions-{position}")
                                 ) {
                                     Icon(icon = ELLIPSIS)
@@ -610,7 +610,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                                 }
                             }
                         }
-                        TooltipContent {{t!("ui.search.row_actions_hint").into_owned()}}
+                        TooltipContent {{t!("ui-search-row_actions_hint").into_owned()}}
                     }
                 }
             }
@@ -648,8 +648,8 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
         }))
     };
     let strings = GridStrings {
-        pin: t!("ui.replay.context.pin_column").into_owned(),
-        unpin: t!("ui.replay.context.unpin_column").into_owned(),
+        pin: t!("ui-replay-context-pin_column").into_owned(),
+        unpin: t!("ui-replay-context-unpin_column").into_owned(),
         ..GridStrings::new()
     };
 
@@ -690,7 +690,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                     }
                 }),
                 row_menu = menu,
-                label = t!("ui.tabs.search").into_owned()
+                label = t!("ui-tabs-search").into_owned()
             )
             // The anchor is the row's filler past the last column. The card goes under or over
             // the row, starting where the columns end, and slides left to stay in the window.
@@ -709,36 +709,36 @@ fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: im
     let (rendered, clipped) = (path.clone(), path.clone());
     view! {
         Show(when = move || !exists) {
-            MenuLabel {{t!("ui.search.open_missing").into_owned()}}
+            MenuLabel {{t!("ui-search-open_missing").into_owned()}}
             MenuSeparator()
         }
         MenuItem(disabled = !exists, on_select = UnsyncCallback::new(move |()| open())) {
-            {t!("ui.search.open").into_owned()}
+            {t!("ui-search-open").into_owned()}
         }
         MenuItem(
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderReplay(rendered.clone())))
         ) {
-            {t!("ui.replay.context.render_replay").into_owned()}
+            {t!("ui-replay-context-render_replay").into_owned()}
         }
         MenuItem(
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone())))
         ) {
-            {t!("ui.replay.context.render_to_clipboard").into_owned()}
+            {t!("ui-replay-context-render_to_clipboard").into_owned()}
         }
         MenuSeparator()
         MenuItem(
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| copy_replay_files(shell.toasts(), std::slice::from_ref(&file)))
         ) {
-            {t!("ui.replay.context.copy_replay").into_owned()}
+            {t!("ui-replay-context-copy_replay").into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| shell.copy_text(copied.clone()))) {
-            {t!("ui.replay.context.copy_path").into_owned()}
+            {t!("ui-replay-context-copy_path").into_owned()}
         }
         MenuItem(disabled = !exists, on_select = UnsyncCallback::new(move |()| reveal_in_file_manager(&path))) {
-            {t!("ui.replay.context.show_in_explorer").into_owned()}
+            {t!("ui-replay-context-show_in_explorer").into_owned()}
         }
     }
 }

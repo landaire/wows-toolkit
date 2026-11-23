@@ -5,7 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rust_i18n::t;
+use wt_translations::DefaultTextResolver;
+use wt_translations::t;
 
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -13,7 +14,6 @@ use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
 use wt_collab_egui::draw_commands::DrawCommandTextures;
 
-use crate::LocalizedTextResolver;
 use crate::data::wows_data::BuildDataCache;
 use crate::db::index::rows::RowSummary;
 use crate::replay::renderer::IconTextures;
@@ -167,7 +167,7 @@ pub(crate) fn preview_tooltip(ui: &mut egui::Ui, deps: &PreviewDeps, key: Previe
         zoom: 1.0,
         pan: egui::Vec2::ZERO,
         filter: &wt_collab_egui::player::NoCommandFilter,
-        text_resolver: &LocalizedTextResolver,
+        text_resolver: &DefaultTextResolver,
         grid: None,
         background: MINIMAP_BACKGROUND,
     }
@@ -175,7 +175,7 @@ pub(crate) fn preview_tooltip(ui: &mut egui::Ui, deps: &PreviewDeps, key: Previe
 
     match state {
         PreviewState::Ready(ref track) if track.frames.is_empty() => {
-            ui.label(t!("ui.replay.preview_empty"));
+            ui.label(t!("ui-replay-preview_empty"));
         }
         PreviewState::Ready(_) => {
             ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(1.0 / PREVIEW_FPS));
@@ -195,7 +195,7 @@ pub(crate) fn preview_tooltip(ui: &mut egui::Ui, deps: &PreviewDeps, key: Previe
             // below the map.
             let spinner_rect = egui::Rect::from_center_size(response.rect.center(), egui::Vec2::splat(24.0));
             egui::Spinner::new().paint_at(ui, spinner_rect);
-            ui.label(t!("ui.replay.preview_loading"));
+            ui.label(t!("ui-replay-preview_loading"));
             // A bake runs for seconds. Repainting the whole app as fast as it
             // will go for all of that costs far more than the spinner is worth,
             // and this is still well above the rate the spinner is read at.

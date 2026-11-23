@@ -2,12 +2,12 @@
 //! HE and SAP shell of the ships being compared does to that plating. The readout itself comes from
 //! `wows_toolkit_armor::splash::splash_readout`.
 
-use rust_i18n::t;
 use wows_toolkit_armor::splash::ShellVerdict;
 use wows_toolkit_armor::splash::SplashReadout;
 use wows_toolkit_armor::splash::ZoneReadout;
 use wows_toolkit_armor::splash::bursting_shell;
 use wows_toolkit_viewmodel::armor::penetration::Ifhe;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -61,7 +61,7 @@ pub fn SplashReadoutPanel(
         match viewport.splash_readout(&ships, ifhe) {
             Some(readout) => readout_view(&readout, has_bursting_shell),
             None => {
-                let hint = t!("ui.armor.splash.hint").into_owned();
+                let hint = t!("ui-armor-splash-hint").into_owned();
                 AnyView::new(view! {
                     text(class = "wt-armor-splash__dim", attr:data-testid = "armor-splash-hint") {{hint}}
                 })
@@ -77,23 +77,23 @@ pub fn SplashReadoutPanel(
 /// The burst's reach and triangles, then its zones, or why there are none to read.
 fn readout_view(readout: &SplashReadout, has_bursting_shell: bool) -> AnyView {
     let half_extent =
-        t!("ui.armor.splash.half_extent", value = format!("{:.4}", readout.half_extent.value())).into_owned();
+        t!("ui-armor-splash-half_extent", value = format!("{:.4}", readout.half_extent.value())).into_owned();
     let triangles = readout.triangles.map(|triangles| {
-        let said = t!("ui.armor.splash.triangles", total = triangles.in_volume, penetrated = triangles.penetrated)
+        let said = t!("ui-armor-splash-triangles", total = triangles.in_volume, penetrated = triangles.penetrated)
             .into_owned();
         view! { text(class = "wt-armor-splash__triangles", attr:data-testid = "armor-splash-triangles") {{said}} }
     });
 
     let zones = if readout.zones.is_empty() {
-        let none = t!("ui.armor.splash.no_zones").into_owned();
+        let none = t!("ui-armor-splash-no_zones").into_owned();
         AnyView::new(
             view! { text(class = "wt-armor-splash__dim", attr:data-testid = "armor-splash-no-zones") {{none}} },
         )
     } else {
-        let heading = t!("ui.armor.splash.zones").into_owned();
+        let heading = t!("ui-armor-splash-zones").into_owned();
         // Without a bursting shell compared, each zone lists no verdicts; this says why.
         let no_shells = (!has_bursting_shell).then(|| {
-            let said = t!("ui.armor.splash_no_shells").into_owned();
+            let said = t!("ui-armor-splash_no_shells").into_owned();
             view! { text(class = "wt-armor-splash__dim", attr:data-testid = "armor-splash-no-shells") {{said}} }
         });
         let rows: Vec<AnyView> = readout.zones.iter().enumerate().map(|(index, zone)| zone_view(index, zone)).collect();
@@ -120,7 +120,7 @@ fn readout_view(readout: &SplashReadout, has_bursting_shell: bool) -> AnyView {
 fn zone_view(index: usize, zone: &ZoneReadout) -> AnyView {
     let name = zone.zone_name.clone();
     let direct = zone.is_direct_hit.then(|| {
-        let said = t!("ui.armor.splash.direct_hit").into_owned();
+        let said = t!("ui-armor-splash-direct_hit").into_owned();
         view! { text(class = "wt-armor-splash__direct", attr:data-testid = "armor-splash-direct-hit") {{said}} }
     });
     let thickness = zone.thickness.map(|thickness| {
@@ -128,7 +128,7 @@ fn zone_view(index: usize, zone: &ZoneReadout) -> AnyView {
         view! { text(class = "wt-armor-splash__dim") {{said}} }
     });
     let hp = zone.max_hp.map(|hp| {
-        let said = t!("ui.armor.splash.hp", value = format!("{hp:.0}")).into_owned();
+        let said = t!("ui-armor-splash-hp", value = format!("{hp:.0}")).into_owned();
         view! { text(class = "wt-armor-splash__dim") {{said}} }
     });
     let verdicts: Vec<AnyView> = zone.verdicts.iter().map(verdict_view).collect();
@@ -152,7 +152,7 @@ fn verdict_view(verdict: &ShellVerdict) -> AnyView {
     let (key, tone) = result_verdict(verdict.result);
     let name = format!("{} {}", verdict.ship_name, ammo_label(&verdict.ammo_type, verdict.caliber));
     let pen = match verdict.penetration {
-        Some(pen) if verdict.ifhe_applied => format!("{:.0}mm {}", pen.value(), t!("ui.armor.pen.ifhe")),
+        Some(pen) if verdict.ifhe_applied => format!("{:.0}mm {}", pen.value(), t!("ui-armor-pen-ifhe")),
         Some(pen) => format!("{:.0}mm", pen.value()),
         None => "-".to_owned(),
     };

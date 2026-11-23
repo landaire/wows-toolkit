@@ -4,7 +4,6 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_replays::types::ShotId;
 use wows_toolkit_armor::assets::ModelAssets;
 use wows_toolkit_armor::camera_rings::RingRequest;
@@ -34,6 +33,7 @@ use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
+use wt_translations::t;
 
 use crate::shell::tabs::ModifierKey;
 
@@ -415,11 +415,11 @@ pub enum Agreement {
 pub fn agreement(verdict: &ComparisonVerdict) -> SimAgreement {
     match verdict {
         ComparisonVerdict::Match => {
-            SimAgreement { label: t!("ui.armor.realtime.sim_agrees").into_owned(), standing: Agreement::Agrees }
+            SimAgreement { label: t!("ui-armor-realtime-sim_agrees").into_owned(), standing: Agreement::Agrees }
         }
         ComparisonVerdict::RicochetRngDefer { angle, ricochet_start, always_ricochet } => SimAgreement {
             label: t!(
-                "ui.armor.realtime.sim_rng_zone",
+                "ui-armor-realtime-sim_rng_zone",
                 angle = format!("{:.1}", angle.value()),
                 from = format!("{:.1}", ricochet_start.value()),
                 to = format!("{:.1}", always_ricochet.value()),
@@ -428,7 +428,7 @@ pub fn agreement(verdict: &ComparisonVerdict) -> SimAgreement {
             standing: Agreement::Deferred,
         },
         ComparisonVerdict::Mismatch { sim, server } => SimAgreement {
-            label: t!("ui.armor.realtime.sim_disagrees", sim = t!(sim.label_key()), server = t!(server.label_key()))
+            label: t!("ui-armor-realtime-sim_disagrees", sim = t!(sim.label_key()), server = t!(server.label_key()))
                 .into_owned(),
             standing: Agreement::Disagrees,
         },

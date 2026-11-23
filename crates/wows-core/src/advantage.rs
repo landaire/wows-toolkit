@@ -729,9 +729,9 @@ pub fn breakdown_rows(breakdown: &AdvantageBreakdown) -> Option<Vec<BreakdownRow
     }
     let mut rows = Vec::new();
     let factors = [
-        ("ui.renderer.advantage.score_projection", breakdown.score_projection),
-        ("ui.renderer.advantage.fleet_power", breakdown.fleet_power),
-        ("ui.renderer.advantage.strategic_threat", breakdown.strategic_threat),
+        ("ui-renderer-advantage-score_projection", breakdown.score_projection),
+        ("ui-renderer-advantage-fleet_power", breakdown.fleet_power),
+        ("ui-renderer-advantage-strategic_threat", breakdown.strategic_threat),
     ];
     for (label_key, value) in factors {
         if value.0 == 0.0 && value.1 == 0.0 {
@@ -739,7 +739,7 @@ pub fn breakdown_rows(breakdown: &AdvantageBreakdown) -> Option<Vec<BreakdownRow
         }
         rows.push(BreakdownRow { label_key, contribution: contribution(value) });
     }
-    rows.push(BreakdownRow { label_key: "ui.renderer.advantage.total", contribution: contribution(breakdown.total) });
+    rows.push(BreakdownRow { label_key: "ui-renderer-advantage-total", contribution: contribution(breakdown.total) });
     Some(rows)
 }
 
@@ -780,9 +780,9 @@ mod breakdown_tests {
         assert_eq!(
             labels,
             [
-                "ui.renderer.advantage.score_projection",
-                "ui.renderer.advantage.strategic_threat",
-                "ui.renderer.advantage.total",
+                "ui-renderer-advantage-score_projection",
+                "ui-renderer-advantage-strategic_threat",
+                "ui-renderer-advantage-total",
             ],
             "fleet power was zero for both, so it is not a line"
         );
@@ -799,7 +799,7 @@ mod breakdown_tests {
         let mut breakdown = breakdown();
         breakdown.fleet_power = (3.0, 3.0);
         let rows = breakdown_rows(&breakdown).expect("nobody was eliminated");
-        let fleet = rows.iter().find(|row| row.label_key == "ui.renderer.advantage.fleet_power");
+        let fleet = rows.iter().find(|row| row.label_key == "ui-renderer-advantage-fleet_power");
         assert_eq!(fleet.expect("fleet power is a line").contribution, "0");
     }
 

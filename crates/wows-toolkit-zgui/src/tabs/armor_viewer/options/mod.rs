@@ -28,11 +28,11 @@ mod visibility;
 use std::sync::Arc;
 
 use landaire_ui::EscapeClears;
-use rust_i18n::t;
 use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
 use wows_toolkit_viewmodel::armor::options_panel::OptionSectionsOpen;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
 use wows_toolkit_viewmodel::armor::options_panel::TabMatches;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Memo;
@@ -122,37 +122,37 @@ const CSS: &str = css!(
 /// The controls of the trajectory and pen check panels, which a filter finds by these names and
 /// then shows whole.
 const TRAJECTORY_LABELS: [&str; 17] = [
-    "ui.armor.continue_ricochet",
-    "ui.armor.trajectory_next_cast",
-    "ui.armor.trajectory_range",
-    "ui.armor.trajectory_add_ship",
-    "ui.armor.trajectory_add_ship_tooltip",
-    "ui.armor.trajectory_ship",
-    "ui.armor.trajectory_select_ship",
-    "ui.armor.trajectory_shell",
-    "ui.armor.trajectory_select_shell",
-    "ui.armor.trajectory_ship_tooltip",
-    "ui.armor.trajectory_shell_tooltip",
-    "ui.armor.trajectory_clear",
-    "ui.armor.arc_isolate_plates",
-    "ui.armor.arc_isolate_plates_tooltip",
-    "ui.armor.arc_isolate_zones",
-    "ui.armor.arc_isolate_zones_tooltip",
-    "ui.armor.arc_delete",
+    "ui-armor-continue_ricochet",
+    "ui-armor-trajectory_next_cast",
+    "ui-armor-trajectory_range",
+    "ui-armor-trajectory_add_ship",
+    "ui-armor-trajectory_add_ship_tooltip",
+    "ui-armor-trajectory_ship",
+    "ui-armor-trajectory_select_ship",
+    "ui-armor-trajectory_shell",
+    "ui-armor-trajectory_select_shell",
+    "ui-armor-trajectory_ship_tooltip",
+    "ui-armor-trajectory_shell_tooltip",
+    "ui-armor-trajectory_clear",
+    "ui-armor-arc_isolate_plates",
+    "ui-armor-arc_isolate_plates_tooltip",
+    "ui-armor-arc_isolate_zones",
+    "ui-armor-arc_isolate_zones_tooltip",
+    "ui-armor-arc_delete",
 ];
 const PEN_CHECK_LABELS: [&str; 12] = [
-    "ui.armor.pen.ifhe",
-    "ui.armor.pen.ifhe_tooltip",
-    "ui.armor.pen.clear_all",
-    "ui.armor.pen.remove",
-    "ui.armor.pen.search_hint",
-    "ui.armor.pen.use_for_trajectory",
-    "ui.armor.pen.firing_ship_tooltip",
-    "ui.armor.realtime.incoming_fire",
-    "ui.armor.realtime.attacker_filter",
-    "ui.armor.realtime.all_enemies",
-    "ui.armor.realtime.show_secondaries",
-    "ui.armor.realtime.seek_to_salvo",
+    "ui-armor-pen-ifhe",
+    "ui-armor-pen-ifhe_tooltip",
+    "ui-armor-pen-clear_all",
+    "ui-armor-pen-remove",
+    "ui-armor-pen-search_hint",
+    "ui-armor-pen-use_for_trajectory",
+    "ui-armor-pen-firing_ship_tooltip",
+    "ui-armor-realtime-incoming_fire",
+    "ui-armor-realtime-attacker_filter",
+    "ui-armor-realtime-all_enemies",
+    "ui-armor-realtime-show_secondaries",
+    "ui-armor-realtime-seek_to_salvo",
 ];
 
 /// What a section body reads.
@@ -224,7 +224,7 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
         let comparing = position.count > 1;
         let said = match (comparing, name) {
             (true, name) => {
-                let pane = t!("ui.armor.options_pane", number = position.number, count = position.count);
+                let pane = t!("ui-armor-options_pane", number = position.number, count = position.count);
                 Some(match name {
                     Some(name) => format!("{pane}: {name}"),
                     None => pane.into_owned(),
@@ -245,14 +245,14 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
     view! {
         column(class = "wt-armor-options", attr:data-testid = "armor-options-panel") {
             column(class = "wt-armor-options__header") {
-                text(class = "wt-armor-options__title") {{move || { locale.track(); t!("ui.armor.options").into_owned() }}}
+                text(class = "wt-armor-options__title") {{move || { locale.track(); t!("ui-armor-options").into_owned() }}}
                 {target}
                 row(class = "wt-armor-options__filter") {
                     AppIcon(glyph = wows_toolkit_icons::Glyph::Search)
                     Input(
                         value = filter_text,
-                        placeholder = t!("ui.armor.filter_options").into_owned(),
-                        label = t!("ui.armor.filter_options").into_owned(),
+                        placeholder = t!("ui-armor-filter_options").into_owned(),
+                        label = t!("ui-armor-filter_options").into_owned(),
                         class = "wt-armor-options__field",
                         attr:data-testid = "armor-options-filter",
                         on:key_down:capture = move |ev| {
@@ -264,7 +264,7 @@ pub fn OptionsRail(workspace: ArmorWorkspace) -> impl IntoView {
                             variant = ButtonVariant::Ghost,
                             size = ButtonSize::IconXs,
                             attr:data-testid = "armor-options-filter-clear",
-                            a11y:label = t!("ui.stats.clear").into_owned(),
+                            a11y:label = t!("ui-stats-clear").into_owned(),
                             on:click = move |_| filter_text.set(String::new())
                         ) {
                             AppIcon(glyph = wows_toolkit_icons::Glyph::X)
@@ -401,17 +401,17 @@ fn tab_parts(cx: &SectionCx, tab: OptionsTab) -> TabParts {
             sections.extend(section(
                 cx,
                 OptionSection::Configuration,
-                &t!("ui.armor.option_tabs.configuration"),
+                &t!("ui-armor-option_tabs-configuration"),
                 hull::config_body,
             ));
-            sections.extend(section(cx, OptionSection::Textures, &t!("ui.armor.textures.title"), textures::body));
+            sections.extend(section(cx, OptionSection::Textures, &t!("ui-armor-textures-title"), textures::body));
         }
         OptionsTab::Layers => {
             if has_armor {
                 sections.extend(section(
                     cx,
                     OptionSection::Visibility,
-                    &t!("ui.armor.armor_options"),
+                    &t!("ui-armor-armor_options"),
                     visibility::body,
                 ));
             }
@@ -420,14 +420,14 @@ fn tab_parts(cx: &SectionCx, tab: OptionsTab) -> TabParts {
                 sections.extend(section(
                     cx,
                     OptionSection::SplashZones,
-                    &t!("ui.armor.splash.section"),
+                    &t!("ui-armor-splash-section"),
                     splash_zones::body,
                 ));
             }
             sections.extend(section(
                 cx,
                 OptionSection::HullParts,
-                &t!("ui.armor.option_tabs.hull_parts"),
+                &t!("ui-armor-option_tabs-hull_parts"),
                 hull::parts_body,
             ));
         }
@@ -436,22 +436,22 @@ fn tab_parts(cx: &SectionCx, tab: OptionsTab) -> TabParts {
                 readout = Some(splash_readout(cx));
             }
             if has_armor {
-                sections.extend(section(cx, OptionSection::Trajectory, &t!("ui.armor.trajectory"), trajectory_body));
-                sections.extend(section(cx, OptionSection::PenCheck, &t!("ui.armor.pen_check"), pen_check_body));
+                sections.extend(section(cx, OptionSection::Trajectory, &t!("ui-armor-trajectory"), trajectory_body));
+                sections.extend(section(cx, OptionSection::PenCheck, &t!("ui-armor-pen_check"), pen_check_body));
             }
         }
         OptionsTab::Display => {
-            sections.extend(section(cx, OptionSection::Display, &t!("ui.armor.display"), display::body));
+            sections.extend(section(cx, OptionSection::Display, &t!("ui-armor-display"), display::body));
             if ship {
                 sections.extend(section(
                     cx,
                     OptionSection::CameraRings,
-                    &t!("ui.armor.camera_rings"),
+                    &t!("ui-armor-camera_rings"),
                     display::camera_body,
                 ));
             }
             if features.is_some() {
-                sections.extend(section(cx, OptionSection::Lighting, &t!("ui.armor.lighting"), display::lighting_body));
+                sections.extend(section(cx, OptionSection::Lighting, &t!("ui-armor-lighting"), display::lighting_body));
             }
         }
     }
@@ -466,14 +466,14 @@ fn tab_view(tab: OptionsTab, parts: TabParts, nothing_matched: bool) -> AnyView 
     let none = nothing_matched.then(|| {
         view! {
             text(class = "wt-armor-options__none", attr:data-testid = "armor-options-no-match") {{
-                t!("ui.armor.no_matching_options").into_owned()
+                t!("ui-armor-no_matching_options").into_owned()
             }}
         }
     });
     let empty = (!nothing_matched && tools.is_empty() && sections.is_empty()).then(|| {
         view! {
             text(class = "wt-armor-options__none", attr:data-testid = "armor-options-tab-empty") {{
-                t!("ui.armor.option_tabs.empty").into_owned()
+                t!("ui-armor-option_tabs-empty").into_owned()
             }}
         }
     });
@@ -539,7 +539,7 @@ fn pen_check_body(cx: &SectionCx) -> Option<AnyView> {
 /// hull configuration.
 fn heading_aliases(which: OptionSection) -> &'static [&'static str] {
     match which {
-        OptionSection::Configuration => &["ui.armor.hull_toggle"],
+        OptionSection::Configuration => &["ui-armor-hull_toggle"],
         _ => &[],
     }
 }

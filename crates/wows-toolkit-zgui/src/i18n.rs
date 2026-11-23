@@ -1,6 +1,6 @@
 //! The language the interface reads in.
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Set;
@@ -21,9 +21,6 @@ impl LanguageCode {
 }
 
 /// The interface language, as a signal every translated string can follow.
-///
-/// `rust_i18n` keeps one locale per crate, so a change is applied to this crate's strings and to
-/// the shared crates' strings at once.
 #[derive(Clone, Copy)]
 pub struct Locale {
     /// `None` until a language is chosen, which reads as English.
@@ -40,9 +37,13 @@ impl Locale {
         self.chosen.track();
     }
 
-    /// Switches every catalog to `code`.
+    /// Switches every translated string to `code`.
     pub fn choose(self, code: LanguageCode) {
-        apply_to_catalogs(&code);
+        if let Err(error) = wt_translations::set_locale(code.as_str()) {
+            tracing::warn!(%error, "keeping the current interface language");
+            return;
+        }
+
         self.chosen.set(Some(code));
     }
 
@@ -59,11 +60,4 @@ impl Default for Locale {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Points this crate's catalog and the shared crates' catalogs at `code`.
-pub fn apply_to_catalogs(code: &LanguageCode) {
-    rust_i18n::set_locale(code.as_str());
-    wows_toolkit_viewmodel::set_locale(code.as_str());
-    wows_toolkit_replay_data::set_locale(code.as_str());
 }

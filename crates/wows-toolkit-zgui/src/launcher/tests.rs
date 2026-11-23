@@ -431,7 +431,7 @@ fn update_asks_where_the_build_goes_before_downloading() {
     crate::interaction_tests::settle_in_real_time(&mut launcher.window);
     assert!(!downloading(&launcher), "another folder cannot take the install's update");
     let toasts = launcher.window.texts_by_class("lui-toasts").concat();
-    let said = rust_i18n::t!("ui.launcher.update_in_place", path = install.display().to_string()).into_owned();
+    let said = wt_translations::t!("ui-launcher-update_in_place", path = install.display().to_string()).into_owned();
     assert!(toasts.contains(&said), "the message says where the update goes: {toasts:?}");
 
     // The same folder spelled another way is still the install.
@@ -903,7 +903,7 @@ fn an_unclassified_refusal_keeps_the_report_out_of_the_form() {
 fn every_sign_in_failure_has_a_sentence() {
     for failure in wows_toolkit_launcher::SignInFailure::ALL {
         let key = wows_toolkit_launcher::sign_in_failure_key(failure);
-        let rendered = rust_i18n::t!(key).into_owned();
+        let rendered = wt_translations::t!(key).into_owned();
         assert_ne!(rendered, key, "{failure:?} has no catalog entry");
     }
 }

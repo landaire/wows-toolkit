@@ -119,7 +119,6 @@ roxmltree = { workspace = true }
 nalgebra = "0.34.2"
 regex = "1.13"
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-rust-i18n = { workspace = true }
 sys-locale = { workspace = true }
 ron = "0.12.2"
 egui_inbox = "0.14.0"

@@ -5,6 +5,7 @@ use egui::ScrollArea;
 use egui_dock::DockArea;
 use egui_dock::TabViewer;
 use egui_dock::tab_viewer::OnCloseResponse;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::directory_stats::DirectoryStatsId;
@@ -30,7 +31,6 @@ use crate::util::personal_rating::PersonalRatingCategory;
 use crate::util::personal_rating::PersonalRatingCategorySwatch;
 use crate::util::personal_rating::PersonalRatingData;
 use crate::util::separate_number;
-use rust_i18n::t;
 use std::cmp::Reverse;
 use std::sync::Arc;
 use wows_replays::types::GameParamId;
@@ -252,7 +252,7 @@ impl TabViewer for StatsTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
-            StatsSubTab::Overview => wt_translations::icon_t(icons::LIST, &t!("ui.stats.overview")).into(),
+            StatsSubTab::Overview => wt_translations::icon_t(icons::LIST, &t!("ui-stats-overview")).into(),
             StatsSubTab::Charts(id) => {
                 let id = *id;
                 match self.tab_state.read_scoped_chart_config(self.scope, id, |cfg| cfg.map(chart_title)).flatten() {
@@ -347,27 +347,27 @@ impl ToolkitTabViewer<'_> {
             match read {
                 ReadState::Walking => {
                     ui.spinner();
-                    ui.label(t!("ui.stats.directory_walking"));
+                    ui.label(t!("ui-stats-directory_walking"));
                 }
                 ReadState::Scanning(progress) => {
                     ui.spinner();
-                    ui.label(t!("ui.stats.directory_scanning", done = progress.done, total = progress.total));
+                    ui.label(t!("ui-stats-directory_scanning", done = progress.done, total = progress.total));
                 }
                 ReadState::Reading(progress) => {
                     ui.spinner();
-                    ui.label(t!("ui.stats.directory_reading", done = progress.done, total = progress.total));
+                    ui.label(t!("ui-stats-directory_reading", done = progress.done, total = progress.total));
                 }
                 ReadState::Finished => {
                     reload = ui
-                        .button(wt_translations::icon_t(icons::ARROW_CLOCKWISE, &t!("ui.stats.directory_reload")))
-                        .on_hover_text(t!("ui.stats.directory_reload_tooltip"))
+                        .button(wt_translations::icon_t(icons::ARROW_CLOCKWISE, &t!("ui-stats-directory_reload")))
+                        .on_hover_text(t!("ui-stats-directory_reload_tooltip"))
                         .clicked();
                 }
             }
             if skips.total() > 0 {
                 ui.separator();
-                ui.label(t!("ui.stats.directory_skipped", count = skips.total())).on_hover_text(t!(
-                    "ui.stats.directory_skipped_detail",
+                ui.label(t!("ui-stats-directory_skipped", count = skips.total())).on_hover_text(t!(
+                    "ui-stats-directory_skipped_detail",
                     unreadable = skips.unreadable,
                     missing_build = skips.missing_build,
                     no_results = skips.no_results
@@ -397,7 +397,7 @@ impl ToolkitTabViewer<'_> {
         let filters_before = filters.clone();
 
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut filters.limit_enabled, t!("ui.stats.limit"));
+            ui.checkbox(&mut filters.limit_enabled, t!("ui-stats-limit"));
             let mut value = filters.game_count as u32;
             if ui
                 .add_enabled(filters.limit_enabled, egui::DragValue::new(&mut value).range(1..=999).speed(0.2))
@@ -408,17 +408,17 @@ impl ToolkitTabViewer<'_> {
 
             ui.separator();
 
-            ui.label(t!("ui.stats.division"));
-            ui.selectable_value(&mut filters.division_filter, DivisionFilter::All, t!("ui.stats.div_all"));
-            ui.selectable_value(&mut filters.division_filter, DivisionFilter::SoloOnly, t!("ui.stats.div_solo"));
-            ui.selectable_value(&mut filters.division_filter, DivisionFilter::DivOnly, t!("ui.stats.div_div"));
+            ui.label(t!("ui-stats-division"));
+            ui.selectable_value(&mut filters.division_filter, DivisionFilter::All, t!("ui-stats-div_all"));
+            ui.selectable_value(&mut filters.division_filter, DivisionFilter::SoloOnly, t!("ui-stats-div_solo"));
+            ui.selectable_value(&mut filters.division_filter, DivisionFilter::DivOnly, t!("ui-stats-div_div"));
 
             // A selection can outlive its mode's games (cleared games, a
             // reloaded directory); the buttons stay so it can be undone.
             if all_modes.len() > 1 || !filters.game_mode_filter.is_empty() {
                 ui.separator();
-                ui.label(t!("ui.stats.mode_label"));
-                if ui.selectable_label(filters.game_mode_filter.is_empty(), t!("ui.stats.div_all")).clicked() {
+                ui.label(t!("ui-stats-mode_label"));
+                if ui.selectable_label(filters.game_mode_filter.is_empty(), t!("ui-stats-div_all")).clicked() {
                     filters.game_mode_filter.clear();
                 }
                 for mode in &all_modes {
@@ -439,7 +439,7 @@ impl ToolkitTabViewer<'_> {
             if scope == StatsScope::Session {
                 ui.separator();
 
-                if ui.button(wt_translations::icon_t(icons::ERASER, &t!("ui.stats.clear"))).clicked() {
+                if ui.button(wt_translations::icon_t(icons::ERASER, &t!("ui-stats-clear"))).clicked() {
                     self.tab_state.pending_confirmation = Some(crate::tab_state::ConfirmableAction::ClearSessionStats);
                 }
             }
@@ -563,7 +563,7 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
                 ui.separator();
             }
             led = true;
-            ui.label(t!("ui.stats.pr"));
+            ui.label(t!("ui-stats-pr"));
             crate::ui::widgets::pr_chip(
                 ui,
                 pr_result.category,
@@ -575,29 +575,29 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
         if let Some(mc) = match_contribution {
             let category = McStats::category(mc.average);
             ui.separator();
-            ui.label(t!("ui.stats.mc"));
+            ui.label(t!("ui-stats-mc"));
             crate::ui::widgets::pr_chip(ui, category, &format!("{:.0} ({})", mc.average, category.name()), true)
-                .on_hover_text(t!("ui.rating.match_contribution"));
+                .on_hover_text(t!("ui-rating-match_contribution"));
         }
 
         // Total frags
         if led {
             ui.separator();
         }
-        ui.label(t!("ui.stats.frags_count", count = summary.total_frags));
+        ui.label(t!("ui-stats-frags_count", count = summary.total_frags));
 
         // Max frags
         if let Some((ship_id, max_frags)) = summary.best_frags {
             let ship = resolve_ship_name(ship_id, provider_ref);
             ui.separator();
-            ui.label(t!("ui.stats.best_frags", ship = ship, count = max_frags));
+            ui.label(t!("ui-stats-best_frags", ship = ship, count = max_frags));
         }
 
         // Max damage
         if let Some((ship_id, max_damage)) = summary.best_damage {
             let ship = resolve_ship_name(ship_id, provider_ref);
             ui.separator();
-            ui.label(t!("ui.stats.max_damage", ship = ship, damage = separate_number(max_damage, locale_ref)));
+            ui.label(t!("ui-stats-max_damage", ship = ship, damage = separate_number(max_damage, locale_ref)));
         }
     });
 
@@ -720,7 +720,7 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
                         ui.label(perf_info.records().hover_text());
                     });
                     ui.menu_button(icons::COPY, |ui| {
-                        if ui.button(t!("ui.stats.copy_markdown")).clicked() {
+                        if ui.button(t!("ui-stats-copy_markdown")).clicked() {
                             ui.ctx().copy_text(stats_table::to_markdown(
                                 &header,
                                 &table_rows,
@@ -729,7 +729,7 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
                             ));
                             ui.close();
                         }
-                        if ui.button(t!("ui.stats.copy_csv")).clicked() {
+                        if ui.button(t!("ui-stats-copy_csv")).clicked() {
                             ui.ctx().copy_text(stats_table::to_csv(&table_rows, translated_column, translated_label));
                             ui.close();
                         }
@@ -739,7 +739,7 @@ fn build_stats_overview(tab_state: &mut TabState, scope: StatsScope, ui: &mut eg
                     if scope == StatsScope::Session
                         && ui
                             .button(icons::TRASH)
-                            .on_hover_text(t!("ui.stats.remove_games_hint", ship = ship_name))
+                            .on_hover_text(t!("ui-stats-remove_games_hint", ship = ship_name))
                             .clicked()
                     {
                         if ui.input(|i| i.modifiers.ctrl) {
@@ -842,8 +842,8 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
 
     if ship_stats.is_empty() {
         match scope {
-            StatsScope::Session => ui.label(t!("ui.stats.no_stats")),
-            StatsScope::Directory(_) => ui.label(t!("ui.stats.directory_no_games")),
+            StatsScope::Session => ui.label(t!("ui-stats-no_stats")),
+            StatsScope::Directory(_) => ui.label(t!("ui-stats-directory_no_games")),
         };
         return;
     }
@@ -866,14 +866,14 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
     ui.push_id(chart_id, |ui| {
         ui.horizontal(|ui| {
             // Settings menu button with nested popup support
-            ui.menu_button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.stats.settings")), |ui| {
+            ui.menu_button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui-stats-settings")), |ui| {
                 tab_state.edit_scoped_chart_config(scope, chart_id, |cfg| {
                     ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                         ui.set_min_width(280.0);
 
-                        ui.strong(t!("ui.stats.chart_type"));
+                        ui.strong(t!("ui-stats-chart_type"));
                         ui.indent(("chart_type_indent", chart_id), |ui| {
-                            ui.label(t!("ui.stats.stat_label"));
+                            ui.label(t!("ui-stats-stat_label"));
                             ui.horizontal_wrapped(|ui| {
                                 for stat in ChartableStat::all() {
                                     if ui.selectable_label(cfg.selected_stat == *stat, stat.name()).clicked() {
@@ -883,16 +883,16 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
                                 }
                             });
                             ui.horizontal(|ui| {
-                                ui.label(t!("ui.stats.mode_label"));
+                                ui.label(t!("ui-stats-mode_label"));
                                 ui.add_enabled_ui(!cfg.combined, |ui| {
                                     if ui
-                                        .selectable_value(&mut cfg.mode, ChartMode::Line, t!("ui.stats.chart_line"))
+                                        .selectable_value(&mut cfg.mode, ChartMode::Line, t!("ui-stats-chart_line"))
                                         .clicked()
                                     {
                                         cfg.reset_plot = true;
                                     }
                                     if ui
-                                        .selectable_value(&mut cfg.mode, ChartMode::Bar, t!("ui.stats.chart_bar"))
+                                        .selectable_value(&mut cfg.mode, ChartMode::Bar, t!("ui-stats-chart_bar"))
                                         .clicked()
                                     {
                                         cfg.reset_plot = true;
@@ -903,9 +903,9 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
 
                         ui.separator();
 
-                        ui.strong(t!("ui.stats.options"));
+                        ui.strong(t!("ui-stats-options"));
                         ui.indent(("options_indent", chart_id), |ui| {
-                            if ui.checkbox(&mut cfg.combined, t!("ui.stats.combined")).changed() {
+                            if ui.checkbox(&mut cfg.combined, t!("ui-stats-combined")).changed() {
                                 cfg.reset_plot = true;
                                 if cfg.combined {
                                     cfg.mode = ChartMode::Line;
@@ -914,22 +914,22 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
                             if cfg.mode == ChartMode::Line {
                                 ui.add_enabled(
                                     !cfg.combined,
-                                    egui::Checkbox::new(&mut cfg.rolling_average, t!("ui.stats.rolling_avg")),
+                                    egui::Checkbox::new(&mut cfg.rolling_average, t!("ui-stats-rolling_avg")),
                                 );
                             }
-                            ui.checkbox(&mut cfg.show_labels, t!("ui.stats.labels"));
+                            ui.checkbox(&mut cfg.show_labels, t!("ui-stats-labels"));
                         });
 
                         ui.separator();
 
-                        ui.strong(t!("ui.stats.ships"));
+                        ui.strong(t!("ui-stats-ships"));
                         ui.indent(("ships_indent", chart_id), |ui| {
                             ui.horizontal(|ui| {
-                                if ui.button(t!("ui.stats.all_ships")).clicked() {
+                                if ui.button(t!("ui-stats-all_ships")).clicked() {
                                     cfg.selected_ships = all_ship_ids.clone();
                                     cfg.selected_ships_manually_changed = true;
                                 }
-                                if ui.button(t!("ui.stats.no_ships")).clicked() {
+                                if ui.button(t!("ui-stats-no_ships")).clicked() {
                                     cfg.selected_ships.clear();
                                     cfg.selected_ships_manually_changed = true;
                                 }
@@ -954,7 +954,7 @@ fn build_stats_charts(tab_state: &mut TabState, scope: StatsScope, chart_id: u64
             let has_plot = tab_state
                 .read_scoped_chart_config(scope, chart_id, |cfg| cfg.and_then(|cfg| cfg.plot_rect).is_some())
                 == Some(true);
-            if has_plot && ui.button(wt_translations::icon_t(icons::CAMERA, &t!("ui.stats.copy_as_image"))).clicked() {
+            if has_plot && ui.button(wt_translations::icon_t(icons::CAMERA, &t!("ui-stats-copy_as_image"))).clicked() {
                 let pending = PendingScreenshot::request(ui.ctx());
                 tab_state.edit_scoped_chart_config(scope, chart_id, |cfg| cfg.pending_screenshot = Some(pending));
             }

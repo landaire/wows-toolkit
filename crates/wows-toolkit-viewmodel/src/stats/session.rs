@@ -31,8 +31,8 @@ impl SessionScope {
     /// The catalogue key this choice's name lives under.
     pub const fn translation_key(self) -> &'static str {
         match self {
-            Self::Manual => "ui.stats.session_manual",
-            Self::SinceAppOpened => "ui.stats.session_since_opened",
+            Self::Manual => "ui-stats-session_manual",
+            Self::SinceAppOpened => "ui-stats-session_since_opened",
         }
     }
 }

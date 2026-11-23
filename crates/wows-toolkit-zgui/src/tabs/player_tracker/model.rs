@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use futures::StreamExt;
 use futures::channel::mpsc;
 use jiff::Timestamp;
-use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
@@ -39,6 +38,7 @@ use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_player_rows;
 use wows_toolkit_viewmodel::query_bar::seed;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::Owner;
@@ -715,9 +715,9 @@ impl TrackerModel {
 /// What a table says in place of its rows, or `None` when it has rows to show.
 pub fn table_status(state: &LoadState, rows: usize, loading_key: &str, empty_key: &str) -> Option<String> {
     match state {
-        LoadState::Idle => Some(t!("ui.player_tracker.waiting_for_index").into_owned()),
+        LoadState::Idle => Some(t!("ui-player_tracker-waiting_for_index").into_owned()),
         LoadState::Loading => Some(t!(loading_key).into_owned()),
-        LoadState::Failed(reason) => Some(t!("ui.player_tracker.index_failed", reason = reason).into_owned()),
+        LoadState::Failed(reason) => Some(t!("ui-player_tracker-index_failed", reason = reason).into_owned()),
         LoadState::Loaded if rows == 0 => Some(t!(empty_key).into_owned()),
         LoadState::Loaded => None,
     }

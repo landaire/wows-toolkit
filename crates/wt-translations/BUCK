@@ -7,8 +7,10 @@ workspace_library(
     version = "0.17.1",
     deps = [
         "//crates/wows-core:wows_core",
-        "//third-party/rust:rust-i18n",
-        "//third-party/rust:toml",
+        "//third-party/rust:fluent-bundle",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tracing",
+        "//third-party/rust:unic-langid",
     ],
 )
 
@@ -20,7 +22,9 @@ workspace_test(
     version = "0.17.1",
     deps = [
         "//crates/wows-core:wows_core",
-        "//third-party/rust:rust-i18n",
-        "//third-party/rust:toml",
+        "//third-party/rust:fluent-bundle",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tracing",
+        "//third-party/rust:unic-langid",
     ],
 )

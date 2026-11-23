@@ -1,7 +1,7 @@
 use egui::Color32;
 use egui::RichText;
-use rust_i18n::t;
 use wowsunpack::game_types::TeamId;
+use wt_translations::t;
 
 use crate::replay::minimap_view::ENEMY_COLOR;
 use crate::replay::minimap_view::FRIENDLY_COLOR;
@@ -34,11 +34,11 @@ fn row_content(kind: &TimelineEventKind, viewer_team: Option<TeamId>) -> (Color3
 /// both the inspector window and the renderer's narrow popup.
 pub(crate) fn timeline_filter_bar(ui: &mut egui::Ui, filter: &mut TimelineFilter) {
     ui.horizontal(|ui| {
-        ui.menu_button(t!("ui.replay.timeline_filter"), |ui| {
-            if ui.button(t!("ui.replay.timeline_filter_all")).clicked() {
+        ui.menu_button(t!("ui-replay-timeline_filter"), |ui| {
+            if ui.button(t!("ui-replay-timeline_filter_all")).clicked() {
                 filter.kinds = [true; KIND_COUNT];
             }
-            if ui.button(t!("ui.replay.timeline_filter_none")).clicked() {
+            if ui.button(t!("ui-replay-timeline_filter_none")).clicked() {
                 filter.kinds = [false; KIND_COUNT];
             }
             ui.separator();
@@ -49,7 +49,7 @@ pub(crate) fn timeline_filter_bar(ui: &mut egui::Ui, filter: &mut TimelineFilter
         ui.add(
             egui::TextEdit::singleline(&mut filter.search)
                 .desired_width(140.0)
-                .hint_text(t!("ui.replay.timeline_search_hint")),
+                .hint_text(t!("ui-replay-timeline_search_hint")),
         );
     });
 }
@@ -65,7 +65,7 @@ pub(crate) fn timeline_list(
 ) {
     let visible: Vec<&TimelineEvent> = events.iter().filter(|e| filter.matches(e)).collect();
     if visible.is_empty() {
-        ui.label(t!("ui.replay.timeline_no_events"));
+        ui.label(t!("ui-replay-timeline_no_events"));
         return;
     }
 

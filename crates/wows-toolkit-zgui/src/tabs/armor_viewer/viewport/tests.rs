@@ -20,7 +20,6 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_replays::types::ShotId;
 use wows_toolkit_armor::catalog::ShipCatalog;
 use wows_toolkit_armor::load_model::fixtures::armored_model_scene;
@@ -47,6 +46,7 @@ use wowsunpack::game_data::AssetsBin;
 use wowsunpack::game_data::build_game_vfs_for_build;
 use wowsunpack::game_data::list_available_builds;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wt_translations::t;
 use zgui::component;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
@@ -623,7 +623,7 @@ fn a_shift_click_off_the_hull_says_why_nothing_was_cast() {
     window.advance(Duration::from_millis(100));
     assert!(state.arcs().is_empty());
     assert!(window.by_test_id("armor-viewport-cast-miss").is_some(), "the miss is said");
-    assert_eq!(cast_hint_text(&window), t!("ui.armor.cast.miss_nothing_under_pointer"), "in place of the hint");
+    assert_eq!(cast_hint_text(&window), t!("ui-armor-cast-miss_nothing_under_pointer"), "in place of the hint");
 
     window.advance(Duration::from_secs(4));
     assert!(window.by_test_id("armor-viewport-cast-miss").is_none(), "the miss is said for a while only");
@@ -657,7 +657,7 @@ fn a_shift_click_on_a_plate_of_unknown_thickness_says_so() {
     window.click_at_with(plate_on_screen(state), Modifiers::SHIFT);
     window.advance(Duration::from_millis(100));
     assert!(state.arcs().is_empty());
-    assert_eq!(cast_hint_text(&window), t!("ui.armor.cast.miss_thickness_unknown"));
+    assert_eq!(cast_hint_text(&window), t!("ui-armor-cast-miss_thickness_unknown"));
 }
 
 /// Holding Shift over a plate shows the crosshair, and only there.

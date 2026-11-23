@@ -3,13 +3,13 @@
 
 use std::collections::BTreeSet;
 
-use rust_i18n::t;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_data_mgr::download_repo::DownloadPlan;
 use wows_data_mgr::download_repo::RemoteAvailability;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
 use wows_toolkit_services::game_data_cache;
 use wows_toolkit_services::game_data_cache::CacheOutcome;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -89,7 +89,7 @@ impl GameDataOffer {
     /// again, declined before or not.
     pub fn check(self, shell: Shell, missing: Vec<MissingBuild>) {
         if missing.is_empty() {
-            shell.toasts().info(t!("ui.replay_folders.game_data_available").into_owned());
+            shell.toasts().info(t!("ui-replay_folders-game_data_available").into_owned());
             return;
         }
         self.offered.update_value(|offered| {
@@ -141,20 +141,20 @@ impl GameDataOffer {
         let Some(base) = cache_base(services) else {
             let open = shell.settings_drawer;
             shell.toasts().show(
-                landaire_ui::Notice::warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned())
-                    .action(t!("ui.settings.panel.open").into_owned(), move || open.open_at(Setting::CacheDirectory)),
+                landaire_ui::Notice::warn(t!("ui-dialogs-download_plan_no_cache_dir").into_owned())
+                    .action(t!("ui-settings-panel-open").into_owned(), move || open.open_at(Setting::CacheDirectory)),
             );
             return;
         };
         let Some(runtime) = services.runtime() else { return };
 
         self.showing.set_value(true);
-        shell.toasts().info(t!("ui.dialogs.download_plan_pending").into_owned());
+        shell.toasts().info(t!("ui-dialogs-download_plan_pending").into_owned());
         let builds: Vec<(u32, Option<String>)> =
             missing.iter().map(|build| (build.build, build.version.clone())).collect();
         let proxy = proxy_url(services);
         let asked = base.clone();
-        let job = services.jobs.start(Job { name: t!("ui.app.status_cache_planning").into_owned(), progress: None });
+        let job = services.jobs.start(Job { name: t!("ui-app-status_cache_planning").into_owned(), progress: None });
         let owner = self.owner.get_value();
         let _planning = owner.with(|| {
             spawn_local(async move {
@@ -177,7 +177,7 @@ impl GameDataOffer {
                         if let CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("game data: the download could not be planned: {reason}");
                         }
-                        shell.toasts().warn(t!("ui.dialogs.download_plan_failed").into_owned());
+                        shell.toasts().warn(t!("ui-dialogs-download_plan_failed").into_owned());
                         None
                     }
                 };
@@ -255,13 +255,13 @@ impl GameDataOffer {
                 HostedDialog(handle = handle) {
                     DialogContent(attr:data-testid = "download-offer") {
                         DialogHeader {
-                            DialogTitle {{t!("ui.windows.download_game_data").into_owned()}}
-                            DialogDescription {{t!("ui.dialogs.download_game_data_intro").into_owned()}}
+                            DialogTitle {{t!("ui-windows-download_game_data").into_owned()}}
+                            DialogDescription {{t!("ui-dialogs-download_game_data_intro").into_owned()}}
                         }
                         column(class = "wt-offer") {
                             {row_views}
                             {total.map(|count| view! {
-                                text(class = "wt-offer__count") {{t!("ui.dialogs.download_objects_to_fetch", count = count).into_owned()}}
+                                text(class = "wt-offer__count") {{t!("ui-dialogs-download_objects_to_fetch", count = count).into_owned()}}
                             })}
                         }
                         DialogFooter {
@@ -271,7 +271,7 @@ impl GameDataOffer {
                                 attr:data-testid = "download-offer-cancel",
                                 on:click = move |_| decline()
                             ) {
-                                {t!("ui.buttons.cancel").into_owned()}
+                                {t!("ui-buttons-cancel").into_owned()}
                             }
                             Button(
                                 size = ButtonSize::Sm,
@@ -279,7 +279,7 @@ impl GameDataOffer {
                                 attr:data-testid = "download-offer-ok",
                                 on:click = move |_| accept()
                             ) {
-                                {t!("ui.buttons.download").into_owned()}
+                                {t!("ui-buttons-download").into_owned()}
                             }
                         }
                     }
@@ -339,11 +339,11 @@ fn describe_missing_builds(missing: &[MissingBuild], plan: Option<&DownloadPlan>
         .iter()
         .map(|build| {
             let named = t!(
-                "ui.dialogs.download_build_row",
+                "ui-dialogs-download_build_row",
                 version = build.version.clone().unwrap_or_else(|| "?".to_owned()),
                 build = build.build
             );
-            let needed = t!("ui.dialogs.download_replays_needing", count = build.replays);
+            let needed = t!("ui-dialogs-download_replays_needing", count = build.replays);
             let said = plan
                 .and_then(|plan| plan.resolved.iter().find(|resolved| resolved.requested_build == build.build))
                 .map(|resolved| availability_said(&resolved.availability));
@@ -358,12 +358,12 @@ fn describe_missing_builds(missing: &[MissingBuild], plan: Option<&DownloadPlan>
 
 fn availability_said(availability: &RemoteAvailability) -> String {
     match availability {
-        RemoteAvailability::Exact => t!("ui.dialogs.download_availability_exact").into_owned(),
+        RemoteAvailability::Exact => t!("ui-dialogs-download_availability_exact").into_owned(),
         RemoteAvailability::Nearest { version, build } => {
-            t!("ui.dialogs.download_availability_nearest", version = version, build = build).into_owned()
+            t!("ui-dialogs-download_availability_nearest", version = version, build = build).into_owned()
         }
-        RemoteAvailability::Unpublished => t!("ui.dialogs.download_availability_unpublished").into_owned(),
-        RemoteAvailability::Unreachable => t!("ui.dialogs.download_availability_unreachable").into_owned(),
+        RemoteAvailability::Unpublished => t!("ui-dialogs-download_availability_unpublished").into_owned(),
+        RemoteAvailability::Unreachable => t!("ui-dialogs-download_availability_unreachable").into_owned(),
     }
 }
 

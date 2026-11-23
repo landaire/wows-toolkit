@@ -1,8 +1,8 @@
 //! The launcher's palette entries, offered while the launcher is enabled: Play as each saved
 //! account, Game settings, Add account, Update and Open replay in game.
 
-use rust_i18n::t;
 use wows_toolkit_launcher::LoginTarget;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::prelude::Get;
@@ -75,7 +75,7 @@ pub fn LauncherOffers(shell: Shell, model: LauncherModel) -> impl IntoView {
 #[component]
 fn PlayAsOffer(shell: Shell, model: LauncherModel, account: AccountLabel) -> impl IntoView {
     let key = account.key;
-    let label = t!("ui.launcher.palette.play_as", nickname = account.nickname, realm = account.realm).into_owned();
+    let label = t!("ui-launcher-palette-play_as", nickname = account.nickname, realm = account.realm).into_owned();
     let glyph = OfferGlyph { glyph: realm_glyph(key.realm), label: realm_name(key.realm) };
     shell.palette.offer_labelled(
         RootCommand::Launcher(LauncherCommand::PlayAs(key)),

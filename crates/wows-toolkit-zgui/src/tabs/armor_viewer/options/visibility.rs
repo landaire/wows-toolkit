@@ -12,7 +12,6 @@ use landaire_ui::EscapeClears;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_armor::load_model::MountRef;
 use wows_toolkit_armor::load_ship::ArmorThickness;
 use wows_toolkit_armor::load_ship::ArmorZone;
@@ -30,6 +29,7 @@ use wows_toolkit_icons::Glyph;
 use wowsunpack::export::gltf_export::thickness_to_color;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::Species;
+use wt_translations::t;
 use zgui::css;
 use zgui::geom::Point;
 use zgui::reactive::LocalStorage;
@@ -146,12 +146,12 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
         let query = RailFilter::new(&zone_filter.get());
         query.is_active().then(|| match_count(&query, &counted))
     });
-    let field = tree_field("armor-zone-filter", zone_filter, t!("ui.armor.filter_zones").into_owned(), field_matches);
+    let field = tree_field("armor-zone-filter", zone_filter, t!("ui-armor-filter_zones").into_owned(), field_matches);
 
     let tree = TreeCx {
         viewport,
         shell: Shell::current(),
-        zone_tooltip: Rc::from(t!("ui.armor.zone_toggle_tooltip", key = ModifierKey::Primary.label()).as_ref()),
+        zone_tooltip: Rc::from(t!("ui-armor-zone_toggle_tooltip", key = ModifierKey::Primary.label()).as_ref()),
     };
     let rows = move || {
         let field_query = RailFilter::new(&zone_filter.get());
@@ -207,7 +207,7 @@ pub(super) fn no_ship_loaded() -> AnyView {
     install_stylesheet(SHEET, CSS);
 
     AnyView::new(view! {
-        text(class = "wt-armor-tree__none") {{t!("ui.armor.no_ship_loaded").into_owned()}}
+        text(class = "wt-armor-tree__none") {{t!("ui-armor-no_ship_loaded").into_owned()}}
     })
 }
 
@@ -222,8 +222,8 @@ pub(super) fn tree_field(
     install_stylesheet(SHEET, CSS);
     let count = move || {
         let said = match matches.get()? {
-            0 => t!("ui.armor.tree_no_matches").into_owned(),
-            count => t!("ui.armor.tree_matches", count = count).into_owned(),
+            0 => t!("ui-armor-tree_no_matches").into_owned(),
+            count => t!("ui-armor-tree_matches", count = count).into_owned(),
         };
         let label = said.clone();
         Some(view! {
@@ -231,7 +231,7 @@ pub(super) fn tree_field(
         })
     };
     let escape = EscapeClears::new(value);
-    let clear_label = t!("ui.stats.clear").into_owned();
+    let clear_label = t!("ui-stats-clear").into_owned();
 
     AnyView::new(view! {
         column(class = "wt-armor-tree__field") {
@@ -357,20 +357,20 @@ fn bulk_switches(viewport: ArmorViewportState) -> AnyView {
                     size = ButtonSize::Xs,
                     attr:data-testid = "armor-vis-all",
                     on:click = move |_| viewport.set_all_parts_visible()
-                ) {{t!("ui.armor.all_btn").into_owned()}}
+                ) {{t!("ui-armor-all_btn").into_owned()}}
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
                     attr:data-testid = "armor-vis-none",
                     on:click = move |_| viewport.set_all_parts_hidden()
-                ) {{t!("ui.armor.none_btn").into_owned()}}
+                ) {{t!("ui-armor-none_btn").into_owned()}}
                 if move || viewport.read(|model| !model.plate_visibility.is_empty()).unwrap_or(false) {
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Xs,
                         attr:data-testid = "armor-vis-reset-plates",
                         on:click = move |_| viewport.reset_plate_overrides()
-                    ) {{t!("ui.armor.reset_plates").into_owned()}}
+                    ) {{t!("ui-armor-reset_plates").into_owned()}}
                 }
             }
             box(class = "wt-armor-tree__rule") {}
@@ -384,13 +384,13 @@ fn thickness_source(viewport: ArmorViewportState, armor: &LoadedShipArmor) -> Op
     let model = armor.model()?;
     let label = match &model.thickness {
         ArmorThickness::Ship(source) => {
-            t!("ui.model_view.thickness_from", ship = source.display_name, hp = source.hp.as_str()).into_owned()
+            t!("ui-model_view-thickness_from", ship = source.display_name, hp = source.hp.as_str()).into_owned()
         }
         ArmorThickness::Hull(source) => {
-            t!("ui.model_view.thickness_from", ship = source.display_name, hp = source.section.stem()).into_owned()
+            t!("ui-model_view-thickness_from", ship = source.display_name, hp = source.section.stem()).into_owned()
         }
-        ArmorThickness::Building { name } => t!("ui.model_view.thickness_from_building", building = name).into_owned(),
-        ArmorThickness::Unknown => t!("ui.model_view.thickness_unknown").into_owned(),
+        ArmorThickness::Building { name } => t!("ui-model_view-thickness_from_building", building = name).into_owned(),
+        ArmorThickness::Unknown => t!("ui-model_view-thickness_unknown").into_owned(),
     };
     let current = match &model.thickness {
         ArmorThickness::Ship(source) => Some(source.vehicle_param_index.clone()),
@@ -429,7 +429,7 @@ fn thickness_source(viewport: ArmorViewportState, armor: &LoadedShipArmor) -> Op
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
                     attr:data-testid = "model-thickness-pick"
-                ) {{t!("ui.model_view.thickness_other_ships").into_owned()}}
+                ) {{t!("ui-model_view-thickness_other_ships").into_owned()}}
                 DropdownMenuContent {{items()}}
             }
         })

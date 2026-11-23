@@ -14,7 +14,7 @@ use std::sync::Arc;
 use egui_inbox::UiInbox;
 use parking_lot::RwLock;
 use rootcause::Report;
-use rust_i18n::t;
+use wt_translations::t;
 
 use crate::ui_channel::GuardedSender;
 use crate::ui_channel::StreamEvent;
@@ -357,18 +357,18 @@ impl BackgroundTask {
                             Some(progress) if progress.total > 0 => {
                                 ui.add(
                                     egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
-                                        .text(t!("ui.messages.downloading_game_data")),
+                                        .text(t!("ui-messages-downloading_game_data")),
                                 );
                             }
                             _ => {
                                 ui.spinner();
-                                ui.label(t!("ui.messages.downloading_game_data"));
+                                ui.label(t!("ui-messages-downloading_game_data"));
                             }
                         }
                     }
                     BackgroundTaskKind::CheckingGameDataUpdates => {
                         ui.spinner();
-                        ui.label(t!("ui.messages.checking_game_data_updates"));
+                        ui.label(t!("ui-messages-checking_game_data_updates"));
                     }
                     BackgroundTaskKind::PlanningGameDataDownload { .. } => {
                         // The dialog that asked for this plan shows its own
@@ -382,12 +382,12 @@ impl BackgroundTask {
                             Some(progress) if progress.total > 0 => {
                                 ui.add(
                                     egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
-                                        .text(t!("ui.messages.validating_game_data")),
+                                        .text(t!("ui-messages-validating_game_data")),
                                 );
                             }
                             _ => {
                                 ui.spinner();
-                                ui.label(t!("ui.messages.validating_game_data"));
+                                ui.label(t!("ui-messages-validating_game_data"));
                             }
                         }
                     }
@@ -437,7 +437,7 @@ impl BackgroundTask {
                     BackgroundTaskKind::BatchVideoExport { progress } => {
                         let p = progress.lock();
                         ui.add(egui::ProgressBar::new(p.fraction()).text(t!(
-                            "ui.task.batch_render_progress",
+                            "ui-task-batch_render_progress",
                             current = p.current_index + 1,
                             total = p.total_replays,
                             name = &p.current_name,
@@ -450,14 +450,14 @@ impl BackgroundTask {
                         match last_progress {
                             Some(progress) if progress.total > 0 => {
                                 ui.add(egui::ProgressBar::new(progress.done as f32 / progress.total as f32).text(t!(
-                                    "ui.messages.indexing_replays_progress",
+                                    "ui-messages-indexing_replays_progress",
                                     done = progress.done,
                                     total = progress.total
                                 )));
                             }
                             _ => {
                                 ui.spinner();
-                                ui.label(t!("ui.messages.indexing_replays"));
+                                ui.label(t!("ui-messages-indexing_replays"));
                             }
                         }
                     }
@@ -474,17 +474,17 @@ impl BackgroundTask {
                     }
                     BackgroundTaskKind::LoadingRowSummaries { .. } => {
                         ui.spinner();
-                        ui.label(t!("ui.messages.loading_row_summaries"));
+                        ui.label(t!("ui-messages-loading_row_summaries"));
                     }
                     // Both stages of a directory open read the same directory,
                     // and the listing itself reports which one is running.
                     BackgroundTaskKind::IngestingDirectory { .. } | BackgroundTaskKind::ScanningDirectory { .. } => {
                         ui.spinner();
-                        ui.label(t!("ui.messages.reading_replay_directory"));
+                        ui.label(t!("ui-messages-reading_replay_directory"));
                     }
                     BackgroundTaskKind::ReadingDirectoryStats { .. } => {
                         ui.spinner();
-                        ui.label(t!("ui.stats.directory_reading_task"));
+                        ui.label(t!("ui-stats-directory_reading_task"));
                     }
                     BackgroundTaskKind::LoadingPersonalRatingData
                     | BackgroundTaskKind::UpdateTimedMessage(_)

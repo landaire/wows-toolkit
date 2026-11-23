@@ -5,12 +5,12 @@ use landaire_ui::EscapeClears;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_notices::Notice;
 use wows_toolkit_notices::Notices;
 use wows_toolkit_notices::PROJECT_LICENSE;
 use wows_toolkit_notices::PROJECT_LICENSE_ID;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -134,9 +134,9 @@ pub(super) fn LicensesPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage
     install_stylesheet(SHEET, CSS);
     let locale = Services::current().locale;
     let control = shell.settings_drawer;
-    let back_label = locale.text("ui.settings.licenses.back");
-    let close_label = locale.text("ui.settings.panel.close");
-    let clear_label = locale.text("ui.buttons.clear");
+    let back_label = locale.text("ui-settings-licenses-back");
+    let close_label = locale.text("ui-settings-panel-close");
+    let clear_label = locale.text("ui-buttons-clear");
 
     let typed = RwSignal::new_local(String::new());
     let escape = EscapeClears::new(typed);
@@ -157,17 +157,17 @@ pub(super) fn LicensesPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage
 
     let version = move || {
         locale.track();
-        t!("ui.labels.app_version", version = env!("CARGO_PKG_VERSION")).into_owned()
+        t!("ui-labels-app_version", version = env!("CARGO_PKG_VERSION")).into_owned()
     };
     let project_license = move || {
         locale.track();
-        t!("ui.labels.project_license", license = PROJECT_LICENSE_ID).into_owned()
+        t!("ui-labels-project_license", license = PROJECT_LICENSE_ID).into_owned()
     };
 
     view! {
         row(class = "wt-settings__head") {
             AppIcon(glyph = Glyph::FileText)
-            text(class = "wt-settings__title") {{locale.text("ui.settings.licenses.title")}}
+            text(class = "wt-settings__title") {{locale.text("ui-settings-licenses-title")}}
             Tooltip {
                 TooltipTrigger {
                     Button(
@@ -208,9 +208,9 @@ pub(super) fn LicensesPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage
                     view! {
                         InputGroupInput(
                             value = typed,
-                            placeholder = t!("ui.labels.notices_search_hint").into_owned(),
+                            placeholder = t!("ui-labels-notices_search_hint").into_owned(),
                             node_ref = search,
-                            a11y:label = t!("ui.labels.notices_search_hint").into_owned(),
+                            a11y:label = t!("ui-labels-notices_search_hint").into_owned(),
                             attr:data-testid = "licenses-search",
                             on:key_down = move |ev| {
                                 escape.key_down(ev);
@@ -246,11 +246,11 @@ pub(super) fn LicensesPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage
                         text(class = "wt-licenses__text wt-licenses__project", attr:data-testid = "licenses-project") {{PROJECT_LICENSE}}
                     }
                 } else {}
-                text(class = "wt-licenses__heading") {{locale.text("ui.labels.third_party_notices")}}
-                text(class = "wt-licenses__line") {{locale.text("ui.settings.licenses.third_party_intro")}}
+                text(class = "wt-licenses__heading") {{locale.text("ui-labels-third_party_notices")}}
+                text(class = "wt-licenses__line") {{locale.text("ui-settings-licenses-third_party_intro")}}
                 if move || shown.with(Vec::is_empty) {
                     text(class = "wt-licenses__no-match", attr:data-testid = "licenses-no-match") {
-                        {locale.text("ui.labels.no_matching_notices")}
+                        {locale.text("ui-labels-no_matching_notices")}
                     }
                 } else {
                     column(class = "wt-licenses__card") {

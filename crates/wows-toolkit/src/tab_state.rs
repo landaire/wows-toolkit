@@ -259,15 +259,15 @@ pub enum ChartableStat {
 
 impl ChartableStat {
     pub fn name(&self) -> String {
-        use rust_i18n::t;
+        use wt_translations::t;
         match self {
-            ChartableStat::Damage => t!("stat.damage"),
-            ChartableStat::SpottingDamage => t!("stat.spotting_damage"),
-            ChartableStat::Frags => t!("stat.frags"),
-            ChartableStat::RawXp => t!("stat.raw_xp"),
-            ChartableStat::BaseXp => t!("stat.base_xp"),
-            ChartableStat::WinRate => t!("stat.win_rate"),
-            ChartableStat::PersonalRating => t!("stat.personal_rating"),
+            ChartableStat::Damage => t!("stat-damage"),
+            ChartableStat::SpottingDamage => t!("stat-spotting_damage"),
+            ChartableStat::Frags => t!("stat-frags"),
+            ChartableStat::RawXp => t!("stat-raw_xp"),
+            ChartableStat::BaseXp => t!("stat-base_xp"),
+            ChartableStat::WinRate => t!("stat-win_rate"),
+            ChartableStat::PersonalRating => t!("stat-personal_rating"),
         }
         .into()
     }
@@ -438,12 +438,12 @@ pub enum ConfirmableAction {
 
 impl ConfirmableAction {
     pub fn confirmation_message(&self) -> String {
-        use rust_i18n::t;
+        use wt_translations::t;
         match self {
-            ConfirmableAction::OpenInGame { .. } => t!("confirm.open_in_game"),
-            ConfirmableAction::ClearSessionStats => t!("confirm.clear_all_session_stats"),
-            ConfirmableAction::ClearShipSessionStats { .. } => t!("confirm.clear_ship_session_stats"),
-            ConfirmableAction::SetAsSessionStats { .. } => t!("confirm.set_as_session_stats"),
+            ConfirmableAction::OpenInGame { .. } => t!("confirm-open_in_game"),
+            ConfirmableAction::ClearSessionStats => t!("confirm-clear_all_session_stats"),
+            ConfirmableAction::ClearShipSessionStats { .. } => t!("confirm-clear_ship_session_stats"),
+            ConfirmableAction::SetAsSessionStats { .. } => t!("confirm-set_as_session_stats"),
         }
         .into()
     }
@@ -1707,13 +1707,13 @@ impl TabState {
             }) {
                 Ok(w) => w,
                 Err(e) => {
-                    self.toasts.lock().error(rust_i18n::t!("error.file_watcher_creation", error = e));
+                    self.toasts.lock().error(wt_translations::t!("error-file_watcher_creation", error = e));
                     return;
                 }
             };
 
         if let Err(e) = watcher.watch(replay_dir, RecursiveMode::NonRecursive) {
-            self.toasts.lock().error(rust_i18n::t!("error.replay_dir_watch", error = e));
+            self.toasts.lock().error(wt_translations::t!("error-replay_dir_watch", error = e));
             return;
         }
 

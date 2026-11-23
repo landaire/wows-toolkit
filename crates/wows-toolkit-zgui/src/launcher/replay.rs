@@ -4,9 +4,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use rust_i18n::t;
 use wows_toolkit_launcher::GameBuild;
 use wows_toolkit_launcher::ReplayLaunchError;
+use wt_translations::t;
 use zgui::task::spawn_detached;
 
 use crate::launcher::model::LauncherModel;
@@ -47,9 +47,9 @@ pub fn open(shell: Shell, model: LauncherModel, replay: PathBuf) {
 
         let message = match &err {
             ReplayLaunchError::NoInstallForBuild { build } => {
-                t!("ui.launcher.replay.no_install", build = build).into_owned()
+                t!("ui-launcher-replay-no_install", build = build).into_owned()
             }
-            _ => t!("ui.launcher.launch_failed", error = err.to_string()).into_owned(),
+            _ => t!("ui-launcher-launch_failed", error = err.to_string()).into_owned(),
         };
         shell.toasts().failed(message);
     });

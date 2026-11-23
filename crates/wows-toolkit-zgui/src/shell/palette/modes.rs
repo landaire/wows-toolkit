@@ -11,7 +11,6 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
 use futures::future::Shared;
-use rust_i18n::t;
 use wows_replay_insights::build::shiptool;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::force_reindex::ReindexScope;
@@ -24,6 +23,7 @@ use wows_toolkit_viewmodel::palette::IndexLookup;
 use wows_toolkit_viewmodel::palette::SeededSearch;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
@@ -136,7 +136,7 @@ fn seeded_row(found: SeededSearch, query: &FilterQuery) -> ModeRow {
 }
 
 fn failed(reason: impl std::fmt::Display) -> ModeRows {
-    ModeRows::Unavailable(t!("ui.search.failed", reason = reason).into_owned())
+    ModeRows::Unavailable(t!("ui-search-failed", reason = reason).into_owned())
 }
 
 /// The game versions the listing holds, newest first, each running what `reindex` makes of a
@@ -154,7 +154,7 @@ pub fn reindex_versions(
 /// `major.minor.patch` matches it, best first.
 fn version_rows(rows: &[VersionCount], query: &str, reindex: &dyn Fn(ReindexScope) -> PaletteRun) -> ModeRows {
     if rows.is_empty() {
-        return ModeRows::Unavailable(t!("ui.reindex.no_versions").into_owned());
+        return ModeRows::Unavailable(t!("ui-reindex-no_versions").into_owned());
     }
 
     let query = FilterQuery::new(query);
@@ -164,7 +164,7 @@ fn version_rows(rows: &[VersionCount], query: &str, reindex: &dyn Fn(ReindexScop
         .into_iter()
         .map(|(_, row)| {
             let said = version_said(&row.version);
-            let label = t!("ui.reindex.version_row", version = said, count = row.replays).into_owned();
+            let label = t!("ui-reindex-version_row", version = said, count = row.replays).into_owned();
             let run = reindex(ReindexScope::Version(row.version));
             ModeRow { marks: marks_within(&query, &label, &said), ..ModeRow::new(label, run) }
         })
@@ -223,7 +223,7 @@ fn folder_rows(
 ) -> ModeRows {
     let browse = ModeRow {
         glyph: Some(Glyph::FolderOpen),
-        ..ModeRow::new(t!("ui.replay_folders.browse").into_owned(), browse.clone())
+        ..ModeRow::new(t!("ui-replay_folders-browse").into_owned(), browse.clone())
     };
 
     let query = FilterQuery::new(query);
@@ -258,7 +258,7 @@ fn folder_label(path: &Path) -> String {
 
 /// Asks for a directory of replays and lists it in the replays tab.
 fn browse_folder(shell: Shell) {
-    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.replay.open_directory"));
+    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-replay-open_directory"));
     // Detached: the palette that asked has closed before the reader answers.
     spawn_detached(async move {
         let Some(directory) = chosen(shell, asked).await else { return };
@@ -284,7 +284,7 @@ impl ArmorShipRow {
     /// and the nation by name.
     pub fn new(param_index: ShipParamIndex, display_name: String, tier: &str, class: &str, nation: &str) -> Self {
         let key = FilterKey::new(&display_name);
-        let label = t!("ui.palette.armor_ship_row", name = display_name, tier = tier, class = class, nation = nation)
+        let label = t!("ui-palette-armor_ship_row", name = display_name, tier = tier, class = class, nation = nation)
             .into_owned();
 
         Self { param_index, display_name, key, label }
@@ -333,9 +333,9 @@ fn open_in_shiptool(row: &ArmorShipRow) -> PaletteRun {
 /// `list` ranked for `query`, each row running what `open` makes of its ship.
 fn ship_rows(list: &ShipList, query: &str, open: &dyn Fn(&ArmorShipRow) -> PaletteRun) -> ModeRows {
     match list {
-        ShipList::Pending => ModeRows::Loading(t!("ui.palette.ships_loading").into_owned()),
+        ShipList::Pending => ModeRows::Loading(t!("ui-palette-ships_loading").into_owned()),
         ShipList::Unavailable(reason) => {
-            ModeRows::Unavailable(t!("ui.palette.ships_unavailable", reason = reason).into_owned())
+            ModeRows::Unavailable(t!("ui-palette-ships_unavailable", reason = reason).into_owned())
         }
         ShipList::Ready(rows) => {
             let query = FilterQuery::new(query);
@@ -433,7 +433,7 @@ mod tests {
 
         let all = listed("");
         let labels: Vec<&str> = all.iter().map(|row| row.label.as_str()).collect();
-        assert_eq!(labels, [t!("ui.replay_folders.browse").as_ref(), "Prism", "Ranked games"]);
+        assert_eq!(labels, [t!("ui-replay_folders-browse").as_ref(), "Prism", "Ranked games"]);
         assert_eq!(all[0].glyph, Some(Glyph::FolderOpen));
         assert!(all[1].missing, "a directory that is gone is marked");
         assert!(!all[2].missing);

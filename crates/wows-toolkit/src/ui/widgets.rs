@@ -7,13 +7,13 @@ use egui::RichText;
 use egui::Ui;
 use egui::Visuals;
 use itertools::Itertools;
-use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_toolkit_viewmodel::rating_breakdown::RatingBreakdown;
 use wows_toolkit_viewmodel::rating_breakdown::RatingLine;
 use wows_toolkit_viewmodel::rating_breakdown::basis_badge;
 use wows_toolkit_viewmodel::rating_breakdown::basis_explanation;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
+use wt_translations::t;
 
 use crate::util::personal_rating::PersonalRatingCategory;
 use crate::util::personal_rating::PersonalRatingCategorySwatch;
@@ -52,7 +52,7 @@ pub fn personal_rating_chip(ui: &mut Ui, result: &PersonalRatingResult, value: &
 
     // Built inside the tooltip so rows that are not hovered format nothing.
     egui::Tooltip::for_enabled(&response).show(|ui| {
-        if let Some(breakdown) = RatingBreakdown::personal_rating(result, Some(&wows_toolkit_viewmodel::locale())) {
+        if let Some(breakdown) = RatingBreakdown::personal_rating(result, Some(wt_translations::locale())) {
             rating_breakdown(ui, &breakdown);
         }
     });
@@ -73,7 +73,7 @@ pub fn match_contribution_chip(
     }
 
     egui::Tooltip::for_enabled(&response).show(|ui| {
-        rating_breakdown(ui, &RatingBreakdown::match_contribution(result, Some(&wows_toolkit_viewmodel::locale())));
+        rating_breakdown(ui, &RatingBreakdown::match_contribution(result, Some(wt_translations::locale())));
     });
 
     response
@@ -120,7 +120,7 @@ pub fn rating_breakdown(ui: &mut Ui, breakdown: &RatingBreakdown) {
             );
             rating_bar(ui, line, scale, swatch.text);
             if let Some(delta) = line.versus_average() {
-                ui.label(RichText::new(format!("{delta:+.0} {}", t!("ui.rating.versus_average"))).weak());
+                ui.label(RichText::new(format!("{delta:+.0} {}", t!("ui-rating-versus_average"))).weak());
             }
             ui.label(RichText::new(basis_badge(line.basis)).small().weak());
         });
@@ -186,8 +186,8 @@ pub fn twitch_chip(ui: &mut Ui, candidates: &[SniperCandidate]) -> Option<String
             let minutes = candidate.minutes.iter().join(", ");
             format!(
                 "{}\n{}",
-                t!("ui.twitch.possible_name", name = candidate.login),
-                t!("ui.twitch.seen_minutes", minutes = minutes)
+                t!("ui-twitch-possible_name", name = candidate.login),
+                t!("ui-twitch-seen_minutes", minutes = minutes)
             )
         })
         .join("\n\n");
@@ -195,7 +195,7 @@ pub fn twitch_chip(ui: &mut Ui, candidates: &[SniperCandidate]) -> Option<String
     let response = ui
         .add(egui::Label::new(crate::icons::TWITCH_LOGO).sense(egui::Sense::click()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(format!("{hover}\n\n{}", t!("ui.twitch.click_to_copy")));
+        .on_hover_text(format!("{hover}\n\n{}", t!("ui-twitch-click_to_copy")));
 
     if candidates.len() == 1 {
         return response.clicked().then(|| first.login.clone());

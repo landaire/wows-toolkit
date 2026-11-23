@@ -1,15 +1,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![allow(clippy::blocks_in_conditions)]
 
-// The path deliberately holds no locale files. Pointed at the real catalogs,
-// `i18n!()` generates one `HashMap::from([(k, v)])` temporary per key inside a
-// single closure; across 20 locales that is ~20,000 temporaries, and an
-// unoptimized build gives each its own stack slot, so the initializer needs a
-// frame larger than the 2 MiB a thread gets by default. Every test that reached
-// `t!()` first therefore died with a stack overflow. `TranslationsBackend`
-// supplies the same catalogs, parsed at startup, with no such frame.
-rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
-
 mod app;
 mod armor_viewer;
 pub mod boot;
@@ -91,23 +82,5 @@ pub use util::win32::Win32Status;
 pub use ui::replay_parser::Replay;
 pub const APP_NAME: &str = "WoWs Toolkit";
 pub(crate) use egui_phosphor::regular as icons;
-
-/// Force the `i18n!()` lazy static to initialize. The generated initializer
-/// requires a large stack frame in debug builds, so call this from a thread
-/// with an explicit (larger) stack size.
-pub fn init_i18n() {
-    // Any `t!()` call triggers the lazy init.
-    let _ = rust_i18n::t!("meta.language_name");
-}
-
-/// [`TextResolver`] implementation that uses `t!()` from rust-i18n.
-pub(crate) struct LocalizedTextResolver;
-
-impl wt_translations::TextResolver for LocalizedTextResolver {
-    fn resolve(&self, text: &wt_translations::TranslatableText) -> String {
-        let key = text.key();
-        rust_i18n::t!(key).into()
-    }
-}
 
 pub use wows_toolkit_config::storage_dir;

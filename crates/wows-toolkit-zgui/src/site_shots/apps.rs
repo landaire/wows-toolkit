@@ -194,7 +194,7 @@ fn site_shots_tracker() {
         model.live.seed_stats(identities, stats);
         window.advance(Duration::from_millis(400));
 
-        let label = rust_i18n::t!("ui.player_tracker.subtab_current_match").into_owned();
+        let label = wt_translations::t!("ui-player_tracker-subtab_current_match").into_owned();
         let tab = window.by_role_and_label(Role::Tab, &label).expect("the dock lists the Current Match section");
         window.click(tab).expect("the section's tab can be pressed");
         window.advance(Duration::from_millis(400));

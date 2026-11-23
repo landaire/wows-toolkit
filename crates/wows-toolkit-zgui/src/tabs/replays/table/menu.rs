@@ -7,7 +7,6 @@ use landaire_ui::MenuItems;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::columns::cell_value;
@@ -16,6 +15,7 @@ use wows_toolkit_replay_data::columns::name_color_kind;
 use wows_toolkit_replay_data::columns::row_text;
 use wows_toolkit_replay_data::columns::table_text;
 use wows_toolkit_replay_data::model::PlayerRow;
+use wt_translations::t;
 use zgui::prelude::AnyView;
 use zgui::reactive::Callable;
 use zgui::reactive::RwSignal;
@@ -64,19 +64,19 @@ fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
     if show_ship_config {
         let mut added_any = false;
         if let Some(url) = row.shiptool_url.clone() {
-            items.push(link(t!("ui.replay.build.open_shiptool").into_owned(), url));
+            items.push(link(t!("ui-replay-build-open_shiptool").into_owned(), url));
             added_any = true;
         }
         if let Some(url) = row.ship_config_url.clone() {
-            items.push(link(t!("ui.replay.build.open_in_ship_builder").into_owned(), url.clone()));
-            items.push(copy_item(t!("ui.replay.build.copy_link").into_owned(), cx, move || {
-                Some((url.clone(), t!("ui.replay.build.link_copied").into_owned()))
+            items.push(link(t!("ui-replay-build-open_in_ship_builder").into_owned(), url.clone()));
+            items.push(copy_item(t!("ui-replay-build-copy_link").into_owned(), cx, move || {
+                Some((url.clone(), t!("ui-replay-build-link_copied").into_owned()))
             }));
             added_any = true;
         }
         if let Some(url) = row.short_ship_config_url.clone() {
-            items.push(copy_item(t!("ui.replay.build.copy_short_link").into_owned(), cx, move || {
-                Some((url.clone(), t!("ui.replay.build.link_copied").into_owned()))
+            items.push(copy_item(t!("ui-replay-build-copy_short_link").into_owned(), cx, move || {
+                Some((url.clone(), t!("ui-replay-build-link_copied").into_owned()))
             }));
             added_any = true;
         }
@@ -87,7 +87,7 @@ fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
     }
 
     if let Some(url) = row.wows_numbers_url.clone() {
-        items.push(link(t!("ui.replay.build.open_wows_numbers").into_owned(), url));
+        items.push(link(t!("ui-replay-build-open_wows_numbers").into_owned(), url));
         wrote_links = true;
     }
     if wrote_links {
@@ -96,17 +96,17 @@ fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
 
     if let Some((_, col)) = cx.noted.current().filter(|(noted, _)| *noted == id) {
         let row = Arc::clone(&row);
-        items.push(copy_item(t!("ui.replay.context.copy_cell").into_owned(), cx, move || {
+        items.push(copy_item(t!("ui-replay-context-copy_cell").into_owned(), cx, move || {
             Some((cell_value(&row, col, cx.debug.get_untracked()).text, copied()))
         }));
     }
     {
         let row = Arc::clone(&row);
-        items.push(copy_item(t!("ui.replay.context.copy_row").into_owned(), cx, move || {
+        items.push(copy_item(t!("ui-replay-context-copy_row").into_owned(), cx, move || {
             Some((row_text(&row, &cx.drawn_columns(), cx.debug.get_untracked()), copied()))
         }));
     }
-    items.push(copy_item(t!("ui.replay.context.copy_table").into_owned(), cx, move || {
+    items.push(copy_item(t!("ui-replay-context-copy_table").into_owned(), cx, move || {
         let text = cx.rows.with_untracked(|rows| {
             table_text(rows.iter().map(|row| row.row.as_ref()), &cx.drawn_columns(), cx.debug.get_untracked())
         });
@@ -132,7 +132,7 @@ fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
         && let Some(json) = row.raw_metadata_json.clone()
         && let Some(view_json) = cx.on_view_raw_json
     {
-        let caption = t!("ui.replay.debug.view_raw_metadata").into_owned();
+        let caption = t!("ui-replay-debug-view_raw_metadata").into_owned();
         let open = UnsyncCallback::new(move |()| view_json.run(json.clone()));
         items.push(AnyView::new(view! { MenuSeparator() }));
         items.push(AnyView::new(view! {
@@ -147,7 +147,7 @@ fn row_menu_items(row: Arc<PlayerRow>, id: RowId, cx: TableCx) -> AnyView {
 }
 
 fn copied() -> String {
-    t!("ui.replay.context.copied").into_owned()
+    t!("ui-replay-context-copied").into_owned()
 }
 
 /// Who the menu is about, first: a right-click menu lands wherever the pointer was, and the rows
@@ -212,7 +212,7 @@ fn copy_item(caption: String, cx: TableCx, produce: impl Fn() -> Option<(String,
 /// for a test.
 pub(super) fn row_actions(id: RowId, player: AccountId, cx: TableCx) -> AnyView {
     let anchor = NodeRef::new();
-    let hint = t!("ui.replay.row_actions_hint").into_owned();
+    let hint = t!("ui-replay-row_actions_hint").into_owned();
     let label = hint.clone();
     let menus = cx.menus;
     // The tip stays shut while the menu it names is open over it.

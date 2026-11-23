@@ -11,7 +11,6 @@ use std::time::Duration;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::CollabState;
@@ -25,6 +24,7 @@ use wows_toolkit_viewmodel::settings::keys;
 use wt_collab_client::PeerRole;
 use wt_collab_client::Permissions;
 use wt_collab_client::SessionStatus;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -419,7 +419,7 @@ fn before_revealing_address(shell: Shell, go: impl Fn() + Copy + 'static) {
                             attr:data-testid = "notice-more-info",
                             on:click = move |_| desktop::open_url(url)
                         ) {
-                            {t!("ui.labels.more_info").into_owned()}
+                            {t!("ui-labels-more_info").into_owned()}
                         }
                     }))}
                     row(class = "wt-collab__check") {
@@ -429,14 +429,14 @@ fn before_revealing_address(shell: Shell, go: impl Fn() + Copy + 'static) {
                             labelled_by = name,
                             attr:data-testid = "notice-suppress"
                         )
-                        Label(node_ref = name, control = control) {{t!("ui.labels.suppress_warning").into_owned()}}
+                        Label(node_ref = name, control = control) {{t!("ui-labels-suppress_warning").into_owned()}}
                     }
                     AlertDialogFooter {
                         AlertDialogCancel(size = ButtonSize::Sm, attr:data-testid = "notice-cancel") {
-                            {t!("ui.buttons.cancel").into_owned()}
+                            {t!("ui-buttons-cancel").into_owned()}
                         }
                         AlertDialogAction(size = ButtonSize::Sm, attr:data-testid = "notice-continue", on:click = move |_| go()) {
-                            {t!("ui.buttons.continue_").into_owned()}
+                            {t!("ui-buttons-continue_").into_owned()}
                         }
                     }
                 }
@@ -488,7 +488,7 @@ fn SessionPopover(shell: Shell) -> impl IntoView {
     let active = move || collab.is_active();
     let tip = move || {
         locale.track();
-        if active() { t!("ui.collab.session_active").into_owned() } else { t!("ui.collab.session").into_owned() }
+        if active() { t!("ui-collab-session_active").into_owned() } else { t!("ui-collab-session").into_owned() }
     };
     let phase = Memo::new(move |_| Phase::of(collab.read(CollabState::status)));
     let open = RwSignal::new_local(false);
@@ -551,20 +551,20 @@ fn SessionStart(shell: Shell) -> impl IntoView {
     };
 
     view! {
-        text(class = "wt-collab__title") {{locale.text("ui.collab.display_name")}}
+        text(class = "wt-collab__title") {{locale.text("ui-collab-display_name")}}
         Input(
             value = collab.name,
-            placeholder = t!("ui.collab.display_name_hint").into_owned(),
-            label = t!("ui.collab.display_name").into_owned(),
+            placeholder = t!("ui-collab-display_name_hint").into_owned(),
+            label = t!("ui-collab-display_name").into_owned(),
             attr:data-testid = "collab-display-name",
             on:key_down = move |ev| adopt_on_enter(ev),
             on:focus_out = move |_| collab.adopt_name(shell)
         )
         if move || unnamed.get() {
-            text(class = "wt-collab__hint") {{locale.text("ui.collab.enter_display_name")}}
+            text(class = "wt-collab__hint") {{locale.text("ui-collab-enter_display_name")}}
         } else {}
         Separator()
-        text(class = "wt-collab__title") {{locale.text("ui.collab.host_session")}}
+        text(class = "wt-collab__title") {{locale.text("ui-collab-host_session")}}
         Button(
             variant = ButtonVariant::Outline,
             size = ButtonSize::Sm,
@@ -572,14 +572,14 @@ fn SessionStart(shell: Shell) -> impl IntoView {
             attr:data-testid = "collab-host",
             on:click = move |_| collab.host(shell)
         ) {
-            {locale.text("ui.collab.start_session")}
+            {locale.text("ui-collab-start_session")}
         }
         Separator()
-        text(class = "wt-collab__title") {{locale.text("ui.collab.join_session")}}
+        text(class = "wt-collab__title") {{locale.text("ui-collab-join_session")}}
         Input(
             value = collab.token,
             placeholder = "toolkit-...".to_owned(),
-            label = t!("ui.collab.join_session").into_owned(),
+            label = t!("ui-collab-join_session").into_owned(),
             attr:data-testid = "collab-token"
         )
         Button(
@@ -589,7 +589,7 @@ fn SessionStart(shell: Shell) -> impl IntoView {
             attr:data-testid = "collab-join",
             on:click = move |_| collab.join(shell)
         ) {
-            {locale.text("ui.collab.paste_and_join")}
+            {locale.text("ui-collab-paste_and_join")}
         }
         {move || failure().map(|reason| view! {
             text(class = "wt-collab__error", attr:data-testid = "collab-failure") {{reason}}
@@ -604,15 +604,15 @@ fn SessionWaiting(shell: Shell) -> impl IntoView {
 
     view! {
         row(class = "wt-collab__row") {
-            Spinner(label = t!("ui.collab.starting").into_owned())
-            text(class = "wt-collab__grow") {{locale.text("ui.collab.starting")}}
+            Spinner(label = t!("ui-collab-starting").into_owned())
+            text(class = "wt-collab__grow") {{locale.text("ui-collab-starting")}}
             Button(
                 variant = ButtonVariant::Outline,
                 size = ButtonSize::Sm,
                 attr:data-testid = "collab-cancel",
                 on:click = move |_| shell.collab.leave(shell)
             ) {
-                {locale.text("ui.buttons.cancel")}
+                {locale.text("ui-buttons-cancel")}
             }
         }
     }
@@ -630,7 +630,7 @@ fn SessionFailed(shell: Shell, reason: String) -> impl IntoView {
             attr:data-testid = "collab-dismiss",
             on:click = move |_| shell.collab.leave(shell)
         ) {
-            {locale.text("ui.collab.leave")}
+            {locale.text("ui-collab-leave")}
         }
     }
 }
@@ -643,14 +643,14 @@ fn SessionActive(shell: Shell) -> impl IntoView {
     let heading = move || {
         locale.track();
         if collab.read(CollabState::is_hosting) {
-            t!("ui.collab.session_active").into_owned()
+            t!("ui-collab-session_active").into_owned()
         } else {
-            t!("ui.collab.connected_to_session").into_owned()
+            t!("ui-collab-connected_to_session").into_owned()
         }
     };
     let count = move || {
         locale.track();
-        t!("ui.collab.connected_count", count = collab.read(CollabState::connected).len()).into_owned()
+        t!("ui-collab-connected_count", count = collab.read(CollabState::connected).len()).into_owned()
     };
     let may_steer = Memo::new(move |_| collab.read(CollabState::may_steer));
     // Only the host raises peers: the session ignores a co-host asking to.
@@ -665,7 +665,7 @@ fn SessionActive(shell: Shell) -> impl IntoView {
                 attr:data-testid = "collab-leave",
                 on:click = move |_| collab.leave(shell)
             ) {
-                {locale.text("ui.collab.leave")}
+                {locale.text("ui-collab-leave")}
             }
         }
         text(class = "wt-collab__hint") {{count}}
@@ -683,11 +683,11 @@ fn SessionActive(shell: Shell) -> impl IntoView {
             attr:data-testid = "collab-tactics-board",
             on:click = move |_| shell.tactics.open()
         ) {
-            {locale.text("ui.collab.tactics_board")}
+            {locale.text("ui-collab-tactics_board")}
         }
         if move || collab.read(|state| !state.state.lock().open_replays.is_empty()) {
             Separator()
-            text(class = "wt-collab__title") {{locale.text("ui.collab.shared_windows")}}
+            text(class = "wt-collab__title") {{locale.text("ui-collab-shared_windows")}}
             for replay_id in move || collab.shared_replay_ids(), key = |replay_id: &u64| *replay_id {
                 SharedWindowRow(shell = shell, replay_id = replay_id, may_steer = may_steer)
             }
@@ -711,7 +711,7 @@ fn SessionToken(shell: Shell) -> impl IntoView {
     let locale = shell.services().locale;
     let shown = move || collab.read(CollabState::token_display).unwrap_or_default();
     let revealed = move || collab.read(|state| state.token_revealed);
-    let reveal_tip = t!("ui.collab.toggle_visibility").into_owned();
+    let reveal_tip = t!("ui-collab-toggle_visibility").into_owned();
     let copy = move |value: Option<String>, said: &'static str| {
         let Some(value) = value else { return };
         shell.copy_text(value);
@@ -720,7 +720,7 @@ fn SessionToken(shell: Shell) -> impl IntoView {
 
     view! {
         Separator()
-        text(class = "wt-collab__hint") {{locale.text("ui.collab.session_token")}}
+        text(class = "wt-collab__hint") {{locale.text("ui-collab-session_token")}}
         row(class = "wt-collab__row") {
             text(class = "wt-collab__token", attr:data-testid = "collab-token-shown") {{shown}}
             Tooltip {
@@ -735,7 +735,7 @@ fn SessionToken(shell: Shell) -> impl IntoView {
                         AppIcon(glyph = Signal::derive_local(move || if revealed() { Glyph::EyeOff } else { Glyph::Eye }))
                     }
                 }
-                TooltipContent {{locale.text("ui.collab.toggle_visibility")}}
+                TooltipContent {{locale.text("ui-collab-toggle_visibility")}}
             }
         }
         row(class = "wt-collab__row wt-collab__wrap") {
@@ -743,18 +743,18 @@ fn SessionToken(shell: Shell) -> impl IntoView {
                 variant = ButtonVariant::Outline,
                 size = ButtonSize::Xs,
                 attr:data-testid = "collab-copy-token",
-                on:click = move |_| copy(collab.peek(CollabState::token), "ui.collab.token_copied")
+                on:click = move |_| copy(collab.peek(CollabState::token), "ui-collab-token_copied")
             ) {
-                {locale.text("ui.collab.copy_token")}
+                {locale.text("ui-collab-copy_token")}
             }
             if move || collab.read(CollabState::web_link).is_some() {
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
                     attr:data-testid = "collab-copy-web-link",
-                    on:click = move |_| copy(collab.peek(CollabState::web_link), "ui.collab.web_link_copied")
+                    on:click = move |_| copy(collab.peek(CollabState::web_link), "ui-collab-web_link_copied")
                 ) {
-                    {locale.text("ui.collab.copy_web_link")}
+                    {locale.text("ui-collab-copy_web_link")}
                 }
             } else {}
             {localhost_copy(shell)}
@@ -771,7 +771,7 @@ fn localhost_copy(shell: Shell) -> Option<AnyView> {
     let copy = move || {
         let Some(link) = collab.peek(CollabState::localhost_link) else { return };
         shell.copy_text(link);
-        shell.toasts().info(t!("ui.collab.localhost_copied").into_owned());
+        shell.toasts().info(t!("ui-collab-localhost_copied").into_owned());
     };
     Some(AnyView::new(view! {
         Button(
@@ -780,7 +780,7 @@ fn localhost_copy(shell: Shell) -> Option<AnyView> {
             attr:data-testid = "collab-copy-localhost",
             on:click = move |_| copy()
         ) {
-            {locale.text("ui.collab.copy_localhost_link")}
+            {locale.text("ui-collab-copy_localhost_link")}
         }
     }))
 }
@@ -813,7 +813,7 @@ fn SharedWindowRow(shell: Shell, replay_id: u64, may_steer: Memo<bool>) -> impl 
                 attr:data-testid = format!("collab-open-shared-{replay_id}"),
                 on:click = move |_| shell.collab.watch(watched.get_value().into_iter().collect())
             ) {
-                {locale.text("ui.collab.open")}
+                {locale.text("ui-collab-open")}
             }
             // Only the end the session watches can tell the rest to open one.
             if move || may_steer.get() {
@@ -823,7 +823,7 @@ fn SharedWindowRow(shell: Shell, replay_id: u64, may_steer: Memo<bool>) -> impl 
                     attr:data-testid = format!("collab-open-for-everyone-{replay_id}"),
                     on:click = move |_| shell.collab.peek(|state| state.link().open_for_everyone(replay_id))
                 ) {
-                    {locale.text("ui.collab.open_for_everyone")}
+                    {locale.text("ui-collab-open_for_everyone")}
                 }
             } else {}
         }
@@ -835,8 +835,8 @@ fn SharedWindowRow(shell: Shell, replay_id: u64, may_steer: Memo<bool>) -> impl 
 fn PeerRow(shell: Shell, index: usize, peer: ConnectedPeer, hosting: Memo<bool>) -> impl IntoView {
     let locale = shell.services().locale;
     let role = match peer.role {
-        PeerRole::Host => Some("ui.collab.role_host"),
-        PeerRole::CoHost => Some("ui.collab.role_cohost"),
+        PeerRole::Host => Some("ui-collab-role_host"),
+        PeerRole::CoHost => Some("ui-collab-role_cohost"),
         PeerRole::Peer => None,
     };
     let raisable = matches!(peer.role, PeerRole::Peer) && !peer.is_me;
@@ -846,7 +846,7 @@ fn PeerRow(shell: Shell, index: usize, peer: ConnectedPeer, hosting: Memo<bool>)
         row(class = "wt-collab__row", attr:data-testid = format!("collab-peer-{index}")) {
             text(class = "wt-collab__grow") {{peer.name.clone()}}
             if move || peer.is_me {
-                text(class = "wt-collab__hint") {{locale.text("ui.collab.you")}}
+                text(class = "wt-collab__hint") {{locale.text("ui-collab-you")}}
             } else {}
             {role.map(|role| view! { text(class = "wt-collab__hint") {{locale.text(role)}} })}
             if move || raisable && hosting.get() {
@@ -856,7 +856,7 @@ fn PeerRow(shell: Shell, index: usize, peer: ConnectedPeer, hosting: Memo<bool>)
                     attr:data-testid = format!("collab-promote-{index}"),
                     on:click = move |_| shell.collab.peek(|state| state.promote(user_id))
                 ) {
-                    {locale.text("ui.collab.promote_cohost")}
+                    {locale.text("ui-collab-promote_cohost")}
                 }
             } else {}
         }
@@ -872,11 +872,11 @@ fn SessionLocks(shell: Shell) -> impl IntoView {
 
     view! {
         Separator()
-        text(class = "wt-collab__title") {{locale.text("ui.collab.permissions")}}
-        LockRow(shell = shell, label_key = "ui.collab.lock_annotations", test_id = "collab-lock-annotations",
+        text(class = "wt-collab__title") {{locale.text("ui-collab-permissions")}}
+        LockRow(shell = shell, label_key = "ui-collab-lock_annotations", test_id = "collab-lock-annotations",
             locked = Signal::derive_local(move || permissions().annotations_locked),
             set = |permissions: &mut Permissions, on| permissions.annotations_locked = on)
-        LockRow(shell = shell, label_key = "ui.collab.lock_settings", test_id = "collab-lock-settings",
+        LockRow(shell = shell, label_key = "ui-collab-lock_settings", test_id = "collab-lock-settings",
             locked = Signal::derive_local(move || permissions().settings_locked),
             set = |permissions: &mut Permissions, on| permissions.settings_locked = on)
         Tooltip {
@@ -887,10 +887,10 @@ fn SessionLocks(shell: Shell) -> impl IntoView {
                     attr:data-testid = "collab-reset-overrides",
                     on:click = move |_| collab.state.with_value(CollabState::reset_overrides)
                 ) {
-                    {locale.text("ui.collab.reset_overrides")}
+                    {locale.text("ui-collab-reset_overrides")}
                 }
             }
-            TooltipContent {{locale.text("ui.collab.reset_overrides_tooltip")}}
+            TooltipContent {{locale.text("ui-collab-reset_overrides_tooltip")}}
         }
     }
 }

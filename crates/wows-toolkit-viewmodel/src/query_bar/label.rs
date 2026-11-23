@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use rust_i18n::t;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
 use wowsunpack::game_types::PersonalRatingCategory;
+use wt_translations::t;
 
 use wows_toolkit_config::index::query_ast::CmpOp;
 use wows_toolkit_config::index::query_ast::DivisionScope;
@@ -148,7 +148,7 @@ pub fn pill_segments(term: &MatchTerm, cache: &NameCache) -> Vec<PillSegment> {
         MatchTerm::Field(field, op, value) => field_op_value_segments(match_field_label(*field), *op, value, cache),
         MatchTerm::Roster { quant, pred } => roster_term_segments(*quant, pred, cache),
         MatchTerm::FreeText(s) => {
-            vec![PillSegment { role: SegmentRole::Value, text: t!("ui.search.free_text", text = s).into() }]
+            vec![PillSegment { role: SegmentRole::Value, text: t!("ui-search-free_text", text = s).into() }]
         }
     }
 }
@@ -171,14 +171,14 @@ fn join_segments(segments: &[PillSegment]) -> String {
 /// "no", "3 or more", "exactly 2", and so on for the other `CmpOp`s.
 pub fn quant_prefix(quant: Quant) -> String {
     match quant {
-        Quant::Any => t!("ui.search.quant_any").into(),
-        Quant::None => t!("ui.search.quant_none").into(),
-        Quant::Count(CmpOp::Eq, n) => t!("ui.search.quant_eq", n = n).into(),
-        Quant::Count(CmpOp::Ne, n) => t!("ui.search.quant_ne", n = n).into(),
-        Quant::Count(CmpOp::Gt, n) => t!("ui.search.quant_gt", n = n).into(),
-        Quant::Count(CmpOp::Ge, n) => t!("ui.search.quant_ge", n = n).into(),
-        Quant::Count(CmpOp::Lt, n) => t!("ui.search.quant_lt", n = n).into(),
-        Quant::Count(CmpOp::Le, n) => t!("ui.search.quant_le", n = n).into(),
+        Quant::Any => t!("ui-search-quant_any").into(),
+        Quant::None => t!("ui-search-quant_none").into(),
+        Quant::Count(CmpOp::Eq, n) => t!("ui-search-quant_eq", n = n).into(),
+        Quant::Count(CmpOp::Ne, n) => t!("ui-search-quant_ne", n = n).into(),
+        Quant::Count(CmpOp::Gt, n) => t!("ui-search-quant_gt", n = n).into(),
+        Quant::Count(CmpOp::Ge, n) => t!("ui-search-quant_ge", n = n).into(),
+        Quant::Count(CmpOp::Lt, n) => t!("ui-search-quant_lt", n = n).into(),
+        Quant::Count(CmpOp::Le, n) => t!("ui-search-quant_le", n = n).into(),
     }
 }
 
@@ -247,63 +247,63 @@ fn roster_expr_text(expr: &Expr<RosterTerm>, cache: &NameCache) -> String {
 
 pub fn match_field_label(field: MatchField) -> String {
     match field {
-        MatchField::Map => t!("ui.search.field.map"),
-        MatchField::GameType => t!("ui.search.field.game_type"),
-        MatchField::GameMode => t!("ui.search.field.game_mode"),
-        MatchField::MatchGroup => t!("ui.search.field.match_group"),
-        MatchField::Date => t!("ui.search.field.date"),
-        MatchField::Build => t!("ui.search.field.build"),
-        MatchField::Outcome => t!("ui.search.field.outcome"),
-        MatchField::Group => t!("ui.search.field.group"),
-        MatchField::ResultsAvailable => t!("ui.search.field.results_available"),
+        MatchField::Map => t!("ui-search-field-map"),
+        MatchField::GameType => t!("ui-search-field-game_type"),
+        MatchField::GameMode => t!("ui-search-field-game_mode"),
+        MatchField::MatchGroup => t!("ui-search-field-match_group"),
+        MatchField::Date => t!("ui-search-field-date"),
+        MatchField::Build => t!("ui-search-field-build"),
+        MatchField::Outcome => t!("ui-search-field-outcome"),
+        MatchField::Group => t!("ui-search-field-group"),
+        MatchField::ResultsAvailable => t!("ui-search-field-results_available"),
     }
     .into()
 }
 
 pub fn roster_field_label(field: RosterField) -> String {
     match field {
-        RosterField::Relation => t!("ui.search.field.relation"),
-        RosterField::Division => t!("ui.search.field.division"),
-        RosterField::Account => t!("ui.search.field.player_present"),
-        RosterField::Name => t!("ui.search.field.name"),
-        RosterField::Clan => t!("ui.search.field.clan"),
-        RosterField::Realm => t!("ui.search.field.realm"),
-        RosterField::Ship => t!("ui.search.field.ship"),
-        RosterField::ShipIndex => t!("ui.search.field.ship_index"),
-        RosterField::Nation => t!("ui.search.field.nation"),
-        RosterField::Class => t!("ui.search.field.class"),
-        RosterField::Tier => t!("ui.search.field.tier"),
-        RosterField::TestShip => t!("ui.search.field.test_ship"),
-        RosterField::Damage => t!("ui.search.field.stat_damage"),
-        RosterField::Kills => t!("ui.search.field.stat_kills"),
-        RosterField::Spotting => t!("ui.search.field.stat_spotting"),
-        RosterField::Potential => t!("ui.search.field.stat_potential"),
-        RosterField::Received => t!("ui.search.field.stat_received"),
-        RosterField::Pr => t!("ui.search.field.stat_pr"),
-        RosterField::Rating => t!("ui.search.field.rating"),
-        RosterField::Survived => t!("ui.search.field.stat_survived"),
-        RosterField::Disconnected => t!("ui.search.field.stat_disconnected"),
-        RosterField::StreamSniper => t!("ui.search.field.stream_sniper"),
-        RosterField::SniperLogin => t!("ui.search.field.sniper_login"),
+        RosterField::Relation => t!("ui-search-field-relation"),
+        RosterField::Division => t!("ui-search-field-division"),
+        RosterField::Account => t!("ui-search-field-player_present"),
+        RosterField::Name => t!("ui-search-field-name"),
+        RosterField::Clan => t!("ui-search-field-clan"),
+        RosterField::Realm => t!("ui-search-field-realm"),
+        RosterField::Ship => t!("ui-search-field-ship"),
+        RosterField::ShipIndex => t!("ui-search-field-ship_index"),
+        RosterField::Nation => t!("ui-search-field-nation"),
+        RosterField::Class => t!("ui-search-field-class"),
+        RosterField::Tier => t!("ui-search-field-tier"),
+        RosterField::TestShip => t!("ui-search-field-test_ship"),
+        RosterField::Damage => t!("ui-search-field-stat_damage"),
+        RosterField::Kills => t!("ui-search-field-stat_kills"),
+        RosterField::Spotting => t!("ui-search-field-stat_spotting"),
+        RosterField::Potential => t!("ui-search-field-stat_potential"),
+        RosterField::Received => t!("ui-search-field-stat_received"),
+        RosterField::Pr => t!("ui-search-field-stat_pr"),
+        RosterField::Rating => t!("ui-search-field-rating"),
+        RosterField::Survived => t!("ui-search-field-stat_survived"),
+        RosterField::Disconnected => t!("ui-search-field-stat_disconnected"),
+        RosterField::StreamSniper => t!("ui-search-field-stream_sniper"),
+        RosterField::SniperLogin => t!("ui-search-field-sniper_login"),
     }
     .into()
 }
 
 pub fn op_label(op: Op) -> String {
     match op {
-        Op::Contains => t!("ui.search.op.contains"),
-        Op::Equals => t!("ui.search.op.equals"),
-        Op::NotEquals => t!("ui.search.op.not_equals"),
-        Op::Eq => t!("ui.search.op.eq"),
-        Op::Ne => t!("ui.search.op.ne"),
-        Op::Gt => t!("ui.search.op.gt"),
-        Op::Ge => t!("ui.search.op.ge"),
-        Op::Lt => t!("ui.search.op.lt"),
-        Op::Le => t!("ui.search.op.le"),
-        Op::Is => t!("ui.search.op.is"),
-        Op::IsNot => t!("ui.search.op.is_not"),
-        Op::IsSet => t!("ui.search.op.is_set"),
-        Op::IsNotSet => t!("ui.search.op.is_not_set"),
+        Op::Contains => t!("ui-search-op-contains"),
+        Op::Equals => t!("ui-search-op-equals"),
+        Op::NotEquals => t!("ui-search-op-not_equals"),
+        Op::Eq => t!("ui-search-op-eq"),
+        Op::Ne => t!("ui-search-op-ne"),
+        Op::Gt => t!("ui-search-op-gt"),
+        Op::Ge => t!("ui-search-op-ge"),
+        Op::Lt => t!("ui-search-op-lt"),
+        Op::Le => t!("ui-search-op-le"),
+        Op::Is => t!("ui-search-op-is"),
+        Op::IsNot => t!("ui-search-op-is_not"),
+        Op::IsSet => t!("ui-search-op-is_set"),
+        Op::IsNotSet => t!("ui-search-op-is_not_set"),
     }
     .into()
 }
@@ -367,16 +367,16 @@ fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>,
             let Expr::Leaf(inner) = &cs[1] else { return None };
             let scope_label: String = match (first.field, &first.value, first.op) {
                 (RosterField::Relation, Value::Relation(VehicleRelation::SelfPlayer), Op::Is) => {
-                    t!("ui.search.scope_self").into()
+                    t!("ui-search-scope_self").into()
                 }
                 (RosterField::Relation, Value::Relation(VehicleRelation::Ally), Op::Is) => {
-                    t!("ui.search.scope_ally").into()
+                    t!("ui-search-scope_ally").into()
                 }
                 (RosterField::Relation, Value::Relation(VehicleRelation::Enemy), Op::Is) => {
-                    t!("ui.search.scope_enemy").into()
+                    t!("ui-search-scope_enemy").into()
                 }
                 (RosterField::Division, Value::Division(DivisionScope::Mine), Op::Is) => {
-                    t!("ui.search.scope_div").into()
+                    t!("ui-search-scope_div").into()
                 }
                 _ => return None,
             };
@@ -422,7 +422,7 @@ fn lowercase_first(s: &str) -> String {
 }
 
 pub fn bool_label(b: bool) -> String {
-    if b { t!("ui.search.bool_true") } else { t!("ui.search.bool_false") }.into()
+    if b { t!("ui-search-bool_true") } else { t!("ui-search-bool_false") }.into()
 }
 
 pub fn outcome_label(o: MatchOutcome) -> String {
@@ -430,32 +430,32 @@ pub fn outcome_label(o: MatchOutcome) -> String {
 }
 
 /// Split from `outcome_label` so a test can assert the translated text is not
-/// the key itself -- `rust_i18n::t!` returns a missing key verbatim, which is
+/// the key itself -- `t!` returns a missing id verbatim, which is
 /// non-empty and would otherwise satisfy every existing non-empty-text
 /// assertion while shipping the literal key string.
 fn outcome_key(o: MatchOutcome) -> &'static str {
     match o {
-        MatchOutcome::Win => "ui.search.outcome_win",
-        MatchOutcome::Loss => "ui.search.outcome_loss",
-        MatchOutcome::Draw => "ui.search.outcome_draw",
-        MatchOutcome::Unknown => "ui.search.outcome_unknown",
+        MatchOutcome::Win => "ui-search-outcome_win",
+        MatchOutcome::Loss => "ui-search-outcome_loss",
+        MatchOutcome::Draw => "ui-search-outcome_draw",
+        MatchOutcome::Unknown => "ui-search-outcome_unknown",
     }
 }
 
 pub fn relation_label(r: VehicleRelation) -> String {
     match r {
-        VehicleRelation::SelfPlayer => t!("ui.search.value.relation_self"),
-        VehicleRelation::Ally => t!("ui.search.value.relation_ally"),
-        VehicleRelation::Enemy => t!("ui.search.value.relation_enemy"),
+        VehicleRelation::SelfPlayer => t!("ui-search-value-relation_self"),
+        VehicleRelation::Ally => t!("ui-search-value-relation_ally"),
+        VehicleRelation::Enemy => t!("ui-search-value-relation_enemy"),
     }
     .into()
 }
 
 pub fn division_label(d: DivisionScope) -> String {
     match d {
-        DivisionScope::Mine => t!("ui.search.value.division_mine"),
-        DivisionScope::Any => t!("ui.search.value.division_any"),
-        DivisionScope::None => t!("ui.search.value.division_none"),
+        DivisionScope::Mine => t!("ui-search-value-division_mine"),
+        DivisionScope::Any => t!("ui-search-value-division_any"),
+        DivisionScope::None => t!("ui-search-value-division_none"),
     }
     .into()
 }
@@ -472,44 +472,44 @@ pub fn game_mode_label(mode: GameMode) -> String {
 ///
 /// Where the game's own player-facing name for a mode has not been confirmed
 /// (there is no `IDS_` source for `GAME_MODE` anywhere in the deobfuscated
-/// scripts), `en.toml`'s value is the mode's own name from the id table,
+/// scripts), `en.ftl`'s value is the mode's own name from the id table,
 /// typeset for reading (underscores to spaces, words capitalised) rather than
 /// an invented descriptive phrase: an invented phrase asserts a mechanic
 /// nobody verified, where typesetting the table's own name asserts nothing
 /// beyond what the table says -- `MEGABASE` and "Megabase" are the same
 /// identifier, one of them just readable. Each mode's value is one line in
-/// `en.toml`, so a confirmed name can replace one without touching this match
+/// `en.ftl`, so a confirmed name can replace one without touching this match
 /// or anything else.
 fn game_mode_key(mode: GameMode) -> &'static str {
     match mode {
-        GameMode::Test => "ui.search.value.game_mode_test",
-        GameMode::Standart => "ui.search.value.game_mode_standard",
-        GameMode::Singlebase => "ui.search.value.game_mode_singlebase",
-        GameMode::Domination => "ui.search.value.game_mode_domination",
-        GameMode::Tutorial => "ui.search.value.game_mode_tutorial",
-        GameMode::Megabase => "ui.search.value.game_mode_megabase",
-        GameMode::Forts => "ui.search.value.game_mode_forts",
-        GameMode::StandardDomination => "ui.search.value.game_mode_standard_domination",
-        GameMode::Epicenter => "ui.search.value.game_mode_epicenter",
-        GameMode::AssaultDefense => "ui.search.value.game_mode_assault_defense",
-        GameMode::Pve => "ui.search.value.game_mode_pve",
-        GameMode::ArmsRace => "ui.search.value.game_mode_arms_race",
-        GameMode::EpicenterRing => "ui.search.value.game_mode_epicenter_ring",
-        GameMode::AntiStandard => "ui.search.value.game_mode_anti_standard",
-        GameMode::AttackDefense => "ui.search.value.game_mode_attack_defense",
-        GameMode::TorpedoBeat => "ui.search.value.game_mode_torpedo_beat",
-        GameMode::TeamBattleRoyale => "ui.search.value.game_mode_team_battle_royale",
-        GameMode::EscapeToPortal => "ui.search.value.game_mode_escape_to_portal",
-        GameMode::DominationAsymm => "ui.search.value.game_mode_domination_asymm",
-        GameMode::KeyBattle => "ui.search.value.game_mode_key_battle",
-        GameMode::Portal2021 => "ui.search.value.game_mode_portal_2021",
-        GameMode::TeamBattleRoyale2021 => "ui.search.value.game_mode_team_battle_royale_2021",
-        GameMode::ConvoyEvent => "ui.search.value.game_mode_convoy_event",
-        GameMode::ConvoyAirship => "ui.search.value.game_mode_convoy_airship",
-        GameMode::TwoTeamsBattleRoyale => "ui.search.value.game_mode_two_teams_battle_royale",
-        GameMode::PinataEvent => "ui.search.value.game_mode_pinata_event",
-        GameMode::Respawns => "ui.search.value.game_mode_respawns",
-        GameMode::RespawnsSectors => "ui.search.value.game_mode_respawns_sectors",
+        GameMode::Test => "ui-search-value-game_mode_test",
+        GameMode::Standart => "ui-search-value-game_mode_standard",
+        GameMode::Singlebase => "ui-search-value-game_mode_singlebase",
+        GameMode::Domination => "ui-search-value-game_mode_domination",
+        GameMode::Tutorial => "ui-search-value-game_mode_tutorial",
+        GameMode::Megabase => "ui-search-value-game_mode_megabase",
+        GameMode::Forts => "ui-search-value-game_mode_forts",
+        GameMode::StandardDomination => "ui-search-value-game_mode_standard_domination",
+        GameMode::Epicenter => "ui-search-value-game_mode_epicenter",
+        GameMode::AssaultDefense => "ui-search-value-game_mode_assault_defense",
+        GameMode::Pve => "ui-search-value-game_mode_pve",
+        GameMode::ArmsRace => "ui-search-value-game_mode_arms_race",
+        GameMode::EpicenterRing => "ui-search-value-game_mode_epicenter_ring",
+        GameMode::AntiStandard => "ui-search-value-game_mode_anti_standard",
+        GameMode::AttackDefense => "ui-search-value-game_mode_attack_defense",
+        GameMode::TorpedoBeat => "ui-search-value-game_mode_torpedo_beat",
+        GameMode::TeamBattleRoyale => "ui-search-value-game_mode_team_battle_royale",
+        GameMode::EscapeToPortal => "ui-search-value-game_mode_escape_to_portal",
+        GameMode::DominationAsymm => "ui-search-value-game_mode_domination_asymm",
+        GameMode::KeyBattle => "ui-search-value-game_mode_key_battle",
+        GameMode::Portal2021 => "ui-search-value-game_mode_portal_2021",
+        GameMode::TeamBattleRoyale2021 => "ui-search-value-game_mode_team_battle_royale_2021",
+        GameMode::ConvoyEvent => "ui-search-value-game_mode_convoy_event",
+        GameMode::ConvoyAirship => "ui-search-value-game_mode_convoy_airship",
+        GameMode::TwoTeamsBattleRoyale => "ui-search-value-game_mode_two_teams_battle_royale",
+        GameMode::PinataEvent => "ui-search-value-game_mode_pinata_event",
+        GameMode::Respawns => "ui-search-value-game_mode_respawns",
+        GameMode::RespawnsSectors => "ui-search-value-game_mode_respawns_sectors",
     }
 }
 
@@ -523,14 +523,14 @@ pub fn rating_label(band: PersonalRatingCategory) -> String {
 /// label actually translated rather than merely being non-empty.
 fn rating_key(band: PersonalRatingCategory) -> &'static str {
     match band {
-        PersonalRatingCategory::Bad => "ui.search.value.rating_bad",
-        PersonalRatingCategory::BelowAverage => "ui.search.value.rating_below_average",
-        PersonalRatingCategory::Average => "ui.search.value.rating_average",
-        PersonalRatingCategory::Good => "ui.search.value.rating_good",
-        PersonalRatingCategory::VeryGood => "ui.search.value.rating_very_good",
-        PersonalRatingCategory::Great => "ui.search.value.rating_great",
-        PersonalRatingCategory::Unicum => "ui.search.value.rating_unicum",
-        PersonalRatingCategory::SuperUnicum => "ui.search.value.rating_super_unicum",
+        PersonalRatingCategory::Bad => "ui-search-value-rating_bad",
+        PersonalRatingCategory::BelowAverage => "ui-search-value-rating_below_average",
+        PersonalRatingCategory::Average => "ui-search-value-rating_average",
+        PersonalRatingCategory::Good => "ui-search-value-rating_good",
+        PersonalRatingCategory::VeryGood => "ui-search-value-rating_very_good",
+        PersonalRatingCategory::Great => "ui-search-value-rating_great",
+        PersonalRatingCategory::Unicum => "ui-search-value-rating_unicum",
+        PersonalRatingCategory::SuperUnicum => "ui-search-value-rating_super_unicum",
     }
 }
 
@@ -540,12 +540,12 @@ pub fn class_label(c: ShipClass) -> String {
 
 fn class_key(c: ShipClass) -> &'static str {
     match c {
-        ShipClass::AirCarrier => "ui.search.value.class_air_carrier",
-        ShipClass::Battleship => "ui.search.value.class_battleship",
-        ShipClass::Cruiser => "ui.search.value.class_cruiser",
-        ShipClass::Destroyer => "ui.search.value.class_destroyer",
-        ShipClass::Submarine => "ui.search.value.class_submarine",
-        ShipClass::Auxiliary => "ui.search.value.class_auxiliary",
+        ShipClass::AirCarrier => "ui-search-value-class_air_carrier",
+        ShipClass::Battleship => "ui-search-value-class_battleship",
+        ShipClass::Cruiser => "ui-search-value-class_cruiser",
+        ShipClass::Destroyer => "ui-search-value-class_destroyer",
+        ShipClass::Submarine => "ui-search-value-class_submarine",
+        ShipClass::Auxiliary => "ui-search-value-class_auxiliary",
     }
 }
 

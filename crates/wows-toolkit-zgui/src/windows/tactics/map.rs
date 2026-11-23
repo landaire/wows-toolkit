@@ -1,7 +1,6 @@
 //! The map itself: the drawn frame, the pointer on it, its menu and the turning handle.
 
 use landaire_ui::LoadingProps;
-use rust_i18n::t;
 use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
 use wows_toolkit_replay_data::tactics::BoardTool;
 use wows_toolkit_replay_data::tactics::ElementPos;
@@ -13,6 +12,7 @@ use wows_toolkit_replay_data::tactics::RADIUS_STEP_KM;
 use wows_toolkit_replay_data::tactics::board::BoardKey;
 use wows_toolkit_replay_data::tactics::board::Modifiers;
 use wows_toolkit_replay_data::tactics::shortcut_modifier_name;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::geom::CssPx;
@@ -148,17 +148,17 @@ pub fn BoardMap(model: BoardModel) -> impl IntoView {
         {move || match placeholder.get() {
             Some(Placeholder::PickAMap) => AnyView::new(view! {
                 box(class = "wt-tactics-map__said", attr:data-testid = "tactics-pick-a-map") {
-                    text {{locale.text("ui.tactics.pick_a_map")}}
+                    text {{locale.text("ui-tactics-pick_a_map")}}
                 }
             }),
             Some(Placeholder::NoArt) => AnyView::new(view! {
                 box(class = "wt-tactics-map__said", attr:data-testid = "tactics-no-art") {
-                    text {{locale.text("ui.tactics.no_map_art")}}
+                    text {{locale.text("ui-tactics-no_map_art")}}
                 }
             }),
             Some(Placeholder::Drawing) => AnyView::new(view! {
                 Loading(
-                    label = Signal::derive_local(locale.text("ui.tactics.drawing")),
+                    label = Signal::derive_local(locale.text("ui-tactics-drawing")),
                     attr:data-testid = "tactics-drawing"
                 )
             }),
@@ -330,7 +330,7 @@ fn menu_items(model: BoardModel) -> Vec<AnyView> {
     let separator = || AnyView::new(view! { MenuSeparator() });
 
     let mut items = vec![item(
-        t!("ui.tactics.reset_view").into_owned(),
+        t!("ui-tactics-reset_view").into_owned(),
         "tactics-menu-reset-view",
         Box::new(move || model.update(|board| board.reset_view())),
     )];
@@ -351,27 +351,27 @@ fn menu_items(model: BoardModel) -> Vec<AnyView> {
         items.push(separator());
         if let Some((side, radius, frozen)) = snapshot.selected {
             items.push(item(
-                format!("{}: {}", t!("ui.tactics.cap_team"), t!(side.label_key())),
+                format!("{}: {}", t!("ui-tactics-cap_team"), t!(side.label_key())),
                 "tactics-menu-cap-team",
                 Box::new(move || model.update(|board| board.cycle_selected_team())),
             ));
             if radius > MIN_CAP_RADIUS {
                 items.push(item(
-                    t!("ui.tactics.cap_narrow_tooltip").into_owned(),
+                    t!("ui-tactics-cap_narrow_tooltip").into_owned(),
                     "tactics-menu-cap-narrow",
                     Box::new(move || model.update(|board| board.step_selected_radius(-RADIUS_STEP_KM))),
                 ));
             }
             if radius < MAX_CAP_RADIUS {
                 items.push(item(
-                    t!("ui.tactics.cap_widen_tooltip").into_owned(),
+                    t!("ui-tactics-cap_widen_tooltip").into_owned(),
                     "tactics-menu-cap-widen",
                     Box::new(move || model.update(|board| board.step_selected_radius(RADIUS_STEP_KM))),
                 ));
             }
             if !frozen {
                 items.push(item(
-                    t!("ui.tactics.delete_cap").into_owned(),
+                    t!("ui-tactics-delete_cap").into_owned(),
                     "tactics-menu-cap-delete",
                     Box::new(move || model.update(|board| board.remove_selected())),
                 ));
@@ -379,7 +379,7 @@ fn menu_items(model: BoardModel) -> Vec<AnyView> {
         }
         if snapshot.has_map {
             items.push(item(
-                t!("ui.tactics.add_cap").into_owned(),
+                t!("ui-tactics-add_cap").into_owned(),
                 "tactics-menu-add-cap",
                 Box::new(move || model.update(|board| board.set_adding(true))),
             ));
@@ -391,21 +391,21 @@ fn menu_items(model: BoardModel) -> Vec<AnyView> {
     }
     if snapshot.can_undo {
         items.push(item(
-            t!("ui.renderer.annotations.undo").into_owned(),
+            t!("ui-renderer-annotations-undo").into_owned(),
             "tactics-menu-undo",
             Box::new(move || model.update(|board| board.undo())),
         ));
     }
     if snapshot.can_redo {
         items.push(item(
-            t!("ui.renderer.annotations.redo").into_owned(),
+            t!("ui-renderer-annotations-redo").into_owned(),
             "tactics-menu-redo",
             Box::new(move || model.update(|board| board.redo())),
         ));
     }
     if snapshot.has_drawing {
         items.push(item(
-            t!("ui.tactics.clear_drawing").into_owned(),
+            t!("ui-tactics-clear_drawing").into_owned(),
             "tactics-menu-clear-drawing",
             Box::new(move || model.update(|board| board.clear_annotations())),
         ));

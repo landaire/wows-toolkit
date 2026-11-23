@@ -149,23 +149,28 @@ impl CommandPalette {
             .push(egui_palette::Entry::new("Games I died in", PaletteAction::OpenSearchWith(seed::games_i_died_in())));
         entries.push(egui_palette::Entry::new("Games I won", PaletteAction::OpenSearchWith(seed::games_i_won())));
 
-        entries.push(egui_palette::Entry::new(rust_i18n::t!("ui.replay.open_manually"), PaletteAction::OpenReplayFile));
         entries.push(egui_palette::Entry::new(
-            rust_i18n::t!("ui.replay.open_directory"),
+            wt_translations::t!("ui-replay-open_manually"),
+            PaletteAction::OpenReplayFile,
+        ));
+        entries.push(egui_palette::Entry::new(
+            wt_translations::t!("ui-replay-open_directory"),
             PaletteAction::OpenReplayDirectory,
         ));
         entries.push(egui_palette::Entry::new(
-            rust_i18n::t!("ui.replay.import_constants"),
+            wt_translations::t!("ui-replay-import_constants"),
             PaletteAction::ImportConstantsFile,
         ));
         entries.push(egui_palette::Entry::new(
-            rust_i18n::t!("ui.replay.refresh_persisted_data"),
+            wt_translations::t!("ui-replay-refresh_persisted_data"),
             PaletteAction::RefreshPersistedReplayData,
         ));
-        entries
-            .push(egui_palette::Entry::new(rust_i18n::t!("ui.replay.copy_latest_log"), PaletteAction::CopyLatestLog));
         entries.push(egui_palette::Entry::new(
-            rust_i18n::t!("ui.replay.copy_bug_report_info"),
+            wt_translations::t!("ui-replay-copy_latest_log"),
+            PaletteAction::CopyLatestLog,
+        ));
+        entries.push(egui_palette::Entry::new(
+            wt_translations::t!("ui-replay-copy_bug_report_info"),
             PaletteAction::CopyBugReportInfo,
         ));
         entries.push(egui_palette::Entry::new("Advanced search...", PaletteAction::OpenSearchTab));

@@ -97,9 +97,9 @@ impl CodeIntegrityPreference {
     /// Translation key for this choice's label.
     pub const fn key(self) -> &'static str {
         match self {
-            Self::Automatic => "ui.settings.app.code_integrity_automatic",
-            Self::Always => "ui.settings.app.code_integrity_always",
-            Self::Never => "ui.settings.app.code_integrity_never",
+            Self::Automatic => "ui-settings-app-code_integrity_automatic",
+            Self::Always => "ui-settings-app-code_integrity_always",
+            Self::Never => "ui-settings-app-code_integrity_never",
         }
     }
 }

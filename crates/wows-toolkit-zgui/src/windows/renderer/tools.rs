@@ -9,7 +9,6 @@ use landaire_ui::Rgb;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::drawing_style::INKS;
 use wows_toolkit_replay_data::drawing_style::Ink;
@@ -29,6 +28,7 @@ use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wt_collab_client::geometry::ENEMY_COLOR;
 use wt_collab_client::geometry::FRIENDLY_COLOR;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -92,7 +92,7 @@ pub fn ToolsPopover(session: RendererSession) -> impl IntoView {
     let query = RwSignal::new_local(String::new());
     let escape = EscapeClears::new(query);
     let named = move || {
-        let key = if locked.get() { "ui.renderer.annotations.locked" } else { "ui.renderer.annotations.title" };
+        let key = if locked.get() { "ui-renderer-annotations-locked" } else { "ui-renderer-annotations-title" };
         t!(key).into_owned()
     };
     let glyph = move || {
@@ -182,7 +182,7 @@ fn ToolsPanel(
                     }
                 ) {
                     AppIcon(glyph = Glyph::RotateCcw)
-                    text {{t!("ui.renderer.annotations.undo").into_owned()}}
+                    text {{t!("ui-renderer-annotations-undo").into_owned()}}
                 }
                 Button(
                     variant = ButtonVariant::Ghost,
@@ -195,7 +195,7 @@ fn ToolsPanel(
                     }
                 ) {
                     AppIcon(glyph = Glyph::Trash)
-                    text {{t!("ui.renderer.annotations.clear_all").into_owned()}}
+                    text {{t!("ui-renderer-annotations-clear_all").into_owned()}}
                 }
             }
             Separator()
@@ -223,7 +223,7 @@ fn ToolToggle(session: RendererSession, button: &'static ToolButton) -> impl Int
     let fillable = is_fillable(&make());
     let tip = move || {
         if fillable && on.get() {
-            format!("{named} - {}", t!("ui.renderer.annotations.toggle_fill"))
+            format!("{named} - {}", t!("ui-renderer-annotations-toggle_fill"))
         } else {
             named.clone()
         }
@@ -292,9 +292,9 @@ fn NibRow(session: RendererSession) -> impl IntoView {
 
     view! {
         row(class = "wt-renderer-tools__row") {
-            text(class = "wt-renderer-tools__dim") {{t!("ui.renderer.annotations.nib").into_owned()}}
+            text(class = "wt-renderer-tools__dim") {{t!("ui-renderer-annotations-nib").into_owned()}}
             NibStep(
-                label_key = "ui.renderer.annotations.thinner",
+                label_key = "ui-renderer-annotations-thinner",
                 test_id = "replay-renderer-nib-thinner",
                 glyph = "-",
                 disabled = Signal::derive_local(move || nib() <= MIN_NIB),
@@ -302,7 +302,7 @@ fn NibRow(session: RendererSession) -> impl IntoView {
             )
             text(class = "wt-renderer-tools__nib", attr:data-testid = "replay-renderer-nib", a11y:label = shown) {{shown}}
             NibStep(
-                label_key = "ui.renderer.annotations.thicker",
+                label_key = "ui-renderer-annotations-thicker",
                 test_id = "replay-renderer-nib-thicker",
                 glyph = "+",
                 disabled = Signal::derive_local(move || nib() >= MAX_NIB),
@@ -378,7 +378,7 @@ fn CustomInk(session: RendererSession) -> impl IntoView {
                 let ink = [chosen.red(), chosen.green(), chosen.blue(), u8::MAX];
                 session.annotate(|annotator, _| annotator.set_ink(ink));
             }),
-            label = t!("ui.renderer.annotations.custom_ink").into_owned(),
+            label = t!("ui-renderer-annotations-custom_ink").into_owned(),
             attr:data-testid = "replay-renderer-ink-custom"
         )
     }
@@ -438,7 +438,7 @@ fn ShipChooser(
             })
             .collect::<Vec<_>>()
     };
-    let named = named.unwrap_or_else(|| t!("ui.renderer.annotations.no_ship").into_owned());
+    let named = named.unwrap_or_else(|| t!("ui-renderer-annotations-no_ship").into_owned());
 
     view! {
         column(class = "wt-renderer-tools__chooser", attr:data-testid = "replay-renderer-ship-chooser") {
@@ -446,8 +446,8 @@ fn ShipChooser(
             text(class = "wt-renderer-tools__dim", attr:data-testid = "replay-renderer-ship-named") {{named}}
             Input(
                 value = query,
-                placeholder = t!("ui.renderer.annotations.ship_hint").into_owned(),
-                label = t!("ui.renderer.annotations.ship_hint").into_owned(),
+                placeholder = t!("ui-renderer-annotations-ship_hint").into_owned(),
+                label = t!("ui-renderer-annotations-ship_hint").into_owned(),
                 node_ref = escape.node_ref(),
                 attr:data-testid = "replay-renderer-ship-search",
                 on:key_down = move |ev| {

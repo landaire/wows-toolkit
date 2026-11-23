@@ -58,18 +58,18 @@ pub fn TabBody(tab: TabKey) -> impl IntoView {
 /// The words of a dock's group menus in the reader's language.
 fn dock_menu_strings(locale: Locale) -> DockMenuStrings {
     DockMenuStrings {
-        menu: Signal::derive_local(locale.text("ui.buttons.more_options")),
-        zoom_in: Signal::derive_local(locale.text("ui.tabs.zoom_in_panel")),
-        zoom_out: Signal::derive_local(locale.text("ui.tabs.zoom_out_panel")),
-        close: Signal::derive_local(locale.text("ui.tabs.close_panel")),
+        menu: Signal::derive_local(locale.text("ui-buttons-more_options")),
+        zoom_in: Signal::derive_local(locale.text("ui-tabs-zoom_in_panel")),
+        zoom_out: Signal::derive_local(locale.text("ui-tabs-zoom_out_panel")),
+        close: Signal::derive_local(locale.text("ui-tabs-close_panel")),
     }
 }
 
 /// The words of a tab's right-click menu in the reader's language.
 pub(crate) fn tab_menu_strings(locale: Locale) -> TabStripStrings {
     TabStripStrings {
-        close: Signal::derive_local(locale.text("ui.tabs.close_tab")),
-        close_others: Signal::derive_local(locale.text("ui.tabs.close_other_tabs")),
-        close_to_the_right: Signal::derive_local(locale.text("ui.tabs.close_tabs_to_the_right")),
+        close: Signal::derive_local(locale.text("ui-tabs-close_tab")),
+        close_others: Signal::derive_local(locale.text("ui-tabs-close_other_tabs")),
+        close_to_the_right: Signal::derive_local(locale.text("ui-tabs-close_tabs_to_the_right")),
     }
 }

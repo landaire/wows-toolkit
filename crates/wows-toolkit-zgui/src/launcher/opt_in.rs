@@ -1,6 +1,6 @@
 //! The notice the user accepts before the launcher turns on.
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::view;
 use zgui::view::AnyView;
 use zgui::view::install_stylesheet;
@@ -27,11 +27,11 @@ pub fn ask_to_enable(shell: Shell, model: LauncherModel) {
             HostedDialog(handle = handle) {
                 DialogContent(attr:data-testid = "launcher-opt-in") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.launcher.opt_in.title").into_owned()}}
+                        DialogTitle {{t!("ui-launcher-opt_in-title").into_owned()}}
                     }
                     column(class = "wt-launcher__column wt-launcher__column--wide wt-launcher__notice") {
-                        text(class = "wt-launcher__notice-account", attr:data-testid = "launcher-opt-in-account") {{t!("ui.launcher.opt_in.notice_account").into_owned()}}
-                        text(attr:data-testid = "launcher-opt-in-reports") {{t!("ui.launcher.opt_in.notice_reports").into_owned()}}
+                        text(class = "wt-launcher__notice-account", attr:data-testid = "launcher-opt-in-account") {{t!("ui-launcher-opt_in-notice_account").into_owned()}}
+                        text(attr:data-testid = "launcher-opt-in-reports") {{t!("ui-launcher-opt_in-notice_reports").into_owned()}}
                     }
                     DialogFooter {
                         Button(
@@ -40,7 +40,7 @@ pub fn ask_to_enable(shell: Shell, model: LauncherModel) {
                             attr:data-testid = "launcher-opt-in-cancel",
                             on:click = move |_| handle.close()
                         ) {
-                            {t!("ui.launcher.opt_in.cancel").into_owned()}
+                            {t!("ui-launcher-opt_in-cancel").into_owned()}
                         }
                         Button(
                             size = ButtonSize::Sm,
@@ -50,7 +50,7 @@ pub fn ask_to_enable(shell: Shell, model: LauncherModel) {
                                 handle.close();
                             }
                         ) {
-                            {t!("ui.launcher.opt_in.continue").into_owned()}
+                            {t!("ui-launcher-opt_in-continue").into_owned()}
                         }
                     }
                 }

@@ -1,7 +1,6 @@
 //! The Search tab's results: the columns, what each cell reads, and the index lookups behind the
 //! query bar's value completions.
 
-use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
@@ -9,6 +8,7 @@ use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wt_translations::t;
 
 use crate::formatting::separate_number;
 use crate::name_lookup::PlayerLookup;
@@ -52,15 +52,15 @@ impl ResultColumn {
     /// reads.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Sortable(SortColumn::Date) => "ui.search.column.date",
-            Self::Sortable(SortColumn::Map) => "ui.search.column.map",
-            Self::Sortable(SortColumn::Mode) => "ui.search.column.mode",
-            Self::Ship => "ui.search.column.ship",
-            Self::Sortable(SortColumn::Outcome) => "ui.search.column.result",
-            Self::Sortable(SortColumn::Damage) => "ui.search.column.damage",
-            Self::Sortable(SortColumn::Kills) => "ui.search.column.kills",
-            Self::Sortable(SortColumn::Pr) => "ui.search.column.pr",
-            Self::Sortable(SortColumn::Mc) => "ui.search.column.mc",
+            Self::Sortable(SortColumn::Date) => "ui-search-column-date",
+            Self::Sortable(SortColumn::Map) => "ui-search-column-map",
+            Self::Sortable(SortColumn::Mode) => "ui-search-column-mode",
+            Self::Ship => "ui-search-column-ship",
+            Self::Sortable(SortColumn::Outcome) => "ui-search-column-result",
+            Self::Sortable(SortColumn::Damage) => "ui-search-column-damage",
+            Self::Sortable(SortColumn::Kills) => "ui-search-column-kills",
+            Self::Sortable(SortColumn::Pr) => "ui-search-column-pr",
+            Self::Sortable(SortColumn::Mc) => "ui-search-column-mc",
         }
     }
 
@@ -82,9 +82,9 @@ impl ResultColumn {
 
 pub fn outcome_label(outcome: MatchOutcome) -> String {
     match outcome {
-        MatchOutcome::Win => t!("ui.search.outcome_win").into_owned(),
-        MatchOutcome::Loss => t!("ui.search.outcome_loss").into_owned(),
-        MatchOutcome::Draw => t!("ui.search.outcome_draw").into_owned(),
+        MatchOutcome::Win => t!("ui-search-outcome_win").into_owned(),
+        MatchOutcome::Loss => t!("ui-search-outcome_loss").into_owned(),
+        MatchOutcome::Draw => t!("ui-search-outcome_draw").into_owned(),
         MatchOutcome::Unknown => "-".to_string(),
     }
 }
@@ -110,7 +110,7 @@ pub fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
 /// The hover a hit's cell carries, where the cell needs explaining.
 pub fn cell_hover(hit: &MatchHit, column: SortColumn) -> Option<String> {
     match column {
-        SortColumn::Pr if !hit.rating_scope().is_rated() => Some(t!("ui.personal_rating.unrated_hover").into_owned()),
+        SortColumn::Pr if !hit.rating_scope().is_rated() => Some(t!("ui-personal_rating-unrated_hover").into_owned()),
         SortColumn::Mc if !hit.rating_scope().is_rated() => {
             Some(MatchContributionWithheld::UnratedBattle.explanation())
         }
@@ -251,9 +251,9 @@ pub async fn look_up_pill_names(pool: &sqlx::SqlitePool, ids: &PillIds) -> PillN
 
 #[cfg(test)]
 mod tests {
-    use rust_i18n::t;
     use wows_toolkit_config::index::rows::MatchHit;
     use wows_toolkit_config::index::rows::MatchOutcome;
+    use wt_translations::t;
 
     use super::ResultColumn;
     use super::cell_hover;
@@ -273,8 +273,11 @@ mod tests {
     /// Each header reads its egui translation, in the reader's language.
     #[test]
     fn headers_read_the_translated_column_names() {
-        let labels: Vec<String> =
-            ResultColumn::all().into_iter().map(|column| t!(column.label_key(), locale = "de").into_owned()).collect();
+        let german = wt_translations::Language::from_code("de").expect("de is supported");
+        let labels: Vec<String> = ResultColumn::all()
+            .into_iter()
+            .map(|column| t!(column.label_key(), locale = german).into_owned())
+            .collect();
         insta::assert_debug_snapshot!(labels);
     }
 
@@ -312,7 +315,7 @@ mod tests {
         for column in [SortColumn::Pr, SortColumn::Mc] {
             assert_eq!(cell_text(&unrated, column), "-", "{column:?}");
         }
-        assert_eq!(cell_hover(&unrated, SortColumn::Pr), Some(t!("ui.personal_rating.unrated_hover").into_owned()));
+        assert_eq!(cell_hover(&unrated, SortColumn::Pr), Some(t!("ui-personal_rating-unrated_hover").into_owned()));
         assert_eq!(cell_hover(&unrated, SortColumn::Mc), Some(MatchContributionWithheld::UnratedBattle.explanation()));
 
         let rated = hit("RandomBattle", "pvp");

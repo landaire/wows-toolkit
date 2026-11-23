@@ -662,7 +662,7 @@ pub fn exported_file_stem(
         .find(|vehicle| vehicle.relation == 0)
         .and_then(|vehicle| metadata.param_localization_id(vehicle.shipId.raw().into()))
         .and_then(|id| metadata.localized_name_from_id(&wowsunpack::data::TranslationKey::new(id)))
-        .unwrap_or_else(|| rust_i18n::t!("ui.replay.spectator").into_owned());
+        .unwrap_or_else(|| wt_translations::t!("ui-replay-spectator").into_owned());
 
     let parts = [
         ship,

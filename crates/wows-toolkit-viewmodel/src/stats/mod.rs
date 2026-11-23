@@ -74,9 +74,9 @@ impl DivisionFilter {
     /// The catalogue key this choice's name lives under.
     pub const fn translation_key(self) -> &'static str {
         match self {
-            Self::All => "ui.stats.div_all",
-            Self::SoloOnly => "ui.stats.div_solo",
-            Self::DivOnly => "ui.stats.div_div",
+            Self::All => "ui-stats-div_all",
+            Self::SoloOnly => "ui-stats-div_solo",
+            Self::DivOnly => "ui-stats-div_div",
         }
     }
 

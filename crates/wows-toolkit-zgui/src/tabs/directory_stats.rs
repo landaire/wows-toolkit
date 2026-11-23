@@ -17,7 +17,6 @@ use futures::channel::mpsc::UnboundedReceiver;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::directory_stats::DirectoryStatsUpdate;
 use wows_toolkit_replay_data::directory_stats::ReadState;
@@ -29,6 +28,7 @@ use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetGames;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetProgress;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetSkips;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -162,12 +162,12 @@ impl DirectoryRead {
     /// The translated status line, `None` once the read has finished.
     fn status(self) -> Option<String> {
         match self.state {
-            ReadState::Walking => Some(t!("ui.stats.directory_walking").into_owned()),
+            ReadState::Walking => Some(t!("ui-stats-directory_walking").into_owned()),
             ReadState::Scanning(progress) => {
-                Some(t!("ui.stats.directory_scanning", done = progress.done, total = progress.total).into_owned())
+                Some(t!("ui-stats-directory_scanning", done = progress.done, total = progress.total).into_owned())
             }
             ReadState::Reading(progress) => {
-                Some(t!("ui.stats.directory_reading", done = progress.done, total = progress.total).into_owned())
+                Some(t!("ui-stats-directory_reading", done = progress.done, total = progress.total).into_owned())
             }
             ReadState::Finished => None,
         }
@@ -278,7 +278,7 @@ fn start_read(
     let timers = Timers::current();
 
     spawn_local(async move {
-        let job = services.jobs.start(Job { name: t!("ui.stats.directory_reading_task").into_owned(), progress: None });
+        let job = services.jobs.start(Job { name: t!("ui-stats-directory_reading_task").into_owned(), progress: None });
         let mut set = ReplaySetGames::new();
         fold_updates(rx, timers, |updates| {
             let mut shown = read.get_untracked();
@@ -292,7 +292,7 @@ fn start_read(
             }
             if let Some(progress) = shown.progress() {
                 job.report(Job {
-                    name: t!("ui.stats.directory_reading_task").into_owned(),
+                    name: t!("ui-stats-directory_reading_task").into_owned(),
                     progress: Progress::new(progress.done as u64, progress.total as u64),
                 });
             }
@@ -373,7 +373,7 @@ fn DirectoryHeader(
                 box(class = "wt-directory-stats__rule")
                 Show(when = move || status().is_some()) {
                     row(class = "wt-directory-stats__status", attr:data-testid = "directory-stats-status") {
-                        Spinner(label = t!("ui.stats.directory_reading_task").into_owned())
+                        Spinner(label = t!("ui-stats-directory_reading_task").into_owned())
                         text {{move || status().unwrap_or_default()}}
                     }
                 }
@@ -389,13 +389,13 @@ fn DirectoryHeader(
                                 AppIcon(glyph = Glyph::RotateCw)
                                 text {{move || {
                                     locale.track();
-                                    t!("ui.stats.directory_reload").into_owned()
+                                    t!("ui-stats-directory_reload").into_owned()
                                 }}}
                             }
                         }
                         TooltipContent {{move || {
                             locale.track();
-                            t!("ui.stats.directory_reload_tooltip").into_owned()
+                            t!("ui-stats-directory_reload_tooltip").into_owned()
                         }}}
                     }
                 }
@@ -406,7 +406,7 @@ fn DirectoryHeader(
                             text(class = "wt-directory-stats__skipped", attr:data-testid = "directory-stats-skipped") {
                                 {move || {
                                     locale.track();
-                                    t!("ui.stats.directory_skipped", count = read.get().skips.total()).into_owned()
+                                    t!("ui-stats-directory_skipped", count = read.get().skips.total()).into_owned()
                                 }}
                             }
                         }
@@ -414,7 +414,7 @@ fn DirectoryHeader(
                             locale.track();
                             let skips = read.get().skips;
                             t!(
-                                "ui.stats.directory_skipped_detail",
+                                "ui-stats-directory_skipped_detail",
                                 unreadable = skips.unreadable,
                                 missing_build = skips.missing_build,
                                 no_results = skips.no_results
@@ -427,7 +427,7 @@ fn DirectoryHeader(
             Show(when = move || read.get().progress().is_some()) {
                 Progress(
                     attr:data-testid = "directory-stats-progress",
-                    label = t!("ui.stats.directory_reading_task").into_owned(),
+                    label = t!("ui-stats-directory_reading_task").into_owned(),
                     value = Signal::derive_local(move || {
                         read.get().progress().map(|progress| f64::from(progress.fraction()) * 100.0)
                     })

@@ -5,10 +5,10 @@ use std::collections::BTreeSet;
 
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
-use rust_i18n::t;
 use wows_toolkit_viewmodel::bug_report::ConstantsFetchStatus;
 use wows_toolkit_viewmodel::bug_report::record_constants_fetch;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::UpdateValue;
@@ -120,7 +120,7 @@ impl ResultMappings {
                     shell.toasts().withdraw(&ToastKey::new(CONSTANTS_UNFIT));
                 }
                 if fetched > 0 {
-                    shell.toasts().info(t!("ui.replay.constants_written", count = fetched).into_owned());
+                    shell.toasts().info(t!("ui-replay-constants_written", count = fetched).into_owned());
                 }
                 // What is open was read through the mapping that was there before.
                 workspace.reparse_all(ReparseCause::GameDataArrived);
@@ -137,7 +137,7 @@ impl ResultMappings {
             return;
         }
         workspace.shell.toasts().show(
-            Notice::warn(t!("ui.messages.constants_version_mismatch").into_owned())
+            Notice::warn(t!("ui-messages-constants_version_mismatch").into_owned())
                 .keyed(ToastKey::new(CONSTANTS_UNFIT))
                 .sticky(),
         );

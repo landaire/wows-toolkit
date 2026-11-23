@@ -7,7 +7,6 @@ use std::sync::LazyLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use rust_i18n::t;
 use wows_minimap_renderer::EncoderKind;
 use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::PlaybackRate;
@@ -25,6 +24,7 @@ use wows_minimap_renderer::timing::ExportTiming;
 use wows_minimap_renderer::timing::ExportWindow;
 use wows_minimap_renderer::video::CodecChoice;
 use wows_replays::types::GameClock;
+use wt_translations::t;
 
 use crate::load::GameDataCache;
 use crate::minimap_preview::SharedPreviewRenderer;
@@ -78,8 +78,8 @@ impl ExportStage {
     /// the egui renderer words it.
     pub const fn label_key(self) -> &'static str {
         match self {
-            Self::Encoding => "ui.renderer.encoding",
-            Self::Muxing => "ui.renderer.muxing",
+            Self::Encoding => "ui-renderer-encoding",
+            Self::Muxing => "ui-renderer-muxing",
         }
     }
 }
@@ -96,7 +96,7 @@ pub enum ExportTarget {
 /// Why an export stopped before it finished.
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
-    #[error("{}", t!("ui.replay.renderer.export_path_unusable"))]
+    #[error("{}", t!("ui-replay-renderer-export_path_unusable"))]
     UnusablePath { path: PathBuf },
     #[error("the encoder could not start: {0}")]
     Start(rootcause::Report<VideoError>),

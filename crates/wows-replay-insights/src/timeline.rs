@@ -846,14 +846,14 @@ pub fn kind_index(kind: &TimelineEventKind) -> usize {
 /// The translation key naming the kind at `index`.
 pub fn kind_label_key(index: usize) -> &'static str {
     match index {
-        0 => "ui.replay.timeline_kind_health_lost",
-        1 => "ui.replay.timeline_kind_death",
-        2 => "ui.replay.timeline_kind_cap_contested",
-        3 => "ui.replay.timeline_kind_cap_flipped",
-        4 => "ui.replay.timeline_kind_cap_being_captured",
-        5 => "ui.replay.timeline_kind_radar",
-        6 => "ui.replay.timeline_kind_advantage",
-        _ => "ui.replay.timeline_kind_disconnected",
+        0 => "ui-replay-timeline_kind_health_lost",
+        1 => "ui-replay-timeline_kind_death",
+        2 => "ui-replay-timeline_kind_cap_contested",
+        3 => "ui-replay-timeline_kind_cap_flipped",
+        4 => "ui-replay-timeline_kind_cap_being_captured",
+        5 => "ui-replay-timeline_kind_radar",
+        6 => "ui-replay-timeline_kind_advantage",
+        _ => "ui-replay-timeline_kind_disconnected",
     }
 }
 

@@ -78,7 +78,6 @@ TOOLKIT_COMMON_DEPS = [
     "//third-party/rust:ron",
     "//third-party/rust:rootcause",
     "//third-party/rust:roxmltree",
-    "//third-party/rust:rust-i18n",
     "//third-party/rust:rustls",
     "//third-party/rust:semver",
     "//third-party/rust:serde",

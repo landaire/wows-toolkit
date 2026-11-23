@@ -29,7 +29,6 @@ REPLAY_DATA_COMMON_DEPS = [
     "//third-party/rust:notify",
     "//third-party/rust:rkyv",
     "//third-party/rust:rootcause",
-    "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
     "//third-party/rust:sqlx",

@@ -17,7 +17,6 @@ use landaire_ui::LoadingProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::SavedRenderOptions;
 use wows_minimap_renderer::assets;
@@ -63,6 +62,7 @@ use wt_collab_client::geometry::measurement_commands;
 use wt_collab_client::geometry::placed_ship_range_commands;
 use wt_collab_client::protocol::CursorAt;
 use wt_collab_client::protocol::CursorScope;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -769,7 +769,7 @@ pub(super) fn WatchedView(watch: WatchSession) -> impl IntoView {
                 Show(when = move || !watch.drawn.get()) {
                     // The host may never send a frame, so the wait has no end.
                     Loading(
-                        label = t!("ui.collab.waiting_for_frames").into_owned(),
+                        label = t!("ui-collab-waiting_for_frames").into_owned(),
                         pace = LoadingPace::Unbounded,
                         attr:data-testid = "watched-playback-waiting"
                     )
@@ -804,7 +804,7 @@ fn HostClockStrip(watch: WatchSession) -> impl IntoView {
     view! {
         Show(when = move || clock().is_some()) {
             row(class = "wt-watched__clock", attr:data-testid = "watched-playback-clock") {
-                text {{t!("ui.collab.watching").into_owned()}}
+                text {{t!("ui-collab-watching").into_owned()}}
                 text(attr:data-testid = "watched-playback-clock-time") {{label}}
                 Show(when = move || through().is_some()) {
                     box(class = "wt-watched__bar") {
@@ -826,7 +826,7 @@ fn HostClockStrip(watch: WatchSession) -> impl IntoView {
 #[component]
 fn WatchedLayers(watch: WatchSession) -> impl IntoView {
     install_stylesheet(options::SHEET, options::CSS);
-    let label = t!("ui.renderer.settings.title").into_owned();
+    let label = t!("ui-renderer-settings-title").into_owned();
     let named = label.clone();
     let set = UnsyncCallback::new(move |(toggle, on): (&'static Toggle, bool)| watch.toggle_layer(toggle, on));
 

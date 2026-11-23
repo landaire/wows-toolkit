@@ -8,7 +8,6 @@ use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replay_insights::timeline::EventTone;
 use wows_replay_insights::timeline::KIND_COUNT;
 use wows_replay_insights::timeline::kind_label_key;
@@ -16,6 +15,7 @@ use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_render::playback::mmss;
 use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
 use wows_toolkit_replay_data::replay_render::timeline::TimelineRow;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::prelude::ClipboardKind;
@@ -110,7 +110,7 @@ pub(crate) struct PickedEvent {
 #[component]
 pub fn TimelinePopover(session: RendererSession) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
-    let label = t!("ui.renderer.settings.event_timeline").into_owned();
+    let label = t!("ui-renderer-settings-event_timeline").into_owned();
     let named = label.clone();
     let title = label.clone();
     let cx = TimelineCx {
@@ -167,7 +167,7 @@ pub(crate) fn TimelineCopyButton(cx: TimelineCx) -> impl IntoView {
             let Some(clipboard) = clipboard else { return };
             clipboard.set_text(ClipboardKind::Standard, text);
             if let Some(toasts) = toasts {
-                toasts.ok(t!("ui.replay.timeline_copied").into_owned());
+                toasts.ok(t!("ui-replay-timeline_copied").into_owned());
             }
         });
     };
@@ -182,10 +182,10 @@ pub(crate) fn TimelineCopyButton(cx: TimelineCx) -> impl IntoView {
                     attr:data-testid = cx.test_id("copy"),
                     on:click = move |_| copy()
                 ) {
-                    {t!("ui.buttons.copy").into_owned()}
+                    {t!("ui-buttons-copy").into_owned()}
                 }
             }
-            TooltipContent {{t!("ui.replay.timeline_export_tooltip").into_owned()}}
+            TooltipContent {{t!("ui-replay-timeline_export_tooltip").into_owned()}}
         }
     }
 }
@@ -207,7 +207,7 @@ pub(crate) fn TimelineFilterBar(cx: TimelineCx, escape: EscapeClears) -> impl In
                     attr:data-testid = cx.test_id("all"),
                     on:click = move |_| set_every_kind(true)
                 ) {
-                    {t!("ui.replay.timeline_filter_all").into_owned()}
+                    {t!("ui-replay-timeline_filter_all").into_owned()}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -215,14 +215,14 @@ pub(crate) fn TimelineFilterBar(cx: TimelineCx, escape: EscapeClears) -> impl In
                     attr:data-testid = cx.test_id("none"),
                     on:click = move |_| set_every_kind(false)
                 ) {
-                    {t!("ui.replay.timeline_filter_none").into_owned()}
+                    {t!("ui-replay-timeline_filter_none").into_owned()}
                 }
                 box(class = "wt-renderer-timeline__search") {
                     Input(
                         value = Binding::controlled(search, move |text: String| {
                             events.update(|events| events.set_filter(|filter| filter.search = text));
                         }),
-                        placeholder = t!("ui.replay.timeline_search_hint").into_owned(),
+                        placeholder = t!("ui-replay-timeline_search_hint").into_owned(),
                         attr:data-testid = cx.test_id("search"),
                         node_ref = escape.node_ref(),
                         on:key_down = move |ev| {
@@ -279,13 +279,13 @@ pub(crate) fn TimelineRows(cx: TimelineCx) -> impl IntoView {
 
     move || match listing() {
         Listing::Reading => AnyView::new(view! {
-            LoadingLine(label = t!("ui.replay.timeline_parsing").into_owned(), class = "wt-renderer-timeline__said")
+            LoadingLine(label = t!("ui-replay-timeline_parsing").into_owned(), class = "wt-renderer-timeline__said")
         }),
         Listing::NothingHappened => AnyView::new(view! {
-            text(class = "wt-renderer-timeline__said") {{t!("ui.replay.timeline_no_events").into_owned()}}
+            text(class = "wt-renderer-timeline__said") {{t!("ui-replay-timeline_no_events").into_owned()}}
         }),
         Listing::NothingMatches => AnyView::new(view! {
-            text(class = "wt-renderer-timeline__said") {{t!("ui.replay.timeline_no_matches").into_owned()}}
+            text(class = "wt-renderer-timeline__said") {{t!("ui-replay-timeline_no_matches").into_owned()}}
         }),
         Listing::Rows => AnyView::new(view! {
             column(class = "wt-renderer-timeline__list", attr:data-testid = cx.test_id("list")) {

@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_replay_data::force_reindex::version_said;
@@ -18,6 +17,7 @@ use wows_toolkit_viewmodel::bug_report::record_constants_fetch;
 use wows_toolkit_viewmodel::first_run::adopt_found_install;
 use wows_toolkit_viewmodel::first_run::adopt_system_locale;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -199,10 +199,10 @@ pub(crate) fn check_wows_dir(shell: Shell, wows_dir: String) {
 pub fn warn_wows_dir_invalid(shell: Shell) {
     let open = shell.settings_drawer;
     shell.toasts().show(
-        landaire_ui::Notice::warn(t!("ui.messages.wows_dir_invalid").into_owned())
+        landaire_ui::Notice::warn(t!("ui-messages-wows_dir_invalid").into_owned())
             .keyed(landaire_ui::ToastKey::new(STUCK_WOWS_DIR))
             .sticky()
-            .action_keeping_open(t!("ui.settings.panel.open").into_owned(), move || {
+            .action_keeping_open(t!("ui-settings-panel-open").into_owned(), move || {
                 open.open_at(Setting::WowsDirectory);
             }),
     );
@@ -223,7 +223,7 @@ fn announce_game_data(services: Services, shell: Shell) {
             GameDataState::NoInstall | GameDataState::Loading { .. } => None,
         };
         if finished == Some(true) && previous != Some(Some(true)) {
-            shell.toasts().ok(t!("ui.messages.game_data_loaded").into_owned());
+            shell.toasts().ok(t!("ui-messages-game_data_loaded").into_owned());
         }
 
         finished
@@ -304,7 +304,7 @@ fn constants_checked(services: Services, shell: Shell, outcome: Checked) {
                 settings.constants_commit = Some(commit.clone());
                 Some(commit)
             });
-            shell.toasts().info(t!("ui.replay.constants_latest_written").into_owned());
+            shell.toasts().info(t!("ui-replay-constants_latest_written").into_owned());
             shell.request_replay(ReplayRequest::ReparseOpen);
         }
         Checked::UpToDate => record_constants_fetch(ConstantsFetchStatus::Succeeded),
@@ -312,7 +312,7 @@ fn constants_checked(services: Services, shell: Shell, outcome: Checked) {
             record_constants_fetch(ConstantsFetchStatus::Failed(reason.clone()));
             // A notice rather than a failure: the cached mappings still read.
             tracing::warn!(%reason, "constants: the published mappings could not be checked");
-            shell.toasts().warn(t!("ui.replay.constants_check_failed", reason = reason).into_owned());
+            shell.toasts().warn(t!("ui-replay-constants_check_failed", reason = reason).into_owned());
         }
     }
 }

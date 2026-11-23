@@ -426,7 +426,7 @@ fn a_pane_tab_closes_by_its_button_or_a_middle_click() {
     assert_ne!(workspace.active_id(), first);
     assert!(workspace.active_untracked().shown().is_none());
     assert!(first_viewport.read_untracked(|_| ()).is_none(), "the last pane's viewport is let go too");
-    armor.tab(&rust_i18n::t!("ui.armor.empty"));
+    armor.tab(&wt_translations::t!("ui-armor-empty"));
 }
 
 /// A ship opened in a new tab joins the active pane's group and becomes the active pane. Choosing
@@ -1124,7 +1124,7 @@ fn the_rail_filter_opens_the_section_holding_a_match_and_escape_restores_the_rai
         assert!(armor.shown("armor-vis-zone-row-Stern"));
         assert!(!armor.shown("armor-vis-zone-row-Bow"));
     });
-    let roll = rust_i18n::t!("ui.armor.roll").into_owned();
+    let roll = wt_translations::t!("ui-armor-roll").into_owned();
     find(&mut armor, &roll, &|armor| {
         assert!(armor.shown("armor-options-body-Display"), "the display section opens");
     });
@@ -1145,7 +1145,7 @@ fn a_search_counts_the_matches_on_each_tab_and_dims_the_rest() {
     armor.type_into("armor-options-filter", "ocean wave");
     let badge = |armor: &ArmorWindow, tab: OptionsTab| armor.shown(&format!("armor-options-tab-count-{}", tab.id()));
     let counted = |tab: &str, count: usize| {
-        rust_i18n::t!("ui.armor.option_tabs.tab_matches", tab = tab, count = count).into_owned()
+        wt_translations::t!("ui-armor-option_tabs-tab_matches", tab = tab, count = count).into_owned()
     };
     assert!(badge(&armor, OptionsTab::Ship), "the configuration section holds it");
     assert_eq!(armor.tab_state(OptionsTab::Ship).label, Some(counted("Ship", 1)), "the count is read with the tab");
@@ -1214,7 +1214,7 @@ fn a_search_for_hull_finds_the_configuration_section() {
     armor.install(scene, &[]);
     armor.show_tab(OptionsTab::Layers);
 
-    let hull = rust_i18n::t!("ui.armor.hull_toggle").into_owned();
+    let hull = wt_translations::t!("ui-armor-hull_toggle").into_owned();
     armor.type_into("armor-options-filter", &hull);
     armor.show_tab(OptionsTab::Ship);
 

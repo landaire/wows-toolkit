@@ -248,9 +248,9 @@ impl CapSide {
     /// The translation key the board labels it with.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Neutral => "ui.tactics.team_neutral",
-            Self::Friendly => "ui.tactics.team_one",
-            Self::Enemy => "ui.tactics.team_two",
+            Self::Neutral => "ui-tactics-team_neutral",
+            Self::Friendly => "ui-tactics-team_one",
+            Self::Enemy => "ui-tactics-team_two",
         }
     }
 }
@@ -532,14 +532,14 @@ impl BoardTool {
 
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Freehand => "ui.renderer.annotations.tool_freehand",
-            Self::Line => "ui.renderer.annotations.tool_line",
-            Self::Arrow => "ui.renderer.annotations.tool_arrow",
-            Self::Circle => "ui.renderer.annotations.tool_circle",
-            Self::Rectangle => "ui.renderer.annotations.tool_rectangle",
-            Self::Triangle => "ui.renderer.annotations.tool_triangle",
-            Self::Measurement => "ui.renderer.annotations.tool_measurement",
-            Self::Eraser => "ui.renderer.annotations.tool_eraser",
+            Self::Freehand => "ui-renderer-annotations-tool_freehand",
+            Self::Line => "ui-renderer-annotations-tool_line",
+            Self::Arrow => "ui-renderer-annotations-tool_arrow",
+            Self::Circle => "ui-renderer-annotations-tool_circle",
+            Self::Rectangle => "ui-renderer-annotations-tool_rectangle",
+            Self::Triangle => "ui-renderer-annotations-tool_triangle",
+            Self::Measurement => "ui-renderer-annotations-tool_measurement",
+            Self::Eraser => "ui-renderer-annotations-tool_eraser",
         }
     }
 
@@ -573,12 +573,12 @@ pub fn shortcut_modifier_name() -> &'static str {
 /// Chosen once and carried by every ship placed afterwards: a reader comparing two ships'
 /// detection ranges wants the same circles on both.
 pub const RANGE_CIRCLES: [(RangeCircle, &str); 6] = [
-    (RangeCircle::Detection, "ui.renderer.context.detection"),
-    (RangeCircle::MainBattery, "ui.renderer.context.main_battery"),
-    (RangeCircle::SecondaryBattery, "ui.renderer.context.secondary"),
-    (RangeCircle::Torpedo, "ui.renderer.context.torpedo"),
-    (RangeCircle::Radar, "ui.renderer.context.radar"),
-    (RangeCircle::Hydro, "ui.renderer.context.hydro"),
+    (RangeCircle::Detection, "ui-renderer-context-detection"),
+    (RangeCircle::MainBattery, "ui-renderer-context-main_battery"),
+    (RangeCircle::SecondaryBattery, "ui-renderer-context-secondary"),
+    (RangeCircle::Torpedo, "ui-renderer-context-torpedo"),
+    (RangeCircle::Radar, "ui-renderer-context-radar"),
+    (RangeCircle::Hydro, "ui-renderer-context-hydro"),
 ];
 
 /// One of the circles a placed ship can show.
@@ -620,9 +620,9 @@ impl RangeCircle {
 
 /// The build choices a placed ship can be given, with their translation keys.
 pub const SHIP_MODIFIERS: [(ShipModifier, &str); 3] = [
-    (ShipModifier::ConcealmentExpert, "ui.tactics.concealment_expert"),
-    (ShipModifier::GunRange, "ui.tactics.gun_range_mod"),
-    (ShipModifier::SecondaryRange, "ui.tactics.secondary_range_mod"),
+    (ShipModifier::ConcealmentExpert, "ui-tactics-concealment_expert"),
+    (ShipModifier::GunRange, "ui-tactics-gun_range_mod"),
+    (ShipModifier::SecondaryRange, "ui-tactics-secondary_range_mod"),
 ];
 
 /// A captain skill or upgrade that moves one of a placed ship's circles.

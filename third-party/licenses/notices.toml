@@ -356,18 +356,6 @@ license = "MIT"
 files = ["third-party/licenses/texts/rust-number-prefix.txt"]
 
 [[crate_license]]
-name = "rust-i18n-macro"
-version = "3.1.5"
-license = "MIT"
-files = ["third-party/licenses/texts/rust-i18n.txt"]
-
-[[crate_license]]
-name = "rust-i18n-support"
-version = "3.1.5"
-license = "MIT"
-files = ["third-party/licenses/texts/rust-i18n.txt"]
-
-[[crate_license]]
 name = "taffy"
 version = "0.15.0"
 license = "MIT"

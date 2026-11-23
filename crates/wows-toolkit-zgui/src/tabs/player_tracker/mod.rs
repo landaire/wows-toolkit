@@ -27,9 +27,9 @@ use landaire_ui::SavedNode;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::RenderEffect;
@@ -241,9 +241,9 @@ impl Section {
 
     const fn label_key(self) -> &'static str {
         match self {
-            Self::Players => "ui.player_tracker.subtab_players",
-            Self::CurrentMatch => "ui.player_tracker.subtab_current_match",
-            Self::Clans => "ui.player_tracker.subtab_clans",
+            Self::Players => "ui-player_tracker-subtab_players",
+            Self::CurrentMatch => "ui-player_tracker-subtab_current_match",
+            Self::Clans => "ui-player_tracker-subtab_clans",
         }
     }
 
@@ -353,8 +353,8 @@ pub fn PlayerTrackerTab() -> impl IntoView {
                 class = "wt-tracker-dock",
                 menu = dock_menu_strings(locale),
                 strings = tab_menu_strings(locale),
-                close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
-                tabs_label = Signal::derive_local(locale.text("ui.tabs.player_tracker"))
+                close_label = Signal::derive_local(locale.text("ui-tabs-close_panel")),
+                tabs_label = Signal::derive_local(locale.text("ui-tabs-player_tracker"))
             )
         }
     }
@@ -493,7 +493,7 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
             Select(value = Binding::controlled(period, choose)) {
                 SelectTrigger(
                     size = SelectTriggerSize::Sm,
-                    label = t!("ui.player_tracker.time_period").into_owned(),
+                    label = t!("ui-player_tracker-time_period").into_owned(),
                     class = "wt-tracker-toolbar__period",
                     attr:data-testid = "tracker-period"
                 ) {
@@ -512,8 +512,8 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                 AppIcon(glyph = Glyph::Search)
                 Input(
                     value = filter,
-                    placeholder = t!("ui.player_tracker.filter_hint").into_owned(),
-                    label = t!("ui.player_tracker.filter_hint").into_owned(),
+                    placeholder = t!("ui-player_tracker-filter_hint").into_owned(),
+                    label = t!("ui-player_tracker-filter_hint").into_owned(),
                     class = "wt-tracker-toolbar__field",
                     attr:data-testid = "tracker-filter",
                     on:key_down = move |ev| {
@@ -525,13 +525,13 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
             Separator(orientation = SeparatorOrientation::Vertical)
             IconButton(
                 glyph = Glyph::RotateCcw,
-                hover = t!("ui.player_tracker.populate_from_replays").into_owned(),
+                hover = t!("ui-player_tracker-populate_from_replays").into_owned(),
                 test_id = "tracker-repopulate".to_owned(),
                 on_press = move || model.populate()
             )
             IconButton(
                 glyph = Glyph::Trash,
-                hover = t!("ui.player_tracker.clear_stats").into_owned(),
+                hover = t!("ui-player_tracker-clear_stats").into_owned(),
                 test_id = "tracker-clear".to_owned(),
                 on_press = move || confirm_clear(shell, model)
             )
@@ -551,11 +551,11 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                             control = division_mates_box,
                             attr:data-testid = "tracker-show-division-mates-label"
                         ) {
-                            {t!("ui.player_tracker.show_division_mates").into_owned()}
+                            {t!("ui-player_tracker-show_division_mates").into_owned()}
                         }
                     }
                 }
-                TooltipContent {{t!("ui.player_tracker.show_division_mates_hover").into_owned()}}
+                TooltipContent {{t!("ui-player_tracker-show_division_mates_hover").into_owned()}}
             }
             Tooltip {
                 TooltipTrigger {
@@ -574,11 +574,11 @@ fn Toolbar(model: TrackerModel, shell: Shell) -> impl IntoView {
                             attr:data-testid = "tracker-seen-in-twitch-chat-label",
                             on:click = move |_| model.set_seen_in_twitch_chat(!model.seen_in_twitch_chat.get_untracked())
                         ) {
-                            {t!("ui.player_tracker.seen_in_twitch_chat").into_owned()}
+                            {t!("ui-player_tracker-seen_in_twitch_chat").into_owned()}
                         }
                     }
                 }
-                TooltipContent {{t!("ui.player_tracker.seen_in_twitch_chat_hover").into_owned()}}
+                TooltipContent {{t!("ui-player_tracker-seen_in_twitch_chat_hover").into_owned()}}
             }
         }
     }
@@ -593,13 +593,13 @@ fn confirm_clear(shell: Shell, model: TrackerModel) {
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "tracker-clear-dialog") {
                     AlertDialogHeader {
-                        AlertDialogTitle {{t!("ui.player_tracker.clear_stats").into_owned()}}
-                        AlertDialogDescription {{t!("confirm.clear_all_session_stats").into_owned()}}
+                        AlertDialogTitle {{t!("ui-player_tracker-clear_stats").into_owned()}}
+                        AlertDialogDescription {{t!("confirm-clear_all_session_stats").into_owned()}}
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(attr:data-testid = "tracker-clear-confirm", on:click = move |_| model.clear_tracked()) {
-                            {t!("ui.buttons.yes").into_owned()}
+                            {t!("ui-buttons-yes").into_owned()}
                         }
                     }
                 }

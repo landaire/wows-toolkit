@@ -3,12 +3,12 @@
 //! A line chart walks the games in order; a bar chart compares per-ship
 //! averages. Which statistic either plots is the same list in both front ends.
 
-use rust_i18n::t;
 use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::types::GameParamId;
+use wt_translations::t;
 
 use super::PerGameStat;
 use super::PerformanceInfo;
@@ -117,29 +117,29 @@ impl ChartableStat {
     /// ends name it the same way and in the reader's own language.
     pub const fn translation_key(self) -> &'static str {
         match self {
-            Self::Damage => "stat.damage",
-            Self::SpottingDamage => "stat.spotting_damage",
-            Self::Frags => "stat.frags",
-            Self::RawXp => "stat.raw_xp",
-            Self::BaseXp => "stat.base_xp",
-            Self::WinRate => "stat.win_rate",
-            Self::PersonalRating => "stat.personal_rating",
-            Self::MatchContribution => "stat.match_contribution",
-            Self::PotentialDamage => "ui.replay.column.potential_damage",
-            Self::ReceivedDamage => "ui.replay.column.received_damage",
-            Self::Hits => "ui.replay.column.hits",
-            Self::Fires => "ui.replay.column.fires",
-            Self::Floods => "ui.replay.column.floods",
-            Self::Citadels => "ui.replay.column.citadels",
-            Self::Crits => "ui.replay.column.crits",
-            Self::DistanceTraveled => "ui.replay.column.distance_traveled",
-            Self::CapturePoints => "stat.capture_points",
-            Self::PlanesKilled => "stat.planes_shot_down",
-            Self::AntiAirDamage => "stat.anti_air_damage",
-            Self::TimeLived => "ui.replay.column.time_lived",
-            Self::SurvivalRate => "stat.survival_rate",
-            Self::TorpedoesSpotted => "stat.torpedoes_spotted",
-            Self::Heals => "ui.replay.column.heals",
+            Self::Damage => "stat-damage",
+            Self::SpottingDamage => "stat-spotting_damage",
+            Self::Frags => "stat-frags",
+            Self::RawXp => "stat-raw_xp",
+            Self::BaseXp => "stat-base_xp",
+            Self::WinRate => "stat-win_rate",
+            Self::PersonalRating => "stat-personal_rating",
+            Self::MatchContribution => "stat-match_contribution",
+            Self::PotentialDamage => "ui-replay-column-potential_damage",
+            Self::ReceivedDamage => "ui-replay-column-received_damage",
+            Self::Hits => "ui-replay-column-hits",
+            Self::Fires => "ui-replay-column-fires",
+            Self::Floods => "ui-replay-column-floods",
+            Self::Citadels => "ui-replay-column-citadels",
+            Self::Crits => "ui-replay-column-crits",
+            Self::DistanceTraveled => "ui-replay-column-distance_traveled",
+            Self::CapturePoints => "stat-capture_points",
+            Self::PlanesKilled => "stat-planes_shot_down",
+            Self::AntiAirDamage => "stat-anti_air_damage",
+            Self::TimeLived => "ui-replay-column-time_lived",
+            Self::SurvivalRate => "stat-survival_rate",
+            Self::TorpedoesSpotted => "stat-torpedoes_spotted",
+            Self::Heals => "ui-replay-column-heals",
         }
     }
 
@@ -618,10 +618,10 @@ pub fn selectable_stats(mode: ChartMode, running: bool, combined: bool, personal
 /// raw per-game figure.
 pub fn value_axis_label(stat: ChartableStat, mode: ChartMode, running: bool, combined: bool) -> String {
     if mode == ChartMode::Bar {
-        return t!("ui.stats.series_average", stat = stat.label()).into_owned();
+        return t!("ui-stats-series_average", stat = stat.label()).into_owned();
     }
     if running || combined {
-        return t!("ui.stats.series_running", stat = stat.label()).into_owned();
+        return t!("ui-stats-series_running", stat = stat.label()).into_owned();
     }
 
     stat.label()

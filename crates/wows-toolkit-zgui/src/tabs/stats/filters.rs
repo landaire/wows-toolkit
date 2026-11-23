@@ -4,13 +4,13 @@ use landaire_ui::EscapeClears;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::stats::DateSpan;
 use wows_toolkit_viewmodel::stats::GameDay;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Memo;
@@ -118,7 +118,7 @@ pub fn ShipFilter(editor: FilterEditor, #[prop(into)] ships: Signal<Vec<(GamePar
     let count_label = move || {
         locale.track();
         let (kept, total) = counts();
-        t!("ui.stats.ship_selection_count", selected = kept, total = total).into_owned()
+        t!("ui-stats-ship_selection_count", selected = kept, total = total).into_owned()
     };
     let none_visible = Signal::derive_local(move || visible.with(Vec::is_empty));
     let keep_visible = move |kept: bool| {
@@ -158,23 +158,23 @@ pub fn ShipFilter(editor: FilterEditor, #[prop(into)] ships: Signal<Vec<(GamePar
                         variant = ButtonVariant::Outline,
                         class = "wt-stats-filters__narrowed",
                         attr:data-narrowed = move || { let (kept, total) = counts(); Some((kept < total).to_string()) },
-                        a11y:label = move || format!("{}: {}", t!("ui.stats.ships"), count_label()),
+                        a11y:label = move || format!("{}: {}", t!("ui-stats-ships"), count_label()),
                         attr:data-testid = "stats-ship-filter"
                     ) {
                         AppIcon(glyph = Glyph::Funnel)
-                        text {{tr("ui.stats.ships")}}
+                        text {{tr("ui-stats-ships")}}
                         text(class = "wt-stats-filters__dim") {{count_label}}
                     }
                     PopoverContent(class = "wt-stats-filters__menu", dismiss_on_escape = escape.dismiss_on_escape(), attr:data-testid = "stats-ship-filter-menu") {
                         row(class = "wt-stats-filters__heading-row") {
-                            text(class = "wt-stats-filters__heading") {{tr("ui.stats.ships")}}
+                            text(class = "wt-stats-filters__heading") {{tr("ui-stats-ships")}}
                             text(class = "wt-stats-filters__dim") {{count_label}}
                         }
                         row(class = "wt-stats-filters__row") {
                             box(class = "wt-stats-filters__search") {
                                 Input(
                                     value = query,
-                                    placeholder = t!("ui.stats.search_ships").into_owned(),
+                                    placeholder = t!("ui-stats-search_ships").into_owned(),
                                     node_ref = escape.node_ref(),
                                     attr:data-testid = "stats-ship-filter-search",
                                     on:key_down = move |ev| {
@@ -187,18 +187,18 @@ pub fn ShipFilter(editor: FilterEditor, #[prop(into)] ships: Signal<Vec<(GamePar
                             Tooltip {
                                 TooltipTrigger {
                                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "stats-ship-filter-all", on:click = move |_| keep_visible(true)) {
-                                        {tr("ui.stats.all_ships")}
+                                        {tr("ui-stats-all_ships")}
                                     }
                                 }
-                                TooltipContent {{tr("ui.stats.keep_ships_tooltip")}}
+                                TooltipContent {{tr("ui-stats-keep_ships_tooltip")}}
                             }
                             Tooltip {
                                 TooltipTrigger {
                                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "stats-ship-filter-none", on:click = move |_| keep_visible(false)) {
-                                        {tr("ui.stats.no_ships")}
+                                        {tr("ui-stats-no_ships")}
                                     }
                                 }
-                                TooltipContent {{tr("ui.stats.leave_out_ships_tooltip")}}
+                                TooltipContent {{tr("ui-stats-leave_out_ships_tooltip")}}
                             }
                         }
                         for ship in move || visible.get(), key = |ship: &(GameParamId, String)| ship.0 {
@@ -207,7 +207,7 @@ pub fn ShipFilter(editor: FilterEditor, #[prop(into)] ships: Signal<Vec<(GamePar
                     }
                 }
             }
-            TooltipContent {{tr("ui.stats.ship_filter_tooltip")}}
+            TooltipContent {{tr("ui-stats-ship_filter_tooltip")}}
         }
     }
 }
@@ -238,8 +238,8 @@ pub fn DateFilter(editor: FilterEditor) -> impl IntoView {
                 range = span,
                 months = 2,
                 today = today,
-                placeholder = t!("ui.stats.all_dates").into_owned(),
-                label = t!("ui.stats.dates").into_owned(),
+                placeholder = t!("ui-stats-all_dates").into_owned(),
+                label = t!("ui-stats-dates").into_owned(),
                 attr:data-testid = "stats-date-filter"
             )
             if move || !open.get() {
@@ -248,14 +248,14 @@ pub fn DateFilter(editor: FilterEditor) -> impl IntoView {
                         Button(
                             size = ButtonSize::IconSm,
                             variant = ButtonVariant::Ghost,
-                            a11y:label = move || { locale.track(); t!("ui.stats.clear_dates").into_owned() },
+                            a11y:label = move || { locale.track(); t!("ui-stats-clear_dates").into_owned() },
                             attr:data-testid = "stats-date-filter-clear",
                             on:click = move |_| editor.edit(|filters| filters.dates = DateSpan::default())
                         ) {
                             AppIcon(glyph = Glyph::X)
                         }
                     }
-                    TooltipContent {{move || { locale.track(); t!("ui.stats.clear_dates").into_owned() }}}
+                    TooltipContent {{move || { locale.track(); t!("ui-stats-clear_dates").into_owned() }}}
                 }
             } else {}
         }

@@ -10,7 +10,6 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::TreeRow;
-use rust_i18n::t;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::ShipPartRef;
 use wows_toolkit_armor::model_refs::VehicleParamIndex;
@@ -20,6 +19,7 @@ use wows_toolkit_armor::sidebar_tree::RowKind;
 use wows_toolkit_armor::sidebar_tree::RowNote;
 use wows_toolkit_armor::sidebar_tree::row_tooltip;
 use wowsunpack::export::model_catalog::ModelPath;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
@@ -210,7 +210,7 @@ fn hardpoint_checkbox(sources: RowSources, id: &RowId, target: HardpointTarget) 
     let toggle = move |checked: Checked| {
         state.send(SidebarEvent::Hardpoints { target: target.clone(), visible: checked == Checked::Yes });
     };
-    let label = t!("ui.models.hardpoints_tooltip").into_owned();
+    let label = t!("ui-models-hardpoints_tooltip").into_owned();
     let test_id = format!("armor-sidebar-hardpoints-{id}");
     let stop_click = |ev: &mut EventCx<'_, events::Click>| ev.stop_propagation();
     let stop_double = |ev: &mut EventCx<'_, events::DoubleClick>| ev.stop_propagation();
@@ -226,7 +226,7 @@ fn hardpoint_checkbox(sources: RowSources, id: &RowId, target: HardpointTarget) 
                     )
                 }
             }
-            TooltipContent {{sources.services.locale.text("ui.models.hardpoints_tooltip")}}
+            TooltipContent {{sources.services.locale.text("ui-models-hardpoints_tooltip")}}
         }
     })
 }
@@ -257,19 +257,19 @@ fn ship_menu(state: SidebarState, ship: ShipChoice) -> impl IntoView {
             attr:data-testid = "armor-sidebar-menu-compare",
             on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::CompareSplit(Some(compared.clone()))))
         ) {
-            {t!("ui.armor.compare_split").into_owned()}
+            {t!("ui-armor-compare_split").into_owned()}
         }
         MenuItem(
             attr:data-testid = "armor-sidebar-menu-new-tab",
             on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::OpenInNewTab(tabbed.clone())))
         ) {
-            {t!("ui.armor.open_in_new_tab").into_owned()}
+            {t!("ui-armor-open_in_new_tab").into_owned()}
         }
         MenuItem(
             attr:data-testid = "armor-sidebar-menu-export-ship",
             on_select = UnsyncCallback::new(move |()| state.send(SidebarEvent::ExportShip(ship.clone())))
         ) {
-            {t!("ui.armor.export_model").into_owned()}
+            {t!("ui-armor-export_model").into_owned()}
         }
     }
 }
@@ -279,7 +279,7 @@ fn model_menu(state: SidebarState, shell: Shell, model: ModelPath, from_ship: Op
     let path = model.as_str().to_string();
     let copy = move |()| {
         shell.copy_text(path.clone());
-        shell.toasts().ok(t!("ui.models.path_copied", path = path).into_owned());
+        shell.toasts().ok(t!("ui-models-path_copied", path = path).into_owned());
     };
 
     view! {
@@ -289,7 +289,7 @@ fn model_menu(state: SidebarState, shell: Shell, model: ModelPath, from_ship: Op
                 state.send(SidebarEvent::OpenModel { model: opened.clone(), from_ship: opened_from.clone() });
             })
         ) {
-            {t!("ui.models.open").into_owned()}
+            {t!("ui-models-open").into_owned()}
         }
         MenuItem(
             attr:data-testid = "armor-sidebar-menu-export-model",
@@ -297,10 +297,10 @@ fn model_menu(state: SidebarState, shell: Shell, model: ModelPath, from_ship: Op
                 state.send(SidebarEvent::ExportModel { model: model.clone(), from_ship: from_ship.clone() });
             })
         ) {
-            {t!("ui.models.export").into_owned()}
+            {t!("ui-models-export").into_owned()}
         }
         MenuItem(attr:data-testid = "armor-sidebar-menu-copy-path", on_select = UnsyncCallback::new(copy)) {
-            {t!("ui.models.copy_path").into_owned()}
+            {t!("ui-models-copy_path").into_owned()}
         }
     }
 }

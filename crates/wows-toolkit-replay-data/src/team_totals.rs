@@ -2,8 +2,8 @@
 
 use std::borrow::Borrow;
 
-use rust_i18n::t;
 use wows_replays::types::TeamId;
+use wt_translations::t;
 
 use crate::columns::ReplayColumn;
 use crate::model::PlayerRow;
@@ -22,8 +22,8 @@ impl TeamSide {
 
     pub fn label(self) -> String {
         match self {
-            Self::Allies => t!("ui.player_tracker.allies").into_owned(),
-            Self::Enemies => t!("ui.player_tracker.enemies").into_owned(),
+            Self::Allies => t!("ui-player_tracker-allies").into_owned(),
+            Self::Enemies => t!("ui-player_tracker-enemies").into_owned(),
         }
     }
 }
@@ -117,7 +117,7 @@ pub struct TeamShare {
 impl TeamShare {
     pub fn text(self) -> String {
         let pct = format!("{:.0}%", self.fraction * 100.);
-        t!("ui.replay.team_share", pct = pct, team = self.side.label()).into_owned()
+        t!("ui-replay-team_share", pct = pct, team = self.side.label()).into_owned()
     }
 }
 

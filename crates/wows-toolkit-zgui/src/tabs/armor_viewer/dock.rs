@@ -6,7 +6,7 @@ use landaire_ui::DockProps;
 use landaire_ui::PanelFactory;
 use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Signal;
@@ -55,8 +55,8 @@ pub fn ArmorDock(workspace: ArmorWorkspace) -> impl IntoView {
     view! {
         Dock(
             state = workspace.dock,
-            close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
-            tabs_label = Signal::derive_local(locale.text("ui.armor.viewports")),
+            close_label = Signal::derive_local(locale.text("ui-tabs-close_panel")),
+            tabs_label = Signal::derive_local(locale.text("ui-armor-viewports")),
             menu = dock_menu_strings(locale),
             strings = tab_menu_strings(locale),
             class = "wt-armor-dock",
@@ -81,7 +81,7 @@ pub(super) fn register(workspace: ArmorWorkspace) {
 
                 match shown {
                     Some(armor) => armor.display_name.clone(),
-                    None => t!("ui.armor.empty").into_owned(),
+                    None => t!("ui-armor-empty").into_owned(),
                 }
             },
             move |id: &PanelId| match PaneId::from_panel(id).and_then(|pane| workspace.find_pane(pane)) {

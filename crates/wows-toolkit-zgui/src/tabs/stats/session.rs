@@ -1,9 +1,9 @@
 //! The control that chooses which battles the session holds, shown in the replay listing's options
 //! and the Stats tab's filter bar.
 
-use rust_i18n::t;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Signal;
 use zgui::reactive::prelude::With;
@@ -26,9 +26,9 @@ pub fn opened_label(opened: AppOpened) -> String {
 /// "5 battles".
 pub fn battles_label(count: usize) -> String {
     if count == 1 {
-        t!("ui.stats.session_battles_one").into_owned()
+        t!("ui-stats-session_battles_one").into_owned()
     } else {
-        t!("ui.stats.session_battles_many", count = count).into_owned()
+        t!("ui-stats-session_battles_many", count = count).into_owned()
     }
 }
 
@@ -36,9 +36,9 @@ pub fn battles_label(count: usize) -> String {
 pub fn session_state(session: Session) -> String {
     let battles = battles_label(session.games().with(|games| games.len()));
     match session.scope() {
-        SessionScope::Manual => t!("ui.stats.session_chip_manual", battles = battles).into_owned(),
+        SessionScope::Manual => t!("ui-stats-session_chip_manual", battles = battles).into_owned(),
         SessionScope::SinceAppOpened => {
-            t!("ui.stats.session_chip_since", time = opened_label(session.opened()), battles = battles).into_owned()
+            t!("ui-stats-session_chip_since", time = opened_label(session.opened()), battles = battles).into_owned()
         }
     }
 }
@@ -46,9 +46,9 @@ pub fn session_state(session: Session) -> String {
 /// What the chosen scope holds.
 pub fn scope_hint(session: Session) -> String {
     match session.scope() {
-        SessionScope::Manual => t!("ui.stats.session_manual_tooltip").into_owned(),
+        SessionScope::Manual => t!("ui-stats-session_manual_tooltip").into_owned(),
         SessionScope::SinceAppOpened => {
-            t!("ui.stats.session_since_opened_tooltip", time = opened_label(session.opened())).into_owned()
+            t!("ui-stats-session_since_opened_tooltip", time = opened_label(session.opened())).into_owned()
         }
     }
 }
@@ -86,7 +86,7 @@ pub fn SessionScopeChoice(test_id: &'static str) -> impl IntoView {
             value = Binding::controlled(chosen, choose),
             variant = ToggleVariant::Outline,
             size = ToggleSize::Sm,
-            label = t!("ui.stats.session_title").into_owned(),
+            label = t!("ui-stats-session_title").into_owned(),
             attr:data-testid = test_id
         ) {
             ToggleGroupItem(value = scope_value(SessionScope::Manual), attr:data-testid = format!("{test_id}-manual")) {

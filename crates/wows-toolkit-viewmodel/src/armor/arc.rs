@@ -213,12 +213,12 @@ impl SimOutcome {
     /// The key naming this outcome, for a front end that translates it.
     pub const fn label_key(self) -> &'static str {
         match self {
-            Self::Citadel => "ui.armor.outcome.citadel",
-            Self::Penetration => "ui.armor.outcome.penetration",
-            Self::Overpenetration => "ui.armor.outcome.overpenetration",
-            Self::Ricochet => "ui.armor.outcome.ricochet",
-            Self::Shatter => "ui.armor.outcome.shatter",
-            Self::Stopped => "ui.armor.outcome.stopped",
+            Self::Citadel => "ui-armor-outcome-citadel",
+            Self::Penetration => "ui-armor-outcome-penetration",
+            Self::Overpenetration => "ui-armor-outcome-overpenetration",
+            Self::Ricochet => "ui-armor-outcome-ricochet",
+            Self::Shatter => "ui-armor-outcome-shatter",
+            Self::Stopped => "ui-armor-outcome-stopped",
         }
     }
 
@@ -253,9 +253,9 @@ impl SimVerdict {
     pub const fn label_key(self) -> &'static str {
         match self {
             Self::Outcome(outcome) => outcome.label_key(),
-            Self::OvermatchRulesOutRicochet => "ui.armor.sim.overmatch_rules_out_ricochet",
-            Self::AlwaysRicochetBand => "ui.armor.sim.always_ricochet_band",
-            Self::RicochetAngleTooLow => "ui.armor.sim.ricochet_angle_too_low",
+            Self::OvermatchRulesOutRicochet => "ui-armor-sim-overmatch_rules_out_ricochet",
+            Self::AlwaysRicochetBand => "ui-armor-sim-always_ricochet_band",
+            Self::RicochetAngleTooLow => "ui-armor-sim-ricochet_angle_too_low",
         }
     }
 

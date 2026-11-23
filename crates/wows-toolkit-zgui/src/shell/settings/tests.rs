@@ -13,7 +13,6 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_notices::Notices;
 use wows_toolkit_services::settings::StartupSettings;
@@ -22,6 +21,7 @@ use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
+use wt_translations::t;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Rect;
@@ -394,7 +394,7 @@ fn the_licenses_page_shows_and_searches_the_notices() {
     click(&mut window, "settings-licenses-open");
     assert!(window.by_test_id("settings-drawer-scroll").is_none(), "the page replaces the settings list");
 
-    let version = t!("ui.labels.app_version", version = env!("CARGO_PKG_VERSION")).into_owned();
+    let version = t!("ui-labels-app_version", version = env!("CARGO_PKG_VERSION")).into_owned();
     assert_eq!(window.texts_by_class("wt-licenses__version"), vec![version]);
     let project = window.texts_by_class("wt-licenses__project");
     assert!(
@@ -511,7 +511,7 @@ fn the_game_directory_warning_stays_when_its_button_is_pressed() {
     crate::shell::startup::warn_wows_dir_invalid(shell());
     settle(&mut window);
 
-    press_warning_button(&mut window, &t!("ui.messages.wows_dir_invalid"), Setting::WowsDirectory);
+    press_warning_button(&mut window, &t!("ui-messages-wows_dir_invalid"), Setting::WowsDirectory);
 }
 
 /// The warning about a Twitch credential Twitch refused stays while its button opens the drawer at
@@ -519,7 +519,7 @@ fn the_game_directory_warning_stays_when_its_button_is_pressed() {
 #[test]
 fn the_twitch_warning_stays_when_its_button_is_pressed() {
     let mut window = open_unsaved();
-    let warning = t!("ui.messages.twitch_token_invalid").into_owned();
+    let warning = t!("ui-messages-twitch_token_invalid").into_owned();
     shell().twitch_refused();
     settle(&mut window);
 
@@ -534,7 +534,7 @@ fn the_twitch_warning_stays_when_its_button_is_pressed() {
 /// `setting` at the top and the warning stays until the state it reports is fixed.
 fn press_warning_button(window: &mut HeadlessWindow, warning: &str, setting: Setting) {
     assert!(window.texts_by_class("lui-toasts").concat().contains(warning), "the warning is up");
-    let open = window.by_role_and_label(Role::Button, &t!("ui.settings.panel.open")).expect("the warning has a button");
+    let open = window.by_role_and_label(Role::Button, &t!("ui-settings-panel-open")).expect("the warning has a button");
     window.click(open).expect("the button can be pressed");
     settle(window);
     settle(window);
@@ -639,7 +639,7 @@ fn the_drawer_label_follows_the_language() {
     let locale = shell().services().locale;
     locale.choose(LanguageCode::new("de"));
     settle(&mut window);
-    let german = t!("ui.tabs.settings").into_owned();
+    let german = t!("ui-tabs-settings").into_owned();
     let shown = label(&mut window, "settings-drawer");
     locale.choose(LanguageCode::new("en"));
 
@@ -658,10 +658,10 @@ fn the_controls_follow_the_language() {
     let locale = shell().services().locale;
     locale.choose(LanguageCode::new("de"));
     settle(&mut window);
-    let german = t!("ui.settings.wows.cache.open_folder").into_owned();
+    let german = t!("ui-settings-wows-cache-open_folder").into_owned();
     let shown = window.texts_by_class("wt-settings__card").concat();
     let searched = label(&mut window, "settings-search");
-    let asked = t!("ui.settings.panel.search_placeholder").into_owned();
+    let asked = t!("ui-settings-panel-search_placeholder").into_owned();
     locale.choose(LanguageCode::new("en"));
 
     assert!(!english.contains(&german), "German words the button differently");
@@ -686,7 +686,7 @@ fn a_missing_auto_export_directory_is_marked() {
     let marked = wait(&mut window, |window| window.attribute(path, "data-error").is_some());
     assert!(marked, "the directory is marked");
     assert!(window.attribute(row, "data-error").is_some(), "and so is its row");
-    let note = t!("ui.settings.replay.export_path_missing").into_owned();
+    let note = t!("ui-settings-replay-export_path_missing").into_owned();
     assert!(window.texts_by_class("wt-settings__note").contains(&note), "whose note says why");
 
     click(&mut window, "auto-export-data");
@@ -786,9 +786,9 @@ fn a_setting_in_error_is_marked_until_the_error_clears() {
     settle(&mut window);
     assert_eq!(marks(&window), [true; 3], "the row, its section's button and the gear are marked");
     assert!(window.by_test_id("settings-row-fault").is_some(), "the row's title carries the error icon");
-    let note = t!("ui.messages.wows_dir_invalid").into_owned();
+    let note = t!("ui-messages-wows_dir_invalid").into_owned();
     assert!(window.texts_by_class("wt-settings__note").contains(&note), "and its note says why");
-    let named = t!("ui.settings.panel.in_error", name = SettingsSection::Game.name()).into_owned();
+    let named = t!("ui-settings-panel-in_error", name = SettingsSection::Game.name()).into_owned();
     assert_eq!(label(&mut window, &category_test_id(SettingsSection::Game)), Some(named));
 
     shell().settings_drawer.wows_dir_invalid.set(false);
@@ -815,7 +815,7 @@ fn a_refused_twitch_credential_marks_its_row() {
     shell().paste_twitch_token();
     settle(&mut window);
     assert!(window.attribute(row, "data-error").is_some(), "a paste that held no credential marks the row");
-    let note = t!("ui.collab.clipboard_empty").into_owned();
+    let note = t!("ui-collab-clipboard_empty").into_owned();
     assert!(window.texts_by_class("wt-settings__note").contains(&note), "and its note says why");
 }
 
@@ -925,14 +925,14 @@ fn forced_reindex_shown(options: HeadlessOptions) -> (HeadlessWindow, Arc<std::s
 fn a_forced_reindex_shows_and_stops_under_the_index_controls() {
     let (mut window, cancel) = forced_reindex_shown(HeadlessOptions::new(REVIEW_SIZE));
 
-    let progress = t!("ui.settings.index.progress", done = 2, total = 5, failed = 0).into_owned();
+    let progress = t!("ui-settings-index-progress", done = 2, total = 5, failed = 0).into_owned();
     assert!(window.texts_by_class("wt-settings__line").contains(&progress), "the progress is shown");
     let build = find(&window, "index-build");
     assert!(window.a11y(build).is_some_and(|state| state.disabled), "building is refused beside it");
     click(&mut window, "index-stop");
     assert!(cancel.load(std::sync::atomic::Ordering::Relaxed), "Stop stops the forced re-index");
 
-    let said = t!("ui.reindex.stopped_before_reading").into_owned();
+    let said = t!("ui-reindex-stopped_before_reading").into_owned();
     shell().replay_index.finish_forced(said.clone());
     settle(&mut window);
     let lines = window.texts_by_class("wt-settings__line");

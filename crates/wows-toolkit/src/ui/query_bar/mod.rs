@@ -29,7 +29,7 @@ use egui::UiBuilder;
 use egui::text::CCursor;
 use egui::text::CCursorRange;
 use egui::text_edit::TextEditState;
-use rust_i18n::t;
+use wt_translations::t;
 
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::Op;
@@ -149,7 +149,8 @@ pub struct QueryBar {
     /// How far back into the caller's history Up has walked.
     history_cursor: Option<usize>,
     suggestions: Vec<Suggestion>,
-    suggestions_locale: String,
+    /// The language `suggestions` are written in.
+    suggestions_language: Option<wt_translations::Language>,
 
     /// Trees to step back to, oldest first: one entry per committed change,
     /// holding the query as it stood before that change. A deque because the
@@ -805,7 +806,7 @@ impl QueryBar {
         let width = rect.width();
         // The hint describes an empty bar; beside committed pills it would read
         // as another filter rather than as placeholder text.
-        let hint = if self.expr.is_empty_all() { t!("ui.search.bar.hint").into_owned() } else { String::new() };
+        let hint = if self.expr.is_empty_all() { t!("ui-search-bar-hint").into_owned() } else { String::new() };
         let output = ui
             .scope_builder(
                 UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
@@ -874,13 +875,13 @@ impl QueryBar {
                 }
             }
             TokenKind::Connector { is_or } | TokenKind::GroupOpen { is_or } => {
-                response.clone().on_hover_text(t!("ui.search.bar.flip_connector").into_owned());
+                response.clone().on_hover_text(t!("ui-search-bar-flip_connector").into_owned());
                 if response.clicked() {
                     commands.push(Command::SetConnector(token.path.clone(), !is_or));
                 }
             }
             TokenKind::GroupClose => {
-                response.clone().on_hover_text(t!("ui.search.bar.ungroup").into_owned());
+                response.clone().on_hover_text(t!("ui-search-bar-ungroup").into_owned());
                 if response.clicked() {
                     commands.push(Command::Ungroup(token.path.clone()));
                 }
@@ -901,25 +902,25 @@ impl QueryBar {
         let mut edited = false;
         ui.horizontal_wrapped(|ui| {
             let groupable = select::can_group(&self.expr, &self.selection);
-            if ui.add_enabled(groupable, egui::Button::new(t!("ui.search.bar.group_and").into_owned())).clicked() {
+            if ui.add_enabled(groupable, egui::Button::new(t!("ui-search-bar-group_and").into_owned())).clicked() {
                 select::group(&mut self.expr, &self.selection, false);
                 edited = true;
             }
-            if ui.add_enabled(groupable, egui::Button::new(t!("ui.search.bar.group_or").into_owned())).clicked() {
+            if ui.add_enabled(groupable, egui::Button::new(t!("ui-search-bar-group_or").into_owned())).clicked() {
                 select::group(&mut self.expr, &self.selection, true);
                 edited = true;
             }
-            if ui.button(t!("ui.search.bar.negate").into_owned()).clicked() {
+            if ui.button(t!("ui-search-bar-negate").into_owned()).clicked() {
                 for path in self.selection.nodes.clone() {
                     select::negate(&mut self.expr, &path);
                 }
                 edited = true;
             }
-            if ui.button(t!("ui.search.bar.delete").into_owned()).clicked() {
+            if ui.button(t!("ui-search-bar-delete").into_owned()).clicked() {
                 select::delete(&mut self.expr, &self.selection);
                 edited = true;
             }
-            if ui.button(t!("ui.search.bar.clear_selection").into_owned()).clicked() {
+            if ui.button(t!("ui-search-bar-clear_selection").into_owned()).clicked() {
                 self.selection.clear();
                 self.anchor = None;
                 self.focus = None;
@@ -1033,7 +1034,7 @@ impl QueryBar {
                 }
                 if rows.is_empty() {
                     ui.label(
-                        egui::RichText::new(t!("ui.search.bar.no_suggestions").into_owned()).color(ui.sem().text_dim),
+                        egui::RichText::new(t!("ui-search-bar-no_suggestions").into_owned()).color(ui.sem().text_dim),
                     );
                     return;
                 }
@@ -2116,9 +2117,9 @@ impl QueryBar {
     /// it; its labels are translated and there are enough of them that
     /// rebuilding per frame would be wasted work.
     fn refresh_suggestions(&mut self) {
-        let locale = rust_i18n::locale();
-        if self.suggestions.is_empty() || self.suggestions_locale != *locale {
-            self.suggestions_locale = locale.to_string();
+        let language = wt_translations::language();
+        if self.suggestions.is_empty() || self.suggestions_language != Some(language) {
+            self.suggestions_language = Some(language);
             self.suggestions = filter_options();
         }
     }
@@ -2245,11 +2246,11 @@ fn pill_menu(ui: &mut Ui, expr: &MatchExpr, path: &NodePath, commands: &mut Vec<
     if !select::addresses_match_node(expr, path) {
         return;
     }
-    if ui.button(t!("ui.search.bar.negate").into_owned()).clicked() {
+    if ui.button(t!("ui-search-bar-negate").into_owned()).clicked() {
         commands.push(Command::Negate(path.clone()));
         ui.close();
     }
-    if ui.button(t!("ui.search.bar.delete").into_owned()).clicked() {
+    if ui.button(t!("ui-search-bar-delete").into_owned()).clicked() {
         commands.push(Command::Delete(path.clone()));
         ui.close();
     }
@@ -2259,9 +2260,9 @@ fn pill_menu(ui: &mut Ui, expr: &MatchExpr, path: &NodePath, commands: &mut Vec<
 /// new category cannot render untranslated.
 fn category_label(category: SuggestionCategory) -> String {
     match category {
-        SuggestionCategory::Preset => t!("ui.search.bar.context_preset"),
-        SuggestionCategory::Match => t!("ui.search.bar.context_match"),
-        SuggestionCategory::Roster => t!("ui.search.bar.context_roster"),
+        SuggestionCategory::Preset => t!("ui-search-bar-context_preset"),
+        SuggestionCategory::Match => t!("ui-search-bar-context_match"),
+        SuggestionCategory::Roster => t!("ui-search-bar-context_roster"),
     }
     .into_owned()
 }
@@ -2290,9 +2291,9 @@ fn token_galleys(ui: &Ui, token: &Token, font: &egui::FontId) -> Vec<Arc<Galley>
             .map(|segment| ui.painter().layout_no_wrap(segment.text.clone(), font.clone(), egui::Color32::PLACEHOLDER))
             .collect(),
         TokenKind::Connector { is_or } => {
-            run(if *is_or { t!("ui.search.bar.or_word") } else { t!("ui.search.bar.and_word") }.into_owned())
+            run(if *is_or { t!("ui-search-bar-or_word") } else { t!("ui-search-bar-and_word") }.into_owned())
         }
-        TokenKind::NotPrefix => run(t!("ui.search.bar.not_word").into_owned()),
+        TokenKind::NotPrefix => run(t!("ui-search-bar-not_word").into_owned()),
         TokenKind::GroupOpen { .. } => run("(".to_owned()),
         // The closing bracket of an editable group is its dissolve control, so
         // it reads as a close button rather than as punctuation.

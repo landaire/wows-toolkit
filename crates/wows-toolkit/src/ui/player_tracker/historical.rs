@@ -4,8 +4,8 @@ use std::sync::Arc;
 use egui::RichText;
 use itertools::Itertools;
 use jiff::Timestamp;
-use rust_i18n::t;
 use wows_replays::types::AccountId;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::icons;
@@ -223,7 +223,7 @@ impl HistoricalTable<'_> {
                 if ui
                     .add(egui::Label::new(RichText::new(&account_text).small().weak()).sense(egui::Sense::click()))
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(t!("ui.player_tracker.copy_wg_id"))
+                    .on_hover_text(t!("ui-player_tracker-copy_wg_id"))
                     .clicked()
                 {
                     self.copy_text = Some(account_text);
@@ -231,7 +231,7 @@ impl HistoricalTable<'_> {
 
                 if !view.aliases.is_empty() {
                     ui.label(icons::USERS_THREE)
-                        .on_hover_text(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
+                        .on_hover_text(t!("ui-player_tracker-aliases_hover", names = view.aliases.join(", ")));
                 }
             }
             HistoricalColumn::TotalEncounters => {
@@ -262,7 +262,7 @@ impl HistoricalTable<'_> {
                     toggle_expand = true;
                 }
 
-                if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui.player_tracker.find_matches")).clicked() {
+                if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui-player_tracker-find_matches")).clicked() {
                     self.find_matches_target = Some(view.account_id);
                 }
             }
@@ -291,12 +291,12 @@ impl HistoricalTable<'_> {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
             if !view.aliases.is_empty() {
-                ui.label(t!("ui.player_tracker.aliases_hover", names = view.aliases.join(", ")));
+                ui.label(t!("ui-player_tracker-aliases_hover", names = view.aliases.join(", ")));
             }
-            ui.label(t!("ui.player_tracker.last_encountered_exact", timestamp = &view.last_seen_exact));
-            ui.label(t!("ui.player_tracker.arena_count", count = view.total_encounters));
+            ui.label(t!("ui-player_tracker-last_encountered_exact", timestamp = &view.last_seen_exact));
+            ui.label(t!("ui-player_tracker-arena_count", count = view.total_encounters));
             ui.add_space(4.0);
-            ui.label(t!("ui.player_tracker.notes_hint"));
+            ui.label(t!("ui-player_tracker-notes_hint"));
 
             // `view` is a snapshot, so the editor takes its own mutable borrow here.
             let mut edited = false;
@@ -353,27 +353,27 @@ impl egui_table::TableDelegate for HistoricalTable<'_> {
         let sorted_by = self.tracker.sort_order;
         let (key, target, is_active) = match column {
             HistoricalColumn::Clan => (
-                "ui.player_tracker.column.clan",
+                "ui-player_tracker-column-clan",
                 SortedBy::Clan(SortOrder::Asc),
                 matches!(sorted_by, SortedBy::Clan(_)),
             ),
             HistoricalColumn::Player => (
-                "ui.player_tracker.column.player_name",
+                "ui-player_tracker-column-player_name",
                 SortedBy::Name(SortOrder::Asc),
                 matches!(sorted_by, SortedBy::Name(_)),
             ),
             HistoricalColumn::TotalEncounters => (
-                "ui.player_tracker.column.total_encounters",
+                "ui-player_tracker-column-total_encounters",
                 SortedBy::TimesEncountered(SortOrder::Asc),
                 matches!(sorted_by, SortedBy::TimesEncountered(_)),
             ),
             HistoricalColumn::EncountersInRange => (
-                "ui.player_tracker.column.encounters_in_range",
+                "ui-player_tracker-column-encounters_in_range",
                 SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc),
                 matches!(sorted_by, SortedBy::TimesEncounteredInTimeRange(_)),
             ),
             HistoricalColumn::LastEncountered => (
-                "ui.player_tracker.column.last_encountered",
+                "ui-player_tracker-column-last_encountered",
                 SortedBy::LastEncountered(SortOrder::Asc),
                 matches!(sorted_by, SortedBy::LastEncountered(_)),
             ),
@@ -468,7 +468,7 @@ impl ToolkitTabViewer<'_> {
 
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
+                    if ui.button(t!("ui-player_tracker-clear_stats")).clicked() {
                         // The division marks go with the players holding them.
                         // Nothing has to re-read the index for them: whatever
                         // repopulates the tracker marks as it goes, either from
@@ -487,36 +487,36 @@ impl ToolkitTabViewer<'_> {
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastHour,
-                                t!("ui.player_tracker.period.past_hour"),
+                                t!("ui-player_tracker-period-past_hour"),
                             );
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastSixHours,
-                                t!("ui.player_tracker.period.past_six_hours"),
+                                t!("ui-player_tracker-period-past_six_hours"),
                             );
-                            ui.selectable_value(selected, TimePeriod::LastDay, t!("ui.player_tracker.period.past_day"));
+                            ui.selectable_value(selected, TimePeriod::LastDay, t!("ui-player_tracker-period-past_day"));
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastWeek,
-                                t!("ui.player_tracker.period.past_week"),
+                                t!("ui-player_tracker-period-past_week"),
                             );
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastMonth,
-                                t!("ui.player_tracker.period.past_month"),
+                                t!("ui-player_tracker-period-past_month"),
                             );
-                            ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
+                            ui.selectable_value(selected, TimePeriod::AllTime, t!("ui-player_tracker-period-all_time"));
                         });
                     // The same field the Clans tab's checkbox edits, so the two
                     // stay in sync in both directions with no extra state.
-                    ui.checkbox(&mut player_tracker.show_division_mates, t!("ui.player_tracker.show_division_mates"))
-                        .on_hover_text(t!("ui.player_tracker.show_division_mates_hover"));
+                    ui.checkbox(&mut player_tracker.show_division_mates, t!("ui-player_tracker-show_division_mates"))
+                        .on_hover_text(t!("ui-player_tracker-show_division_mates_hover"));
 
-                    ui.label(t!("ui.player_tracker.player_filter"));
+                    ui.label(t!("ui-player_tracker-player_filter"));
                     ui.text_edit_singleline(&mut player_tracker.player_filter);
 
                     if ui
-                        .add_enabled(populate_enabled, egui::Button::new(t!("ui.player_tracker.populate_from_replays")))
+                        .add_enabled(populate_enabled, egui::Button::new(t!("ui-player_tracker-populate_from_replays")))
                         .clicked()
                     {
                         // Prefer the durable index: it's already parsed and avoids
@@ -585,7 +585,7 @@ impl ToolkitTabViewer<'_> {
         }
 
         if let Some(text) = copy_text {
-            self.tab_state.toasts.lock().success(t!("ui.player_tracker.copied_wg_id", id = &text).to_string());
+            self.tab_state.toasts.lock().success(t!("ui-player_tracker-copied_wg_id", id = &text).to_string());
             ui.ctx().copy_text(text);
         }
         if let Some(id) = find_matches_target {

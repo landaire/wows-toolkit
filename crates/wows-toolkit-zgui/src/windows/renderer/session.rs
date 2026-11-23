@@ -11,7 +11,6 @@ use std::time::Duration;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_minimap_renderer::ExportSettings;
 use wows_minimap_renderer::RenderOptions;
@@ -104,6 +103,7 @@ use wt_collab_client::protocol::CollabRenderOptions;
 use wt_collab_client::protocol::CursorAt;
 use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::types::PlacedShipRanges;
+use wt_translations::t;
 use zgui::prelude::WindowHandle;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -149,7 +149,7 @@ impl RenderRequest {
         self.path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned())
+            .unwrap_or_else(|| t!("ui-replay-context-render_replay").into_owned())
     }
 }
 
@@ -540,7 +540,7 @@ impl RendererSession {
         });
         let Some(started) = started else { return };
         let Some(BakeStart { request, game_data, cancel, generation, names }) = started else {
-            self.status.set(Status::Failed(t!("ui.replay.loading_game_data").into_owned()));
+            self.status.set(Status::Failed(t!("ui-replay-loading_game_data").into_owned()));
             return;
         };
         // A battle already on screen stays there, playing, until the new bake lands.
@@ -570,7 +570,7 @@ impl RendererSession {
                 Err(err) if shown.is_some() => {
                     let messages = self.run.try_with_value(|run| run.messages).flatten();
                     if let Some(messages) = messages {
-                        messages.failed(format!("{}: {err}", t!("ui.replay.renderer.failed")));
+                        messages.failed(format!("{}: {err}", t!("ui-replay-renderer-failed")));
                     }
                     return;
                 }
@@ -1832,7 +1832,7 @@ impl RendererSession {
         zgui::task::spawn_detached(async move {
             let output = match target {
                 ExportTarget::File => {
-                    let title = t!("ui.replay.renderer.export_video").into_owned();
+                    let title = t!("ui-replay-renderer-export_video").into_owned();
                     let asked = wows_toolkit_services::dialog::save_file(
                         Some(&title),
                         &suggested,
@@ -1903,14 +1903,14 @@ impl RendererSession {
             if let Some(messages) = messages {
                 match outcome {
                     Ok(ExportDone::Saved(path)) => {
-                        messages.ok(t!("ui.replay.renderer.export_saved", path = path.display()).into_owned());
+                        messages.ok(t!("ui-replay-renderer-export_saved", path = path.display()).into_owned());
                     }
                     Ok(ExportDone::Copied) => {
-                        messages.ok(t!("ui.replay.renderer.export_copied").into_owned());
+                        messages.ok(t!("ui-replay-renderer-export_copied").into_owned());
                     }
                     // An open viewport says why above its scrubber.
                     Err(reason) if shown.is_none() => {
-                        messages.failed(t!("ui.replay.renderer.export_not_written", reason = reason).into_owned());
+                        messages.failed(t!("ui-replay-renderer-export_not_written", reason = reason).into_owned());
                     }
                     Err(_) => {}
                 }
@@ -2043,7 +2043,7 @@ async fn load_saved_defaults(services: Services) -> SavedRenderOptions {
 
 /// What the status bar calls an export at `stage`.
 fn export_job_name(stage: ExportStage) -> String {
-    format!("{}: {}", t!("ui.replay.renderer.export_video"), t!(stage.label_key()))
+    format!("{}: {}", t!("ui-replay-renderer-export_video"), t!(stage.label_key()))
 }
 
 /// Puts `path` on the clipboard as a file, which is what a chat client pastes as an attachment.

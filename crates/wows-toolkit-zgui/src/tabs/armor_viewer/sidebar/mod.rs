@@ -33,7 +33,6 @@ use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
 use landaire_ui::TreeTooltip;
-use rust_i18n::t;
 use wows_toolkit_armor::catalog::ShipCatalog;
 use wows_toolkit_armor::model_refs::HardpointTarget;
 use wows_toolkit_armor::model_refs::OpenTarget;
@@ -46,6 +45,7 @@ use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::export::model_library::ModelLibrary;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_types::GameParamId;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -287,13 +287,13 @@ pub fn ArmorSidebar(
             _ => {}
         }
     };
-    let search_label = t!("ui.models.search").into_owned();
+    let search_label = t!("ui-models-search").into_owned();
     let tree_model: Signal<Rc<SidebarTree>, LocalStorage> = state.tree.into();
 
     let body = move || match state.catalog() {
         None => AnyView::new(view! {
             Loading(
-                label = Signal::derive_local(services.locale.text("ui.armor.loading_catalog")),
+                label = Signal::derive_local(services.locale.text("ui-armor-loading_catalog")),
                 placement = LoadingPlacement::Top,
                 attr:data-testid = "armor-sidebar-loading"
             )
@@ -312,7 +312,7 @@ pub fn ArmorSidebar(
                 context_menu = TreeMenu::new(move |id: &RowId| row_menu(state, shell, id)),
                 tooltip = TreeTooltip::new(move |id: &RowId| row_tip(state, id)),
                 handle = state.handle,
-                label = t!("ui.armor.ships").into_owned(),
+                label = t!("ui-armor-ships").into_owned(),
                 attr:data-testid = "armor-sidebar-tree"
             )
         }),

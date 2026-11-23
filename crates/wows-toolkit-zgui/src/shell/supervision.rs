@@ -6,13 +6,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::StreamExt;
-use rust_i18n::t;
 use wows_toolkit_replay_data::live_match::LivePoll;
 use wows_toolkit_replay_data::loader::ReplayLoader;
 use wows_toolkit_services::supervision::queue::Activity;
 use wows_toolkit_services::supervision::watchdog::WorkerHealth;
 use wows_toolkit_services::supervision::watchdog::WorkerName;
 use wows_toolkit_services::supervision::watchdog::WorkerReport;
+use wt_translations::t;
 use zgui::reactive::on_cleanup_local;
 use zgui::task::spawn_local;
 use zgui::view::Timers;
@@ -58,9 +58,9 @@ pub fn begin(services: Services) {
 /// The name a worker goes by in the status bar.
 pub fn worker_title(name: &WorkerName) -> String {
     match name.as_str() {
-        ReplayLoader::WORKER => t!("ui.app.worker_replay_loader").into_owned(),
-        LivePoll::WORKER => t!("ui.app.worker_live_match").into_owned(),
-        ConstantsWorker::WORKER => t!("ui.app.worker_constants").into_owned(),
+        ReplayLoader::WORKER => t!("ui-app-worker_replay_loader").into_owned(),
+        LivePoll::WORKER => t!("ui-app-worker_live_match").into_owned(),
+        ConstantsWorker::WORKER => t!("ui-app-worker_constants").into_owned(),
         other => other.to_owned(),
     }
 }
@@ -72,9 +72,9 @@ fn show_workers(services: Services, shown: &mut HashMap<WorkerName, JobHandle>, 
         let title = worker_title(&worker.name);
         let said = match &worker.health {
             WorkerHealth::Running => continue,
-            WorkerHealth::Stalled => t!("ui.app.worker_stalled", worker = title),
-            WorkerHealth::Restarting { .. } => t!("ui.app.worker_restarting", worker = title),
-            WorkerHealth::GaveUp { .. } => t!("ui.app.worker_stopped", worker = title),
+            WorkerHealth::Stalled => t!("ui-app-worker_stalled", worker = title),
+            WorkerHealth::Restarting { .. } => t!("ui-app-worker_restarting", worker = title),
+            WorkerHealth::GaveUp { .. } => t!("ui-app-worker_stopped", worker = title),
         };
         let job = Job { name: said.into_owned(), progress: None };
         match shown.get(&worker.name) {
@@ -94,8 +94,8 @@ fn show_reading(services: Services, reading: &mut Option<JobHandle>, held: &Acti
             *reading = None;
             return;
         }
-        [one] => t!("ui.app.reading_replay", replay = one.file_stem().unwrap_or(one.as_os_str()).to_string_lossy()),
-        many => t!("ui.app.reading_replays", count = many.len()),
+        [one] => t!("ui-app-reading_replay", replay = one.file_stem().unwrap_or(one.as_os_str()).to_string_lossy()),
+        many => t!("ui-app-reading_replays", count = many.len()),
     };
     let job = Job { name: said.into_owned(), progress: None };
     match reading {

@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use rust_i18n::t;
 use wows_toolkit_services::dialog::Answer;
+use wt_translations::t;
 
 use crate::shell::Shell;
 
@@ -16,7 +16,7 @@ impl Shell {
         asked.await.unwrap_or_else(|err| {
             tracing::error!("file dialog could not be opened: {err}");
             if let Some(toasts) = self.try_toasts() {
-                toasts.failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+                toasts.failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
             }
             None
         })

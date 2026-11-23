@@ -135,13 +135,6 @@ fn main() -> eframe::Result<()> {
         });
     }
 
-    // Load the translation catalogs before anything asks for a string. This
-    // once needed a 4 MB thread: `i18n!()` was pointed at the catalogs and its
-    // generated initializer built one temporary per key in a single frame. The
-    // catalogs are parsed from embedded source now (see `TranslationsBackend`),
-    // which needs well under 64 KB, so the main thread is fine.
-    wows_toolkit::init_i18n();
-
     let icon_data: &[u8] = &include_bytes!(concat!(env!("OUT_DIR"), "/wows_toolkit.png"))[..];
 
     let mut viewport = egui::ViewportBuilder::default()

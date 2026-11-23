@@ -33,11 +33,11 @@ use landaire_ui::PanelWidth;
 use landaire_ui::SidePanel;
 use landaire_ui::SideSplitProps;
 use landaire_ui::WidthRange;
-use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::default_columns;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -210,7 +210,7 @@ pub fn ReplaysTab() -> impl IntoView {
     let banner = move || match services.game_data.state() {
         GameDataState::Failed(reason) => Some(view! {
             text(class = "wt-replays__banner", attr:data-testid = "replays-game-data-failed") {{
-                t!("ui.replay.game_data_failed", error = reason).into_owned()
+                t!("ui-replay-game_data_failed", error = reason).into_owned()
             }}
         }),
         GameDataState::NoInstall | GameDataState::Loading { .. } | GameDataState::Ready(_) => None,
@@ -224,7 +224,7 @@ pub fn ReplaysTab() -> impl IntoView {
                 open = listing_open,
                 width = listing_width,
                 range = LISTING_RANGE,
-                resize_label = t!("ui.replay.listing_caption").into_owned(),
+                resize_label = t!("ui-replay-listing_caption").into_owned(),
                 keep_mounted = true,
                 attr:data-testid = "replay-listing-split"
             ) {
@@ -234,8 +234,8 @@ pub fn ReplaysTab() -> impl IntoView {
                 box(class = "wt-replays__main") {
                     Dock(
                         state = workspace.dock,
-                        close_label = t!("ui.replay_folders.close").into_owned(),
-                        tabs_label = t!("ui.replay.listing_caption").into_owned(),
+                        close_label = t!("ui-replay_folders-close").into_owned(),
+                        tabs_label = t!("ui-replay-listing_caption").into_owned(),
                         class = "wt-replays__dock",
                         menu = dock_menu_strings(locale),
                         strings = tab_menu_strings(locale),
@@ -430,7 +430,7 @@ fn follow_game_data(workspace: ReplayWorkspace, control: BrowserControl, offer: 
         let Some(empty) = control.install_listed_empty() else { return };
         checked_install.set_value(true);
         if empty {
-            shell.toasts().warn(t!("ui.messages.no_replays_detected").into_owned());
+            shell.toasts().warn(t!("ui-messages-no_replays_detected").into_owned());
         }
     });
     let downloading = RenderEffect::new(move |was_busy: Option<bool>| {
@@ -500,7 +500,7 @@ fn publish_toggles(dock: DockState, listing_open: RwSignal<bool, LocalStorage>) 
             locale.track();
             let mut toggles = vec![PanelToggle {
                 test_id: "replay-listing-toggle",
-                name: t!("ui.replay.listing_caption").into_owned(),
+                name: t!("ui-replay-listing_caption").into_owned(),
                 side: PanelSide::Left,
                 open: listing_open,
             }];
@@ -562,8 +562,8 @@ fn EmptyPane() -> impl IntoView {
                     vector(class = "wt-replays__islands", prop:svg = PropValue::from(islands_svg())) {}
                     {captures}
                 }
-                text(class = "wt-replays__title") {{t!("ui.replay.select_replay").into_owned()}}
-                text(class = "wt-replays__hint") {{t!("ui.replay.drop_hint").into_owned()}}
+                text(class = "wt-replays__title") {{t!("ui-replay-select_replay").into_owned()}}
+                text(class = "wt-replays__hint") {{t!("ui-replay-drop_hint").into_owned()}}
             }
         }
     }

@@ -1,10 +1,10 @@
 //! What the shell offers on the palette itself: the commands whose work it or the shared services
 //! can do without a tab.
 
-use rust_i18n::t;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::reactive::RwSignal;
 use zgui::task::spawn_detached;
 use zgui::view;
@@ -160,16 +160,16 @@ fn confirm_refresh_persisted_data(shell: Shell) {
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "refresh-persisted-data-confirm") {
                     AlertDialogHeader {
-                        AlertDialogTitle {{t!("ui.windows.refresh_persisted_data").into_owned()}}
-                        AlertDialogDescription {{t!("ui.dialogs.refresh_persisted_data_message").into_owned()}}
+                        AlertDialogTitle {{t!("ui-windows-refresh_persisted_data").into_owned()}}
+                        AlertDialogDescription {{t!("ui-dialogs-refresh_persisted_data_message").into_owned()}}
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(
                             attr:data-testid = "refresh-persisted-data-ok",
                             on:click = move |_| shell.build_replay_index(IndexMode::RefreshAll)
                         ) {
-                            {t!("ui.buttons.refresh_persisted_data_confirm").into_owned()}
+                            {t!("ui-buttons-refresh_persisted_data_confirm").into_owned()}
                         }
                     }
                 }

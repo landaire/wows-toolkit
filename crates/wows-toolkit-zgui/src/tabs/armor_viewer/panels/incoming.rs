@@ -9,7 +9,6 @@ use std::rc::Rc;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replays::analyzer::decoder::HitType;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -24,6 +23,7 @@ use wows_toolkit_viewmodel::armor::penetration::Ifhe;
 use wows_toolkit_viewmodel::armor::plate_detail::flat_check;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::ShellInfo;
+use wt_translations::t;
 use zgui::canvas::zgui_color::Color;
 use zgui::component;
 use zgui::css;
@@ -173,12 +173,12 @@ fn clock_label(clock: GameClock) -> String {
 fn fired_label(context: &IncomingContext, salvo: &IncomingSalvo) -> Option<String> {
     let shell = context.shells.get(&salvo.shell).map(|shell| {
         let name = context.shell_names.get(&salvo.shell).unwrap_or(&shell.name);
-        t!("ui.armor.realtime.salvo_shell", caliber = format!("{:.0}", shell.caliber.value()), shell = name)
+        t!("ui-armor-realtime-salvo_shell", caliber = format!("{:.0}", shell.caliber.value()), shell = name)
             .into_owned()
     });
     let range = salvo
         .average_range()
-        .map(|range| t!("ui.armor.realtime.salvo_range", km = format!("{:.1}", range.value())).into_owned());
+        .map(|range| t!("ui-armor-realtime-salvo_range", km = format!("{:.1}", range.value())).into_owned());
 
     match (shell, range) {
         (Some(shell), Some(range)) => Some(format!("{shell}, {range}")),
@@ -263,7 +263,7 @@ pub fn IncomingLog(
         });
 
         let mut buttons =
-            vec![attacker_button(incoming, None, t!("ui.armor.realtime.all_enemies").into_owned(), chosen)];
+            vec![attacker_button(incoming, None, t!("ui-armor-realtime-all_enemies").into_owned(), chosen)];
         buttons.extend(attackers.iter().map(|(id, named)| attacker_button(incoming, Some(*id), named.clone(), chosen)));
 
         let strip = strip.map(|strip| {
@@ -272,13 +272,13 @@ pub fn IncomingLog(
         });
         let unchecked = (unchecked > 0).then(|| {
             AnyView::new(view! {
-                text(class = "wt-armor-incoming__dim") {{t!("ui.armor.realtime.sim_unchecked", count = unchecked).into_owned()}}
+                text(class = "wt-armor-incoming__dim") {{t!("ui-armor-realtime-sim_unchecked", count = unchecked).into_owned()}}
             })
         });
         let secondaries_checked = Signal::stored_local(if secondaries { Checked::Yes } else { Checked::No });
         let log = if salvos.is_empty() {
             AnyView::new(view! {
-                text(class = "wt-armor-incoming__hint") {{t!("ui.armor.realtime.nothing_landed").into_owned()}}
+                text(class = "wt-armor-incoming__hint") {{t!("ui-armor-realtime-nothing_landed").into_owned()}}
             })
         } else {
             let pick = viewport.incoming_pick();
@@ -298,7 +298,7 @@ pub fn IncomingLog(
         };
         let pick_hint = (!salvos.is_empty()).then(|| {
             AnyView::new(view! {
-                text(class = "wt-armor-incoming__dim") {{t!("ui.armor.realtime.pick_hint").into_owned()}}
+                text(class = "wt-armor-incoming__dim") {{t!("ui-armor-realtime-pick_hint").into_owned()}}
             })
         });
         let detail = viewport.incoming_detail().map(|detail| shell_detail(detail, viewport));
@@ -307,13 +307,13 @@ pub fn IncomingLog(
 
         AnyView::new(view! {
             column(class = "wt-armor-incoming", attr:data-testid = "armor-incoming") {
-                text(class = "wt-armor-incoming__title") {{locale.text("ui.armor.realtime.incoming_fire")}}
+                text(class = "wt-armor-incoming__title") {{locale.text("ui-armor-realtime-incoming_fire")}}
                 {strip}
                 text(class = "wt-armor-incoming__dim", attr:data-testid = "armor-incoming-tracked") {
-                    {t!("ui.armor.realtime.tracked", salvos = salvos.len(), shells = shells).into_owned()}
+                    {t!("ui-armor-realtime-tracked", salvos = salvos.len(), shells = shells).into_owned()}
                 }
                 {unchecked}
-                text(class = "wt-armor-incoming__dim") {{locale.text("ui.armor.realtime.attacker_filter")}}
+                text(class = "wt-armor-incoming__dim") {{locale.text("ui-armor-realtime-attacker_filter")}}
                 row(class = "wt-armor-incoming__attackers") {
                     {buttons}
                 }
@@ -327,7 +327,7 @@ pub fn IncomingLog(
                         attr:data-testid = "armor-incoming-secondaries"
                     )
                     Label(node_ref = secondaries_name, control = secondaries_box) {
-                        {locale.text("ui.armor.realtime.show_secondaries")}
+                        {locale.text("ui-armor-realtime-show_secondaries")}
                     }
                 }
                 {pick_hint}
@@ -399,9 +399,9 @@ fn salvo_block(
     // rather than as a blank.
     let who = incoming
         .with_untracked(|fire| fire.context.attackers.get(&salvo.attacker).cloned())
-        .unwrap_or_else(|| t!("ui.armor.realtime.unknown_attacker", id = salvo.attacker.raw()).into_owned());
+        .unwrap_or_else(|| t!("ui-armor-realtime-unknown_attacker", id = salvo.attacker.raw()).into_owned());
     let clock = salvo.first_clock;
-    let seek_label = t!("ui.armor.realtime.seek_to_salvo").into_owned();
+    let seek_label = t!("ui-armor-realtime-seek_to_salvo").into_owned();
     let seek_tip = seek_label.clone();
 
     let single = match salvo.shells.as_slice() {
@@ -434,7 +434,7 @@ fn salvo_block(
             }
         })
     });
-    let count = t!("ui.armor.realtime.shells", count = salvo.shells.len()).into_owned();
+    let count = t!("ui-armor-realtime-shells", count = salvo.shells.len()).into_owned();
     let fired = incoming.with_untracked(|fire| fired_label(&fire.context, salvo)).map(|fired| {
         AnyView::new(view! {
             text(class = "wt-armor-incoming__fired", attr:data-testid = format!("armor-incoming-fired-{index}")) {{fired}}
@@ -527,9 +527,9 @@ fn salvo_block(
 fn shell_detail(detail: IncomingShellDetail, viewport: ArmorViewportState) -> AnyView {
     let title = match &detail.shell {
         Some(shell) => format!("{} {:.0} mm", shell.ammo_type.display_name(), shell.caliber.value()),
-        None => t!("ui.armor.realtime.no_data").into_owned(),
+        None => t!("ui-armor-realtime-no_data").into_owned(),
     };
-    let server = t!("ui.armor.realtime.server_outcome", outcome = hit_outcome_label(&detail.server)).into_owned();
+    let server = t!("ui-armor-realtime-server_outcome", outcome = hit_outcome_label(&detail.server)).into_owned();
     let agreement = detail.agreement.map(|agreed| {
         AnyView::new(view! {
             text(class = "wt-armor-incoming__sim", attr:data-standing = standing_name(agreed.standing)) {
@@ -565,7 +565,7 @@ fn shell_detail(detail: IncomingShellDetail, viewport: ArmorViewportState) -> An
                 }
             })
         }
-        None => plate_detail::line(t!("ui.armor.realtime.not_cast").into_owned(), "dim", "armor-incoming-not-cast"),
+        None => plate_detail::line(t!("ui-armor-realtime-not_cast").into_owned(), "dim", "armor-incoming-not-cast"),
     };
 
     AnyView::new(view! {

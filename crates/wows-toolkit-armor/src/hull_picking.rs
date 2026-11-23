@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 
-use rust_i18n::t;
 use wowsunpack::export::armor_ray::ray_triangle_intersect;
 use wowsunpack::export::armor_ray::transform_point;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
@@ -17,6 +16,7 @@ use wowsunpack::export::part_group::PartGroup;
 use wowsunpack::export::ship_parts::ShipPart;
 use wowsunpack::export::ship_parts::ShipPartKey;
 use wowsunpack::game_params::types::ShipModelDistance;
+use wt_translations::t;
 
 use crate::load_ship::transform_normal;
 use crate::model_tree::model_sub_kind_label;
@@ -454,12 +454,12 @@ impl MeshTooltip {
 
     /// The model line, when the mesh comes from a model.
     pub fn model_label(&self) -> Option<String> {
-        self.model.as_ref().map(|model| t!("ui.model_view.part_model", model = model).into_owned())
+        self.model.as_ref().map(|model| t!("ui-model_view-part_model", model = model).into_owned())
     }
 
     /// The hardpoint line, when the mesh is mounted on one.
     pub fn hardpoint_label(&self) -> Option<String> {
-        self.hardpoint.as_ref().map(|hardpoint| t!("ui.model_view.part_hardpoint", hardpoint = hardpoint).into_owned())
+        self.hardpoint.as_ref().map(|hardpoint| t!("ui-model_view-part_hardpoint", hardpoint = hardpoint).into_owned())
     }
 }
 
@@ -470,19 +470,19 @@ fn part_group_label(group: PartGroup) -> String {
 
 const fn part_group_key(group: PartGroup) -> &'static str {
     match group {
-        PartGroup::Hull => "ui.model_view.part_group.hull",
-        PartGroup::MainBattery => "ui.model_view.part_group.main_battery",
-        PartGroup::SecondaryBattery => "ui.model_view.part_group.secondary_battery",
-        PartGroup::AaGuns => "ui.model_view.part_group.aa_guns",
-        PartGroup::Torpedoes => "ui.model_view.part_group.torpedoes",
-        PartGroup::DepthCharges => "ui.model_view.part_group.depth_charges",
-        PartGroup::FireControl => "ui.model_view.part_group.fire_control",
-        PartGroup::Radar => "ui.model_view.part_group.radar",
-        PartGroup::Missiles => "ui.model_view.part_group.missiles",
-        PartGroup::Decorations => "ui.model_view.part_group.decorations",
-        PartGroup::Misc => "ui.model_view.part_group.misc",
-        PartGroup::Armor => "ui.model_view.part_group.armor",
-        PartGroup::Other => "ui.model_view.part_group.other",
+        PartGroup::Hull => "ui-model_view-part_group-hull",
+        PartGroup::MainBattery => "ui-model_view-part_group-main_battery",
+        PartGroup::SecondaryBattery => "ui-model_view-part_group-secondary_battery",
+        PartGroup::AaGuns => "ui-model_view-part_group-aa_guns",
+        PartGroup::Torpedoes => "ui-model_view-part_group-torpedoes",
+        PartGroup::DepthCharges => "ui-model_view-part_group-depth_charges",
+        PartGroup::FireControl => "ui-model_view-part_group-fire_control",
+        PartGroup::Radar => "ui-model_view-part_group-radar",
+        PartGroup::Missiles => "ui-model_view-part_group-missiles",
+        PartGroup::Decorations => "ui-model_view-part_group-decorations",
+        PartGroup::Misc => "ui-model_view-part_group-misc",
+        PartGroup::Armor => "ui-model_view-part_group-armor",
+        PartGroup::Other => "ui-model_view-part_group-other",
     }
 }
 
@@ -691,7 +691,7 @@ mod tests {
     /// miscellaneous part by its group and kind.
     #[test]
     fn the_tooltip_names_the_group_in_the_readers_language() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let mut guns = quad("AA", 0.0, None);
         guns.group = PartGroup::AaGuns;
         let mut screw = quad("Screw", 0.0, None);
@@ -709,13 +709,11 @@ mod tests {
     /// A group with no name in a language would show its key there.
     #[test]
     fn every_group_is_named_in_every_language() {
-        use rust_i18n::Backend as _;
-
-        let catalog = wt_translations::TranslationsBackend::load();
-        for language in wt_translations::SUPPORTED_LANGUAGES {
+        for info in wt_translations::SUPPORTED_LANGUAGES {
+            let language = wt_translations::Language::from_code(info.code).expect("listed languages are supported");
             for group in PartGroup::ALL {
                 let key = part_group_key(group);
-                assert!(catalog.translate(language.code, key).is_some(), "{} lacks {key}", language.code);
+                assert!(wt_translations::has_message(language, key), "{} lacks {key}", info.code);
             }
         }
     }

@@ -4,12 +4,12 @@
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wgc_auth::AccountRealm;
 use wows_toolkit_launcher::KeyringState;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::REALMS;
 use wows_toolkit_launcher::SessionStorage;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -121,15 +121,15 @@ pub fn open_sign_in(shell: Shell, model: LauncherModel, target: LoginTarget) {
     shell.dialogs.open(move |handle| {
         install_stylesheet(SHEET, CSS);
         let title = match target {
-            LoginTarget::NewAccount => t!("ui.launcher.account.add_title").into_owned(),
-            LoginTarget::Reauthenticate(_) => t!("ui.launcher.account.again_title").into_owned(),
+            LoginTarget::NewAccount => t!("ui-launcher-account-add_title").into_owned(),
+            LoginTarget::Reauthenticate(_) => t!("ui-launcher-account-again_title").into_owned(),
         };
         let title = zgui::reactive::StoredValue::new(title);
         let finished = Memo::new(move |_| model.with(|state| state.launcher.login_finished()));
         let closing = RenderEffect::new(move |_| {
             let Some((_, storage)) = finished.get() else { return };
             if storage == SessionStorage::MemoryOnly {
-                shell.toasts().warn(t!("ui.launcher.account.memory_only").into_owned());
+                shell.toasts().warn(t!("ui-launcher-account-memory_only").into_owned());
             }
             handle.close();
         });
@@ -167,7 +167,7 @@ pub fn KeyringHint(model: LauncherModel) -> impl IntoView {
 
     view! {
         Show(when = move || ahead.get()) {
-            text(class = "wt-launcher__dim", attr:data-testid = "launcher-keyring-hint") {{locale.text("ui.launcher.keyring.unlock_hint")}}
+            text(class = "wt-launcher__dim", attr:data-testid = "launcher-keyring-hint") {{locale.text("ui-launcher-keyring-unlock_hint")}}
         }
     }
 }
@@ -244,7 +244,7 @@ fn Credentials(model: LauncherModel, form: SignInForm, target: LoginTarget) -> i
         AnyView::new(view! {
             text(class = "wt-launcher__dim") {{move || {
                 locale.track();
-                t!("ui.launcher.account.realm_fixed", realm = realm_badge(form.realm.get())).into_owned()
+                t!("ui-launcher-account-realm_fixed", realm = realm_badge(form.realm.get())).into_owned()
             }}}
         })
     } else {
@@ -265,8 +265,8 @@ fn Credentials(model: LauncherModel, form: SignInForm, target: LoginTarget) -> i
         {realm_picker}
         Input(
             value = form.email,
-            placeholder = locale.text("ui.launcher.account.email")(),
-            label = locale.text("ui.launcher.account.email")(),
+            placeholder = locale.text("ui-launcher-account-email")(),
+            label = locale.text("ui-launcher-account-email")(),
             required = true,
             invalid = email_invalid,
             class = "wt-launcher__input",
@@ -276,8 +276,8 @@ fn Credentials(model: LauncherModel, form: SignInForm, target: LoginTarget) -> i
         Input(
             value = form.password,
             secure = true,
-            placeholder = locale.text("ui.launcher.account.password")(),
-            label = locale.text("ui.launcher.account.password")(),
+            placeholder = locale.text("ui-launcher-account-password")(),
+            label = locale.text("ui-launcher-account-password")(),
             required = true,
             class = "wt-launcher__input",
             attr:data-testid = "launcher-password",
@@ -292,13 +292,13 @@ fn Credentials(model: LauncherModel, form: SignInForm, target: LoginTarget) -> i
                 attr:data-testid = "launcher-sign-in",
                 on:click = move |_| form.sign_in(model, target)
             ) {
-                {locale.text("ui.launcher.account.sign_in")}
+                {locale.text("ui-launcher-account-sign_in")}
             }
             if move || busy.get() {
                 Spinner(attr:data-testid = "launcher-signing-in")
             }
         }
-        text(class = "wt-launcher__dim") {{locale.text("ui.launcher.account.password_note")}}
+        text(class = "wt-launcher__dim") {{locale.text("ui-launcher-account-password_note")}}
     }
 }
 
@@ -312,11 +312,11 @@ fn TwoFactor(model: LauncherModel, form: SignInForm) -> impl IntoView {
     let backup = form.backup_code;
 
     view! {
-        text {{locale.text("ui.launcher.account.code_required")}}
+        text {{locale.text("ui-launcher-account-code_required")}}
         Input(
             value = form.code,
-            placeholder = locale.text("ui.launcher.account.code")(),
-            label = locale.text("ui.launcher.account.code")(),
+            placeholder = locale.text("ui-launcher-account-code")(),
+            label = locale.text("ui-launcher-account-code")(),
             class = "wt-launcher__input",
             attr:data-testid = "launcher-code",
             on:key_down = move |ev| {
@@ -332,7 +332,7 @@ fn TwoFactor(model: LauncherModel, form: SignInForm) -> impl IntoView {
                 control = backup_box,
                 attr:data-testid = "launcher-backup-code-label"
             ) {
-                {locale.text("ui.launcher.account.use_backup_code")}
+                {locale.text("ui-launcher-account-use_backup_code")}
             }
         }
         LoginError(model = model)
@@ -343,7 +343,7 @@ fn TwoFactor(model: LauncherModel, form: SignInForm) -> impl IntoView {
                 attr:data-testid = "launcher-submit-code",
                 on:click = move |_| form.submit_code(model)
             ) {
-                {locale.text("ui.launcher.account.submit_code")}
+                {locale.text("ui-launcher-account-submit_code")}
             }
             if move || busy.get() {
                 Spinner()
@@ -357,7 +357,7 @@ fn CaptchaNotice(model: LauncherModel) -> impl IntoView {
     let locale = Services::current().locale;
 
     view! {
-        text(class = "wt-launcher__warn", attr:data-testid = "launcher-captcha") {{locale.text("ui.launcher.account.captcha")}}
+        text(class = "wt-launcher__warn", attr:data-testid = "launcher-captcha") {{locale.text("ui-launcher-account-captcha")}}
         row(class = "wt-launcher__row") {
             Button(
                 variant = ButtonVariant::Outline,
@@ -365,7 +365,7 @@ fn CaptchaNotice(model: LauncherModel) -> impl IntoView {
                 attr:data-testid = "launcher-captcha-retry",
                 on:click = move |_| model.update_launcher(|launcher| launcher.dismiss_captcha())
             ) {
-                {locale.text("ui.launcher.retry")}
+                {locale.text("ui-launcher-retry")}
             }
         }
     }
@@ -381,12 +381,12 @@ pub fn KeyringNotice(model: LauncherModel) -> impl IntoView {
     view! {
         Show(when = move || missing.get()) {
             column(class = "wt-launcher__column wt-launcher__keyring", attr:data-testid = "launcher-keyring-missing") {
-                text(class = "wt-launcher__warn") {{locale.text("ui.launcher.keyring.unencrypted")}}
+                text(class = "wt-launcher__warn") {{locale.text("ui-launcher-keyring-unencrypted")}}
                 Tooltip {
                     TooltipTrigger {
-                        text(class = "wt-launcher__link", attr:data-testid = "launcher-keyring-help") {{locale.text("ui.launcher.keyring.how")}}
+                        text(class = "wt-launcher__link", attr:data-testid = "launcher-keyring-help") {{locale.text("ui-launcher-keyring-how")}}
                     }
-                    TooltipContent {{locale.text("ui.launcher.keyring.how_detail")}}
+                    TooltipContent {{locale.text("ui-launcher-keyring-how_detail")}}
                 }
             }
         }

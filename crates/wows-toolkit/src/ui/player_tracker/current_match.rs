@@ -15,12 +15,12 @@ use egui_taffy::taffy::prelude::fr;
 use egui_taffy::taffy::prelude::length;
 use egui_taffy::taffy::prelude::percent;
 use jiff::Timestamp;
-use rust_i18n::t;
 use wows_replays::ReplayFile;
 use wows_replays::types::AccountId;
 use wows_toolkit_viewmodel::player_tracker::live::debug_replay_choices;
 use wowsunpack::data::Version;
 use wowsunpack::rating_scope::RatingScope;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::match_stats::PlayerStatsOut;
@@ -117,7 +117,7 @@ impl ToolkitTabViewer<'_> {
                 ..
             } = &*player_tracker;
             let Some(roster) = resolved_roster.as_ref() else {
-                ui.label(RichText::new(t!("ui.player_tracker.no_live_match")).weak());
+                ui.label(RichText::new(t!("ui-player_tracker-no_live_match")).weak());
                 return;
             };
 
@@ -126,10 +126,10 @@ impl ToolkitTabViewer<'_> {
 
             ui.horizontal(|ui| {
                 let mut new_mode = mode;
-                ui.selectable_value(&mut new_mode, WinRateMode::Overall, t!("ui.player_tracker.win_rate_overall"))
-                    .on_hover_text(t!("ui.player_tracker.win_rate_mode_hover"));
-                ui.selectable_value(&mut new_mode, WinRateMode::Ship, t!("ui.player_tracker.win_rate_ship"))
-                    .on_hover_text(t!("ui.player_tracker.win_rate_mode_hover"));
+                ui.selectable_value(&mut new_mode, WinRateMode::Overall, t!("ui-player_tracker-win_rate_overall"))
+                    .on_hover_text(t!("ui-player_tracker-win_rate_mode_hover"));
+                ui.selectable_value(&mut new_mode, WinRateMode::Ship, t!("ui-player_tracker-win_rate_ship"))
+                    .on_hover_text(t!("ui-player_tracker-win_rate_mode_hover"));
                 if new_mode != mode {
                     actions.set_win_rate_mode = Some(new_mode);
                 }
@@ -140,12 +140,12 @@ impl ToolkitTabViewer<'_> {
                 ui.selectable_value(
                     &mut new_view_mode,
                     CurrentMatchViewMode::Compact,
-                    t!("ui.player_tracker.view_compact"),
+                    t!("ui-player_tracker-view_compact"),
                 );
                 ui.selectable_value(
                     &mut new_view_mode,
                     CurrentMatchViewMode::Detailed,
-                    t!("ui.player_tracker.view_detailed"),
+                    t!("ui-player_tracker-view_detailed"),
                 );
                 if new_view_mode != view_mode {
                     actions.set_view_mode = Some(new_view_mode);
@@ -157,18 +157,18 @@ impl ToolkitTabViewer<'_> {
                     MatchStatsState::Idle => {}
                     MatchStatsState::Resolving => {
                         ui.spinner();
-                        ui.label(t!("ui.player_tracker.stats_resolving"));
+                        ui.label(t!("ui-player_tracker-stats_resolving"));
                     }
                     // Held for one frame at most: the lookup is sent at the
                     // end of the frame that draws this view.
                     MatchStatsState::Held | MatchStatsState::Fetching => {
                         ui.spinner();
-                        ui.label(t!("ui.player_tracker.stats_fetching"));
+                        ui.label(t!("ui-player_tracker-stats_fetching"));
                     }
                     MatchStatsState::Ready(_) => {}
                     MatchStatsState::Failed(reason) => {
                         ui.label(
-                            RichText::new(t!("ui.player_tracker.stats_unavailable", reason = reason))
+                            RichText::new(t!("ui-player_tracker-stats_unavailable", reason = reason))
                                 .color(ui.sem().warn),
                         );
                     }
@@ -181,7 +181,7 @@ impl ToolkitTabViewer<'_> {
                 _ => &empty_stats,
             };
 
-            let locale = rust_i18n::locale().to_string();
+            let locale = wt_translations::locale().to_string();
             let twitch_state = self.tab_state.twitch_state.read();
             let ctx = TeamContext {
                 tracked: tracked_players,
@@ -199,14 +199,14 @@ impl ToolkitTabViewer<'_> {
 
             let win = ui.sem().win;
             let loss = ui.sem().loss;
-            let your_team = t!("ui.player_tracker.your_team", count = roster.friendly.len()).to_string();
-            let enemy_team = t!("ui.player_tracker.enemy_team", count = roster.enemy.len()).to_string();
+            let your_team = t!("ui-player_tracker-your_team", count = roster.friendly.len()).to_string();
+            let enemy_team = t!("ui-player_tracker-enemy_team", count = roster.enemy.len()).to_string();
 
             render_rosters(ui, your_team, enemy_team, win, loss, &roster.friendly, &roster.enemy, &ctx, &mut actions);
         }
 
         if let Some(login) = actions.copy_login {
-            self.tab_state.toasts.lock().success(t!("ui.twitch.copied", name = &login).to_string());
+            self.tab_state.toasts.lock().success(t!("ui-twitch-copied", name = &login).to_string());
             ui.ctx().copy_text(login);
         }
         if let Some(id) = actions.find_matches_target {
@@ -240,7 +240,7 @@ impl ToolkitTabViewer<'_> {
         let label = selected
             .as_ref()
             .and_then(|path| replays.iter().find(|choice| choice.path == *path).map(|choice| choice.label.clone()))
-            .unwrap_or_else(|| t!("ui.player_tracker.debug_replay_none").to_string());
+            .unwrap_or_else(|| t!("ui-player_tracker-debug_replay_none").to_string());
 
         let mut picked = None;
         ui.horizontal(|ui| {
@@ -251,8 +251,8 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
             });
-            ui.label(t!("ui.player_tracker.debug_replay_picker"))
-                .on_hover_text(t!("ui.player_tracker.debug_replay_picker_hover"));
+            ui.label(t!("ui-player_tracker-debug_replay_picker"))
+                .on_hover_text(t!("ui-player_tracker-debug_replay_picker_hover"));
         });
 
         let Some(path) = picked else {
@@ -410,9 +410,9 @@ fn row_fill(band: Option<PersonalRatingCategory>, index: usize, visuals: &egui::
 /// entry at all and so gets no hover.
 fn no_rate_hover_key(status: PlayerStatsStatus) -> &'static str {
     match status {
-        PlayerStatsStatus::Hidden => "ui.player_tracker.stats_hidden",
-        PlayerStatsStatus::Unavailable | PlayerStatsStatus::Unknown => "ui.player_tracker.stats_no_data",
-        PlayerStatsStatus::Ok => "ui.player_tracker.stats_unplayed_ship",
+        PlayerStatsStatus::Hidden => "ui-player_tracker-stats_hidden",
+        PlayerStatsStatus::Unavailable | PlayerStatsStatus::Unknown => "ui-player_tracker-stats_no_data",
+        PlayerStatsStatus::Ok => "ui-player_tracker-stats_unplayed_ship",
     }
 }
 
@@ -433,17 +433,17 @@ fn render_team(
         if let Some(rate) = team_average_win_rate(rows, ctx.stats, ctx.mode) {
             let swatch = PersonalRatingCategory::from_win_rate(rate).swatch(ui.visuals());
             ui.label(
-                RichText::new(t!("ui.player_tracker.team_average_win_rate", rate = format!("{rate:.1}%")))
+                RichText::new(t!("ui-player_tracker-team_average_win_rate", rate = format!("{rate:.1}%")))
                     .color(swatch.text),
             );
         }
         if !ctx.rating_scope.is_rated() {
-            ui.label(RichText::new(format!("{}: -", t!("stat.avg_pr"))).weak())
-                .on_hover_text(t!("ui.personal_rating.unrated_hover"));
+            ui.label(RichText::new(format!("{}: -", t!("stat-avg_pr"))).weak())
+                .on_hover_text(t!("ui-personal_rating-unrated_hover"));
         }
         if let Some(pr) = team_average_personal_rating(rows, ctx.stats, ctx.mode, ctx.rating_scope) {
             let swatch = PersonalRatingCategory::from_pr(pr).swatch(ui.visuals());
-            ui.label(RichText::new(format!("{}: {pr:.0}", t!("stat.avg_pr"))).color(swatch.text));
+            ui.label(RichText::new(format!("{}: {pr:.0}", t!("stat-avg_pr"))).color(swatch.text));
         }
     });
 
@@ -522,28 +522,28 @@ fn render_team_header(ui: &mut egui::Ui, id_salt: &'static str, grid_width: f32,
             .show(|tui| {
                 tui.style(class_column_style())
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.search.field.class"));
+                    .small(t!("ui-search-field-class"));
                 tui.style(player_column_style())
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.search.field.player_present"));
+                    .small(t!("ui-search-field-player_present"));
                 tui.style(ship_column_style())
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.replay.column.ship_name"));
+                    .small(t!("ui-replay-column-ship_name"));
                 tui.style(fixed_column_style(WIN_RATE_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.player_tracker.column.win_rate"));
+                    .small(t!("ui-player_tracker-column-win_rate"));
                 tui.style(fixed_column_style(PERSONAL_RATING_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.player_tracker.column.personal_rating"));
+                    .small(t!("ui-player_tracker-column-personal_rating"));
                 tui.style(fixed_column_style(BATTLES_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.player_tracker.column.battles"));
+                    .small(t!("ui-player_tracker-column-battles"));
                 tui.style(fixed_column_style(DAMAGE_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.player_tracker.column.avg_damage"));
+                    .small(t!("ui-player_tracker-column-avg_damage"));
                 tui.style(fixed_column_style(ENCOUNTERS_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .small(t!("ui.player_tracker.column.encounters"));
+                    .small(t!("ui-player_tracker-column-encounters"));
                 tui.style(fixed_column_style(ACTIONS_COLUMN_WIDTH)).add_empty();
             });
     });
@@ -637,7 +637,7 @@ fn render_ship_name(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamConte
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
         first_detail_line(ui, |ui| render_ship_name_line(ui, row_data));
-        ui.label(RichText::new(t!("ui.player_tracker.ship_stats")).small().weak());
+        ui.label(RichText::new(t!("ui-player_tracker-ship_stats")).small().weak());
     });
 }
 
@@ -686,7 +686,7 @@ fn render_player_identity_line(
     ui.spacing_mut().item_spacing.x = 2.0;
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if stats_entry.is_some_and(|entry| entry.status == PlayerStatsStatus::Hidden) {
-            ui.label(icons::EYE_SLASH).on_hover_text(t!("ui.player_tracker.stats_hidden"));
+            ui.label(icons::EYE_SLASH).on_hover_text(t!("ui-player_tracker-stats_hidden"));
         }
 
         if let Some(player) = row_data.tracked.and_then(|id| ctx.tracked.get(&id))
@@ -751,7 +751,7 @@ fn render_personal_rating(
 ) {
     // The ratings are career figures, shown only where the match itself is rated.
     if !rating_scope.is_rated() {
-        ui.label(RichText::new("-").weak()).on_hover_text(t!("ui.personal_rating.unrated_hover"));
+        ui.label(RichText::new("-").weak()).on_hover_text(t!("ui-personal_rating-unrated_hover"));
         return;
     }
     let Some(pr) = row_stats(stats_entry, mode, rating_scope).pr else {
@@ -759,8 +759,8 @@ fn render_personal_rating(
         return;
     };
     let hover = match mode {
-        WinRateMode::Overall => t!("ui.player_tracker.pr_overall_hover"),
-        WinRateMode::Ship => t!("ui.player_tracker.pr_ship_hover"),
+        WinRateMode::Overall => t!("ui-player_tracker-pr_overall_hover"),
+        WinRateMode::Ship => t!("ui-player_tracker-pr_ship_hover"),
     };
     crate::ui::widgets::pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false)
         .on_hover_text(hover);
@@ -775,7 +775,7 @@ fn render_battles(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: 
         ui.label(RichText::new("-").weak());
         return;
     };
-    let hover = format!("{}: {}", scope_label(mode), t!("ui.player_tracker.column.battles"));
+    let hover = format!("{}: {}", scope_label(mode), t!("ui-player_tracker-column-battles"));
     ui.label(separate_number(battles, Some(ctx.locale))).on_hover_text(hover);
 }
 
@@ -788,7 +788,7 @@ fn render_damage(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &
         ui.label(RichText::new("-").weak());
         return;
     };
-    let hover = format!("{}: {}", scope_label(mode), t!("ui.player_tracker.avg_damage"));
+    let hover = format!("{}: {}", scope_label(mode), t!("ui-player_tracker-avg_damage"));
     ui.label(separate_number(damage, Some(ctx.locale))).on_hover_text(hover);
 }
 
@@ -811,8 +811,8 @@ fn render_scoped_cell(ui: &mut egui::Ui, ctx: &TeamContext<'_>, mut render: impl
 
 fn scope_label(mode: WinRateMode) -> String {
     match mode {
-        WinRateMode::Overall => t!("ui.player_tracker.win_rate_overall"),
-        WinRateMode::Ship => t!("ui.player_tracker.win_rate_ship"),
+        WinRateMode::Overall => t!("ui-player_tracker-win_rate_overall"),
+        WinRateMode::Ship => t!("ui-player_tracker-win_rate_ship"),
     }
     .to_string()
 }
@@ -833,7 +833,7 @@ fn render_encounters(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamCont
         text = text.color(color);
     }
     ui.label(text).on_hover_text(t!(
-        "ui.player_tracker.encounters_hover",
+        "ui-player_tracker-encounters_hover",
         total = total,
         range = in_range,
         last = last
@@ -852,7 +852,7 @@ fn render_action_menu(ui: &mut egui::Ui, row_data: &LiveRosterRow, actions: &mut
     ui.menu_button(icons::DOTS_THREE, |ui| {
         if let Some(id) = row_data.tracked
             && ui
-                .small_button(wt_translations::icon_t(icons::MAGNIFYING_GLASS, &t!("ui.player_tracker.find_matches")))
+                .small_button(wt_translations::icon_t(icons::MAGNIFYING_GLASS, &t!("ui-player_tracker-find_matches")))
                 .clicked()
         {
             actions.find_matches_target = Some(id);
@@ -867,7 +867,7 @@ fn render_action_menu(ui: &mut egui::Ui, row_data: &LiveRosterRow, actions: &mut
             if ui
                 .small_button(wt_translations::icon_t(
                     icons::ARROW_SQUARE_OUT,
-                    &t!("ui.player_tracker.open_wows_numbers"),
+                    &t!("ui-player_tracker-open_wows_numbers"),
                 ))
                 .clicked()
             {
@@ -879,7 +879,7 @@ fn render_action_menu(ui: &mut egui::Ui, row_data: &LiveRosterRow, actions: &mut
             if ui
                 .small_button(wt_translations::icon_t(
                     icons::ARROW_SQUARE_OUT,
-                    &t!("ui.player_tracker.open_shipbuilds"),
+                    &t!("ui-player_tracker-open_shipbuilds"),
                 ))
                 .clicked()
             {
@@ -961,10 +961,10 @@ mod tests {
     /// reason, and `Ok` (an unplayed ship) gets the unplayed-ship reason.
     #[test]
     fn no_rate_hover_key_picks_the_status_specific_reason() {
-        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Hidden), "ui.player_tracker.stats_hidden");
-        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Unavailable), "ui.player_tracker.stats_no_data");
-        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Unknown), "ui.player_tracker.stats_no_data");
-        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Ok), "ui.player_tracker.stats_unplayed_ship");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Hidden), "ui-player_tracker-stats_hidden");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Unavailable), "ui-player_tracker-stats_no_data");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Unknown), "ui-player_tracker-stats_no_data");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Ok), "ui-player_tracker-stats_unplayed_ship");
     }
 
     #[test]
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn win_rate_hover_labels_both_scopes_when_both_are_present() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(42.2));
 
         let hover = win_rate_hover(Some(&stats), "en").expect("both scopes are present");
@@ -1068,7 +1068,7 @@ mod tests {
     /// Average damage joins each scope's line, grouped for the locale.
     #[test]
     fn win_rate_hover_carries_average_damage_when_the_scope_reports_it() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(42.2));
 
         let hover = win_rate_hover(Some(&stats), "en").expect("both scopes are present");
@@ -1081,7 +1081,7 @@ mod tests {
     /// clause, rather than reporting a fabricated 0.
     #[test]
     fn win_rate_hover_drops_the_damage_clause_when_the_scope_has_none() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let mut stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(42.2));
         stats.overall_avg_damage = None;
 
@@ -1097,7 +1097,7 @@ mod tests {
     /// a zero one, so the hover must omit that line rather than show 0%.
     #[test]
     fn win_rate_hover_omits_a_scope_with_no_rate() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let stats = stats(PlayerStatsStatus::Ok, Some(52.5), None);
 
         let hover = win_rate_hover(Some(&stats), "en").expect("the overall scope is present");
@@ -1179,7 +1179,7 @@ mod tests {
 
     #[test]
     fn kittest_current_match_columns_are_visually_aligned() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let mut friendly = vec![
             visual_row(1, "Bourgogne", Some("PL-WY"), "ORKANIN"),
             visual_row(2, "C. Colombo", Some("VENIK"), "MarshalPiten"),
@@ -1312,7 +1312,7 @@ mod tests {
 
     #[test]
     fn kittest_detailed_rows_show_overall_then_ship_stats() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let friendly = vec![visual_row(1, "Bourgogne", Some("PL-WY"), "ORKANIN")];
         let enemy = vec![visual_row(2, "Libertad", None, "DontThankMe")];
         let mut friendly_stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(61.7));
@@ -1409,7 +1409,7 @@ mod tests {
 
     #[test]
     fn kittest_detailed_ship_scope_changes_banding_without_hiding_overall_stats() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let friendly = vec![visual_row(1, "Bourgogne", Some("PL-WY"), "ORKANIN")];
         let enemy = vec![visual_row(2, "Libertad", None, "DontThankMe")];
         let mut friendly_stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(61.7));
@@ -1471,7 +1471,7 @@ mod tests {
 
     #[test]
     fn kittest_compact_full_rosters_fit_the_representative_viewport() {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let friendly: Vec<_> = (0..12)
             .map(|index| visual_row(index + 1, &format!("Ship F{index}"), None, &format!("Friendly{index}")))
             .collect();

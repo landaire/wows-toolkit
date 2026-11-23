@@ -14,7 +14,6 @@ use landaire_ui::ThemeRootProps;
 use landaire_ui::ToastHostProps;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
-use rust_i18n::t;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
@@ -26,6 +25,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use wows_toolkit_viewmodel::stats::setting_keys;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
@@ -135,8 +135,8 @@ fn dock_tab_selected(window: &mut HeadlessWindow, label: &str) -> Option<bool> {
 fn the_stats_dock_opens_on_the_overview_with_a_chart_beside_it() {
     let mut window = open_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
 
-    let overview = t!("ui.stats.overview").into_owned();
-    let ships = t!("ui.stats.ships").into_owned();
+    let overview = t!("ui-stats-overview").into_owned();
+    let ships = t!("ui-stats-ships").into_owned();
     assert_eq!(dock_tab_selected(&mut window, &overview), Some(true), "the tab opens on its overview");
     assert_eq!(dock_tab_selected(&mut window, &ships), Some(false));
     assert!(window.by_test_id("stats-chart").is_some(), "the chart is visible beside the overview");
@@ -269,23 +269,23 @@ fn a_left_out_ship_and_game_leave_every_panel_until_the_filters_reset() {
     };
     assert!(window.by_test_id("stats-reset-filters").is_none(), "nothing is filtered to begin with");
 
-    show_dock_tab(&mut window, &t!("ui.stats.ships"));
+    show_dock_tab(&mut window, &t!("ui-stats-ships"));
     assert_eq!(ships(&window), ["3/3"]);
     click(&mut window, &format!("ship-leave-out-{}", 4_288_675_536_u64));
     assert_eq!(ships(&window), ["2/2"], "Yamato leaves the Ships panel");
     assert!(narrowed(&window, "stats-ship-filter"), "the ship filter shows it narrows the games");
 
     // Yamato's five games are no longer offered; the newest game, a Des Moines one, is.
-    show_dock_tab(&mut window, &t!("ui.stats.matches"));
-    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 9, total = 9, left_out = 0).into_owned()]);
+    show_dock_tab(&mut window, &t!("ui-stats-matches"));
+    assert_eq!(matches(&window), [t!("ui-stats-match_count", shown = 9, total = 9, left_out = 0).into_owned()]);
     assert!(window.by_test_id("stats-left-out-games").is_none());
     click(&mut window, "stats-match-keep-13");
     assert_eq!(checked(&mut window, "stats-match-keep-13"), Some(Toggled::False));
-    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 9, total = 9, left_out = 1).into_owned()]);
+    assert_eq!(matches(&window), [t!("ui-stats-match_count", shown = 9, total = 9, left_out = 1).into_owned()]);
     assert!(window.by_test_id("stats-left-out-games").is_some(), "the bar counts the game left out");
 
     click(&mut window, "stats-reset-filters");
-    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 14, total = 14, left_out = 0).into_owned()]);
+    assert_eq!(matches(&window), [t!("ui-stats-match_count", shown = 14, total = 14, left_out = 0).into_owned()]);
     assert!(window.by_test_id("stats-left-out-games").is_none());
     assert!(!narrowed(&window, "stats-ship-filter"));
     assert!(window.by_test_id("stats-reset-filters").is_none(), "nothing is left to reset");
@@ -295,7 +295,7 @@ fn a_left_out_ship_and_game_leave_every_panel_until_the_filters_reset() {
 #[test]
 fn a_left_out_game_that_is_gone_is_forgotten() {
     let (mut window, handles) = open_directory();
-    show_dock_tab(&mut window, &t!("ui.stats.matches"));
+    show_dock_tab(&mut window, &t!("ui-stats-matches"));
     click(&mut window, "stats-match-keep-13");
     assert!(window.by_test_id("stats-left-out-games").is_some());
 
@@ -310,19 +310,19 @@ fn a_left_out_game_that_is_gone_is_forgotten() {
 fn the_ship_filter_puts_a_left_out_ship_back() {
     let (mut window, _handles) = open_directory();
     let matches = |window: &HeadlessWindow| window.texts_by_class("wt-stats-matches__count");
-    show_dock_tab(&mut window, &t!("ui.stats.matches"));
+    show_dock_tab(&mut window, &t!("ui-stats-matches"));
 
     click(&mut window, "stats-ship-filter");
     let yamato = format!("stats-ship-filter-{}", 4_288_675_536_u64);
     assert_eq!(checked(&mut window, &yamato), Some(Toggled::True), "every ship counts to begin with");
     click(&mut window, &yamato);
     assert_eq!(checked(&mut window, &yamato), Some(Toggled::False));
-    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 9, total = 9, left_out = 0).into_owned()]);
+    assert_eq!(matches(&window), [t!("ui-stats-match_count", shown = 9, total = 9, left_out = 0).into_owned()]);
 
     click(&mut window, "stats-ship-filter-none");
-    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 0, total = 0, left_out = 0).into_owned()]);
+    assert_eq!(matches(&window), [t!("ui-stats-match_count", shown = 0, total = 0, left_out = 0).into_owned()]);
     click(&mut window, "stats-ship-filter-all");
-    assert_eq!(matches(&window), [t!("ui.stats.match_count", shown = 14, total = 14, left_out = 0).into_owned()]);
+    assert_eq!(matches(&window), [t!("ui-stats-match_count", shown = 14, total = 14, left_out = 0).into_owned()]);
 }
 
 #[test]
@@ -502,9 +502,9 @@ fn a_chart_tab_names_its_statistic_and_how_it_is_plotted() {
     let line = ChartSettings::default();
     assert_eq!(chart_title(&line), damage);
     let running = ChartSettings { running: true, ..ChartSettings::default() };
-    assert_eq!(chart_title(&running), format!("{damage} {}", t!("chart.rolling_average_suffix")));
+    assert_eq!(chart_title(&running), format!("{damage} {}", t!("chart-rolling_average_suffix")));
     let bar = ChartSettings { mode: ChartMode::Bar, ..ChartSettings::default() };
-    assert_eq!(chart_title(&bar), t!("stat.avg_prefix", name = damage));
+    assert_eq!(chart_title(&bar), t!("stat-avg_prefix", name = damage));
     let win_rate = ChartSettings { mode: ChartMode::Bar, stat: ChartableStat::WinRate, ..ChartSettings::default() };
     assert_eq!(chart_title(&win_rate), ChartableStat::WinRate.label(), "a win rate is not averaged twice");
     let survival =
@@ -576,7 +576,7 @@ fn debug_mode_offers_sample_data_that_replaces_the_session_until_restored() {
     assert!(window.by_test_id("stats-clear").is_none(), "made-up games cannot be cleared");
     assert!(window.by_test_id("stats-overview-summary").is_some(), "the overview sums the games");
     assert!(window.by_test_id("stats-chart").is_some(), "the chart plots them");
-    let ships = t!("ui.stats.ships").into_owned();
+    let ships = t!("ui-stats-ships").into_owned();
     let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
     window.click(tab).expect("the Ships tab is clicked");
     window.advance(Duration::from_millis(300));
@@ -696,13 +696,13 @@ fn label_of(window: &mut HeadlessWindow, test_id: &str) -> String {
 
 /// The overview's record, the Ships panel's count and the chart's ships, in that order.
 fn every_view(window: &mut HeadlessWindow) -> (String, String, String) {
-    let overview = t!("ui.stats.overview").into_owned();
+    let overview = t!("ui-stats-overview").into_owned();
     let tab = window.by_role_and_label(Role::Tab, &overview).expect("the Overview tab is in the dock");
     window.click(tab).expect("the Overview tab is clicked");
     window.advance(Duration::from_millis(300));
     let record = window.texts_by_class("wt-stats-summary__record").join(" ");
 
-    let ships = t!("ui.stats.ships").into_owned();
+    let ships = t!("ui-stats-ships").into_owned();
     let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
     window.click(tab).expect("the Ships tab is clicked");
     window.advance(Duration::from_millis(300));
@@ -716,7 +716,7 @@ fn the_session_scope_narrows_every_stats_view_to_the_session_and_back() {
     let (mut window, services) = open_session_stats(HeadlessOptions::new(crate::interaction_tests::REVIEW_SIZE));
     let saved_view = every_view(&mut window);
     assert_eq!(saved_view.1, "3/3", "the saved session's three ships are listed");
-    assert!(saved_view.2.ends_with(&t!("ui.stats.ship_selection_count", selected = 3, total = 3).into_owned()));
+    assert!(saved_view.2.ends_with(&t!("ui-stats-ship_selection_count", selected = 3, total = 3).into_owned()));
 
     click(&mut window, "stats-session-scope-since-opened");
     settle_in_real_time(&mut window);
@@ -728,12 +728,12 @@ fn the_session_scope_narrows_every_stats_view_to_the_session_and_back() {
     );
     assert_eq!(
         text_of(&window, "wt-stats__session-count"),
-        t!("ui.stats.session_chip_since", time = "14:32", battles = t!("ui.stats.session_battles_many", count = 2))
+        t!("ui-stats-session_chip_since", time = "14:32", battles = t!("ui-stats-session_battles_many", count = 2))
     );
     let (record, ships, chart) = every_view(&mut window);
     assert_eq!(record, "1W/1L (50.0%)", "the overview counts the two battles since the app opened");
     assert_eq!(ships, "1/1", "the Ships panel lists only their ship");
-    assert!(chart.ends_with(&t!("ui.stats.ship_selection_count", selected = 1, total = 1).into_owned()), "{chart}");
+    assert!(chart.ends_with(&t!("ui-stats-ship_selection_count", selected = 1, total = 1).into_owned()), "{chart}");
     let clear = window.by_test_id("stats-clear").expect("the clear button is on screen");
     assert_eq!(
         window.a11y(clear).map(|state| state.disabled),
@@ -758,7 +758,7 @@ fn a_session_with_no_battles_says_what_fills_it() {
     click(&mut window, "stats-session-scope-since-opened");
     settle_in_real_time(&mut window);
     let said = window.texts_by_class("wt-stats__empty-text").concat();
-    assert_eq!(said, t!("ui.stats.session_empty_since", time = "14:32"));
+    assert_eq!(said, t!("ui-stats-session_empty_since", time = "14:32"));
 
     services.session.listed(yamato_at("16.11.2026 15:00:00", 90_000, true));
     settle_in_real_time(&mut window);

@@ -9,12 +9,12 @@ use landaire_ui::ThemeRootProps;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_toolkit_replay_data::directory_stats::ReadState;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetProgress;
 use wows_toolkit_viewmodel::stats::replay_set::ReplaySetSkips;
+use wt_translations::t;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::view;
@@ -114,7 +114,7 @@ fn a_dock_tab_chosen_in_a_directory_tab_is_shown() {
     settle(&mut window);
     assert!(window.by_test_id("directory-stats-reload").is_some(), "the read has finished");
 
-    let ships = t!("ui.stats.ships").into_owned();
+    let ships = t!("ui-stats-ships").into_owned();
     let tab = window.by_role_and_label(Role::Tab, &ships).expect("the Ships tab is in the dock");
     window.click(tab).expect("the Ships tab is clicked");
     settle(&mut window);

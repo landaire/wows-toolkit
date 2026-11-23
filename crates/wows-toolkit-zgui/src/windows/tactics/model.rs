@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::tactics::ScanProgress;
@@ -11,6 +10,7 @@ use wows_toolkit_replay_data::tactics::board::Board;
 use wows_toolkit_replay_data::tactics::board::BoardNotice;
 use wows_toolkit_replay_data::tactics::board::Redraw;
 use wows_toolkit_replay_data::tactics::render::FrameRequest;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -153,25 +153,25 @@ impl BoardModel {
     fn tell(self, notice: &BoardNotice) {
         let Some(toasts) = self.toasts.get_value() else { return };
         match notice {
-            BoardNotice::PresetNeedsName => toasts.warn(t!("ui.tactics.preset_needs_a_name").into_owned()),
-            BoardNotice::PresetNeedsMap => toasts.warn(t!("ui.tactics.preset_needs_a_map").into_owned()),
-            BoardNotice::PresetSaved { name } => toasts.info(t!("ui.tactics.preset_saved", name = name).into_owned()),
+            BoardNotice::PresetNeedsName => toasts.warn(t!("ui-tactics-preset_needs_a_name").into_owned()),
+            BoardNotice::PresetNeedsMap => toasts.warn(t!("ui-tactics-preset_needs_a_map").into_owned()),
+            BoardNotice::PresetSaved { name } => toasts.info(t!("ui-tactics-preset_saved", name = name).into_owned()),
             BoardNotice::PresetSaveFailed { error } => {
-                toasts.failed(t!("ui.tactics.preset_save_failed", error = error).into_owned())
+                toasts.failed(t!("ui-tactics-preset_save_failed", error = error).into_owned())
             }
             BoardNotice::PresetLoadFailed { error } => {
-                toasts.failed(t!("ui.tactics.preset_load_failed", error = error).into_owned())
+                toasts.failed(t!("ui-tactics-preset_load_failed", error = error).into_owned())
             }
             BoardNotice::PresetDeleteFailed { error } => {
-                toasts.failed(t!("ui.tactics.preset_delete_failed", error = error).into_owned())
+                toasts.failed(t!("ui-tactics-preset_delete_failed", error = error).into_owned())
             }
-            BoardNotice::NoReplaysDir => toasts.warn(t!("ui.messages.wows_dir_not_set").into_owned()),
-            BoardNotice::ScanNeedsGameData => toasts.warn(t!("ui.tactics.scan_needs_game_data").into_owned()),
+            BoardNotice::NoReplaysDir => toasts.warn(t!("ui-messages-wows_dir_not_set").into_owned()),
+            BoardNotice::ScanNeedsGameData => toasts.warn(t!("ui-tactics-scan_needs_game_data").into_owned()),
             BoardNotice::ScanDone { added, total } => {
-                toasts.info(t!("ui.tactics.scan_done", added = added, total = total).into_owned())
+                toasts.info(t!("ui-tactics-scan_done", added = added, total = total).into_owned())
             }
             BoardNotice::SessionBoardsFull { limit } => {
-                toasts.warn(t!("ui.tactics.session_boards_full", limit = limit).into_owned())
+                toasts.warn(t!("ui-tactics-session_boards_full", limit = limit).into_owned())
             }
         };
     }

@@ -7,7 +7,6 @@
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use rust_i18n::t;
 use wows_core::pseudonym;
 use wows_core::rating_scope::RatingScope;
 use wows_replays::ReplayMeta;
@@ -22,6 +21,7 @@ use wows_toolkit_config::index::rows::TwitchChatter;
 use wows_toolkit_config::index::rows::stored_rating_scope;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wt_translations::t;
 
 use crate::formatting::separate_number;
 
@@ -316,7 +316,7 @@ pub fn stats_line_parts(
 
     if !stats.known {
         return vec![
-            LinePart::Text(format!("{}  ", t!("ui.replay.row_not_indexed"))),
+            LinePart::Text(format!("{}  ", t!("ui-replay-row_not_indexed"))),
             LinePart::Glyph(LineGlyph::Clock),
             LinePart::Text(format!(" {when}")),
         ];
@@ -343,7 +343,7 @@ pub fn stats_line_parts(
 /// stay in use.
 fn stats_words(stats: &RowStats, when: &str, locale: Option<&str>) -> String {
     if !stats.known {
-        return format!("{}  {when}", t!("ui.replay.row_not_indexed"));
+        return format!("{}  {when}", t!("ui-replay-row_not_indexed"));
     }
 
     let mut parts: Vec<String> = Vec::new();
@@ -351,11 +351,11 @@ fn stats_words(stats: &RowStats, when: &str, locale: Option<&str>) -> String {
         parts.push(separate_number(damage, locale));
     }
     if let Some(kills) = stats.kills {
-        parts.push(t!("ui.replay.row_kills", count = kills).to_string());
+        parts.push(t!("ui-replay-row_kills", count = kills).to_string());
     }
     match stats.survived {
-        Some(true) => parts.push(t!("ui.replay.row_survived").to_string()),
-        Some(false) => parts.push(t!("ui.replay.row_sunk").to_string()),
+        Some(true) => parts.push(t!("ui-replay-row_survived").to_string()),
+        Some(false) => parts.push(t!("ui-replay-row_sunk").to_string()),
         None => {}
     }
     parts.push(when.to_string());
@@ -367,7 +367,7 @@ fn stats_words(stats: &RowStats, when: &str, locale: Option<&str>) -> String {
 /// mates, so the tooltip never shows an empty division line.
 fn division_line(stats: &RowStats) -> Option<String> {
     let members = division_members(stats)?;
-    Some(t!("ui.replay.row_division", members = members).to_string())
+    Some(t!("ui-replay-row_division", members = members).to_string())
 }
 
 /// The division mates, `[CLAN] Name` per member where there is a clan and a
@@ -421,7 +421,7 @@ pub fn hover_facts(identity: &RowIdentity, stats: &RowStats, locale: Option<&str
     let fact = |key: &str, value: String| HoverFact { label: t!(key).into_owned(), value };
 
     let mut facts =
-        vec![fact("ui.replay.hover.ship", identity.ship.clone()), fact("ui.replay.hover.map", identity.map.clone())];
+        vec![fact("ui-replay-hover-ship", identity.ship.clone()), fact("ui-replay-hover-map", identity.map.clone())];
 
     // The scenario and the mode name the same match from two angles
     // ("Domination", "Random Battle"); one line reads as one fact.
@@ -432,31 +432,31 @@ pub fn hover_facts(identity: &RowIdentity, stats: &RowStats, locale: Option<&str
         (true, true) => String::new(),
     };
     if !mode.is_empty() {
-        facts.push(fact("ui.replay.hover.mode", mode));
+        facts.push(fact("ui-replay-hover-mode", mode));
     }
-    facts.push(fact("ui.replay.hover.played", identity.date_time.clone()));
+    facts.push(fact("ui-replay-hover-played", identity.date_time.clone()));
 
     if !stats.known {
-        facts.push(fact("ui.replay.hover.result", t!("ui.replay.hover_not_indexed").into_owned()));
+        facts.push(fact("ui-replay-hover-result", t!("ui-replay-hover_not_indexed").into_owned()));
         return facts;
     }
 
     if let Some(damage) = stats.damage {
-        facts.push(fact("ui.replay.hover.damage", separate_number(damage, locale)));
+        facts.push(fact("ui-replay-hover-damage", separate_number(damage, locale)));
     }
     if let Some(kills) = stats.kills {
-        facts.push(fact("ui.replay.hover.kills", kills.to_string()));
+        facts.push(fact("ui-replay-hover-kills", kills.to_string()));
     }
     match stats.survived {
-        Some(true) => facts.push(fact("ui.replay.hover.result", t!("ui.replay.hover_survived").into_owned())),
-        Some(false) => facts.push(fact("ui.replay.hover.result", t!("ui.replay.hover_sunk").into_owned())),
+        Some(true) => facts.push(fact("ui-replay-hover-result", t!("ui-replay-hover_survived").into_owned())),
+        Some(false) => facts.push(fact("ui-replay-hover-result", t!("ui-replay-hover_sunk").into_owned())),
         None => {}
     }
     if let Some(division) = division_members(stats) {
-        facts.push(fact("ui.replay.hover.division", division));
+        facts.push(fact("ui-replay-hover-division", division));
     }
     if let Some(chatters) = twitch_members(stats) {
-        facts.push(fact("ui.replay.hover.twitch", chatters));
+        facts.push(fact("ui-replay-hover-twitch", chatters));
     }
     facts
 }
@@ -524,7 +524,7 @@ pub fn listed_ship_name(listed: &ListedReplay, metadata_provider: &GameMetadataP
         .ship_id
         .and_then(|ship_id| metadata_provider.param_localization_id(ship_id.raw().into()))
         .and_then(|id| metadata_provider.localized_name_from_id(&wowsunpack::data::TranslationKey::new(id)))
-        .unwrap_or_else(|| t!("ui.replay.spectator").into())
+        .unwrap_or_else(|| t!("ui-replay-spectator").into())
 }
 
 /// Translate a listed replay's raw metadata into what the row draws. Requires
@@ -885,11 +885,11 @@ mod tests {
         assert!(hover.contains("Randoms"), "game mode must survive in the tooltip: {hover:?}");
         assert!(hover.contains("28.07.2026 14:23:05"));
         assert!(
-            hover.contains(t!("ui.replay.row_kills", count = 3).as_ref()),
+            hover.contains(t!("ui-replay-row_kills", count = 3).as_ref()),
             "kills must read as words in the tooltip: {hover:?}"
         );
         assert!(
-            hover.contains(t!("ui.replay.row_survived").as_ref()),
+            hover.contains(t!("ui-replay-row_survived").as_ref()),
             "survival must read as a word in the tooltip: {hover:?}"
         );
     }
@@ -902,11 +902,11 @@ mod tests {
         assert!(hover.contains("Domination"), "scenario must survive in the tooltip: {hover:?}");
         assert!(hover.contains("Randoms"), "game mode must survive in the tooltip: {hover:?}");
         assert!(
-            hover.contains(t!("ui.replay.row_sunk").as_ref()),
+            hover.contains(t!("ui-replay-row_sunk").as_ref()),
             "death must read as a word in the tooltip: {hover:?}"
         );
         assert!(
-            !hover.contains(t!("ui.replay.row_survived").as_ref()),
+            !hover.contains(t!("ui-replay-row_survived").as_ref()),
             "the survived and sunk words must not both appear: {hover:?}"
         );
     }
@@ -963,7 +963,7 @@ mod tests {
             login: wows_toolkit_config::index::rows::TwitchLogin(login.into()),
         };
         let seen = RowSummary { twitch_chatters: vec![chatter("Anna", "anna_tv"), chatter("Zed", "zed")], ..summary() };
-        let label = t!("ui.replay.hover.twitch").into_owned();
+        let label = t!("ui-replay-hover-twitch").into_owned();
 
         let facts = hover_facts(&identity(), &resolve_row_stats(None, Some(&seen)), Some("en-US"));
         let twitch = facts.iter().find(|fact| fact.label == label).expect("a Twitch line");
@@ -1001,7 +1001,7 @@ mod tests {
     fn stats_line_falls_back_to_the_not_indexed_string() {
         let stats = resolve_row_stats(None, None);
         let line = stats_line(&identity(), &stats, ReplayGrouping::Date, Some("en-US"));
-        assert!(line.contains(t!("ui.replay.row_not_indexed").as_ref()));
+        assert!(line.contains(t!("ui-replay-row_not_indexed").as_ref()));
         assert!(!line.contains(','), "no stat numbers should be rendered: {line:?}");
     }
 

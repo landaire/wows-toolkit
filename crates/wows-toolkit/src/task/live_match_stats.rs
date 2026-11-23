@@ -11,13 +11,13 @@ use std::time::Instant;
 use jiff::Timestamp;
 use parking_lot::RwLock;
 use rootcause::prelude::*;
-use rust_i18n::t;
 use tracing::debug;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::analyzer::arena_scan::scan_arena_state;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
+use wt_translations::t;
 
 use crate::data::match_stats::MatchStatsClient;
 use crate::data::match_stats::MatchStatsError;
@@ -80,7 +80,7 @@ pub(crate) fn resolve_and_fetch(
     let Some(build) = build else {
         tracker.write().set_match_stats_for(
             started_at,
-            MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()),
+            MatchStatsState::Failed(t!("ui-player_tracker-roster_unavailable").into()),
         );
         return;
     };
@@ -100,7 +100,7 @@ pub(crate) fn resolve_and_fetch(
     let Some(state) = state else {
         tracker.write().set_match_stats_for(
             started_at,
-            MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()),
+            MatchStatsState::Failed(t!("ui-player_tracker-roster_unavailable").into()),
         );
         return;
     };
@@ -169,7 +169,7 @@ pub(crate) fn fetch(lookup: StatsLookup, tracker: &Arc<RwLock<PlayerTracker>>, c
 fn failure_reason(error: MatchStatsError) -> String {
     match error {
         MatchStatsError::RateLimited { retry_after } | MatchStatsError::RecentlyFailed { retry_after } => {
-            t!("ui.player_tracker.stats_rate_limited", wait = format_wait_minutes(retry_after)).into()
+            t!("ui-player_tracker-stats_rate_limited", wait = format_wait_minutes(retry_after)).into()
         }
         other => other.to_string(),
     }

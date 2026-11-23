@@ -6,7 +6,6 @@ use std::num::NonZeroU32;
 use std::path::Path;
 use std::path::PathBuf;
 
-use rust_i18n::t;
 use wgc_launch::InstallFiles;
 use wgc_launch::InstallView;
 use wgc_launch::RuntimeDirs;
@@ -29,6 +28,7 @@ use wows_game_settings::WindowMode;
 use wows_toolkit_launcher::InstallSettingsFiles;
 use wows_toolkit_launcher::installed_builds;
 use wows_toolkit_replay_data::replay_folder::app_runtime_dirs;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -157,10 +157,10 @@ impl Group {
 
     fn label(self) -> String {
         match self {
-            Self::Display => t!("ui.launcher.game_settings.display"),
-            Self::Graphics => t!("ui.launcher.game_settings.graphics"),
-            Self::Sound => t!("ui.launcher.game_settings.sound"),
-            Self::Replays => t!("ui.launcher.game_settings.replays"),
+            Self::Display => t!("ui-launcher-game_settings-display"),
+            Self::Graphics => t!("ui-launcher-game_settings-graphics"),
+            Self::Sound => t!("ui-launcher-game_settings-sound"),
+            Self::Replays => t!("ui-launcher-game_settings-replays"),
         }
         .into_owned()
     }
@@ -339,12 +339,12 @@ impl Form {
                 changes.window_mode = wanted.filter(|wanted| wanted != current);
             }
             if let Some(current) = display.monitor_index.known() {
-                let wanted = parse_number::<u8>(&self.monitor.get_untracked(), "ui.launcher.game_settings.monitor")?;
+                let wanted = parse_number::<u8>(&self.monitor.get_untracked(), "ui-launcher-game_settings-monitor")?;
                 changes.monitor_index = Some(MonitorIndex::new(wanted)).filter(|wanted| wanted != current);
             }
             if let Some(current) = display.fullscreen_resolution.known() {
-                let width = parse_number::<u16>(&self.width.get_untracked(), "ui.launcher.game_settings.resolution")?;
-                let height = parse_number::<u16>(&self.height.get_untracked(), "ui.launcher.game_settings.resolution")?;
+                let width = parse_number::<u16>(&self.width.get_untracked(), "ui-launcher-game_settings-resolution")?;
+                let height = parse_number::<u16>(&self.height.get_untracked(), "ui-launcher-game_settings-resolution")?;
                 let wanted = Resolution::new(width, height).map_err(|err| err.to_string())?;
                 changes.fullscreen_resolution = Some(wanted).filter(|wanted| wanted != current);
             }
@@ -353,7 +353,7 @@ impl Form {
                 let wanted = if text.trim().is_empty() {
                     RefreshRate::display()
                 } else {
-                    let hz = parse_number::<u16>(&text, "ui.launcher.game_settings.refresh")?;
+                    let hz = parse_number::<u16>(&text, "ui-launcher-game_settings-refresh")?;
                     RefreshRate::hz(hz).map_err(|err| err.to_string())?
                 };
                 changes.refresh_rate = Some(wanted).filter(|wanted| wanted != current);
@@ -364,7 +364,7 @@ impl Form {
             if let Some(current) = display.ui_scale.known() {
                 let text = self.ui_scale.get_untracked();
                 if text != scale_value(current.get()) {
-                    let scale = parse_number::<f32>(&text, "ui.launcher.game_settings.ui_scale")?;
+                    let scale = parse_number::<f32>(&text, "ui-launcher-game_settings-ui_scale")?;
                     changes.ui_scale = Some(UiScale::new(scale).map_err(|err| err.to_string())?);
                 }
             }
@@ -396,9 +396,9 @@ impl Form {
         if let Some(replays) = settings.replays.available() {
             if let Some(current) = replays.kept.known() {
                 let kept =
-                    parse_number::<u32>(&self.replays_kept.get_untracked(), "ui.launcher.game_settings.replays_kept")?;
+                    parse_number::<u32>(&self.replays_kept.get_untracked(), "ui-launcher-game_settings-replays_kept")?;
                 let kept = NonZeroU32::new(kept)
-                    .ok_or_else(|| t!("ui.launcher.game_settings.replays_kept_zero").into_owned())?;
+                    .ok_or_else(|| t!("ui-launcher-game_settings-replays_kept_zero").into_owned())?;
                 changes.replays_kept = Some(ReplayCount::new(kept)).filter(|wanted| wanted != current);
             }
             if let Some(current) = replays.versioned.known() {
@@ -413,7 +413,7 @@ impl Form {
 /// Opens the dialog over the default account's install.
 pub fn open(shell: Shell, model: LauncherModel) {
     let Some(target) = SettingsTarget::of(model) else {
-        shell.toasts().warn(t!("ui.launcher.game_settings.no_install").into_owned());
+        shell.toasts().warn(t!("ui-launcher-game_settings-no_install").into_owned());
         return;
     };
     model.ensure_sessions();
@@ -423,7 +423,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
         install_stylesheet("wt-game-settings", DIALOG_CSS);
         let target = target.clone();
         let subtitle = match target.build {
-            Some(build) => format!("{}, {}", target.root.display(), t!("ui.launcher.game_settings.build", build = build.0)),
+            Some(build) => format!("{}, {}", target.root.display(), t!("ui-launcher-game_settings-build", build = build.0)),
             None => target.root.display().to_string(),
         };
         let subtitle = zgui::reactive::StoredValue::new(subtitle);
@@ -482,12 +482,12 @@ pub fn open(shell: Shell, model: LauncherModel) {
             HostedDialog(handle = handle) {
                 DialogContent(attr:data-testid = "launcher-game-settings") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.launcher.game_settings.title").into_owned()}}
+                        DialogTitle {{t!("ui-launcher-game_settings-title").into_owned()}}
                         text(class = "wt-game-settings__note wt-launcher__truncate") {{subtitle.get_value()}}
                     }
                     KeyringHint(model = model)
                     Show(when = move || running.get()) {
-                        text(class = "wt-game-settings__banner", attr:data-testid = "launcher-game-settings-locked") {{t!("ui.launcher.game_settings.locked").into_owned()}}
+                        text(class = "wt-game-settings__banner", attr:data-testid = "launcher-game-settings-locked") {{t!("ui-launcher-game_settings-locked").into_owned()}}
                     }
                     {move || match loaded.get() {
                         Loaded::Reading => AnyView::new(view! { Spinner() }),
@@ -523,14 +523,14 @@ pub fn open(shell: Shell, model: LauncherModel) {
                         text(class = "wt-launcher__error", attr:data-testid = "launcher-game-settings-error") {{why}}
                     })}
                     DialogFooter {
-                        text(class = "wt-game-settings__note") {{t!("ui.launcher.game_settings.footer").into_owned()}}
+                        text(class = "wt-game-settings__note") {{t!("ui-launcher-game_settings-footer").into_owned()}}
                         Button(
                             variant = ButtonVariant::Outline,
                             size = ButtonSize::Sm,
                             attr:data-testid = "launcher-game-settings-cancel",
                             on:click = move |_| handle.close()
                         ) {
-                            {t!("ui.launcher.game_settings.cancel").into_owned()}
+                            {t!("ui-launcher-game_settings-cancel").into_owned()}
                         }
                         Button(
                             size = ButtonSize::Sm,
@@ -538,7 +538,7 @@ pub fn open(shell: Shell, model: LauncherModel) {
                             attr:data-testid = "launcher-game-settings-save",
                             on:click = move |_| save()
                         ) {
-                            {t!("ui.launcher.game_settings.save").into_owned()}
+                            {t!("ui-launcher-game_settings-save").into_owned()}
                         }
                     }
                 }
@@ -577,55 +577,55 @@ fn display_fields(settings: &GameSettings, form: Form, locked: Signal<bool, Loca
     match &settings.display {
         Section::Available(display) => {
             rows.push(field_row(
-                "ui.launcher.game_settings.window_mode",
+                "ui-launcher-game_settings-window_mode",
                 "launcher-gs-window-mode",
                 editable(&display.window_mode, || window_mode_select(form.window_mode, locked)),
             ));
             if let Some(name) = display.monitor_name.known() {
                 rows.push(field_row(
-                    "ui.launcher.game_settings.monitor_name",
+                    "ui-launcher-game_settings-monitor_name",
                     "launcher-gs-monitor-name",
                     text_view(name.clone()),
                 ));
             }
             rows.push(field_row(
-                "ui.launcher.game_settings.monitor",
+                "ui-launcher-game_settings-monitor",
                 "launcher-gs-monitor",
                 editable(&display.monitor_index, || number_input(form.monitor, locked, "launcher-gs-monitor-input")),
             ));
             rows.push(field_row(
-                "ui.launcher.game_settings.resolution",
+                "ui-launcher-game_settings-resolution",
                 "launcher-gs-resolution",
                 editable(&display.fullscreen_resolution, || {
                     AnyView::new(view! {
-                        Input(value = form.width, disabled = locked, class = "wt-game-settings__number", label = t!("ui.launcher.game_settings.width").into_owned(), attr:data-testid = "launcher-gs-width")
+                        Input(value = form.width, disabled = locked, class = "wt-game-settings__number", label = t!("ui-launcher-game_settings-width").into_owned(), attr:data-testid = "launcher-gs-width")
                         text {"x"}
-                        Input(value = form.height, disabled = locked, class = "wt-game-settings__number", label = t!("ui.launcher.game_settings.height").into_owned(), attr:data-testid = "launcher-gs-height")
+                        Input(value = form.height, disabled = locked, class = "wt-game-settings__number", label = t!("ui-launcher-game_settings-height").into_owned(), attr:data-testid = "launcher-gs-height")
                     })
                 }),
             ));
             rows.push(field_row(
-                "ui.launcher.game_settings.refresh",
+                "ui-launcher-game_settings-refresh",
                 "launcher-gs-refresh",
                 editable(&display.refresh_rate, || {
                     AnyView::new(view! {
                         Input(
                             value = form.refresh,
                             disabled = locked,
-                            placeholder = t!("ui.launcher.game_settings.display_rate").into_owned(),
-                            label = t!("ui.launcher.game_settings.refresh").into_owned(),
+                            placeholder = t!("ui-launcher-game_settings-display_rate").into_owned(),
+                            label = t!("ui-launcher-game_settings-refresh").into_owned(),
                             attr:data-testid = "launcher-gs-refresh-input"
                         )
                     })
                 }),
             ));
             rows.push(field_row(
-                "ui.launcher.game_settings.vsync",
+                "ui-launcher-game_settings-vsync",
                 "launcher-gs-vsync",
                 editable(&display.vsync, || switch(form.vsync, locked, "launcher-gs-vsync-switch")),
             ));
             rows.push(field_row(
-                "ui.launcher.game_settings.ui_scale",
+                "ui-launcher-game_settings-ui_scale",
                 "launcher-gs-ui-scale",
                 editable(&display.ui_scale, || ui_scale_select(form.ui_scale, locked)),
             ));
@@ -636,12 +636,12 @@ fn display_fields(settings: &GameSettings, form: Form, locked: Signal<bool, Loca
     match &settings.frame_rate {
         Section::Available(frame_rate) => {
             rows.push(field_row(
-                "ui.launcher.game_settings.battle_fps",
+                "ui-launcher-game_settings-battle_fps",
                 "launcher-gs-battle-fps",
                 editable(&frame_rate.battle, || fps_input(form.battle_fps, locked, "launcher-gs-battle-fps-input")),
             ));
             rows.push(field_row(
-                "ui.launcher.game_settings.port_fps",
+                "ui-launcher-game_settings-port_fps",
                 "launcher-gs-port-fps",
                 editable(&frame_rate.port, || fps_input(form.port_fps, locked, "launcher-gs-port-fps-input")),
             ));
@@ -651,7 +651,7 @@ fn display_fields(settings: &GameSettings, form: Form, locked: Signal<bool, Loca
 
     if let Section::Available(interface) = &settings.interface {
         rows.push(field_row(
-            "ui.launcher.game_settings.skip_intro",
+            "ui-launcher-game_settings-skip_intro",
             "launcher-gs-skip-intro",
             editable(&interface.skip_intro_video, || switch(form.skip_intro, locked, "launcher-gs-skip-intro-switch")),
         ));
@@ -663,25 +663,25 @@ fn display_fields(settings: &GameSettings, form: Form, locked: Signal<bool, Loca
 fn graphics_fields(settings: &GameSettings) -> AnyView {
     let rows = match &settings.graphics {
         Section::Available(graphics) => vec![
-            field_row("ui.launcher.game_settings.preset", "launcher-gs-preset", read_only(&graphics.preset)),
+            field_row("ui-launcher-game_settings-preset", "launcher-gs-preset", read_only(&graphics.preset)),
             field_row(
-                "ui.launcher.game_settings.antialiasing",
+                "ui-launcher-game_settings-antialiasing",
                 "launcher-gs-antialiasing",
                 read_only(&graphics.antialiasing),
             ),
             field_row(
-                "ui.launcher.game_settings.textures",
+                "ui-launcher-game_settings-textures",
                 "launcher-gs-textures",
                 read_only(&graphics.texture_quality),
             ),
             field_row(
-                "ui.launcher.game_settings.filtering",
+                "ui-launcher-game_settings-filtering",
                 "launcher-gs-filtering",
                 read_only(&graphics.texture_filtering),
             ),
-            field_row("ui.launcher.game_settings.shadows", "launcher-gs-shadows", read_only(&graphics.shadow_quality)),
+            field_row("ui-launcher-game_settings-shadows", "launcher-gs-shadows", read_only(&graphics.shadow_quality)),
             AnyView::new(
-                view! { text(class = "wt-game-settings__note") {{t!("ui.launcher.game_settings.graphics_note").into_owned()}} },
+                view! { text(class = "wt-game-settings__note") {{t!("ui-launcher-game_settings-graphics_note").into_owned()}} },
             ),
         ],
         Section::Unavailable(why) => vec![unavailable(why.to_string())],
@@ -694,17 +694,17 @@ fn sound_fields(settings: &GameSettings, form: Form, locked: Signal<bool, LocalS
     let rows = match &settings.sound {
         Section::Available(sound) => vec![
             field_row(
-                "ui.launcher.game_settings.master",
+                "ui-launcher-game_settings-master",
                 "launcher-gs-master",
                 editable(&sound.master, || volume_slider(form.master, locked, "launcher-gs-master-slider")),
             ),
             field_row(
-                "ui.launcher.game_settings.music_port",
+                "ui-launcher-game_settings-music_port",
                 "launcher-gs-music-port",
                 editable(&sound.music_port, || volume_slider(form.music_port, locked, "launcher-gs-music-port-slider")),
             ),
             field_row(
-                "ui.launcher.game_settings.music_battle",
+                "ui-launcher-game_settings-music_battle",
                 "launcher-gs-music-battle",
                 editable(&sound.music_battle, || {
                     volume_slider(form.music_battle, locked, "launcher-gs-music-battle-slider")
@@ -721,17 +721,17 @@ fn replay_fields(settings: &GameSettings, form: Form, locked: Signal<bool, Local
     let rows = match &settings.replays {
         Section::Available(replays) => vec![
             field_row(
-                "ui.launcher.game_settings.replays_kept",
+                "ui-launcher-game_settings-replays_kept",
                 "launcher-gs-replays-kept",
                 editable(&replays.kept, || number_input(form.replays_kept, locked, "launcher-gs-replays-kept-input")),
             ),
             field_row(
-                "ui.launcher.game_settings.versioned",
+                "ui-launcher-game_settings-versioned",
                 "launcher-gs-versioned",
                 editable(&replays.versioned, || switch(form.versioned, locked, "launcher-gs-versioned-switch")),
             ),
             AnyView::new(
-                view! { text(class = "wt-game-settings__note") {{t!("ui.launcher.game_settings.replays_note").into_owned()}} },
+                view! { text(class = "wt-game-settings__note") {{t!("ui-launcher-game_settings-replays_note").into_owned()}} },
             ),
         ],
         Section::Unavailable(why) => vec![unavailable(why.to_string())],
@@ -754,7 +754,7 @@ pub fn ReplayRetention(shell: Shell, model: LauncherModel) -> impl IntoView {
 
     let Some(target) = target else {
         return AnyView::new(view! {
-            text(class = "wt-launcher__dim", attr:data-testid = "launcher-retention-no-install") {{t!("ui.launcher.game_settings.no_install").into_owned()}}
+            text(class = "wt-launcher__dim", attr:data-testid = "launcher-retention-no-install") {{t!("ui-launcher-game_settings-no_install").into_owned()}}
         });
     };
     read(target.clone(), loaded, form);
@@ -791,7 +791,7 @@ pub fn ReplayRetention(shell: Shell, model: LauncherModel) -> impl IntoView {
                 Ok(snapshot) => {
                     form.load(snapshot.settings());
                     loaded.set(Loaded::Read(Box::new(snapshot)));
-                    shell.toasts().ok(t!("ui.launcher.game_settings.saved").into_owned());
+                    shell.toasts().ok(t!("ui-launcher-game_settings-saved").into_owned());
                 }
                 Err(why) => error.set(Some(why)),
             }
@@ -816,7 +816,7 @@ pub fn ReplayRetention(shell: Shell, model: LauncherModel) -> impl IntoView {
                     attr:data-testid = "launcher-retention-save",
                     on:click = move |_| save()
                 ) {
-                    {t!("ui.launcher.game_settings.save").into_owned()}
+                    {t!("ui-launcher-game_settings-save").into_owned()}
                 }
             }
         }
@@ -838,9 +838,9 @@ fn field_row(name_key: &'static str, test_id: &'static str, control: AnyView) ->
 fn editable<T>(field: &Field<T>, make: impl FnOnce() -> AnyView) -> AnyView {
     match field {
         Field::Known(_) => make(),
-        Field::Absent => text_view(t!("ui.launcher.game_settings.absent").into_owned()),
+        Field::Absent => text_view(t!("ui-launcher-game_settings-absent").into_owned()),
         Field::Unrecognized(found) => {
-            text_view(t!("ui.launcher.game_settings.unrecognized", value = found).into_owned())
+            text_view(t!("ui-launcher-game_settings-unrecognized", value = found).into_owned())
         }
     }
 }
@@ -848,7 +848,7 @@ fn editable<T>(field: &Field<T>, make: impl FnOnce() -> AnyView) -> AnyView {
 fn read_only<T: std::fmt::Debug>(field: &Field<T>) -> AnyView {
     match field {
         Field::Known(value) => text_view(format!("{value:?}")),
-        Field::Absent => text_view(t!("ui.launcher.game_settings.absent").into_owned()),
+        Field::Absent => text_view(t!("ui-launcher-game_settings-absent").into_owned()),
         Field::Unrecognized(found) => text_view(found.clone()),
     }
 }
@@ -880,7 +880,7 @@ fn fps_input(
         Input(
             value = value,
             disabled = locked,
-            placeholder = t!("ui.launcher.game_settings.unlimited").into_owned(),
+            placeholder = t!("ui-launcher-game_settings-unlimited").into_owned(),
             attr:data-testid = test_id
         )
     })
@@ -921,7 +921,7 @@ fn window_mode_select(value: RwSignal<String, LocalStorage>, locked: Signal<bool
                 value.set(mode);
             }
         })) {
-            SelectTrigger(size = SelectTriggerSize::Sm, label = t!("ui.launcher.game_settings.window_mode").into_owned(), attr:data-testid = "launcher-gs-window-mode-select") {
+            SelectTrigger(size = SelectTriggerSize::Sm, label = t!("ui-launcher-game_settings-window_mode").into_owned(), attr:data-testid = "launcher-gs-window-mode-select") {
                 SelectValue()
             }
             SelectContent {
@@ -951,7 +951,7 @@ fn ui_scale_select(value: RwSignal<String, LocalStorage>, locked: Signal<bool, L
                 value.set(scale);
             }
         })) {
-            SelectTrigger(size = SelectTriggerSize::Sm, label = t!("ui.launcher.game_settings.ui_scale").into_owned(), attr:data-testid = "launcher-gs-ui-scale-select") {
+            SelectTrigger(size = SelectTriggerSize::Sm, label = t!("ui-launcher-game_settings-ui_scale").into_owned(), attr:data-testid = "launcher-gs-ui-scale-select") {
                 SelectValue()
             }
             SelectContent {
@@ -975,9 +975,9 @@ fn window_mode_value(mode: WindowMode) -> &'static str {
 
 fn window_mode_label(mode: WindowMode) -> String {
     match mode {
-        WindowMode::Windowed => t!("ui.launcher.game_settings.windowed"),
-        WindowMode::Borderless => t!("ui.launcher.game_settings.borderless"),
-        WindowMode::Fullscreen => t!("ui.launcher.game_settings.fullscreen"),
+        WindowMode::Windowed => t!("ui-launcher-game_settings-windowed"),
+        WindowMode::Borderless => t!("ui-launcher-game_settings-borderless"),
+        WindowMode::Fullscreen => t!("ui-launcher-game_settings-fullscreen"),
     }
     .into_owned()
 }
@@ -1010,7 +1010,7 @@ fn parse_fps(text: &str) -> Result<FrameRateLimit, String> {
     if text.is_empty() {
         return Ok(FrameRateLimit::unlimited());
     }
-    let fps: u16 = parse_number(text, "ui.launcher.game_settings.battle_fps")?;
+    let fps: u16 = parse_number(text, "ui-launcher-game_settings-battle_fps")?;
     if fps == 0 {
         return Ok(FrameRateLimit::unlimited());
     }
@@ -1035,5 +1035,5 @@ fn volume_change(field: &Field<Volume>, shown: f64) -> Result<Option<Volume>, St
 }
 
 fn parse_number<T: std::str::FromStr>(text: &str, name_key: &'static str) -> Result<T, String> {
-    text.trim().parse().map_err(|_| t!("ui.launcher.game_settings.not_a_number", field = t!(name_key)).into_owned())
+    text.trim().parse().map_err(|_| t!("ui-launcher-game_settings-not_a_number", field = t!(name_key)).into_owned())
 }

@@ -15,8 +15,8 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::count_up;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -93,7 +93,7 @@ const CSS: &str = css!(
 fn said(job: &Job) -> String {
     match job.progress {
         Some(progress) => {
-            format!("{} {}", job.name, t!("ui.app.status_of", done = progress.done, total = progress.total))
+            format!("{} {}", job.name, t!("ui-app-status_of", done = progress.done, total = progress.total))
         }
         None => job.name.clone(),
     }
@@ -143,9 +143,9 @@ fn StatusPanelToggle(toggle: PanelToggle) -> impl IntoView {
     let tip = move || {
         locale.track();
         if open.get() {
-            t!("ui.app.status_hide_panel", panel = name).into_owned()
+            t!("ui-app-status_hide_panel", panel = name).into_owned()
         } else {
-            t!("ui.app.status_show_panel", panel = name).into_owned()
+            t!("ui-app-status_show_panel", panel = name).into_owned()
         }
     };
     let tooltip = tip.clone();
@@ -180,10 +180,10 @@ fn McpIndicator(shell: Shell) -> impl IntoView {
     let tip = move || {
         locale.track();
         match mcp.status() {
-            McpStatus::Running { endpoint } => t!("ui.mcp.status_running", url = endpoint.url()).into_owned(),
-            McpStatus::Starting { address } => t!("ui.mcp.status_starting", address = address).into_owned(),
-            McpStatus::Failed { .. } => t!("ui.mcp.status_failed").into_owned(),
-            McpStatus::Stopped => t!("ui.mcp.status_stopped").into_owned(),
+            McpStatus::Running { endpoint } => t!("ui-mcp-status_running", url = endpoint.url()).into_owned(),
+            McpStatus::Starting { address } => t!("ui-mcp-status_starting", address = address).into_owned(),
+            McpStatus::Failed { .. } => t!("ui-mcp-status_failed").into_owned(),
+            McpStatus::Stopped => t!("ui-mcp-status_stopped").into_owned(),
         }
     };
     let state = move || match mcp.status() {
@@ -236,7 +236,7 @@ fn Work(jobs: Signal<Vec<Job>, LocalStorage>) -> impl IntoView {
         locale.track();
         match jobs.get().as_slice() {
             [only] => said(only),
-            several => t!("ui.app.status_tasks", count = several.len()).into_owned(),
+            several => t!("ui-app-status_tasks", count = several.len()).into_owned(),
         }
     };
 
@@ -285,7 +285,7 @@ fn JobLine(job: Signal<Option<Job>, LocalStorage>) -> impl IntoView {
             Some(progress) => format!(
                 "{} {}",
                 job.name,
-                t!("ui.app.status_of", done = shown.get().min(progress.done), total = progress.total)
+                t!("ui-app-status_of", done = shown.get().min(progress.done), total = progress.total)
             ),
             None => job.name,
         }

@@ -7,7 +7,6 @@ use landaire_ui::MarkedTextProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_viewmodel::query_bar::label::NameCache;
@@ -23,6 +22,7 @@ use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::query_bar::tokens::TokenKind;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -247,8 +247,8 @@ pub(crate) fn QueryBar(search: Search) -> impl IntoView {
                         Input(
                             node_ref = input,
                             value = search.pending,
-                            placeholder = t!("ui.search.add_filter").into_owned(),
-                            label = t!("ui.tabs.search").into_owned(),
+                            placeholder = t!("ui-search-add_filter").into_owned(),
+                            label = t!("ui-tabs-search").into_owned(),
                             attr:data-testid = "search-query"
                         )
                     }
@@ -259,7 +259,7 @@ pub(crate) fn QueryBar(search: Search) -> impl IntoView {
                     on:click = move |_| search.commit_typed(),
                     attr:data-testid = "search-run"
                 ) {
-                    {t!("ui.tabs.search").into_owned()}
+                    {t!("ui-tabs-search").into_owned()}
                 }
             }
             Show(when = move || search.value_error.get()) {
@@ -444,7 +444,7 @@ fn segment_view(
                         {label}
                     }
                 }
-                TooltipContent {{t!("ui.search.edit_value").into_owned()}}
+                TooltipContent {{t!("ui-search-edit_value").into_owned()}}
             }
         });
     }
@@ -493,18 +493,18 @@ fn pill_menu_items(search: Search, path: &NodePath, menu: PillMenuState) -> Vec<
         })
     };
     let separator = || AnyView::new(view! { MenuSeparator() });
-    let select_label = t!(if menu.selected { "ui.search.pill_deselect" } else { "ui.search.pill_select" }).into_owned();
+    let select_label = t!(if menu.selected { "ui-search-pill_deselect" } else { "ui-search-pill_select" }).into_owned();
     vec![
         item(select_label, StructuralEdit::ToggleSelected, true),
         separator(),
-        item(t!("ui.search.pill_group_all").into_owned(), StructuralEdit::Group { is_or: false }, menu.can_group),
-        item(t!("ui.search.pill_group_any").into_owned(), StructuralEdit::Group { is_or: true }, menu.can_group),
-        item(t!("ui.search.pill_ungroup").into_owned(), StructuralEdit::Ungroup, menu.can_ungroup),
+        item(t!("ui-search-pill_group_all").into_owned(), StructuralEdit::Group { is_or: false }, menu.can_group),
+        item(t!("ui-search-pill_group_any").into_owned(), StructuralEdit::Group { is_or: true }, menu.can_group),
+        item(t!("ui-search-pill_ungroup").into_owned(), StructuralEdit::Ungroup, menu.can_ungroup),
         separator(),
-        item(t!("ui.search.pill_negate").into_owned(), StructuralEdit::Negate, true),
-        item(t!("ui.search.pill_flip_connector").into_owned(), StructuralEdit::FlipConnector, true),
+        item(t!("ui-search-pill_negate").into_owned(), StructuralEdit::Negate, true),
+        item(t!("ui-search-pill_flip_connector").into_owned(), StructuralEdit::FlipConnector, true),
         separator(),
-        item(t!("ui.search.pill_delete").into_owned(), StructuralEdit::Delete, menu.can_delete),
+        item(t!("ui-search-pill_delete").into_owned(), StructuralEdit::Delete, menu.can_delete),
     ]
 }
 
@@ -643,7 +643,7 @@ fn CompletionRows(search: Search) -> impl IntoView {
             attr:data-testid = "search-completions"
         ) {
             Show(when = move || search.value_lookup_running.get()) {
-                LoadingLine(label = t!("ui.search.looking_up_values").into_owned(), class = "wt-search-looking-up")
+                LoadingLine(label = t!("ui-search-looking_up_values").into_owned(), class = "wt-search-looking-up")
             }
             {rows}
         }
@@ -653,7 +653,7 @@ fn CompletionRows(search: Search) -> impl IntoView {
 /// The parse error: the message, and the query with the run the parser objected to marked. An
 /// empty or out-of-range span marks nothing.
 fn parse_error_strip(reason: &str, span: std::ops::Range<usize>, text: &str) -> AnyView {
-    let message = t!("ui.search.parse_failed", reason = reason).into_owned();
+    let message = t!("ui-search-parse_failed", reason = reason).into_owned();
     let marked = text.get(span.clone()).filter(|marked| !marked.is_empty()).map(|marked| {
         let before = text[..span.start].to_string();
         let after = text[span.end..].to_string();

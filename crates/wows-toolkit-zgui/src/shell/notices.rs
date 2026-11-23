@@ -1,6 +1,6 @@
 //! Errors worth reading in full, and how a finished job says what happened.
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
@@ -69,10 +69,10 @@ pub fn show_error(shell: Shell, text: String) {
             HostedDialog(handle = handle) {
                 DialogContent(dismiss_on_outside_press = false, attr:data-testid = "notice-error") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.windows.error").into_owned()}}
+                        DialogTitle {{t!("ui-windows-error").into_owned()}}
                     }
                     column(class = "wt-error") {
-                        text(class = "wt-error__lead") {{t!("ui.labels.error_occurred").into_owned()}}
+                        text(class = "wt-error__lead") {{t!("ui-labels-error_occurred").into_owned()}}
                         text(class = "wt-error__text", attr:data-testid = "notice-error-text") {{text.get_value()}}
                     }
                     DialogFooter {
@@ -83,7 +83,7 @@ pub fn show_error(shell: Shell, text: String) {
                             attr:data-testid = "notice-error-copy",
                             on:click = move |_| shell.copy_text(text.get_value())
                         ) {
-                            {t!("ui.buttons.copy").into_owned()}
+                            {t!("ui-buttons-copy").into_owned()}
                         }
                     }
                 }

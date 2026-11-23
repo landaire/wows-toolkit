@@ -111,7 +111,7 @@ fn index(buildings: ModelBuildings) -> ModelTreeIndex {
 impl Sidebar {
     /// The sidebar over the fixture catalogue, with its model listing adopted.
     fn open() -> Self {
-        rust_i18n::set_locale("en");
+        wt_translations::set_language(wt_translations::Language::ENGLISH);
         let options = HeadlessOptions::new(WindowSize { width: 500.0, height: 1000.0 });
         let mut this = Self::mount(options, ThemeChoice::Dark, catalog(), ModelsSource::Loading);
 
@@ -672,7 +672,7 @@ fn a_ship_row_loads_the_ship_without_unfolding_and_a_part_row_opens_the_part_mod
 /// tabs do.
 #[test]
 fn a_class_icon_points_right() {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let vfs = game_art::testing::upright_class_icon(Species::Battleship);
     let options = HeadlessOptions {
         drawing: Drawing::Device,
@@ -696,7 +696,7 @@ fn a_class_icon_points_right() {
 /// draws its icon.
 #[test]
 fn the_class_icons_are_drawn_with_the_first_listing() {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let loaded = catalog_over(game_art::testing::upright_class_icon(Species::Battleship));
     let options = HeadlessOptions::new(WindowSize { width: 400.0, height: 300.0 });
     let mut sidebar = Sidebar::mount(options, ThemeChoice::Dark, Arc::clone(&loaded), ModelsSource::Loading);
@@ -758,7 +758,7 @@ fn settle_until_listed(sidebar: &mut Sidebar) {
 fn the_sidebar_renders_the_real_catalogue_in_dark_and_light() {
     use landaire_ui::Appearance;
 
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let (loaded, models) = real_catalog();
     let size = WindowSize { width: 480.0, height: 900.0 };
 

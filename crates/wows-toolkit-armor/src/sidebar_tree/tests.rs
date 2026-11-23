@@ -14,7 +14,7 @@ struct Data {
 }
 
 fn data() -> Data {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let ships = fixture::ships();
     let catalog = fixture::catalog();
     let references = fixture::references(&ships);
@@ -27,7 +27,7 @@ fn data() -> Data {
 /// A catalogue far larger than a search opens: 3000 main battery guns in
 /// each of two nations.
 fn large_data() -> Data {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let ships = fixture::ships();
     let guns = [("usa", "AGM"), ("japan", "JGM")].into_iter().flat_map(|(nation, prefix)| {
         (0..3000).map(move |idx| {
@@ -705,7 +705,7 @@ fn a_broad_search_leaves_its_folders_closed_with_their_counts() {
 /// of their own rather than their directory's.
 #[test]
 fn the_common_models_follow_the_nations_under_their_own_name() {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let ships = fixture::ships();
     let guns = ["common", "usa", "japan"]
         .into_iter()
@@ -925,7 +925,7 @@ fn a_row_tooltip_names_the_whole_row_and_what_it_opens() {
     );
     assert_eq!(row_tooltip(&RowKind::PartFolder, &[], None), None, "a folder shows its whole name already");
 
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     assert_eq!(
         row_tooltip(&RowKind::Model(turret), &[], Some(GeometryAvailability::Absent)).as_deref(),
         Some(format!("AGM034_16in50_Mk7\n{}\nNot in your game files", fixture::IOWA_TURRET).as_str()),
@@ -935,7 +935,7 @@ fn a_row_tooltip_names_the_whole_row_and_what_it_opens() {
 
 #[test]
 fn a_skin_row_tooltip_names_the_model_it_replaces_and_the_exteriors() {
-    rust_i18n::set_locale("en");
+    wt_translations::set_language(wt_translations::Language::ENGLISH);
     let catalog = fixture::catalog();
     let ships = fixture::ships();
     let references = fixture::references(&ships);

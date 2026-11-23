@@ -11,7 +11,6 @@ use landaire_ui::NumberRange;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::drawing_style::INKS;
 use wows_toolkit_replay_data::drawing_style::Ink;
@@ -42,6 +41,7 @@ use wows_toolkit_replay_data::tactics::team_color;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wt_collab_client::geometry::ENEMY_COLOR;
 use wt_collab_client::geometry::FRIENDLY_COLOR;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -268,11 +268,11 @@ pub fn BoardToolbar(model: BoardModel) -> impl IntoView {
             row(class = "wt-tactics-toolbar__row") {
                 if move || may_steer.get() {
                     row(class = "wt-tactics-toolbar__group wt-tactics-toolbar__group--wide") {
-                        text(class = "wt-tactics-toolbar__label") {{locale.text("ui.tactics.map")}}
+                        text(class = "wt-tactics-toolbar__label") {{locale.text("ui-tactics-map")}}
                         MapPicker(model = model)
                         if move || has_map.get() {
                             Rule()
-                            text(class = "wt-tactics-toolbar__label") {{locale.text("ui.tactics.mode")}}
+                            text(class = "wt-tactics-toolbar__label") {{locale.text("ui-tactics-mode")}}
                             ModePicker(model = model)
                         } else {}
                         Rule()
@@ -319,7 +319,7 @@ fn MapPicker(model: BoardModel) -> impl IntoView {
                 .with(|entries| entries.iter().find(|entry| entry.choice.key() == key).map(|entry| entry.title.clone()))
         })
     };
-    let trigger = move || chosen().unwrap_or_else(|| t!("ui.tactics.map_hint").into_owned());
+    let trigger = move || chosen().unwrap_or_else(|| t!("ui-tactics-map_hint").into_owned());
     let query = Memo::new(move |_| FilterQuery::new(&typed.get()));
     let found = Memo::new(move |_| {
         query.with(|query| {
@@ -358,8 +358,8 @@ fn MapPicker(model: BoardModel) -> impl IntoView {
                 ) {
                     Input(
                         value = typed,
-                        placeholder = t!("ui.tactics.map_hint").into_owned(),
-                        label = t!("ui.tactics.map").into_owned(),
+                        placeholder = t!("ui-tactics-map_hint").into_owned(),
+                        label = t!("ui-tactics-map").into_owned(),
                         class = "wt-tactics-toolbar__map-search",
                         attr:data-testid = "tactics-map-search"
                     )
@@ -413,13 +413,13 @@ fn ModePicker(model: BoardModel) -> impl IntoView {
             box(class = "wt-tactics-toolbar__mode") {
                 Combobox(value = Binding::controlled(chosen, choose)) {
                     ComboboxInput(
-                        placeholder = t!("ui.tactics.mode").into_owned(),
-                        label = t!("ui.tactics.mode").into_owned(),
+                        placeholder = t!("ui-tactics-mode").into_owned(),
+                        label = t!("ui-tactics-mode").into_owned(),
                         attr:data-testid = "tactics-mode-select"
                     )
                     ComboboxContent {
-                        ComboboxItem(value = BLANK_MODE, text = t!("ui.replay.hover.blank_mode").into_owned()) {
-                            {t!("ui.replay.hover.blank_mode").into_owned()}
+                        ComboboxItem(value = BLANK_MODE, text = t!("ui-replay-hover-blank_mode").into_owned()) {
+                            {t!("ui-replay-hover-blank_mode").into_owned()}
                         }
                         for mode in move || modes.get(), key = |mode: &wows_toolkit_replay_data::tactics::ModeChoice| mode_value(&mode.key) {
                             ComboboxItem(value = mode_value(&mode.key), text = mode.label.clone()) {
@@ -463,8 +463,8 @@ fn ShipPicker(model: BoardModel) -> impl IntoView {
                     Input(
                         value = typed,
                         on_change = on_change,
-                        placeholder = t!("ui.renderer.annotations.ship_hint").into_owned(),
-                        label = t!("ui.renderer.annotations.ship_hint").into_owned(),
+                        placeholder = t!("ui-renderer-annotations-ship_hint").into_owned(),
+                        label = t!("ui-renderer-annotations-ship_hint").into_owned(),
                         disabled = locked,
                         class = "wt-tactics-toolbar__search",
                         attr:data-testid = "tactics-ship-search",
@@ -474,10 +474,10 @@ fn ShipPicker(model: BoardModel) -> impl IntoView {
                     )
                 }
                 {move || placing.get().map(|(name, friendly)| {
-                    let side = if friendly { t!("ui.tactics.side_friendly") } else { t!("ui.tactics.side_enemy") };
+                    let side = if friendly { t!("ui-tactics-side_friendly") } else { t!("ui-tactics-side_enemy") };
                     let side = side.into_owned();
                     AnyView::new(view! {
-                        text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.placing", ship = name).into_owned()}}
+                        text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-placing", ship = name).into_owned()}}
                         Button(
                             variant = ButtonVariant::Outline,
                             size = ButtonSize::Xs,
@@ -553,7 +553,7 @@ fn RangeCircles(model: BoardModel) -> impl IntoView {
     });
     // A memo, so the popover is rebuilt only when the lock changes.
     let held = Memo::new(move |_| locked.get());
-    let label = move || format!("{} ({})", t!("ui.renderer.context.ranges"), active());
+    let label = move || format!("{} ({})", t!("ui-renderer-context-ranges"), active());
 
     view! {
         if move || held.get() {
@@ -574,7 +574,7 @@ fn RangeCircles(model: BoardModel) -> impl IntoView {
                             attr:data-testid = "tactics-ranges-enable-all",
                             on:click = move |_| model.update(|board| board.set_all_range_circles(true))
                         ) {
-                            {t!("ui.renderer.context.enable_all").into_owned()}
+                            {t!("ui-renderer-context-enable_all").into_owned()}
                         }
                         Button(
                             variant = ButtonVariant::Outline,
@@ -583,7 +583,7 @@ fn RangeCircles(model: BoardModel) -> impl IntoView {
                             attr:data-testid = "tactics-ranges-disable-all",
                             on:click = move |_| model.update(|board| board.set_all_range_circles(false))
                         ) {
-                            {t!("ui.renderer.context.disable_all").into_owned()}
+                            {t!("ui-renderer-context-disable_all").into_owned()}
                         }
                     }
                     for entry in move || RANGE_CIRCLES.to_vec(), key = |entry: &(RangeCircle, &str)| entry.0 as u8 {
@@ -674,7 +674,7 @@ fn ShipConfig(model: BoardModel) -> impl IntoView {
     view! {
         row(class = "wt-tactics-toolbar__row wt-tactics-toolbar__row--ship", attr:data-testid = "tactics-ship-config") {
             row(class = "wt-tactics-toolbar__group") {
-                text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.ship_config").into_owned()}}
+                text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-ship_config").into_owned()}}
                 text(class = "wt-tactics-panel__text", attr:data-testid = "tactics-ship-config-name") {{name}}
             }
             if move || has_hulls.get() {
@@ -683,7 +683,7 @@ fn ShipConfig(model: BoardModel) -> impl IntoView {
             } else {}
             Rule()
             row(class = "wt-tactics-toolbar__group") {
-                text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.modifiers").into_owned()}}
+                text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-modifiers").into_owned()}}
                 for entry in move || SHIP_MODIFIERS.to_vec(), key = |entry: &(ShipModifier, &str)| entry.0 as u8 {
                     ShipCheck(
                         checked = Signal::derive_local(move || {
@@ -698,7 +698,7 @@ fn ShipConfig(model: BoardModel) -> impl IntoView {
             }
             Rule()
             row(class = "wt-tactics-toolbar__group") {
-                text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.ship_ranges").into_owned()}}
+                text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-ship_ranges").into_owned()}}
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
@@ -706,7 +706,7 @@ fn ShipConfig(model: BoardModel) -> impl IntoView {
                     attr:data-testid = "tactics-ship-ranges-all",
                     on:click = move |_| model.update(|board| board.set_picked_range_circles(&all, true))
                 ) {
-                    {t!("ui.renderer.context.enable_all").into_owned()}
+                    {t!("ui-renderer-context-enable_all").into_owned()}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -715,7 +715,7 @@ fn ShipConfig(model: BoardModel) -> impl IntoView {
                     attr:data-testid = "tactics-ship-ranges-none",
                     on:click = move |_| model.update(|board| board.set_picked_range_circles(&all, false))
                 ) {
-                    {t!("ui.renderer.context.disable_all").into_owned()}
+                    {t!("ui-renderer-context-disable_all").into_owned()}
                 }
                 for entry in move || RANGE_CIRCLES.to_vec(), key = |entry: &(RangeCircle, &str)| entry.0 as u8 {
                     ShipCheck(
@@ -766,7 +766,7 @@ fn ShapeEdit(model: BoardModel) -> impl IntoView {
 
     view! {
         row(class = "wt-tactics-toolbar__row wt-tactics-toolbar__row--ship", attr:data-testid = "tactics-shape-edit") {
-            text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.shape").into_owned()}}
+            text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-shape").into_owned()}}
             {move || match controls.get() {
                 Some(ShapeControls::Ship) => AnyView::new(view! { ShipSide(model = model, picked = picked, locked = locked) }),
                 Some(ShapeControls::Outline { in_km }) => AnyView::new(view! {
@@ -779,7 +779,7 @@ fn ShapeEdit(model: BoardModel) -> impl IntoView {
                             picked.with(|shape| matches!(shape, Some(PickedShape::Outline { filled: true, .. })))
                         }),
                         set = UnsyncCallback::new(move |on: bool| model.update(|board| board.set_picked_filled(on))),
-                        key = "ui.tactics.shape_filled",
+                        key = "ui-tactics-shape_filled",
                         test_id = "tactics-shape-filled".to_owned(),
                         locked = locked
                     )
@@ -795,7 +795,7 @@ fn ShapeEdit(model: BoardModel) -> impl IntoView {
                 attr:data-testid = "tactics-shape-delete",
                 on:click = move |_| model.update(|board| board.erase_picked())
             ) {
-                {t!("ui.renderer.annotations.action_delete").into_owned()}
+                {t!("ui-renderer-annotations-action_delete").into_owned()}
             }
         }
     }
@@ -872,13 +872,13 @@ fn ShapeSizeInput(
         (
             NumberRange::new(0.1).with_min(f64::from(MIN_SHAPE_KM)).with_max(f64::from(MAX_SHAPE_KM)),
             Decimals(1),
-            t!("ui.tactics.shape_size_km").into_owned(),
+            t!("ui-tactics-shape_size_km").into_owned(),
         )
     } else {
         (
             NumberRange::new(1.0).with_min(f64::from(MIN_SHAPE_UNITS)).with_max(f64::from(MAX_SHAPE_UNITS)),
             Decimals(0),
-            t!("ui.tactics.shape_size").into_owned(),
+            t!("ui-tactics-shape_size").into_owned(),
         )
     };
 
@@ -892,8 +892,8 @@ fn ShapeSizeInput(
                     decimals = decimals,
                     disabled = locked,
                     label = label,
-                    decrement_label = t!("ui.tactics.shape_smaller").into_owned(),
-                    increment_label = t!("ui.tactics.shape_larger").into_owned(),
+                    decrement_label = t!("ui-tactics-shape_smaller").into_owned(),
+                    increment_label = t!("ui-tactics-shape_larger").into_owned(),
                     class = "wt-tactics-toolbar__size",
                     attr:data-testid = "tactics-shape-size"
                 )
@@ -908,9 +908,9 @@ fn ShipSide(model: BoardModel, picked: Memo<Option<PickedShape>>, locked: Signal
     let friendly = Memo::new(move |_| picked.with(|shape| matches!(shape, Some(PickedShape::Ship { friendly: true }))));
     let side = move || {
         let (color, key) = if friendly.get() {
-            (FRIENDLY_COLOR, "ui.tactics.side_friendly")
+            (FRIENDLY_COLOR, "ui-tactics-side_friendly")
         } else {
-            (ENEMY_COLOR, "ui.tactics.side_enemy")
+            (ENEMY_COLOR, "ui-tactics-side_enemy")
         };
         let dot = format!("rgb({}, {}, {})", color[0], color[1], color[2]);
         AnyView::new(view! {
@@ -947,7 +947,7 @@ fn HullPicker(
         Memo::new(move |_| picked.with(|ship| ship.as_ref().map(|ship| ship.hulls.clone()).unwrap_or_default()));
     let current = Memo::new(move |_| picked.with(|ship| ship.as_ref().and_then(|ship| ship.config.hull_name.clone())));
     // No hull named leaves the choice to the params, which the egui board calls the default.
-    let trigger = move || current.get().unwrap_or_else(|| t!("ui.tactics.hull_default").into_owned());
+    let trigger = move || current.get().unwrap_or_else(|| t!("ui-tactics-hull_default").into_owned());
     let choose = move |hull: String| {
         open.set(false);
         model.update(|board| board.set_picked_hull(hull));
@@ -955,12 +955,12 @@ fn HullPicker(
 
     view! {
         row(class = "wt-tactics-toolbar__group") {
-            text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.hull").into_owned()}}
+            text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-hull").into_owned()}}
             Popover(open = open) {
                 PopoverTrigger(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
-                    a11y:label = t!("ui.tactics.hull").into_owned(),
+                    a11y:label = t!("ui-tactics-hull").into_owned(),
                     attr:data-testid = "tactics-ship-hull"
                 ) {
                     {trigger}
@@ -1038,9 +1038,9 @@ fn Presets(model: BoardModel) -> impl IntoView {
     let trigger = move || {
         let presets = presets.get();
         if presets.is_empty() {
-            t!("ui.tactics.presets").into_owned()
+            t!("ui-tactics-presets").into_owned()
         } else {
-            format!("{} ({})", t!("ui.tactics.presets"), presets.len())
+            format!("{} ({})", t!("ui-tactics-presets"), presets.len())
         }
     };
 
@@ -1050,7 +1050,7 @@ fn Presets(model: BoardModel) -> impl IntoView {
                 {trigger}
             }
             PopoverContent(class = "wt-tactics-panel wt-tactics-panel--presets", attr:data-testid = "tactics-presets-menu") {
-                Tip(tip = t!("ui.tactics.reset_board_tooltip").into_owned()) {
+                Tip(tip = t!("ui-tactics-reset_board_tooltip").into_owned()) {
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Xs,
@@ -1058,15 +1058,15 @@ fn Presets(model: BoardModel) -> impl IntoView {
                         attr:data-testid = "tactics-preset-reset",
                         on:click = move |_| model.update(|board| board.reset_board())
                     ) {
-                        {t!("ui.tactics.reset_board").into_owned()}
+                        {t!("ui-tactics-reset_board").into_owned()}
                     }
                 }
                 row(class = "wt-tactics-panel__row") {
                     Typing {
                         Input(
                             value = name,
-                            placeholder = t!("ui.tactics.preset_name").into_owned(),
-                            label = t!("ui.tactics.preset_name").into_owned(),
+                            placeholder = t!("ui-tactics-preset_name").into_owned(),
+                            label = t!("ui-tactics-preset_name").into_owned(),
                             class = "wt-tactics-toolbar__search",
                             attr:data-testid = "tactics-preset-name"
                         )
@@ -1081,7 +1081,7 @@ fn Presets(model: BoardModel) -> impl IntoView {
                             model.update(|board| board.save_preset(&typed));
                         }
                     ) {
-                        {t!("ui.tactics.preset_save").into_owned()}
+                        {t!("ui-tactics-preset_save").into_owned()}
                     }
                 }
                 if move || !presets.with(Vec::is_empty) {
@@ -1111,14 +1111,14 @@ fn preset_row(model: BoardModel, name: String, locked: Signal<bool, LocalStorage
                     disabled = locked,
                     on:click = move |_| model.update(|board| board.load_preset(&open))
                 ) {
-                    {t!("ui.tactics.preset_open").into_owned()}
+                    {t!("ui-tactics-preset_open").into_owned()}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
                     on:click = move |_| model.update(|board| board.delete_preset(&drop))
                 ) {
-                    {t!("ui.tactics.preset_delete").into_owned()}
+                    {t!("ui-tactics-preset_delete").into_owned()}
                 }
             }
         }
@@ -1133,22 +1133,22 @@ fn Scan(model: BoardModel) -> impl IntoView {
     move || match scanning.get() {
         Some(progress) => AnyView::new(view! {
             row(class = "wt-tactics-toolbar__group wt-tactics-toolbar__group--wide", attr:data-testid = "tactics-scanning") {
-                Spinner(label = t!("ui.tactics.scan_running").into_owned())
+                Spinner(label = t!("ui-tactics-scan_running").into_owned())
                 text(class = "wt-tactics-toolbar__label") {{match progress.total {
-                    Some(total) => t!("ui.tactics.scan_progress", read = progress.read, total = total).into_owned(),
-                    None => t!("ui.tactics.scan_running").into_owned(),
+                    Some(total) => t!("ui-tactics-scan_progress", read = progress.read, total = total).into_owned(),
+                    None => t!("ui-tactics-scan_running").into_owned(),
                 }}}
             }
         }),
         None => AnyView::new(view! {
-            Tip(tip = t!("ui.tactics.scan_replays_tooltip").into_owned()) {
+            Tip(tip = t!("ui-tactics-scan_replays_tooltip").into_owned()) {
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
                     attr:data-testid = "tactics-scan",
                     on:click = move |_| model.scan_replays()
                 ) {
-                    {t!("ui.tactics.scan_replays").into_owned()}
+                    {t!("ui-tactics-scan_replays").into_owned()}
                 }
             }
         }),
@@ -1164,7 +1164,7 @@ fn CapTools(model: BoardModel) -> impl IntoView {
 
     view! {
         row(class = "wt-tactics-toolbar__group") {
-            Tip(tip = t!("ui.tactics.add_cap_tooltip").into_owned()) {
+            Tip(tip = t!("ui-tactics-add_cap_tooltip").into_owned()) {
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
@@ -1175,7 +1175,7 @@ fn CapTools(model: BoardModel) -> impl IntoView {
                         board.set_adding(adding);
                     })
                 ) {
-                    {t!("ui.tactics.add_cap").into_owned()}
+                    {t!("ui-tactics-add_cap").into_owned()}
                 }
             }
             {move || selected.get().map(|cap| {
@@ -1186,38 +1186,38 @@ fn CapTools(model: BoardModel) -> impl IntoView {
                 let frozen = cap.frozen;
                 AnyView::new(view! {
                     text(class = "wt-tactics-toolbar__label", attr:data-testid = "tactics-selected-cap") {
-                        {t!("ui.tactics.selected_cap", letter = cap.letter()).into_owned()}
+                        {t!("ui-tactics-selected_cap", letter = cap.letter()).into_owned()}
                     }
                     text(class = "wt-tactics-toolbar__label") {
-                        {t!("ui.tactics.cap_radius", km = format!("{:.1}", radius_km(cap.radius))).into_owned()}
+                        {t!("ui-tactics-cap_radius", km = format!("{:.1}", radius_km(cap.radius))).into_owned()}
                     }
-                    Tip(tip = t!("ui.tactics.cap_narrow_tooltip").into_owned()) {
+                    Tip(tip = t!("ui-tactics-cap_narrow_tooltip").into_owned()) {
                         Button(
                             variant = ButtonVariant::Outline,
                             size = ButtonSize::Xs,
                             disabled = cap.radius <= MIN_CAP_RADIUS,
-                            a11y:label = t!("ui.tactics.cap_narrow_tooltip").into_owned(),
+                            a11y:label = t!("ui-tactics-cap_narrow_tooltip").into_owned(),
                             attr:data-testid = "tactics-cap-narrow",
                             on:click = move |_| model.update(|board| board.step_selected_radius(-RADIUS_STEP_KM))
                         ) {"-"}
                     }
-                    Tip(tip = t!("ui.tactics.cap_widen_tooltip").into_owned()) {
+                    Tip(tip = t!("ui-tactics-cap_widen_tooltip").into_owned()) {
                         Button(
                             variant = ButtonVariant::Outline,
                             size = ButtonSize::Xs,
                             disabled = cap.radius >= MAX_CAP_RADIUS,
-                            a11y:label = t!("ui.tactics.cap_widen_tooltip").into_owned(),
+                            a11y:label = t!("ui-tactics-cap_widen_tooltip").into_owned(),
                             attr:data-testid = "tactics-cap-widen",
                             on:click = move |_| model.update(|board| board.step_selected_radius(RADIUS_STEP_KM))
                         ) {"+"}
                     }
                     row(class = "wt-tactics-toolbar__group") {
-                        text(class = "wt-tactics-toolbar__label") {{t!("ui.tactics.cap_team").into_owned()}}
-                        Tip(tip = t!("ui.tactics.cap_team_tooltip").into_owned()) {
+                        text(class = "wt-tactics-toolbar__label") {{t!("ui-tactics-cap_team").into_owned()}}
+                        Tip(tip = t!("ui-tactics-cap_team_tooltip").into_owned()) {
                             Button(
                                 variant = ButtonVariant::Outline,
                                 size = ButtonSize::Xs,
-                                a11y:label = format!("{}: {team_label}", t!("ui.tactics.cap_team")),
+                                a11y:label = format!("{}: {team_label}", t!("ui-tactics-cap_team")),
                                 attr:data-testid = "tactics-cap-team",
                                 on:click = move |_| model.update(|board| board.cycle_selected_team())
                             ) {
@@ -1227,9 +1227,9 @@ fn CapTools(model: BoardModel) -> impl IntoView {
                         }
                     }
                     Tip(tip = if frozen {
-                        t!("ui.tactics.cap_replay_delete_tooltip").into_owned()
+                        t!("ui-tactics-cap_replay_delete_tooltip").into_owned()
                     } else {
-                        t!("ui.tactics.delete_cap_tooltip").into_owned()
+                        t!("ui-tactics-delete_cap_tooltip").into_owned()
                     }) {
                         Button(
                             variant = ButtonVariant::Outline,
@@ -1238,20 +1238,20 @@ fn CapTools(model: BoardModel) -> impl IntoView {
                             attr:data-testid = "tactics-cap-delete",
                             on:click = move |_| model.update(|board| board.remove_selected())
                         ) {
-                            {t!("ui.tactics.delete_cap").into_owned()}
+                            {t!("ui-tactics-delete_cap").into_owned()}
                         }
                     }
                 })
             })}
             if move || removable.get() {
-                Tip(tip = t!("ui.tactics.clear_added_caps_tooltip").into_owned()) {
+                Tip(tip = t!("ui-tactics-clear_added_caps_tooltip").into_owned()) {
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Xs,
                         attr:data-testid = "tactics-clear-caps",
                         on:click = move |_| model.update(|board| board.clear_caps())
                     ) {
-                        {t!("ui.tactics.clear_caps").into_owned()}
+                        {t!("ui-tactics-clear_caps").into_owned()}
                     }
                 }
             } else {}
@@ -1283,24 +1283,24 @@ fn DrawTools(model: BoardModel) -> impl IntoView {
             }
             Rule()
             row(class = "wt-tactics-toolbar__group") {
-                text(class = "wt-tactics-toolbar__label") {{t!("ui.renderer.annotations.nib").into_owned()}}
-                Tip(tip = t!("ui.renderer.annotations.thinner").into_owned()) {
+                text(class = "wt-tactics-toolbar__label") {{t!("ui-renderer-annotations-nib").into_owned()}}
+                Tip(tip = t!("ui-renderer-annotations-thinner").into_owned()) {
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Xs,
                         disabled = Signal::derive_local(move || locked.get() || nib.get() <= MIN_NIB),
-                        a11y:label = t!("ui.renderer.annotations.thinner").into_owned(),
+                        a11y:label = t!("ui-renderer-annotations-thinner").into_owned(),
                         attr:data-testid = "tactics-nib-down",
                         on:click = move |_| model.update(|board| board.step_nib(-1.0))
                     ) {"-"}
                 }
                 text(class = "wt-tactics-toolbar__nib", attr:data-testid = "tactics-nib") {{move || format!("{:.0}", nib.get())}}
-                Tip(tip = t!("ui.renderer.annotations.thicker").into_owned()) {
+                Tip(tip = t!("ui-renderer-annotations-thicker").into_owned()) {
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Xs,
                         disabled = Signal::derive_local(move || locked.get() || nib.get() >= MAX_NIB),
-                        a11y:label = t!("ui.renderer.annotations.thicker").into_owned(),
+                        a11y:label = t!("ui-renderer-annotations-thicker").into_owned(),
                         attr:data-testid = "tactics-nib-up",
                         on:click = move |_| model.update(|board| board.step_nib(1.0))
                     ) {"+"}
@@ -1309,7 +1309,7 @@ fn DrawTools(model: BoardModel) -> impl IntoView {
             Rule()
             Shortcuts()
             Rule()
-            Tip(tip = t!("ui.tactics.undo_tooltip", shortcut = format!("{modifier}+Z")).into_owned()) {
+            Tip(tip = t!("ui-tactics-undo_tooltip", shortcut = format!("{modifier}+Z")).into_owned()) {
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
@@ -1317,11 +1317,11 @@ fn DrawTools(model: BoardModel) -> impl IntoView {
                     attr:data-testid = "tactics-undo",
                     on:click = move |_| model.update(|board| board.undo())
                 ) {
-                    {t!("ui.renderer.annotations.undo").into_owned()}
+                    {t!("ui-renderer-annotations-undo").into_owned()}
                 }
             }
             Tip(tip = t!(
-                "ui.tactics.redo_tooltip",
+                "ui-tactics-redo_tooltip",
                 shortcut = format!("{modifier}+Y"),
                 alternate = format!("{modifier}+Shift+Z")
             ).into_owned()) {
@@ -1332,7 +1332,7 @@ fn DrawTools(model: BoardModel) -> impl IntoView {
                     attr:data-testid = "tactics-redo",
                     on:click = move |_| model.update(|board| board.redo())
                 ) {
-                    {t!("ui.renderer.annotations.redo").into_owned()}
+                    {t!("ui-renderer-annotations-redo").into_owned()}
                 }
             }
             if move || has_drawing.get() {
@@ -1343,7 +1343,7 @@ fn DrawTools(model: BoardModel) -> impl IntoView {
                     attr:data-testid = "tactics-clear-drawing",
                     on:click = move |_| model.update(|board| board.clear_annotations())
                 ) {
-                    {t!("ui.tactics.clear_drawing").into_owned()}
+                    {t!("ui-tactics-clear_drawing").into_owned()}
                 }
             } else {}
         }
@@ -1417,7 +1417,7 @@ fn InkButton(model: BoardModel, ink: Ink, locked: Signal<bool, LocalStorage>) ->
 /// The drawing chords in one place, for a reader who does not hover each tool.
 #[component]
 fn Shortcuts() -> impl IntoView {
-    let heading = t!("ui.renderer.annotations.shortcuts_title").into_owned();
+    let heading = t!("ui-renderer-annotations-shortcuts_title").into_owned();
     let tip = heading.clone();
     let label = heading.clone();
 
@@ -1434,9 +1434,9 @@ fn Shortcuts() -> impl IntoView {
                 }
                 PopoverContent(class = "wt-tactics-panel wt-tactics-panel--shortcuts", attr:data-testid = "tactics-shortcuts-menu") {
                     text(class = "wt-tactics-panel__text") {{heading.clone()}}
-                    text(class = "wt-tactics-panel__dim") {{t!("ui.renderer.annotations.shortcuts_tools").into_owned()}}
+                    text(class = "wt-tactics-panel__dim") {{t!("ui-renderer-annotations-shortcuts_tools").into_owned()}}
                     {shortcut_tools()}
-                    text(class = "wt-tactics-panel__dim") {{t!("ui.renderer.annotations.shortcuts_actions").into_owned()}}
+                    text(class = "wt-tactics-panel__dim") {{t!("ui-renderer-annotations-shortcuts_actions").into_owned()}}
                     {shortcut_actions()}
                 }
             }
@@ -1465,11 +1465,11 @@ fn shortcut_tools() -> Vec<AnyView> {
 fn shortcut_actions() -> Vec<AnyView> {
     let modifier = shortcut_modifier_name();
     vec![
-        shortcut_line(format!("{modifier}+Z"), t!("ui.renderer.annotations.action_undo").into_owned()),
-        shortcut_line(format!("{modifier}+Y / {modifier}+Shift+Z"), t!("ui.renderer.annotations.redo").into_owned()),
-        shortcut_line(format!("{modifier}+Click"), t!("ui.renderer.annotations.action_multi_select").into_owned()),
-        shortcut_line("[ / ]".to_owned(), t!("ui.renderer.annotations.action_stroke_width").into_owned()),
-        shortcut_line("Del".to_owned(), t!("ui.renderer.annotations.action_delete").into_owned()),
-        shortcut_line("Esc".to_owned(), t!("ui.renderer.annotations.action_cancel").into_owned()),
+        shortcut_line(format!("{modifier}+Z"), t!("ui-renderer-annotations-action_undo").into_owned()),
+        shortcut_line(format!("{modifier}+Y / {modifier}+Shift+Z"), t!("ui-renderer-annotations-redo").into_owned()),
+        shortcut_line(format!("{modifier}+Click"), t!("ui-renderer-annotations-action_multi_select").into_owned()),
+        shortcut_line("[ / ]".to_owned(), t!("ui-renderer-annotations-action_stroke_width").into_owned()),
+        shortcut_line("Del".to_owned(), t!("ui-renderer-annotations-action_delete").into_owned()),
+        shortcut_line("Esc".to_owned(), t!("ui-renderer-annotations-action_cancel").into_owned()),
     ]
 }

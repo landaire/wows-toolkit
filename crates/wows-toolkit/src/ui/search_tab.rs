@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::settings::ResultColumn;
@@ -434,14 +434,12 @@ fn map_option(name: &str) -> ValueOption {
 pub use wows_toolkit_viewmodel::search::game_mode_gap_applies as game_mode_gap_hint_relevant;
 
 /// The hint's text, singular at exactly one so it never reads "1 indexed
-/// matches". Follows the same `count == 1` split the rest of the app uses;
-/// `rust_i18n`'s own key lookup has no built-in pluralisation, so the split
-/// has to happen here.
+/// matches". Follows the same `count == 1` split the rest of the app uses.
 fn game_mode_gap_hint_text(missing_count: i64) -> std::borrow::Cow<'static, str> {
     if missing_count == 1 {
-        t!("ui.search.game_mode_gap_hint_one")
+        t!("ui-search-game_mode_gap_hint_one")
     } else {
-        t!("ui.search.game_mode_gap_hint", count = missing_count)
+        t!("ui-search-game_mode_gap_hint", count = missing_count)
     }
 }
 
@@ -462,15 +460,15 @@ const RESULT_COLUMNS: [ResultColumn; 9] = [
 
 const fn column_label_key(column: ResultColumn) -> &'static str {
     match column {
-        ResultColumn::Date => "ui.search.column.date",
-        ResultColumn::Map => "ui.search.column.map",
-        ResultColumn::Mode => "ui.search.column.mode",
-        ResultColumn::Ship => "ui.search.column.ship",
-        ResultColumn::Outcome => "ui.search.column.result",
-        ResultColumn::Damage => "ui.search.column.damage",
-        ResultColumn::Kills => "ui.search.column.kills",
-        ResultColumn::Pr => "ui.search.column.pr",
-        ResultColumn::Mc => "ui.search.column.mc",
+        ResultColumn::Date => "ui-search-column-date",
+        ResultColumn::Map => "ui-search-column-map",
+        ResultColumn::Mode => "ui-search-column-mode",
+        ResultColumn::Ship => "ui-search-column-ship",
+        ResultColumn::Outcome => "ui-search-column-result",
+        ResultColumn::Damage => "ui-search-column-damage",
+        ResultColumn::Kills => "ui-search-column-kills",
+        ResultColumn::Pr => "ui-search-column-pr",
+        ResultColumn::Mc => "ui-search-column-mc",
     }
 }
 
@@ -684,7 +682,7 @@ impl ResultsTable<'_> {
             }
             ResultColumn::Pr => {
                 if !hit.rating_scope().is_rated() {
-                    ui.label("-").on_hover_text(t!("ui.personal_rating.unrated_hover"));
+                    ui.label("-").on_hover_text(t!("ui-personal_rating-unrated_hover"));
                 } else if let Some(pr) = hit.self_pr {
                     pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false);
                 }
@@ -705,7 +703,7 @@ impl ResultsTable<'_> {
     fn actions_ui(&mut self, ui: &mut egui::Ui, row: usize) {
         let hit = &self.hits[row];
         let exists = hit.replay_path.exists();
-        let mut open_button = egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.search.open")));
+        let mut open_button = egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui-search-open")));
         if !exists {
             // Disabled renders in the same Noninteractive state the table's
             // scope mutes the bg_stroke of (see `show_results_table`), which
@@ -716,12 +714,12 @@ impl ResultsTable<'_> {
         }
         let btn = ui.add_enabled(exists, open_button);
         if !exists {
-            btn.on_hover_text(t!("ui.search.open_missing"));
+            btn.on_hover_text(t!("ui-search-open_missing"));
         } else if btn.clicked() {
             self.open_path = Some(hit.replay_path.clone());
         }
 
-        let copy_btn = ui.add(egui::Button::new(icons::COPY)).on_hover_text(t!("ui.replay.context.copy_path"));
+        let copy_btn = ui.add(egui::Button::new(icons::COPY)).on_hover_text(t!("ui-replay-context-copy_path"));
         if copy_btn.clicked() {
             self.copy_path = Some(copy_target(self.hits, row));
         }
@@ -740,11 +738,11 @@ impl ResultsTable<'_> {
         // not yet stamped with an mtime still renders on click, and only
         // loses the compact preview.
         let Some(key) = hit_preview_key(hit) else {
-            preview_response.on_hover_text(t!("ui.search.preview_and_render"));
+            preview_response.on_hover_text(t!("ui-search-preview_and_render"));
             return;
         };
         if !preview_response.hovered() {
-            let _ = preview_response.on_hover_text(t!("ui.search.preview_and_render"));
+            let _ = preview_response.on_hover_text(t!("ui-search-preview_and_render"));
             return;
         }
 
@@ -758,7 +756,7 @@ impl ResultsTable<'_> {
                 preview_popup::preview_tooltip(ui, &deps, key.clone(), &hit.map, &hover_text);
             });
         } else {
-            preview_response = preview_response.on_hover_text(t!("ui.search.preview_and_render"));
+            preview_response = preview_response.on_hover_text(t!("ui-search-preview_and_render"));
         }
         let _ = preview_response;
     }
@@ -1056,9 +1054,9 @@ impl ToolkitTabViewer<'_> {
 
         let count = self.tab_state.search_tab.results.len();
         ui.label(if self.tab_state.search_tab.truncated {
-            t!("ui.search.match_count_truncated", count = count)
+            t!("ui-search-match_count_truncated", count = count)
         } else {
-            t!("ui.search.match_count", count = count)
+            t!("ui-search-match_count", count = count)
         });
 
         // Taken out for the duration of the table so the delegate can hold it
@@ -1118,7 +1116,7 @@ impl ToolkitTabViewer<'_> {
 
         if let Some(path) = copy_path {
             ui.ctx().copy_text(path.to_string_lossy().into_owned());
-            self.tab_state.toasts.lock().success(t!("ui.search.path_copied"));
+            self.tab_state.toasts.lock().success(t!("ui-search-path_copied"));
         }
     }
 }
@@ -2500,7 +2498,7 @@ mod tests {
     fn a_disabled_open_button_keeps_its_own_border() {
         let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
 
-        let open_center = harness.only_text_at(&t!("ui.search.open"));
+        let open_center = harness.only_text_at(&t!("ui-search-open"));
         let button_frame = harness
             .shapes
             .iter()
@@ -2655,7 +2653,7 @@ mod tests {
         assert_eq!(distinct.len(), hits.len(), "the fixture rows must be distinguishable: {hits:?}");
 
         let mut harness = TableHarness::new(hits.clone());
-        let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
+        let opens = button_per_row(&harness, &t!("ui-search-open"), hits.len());
         let copies = button_per_row(&harness, icons::COPY, hits.len());
 
         for (row, hit) in hits.iter().enumerate() {
@@ -2716,7 +2714,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
+        let opens = button_per_row(&harness, &t!("ui-search-open"), hits.len());
         let copies = button_per_row(&harness, icons::COPY, hits.len());
         assert_ne!(opens[0], copies[0], "the two buttons drew on top of each other");
 
@@ -2756,7 +2754,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
+        let opens = button_per_row(&harness, &t!("ui-search-open"), hits.len());
         let plays = button_per_row(&harness, icons::PLAY, hits.len());
         assert_ne!(opens[0], plays[0], "the two buttons drew on top of each other");
 
@@ -2811,7 +2809,7 @@ mod tests {
             harness.frame(frame_input());
         }
 
-        let tooltip = t!("ui.search.preview_and_render");
+        let tooltip = t!("ui-search-preview_and_render");
         assert!(
             !harness.text_rects(&tooltip).is_empty(),
             "the combined tooltip {tooltip:?} never painted; shapes: {:?}",

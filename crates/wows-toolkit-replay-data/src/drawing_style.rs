@@ -12,15 +12,15 @@ pub struct Ink {
 
 /// The egui toolbar's `PRESET_COLORS`, in its order.
 pub const INKS: [Ink; 9] = [
-    Ink { rgba: [255, 255, 255, 255], name: "white", label_key: "ui.tactics.ink_white" },
-    Ink { rgba: [160, 160, 160, 255], name: "gray", label_key: "ui.tactics.ink_gray" },
-    Ink { rgba: [230, 50, 50, 255], name: "red", label_key: "ui.tactics.ink_red" },
-    Ink { rgba: [240, 140, 30, 255], name: "orange", label_key: "ui.tactics.ink_orange" },
-    Ink { rgba: [240, 230, 50, 255], name: "yellow", label_key: "ui.tactics.ink_yellow" },
-    Ink { rgba: [50, 200, 50, 255], name: "green", label_key: "ui.tactics.ink_green" },
-    Ink { rgba: [50, 120, 230, 255], name: "blue", label_key: "ui.tactics.ink_blue" },
-    Ink { rgba: [180, 60, 230, 255], name: "purple", label_key: "ui.tactics.ink_purple" },
-    Ink { rgba: [255, 130, 180, 255], name: "pink", label_key: "ui.tactics.ink_pink" },
+    Ink { rgba: [255, 255, 255, 255], name: "white", label_key: "ui-tactics-ink_white" },
+    Ink { rgba: [160, 160, 160, 255], name: "gray", label_key: "ui-tactics-ink_gray" },
+    Ink { rgba: [230, 50, 50, 255], name: "red", label_key: "ui-tactics-ink_red" },
+    Ink { rgba: [240, 140, 30, 255], name: "orange", label_key: "ui-tactics-ink_orange" },
+    Ink { rgba: [240, 230, 50, 255], name: "yellow", label_key: "ui-tactics-ink_yellow" },
+    Ink { rgba: [50, 200, 50, 255], name: "green", label_key: "ui-tactics-ink_green" },
+    Ink { rgba: [50, 120, 230, 255], name: "blue", label_key: "ui-tactics-ink_blue" },
+    Ink { rgba: [180, 60, 230, 255], name: "purple", label_key: "ui-tactics-ink_purple" },
+    Ink { rgba: [255, 130, 180, 255], name: "pink", label_key: "ui-tactics-ink_pink" },
 ];
 
 /// What a tool draws with until the reader picks an ink: egui's `Color32::YELLOW`, which is none

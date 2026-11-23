@@ -3,12 +3,12 @@ use std::collections::HashMap;
 
 use egui::RichText;
 use jiff::Timestamp;
-use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::types::AccountId;
 #[cfg(test)]
 use wows_replays::types::ArenaId;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::db::index::rows::ClanCorrection;
@@ -305,13 +305,13 @@ impl ClansTable<'_> {
             }
             ClanColumn::Sightings => {
                 ui.label(view.sightings.to_string())
-                    .on_hover_text(t!("ui.player_tracker.clan_sightings_hover", range = view.sightings_in_range));
+                    .on_hover_text(t!("ui-player_tracker-clan_sightings_hover", range = view.sightings_in_range));
             }
             ClanColumn::LastSeen => {
                 ui.label(&view.last_seen).on_hover_text(&view.last_seen_exact);
             }
             ClanColumn::Actions => {
-                if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui.player_tracker.find_clan_matches")).clicked()
+                if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui-player_tracker-find_clan_matches")).clicked()
                 {
                     self.clan_search_target = Some(view.clan.clone());
                 }
@@ -358,13 +358,13 @@ impl ClansTable<'_> {
                     .unwrap_or_else(|| account_id.to_string());
 
                 ui.horizontal(|ui| {
-                    if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui.player_tracker.find_matches")).clicked()
+                    if ui.button(icons::MAGNIFYING_GLASS).on_hover_text(t!("ui-player_tracker-find_matches")).clicked()
                     {
                         self.find_matches_target = Some(account_id);
                     }
                     ui.label(name);
                     ui.label(
-                        RichText::new(t!("ui.player_tracker.clan_member_matches", count = matches)).small().weak(),
+                        RichText::new(t!("ui-player_tracker-clan_member_matches", count = matches)).small().weak(),
                     );
                 });
             }
@@ -410,32 +410,32 @@ impl egui_table::TableDelegate for ClansTable<'_> {
         let sorted_by = self.tracker.clan_sort_order;
         let (key, target, is_active) = match column {
             ClanColumn::Clan => (
-                "ui.player_tracker.column.clan",
+                "ui-player_tracker-column-clan",
                 ClanSortedBy::Clan(SortOrder::Asc),
                 matches!(sorted_by, ClanSortedBy::Clan(_)),
             ),
             ClanColumn::Members => (
-                "ui.player_tracker.column.members",
+                "ui-player_tracker-column-members",
                 ClanSortedBy::Members(SortOrder::Desc),
                 matches!(sorted_by, ClanSortedBy::Members(_)),
             ),
             ClanColumn::Matches => (
-                "ui.player_tracker.column.matches",
+                "ui-player_tracker-column-matches",
                 ClanSortedBy::Matches(SortOrder::Desc),
                 matches!(sorted_by, ClanSortedBy::Matches(_)),
             ),
             ClanColumn::MatchesInRange => (
-                "ui.player_tracker.column.encounters_in_range",
+                "ui-player_tracker-column-encounters_in_range",
                 ClanSortedBy::MatchesInRange(SortOrder::Desc),
                 matches!(sorted_by, ClanSortedBy::MatchesInRange(_)),
             ),
             ClanColumn::Sightings => (
-                "ui.player_tracker.column.sightings",
+                "ui-player_tracker-column-sightings",
                 ClanSortedBy::Sightings(SortOrder::Desc),
                 matches!(sorted_by, ClanSortedBy::Sightings(_)),
             ),
             ClanColumn::LastSeen => (
-                "ui.player_tracker.column.last_encountered",
+                "ui-player_tracker-column-last_encountered",
                 ClanSortedBy::LastSeen(SortOrder::Desc),
                 matches!(sorted_by, ClanSortedBy::LastSeen(_)),
             ),
@@ -709,38 +709,38 @@ impl ToolkitTabViewer<'_> {
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastHour,
-                                t!("ui.player_tracker.period.past_hour"),
+                                t!("ui-player_tracker-period-past_hour"),
                             );
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastSixHours,
-                                t!("ui.player_tracker.period.past_six_hours"),
+                                t!("ui-player_tracker-period-past_six_hours"),
                             );
-                            ui.selectable_value(selected, TimePeriod::LastDay, t!("ui.player_tracker.period.past_day"));
+                            ui.selectable_value(selected, TimePeriod::LastDay, t!("ui-player_tracker-period-past_day"));
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastWeek,
-                                t!("ui.player_tracker.period.past_week"),
+                                t!("ui-player_tracker-period-past_week"),
                             );
                             ui.selectable_value(
                                 selected,
                                 TimePeriod::LastMonth,
-                                t!("ui.player_tracker.period.past_month"),
+                                t!("ui-player_tracker-period-past_month"),
                             );
-                            ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
+                            ui.selectable_value(selected, TimePeriod::AllTime, t!("ui-player_tracker-period-all_time"));
                         });
 
                     // The same field the Historical tab's checkbox edits, so the
                     // two stay in sync in both directions with no extra state.
-                    ui.checkbox(&mut player_tracker.show_division_mates, t!("ui.player_tracker.show_division_mates"))
-                        .on_hover_text(t!("ui.player_tracker.show_division_mates_hover"));
+                    ui.checkbox(&mut player_tracker.show_division_mates, t!("ui-player_tracker-show_division_mates"))
+                        .on_hover_text(t!("ui-player_tracker-show_division_mates_hover"));
                 });
 
                 ui.add_space(10.0);
                 ui.separator();
 
                 if breakdown.rows.is_empty() {
-                    ui.label(t!("ui.player_tracker.clan_no_data"));
+                    ui.label(t!("ui-player_tracker-clan_no_data"));
                     player_tracker.clan_breakdown = Some(breakdown);
                     return;
                 }

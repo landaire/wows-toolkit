@@ -4,7 +4,6 @@ use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_minimap_renderer::ExportSpeed;
 use wows_minimap_renderer::ExportTiming;
 use wows_minimap_renderer::VideoCodec;
@@ -18,6 +17,7 @@ use wows_toolkit_replay_data::replay_render::export::approximate_speed;
 use wows_toolkit_replay_data::replay_render::export::encoder_status;
 use wows_toolkit_replay_data::replay_render::export::video_length_label;
 use wows_toolkit_replay_data::replay_render::playback::speed_label;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -92,7 +92,7 @@ pub fn OptionsPopover(session: RendererSession) -> impl IntoView {
             OptionsGear(session = session)
         } else {
             // Refused, so it is never pressed: only the gear's place and look are wanted.
-            TransportButton(glyph = Glyph::Settings, label_key = "ui.renderer.settings.title",
+            TransportButton(glyph = Glyph::Settings, label_key = "ui-renderer-settings-title",
                 test_id = "replay-renderer-settings-toggle", disabled = Signal::stored_local(true),
                 on_press = UnsyncCallback::new(|()| {}))
         }
@@ -102,7 +102,7 @@ pub fn OptionsPopover(session: RendererSession) -> impl IntoView {
 /// The gear once the track is here, and what it opens.
 #[component]
 fn OptionsGear(session: RendererSession) -> impl IntoView {
-    let label = t!("ui.renderer.settings.title").into_owned();
+    let label = t!("ui-renderer-settings-title").into_owned();
     let named = label.clone();
 
     view! {
@@ -179,25 +179,25 @@ fn ExportSettingsSection(session: RendererSession) -> impl IntoView {
 
     view! {
         column {
-            text(class = "wt-renderer-options__heading") {{t!("ui.renderer.settings.export_settings").into_owned()}}
+            text(class = "wt-renderer-options__heading") {{t!("ui-renderer-settings-export_settings").into_owned()}}
             CheckRow(
-                label = t!("ui.renderer.settings.prefer_cpu").into_owned(),
+                label = t!("ui-renderer-settings-prefer_cpu").into_owned(),
                 test_id = "replay-renderer-prefer-cpu".to_owned(),
-                tooltip = t!("ui.renderer.settings.prefer_cpu_tooltip").into_owned(),
+                tooltip = t!("ui-renderer-settings-prefer_cpu_tooltip").into_owned(),
                 checked = prefer_cpu,
                 on_change = UnsyncCallback::new(move |on: bool| session.export.update(|export| export.settings.prefer_cpu = on))
             )
             CheckRow(
-                label = t!("ui.renderer.settings.include_pre_battle").into_owned(),
+                label = t!("ui-renderer-settings-include_pre_battle").into_owned(),
                 test_id = "replay-renderer-include-pre-battle".to_owned(),
-                tooltip = t!("ui.renderer.settings.include_pre_battle_tooltip").into_owned(),
+                tooltip = t!("ui-renderer-settings-include_pre_battle_tooltip").into_owned(),
                 checked = pre_battle,
                 on_change = UnsyncCallback::new(move |on: bool| {
                     session.export.update(|export| export.settings.include_pre_battle = on);
                 })
             )
             VideoTiming(session = session)
-            text(class = "wt-renderer-options__caption") {{t!("ui.renderer.settings.codec").into_owned()}}
+            text(class = "wt-renderer-options__caption") {{t!("ui-renderer-settings-codec").into_owned()}}
             column(class = "wt-renderer-options__codecs") {
                 CodecChoice(session = session, codec = None, test_id = "replay-renderer-codec-auto".to_owned())
                 // Only what this machine can actually encode with.
@@ -220,7 +220,7 @@ fn CodecChoice(session: RendererSession, codec: Option<VideoCodec>, test_id: Str
             let prefer_cpu = session.export.with(|export| export.settings.prefer_cpu);
             format!(
                 "{} ({})",
-                t!("ui.renderer.settings.codec_auto"),
+                t!("ui-renderer-settings-codec_auto"),
                 encoder_status().best_codec(prefer_cpu).display_name()
             )
         }
@@ -258,11 +258,11 @@ fn VideoTiming(session: RendererSession) -> impl IntoView {
         let window = session.track()?.export_window(settings.include_pre_battle)?.seconds();
         let said = match settings.timing {
             ExportTiming::Length(_) => t!(
-                "ui.renderer.settings.export_timing_result_speed",
+                "ui-renderer-settings-export_timing_result_speed",
                 speed = approximate_speed(settings.timing.rate(window))
             ),
             ExportTiming::Speed(_) => t!(
-                "ui.renderer.settings.export_timing_result_length",
+                "ui-renderer-settings-export_timing_result_length",
                 length = video_length_label(settings.timing.output_seconds(window))
             ),
         };
@@ -272,11 +272,11 @@ fn VideoTiming(session: RendererSession) -> impl IntoView {
 
     view! {
         column {
-            text(class = "wt-renderer-options__caption") {{t!("ui.renderer.settings.export_timing").into_owned()}}
+            text(class = "wt-renderer-options__caption") {{t!("ui-renderer-settings-export_timing").into_owned()}}
             row(class = "wt-renderer-options__choices") {
                 // A mode already chosen keeps the length or speed chosen in it.
                 TimingChoice(
-                    label = t!("ui.renderer.settings.export_timing_length").into_owned(),
+                    label = t!("ui-renderer-settings-export_timing_length").into_owned(),
                     test_id = "replay-renderer-timing-length".to_owned(),
                     picked = Signal::derive_local(move || matches!(timing(), ExportTiming::Length(_))),
                     on_press = set(|timing| match timing {
@@ -285,7 +285,7 @@ fn VideoTiming(session: RendererSession) -> impl IntoView {
                     })
                 )
                 TimingChoice(
-                    label = t!("ui.renderer.settings.export_timing_speed").into_owned(),
+                    label = t!("ui-renderer-settings-export_timing_speed").into_owned(),
                     test_id = "replay-renderer-timing-speed".to_owned(),
                     picked = Signal::derive_local(move || matches!(timing(), ExportTiming::Speed(_))),
                     on_press = set(|timing| match timing {
@@ -378,13 +378,13 @@ fn SaveDefaultsButton(session: RendererSession) -> impl IntoView {
                     // A window with no message host has nowhere to say it.
                     let Some(toasts) = toasts else { return };
                     if saved {
-                        toasts.ok(t!("ui.renderer.settings.save_defaults_done").into_owned());
+                        toasts.ok(t!("ui-renderer-settings-save_defaults_done").into_owned());
                     } else {
-                        toasts.failed(t!("ui.renderer.settings.save_defaults_failed").into_owned());
+                        toasts.failed(t!("ui-renderer-settings-save_defaults_failed").into_owned());
                     }
                 })
             ) {
-                {t!("ui.renderer.settings.save_defaults").into_owned()}
+                {t!("ui-renderer-settings-save_defaults").into_owned()}
             }
         }
     }

@@ -5,7 +5,7 @@ use egui::OpenUrl;
 use egui::RichText;
 use egui::Slider;
 use egui::Stroke;
-use rust_i18n::t;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::settings::AppPreferences;
@@ -103,42 +103,42 @@ impl ToolkitTabViewer<'_> {
             ui.set_width(ui.available_width());
 
             // ── Application Settings ──────────────────────────────────
-            section_header(ui, icons::GEAR_FINE, &t!("ui.settings.app.heading"), &t!("ui.settings.app.description"));
+            section_header(ui, icons::GEAR_FINE, &t!("ui-settings-app-heading"), &t!("ui-settings-app-description"));
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
                 let mut check_for_updates = self.tab_state.persisted.read().settings.app.check_for_updates;
-                if ui.checkbox(&mut check_for_updates, t!("ui.settings.app.check_for_updates")).changed() {
+                if ui.checkbox(&mut check_for_updates, t!("ui-settings-app-check_for_updates")).changed() {
                     self.tab_state.persisted.write().settings.app.check_for_updates = check_for_updates;
                 }
                 let mut enable_logging = self.tab_state.persisted.read().settings.app.enable_logging;
                 if ui
-                    .checkbox(&mut enable_logging, t!("ui.settings.app.enable_logging"))
-                    .on_hover_text(t!("ui.settings.app.enable_logging_tooltip"))
+                    .checkbox(&mut enable_logging, t!("ui-settings-app-enable_logging"))
+                    .on_hover_text(t!("ui-settings-app-enable_logging_tooltip"))
                     .changed()
                 {
                     self.tab_state.persisted.write().settings.app.enable_logging = enable_logging;
                 }
                 let mut mode = self.tab_state.persisted.read().settings.integrations.data_sharing_mode;
-                ui.label(t!("ui.settings.app.data_sharing_mode"));
+                ui.label(t!("ui-settings-app-data_sharing_mode"));
                 let mut mode_changed = false;
                 mode_changed |=
-                    ui.radio_value(&mut mode, DataSharingMode::Off, t!("ui.settings.app.data_sharing_off")).changed();
+                    ui.radio_value(&mut mode, DataSharingMode::Off, t!("ui-settings-app-data_sharing_off")).changed();
                 mode_changed |= ui
-                    .radio_value(&mut mode, DataSharingMode::BuildData, t!("ui.settings.app.data_sharing_build_data"))
+                    .radio_value(&mut mode, DataSharingMode::BuildData, t!("ui-settings-app-data_sharing_build_data"))
                     .changed();
                 mode_changed |= ui
-                    .radio_value(&mut mode, DataSharingMode::Replays, t!("ui.settings.app.data_sharing_replays"))
+                    .radio_value(&mut mode, DataSharingMode::Replays, t!("ui-settings-app-data_sharing_replays"))
                     .changed();
                 if mode_changed {
                     self.tab_state.persisted.write().settings.integrations.data_sharing_mode = mode;
                 }
                 ui.horizontal(|ui| {
                     let mut zoom = ui.ctx().zoom_factor();
-                    if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text(t!("ui.settings.app.zoom_factor"))).changed() {
+                    if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text(t!("ui-settings-app-zoom_factor"))).changed() {
                         ui.ctx().set_zoom_factor(zoom);
                         self.tab_state.persisted.write().settings.app.zoom_factor = zoom;
                     }
-                    if ui.button(t!("ui.buttons.reset")).clicked() {
+                    if ui.button(t!("ui-buttons-reset")).clicked() {
                         let default_zoom = AppPreferences::default().zoom_factor;
                         ui.ctx().set_zoom_factor(default_zoom);
                         self.tab_state.persisted.write().settings.app.zoom_factor = default_zoom;
@@ -146,14 +146,14 @@ impl ToolkitTabViewer<'_> {
                 });
                 ui.horizontal(|ui| {
                     let mut theme = self.tab_state.persisted.read().settings.app.theme;
-                    ui.label(t!("ui.settings.app.theme"));
+                    ui.label(t!("ui-settings-app-theme"));
                     let mut changed = false;
                     changed |=
-                        ui.radio_value(&mut theme, ThemeChoice::System, t!("ui.settings.app.theme_system")).changed();
+                        ui.radio_value(&mut theme, ThemeChoice::System, t!("ui-settings-app-theme_system")).changed();
                     changed |=
-                        ui.radio_value(&mut theme, ThemeChoice::Dark, t!("ui.settings.app.theme_dark")).changed();
+                        ui.radio_value(&mut theme, ThemeChoice::Dark, t!("ui-settings-app-theme_dark")).changed();
                     changed |=
-                        ui.radio_value(&mut theme, ThemeChoice::Light, t!("ui.settings.app.theme_light")).changed();
+                        ui.radio_value(&mut theme, ThemeChoice::Light, t!("ui-settings-app-theme_light")).changed();
                     if changed {
                         self.tab_state.persisted.write().settings.app.theme = theme;
                         crate::ui::theme::apply(ui.ctx(), theme);
@@ -168,8 +168,8 @@ impl ToolkitTabViewer<'_> {
 
                     ui.horizontal(|ui| {
                         let mut preference = self.tab_state.persisted.read().settings.app.code_integrity;
-                        ui.label(t!("ui.settings.app.code_integrity"))
-                            .on_hover_text(t!("ui.settings.app.code_integrity_tooltip"));
+                        ui.label(t!("ui-settings-app-code_integrity"))
+                            .on_hover_text(t!("ui-settings-app-code_integrity_tooltip"));
                         let mut changed = false;
                         for choice in CodeIntegrityPreference::ALL {
                             changed |= ui.radio_value(&mut preference, choice, t!(choice.key())).changed();
@@ -181,7 +181,7 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 ui.horizontal(|ui| {
-                    ui.label(t!("ui.settings.app.language"));
+                    ui.label(t!("ui-settings-app-language"));
                     let current_locale =
                         self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".into());
                     let current_name = wt_translations::language_name(&current_locale).unwrap_or("English");
@@ -189,7 +189,8 @@ impl ToolkitTabViewer<'_> {
                         for lang in wt_translations::SUPPORTED_LANGUAGES {
                             if ui.selectable_label(current_locale == lang.code, lang.native_name).clicked() {
                                 self.tab_state.persisted.write().settings.app.locale = Some(lang.code.to_string());
-                                rust_i18n::set_locale(lang.code);
+                                wt_translations::set_locale(lang.code)
+                                    .expect("SUPPORTED_LANGUAGES codes are supported");
 
                                 // Swap the gettext catalog so WoWs translations (ship names,
                                 // achievements, etc.) resolve in the new locale without a
@@ -209,8 +210,8 @@ impl ToolkitTabViewer<'_> {
                     });
                 });
                 if ui
-                    .button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.settings.app.open_data_dir")))
-                    .on_hover_text(t!("ui.settings.app.open_data_dir_tooltip"))
+                    .button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui-settings-app-open_data_dir")))
+                    .on_hover_text(t!("ui-settings-app-open_data_dir_tooltip"))
                     .clicked()
                     && let Some(dir) = crate::storage_dir()
                 {
@@ -219,14 +220,14 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 ui.horizontal(|ui| {
-                    ui.label(t!("ui.settings.app.proxy_url"));
+                    ui.label(t!("ui-settings-app-proxy_url"));
                     // `None` is "no manual override set", which the text field
                     // shows as empty rather than as a placeholder value.
                     let mut proxy_url =
                         self.tab_state.persisted.read().settings.app.proxy_url.clone().unwrap_or_default();
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut proxy_url)
-                            .hint_text(t!("ui.settings.app.proxy_url_hint"))
+                            .hint_text(t!("ui-settings-app-proxy_url_hint"))
                             .desired_width(ui.available_width()),
                     );
                     if response.changed() {
@@ -245,8 +246,8 @@ impl ToolkitTabViewer<'_> {
             section_header(
                 ui,
                 icons::FOLDER_OPEN,
-                &t!("ui.settings.wows.heading"),
-                &t!("ui.settings.wows.description"),
+                &t!("ui-settings-wows-heading"),
+                &t!("ui-settings-wows-description"),
             );
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
@@ -256,7 +257,7 @@ impl ToolkitTabViewer<'_> {
                         if ui
                             .add_enabled(
                                 self.tab_state.can_change_wows_dir && !wows_dir_dialog.is_pending(),
-                                egui::Button::new(t!("ui.buttons.choose")),
+                                egui::Button::new(t!("ui-buttons-choose")),
                             )
                             .clicked()
                         {
@@ -271,7 +272,7 @@ impl ToolkitTabViewer<'_> {
                             egui::TextEdit::singleline(&mut wows_dir)
                                 .id(TabState::wows_dir_field_id())
                                 .interactive(self.tab_state.can_change_wows_dir)
-                                .hint_text(t!("ui.settings.wows.directory_hint"))
+                                .hint_text(t!("ui-settings-wows-directory_hint"))
                                 .text_color_opt(show_text_error.then_some(ui.sem().error)),
                         );
 
@@ -295,13 +296,13 @@ impl ToolkitTabViewer<'_> {
             // Game data cache settings
             {
                 let mut auto_dump = self.tab_state.persisted.read().settings.game.auto_dump_game_data;
-                ui.checkbox(&mut auto_dump, t!("ui.settings.wows.cache.auto_dump"));
+                ui.checkbox(&mut auto_dump, t!("ui-settings-wows-cache-auto_dump"));
                 if auto_dump != self.tab_state.persisted.read().settings.game.auto_dump_game_data {
                     self.tab_state.persisted.write().settings.game.auto_dump_game_data = auto_dump;
                 }
 
                 ui.horizontal(|ui| {
-                    ui.label(t!("ui.settings.wows.cache.directory_label"));
+                    ui.label(t!("ui-settings-wows-cache-directory_label"));
                     let mut cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
                     let default_label = crate::task::replays::game_data_dump_base()
                         .map(|p| p.to_string_lossy().into_owned())
@@ -318,7 +319,7 @@ impl ToolkitTabViewer<'_> {
                     if ui
                         .add_enabled(
                             !cache_dir_dialog.is_pending(),
-                            egui::Button::new(t!("ui.settings.wows.cache.browse")),
+                            egui::Button::new(t!("ui-settings-wows-cache-browse")),
                         )
                         .clicked()
                     {
@@ -341,14 +342,14 @@ impl ToolkitTabViewer<'_> {
                     if stats.version_count > 0 {
                         ui.horizontal(|ui| {
                             ui.label(t!(
-                                "ui.settings.wows.cache.stats",
+                                "ui-settings-wows-cache-stats",
                                 size = humansize::format_size(stats.total_bytes, humansize::BINARY),
                                 count = stats.version_count,
                             ));
-                            if ui.button(t!("ui.settings.wows.cache.open_folder")).clicked() {
+                            if ui.button(t!("ui-settings-wows-cache-open_folder")).clicked() {
                                 crate::util::open_directory(&dump_base);
                             }
-                            if stats.version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
+                            if stats.version_count > 1 && ui.button(t!("ui-settings-wows-cache-delete_old")).clicked() {
                                 wows_data_mgr::dump::delete_old_versions(&dump_base);
                                 self.tab_state.game_data_cache_stats = None;
                             }
@@ -357,7 +358,7 @@ impl ToolkitTabViewer<'_> {
                         ui.horizontal(|ui| {
                             let checking = self.tab_state.checking_game_data_updates;
                             if ui
-                                .add_enabled(!checking, egui::Button::new(t!("ui.settings.wows.cache.check_updates")))
+                                .add_enabled(!checking, egui::Button::new(t!("ui-settings-wows-cache-check_updates")))
                                 .clicked()
                             {
                                 self.tab_state.check_game_data_updates();
@@ -368,8 +369,8 @@ impl ToolkitTabViewer<'_> {
 
                             let validating = self.tab_state.validating_game_data_cache;
                             if ui
-                                .add_enabled(!validating, egui::Button::new(t!("ui.settings.wows.cache.validate")))
-                                .on_hover_text(t!("ui.settings.wows.cache.validate_tooltip"))
+                                .add_enabled(!validating, egui::Button::new(t!("ui-settings-wows-cache-validate")))
+                                .on_hover_text(t!("ui-settings-wows-cache-validate_tooltip"))
                                 .clicked()
                             {
                                 self.tab_state.validate_game_data_cache();
@@ -382,8 +383,8 @@ impl ToolkitTabViewer<'_> {
                         let update_count = self.tab_state.game_data_updates.len();
                         if update_count > 0 {
                             ui.horizontal(|ui| {
-                                ui.label(t!("ui.settings.wows.cache.updates_available", count = update_count));
-                                if ui.button(t!("ui.settings.wows.cache.update_all")).clicked() {
+                                ui.label(t!("ui-settings-wows-cache-updates_available", count = update_count));
+                                if ui.button(t!("ui-settings-wows-cache-update_all")).clicked() {
                                     self.tab_state.update_all_game_data();
                                 }
                             });
@@ -393,10 +394,10 @@ impl ToolkitTabViewer<'_> {
                         if repair_count > 0 {
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(t!("ui.settings.wows.cache.repair_needed", count = repair_count))
+                                    RichText::new(t!("ui-settings-wows-cache-repair_needed", count = repair_count))
                                         .color(ui.sem().error),
                                 );
-                                if ui.button(t!("ui.settings.wows.cache.repair")).clicked() {
+                                if ui.button(t!("ui-settings-wows-cache-repair")).clicked() {
                                     self.tab_state.repair_game_data_cache();
                                 }
                             });
@@ -408,7 +409,7 @@ impl ToolkitTabViewer<'_> {
             ui.add_space(12.0);
 
             // ── Replay Settings ───────────────────────────────────────
-            section_header(ui, icons::TABLE, &t!("ui.settings.replay.heading"), &t!("ui.settings.replay.description"));
+            section_header(ui, icons::TABLE, &t!("ui-settings-replay-heading"), &t!("ui-settings-replay-description"));
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
 
@@ -417,19 +418,19 @@ impl ToolkitTabViewer<'_> {
                     let mut p = self.tab_state.persisted.write();
                     let rs = &mut p.settings.replay;
 
-                    ui.checkbox(&mut rs.show_raw_xp, t!("ui.settings.replay.show_raw_xp"));
-                    ui.checkbox(&mut rs.show_entity_id, t!("ui.settings.replay.show_entity_id"));
+                    ui.checkbox(&mut rs.show_raw_xp, t!("ui-settings-replay-show_raw_xp"));
+                    ui.checkbox(&mut rs.show_entity_id, t!("ui-settings-replay-show_entity_id"));
                     ui.end_row();
 
-                    ui.checkbox(&mut rs.show_observed_damage, t!("ui.settings.replay.show_observed_damage"));
+                    ui.checkbox(&mut rs.show_observed_damage, t!("ui-settings-replay-show_observed_damage"));
                     ui.end_row();
                 });
 
                 {
                     let mut p = self.tab_state.persisted.write();
                     let rs = &mut p.settings.replay;
-                    ui.checkbox(&mut rs.enable_replay_previews, t!("ui.settings.replay.enable_previews"))
-                        .on_hover_text(t!("ui.settings.replay.enable_previews_tooltip"));
+                    ui.checkbox(&mut rs.enable_replay_previews, t!("ui-settings-replay-enable_previews"))
+                        .on_hover_text(t!("ui-settings-replay-enable_previews_tooltip"));
                 }
 
                 ui.add_space(4.0);
@@ -441,7 +442,7 @@ impl ToolkitTabViewer<'_> {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let auto_export_dialog = &mut self.tab_state.settings_dialogs.auto_export_dir;
                         if ui
-                            .add_enabled(!auto_export_dialog.is_pending(), egui::Button::new(t!("ui.buttons.choose")))
+                            .add_enabled(!auto_export_dialog.is_pending(), egui::Button::new(t!("ui-buttons-choose")))
                             .clicked()
                         {
                             auto_export_dialog.open(ui.ctx(), DialogKind::PickFolder, rfd::AsyncFileDialog::new(), ());
@@ -452,7 +453,7 @@ impl ToolkitTabViewer<'_> {
                             let rs = &mut p.settings.replay;
 
                             if ui
-                                .checkbox(&mut rs.auto_export_data, t!("ui.settings.replay.auto_export_data"))
+                                .checkbox(&mut rs.auto_export_data, t!("ui-settings-replay-auto_export_data"))
                                 .changed()
                             {
                                 alert_data_export_change = true;
@@ -465,17 +466,17 @@ impl ToolkitTabViewer<'_> {
                                     ui.selectable_value(
                                         &mut rs.auto_export_format,
                                         ReplayExportFormat::Json,
-                                        t!("ui.settings.replay.format_json"),
+                                        t!("ui-settings-replay-format_json"),
                                     );
                                     ui.selectable_value(
                                         &mut rs.auto_export_format,
                                         ReplayExportFormat::Csv,
-                                        t!("ui.settings.replay.format_csv"),
+                                        t!("ui-settings-replay-format_csv"),
                                     );
                                     ui.selectable_value(
                                         &mut rs.auto_export_format,
                                         ReplayExportFormat::Cbor,
-                                        t!("ui.settings.replay.format_cbor"),
+                                        t!("ui-settings-replay-format_cbor"),
                                     );
                                 });
                             if previously_selected_format != rs.auto_export_format {
@@ -486,7 +487,7 @@ impl ToolkitTabViewer<'_> {
                             let response = ui.add_sized(
                                 ui.available_size(),
                                 egui::TextEdit::singleline(&mut rs.auto_export_path)
-                                    .hint_text(t!("ui.settings.replay.export_path_hint"))
+                                    .hint_text(t!("ui-settings-replay-export_path_hint"))
                                     .text_color_opt((!path_is_valid).then_some(ui.sem().error)),
                             );
 
@@ -515,7 +516,7 @@ impl ToolkitTabViewer<'_> {
                     if ui
                         .add_enabled(
                             reindex_deps.is_some(),
-                            egui::Button::new(t!("ui.settings.replay.index_all_replays")),
+                            egui::Button::new(t!("ui-settings-replay-index_all_replays")),
                         )
                         .clicked()
                         && let Some(deps) = reindex_deps.clone()
@@ -533,9 +534,9 @@ impl ToolkitTabViewer<'_> {
                     if ui
                         .add_enabled(
                             reindex_deps.is_some(),
-                            egui::Button::new(t!("ui.settings.replay.reindex_all_replays")),
+                            egui::Button::new(t!("ui-settings-replay-reindex_all_replays")),
                         )
-                        .on_hover_text(t!("ui.settings.replay.reindex_all_replays_hover"))
+                        .on_hover_text(t!("ui-settings-replay-reindex_all_replays_hover"))
                         .clicked()
                     {
                         self.tab_state.refresh_persisted_data_requested = true;
@@ -549,25 +550,25 @@ impl ToolkitTabViewer<'_> {
             section_header(
                 ui,
                 icons::USERS,
-                &t!("ui.settings.session.heading"),
-                &t!("ui.settings.session.description"),
+                &t!("ui-settings-session-heading"),
+                &t!("ui-settings-session-description"),
             );
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
-                ui.label(t!("ui.settings.session.display_name"));
+                ui.label(t!("ui-settings-session-display_name"));
                 {
                     let mut p = self.tab_state.persisted.write();
                     ui.text_edit_singleline(&mut p.settings.collab.display_name);
                     ui.checkbox(
                         &mut p.settings.collab.suppress_p2p_ip_warning,
-                        t!("ui.settings.session.suppress_ip_warning"),
+                        t!("ui-settings-session-suppress_ip_warning"),
                     )
-                    .on_hover_text(t!("ui.settings.session.ip_warning_tooltip"));
+                    .on_hover_text(t!("ui-settings-session-ip_warning_tooltip"));
                     ui.checkbox(
                         &mut p.settings.collab.disable_auto_open_session_windows,
-                        t!("ui.settings.session.disable_auto_open"),
+                        t!("ui-settings-session-disable_auto_open"),
                     )
-                    .on_hover_text(t!("ui.settings.session.auto_open_tooltip"));
+                    .on_hover_text(t!("ui-settings-session-auto_open_tooltip"));
                 }
             });
 
@@ -576,14 +577,14 @@ impl ToolkitTabViewer<'_> {
             section_header(
                 ui,
                 icons::BROADCAST,
-                &t!("ui.settings.twitch.heading"),
-                &t!("ui.settings.twitch.description"),
+                &t!("ui-settings-twitch-heading"),
+                &t!("ui-settings-twitch-description"),
             );
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
                 if ui
-                    .button(wt_translations::icon_t(icons::BROWSER, &t!("ui.settings.twitch.get_token")))
-                    .on_hover_text(t!("ui.settings.twitch.get_token_tooltip"))
+                    .button(wt_translations::icon_t(icons::BROWSER, &t!("ui-settings-twitch-get_token")))
+                    .on_hover_text(t!("ui-settings-twitch-get_token_tooltip"))
                     .clicked()
                 {
                     ui.ctx().open_url(OpenUrl::new_tab("https://chatterino.com/client_login"));
@@ -598,16 +599,16 @@ impl ToolkitTabViewer<'_> {
 
                 let (label, glyph, tint) = match state {
                     TokenState::Absent => {
-                        (t!("ui.settings.twitch.paste_token_no_token"), Some(icons::WARNING), ui.sem().warn)
+                        (t!("ui-settings-twitch-paste_token_no_token"), Some(icons::WARNING), ui.sem().warn)
                     }
                     TokenState::Valid => {
-                        (t!("ui.settings.twitch.paste_token_valid"), Some(icons::CHECK_CIRCLE), ui.sem().ok)
+                        (t!("ui-settings-twitch-paste_token_valid"), Some(icons::CHECK_CIRCLE), ui.sem().ok)
                     }
                     TokenState::Unvalidated => {
-                        (t!("ui.settings.twitch.paste_token_unvalidated"), None, ui.visuals().text_color())
+                        (t!("ui-settings-twitch-paste_token_unvalidated"), None, ui.visuals().text_color())
                     }
                     TokenState::Rejected => {
-                        (t!("ui.settings.twitch.paste_token_invalid"), Some(icons::X_CIRCLE), ui.sem().error)
+                        (t!("ui-settings-twitch-paste_token_invalid"), Some(icons::X_CIRCLE), ui.sem().error)
                     }
                 };
 
@@ -632,7 +633,7 @@ impl ToolkitTabViewer<'_> {
                         let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
                     }
                 }
-                ui.label(t!("ui.settings.twitch.monitored_channel"));
+                ui.label(t!("ui-settings-twitch-monitored_channel"));
                 let mut monitored_channel =
                     self.tab_state.persisted.read().settings.integrations.twitch_monitored_channel.clone();
                 let response = ui.text_edit_singleline(&mut monitored_channel);
@@ -654,8 +655,8 @@ impl ToolkitTabViewer<'_> {
     fn build_launcher_opt_in(&mut self, ui: &mut egui::Ui) {
         let mut enabled = self.tab_state.persisted.read().settings.launcher.is_enabled();
         if ui
-            .checkbox(&mut enabled, t!("ui.launcher.opt_in.setting"))
-            .on_hover_text(t!("ui.launcher.opt_in.description"))
+            .checkbox(&mut enabled, t!("ui-launcher-opt_in-setting"))
+            .on_hover_text(t!("ui-launcher-opt_in-description"))
             .changed()
         {
             if enabled {
@@ -674,15 +675,15 @@ impl ToolkitTabViewer<'_> {
         let mut cancelled = false;
         let modal = egui::Modal::new(egui::Id::unique("launcher_opt_in")).show(ui.ctx(), |ui| {
             ui.set_max_width(480.0);
-            ui.heading(t!("ui.launcher.opt_in.title"));
+            ui.heading(t!("ui-launcher-opt_in-title"));
             ui.add_space(4.0);
-            ui.label(t!("ui.launcher.opt_in.notice_account"));
+            ui.label(t!("ui-launcher-opt_in-notice_account"));
             ui.add_space(4.0);
-            ui.label(t!("ui.launcher.opt_in.notice_reports"));
+            ui.label(t!("ui-launcher-opt_in-notice_reports"));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                accepted = ui.button(t!("ui.launcher.opt_in.continue")).clicked();
-                cancelled = ui.button(t!("ui.launcher.opt_in.cancel")).clicked();
+                accepted = ui.button(t!("ui-launcher-opt_in-continue")).clicked();
+                cancelled = ui.button(t!("ui-launcher-opt_in-cancel")).clicked();
             });
         });
         if accepted {

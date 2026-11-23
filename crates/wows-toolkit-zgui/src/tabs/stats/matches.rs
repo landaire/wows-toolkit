@@ -18,13 +18,13 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -186,7 +186,7 @@ pub fn StatsMatches(#[prop(into)] games: Signal<Arc<[PerGameStat]>>, editor: Fil
     let count = move || {
         locale.track();
         t!(
-            "ui.stats.match_count",
+            "ui-stats-match_count",
             shown = rows.with(Vec::len),
             total = admitted.with(Vec::len),
             left_out = left_out.get()
@@ -196,7 +196,7 @@ pub fn StatsMatches(#[prop(into)] games: Signal<Arc<[PerGameStat]>>, editor: Fil
     let none_left_out = Signal::derive_local(move || filters.with(|filters| filters.excluded_games.is_empty()));
     let placeholder = move || {
         locale.track();
-        t!("ui.stats.search_matches").into_owned()
+        t!("ui-stats-search_matches").into_owned()
     };
     let escape = EscapeClears::new(query);
 
@@ -216,7 +216,7 @@ pub fn StatsMatches(#[prop(into)] games: Signal<Arc<[PerGameStat]>>, editor: Fil
                 }
                 CheckRow(
                     checked = left_out_only,
-                    label = Signal::derive_local(move || { locale.track(); t!("ui.stats.left_out_only").into_owned() }),
+                    label = Signal::derive_local(move || { locale.track(); t!("ui-stats-left_out_only").into_owned() }),
                     change = UnsyncCallback::new(move |on: bool| left_out_only.set(on)),
                     test_id = "stats-matches-left-out-only"
                 )
@@ -230,16 +230,16 @@ pub fn StatsMatches(#[prop(into)] games: Signal<Arc<[PerGameStat]>>, editor: Fil
                             on:click = move |_| editor.edit(|filters| filters.excluded_games.clear())
                         ) {
                             AppIcon(glyph = Glyph::RotateCcw)
-                            text {{move || { locale.track(); t!("ui.stats.keep_all_games").into_owned() }}}
+                            text {{move || { locale.track(); t!("ui-stats-keep_all_games").into_owned() }}}
                         }
                     }
-                    TooltipContent {{move || { locale.track(); t!("ui.stats.keep_all_games_tooltip").into_owned() }}}
+                    TooltipContent {{move || { locale.track(); t!("ui-stats-keep_all_games_tooltip").into_owned() }}}
                 }
                 text(class = "wt-stats-matches__count", class = TABULAR_CLASS, attr:data-testid = "stats-matches-count") {{count}}
             }
             if move || rows.with(Vec::is_empty) {
                 box(class = "wt-stats-matches__empty") {
-                    text {{locale.text("ui.stats.no_matches")}}
+                    text {{locale.text("ui-stats-no_matches")}}
                 }
             } else {
                 {move || {
@@ -253,14 +253,11 @@ pub fn StatsMatches(#[prop(into)] games: Signal<Arc<[PerGameStat]>>, editor: Fil
 
 fn match_grid(editor: FilterEditor, rows: Signal<Vec<MatchRow>, LocalStorage>) -> AnyView {
     let filters = editor.filters();
-    let figures = wows_toolkit_viewmodel::locale();
+    let figures = wt_translations::locale();
     let number = ColumnSizing::Fixed(ColumnWidth(88.0));
     let left_out = move |row: &MatchRow| filters.with(|filters| filters.excluded_games.contains(row.game()));
-    let damage = {
-        let figures = figures.clone();
-        move |row: &MatchRow| separate_number(row.game().damage, Some(&figures))
-    };
-    let base_xp = move |row: &MatchRow| separate_number(row.game().base_xp, Some(&figures));
+    let damage = move |row: &MatchRow| separate_number(row.game().damage, Some(figures));
+    let base_xp = move |row: &MatchRow| separate_number(row.game().base_xp, Some(figures));
 
     let columns = vec![
         GridColumn::new("kept", String::new(), move |row: &MatchRow| keep_cell(editor, row))
@@ -268,7 +265,7 @@ fn match_grid(editor: FilterEditor, rows: Signal<Vec<MatchRow>, LocalStorage>) -
             .resizable(false)
             .reorderable(false)
             .pinnable(false),
-        GridColumn::new("time", t!("ui.stats.column_time").into_owned(), move |row: &MatchRow| {
+        GridColumn::new("time", t!("ui-stats-column_time").into_owned(), move |row: &MatchRow| {
             let time = row.game().game_time.clone();
             let row = row.clone();
             AnyView::new(view! {
@@ -277,24 +274,24 @@ fn match_grid(editor: FilterEditor, rows: Signal<Vec<MatchRow>, LocalStorage>) -
         })
         .text(|row| row.game().game_time.clone())
         .sizing(ColumnSizing::Fixed(ColumnWidth(150.0))),
-        GridColumn::new("ship", t!("ui.stats.column_ship").into_owned(), |row: &MatchRow| row.game().ship_name.clone())
+        GridColumn::new("ship", t!("ui-stats-column_ship").into_owned(), |row: &MatchRow| row.game().ship_name.clone())
             .text(|row| row.game().ship_name.clone())
             .sizing(ColumnSizing::Fixed(ColumnWidth(160.0))),
-        GridColumn::new("mode", t!("ui.stats.column_mode").into_owned(), |row: &MatchRow| mode_text(row.game()))
+        GridColumn::new("mode", t!("ui-stats-column_mode").into_owned(), |row: &MatchRow| mode_text(row.game()))
             .text(|row| mode_text(row.game()))
             .sizing(ColumnSizing::Fixed(ColumnWidth(150.0))),
-        GridColumn::new("result", t!("ui.stats.column_result").into_owned(), result_cell)
+        GridColumn::new("result", t!("ui-stats-column_result").into_owned(), result_cell)
             .text(|row| result_text(row.game()))
             .sizing(ColumnSizing::Fixed(ColumnWidth(72.0))),
-        GridColumn::new("damage", t!("stat.damage").into_owned(), damage.clone())
+        GridColumn::new("damage", t!("stat-damage").into_owned(), damage.clone())
             .text(damage)
             .sizing(number)
             .align(ColumnAlign::End),
-        GridColumn::new("frags", t!("stat.frags").into_owned(), |row: &MatchRow| row.game().frags.to_string())
+        GridColumn::new("frags", t!("stat-frags").into_owned(), |row: &MatchRow| row.game().frags.to_string())
             .text(|row| row.game().frags.to_string())
             .sizing(ColumnSizing::Fixed(ColumnWidth(56.0)))
             .align(ColumnAlign::End),
-        GridColumn::new("base-xp", t!("stat.base_xp").into_owned(), base_xp.clone())
+        GridColumn::new("base-xp", t!("stat-base_xp").into_owned(), base_xp.clone())
             .text(base_xp)
             .sizing(number)
             .align(ColumnAlign::End),
@@ -311,7 +308,7 @@ fn match_grid(editor: FilterEditor, rows: Signal<Vec<MatchRow>, LocalStorage>) -
             row_key = |row: &MatchRow| row.at,
             mode = RowMode::fixed(ROW_HEIGHT),
             row_menu = row_menu,
-            label = t!("ui.stats.matches").into_owned(),
+            label = t!("ui-stats-matches").into_owned(),
             attr:data-testid = "stats-matches-grid"
         )
     })
@@ -335,9 +332,9 @@ fn keep_cell(editor: FilterEditor, row: &MatchRow) -> AnyView {
     );
     let label = move || {
         if filters.with(|filters| filters.excluded_games.contains(row_label.game())) {
-            t!("ui.stats.keep_game").into_owned()
+            t!("ui-stats-keep_game").into_owned()
         } else {
-            t!("ui.stats.leave_out_game").into_owned()
+            t!("ui-stats-leave_out_game").into_owned()
         }
     };
 
@@ -353,7 +350,7 @@ fn menu_items(editor: FilterEditor, row: MatchRow) -> AnyView {
     let left_out = editor.filters().with_untracked(|filters| filters.excluded_games.contains(row.game()));
     let ship = row.game().ship_id;
     let toggled = row.clone();
-    let game_label = if left_out { t!("ui.stats.keep_game") } else { t!("ui.stats.leave_out_game") };
+    let game_label = if left_out { t!("ui-stats-keep_game") } else { t!("ui-stats-leave_out_game") };
 
     AnyView::new(view! {
         MenuItem(
@@ -366,22 +363,22 @@ fn menu_items(editor: FilterEditor, row: MatchRow) -> AnyView {
             attr:data-testid = format!("stats-match-leave-out-ship-{}", row.at),
             on_select = UnsyncCallback::new(move |()| editor.edit(|filters| filters.set_ship_excluded(ship, true)))
         ) {
-            {t!("ui.stats.leave_out_ship", ship = row.game().ship_name.as_str()).into_owned()}
+            {t!("ui-stats-leave_out_ship", ship = row.game().ship_name.as_str()).into_owned()}
         }
     })
 }
 
 fn mode_text(game: &PerGameStat) -> String {
-    let division = if game.is_div { t!("ui.stats.div_div") } else { t!("ui.stats.div_solo") };
+    let division = if game.is_div { t!("ui-stats-div_div") } else { t!("ui-stats-div_solo") };
     format!("{}, {division}", match_group_display_name(&game.match_group))
 }
 
 fn result_text(game: &PerGameStat) -> String {
     let key = match (game.is_win, game.is_loss, game.is_draw) {
-        (true, _, _) => "ui.search.outcome_win",
-        (_, true, _) => "ui.search.outcome_loss",
-        (_, _, true) => "ui.search.outcome_draw",
-        _ => "ui.search.outcome_unknown",
+        (true, _, _) => "ui-search-outcome_win",
+        (_, true, _) => "ui-search-outcome_loss",
+        (_, _, true) => "ui-search-outcome_draw",
+        _ => "ui-search-outcome_unknown",
     };
     t!(key).into_owned()
 }

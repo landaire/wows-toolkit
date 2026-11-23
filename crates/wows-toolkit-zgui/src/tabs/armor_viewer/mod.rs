@@ -27,12 +27,12 @@ use landaire_ui::SideEdge;
 use landaire_ui::SidePanel;
 use landaire_ui::SideSplitProps;
 use landaire_ui::WidthRange;
-use rust_i18n::t;
 use wows_toolkit_armor::load_ship::SceneSubject;
 use wows_toolkit_armor::model_refs::VehicleParamIndex;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsLayout;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -167,7 +167,7 @@ pub fn ArmorViewerTab() -> impl IntoView {
                 open = workspace.sidebar_open,
                 width = sidebar_width,
                 range = SIDEBAR_RANGE,
-                resize_label = t!("ui.armor.ships").into_owned(),
+                resize_label = t!("ui-armor-ships").into_owned(),
                 keep_mounted = true,
                 attr:data-testid = "armor-viewer-ships"
             ) {
@@ -186,7 +186,7 @@ pub fn ArmorViewerTab() -> impl IntoView {
                     width = options_width,
                     range = OPTIONS_RANGE,
                     edge = SideEdge::Right,
-                    resize_label = t!("ui.armor.options").into_owned(),
+                    resize_label = t!("ui-armor-options").into_owned(),
                     attr:data-testid = "armor-viewer-options"
                 ) {
                     SidePanel(slot) {
@@ -356,13 +356,13 @@ fn publish_chrome(shell: Shell, workspace: ArmorWorkspace) {
         chrome.set_toggles(vec![
             PanelToggle {
                 test_id: "armor-ships-toggle",
-                name: t!("ui.armor.ships").into_owned(),
+                name: t!("ui-armor-ships").into_owned(),
                 side: PanelSide::Left,
                 open: workspace.sidebar_open,
             },
             PanelToggle {
                 test_id: "armor-options-toggle",
-                name: t!("ui.armor.options").into_owned(),
+                name: t!("ui-armor-options").into_owned(),
                 side: PanelSide::Right,
                 open: workspace.options_open,
             },
@@ -371,9 +371,9 @@ fn publish_chrome(shell: Shell, workspace: ArmorWorkspace) {
     let mode = RenderEffect::new(move |_| {
         let mode = workspace.ship_loaded.get().then(|| {
             if ModifierKey::Primary.is_down(shell.held_modifiers()) {
-                ModeHint { key: ModifierKey::Primary, name_key: "ui.armor.mode_solo_zone" }
+                ModeHint { key: ModifierKey::Primary, name_key: "ui-armor-mode_solo_zone" }
             } else {
-                ModeHint { key: ModifierKey::Shift, name_key: "ui.armor.mode_cast_trajectory" }
+                ModeHint { key: ModifierKey::Shift, name_key: "ui-armor-mode_cast_trajectory" }
             }
         });
         chrome.set_mode(mode);

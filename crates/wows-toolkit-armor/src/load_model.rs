@@ -11,7 +11,6 @@ use std::sync::OnceLock;
 
 use nalgebra::Matrix4;
 use rootcause::Report;
-use rust_i18n::t;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::hardpoint::HardpointName;
@@ -33,6 +32,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::game_types::GameParamId;
+use wt_translations::t;
 
 use crate::assets::ModelAssets;
 use crate::camo::RgbaTexture;
@@ -141,7 +141,7 @@ pub struct SceneProblem {
 
 impl SceneProblem {
     pub fn headline(&self) -> String {
-        t!("ui.scene_problem.cannot_show", name = self.subject).into_owned()
+        t!("ui-scene_problem-cannot_show", name = self.subject).into_owned()
     }
 }
 
@@ -160,13 +160,13 @@ pub enum ProblemReason {
 impl ProblemReason {
     pub fn explanation(self) -> String {
         let text = match self {
-            Self::GeometryAbsent => t!("ui.scene_problem.geometry_absent"),
-            Self::ModelUnreadable => t!("ui.scene_problem.model_unreadable"),
-            Self::ShipUnreadable => t!("ui.scene_problem.ship_unreadable"),
-            Self::SectionStandIn => t!("ui.scene_problem.section_stand_in"),
-            Self::Empty(EmptyScene::Meshless) => t!("ui.scene_problem.no_meshes"),
-            Self::Empty(EmptyScene::MeshlessAtLod) => t!("ui.scene_problem.no_meshes_at_lod"),
-            Self::Empty(EmptyScene::Invisible) => t!("ui.scene_problem.no_visible_surface"),
+            Self::GeometryAbsent => t!("ui-scene_problem-geometry_absent"),
+            Self::ModelUnreadable => t!("ui-scene_problem-model_unreadable"),
+            Self::ShipUnreadable => t!("ui-scene_problem-ship_unreadable"),
+            Self::SectionStandIn => t!("ui-scene_problem-section_stand_in"),
+            Self::Empty(EmptyScene::Meshless) => t!("ui-scene_problem-no_meshes"),
+            Self::Empty(EmptyScene::MeshlessAtLod) => t!("ui-scene_problem-no_meshes_at_lod"),
+            Self::Empty(EmptyScene::Invisible) => t!("ui-scene_problem-no_visible_surface"),
         };
 
         text.into_owned()

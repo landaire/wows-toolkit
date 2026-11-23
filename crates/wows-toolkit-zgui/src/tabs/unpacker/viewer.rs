@@ -7,13 +7,13 @@
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use rust_i18n::t;
 use syntect::parsing::ParseState;
 use syntect::parsing::ScopeStack;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
 use wows_toolkit_viewmodel::unpacker::viewer::highlight_language;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -227,7 +227,7 @@ pub fn ViewerPanel(doc: ViewerDoc) -> impl IntoView {
         }),
         Shown::Undecodable(reason) => AnyView::new(view! {
             box(class = "wt-viewer__failed", attr:data-testid = "unpacker-viewer-failed") {
-                text {{t!("ui.unpacker.image_decode_failed", reason = reason).into_owned()}}
+                text {{t!("ui-unpacker-image_decode_failed", reason = reason).into_owned()}}
             }
         }),
     };

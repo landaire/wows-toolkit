@@ -22,18 +22,18 @@ pub fn sign_in_failure_key(failure: crate::SignInFailure) -> &'static str {
     use crate::SignInFailure as F;
 
     match failure {
-        F::WrongCredentials => "ui.launcher.sign_in_error.wrong_credentials",
-        F::TwoFactorRequired => "ui.launcher.sign_in_error.two_factor_required",
-        F::TwoFactorInvalid => "ui.launcher.sign_in_error.two_factor_invalid",
-        F::CaptchaRequired => "ui.launcher.sign_in_error.captcha_required",
-        F::RateLimited => "ui.launcher.sign_in_error.rate_limited",
-        F::AccountBanned => "ui.launcher.sign_in_error.account_banned",
-        F::NetworkUnreachable => "ui.launcher.sign_in_error.network_unreachable",
-        F::ServiceUnavailable => "ui.launcher.sign_in_error.service_unavailable",
-        F::SessionExpired => "ui.launcher.sign_in_error.session_expired",
-        F::KeyringLocked => "ui.launcher.sign_in_error.keyring_locked",
-        F::NotSaved => "ui.launcher.sign_in_error.not_saved",
-        F::Unexpected => "ui.launcher.sign_in_error.unexpected",
+        F::WrongCredentials => "ui-launcher-sign_in_error-wrong_credentials",
+        F::TwoFactorRequired => "ui-launcher-sign_in_error-two_factor_required",
+        F::TwoFactorInvalid => "ui-launcher-sign_in_error-two_factor_invalid",
+        F::CaptchaRequired => "ui-launcher-sign_in_error-captcha_required",
+        F::RateLimited => "ui-launcher-sign_in_error-rate_limited",
+        F::AccountBanned => "ui-launcher-sign_in_error-account_banned",
+        F::NetworkUnreachable => "ui-launcher-sign_in_error-network_unreachable",
+        F::ServiceUnavailable => "ui-launcher-sign_in_error-service_unavailable",
+        F::SessionExpired => "ui-launcher-sign_in_error-session_expired",
+        F::KeyringLocked => "ui-launcher-sign_in_error-keyring_locked",
+        F::NotSaved => "ui-launcher-sign_in_error-not_saved",
+        F::Unexpected => "ui-launcher-sign_in_error-unexpected",
     }
 }
 

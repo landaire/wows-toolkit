@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::assets::ModelAssets;
 use wows_toolkit_armor::assets::load_ship_assets;
@@ -18,6 +17,7 @@ use wows_toolkit_replay_data::replay_render::armor::ArmorFollowed;
 use wows_toolkit_replay_data::replay_render::armor::ShowArmor;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::tier_roman;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -211,7 +211,7 @@ impl ArmorLibrary {
     /// Every ship, as the palette's ship list reads it.
     pub fn ship_list(self, services: Services) -> Signal<ShipList, LocalStorage> {
         Signal::derive_local(move || match services.game_data.state() {
-            GameDataState::NoInstall => ShipList::Unavailable(t!("ui.armor.load_settings").into_owned()),
+            GameDataState::NoInstall => ShipList::Unavailable(t!("ui-armor-load_settings").into_owned()),
             GameDataState::Failed(reason) => ShipList::Unavailable(reason),
             GameDataState::Loading { .. } => ShipList::Pending,
             GameDataState::Ready(_) => match self.bundle.get() {
@@ -253,7 +253,7 @@ impl ArmorLibrary {
         self.models.set(ModelsState::NotStarted);
 
         spawn_local(async move {
-            let job = services.jobs.start(Job { name: t!("ui.armor.loading_catalog").into_owned(), progress: None });
+            let job = services.jobs.start(Job { name: t!("ui-armor-loading_catalog").into_owned(), progress: None });
             let read = long_job(move || {
                 let assets = load_ship_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider())?;
                 let catalog = ShipCatalog::build(loaded.provider());
@@ -281,7 +281,7 @@ impl ArmorLibrary {
 
             // Separate, so the ship list is usable while `assets.bin` is indexed.
             self.models.set(ModelsState::Loading);
-            let job = services.jobs.start(Job { name: t!("ui.models.loading").into_owned(), progress: None });
+            let job = services.jobs.start(Job { name: t!("ui-models-loading").into_owned(), progress: None });
             let built = long_job(move || ModelAssets::build(&bundle.assets)).await;
             drop(job);
             if self.generation.try_get_value() != Some(generation) {

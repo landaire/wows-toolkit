@@ -17,7 +17,6 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
 use image::RgbImage;
-use rust_i18n::t;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::HUD_HEIGHT;
@@ -49,6 +48,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
+use wt_translations::t;
 
 use crate::frame::BgraFrame;
 use crate::load::GameDataCache;
@@ -333,17 +333,17 @@ impl PreviewError {
             // attached path and every frame under it. That belongs in the log,
             // not in a hover popup, so only the error it wraps is shown.
             Self::UnreadableReplay(err) => {
-                Some(t!("ui.replay.preview_unreadable_because", value = err.current_context().to_string()).into_owned())
+                Some(t!("ui-replay-preview_unreadable_because", value = err.current_context().to_string()).into_owned())
             }
             Self::UnwalkableBattle(err) => {
-                Some(t!("ui.replay.preview_unwalkable", value = err.to_string()).into_owned())
+                Some(t!("ui-replay-preview_unwalkable", value = err.to_string()).into_owned())
             }
-            Self::UnknownBuild { raw } => Some(t!("ui.replay.preview_unknown_version", value = raw).into_owned()),
+            Self::UnknownBuild { raw } => Some(t!("ui-replay-preview_unknown_version", value = raw).into_owned()),
             Self::NoGameData { version, .. } => {
-                Some(t!("ui.replay.preview_no_game_data", value = version).into_owned())
+                Some(t!("ui-replay-preview_no_game_data", value = version).into_owned())
             }
-            Self::NoMapInfo { map } => Some(t!("ui.replay.preview_no_map", value = map).into_owned()),
-            Self::Render(err) => Some(t!("ui.replay.preview_render_failed", value = err.to_string()).into_owned()),
+            Self::NoMapInfo { map } => Some(t!("ui-replay-preview_no_map", value = map).into_owned()),
+            Self::Render(err) => Some(t!("ui-replay-preview_render_failed", value = err.to_string()).into_owned()),
             Self::Cancelled => None,
         }
     }

@@ -7,11 +7,11 @@ use landaire_ui::SliderSpan;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_armor::catalog::TierRange;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wowsunpack::game_params::types::tier_roman;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -51,11 +51,11 @@ use crate::tabs::armor_viewer::viewport::XRAY_KEY;
 #[component]
 pub fn SidebarHeader(state: SidebarState, common: Signal<CommonPaneSettings, LocalStorage>) -> impl IntoView {
     let locale = Services::current().locale;
-    let compare_tip = t!("ui.armor.compare_tooltip").into_owned();
+    let compare_tip = t!("ui-armor-compare_tooltip").into_owned();
 
     view! {
         row(class = "wt-armor-sidebar__header") {
-            text(class = "wt-armor-sidebar__title") {{locale.text("ui.armor.ships")}}
+            text(class = "wt-armor-sidebar__title") {{locale.text("ui-armor-ships")}}
             Tooltip {
                 TooltipTrigger {
                     Button(
@@ -66,10 +66,10 @@ pub fn SidebarHeader(state: SidebarState, common: Signal<CommonPaneSettings, Loc
                         on:click = move |_| state.send(SidebarEvent::CompareSplit(None))
                     ) {
                         AppIcon(glyph = Glyph::LayoutDashboard)
-                        text {{locale.text("ui.armor.compare")}}
+                        text {{locale.text("ui-armor-compare")}}
                     }
                 }
-                TooltipContent {{locale.text("ui.armor.compare_tooltip")}}
+                TooltipContent {{locale.text("ui-armor-compare_tooltip")}}
             }
             CommonMenu(state = state, common = common)
         }
@@ -84,7 +84,7 @@ pub fn SidebarHeader(state: SidebarState, common: Signal<CommonPaneSettings, Loc
 #[component]
 fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStorage>) -> impl IntoView {
     let locale = Services::current().locale;
-    let tip = t!("ui.armor.common_settings").into_owned();
+    let tip = t!("ui-armor-common_settings").into_owned();
     let not_comparing = Signal::derive_local(move || !common.get().comparing);
     let change = move |apply: fn(&mut CommonPaneSettings, bool)| {
         move |checked: Checked| {
@@ -104,7 +104,7 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
     };
     let xray_heading = move || {
         locale.track();
-        t!("ui.armor.xray_highlight").into_owned()
+        t!("ui-armor-xray_highlight").into_owned()
     };
     let mirror = Signal::derive_local(move || Checked::from(common.get().mirror_cameras));
     let stack = Signal::derive_local(move || Checked::from(common.get().stack_panes));
@@ -114,7 +114,7 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
     let tiers_text = move || {
         locale.track();
         let tiers = state.tiers.get();
-        t!("ui.armor.tier_filter", lowest = tier_roman(tiers.lowest()), highest = tier_roman(tiers.highest()))
+        t!("ui-armor-tier_filter", lowest = tier_roman(tiers.lowest()), highest = tier_roman(tiers.highest()))
             .into_owned()
     };
     let span = Signal::derive_local(move || {
@@ -126,7 +126,7 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
     let range = SliderRange::new(f64::from(TierRange::LOWEST), f64::from(TierRange::HIGHEST), 1.0);
     // Names what the thumbs choose between, not where they stand, which the slider reports.
     let slider_label =
-        t!("ui.armor.tier_filter", lowest = tier_roman(TierRange::LOWEST), highest = tier_roman(TierRange::HIGHEST))
+        t!("ui-armor-tier_filter", lowest = tier_roman(TierRange::LOWEST), highest = tier_roman(TierRange::HIGHEST))
             .into_owned();
 
     view! {
@@ -148,8 +148,8 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
                     ) {
                         {check(
                             "armor-pane-show-armor-by-default",
-                            "ui.armor.show_armor_by_default",
-                            "ui.armor.show_armor_by_default_tooltip",
+                            "ui-armor-show_armor_by_default",
+                            "ui-armor-show_armor_by_default_tooltip",
                             show_armor,
                             Signal::stored_local(false),
                             change(|common, on| common.opening_layer = OpeningLayer::from_show_armor(on)),
@@ -158,7 +158,7 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
                             text {{xray_heading}}
                             RadioGroup(
                                 value = Binding::controlled(xray, choose_xray),
-                                label = t!("ui.armor.xray_highlight").into_owned(),
+                                label = t!("ui-armor-xray_highlight").into_owned(),
                                 class = "wt-armor-common__xray-choices",
                                 attr:data-testid = "armor-pane-xray-highlight"
                             ) {
@@ -167,24 +167,24 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
                         }
                         {check(
                             "armor-pane-mirror-cameras",
-                            "ui.armor.mirror_cameras",
-                            "ui.armor.mirror_cameras_tooltip",
+                            "ui-armor-mirror_cameras",
+                            "ui-armor-mirror_cameras_tooltip",
                             mirror,
                             not_comparing,
                             change(|common, on| common.mirror_cameras = on),
                         )}
                         {check(
                             "armor-pane-stack",
-                            "ui.armor.stack_panes",
-                            "ui.armor.stack_panes_tooltip",
+                            "ui-armor-stack_panes",
+                            "ui-armor-stack_panes_tooltip",
                             stack,
                             not_comparing,
                             change(|common, on| common.stack_panes = on),
                         )}
                         {check(
                             "armor-pane-sync-options",
-                            "ui.armor.sync_options",
-                            "ui.armor.sync_tooltip",
+                            "ui-armor-sync_options",
+                            "ui-armor-sync_tooltip",
                             sync,
                             not_comparing,
                             change(|common, on| common.sync_options = on),
@@ -203,8 +203,8 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
                         }
                         {check(
                             "armor-sidebar-show-hidden-ships",
-                            "ui.armor.show_hidden_ships",
-                            "ui.armor.show_hidden_ships_tooltip",
+                            "ui-armor-show_hidden_ships",
+                            "ui-armor-show_hidden_ships_tooltip",
                             hidden,
                             Signal::stored_local(false),
                             move |checked: Checked| state.choose_show_hidden(checked == Checked::Yes),
@@ -212,7 +212,7 @@ fn CommonMenu(state: SidebarState, common: Signal<CommonPaneSettings, LocalStora
                     }
                 }
             }
-            TooltipContent {{locale.text("ui.armor.common_settings")}}
+            TooltipContent {{locale.text("ui-armor-common_settings")}}
         }
     }
 }
@@ -283,9 +283,9 @@ fn xray_value(mode: XrayHighlight) -> &'static str {
 
 fn xray_label(mode: XrayHighlight) -> String {
     match mode {
-        XrayHighlight::Always => t!("ui.armor.xray_always").into_owned(),
-        XrayHighlight::WhileHeld => t!("ui.armor.xray_while_held", key = XRAY_KEY.label()).into_owned(),
-        XrayHighlight::Off => t!("ui.armor.xray_off").into_owned(),
+        XrayHighlight::Always => t!("ui-armor-xray_always").into_owned(),
+        XrayHighlight::WhileHeld => t!("ui-armor-xray_while_held", key = XRAY_KEY.label()).into_owned(),
+        XrayHighlight::Off => t!("ui-armor-xray_off").into_owned(),
     }
 }
 

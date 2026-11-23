@@ -73,8 +73,6 @@ wt-collab-client = { workspace = true }
 # Copying replay files puts a file list on the clipboard, a copied chart is an image, and an exported
 # video is handed over as a file. zgui's clipboard carries none of these.
 arboard = "3.6.1"
-# `i18n!` generates its lookup per crate; the catalog behind it is parsed once per process.
-rust-i18n = { workspace = true }
 wt-translations = { workspace = true }
 # The machine's language, offered on a first run.
 sys-locale = { workspace = true }

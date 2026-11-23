@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -98,21 +98,21 @@ impl DropIntent {
         let named = |path: &Path| path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
 
         match (self.replays.as_slice(), self.folders.as_slice()) {
-            ([], []) if self.skipped > 1 => t!("ui.messages.drop_not_replays").into_owned(),
-            ([], []) => t!("ui.messages.drop_not_a_replay").into_owned(),
-            ([replay], []) => t!("ui.app.drop_to_load", file = named(replay)).into_owned(),
-            (replays, []) => t!("ui.app.drop_to_list_replays", count = replays.len()).into_owned(),
-            ([], [folder]) => t!("ui.app.drop_to_list", folder = named(folder)).into_owned(),
-            ([], folders) => t!("ui.app.drop_to_list_folders", count = folders.len()).into_owned(),
+            ([], []) if self.skipped > 1 => t!("ui-messages-drop_not_replays").into_owned(),
+            ([], []) => t!("ui-messages-drop_not_a_replay").into_owned(),
+            ([replay], []) => t!("ui-app-drop_to_load", file = named(replay)).into_owned(),
+            (replays, []) => t!("ui-app-drop_to_list_replays", count = replays.len()).into_owned(),
+            ([], [folder]) => t!("ui-app-drop_to_list", folder = named(folder)).into_owned(),
+            ([], folders) => t!("ui-app-drop_to_list_folders", count = folders.len()).into_owned(),
             (replays, folders) => {
                 let folders = match folders {
                     [folder] => named(folder),
-                    folders => t!("ui.app.drop_folder_count", count = folders.len()).into_owned(),
+                    folders => t!("ui-app-drop_folder_count", count = folders.len()).into_owned(),
                 };
                 match replays {
-                    [replay] => t!("ui.app.drop_to_open_and_list", file = named(replay), folders = folders),
+                    [replay] => t!("ui-app-drop_to_open_and_list", file = named(replay), folders = folders),
                     replays => {
-                        t!("ui.app.drop_to_list_replays_and_folders", count = replays.len(), folders = folders)
+                        t!("ui-app-drop_to_list_replays_and_folders", count = replays.len(), folders = folders)
                     }
                 }
                 .into_owned()
@@ -126,7 +126,7 @@ impl DropIntent {
             return Some(self.said());
         }
 
-        (self.skipped > 0).then(|| t!("ui.messages.drop_skipped", count = self.skipped).into_owned())
+        (self.skipped > 0).then(|| t!("ui-messages-drop_skipped", count = self.skipped).into_owned())
     }
 }
 

@@ -4,9 +4,9 @@
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::prelude::Zoom;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::StoredValue;
@@ -131,7 +131,7 @@ fn take_step(services: Services, appearance: Appearance, toasts: Toasts, step: Z
     apply(services, appearance, zoom);
 
     // Said, since the tab with the zoom slider may not be the one open.
-    let said = t!("ui.settings.panel.zoom_changed", factor = format!("{:.1}", zoom.get()));
+    let said = t!("ui-settings-panel-zoom_changed", factor = format!("{:.1}", zoom.get()));
     toasts.show(Notice::info(said).keyed(ToastKey::new(ZOOM_TOAST)));
 }
 
@@ -140,7 +140,7 @@ pub fn shortcuts_hint() -> String {
     let modifier = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
 
     t!(
-        "ui.settings.panel.zoom_shortcuts",
+        "ui-settings-panel-zoom_shortcuts",
         zoom_in = format!("{modifier}+="),
         zoom_out = format!("{modifier}+-"),
         reset = format!("{modifier}+0")

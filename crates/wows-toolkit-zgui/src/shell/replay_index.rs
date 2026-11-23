@@ -11,7 +11,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionVersion;
 use wows_toolkit_config::index::rows::IndexError;
 use wows_toolkit_replay_data::recording;
@@ -22,6 +21,7 @@ use wows_toolkit_replay_data::replay_index::IndexProgress;
 use wows_toolkit_viewmodel::index_rows::rateable_match_contribution;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -287,7 +287,7 @@ impl Shell {
         let index = self.replay_index;
         // Two passes at once would each load and save the unreadable-file ledger over the other's.
         if index.progress.with_untracked(Option::is_some) || index.folder_pass.get_untracked() {
-            self.toasts().warn(t!("ui.reindex.busy_index").into_owned());
+            self.toasts().warn(t!("ui-reindex-busy_index").into_owned());
             return BuildStart::Busy;
         }
 
@@ -316,7 +316,7 @@ impl Shell {
         index.outcome.set(None);
         index.progress.set(Some(IndexProgress::default()));
 
-        let named = t!("ui.app.status_indexing").into_owned();
+        let named = t!("ui-app-status_indexing").into_owned();
         let held = services.jobs.start(Job { name: named.clone(), progress: None });
         let (reports, received) = futures::channel::mpsc::unbounded::<IndexProgress>();
 
@@ -375,14 +375,14 @@ impl Shell {
                     index.note_written(progress.indexed);
                     let said = if progress.skipped > 0 {
                         t!(
-                            "ui.settings.index.built_with_skipped",
+                            "ui-settings-index-built_with_skipped",
                             indexed = progress.indexed,
                             skipped = progress.skipped,
                             failed = progress.failed
                         )
                         .into_owned()
                     } else {
-                        t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed).into_owned()
+                        t!("ui-settings-index-built", indexed = progress.indexed, failed = progress.failed).into_owned()
                     };
                     if progress.failed > 0 {
                         self.toasts().warn(said.clone());

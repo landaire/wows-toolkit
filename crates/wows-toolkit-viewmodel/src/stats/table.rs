@@ -33,13 +33,13 @@ impl StatLabel {
     /// The key the egui app looks this label up under.
     pub const fn translation_key(self) -> &'static str {
         match self {
-            Self::PersonalRating => "stat.personal_rating",
-            Self::MatchContribution => "stat.match_contribution",
-            Self::Damage => "stat.damage",
-            Self::SpottingDamage => "stat.spotting_damage",
-            Self::Frags => "stat.frags",
-            Self::RawXp => "stat.raw_xp",
-            Self::BaseXp => "stat.base_xp",
+            Self::PersonalRating => "stat-personal_rating",
+            Self::MatchContribution => "stat-match_contribution",
+            Self::Damage => "stat-damage",
+            Self::SpottingDamage => "stat-spotting_damage",
+            Self::Frags => "stat-frags",
+            Self::RawXp => "stat-raw_xp",
+            Self::BaseXp => "stat-base_xp",
         }
     }
 
@@ -72,10 +72,10 @@ pub enum Column {
 impl Column {
     pub const fn translation_key(self) -> &'static str {
         match self {
-            Self::Min => "ui.stats.table.min",
-            Self::Max => "ui.stats.table.max",
-            Self::Total => "ui.stats.table.total",
-            Self::Average => "ui.stats.table.average",
+            Self::Min => "ui-stats-table-min",
+            Self::Max => "ui-stats-table-max",
+            Self::Total => "ui-stats-table-total",
+            Self::Average => "ui-stats-table-average",
         }
     }
 

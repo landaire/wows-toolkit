@@ -6,13 +6,13 @@ use std::path::PathBuf;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_config::ListingRowElement;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -129,9 +129,9 @@ enum ColumnFilter {
 impl ColumnFilter {
     fn label(self) -> String {
         match self {
-            Self::RawXp => t!("stat.raw_xp"),
-            Self::ObservedDamage => t!("ui.replay.column.observed_damage"),
-            Self::Heals => t!("ui.replay.column.heals"),
+            Self::RawXp => t!("stat-raw_xp"),
+            Self::ObservedDamage => t!("ui-replay-column-observed_damage"),
+            Self::Heals => t!("ui-replay-column-heals"),
         }
         .into_owned()
     }
@@ -174,13 +174,13 @@ pub fn ListingHeader(control: BrowserControl, events: BrowserEvents) -> impl Int
         actions::index_offer(control)
     });
     let search_tip =
-        Signal::derive_local(move || offer_tip(search_offer.get(), t!("ui.replay.search_these_replays").into_owned()));
+        Signal::derive_local(move || offer_tip(search_offer.get(), t!("ui-replay-search_these_replays").into_owned()));
     let index_tip =
-        Signal::derive_local(move || offer_tip(index_offer.get(), t!("ui.index_folder.tooltip").into_owned()));
+        Signal::derive_local(move || offer_tip(index_offer.get(), t!("ui-index_folder-tooltip").into_owned()));
 
     view! {
         row(class = "wt-listing-header", attr:data-testid = "replay-listing-header") {
-            text(class = "wt-listing-header__caption") {{locale.text("ui.replay.listing_caption")}}
+            text(class = "wt-listing-header__caption") {{locale.text("ui-replay-listing_caption")}}
             HeaderAction(
                 glyph = Glyph::Search,
                 offer = search_offer,
@@ -259,7 +259,7 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
         listing.directory.get()
     });
     let ready = Signal::derive_local(move || matches!(services.game_data.state(), GameDataState::Ready(_)));
-    let tip = locale.text("ui.replay.listing_options");
+    let tip = locale.text("ui-replay-listing_options");
     let session_hint = Signal::derive_local(move || {
         locale.track();
         scope_hint(services.session)
@@ -276,9 +276,9 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
         let stats_tip = move || {
             locale.track();
             if ready.get() {
-                t!("ui.stats.open_directory_stats_tooltip").into_owned()
+                t!("ui-stats-open_directory_stats_tooltip").into_owned()
             } else {
-                t!("ui.stats.directory_stats_unavailable").into_owned()
+                t!("ui-stats-directory_stats_unavailable").into_owned()
             }
         };
         let path = StoredValue::new_local(path);
@@ -297,7 +297,7 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                         }
                     ) {
                         AppIcon(glyph = Glyph::ChartColumn)
-                        text {{locale.text("ui.stats.open_directory_stats")}}
+                        text {{locale.text("ui-stats-open_directory_stats")}}
                     }
                 }
                 TooltipContent {{stats_tip}}
@@ -386,9 +386,9 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                 on:click = check_game_data
                             ) {
                                 AppIcon(glyph = Glyph::Download)
-                                text {{locale.text("ui.replay.check_game_data")}}
+                                text {{locale.text("ui-replay-check_game_data")}}
                             }
-                            text(class = "wt-listing-options__hint") {{locale.text("ui.replay.check_game_data_tooltip")}}
+                            text(class = "wt-listing-options__hint") {{locale.text("ui-replay-check_game_data_tooltip")}}
                         }
                         {stats}
                         Separator()
@@ -402,11 +402,11 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                         attr:data-testid = "replay-listing-auto-load-latest"
                                     )
                                     Label(node_ref = auto_load_name, control = auto_load_box) {
-                                        {locale.text("ui.replay.autoload_latest")}
+                                        {locale.text("ui-replay-autoload_latest")}
                                     }
                                 }
                             }
-                            TooltipContent {{locale.text("ui.replay.autoload_latest_tooltip")}}
+                            TooltipContent {{locale.text("ui-replay-autoload_latest_tooltip")}}
                         }
                         Tooltip {
                             TooltipTrigger {
@@ -418,33 +418,33 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                         attr:data-testid = "replay-listing-anonymize-names"
                                     )
                                     Label(node_ref = anonymize_name, control = anonymize_box) {
-                                        {locale.text("ui.replay.anonymize_names")}
+                                        {locale.text("ui-replay-anonymize_names")}
                                     }
                                 }
                             }
-                            TooltipContent {{locale.text("ui.replay.anonymize_names_tooltip")}}
+                            TooltipContent {{locale.text("ui-replay-anonymize_names_tooltip")}}
                         }
                         Separator()
-                        text(class = "wt-listing-options__title") {{locale.text("ui.stats.session_title")}}
+                        text(class = "wt-listing-options__title") {{locale.text("ui-stats-session_title")}}
                         SessionScopeChoice(test_id = "replay-listing-session-scope")
                         text(class = "wt-listing-options__hint") {{move || session_hint.get()}}
                         Separator()
-                        text(class = "wt-listing-options__title") {{locale.text("ui.replay.group_label")}}
+                        text(class = "wt-listing-options__title") {{locale.text("ui-replay-group_label")}}
                         ToggleGroup(
                             value = Binding::controlled(grouping, set_grouping),
                             variant = ToggleVariant::Outline,
                             size = ToggleSize::Sm,
-                            label = t!("ui.replay.group_label").into_owned(),
+                            label = t!("ui-replay-group_label").into_owned(),
                             attr:data-testid = "replay-listing-grouping"
                         ) {
                             ToggleGroupItem(value = grouping_value(ReplayGrouping::Date), attr:data-testid = "replay-listing-grouping-date") {
-                                {locale.text("ui.replay.group.date")}
+                                {locale.text("ui-replay-group-date")}
                             }
                             ToggleGroupItem(value = grouping_value(ReplayGrouping::Ship), attr:data-testid = "replay-listing-grouping-ship") {
-                                {locale.text("ui.replay.group.ship")}
+                                {locale.text("ui-replay-group-ship")}
                             }
                             ToggleGroupItem(value = grouping_value(ReplayGrouping::None), attr:data-testid = "replay-listing-grouping-none") {
-                                {locale.text("ui.replay.group.none")}
+                                {locale.text("ui-replay-group-none")}
                             }
                         }
                         Tooltip {
@@ -457,19 +457,19 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                                         attr:data-testid = "replay-listing-group-win-rate-all-modes"
                                     )
                                     Label(node_ref = all_modes_name, control = all_modes_box) {
-                                        {locale.text("ui.replay.group_win_rate_all_modes")}
+                                        {locale.text("ui-replay-group_win_rate_all_modes")}
                                     }
                                 }
                             }
-                            TooltipContent {{locale.text("ui.replay.group_win_rate_all_modes_tooltip")}}
+                            TooltipContent {{locale.text("ui-replay-group_win_rate_all_modes_tooltip")}}
                         }
                         Separator()
-                        text(class = "wt-listing-options__title") {{locale.text("ui.replay.column_filters")}}
+                        text(class = "wt-listing-options__title") {{locale.text("ui-replay-column_filters")}}
                         ColumnFilterCheck(filter = ColumnFilter::RawXp)
                         ColumnFilterCheck(filter = ColumnFilter::ObservedDamage)
                         ColumnFilterCheck(filter = ColumnFilter::Heals)
                         Separator()
-                        text(class = "wt-listing-options__title") {{locale.text("ui.replay.row_elements")}}
+                        text(class = "wt-listing-options__title") {{locale.text("ui-replay-row_elements")}}
                         box(class = "wt-listing-options__checks") {
                             RowElementCheck(element = ListingRowElement::PersonalRating)
                             RowElementCheck(element = ListingRowElement::MatchContribution)
@@ -583,13 +583,13 @@ fn RowElementCheck(element: ListingRowElement) -> impl IntoView {
 
 fn row_element_label(element: ListingRowElement) -> String {
     match element {
-        ListingRowElement::PersonalRating => t!("ui.replay.row_element_personal_rating"),
-        ListingRowElement::MatchContribution => t!("ui.replay.row_element_match_contribution"),
-        ListingRowElement::Division => t!("ui.replay.row_element_division"),
-        ListingRowElement::Twitch => t!("ui.replay.row_element_twitch"),
-        ListingRowElement::Damage => t!("ui.replay.row_element_damage"),
-        ListingRowElement::Kills => t!("ui.replay.row_element_kills"),
-        ListingRowElement::Time => t!("ui.replay.row_element_time"),
+        ListingRowElement::PersonalRating => t!("ui-replay-row_element_personal_rating"),
+        ListingRowElement::MatchContribution => t!("ui-replay-row_element_match_contribution"),
+        ListingRowElement::Division => t!("ui-replay-row_element_division"),
+        ListingRowElement::Twitch => t!("ui-replay-row_element_twitch"),
+        ListingRowElement::Damage => t!("ui-replay-row_element_damage"),
+        ListingRowElement::Kills => t!("ui-replay-row_element_kills"),
+        ListingRowElement::Time => t!("ui-replay-row_element_time"),
     }
     .into_owned()
 }
@@ -611,7 +611,7 @@ const fn row_element_test_id(element: ListingRowElement) -> &'static str {
 fn OpenMenu(control: BrowserControl) -> impl IntoView {
     let shell = control.shell();
     let locale = shell.services().locale;
-    let tip = locale.text("ui.replay.open");
+    let tip = locale.text("ui-replay-open");
 
     view! {
         Tooltip {
@@ -627,10 +627,10 @@ fn OpenMenu(control: BrowserControl) -> impl IntoView {
                     }
                     DropdownMenuContent(placement = Placement::new(Side::Bottom, Align::End)) {
                         MenuItem(on_select = UnsyncCallback::new(move |()| open_replay_file(shell))) {
-                            {t!("ui.replay.open_file").into_owned()}
+                            {t!("ui-replay-open_file").into_owned()}
                         }
                         MenuItem(on_select = UnsyncCallback::new(move |()| control.browse_folder())) {
-                            {t!("ui.replay.open_directory").into_owned()}
+                            {t!("ui-replay-open_directory").into_owned()}
                         }
                     }
                 }

@@ -5,7 +5,7 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
@@ -39,7 +39,7 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
     let summary = move || {
         stats().map(|stats| {
             t!(
-                "ui.settings.wows.cache.stats",
+                "ui-settings-wows-cache-stats",
                 size = humansize::format_size(stats.total_bytes, humansize::BINARY),
                 count = stats.version_count,
             )
@@ -72,7 +72,7 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                         }
                     }
                 ) {
-                    {t!("ui.settings.wows.cache.open_folder").into_owned()}
+                    {t!("ui-settings-wows-cache-open_folder").into_owned()}
                 }
                 // Nothing to prune while there is one build: the newest is kept.
                 if move || several.get() {
@@ -87,7 +87,7 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                             }
                         }
                     ) {
-                        {t!("ui.settings.wows.cache.delete_old").into_owned()}
+                        {t!("ui-settings-wows-cache-delete_old").into_owned()}
                     }
                 } else {}
             }
@@ -101,22 +101,22 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                                 disabled = busy,
                                 attr:data-testid = "cache-actions"
                             ) {
-                                {t!("ui.settings.wows.cache.actions").into_owned()}
+                                {t!("ui-settings-wows-cache-actions").into_owned()}
                             }
                             DropdownMenuContent {
                                 MenuItem(on_select = with_base(|shell, base| shell.check_cache_for_updates(base))) {
-                                    {t!("ui.settings.wows.cache.check_updates").into_owned()}
+                                    {t!("ui-settings-wows-cache-check_updates").into_owned()}
                                 }
                                 MenuItem(on_select = with_base(|shell, base| shell.validate_cache(base))) {
-                                    {t!("ui.settings.wows.cache.validate").into_owned()}
+                                    {t!("ui-settings-wows-cache-validate").into_owned()}
                                 }
                             }
                         }
                     }
-                    TooltipContent {{t!("ui.settings.wows.cache.actions_tooltip").into_owned()}}
+                    TooltipContent {{t!("ui-settings-wows-cache-actions_tooltip").into_owned()}}
                 }
                 if move || busy.get() {
-                    Spinner(label = t!("ui.settings.wows.cache.actions").into_owned())
+                    Spinner(label = t!("ui-settings-wows-cache-actions").into_owned())
                 } else {}
             }
             {move || progress().map(|step| view! {
@@ -125,7 +125,7 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
             if move || updates() > 0 {
                 row(class = "wt-settings__control-row") {
                     text(class = "wt-settings__line", attr:data-testid = "cache-updates") {{move || {
-                        t!("ui.settings.wows.cache.updates_available", count = updates()).into_owned()
+                        t!("ui-settings-wows-cache-updates_available", count = updates()).into_owned()
                     }}}
                     Button(
                         variant = ButtonVariant::Outline,
@@ -138,7 +138,7 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                             }
                         }
                     ) {
-                        {t!("ui.settings.wows.cache.update_all").into_owned()}
+                        {t!("ui-settings-wows-cache-update_all").into_owned()}
                     }
                 }
             } else {}
@@ -156,7 +156,7 @@ pub fn CachedBuilds(shell: Shell) -> impl IntoView {
                             }
                         }
                     ) {
-                        {t!("ui.settings.wows.cache.repair").into_owned()}
+                        {t!("ui-settings-wows-cache-repair").into_owned()}
                     }
                 }
             } else {}

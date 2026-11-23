@@ -36,7 +36,6 @@ use landaire_ui::TippedProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_config::ReplayExportFormat;
@@ -64,6 +63,7 @@ use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::twitch;
 use wowsunpack::game_params::types::Species;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::ArcRwSignal;
@@ -335,12 +335,12 @@ impl SidePanel {
     const fn title_key(self) -> Option<&'static str> {
         match self {
             SidePanel::None => None,
-            SidePanel::Chat => Some("ui.replay.game_chat"),
-            SidePanel::RawMetadata => Some("ui.replay.debug.raw_metadata"),
-            SidePanel::RawResults => Some("ui.replay.debug.raw_results"),
-            SidePanel::MappedResults => Some("ui.replay.debug.mapped_results"),
-            SidePanel::RawPlayerMetadata => Some("ui.replay.debug.player_metadata"),
-            SidePanel::Timeline => Some("ui.replay.timeline"),
+            SidePanel::Chat => Some("ui-replay-game_chat"),
+            SidePanel::RawMetadata => Some("ui-replay-debug-raw_metadata"),
+            SidePanel::RawResults => Some("ui-replay-debug-raw_results"),
+            SidePanel::MappedResults => Some("ui-replay-debug-mapped_results"),
+            SidePanel::RawPlayerMetadata => Some("ui-replay-debug-player_metadata"),
+            SidePanel::Timeline => Some("ui-replay-timeline"),
         }
     }
 
@@ -814,12 +814,12 @@ pub fn ReplayPanel(
 
     let add_alt = move || {
         if alts.with_untracked(Vec::len) >= MAX_ALTS {
-            shell.toasts().warn(t!("ui.replay.load_alt_perspective_limit", limit = MAX_ALTS).into_owned());
+            shell.toasts().warn(t!("ui-replay-load_alt_perspective_limit", limit = MAX_ALTS).into_owned());
             return;
         }
         let Some(cache) = services.game_data.cache_untracked() else { return };
         let asked = wows_toolkit_services::dialog::pick_file(
-            Some(&t!("ui.replay.load_alt_perspective")),
+            Some(&t!("ui-replay-load_alt_perspective")),
             Some(wows_toolkit_services::dialog::REPLAYS),
         );
         let primary = path.get_value();
@@ -828,7 +828,7 @@ pub fn ReplayPanel(
                 Ok(Some(alt)) => alt,
                 Ok(None) => return,
                 Err(err) => {
-                    shell.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+                    shell.toasts().failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
                     return;
                 }
             };
@@ -846,7 +846,7 @@ pub fn ReplayPanel(
                 Err(refused) => {
                     shell
                         .toasts()
-                        .failed(t!("ui.replay.load_alt_perspective_failed", error = refused.to_string()).into_owned());
+                        .failed(t!("ui-replay-load_alt_perspective_failed", error = refused.to_string()).into_owned());
                 }
             }
         });
@@ -866,7 +866,7 @@ pub fn ReplayPanel(
 
     let body = move || match kind.get() {
         StateKind::Loading => AnyView::new(view! {
-            TableSkeleton(label = t!("ui.replay.loading").into_owned(), attr:data-testid = "replay-panel-loading")
+            TableSkeleton(label = t!("ui-replay-loading").into_owned(), attr:data-testid = "replay-panel-loading")
         }),
         StateKind::Failed => {
             let reason = move || {
@@ -877,7 +877,7 @@ pub fn ReplayPanel(
             };
             AnyView::new(view! {
                 column(class = "wt-rp-failed", attr:data-testid = "replay-panel-failed") {
-                    text(class = "wt-rp-failed__title") {{t!("ui.messages.replay_load_failed").into_owned()}}
+                    text(class = "wt-rp-failed__title") {{t!("ui-messages-replay_load_failed").into_owned()}}
                     text(class = "wt-rp-dim") {{reason}}
                 }
             })
@@ -947,7 +947,7 @@ pub fn ReplayPanel(
                         width = side_width,
                         range = SIDE_PANEL_RANGE,
                         edge = landaire_ui::SideEdge::Right,
-                        resize_label = t!("ui.replay.game_chat").into_owned(),
+                        resize_label = t!("ui-replay-game_chat").into_owned(),
                         class = "wt-rp-body"
                     ) {
                         landaire_ui::SidePanel(slot) {
@@ -1031,7 +1031,7 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> O
             }
             let loaded = loaded_state(parsed, columns_now.get_value(), rating_now.get_value());
             if awaited_results && loaded.raw_results.is_some() {
-                shell.toasts().info(t!("ui.replay.results_arrived", battle = loaded.title.clone()).into_owned());
+                shell.toasts().info(t!("ui-replay-results_arrived", battle = loaded.title.clone()).into_owned());
             }
             state.set(LoadState::Loaded(Rc::new(loaded)));
             announce_read(events);
@@ -1045,7 +1045,7 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> O
                 alts.update(|kept| kept.retain(|kept| !same_file(kept, &refused)));
                 shell
                     .toasts()
-                    .failed(t!("ui.replay.load_alt_perspective_failed", error = err.to_string()).into_owned());
+                    .failed(t!("ui-replay-load_alt_perspective_failed", error = err.to_string()).into_owned());
                 return Some(
                     cause.map_or(ReparseCause::AltPerspective, |cause| ReparseCause::AltPerspective.with(cause)),
                 );
@@ -1055,7 +1055,7 @@ fn apply_result(cx: ApplyCx, result: Result<ParsedReplay, ReplayLoadError>) -> O
             {
                 on_build_missing.run(MissingBuild { build: *build, version: version.clone(), replays: 1 });
             }
-            shell.toasts().failed(t!("ui.messages.replay_load_failed").into_owned());
+            shell.toasts().failed(t!("ui-messages-replay_load_failed").into_owned());
             state.set(LoadState::Failed(err.to_string()));
             announce_read(events);
             None
@@ -1248,7 +1248,7 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
     let has_results = move || loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.raw_results.is_some()));
     let has_chat = move || loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.chat.is_some()));
     let outcome = move || loaded.with(|loaded| loaded.as_ref().and_then(|loaded| loaded.battle_result));
-    let chat_label = t!("ui.replay.chat").into_owned();
+    let chat_label = t!("ui-replay-chat").into_owned();
     // The label already names the toggle, so the tip only says why it is off.
     let tip_wanted = RwSignal::new_local(false);
     let tip_open = Signal::derive_local(move || tip_wanted.get() && !has_chat());
@@ -1261,17 +1261,17 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                         TooltipTrigger {
                             row(class = "wt-rp-incomplete", attr:data-testid = "replay-incomplete-results") {
                                 AppIcon(glyph = wows_toolkit_icons::Glyph::Info)
-                                text {{t!("ui.replay.incomplete_results").into_owned()}}
+                                text {{t!("ui-replay-incomplete_results").into_owned()}}
                             }
                         }
-                        TooltipContent {{t!("ui.replay.incomplete_results_tooltip").into_owned()}}
+                        TooltipContent {{t!("ui-replay-incomplete_results_tooltip").into_owned()}}
                     }
                 }
                 {move || outcome().map(|result| AnyView::new(view! { OutcomeBadge(result = result) }))}
             }
             row(class = "wt-rp-header__end") {
                 Show(when = move || parsing.get()) {
-                    LoadingLine(label = t!("ui.replay.loading").into_owned())
+                    LoadingLine(label = t!("ui-replay-loading").into_owned())
                 }
                 {move || export_status.get().map(|status| AnyView::new(view! { text(class = "wt-rp-status", attr:data-testid = "replay-export-status") {{status}} }))}
                 ActionsMenu(header = header.clone())
@@ -1290,7 +1290,7 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                             text {{chat_label}}
                         }
                     }
-                    TooltipContent {{t!("ui.replay.no_chat").into_owned()}}
+                    TooltipContent {{t!("ui-replay-no_chat").into_owned()}}
                 }
             }
         }
@@ -1409,7 +1409,7 @@ fn MatchContextLine(context: MatchContext, played_at: Timestamp) -> impl IntoVie
         .collect();
     // Derived rather than stored, so the hover reads the age as it is drawn, not as the panel was.
     let age = Signal::derive_local(move || {
-        t!("ui.replay.match_age", age = relative_age_text(played_at, Timestamp::now())).into_owned()
+        t!("ui-replay-match_age", age = relative_age_text(played_at, Timestamp::now())).into_owned()
     });
     items.push(AnyView::new(view! {
         row(class = "wt-rp-context__item") {
@@ -1429,9 +1429,9 @@ const EXPORT_FORMATS: [ReplayExportFormat; 3] =
 
 fn export_label(format: ReplayExportFormat) -> String {
     match format {
-        ReplayExportFormat::Json => t!("ui.replay.export_results_json").into_owned(),
-        ReplayExportFormat::Cbor => t!("ui.replay.export_results_cbor").into_owned(),
-        ReplayExportFormat::Csv => t!("ui.replay.export_results_csv").into_owned(),
+        ReplayExportFormat::Json => t!("ui-replay-export_results_json").into_owned(),
+        ReplayExportFormat::Cbor => t!("ui-replay-export_results_cbor").into_owned(),
+        ReplayExportFormat::Csv => t!("ui-replay-export_results_csv").into_owned(),
     }
 }
 
@@ -1487,7 +1487,7 @@ fn export_match(
 ) {
     let export = if debug { loaded.export.clone() } else { loaded.export.clone().stripped() };
     let asked = wows_toolkit_services::dialog::save_file(
-        Some(&t!("ui.replay.export_results_title")),
+        Some(&t!("ui-replay-export_results_title")),
         &format!("{}.{}", loaded.export_stem, export_extension(format)),
         None,
     );
@@ -1497,13 +1497,13 @@ fn export_match(
             Ok(Some(path)) => path,
             Ok(None) => return,
             Err(err) => {
-                shell.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+                shell.toasts().failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
                 return;
             }
         };
         let written = blocking(move || write_export(&export, &path, format)).await;
         status.set(Some(match written {
-            Ok(()) => t!("ui.replay.results_exported").into_owned(),
+            Ok(()) => t!("ui-replay-results_exported").into_owned(),
             Err(err) => {
                 tracing::warn!("replay export failed: {err}");
                 err.to_string()
@@ -1539,8 +1539,8 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
         });
     });
     let alt_label = move || match alts.with(Vec::len) {
-        0 => t!("ui.replay.load_alt_perspective").into_owned(),
-        merged => format!("{} ({merged})", t!("ui.replay.load_alt_perspective")),
+        0 => t!("ui-replay-load_alt_perspective").into_owned(),
+        merged => format!("{} ({merged})", t!("ui-replay-load_alt_perspective")),
     };
     let exports = move || {
         EXPORT_FORMATS
@@ -1571,9 +1571,9 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
         let has_results = loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.raw_results.is_some()));
         let has_mapped = loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.mapped_results.is_some()));
         let items: Vec<AnyView> = [
-            (SidePanel::RawMetadata, "ui.replay.debug.raw_metadata", true),
-            (SidePanel::RawResults, "ui.replay.debug.raw_results", has_results),
-            (SidePanel::MappedResults, "ui.replay.debug.mapped_results", has_mapped),
+            (SidePanel::RawMetadata, "ui-replay-debug-raw_metadata", true),
+            (SidePanel::RawResults, "ui-replay-debug-raw_results", has_results),
+            (SidePanel::MappedResults, "ui-replay-debug-mapped_results", has_mapped),
         ]
         .into_iter()
         .map(|(which, label, enabled)| {
@@ -1588,7 +1588,7 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
         .collect();
         Some(AnyView::new(view! {
             MenuSeparator()
-            MenuLabel(class = "wt-rp-menu-heading") {{t!("ui.replay.section_debug").into_owned()}}
+            MenuLabel(class = "wt-rp-menu-heading") {{t!("ui-replay-section_debug").into_owned()}}
             {items}
         }))
     };
@@ -1596,29 +1596,29 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
     view! {
         DropdownMenu {
             DropdownMenuTrigger(variant = ButtonVariant::Outline, size = ButtonSize::Sm, attr:data-testid = "replay-actions") {
-                {t!("ui.replay.actions").into_owned()}
+                {t!("ui-replay-actions").into_owned()}
             }
             DropdownMenuContent {
-                MenuLabel(class = "wt-rp-menu-heading") {{t!("ui.replay.section_match").into_owned()}}
+                MenuLabel(class = "wt-rp-menu-heading") {{t!("ui-replay-section_match").into_owned()}}
                 {on_render.map(|on_render| AnyView::new(view! {
                     MenuItem(
                         attr:data-testid = "replay-render",
                         on_select = UnsyncCallback::new(move |()| on_render.run(RenderRequest { path: path.get_value(), alts: alts.get_untracked() }))
-                    ) {{t!("ui.replay.context.render_replay").into_owned()}}
+                    ) {{t!("ui-replay-context-render_replay").into_owned()}}
                 }))}
                 MenuItem(attr:data-testid = "replay-load-alt", on_select = load_alt) {{alt_label}}
                 MenuItem(attr:data-testid = "replay-timeline-open", disabled = no_timeline, on_select = open_timeline) {
-                    {t!("ui.replay.timeline").into_owned()}
+                    {t!("ui-replay-timeline").into_owned()}
                 }
                 Show(when = is_test_ship) {
                     MenuCheckboxItem(
                         checked = Binding::controlled(Signal::derive_local(hidden), |_| {}),
                         attr:data-testid = "replay-hide-my-stats",
                         on_change = set_hidden
-                    ) {{t!("ui.replay.hide_my_stats").into_owned()}}
+                    ) {{t!("ui-replay-hide_my_stats").into_owned()}}
                 }
                 MenuSeparator()
-                MenuLabel(class = "wt-rp-menu-heading") {{t!("ui.replay.section_export").into_owned()}}
+                MenuLabel(class = "wt-rp-menu-heading") {{t!("ui-replay-section_export").into_owned()}}
                 {exports}
                 {debug_items}
             }
@@ -1649,7 +1649,7 @@ fn SideContent(
     let game_data = services.game_data;
     let names = Memo::new(move |_| settings.name_display());
     let title = move || kind.get().title_key().map(|key| t!(key).into_owned()).unwrap_or_default();
-    let close_label = StoredValue::new(t!("ui.replay.close_side_panel").into_owned());
+    let close_label = StoredValue::new(t!("ui-replay-close_side_panel").into_owned());
     let content = move || {
         let loaded = loaded.get()?;
         match kind.get() {

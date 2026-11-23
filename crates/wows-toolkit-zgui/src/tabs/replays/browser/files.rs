@@ -5,8 +5,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_toolkit_services::paths::without_verbatim_prefix;
+use wt_translations::t;
 
 use crate::shell::Shell;
 
@@ -29,9 +29,9 @@ pub fn copy_replay_files(toasts: Toasts, paths: &[PathBuf]) {
     match outcome {
         Ok(()) => {
             let message = if paths.len() == 1 {
-                t!("ui.replay.context.copy_replay").into_owned()
+                t!("ui-replay-context-copy_replay").into_owned()
             } else {
-                t!("ui.replay.context.copy_replays", count = paths.len()).into_owned()
+                t!("ui-replay-context-copy_replays", count = paths.len()).into_owned()
             };
             toasts.ok(message);
         }

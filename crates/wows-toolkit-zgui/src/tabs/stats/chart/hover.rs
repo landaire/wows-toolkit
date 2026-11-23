@@ -1,7 +1,6 @@
 //! What the pointer rests on in a plot: the nearest point of a line, or the bar under it, the
 //! text its tooltip shows, and the marks drawn over it.
 
-use rust_i18n::t;
 use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
@@ -13,6 +12,7 @@ use wows_toolkit_viewmodel::stats::plot::PlotLayout;
 use wows_toolkit_viewmodel::stats::plot::PlotPoint;
 use wows_toolkit_viewmodel::stats::plot::PlotRect;
 use wows_toolkit_viewmodel::stats::plot::ValueTone;
+use wt_translations::t;
 
 use crate::tabs::stats::chart::plot::PlotData;
 use crate::tabs::stats::chart::plot::ThemeColors;
@@ -113,7 +113,7 @@ pub(super) fn hover_text(data: &PlotData, hit: PlotHit, stat: ChartableStat, loc
             Some(HoverText {
                 name: line.name.clone(),
                 color: line.color,
-                game: Some(t!("ui.stats.chart_hover_game", number = point + 1, time = at.label).into_owned()),
+                game: Some(t!("ui-stats-chart_hover_game", number = point + 1, time = at.label).into_owned()),
                 value: value_text(stat, at.value, locale),
                 band: value_band(stat, at.value),
             })

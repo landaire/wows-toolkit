@@ -9,7 +9,7 @@
 
 pub mod image;
 
-use rust_i18n::t;
+use wt_translations::t;
 
 use super::chart::ChartBar;
 use super::chart::ChartSeries;
@@ -812,7 +812,7 @@ fn paint_legend(plot: &Plot<'_>, bounds: PlotRect, width: f32, color: PlotColor,
             let remaining = plot.series.len() - visible;
             canvas.text(
                 PlotPoint::new(column.x, top),
-                &t!("ui.stats.series_more", count = remaining),
+                &t!("ui-stats-series_more", count = remaining),
                 TICK_FONT,
                 color,
             );

@@ -5,9 +5,9 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::unpacker::extract::PrototypeOutput;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Signal;
@@ -102,9 +102,9 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
     let has_output_dir = Signal::derive_local(move || !model.output_dir.with(String::is_empty));
     let decode = Signal::derive_local(move || Checked::from(model.prototypes.get() == PrototypeOutput::DecodeToJson));
     let extract_label = move || match count.get() {
-        0 => t!("ui.unpacker.extract").into_owned(),
-        1 => t!("ui.unpacker.extract_one").into_owned(),
-        count => t!("ui.unpacker.extract_many", count = count).into_owned(),
+        0 => t!("ui-unpacker-extract").into_owned(),
+        1 => t!("ui-unpacker-extract_one").into_owned(),
+        count => t!("ui-unpacker-extract_many", count = count).into_owned(),
     };
     let status = move || model.extract.with(|state| state.status()).unwrap_or_default();
     let fraction = Signal::derive_local(move || {
@@ -115,7 +115,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
         if count.get() == 0 {
             return AnyView::new(view! {
                 text(class = "wt-queue__empty", attr:data-testid = "unpacker-queue-empty") {
-                    {t!("ui.unpacker.queue_empty").into_owned()}
+                    {t!("ui-unpacker-queue_empty").into_owned()}
                 }
             });
         }
@@ -123,7 +123,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
             VirtualList(
                 count = count,
                 row_size = ENTRY_HEIGHT,
-                label = t!("ui.unpacker.extraction_queue").into_owned(),
+                label = t!("ui-unpacker-extraction_queue").into_owned(),
                 class = "wt-queue__list",
                 attr:data-testid = "unpacker-queue-list",
                 row = move |ix: usize| entry_row(model, ix)
@@ -140,12 +140,12 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
     view! {
         column(class = "wt-queue", attr:data-testid = "unpacker-queue-panel") {
             column(class = "wt-queue__destination") {
-                text(class = "wt-queue__dim") {{t!("ui.unpacker.extraction_output").into_owned()}}
+                text(class = "wt-queue__dim") {{t!("ui-unpacker-extraction_output").into_owned()}}
                 row(class = "wt-queue__row") {
                     Input(
                         value = output_dir,
-                        placeholder = t!("ui.unpacker.output_dir_hint").into_owned(),
-                        label = t!("ui.unpacker.extraction_output").into_owned(),
+                        placeholder = t!("ui-unpacker-output_dir_hint").into_owned(),
+                        label = t!("ui-unpacker-extraction_output").into_owned(),
                         class = "wt-queue__field",
                         attr:data-testid = "unpacker-output-dir",
                         on:focus_out = move |_| model.store_output_dir(output_dir.get_untracked().trim().to_string()),
@@ -160,14 +160,14 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                             Button(
                                 variant = ButtonVariant::Outline,
                                 size = ButtonSize::IconSm,
-                                a11y:label = t!("ui.unpacker.browse").into_owned(),
+                                a11y:label = t!("ui-unpacker-browse").into_owned(),
                                 attr:data-testid = "unpacker-browse",
                                 on:click = move |_| model.browse_for_output_dir()
                             ) {
                                 AppIcon(glyph = Glyph::FolderOpen)
                             }
                         }
-                        TooltipContent {{t!("ui.unpacker.browse").into_owned()}}
+                        TooltipContent {{t!("ui-unpacker-browse").into_owned()}}
                     }
                 }
                 Tooltip {
@@ -185,16 +185,16 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                                 class = "wt-queue__dim",
                                 attr:data-testid = "unpacker-decode-prototypes-label"
                             ) {
-                                {t!("ui.unpacker.decode_prototypes").into_owned()}
+                                {t!("ui-unpacker-decode_prototypes").into_owned()}
                             }
                         }
                     }
-                    TooltipContent {{t!("ui.unpacker.decode_prototypes_tooltip").into_owned()}}
+                    TooltipContent {{t!("ui-unpacker-decode_prototypes_tooltip").into_owned()}}
                 }
             }
             row(class = "wt-queue__heading") {
                 text(class = format!("wt-queue__dim wt-queue__count {TABULAR_CLASS}")) {
-                    {move || t!("ui.unpacker.queued_count", count = count.get()).into_owned()}
+                    {move || t!("ui-unpacker-queued_count", count = count.get()).into_owned()}
                 }
                 Button(
                     variant = ButtonVariant::Ghost,
@@ -203,7 +203,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                     attr:data-testid = "unpacker-queue-clear-all",
                     on:click = move |_| model.clear_queue()
                 ) {
-                    {t!("ui.unpacker.clear_all").into_owned()}
+                    {t!("ui-unpacker-clear_all").into_owned()}
                 }
             }
             {entries}
@@ -225,7 +225,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                             {move || if has_output_dir.get() {
                                 extract_label()
                             } else {
-                                t!("ui.unpacker.choose_directory").into_owned()
+                                t!("ui-unpacker-choose_directory").into_owned()
                             }}
                         }
                     }
@@ -236,7 +236,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
                             attr:data-testid = "unpacker-cancel",
                             on:click = move |_| model.cancel_extraction()
                         ) {
-                            {t!("ui.buttons.cancel").into_owned()}
+                            {t!("ui-buttons-cancel").into_owned()}
                         }
                     }
                 }
@@ -271,7 +271,7 @@ fn entry_row(model: UnpackerModel, ix: usize) -> impl IntoView {
                     Button(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconXs,
-                        a11y:label = t!("ui.unpacker.remove_from_queue").into_owned(),
+                        a11y:label = t!("ui-unpacker-remove_from_queue").into_owned(),
                         attr:data-testid = format!("unpacker-queue-remove-{ix}"),
                         on:click = move |_| {
                             if let Some(entry) = model.queue.with_untracked(|queue| queue.entries().get(ix).cloned()) {
@@ -282,7 +282,7 @@ fn entry_row(model: UnpackerModel, ix: usize) -> impl IntoView {
                         AppIcon(glyph = Glyph::X)
                     }
                 }
-                TooltipContent {{t!("ui.unpacker.remove_from_queue").into_owned()}}
+                TooltipContent {{t!("ui-unpacker-remove_from_queue").into_owned()}}
             }
         }
     }

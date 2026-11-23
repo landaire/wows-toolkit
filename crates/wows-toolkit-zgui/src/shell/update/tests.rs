@@ -8,10 +8,10 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot;
 use futures::future::LocalBoxFuture;
 use landaire_ui::test_support::HeadlessWindow;
-use rust_i18n::t;
 use wows_toolkit_services::update::Downloaded;
 use wows_toolkit_services::update::UpdateError;
 use wows_toolkit_viewmodel::update::Release;
+use wt_translations::t;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
@@ -124,7 +124,7 @@ fn a_check_by_hand_that_cannot_reach_the_server_says_why() {
     settle(&mut window);
     assert!(jobs().is_empty());
     let said = error_text(&window);
-    assert!(said.contains(t!("ui.messages.update_check_failed").as_ref()), "{said}");
+    assert!(said.contains(t!("ui-messages-update_check_failed").as_ref()), "{said}");
     assert!(said.contains("connection refused"), "{said}");
 }
 
@@ -165,7 +165,7 @@ fn a_check_by_hand_that_finds_nothing_says_the_app_is_up_to_date() {
     settle(&mut window);
 
     let toasts = window.texts_by_class("zui-toast").concat();
-    assert!(toasts.contains(t!("ui.messages.app_up_to_date").as_ref()), "{toasts}");
+    assert!(toasts.contains(t!("ui-messages-app_up_to_date").as_ref()), "{toasts}");
 }
 
 /// The setting's own check runs once a session: turning it off and on again does not ask again.
@@ -217,7 +217,7 @@ fn an_install_says_how_far_it_got_and_why_it_failed() {
     install.progress.unbounded_send(Downloaded { read: 1024, total: Some(4096) }).expect("the flow listens");
     settle(&mut window);
     let named: Vec<String> = jobs().into_iter().map(|job| job.name).collect();
-    assert_eq!(named, [t!("ui.messages.update_downloading", read = "1 KiB", total = "4 KiB").into_owned()]);
+    assert_eq!(named, [t!("ui-messages-update_downloading", read = "1 KiB", total = "4 KiB").into_owned()]);
 
     // An archive without the executable, as a bad release asset would be. The install's end
     // closes its progress channel, as the real one's does.

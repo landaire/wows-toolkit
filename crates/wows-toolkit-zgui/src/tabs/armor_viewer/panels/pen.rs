@@ -13,7 +13,6 @@ use landaire_ui::MarkedTextProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::catalog::ShipCatalog;
 use wows_toolkit_icons::Glyph;
@@ -31,6 +30,7 @@ use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::game_params::types::tier_roman;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -270,7 +270,7 @@ pub fn PenCheckPanel(
         }),
         None => AnyView::new(view! {
             row(class = "wt-armor-pen__against") {
-                text(class = "wt-armor-pen__hint") {{locale.text("ui.armor.pen.hover_a_plate")}}
+                text(class = "wt-armor-pen__hint") {{locale.text("ui-armor-pen-hover_a_plate")}}
             }
         }),
     };
@@ -282,7 +282,7 @@ pub fn PenCheckPanel(
         });
         if ships.is_empty() {
             return AnyView::new(view! {
-                text(class = "wt-armor-pen__hint") {{locale.text("ui.armor.pen.add_a_ship")}}
+                text(class = "wt-armor-pen__hint") {{locale.text("ui-armor-pen-add_a_ship")}}
             });
         }
         let ifhe = Ifhe::from_enabled(ifhe);
@@ -303,7 +303,7 @@ pub fn PenCheckPanel(
                     attr:data-testid = "armor-pen-clear",
                     on:click = move |_| pen.update(PenetrationState::clear)
                 ) {
-                    {locale.text("ui.armor.pen.clear_all")}
+                    {locale.text("ui-armor-pen-clear_all")}
                 }
             }
         })
@@ -326,10 +326,10 @@ pub fn PenCheckPanel(
                                 labelled_by = ifhe_name,
                                 attr:data-testid = "armor-pen-ifhe"
                             )
-                            Label(node_ref = ifhe_name, control = ifhe_box) {{locale.text("ui.armor.pen.ifhe")}}
+                            Label(node_ref = ifhe_name, control = ifhe_box) {{locale.text("ui-armor-pen-ifhe")}}
                         }
                     }
-                    TooltipContent {{locale.text("ui.armor.pen.ifhe_tooltip")}}
+                    TooltipContent {{locale.text("ui-armor-pen-ifhe_tooltip")}}
                 }
             }
             ShipSearch(pen = pen, inputs = search)
@@ -401,8 +401,8 @@ fn ShipSearch(pen: RwSignal<PenetrationState, LocalStorage>, inputs: ShipSearchI
         column(class = "wt-armor-pen__search") {
             Input(
                 value = query,
-                placeholder = t!("ui.armor.pen.search_hint").into_owned(),
-                label = t!("ui.armor.pen.search_hint").into_owned(),
+                placeholder = t!("ui-armor-pen-search_hint").into_owned(),
+                label = t!("ui-armor-pen-search_hint").into_owned(),
                 attr:data-testid = "armor-pen-search",
                 on:key_down = move |ev| {
                     escape.key_down(ev);
@@ -428,7 +428,7 @@ fn ship_block(
     let name = format!("{} {}", tier_roman(ship.tier), ship.display_name);
     let rows: AnyView = if ship.shells.is_empty() {
         AnyView::new(view! {
-            text(class = "wt-armor-pen__hint") {{t!("ui.armor.pen.no_shells", ship = ship.display_name.as_str()).into_owned()}}
+            text(class = "wt-armor-pen__hint") {{t!("ui-armor-pen-no_shells", ship = ship.display_name.as_str()).into_owned()}}
         })
     } else {
         let rows: Vec<AnyView> =
@@ -436,8 +436,8 @@ fn ship_block(
         AnyView::new(view! { column {{rows}} })
     };
     let param_index = ship.param_index.clone();
-    let use_label = t!("ui.armor.pen.use_for_trajectory").into_owned();
-    let remove_label = t!("ui.armor.pen.remove").into_owned();
+    let use_label = t!("ui-armor-pen-use_for_trajectory").into_owned();
+    let remove_label = t!("ui-armor-pen-remove").into_owned();
     let remove_tip = remove_label.clone();
 
     AnyView::new(view! {
@@ -457,7 +457,7 @@ fn ship_block(
                             {use_label.clone()}
                         }
                     }
-                    TooltipContent {{t!("ui.armor.pen.firing_ship_tooltip").into_owned()}}
+                    TooltipContent {{t!("ui-armor-pen-firing_ship_tooltip").into_owned()}}
                 }
                 Tooltip {
                     TooltipTrigger {
@@ -503,7 +503,7 @@ impl Tone {
 /// pointer is no question yet, which reads differently from a shell the data has no figure for.
 fn verdict(shell: &ShellInfo, thickness: Option<Millimeters>, ifhe: Ifhe) -> (&'static str, Tone) {
     match thickness {
-        None => ("ui.armor.pen.awaiting_plate", Tone::Dim),
+        None => ("ui-armor-pen-awaiting_plate", Tone::Dim),
         Some(thickness) => result_verdict(check_penetration(shell, thickness, ifhe)),
     }
 }
@@ -511,10 +511,10 @@ fn verdict(shell: &ShellInfo, thickness: Option<Millimeters>, ifhe: Ifhe) -> (&'
 /// The words and tone of a penetration check. `None` is a shell the data has no figure for.
 pub(super) fn result_verdict(result: Option<PenResult>) -> (&'static str, Tone) {
     match result {
-        Some(PenResult::Penetrates) => ("ui.armor.pen.penetrates", Tone::Ok),
-        Some(PenResult::Bounces) => ("ui.armor.pen.shatters", Tone::Error),
-        Some(PenResult::AngleDependent) => ("ui.armor.pen.angle_dependent", Tone::Warn),
-        None => ("ui.armor.pen.no_data", Tone::Dim),
+        Some(PenResult::Penetrates) => ("ui-armor-pen-penetrates", Tone::Ok),
+        Some(PenResult::Bounces) => ("ui-armor-pen-shatters", Tone::Error),
+        Some(PenResult::AngleDependent) => ("ui-armor-pen-angle_dependent", Tone::Warn),
+        None => ("ui-armor-pen-no_data", Tone::Dim),
     }
 }
 
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn no_plate_awaits_one_rather_than_reading_as_missing_data() {
         let he = shell(AmmoType::HE, 152.0, Some(25.0), None);
-        assert_eq!(verdict(&he, None, Ifhe::NotApplied), ("ui.armor.pen.awaiting_plate", Tone::Dim));
+        assert_eq!(verdict(&he, None, Ifhe::NotApplied), ("ui-armor-pen-awaiting_plate", Tone::Dim));
         assert_eq!(verdict(&he, Some(Millimeters::from(19.0)), Ifhe::NotApplied).1, Tone::Ok);
         assert_eq!(verdict(&he, Some(Millimeters::from(32.0)), Ifhe::NotApplied).1, Tone::Error);
     }

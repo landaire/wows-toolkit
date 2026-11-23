@@ -105,13 +105,13 @@ impl ServerOutcome {
     /// The key naming this outcome, for a front end that translates it.
     pub const fn label_key(&self) -> &'static str {
         match self {
-            Self::Penetration => "ui.armor.outcome.penetration",
-            Self::Citadel => "ui.armor.outcome.citadel",
-            Self::Ricochet => "ui.armor.outcome.ricochet",
-            Self::Shatter => "ui.armor.outcome.shatter",
-            Self::Overpenetration => "ui.armor.outcome.overpenetration",
-            Self::Underwater => "ui.armor.outcome.underwater",
-            Self::Unknown(_) => "ui.armor.outcome.unknown",
+            Self::Penetration => "ui-armor-outcome-penetration",
+            Self::Citadel => "ui-armor-outcome-citadel",
+            Self::Ricochet => "ui-armor-outcome-ricochet",
+            Self::Shatter => "ui-armor-outcome-shatter",
+            Self::Overpenetration => "ui-armor-outcome-overpenetration",
+            Self::Underwater => "ui-armor-outcome-underwater",
+            Self::Unknown(_) => "ui-armor-outcome-unknown",
         }
     }
 

@@ -10,7 +10,6 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_core::rating_scope::RatedBattle;
 use wows_core::rating_scope::RatingScope;
@@ -40,6 +39,7 @@ use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use wowsunpack::game_types::ArenaId;
+use wt_translations::t;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
@@ -273,7 +273,7 @@ fn a_mixed_drop_lists_folders_and_replays_and_counts_what_it_skipped() {
     assert_eq!(control.selected.get_untracked(), dropped[0].0, "and is selected");
     assert!(workspace.open_replays().is_empty(), "no replay opens");
     let toasts = window.texts_by_class("lui-toasts").concat();
-    let skipped = t!("ui.messages.drop_skipped", count = 2).into_owned();
+    let skipped = t!("ui-messages-drop_skipped", count = 2).into_owned();
     assert_eq!(toasts.matches(&skipped).count(), 1, "one message counts the files left alone: {toasts:?}");
 }
 
@@ -382,9 +382,9 @@ fn the_open_menu_lists_a_picked_directory() {
     let trigger = window.by_test_id("replay-listing-open").expect("the header has an open button");
     window.click(trigger).expect("the open button has a box");
     window.advance(Duration::from_millis(300));
-    let file = t!("ui.replay.open_file").into_owned();
+    let file = t!("ui-replay-open_file").into_owned();
     assert!(window.by_role_and_label(Role::MenuItem, &file).is_some(), "the menu offers a replay file");
-    let directory = t!("ui.replay.open_directory").into_owned();
+    let directory = t!("ui-replay-open_directory").into_owned();
     let item = window.by_role_and_label(Role::MenuItem, &directory).expect("the menu offers a directory");
 
     wows_toolkit_services::dialog::take_asked();
@@ -1227,7 +1227,7 @@ fn a_rows_menu_leaves_the_selection_on_the_selected_replay() {
     window.click(row(&window, &paths[0])).expect("the row has a box");
     window.right_click(row(&window, &paths[1])).expect("the row has a box");
     window.advance(Duration::from_millis(300));
-    let open = t!("ui.replay.context.open_in_new_tab").into_owned();
+    let open = t!("ui-replay-context-open_in_new_tab").into_owned();
     assert!(window.by_role_and_label(Role::MenuItem, &open).is_some(), "the row's menu is open");
     assert_eq!(shown.selected_paths(), [paths[0].clone()], "the menu leaves the selection");
 
@@ -1260,7 +1260,7 @@ fn a_lone_rows_menu_renders_it_to_video_or_the_clipboard() {
     let paths = listed(listing(control, &root));
     sent();
 
-    for key in ["ui.replay.context.render_to_video", "ui.replay.context.render_to_clipboard"] {
+    for key in ["ui-replay-context-render_to_video", "ui-replay-context-render_to_clipboard"] {
         let target = row(&window, &paths[0]);
         pick(&mut window, target, &t!(key));
     }
@@ -1285,9 +1285,9 @@ fn a_groups_menu_renders_and_records_session_stats_for_its_replays() {
     sent();
 
     for key in [
-        "ui.replay.context.render_to_video",
-        "ui.replay.context.render_to_clipboard",
-        "ui.replay.context.add_session_stats_one",
+        "ui-replay-context-render_to_video",
+        "ui-replay-context-render_to_clipboard",
+        "ui-replay-context-add_session_stats_one",
     ] {
         let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
         pick(&mut window, header, &t!(key));
@@ -1359,7 +1359,7 @@ fn an_install_with_no_replays_is_warned_of_once_the_game_data_loads() {
         }
         adopt_game_dir(control, &wows);
         settle_in_real_time(&mut window);
-        let warning = t!("ui.messages.no_replays_detected").into_owned();
+        let warning = t!("ui-messages-no_replays_detected").into_owned();
         assert!(!window.texts_by_class("lui-toasts").concat().contains(&warning), "nothing is said before the load");
 
         game_data_ready(control);
@@ -1837,7 +1837,7 @@ fn a_battle_seen_in_twitch_chat_is_marked_and_names_the_players() {
 
     window.hover(row(&window, &seen)).expect("the row has a box");
     window.advance(Duration::from_millis(100));
-    let label = t!("ui.replay.hover.twitch").into_owned();
+    let label = t!("ui-replay-hover-twitch").into_owned();
     let labels = window.texts_by_class("wt-hover-fact__label");
     let values = window.texts_by_class("wt-hover-fact__value");
     let at =

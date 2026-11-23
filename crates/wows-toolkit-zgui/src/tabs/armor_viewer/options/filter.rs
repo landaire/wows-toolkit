@@ -72,7 +72,7 @@ impl RailFilter {
 
     /// Whether the filter keeps any of the texts the translation `keys` name.
     pub fn keeps_any_key(&self, keys: &[&str]) -> bool {
-        !self.is_active() || keys.iter().any(|key| self.keeps(&rust_i18n::t!(*key)))
+        !self.is_active() || keys.iter().any(|key| self.keeps(&wt_translations::t!(*key)))
     }
 
     pub fn query(&self) -> &FilterQuery {

@@ -24,7 +24,6 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 use landaire_ui::Notice;
-use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_toolkit_config::index::query::record_paths_in_source;
@@ -64,6 +63,7 @@ use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::query_bar::seed;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
@@ -566,15 +566,15 @@ pub fn search_offer(control: BrowserControl) -> Offer {
         return Offer::Enabled;
     }
     if is_dropped(control, selected) {
-        return Offer::Disabled(t!("ui.replay_folders.dropped_no_source").into_owned());
+        return Offer::Disabled(t!("ui-replay_folders-dropped_no_source").into_owned());
     }
     match control.work.source(selected) {
         Some(FolderSourceState::Resolved { .. }) => Offer::Enabled,
         Some(FolderSourceState::Unavailable(err)) => {
-            Offer::Disabled(t!("ui.replay_folders.source_failed", error = err.to_string()).into_owned())
+            Offer::Disabled(t!("ui-replay_folders-source_failed", error = err.to_string()).into_owned())
         }
         Some(FolderSourceState::Resolving(_)) | None => {
-            Offer::Disabled(t!("ui.tabs.search_these_replays_unavailable").into_owned())
+            Offer::Disabled(t!("ui-tabs-search_these_replays_unavailable").into_owned())
         }
     }
 }
@@ -583,34 +583,34 @@ pub fn search_offer(control: BrowserControl) -> Offer {
 pub fn index_offer(control: BrowserControl) -> Offer {
     let work = control.work;
     if work.reindexing.get() || work.shell_index.is_running() {
-        return Offer::Disabled(t!("ui.reindex.busy_index").into_owned());
+        return Offer::Disabled(t!("ui-reindex-busy_index").into_owned());
     }
     match control.shell().services().game_data.state() {
         GameDataState::Ready(_) => {}
         GameDataState::Loading { .. } => {
-            return Offer::Disabled(t!("ui.stats.directory_stats_unavailable").into_owned());
+            return Offer::Disabled(t!("ui-stats-directory_stats_unavailable").into_owned());
         }
         GameDataState::Failed(reason) => {
-            return Offer::Disabled(t!("ui.replay.game_data_failed", error = reason).into_owned());
+            return Offer::Disabled(t!("ui-replay-game_data_failed", error = reason).into_owned());
         }
         GameDataState::NoInstall => {
-            let reason = t!("ui.messages.wows_dir_not_set");
-            return Offer::Disabled(t!("ui.replay.game_data_failed", error = reason).into_owned());
+            let reason = t!("ui-messages-wows_dir_not_set");
+            return Offer::Disabled(t!("ui-replay-game_data_failed", error = reason).into_owned());
         }
     }
 
     let selected = control.selected.get();
     if is_dropped(control, selected) {
-        return Offer::Disabled(t!("ui.replay_folders.dropped_no_source").into_owned());
+        return Offer::Disabled(t!("ui-replay_folders-dropped_no_source").into_owned());
     }
     if let Some(FolderSourceState::Unavailable(err)) = work.source(selected) {
-        return Offer::Disabled(t!("ui.replay_folders.source_failed", error = err.to_string()).into_owned());
+        return Offer::Disabled(t!("ui-replay_folders-source_failed", error = err.to_string()).into_owned());
     }
     if work.is_indexing(selected) {
-        return Offer::Disabled(t!("ui.replay_folders.indexing_in_background").into_owned());
+        return Offer::Disabled(t!("ui-replay_folders-indexing_in_background").into_owned());
     }
     if work.passes.with(|passes| passes.values().any(|pass| *pass == PassState::Running)) {
-        return Offer::Disabled(t!("ui.reindex.busy_index").into_owned());
+        return Offer::Disabled(t!("ui-reindex-busy_index").into_owned());
     }
 
     Offer::Enabled
@@ -644,11 +644,11 @@ pub fn search_selected_folder(control: BrowserControl) {
                 let text = print_query(&seed::source_scoped(source));
                 shell.palette.send(shell, TabRequest::Search(text));
                 if indexing {
-                    toasts.info(t!("ui.replay_folders.search_while_indexing").into_owned());
+                    toasts.info(t!("ui-replay_folders-search_while_indexing").into_owned());
                 }
             }
             Ok(Ok(None)) => {
-                toasts.warn(t!("ui.tabs.search_these_replays_unavailable").into_owned());
+                toasts.warn(t!("ui-tabs-search_these_replays_unavailable").into_owned());
             }
             Ok(Err(err)) => search_unreadable(shell.toasts(), &err),
             Err(err) => search_unreadable(shell.toasts(), &err),
@@ -658,7 +658,7 @@ pub fn search_selected_folder(control: BrowserControl) {
 
 fn search_unreadable(toasts: landaire_ui::Toasts, err: &dyn std::error::Error) {
     tracing::warn!("search: the folder's index source could not be read: {err}");
-    toasts.failed(t!("ui.index_folder.unreadable_index").into_owned());
+    toasts.failed(t!("ui-index_folder-unreadable_index").into_owned());
 }
 
 /// Adds the selected tab's listed replays that its source does not hold yet, after asking. A
@@ -668,17 +668,17 @@ pub fn index_selected_folder(control: BrowserControl) {
     let services = shell.services();
     let toasts = shell.toasts();
     if control.work.is_busy() {
-        toasts.warn(t!("ui.reindex.busy_index").into_owned());
+        toasts.warn(t!("ui-reindex-busy_index").into_owned());
         return;
     }
     let Some(listing) = control.selected_listing() else { return };
     let candidates = listing.reindex_candidates();
     if candidates.is_empty() {
-        toasts.info(t!("ui.index_folder.nothing_listed").into_owned());
+        toasts.info(t!("ui-index_folder-nothing_listed").into_owned());
         return;
     }
     let Some(pool) = services.settings.pool() else {
-        toasts.warn(t!("ui.reindex.no_index").into_owned());
+        toasts.warn(t!("ui-reindex-no_index").into_owned());
         return;
     };
 
@@ -701,7 +701,7 @@ pub fn index_selected_folder(control: BrowserControl) {
             .filter(|candidate| !held.contains(candidate.path.to_string_lossy().as_ref()))
             .collect();
         if missing.is_empty() {
-            shell.toasts().info(t!("ui.index_folder.nothing_missing").into_owned());
+            shell.toasts().info(t!("ui-index_folder-nothing_missing").into_owned());
             return;
         }
 
@@ -711,7 +711,7 @@ pub fn index_selected_folder(control: BrowserControl) {
 
 fn index_unreadable(toasts: landaire_ui::Toasts, err: &dyn std::error::Error) {
     tracing::warn!("folder index: the indexed replays could not be read: {err}");
-    toasts.failed(t!("ui.index_folder.unreadable_index").into_owned());
+    toasts.failed(t!("ui-index_folder-unreadable_index").into_owned());
 }
 
 /// The install's replays directory, which the Live source is rooted at when a pass is the first to
@@ -743,19 +743,19 @@ fn prepare(control: BrowserControl, candidates: Vec<ReindexCandidate>, confirm: 
     let services = shell.services();
     let toasts = shell.toasts();
     if control.work.is_busy() {
-        toasts.warn(t!("ui.reindex.busy_index").into_owned());
+        toasts.warn(t!("ui-reindex-busy_index").into_owned());
         return;
     }
     if candidates.is_empty() {
-        toasts.info(t!("ui.reindex.nothing_listed").into_owned());
+        toasts.info(t!("ui-reindex-nothing_listed").into_owned());
         return;
     }
     let Some(game_data) = services.game_data.cache_untracked() else {
-        toasts.warn(t!("ui.reindex.no_game_data").into_owned());
+        toasts.warn(t!("ui-reindex-no_game_data").into_owned());
         return;
     };
     if install_replays_root(services).is_none() {
-        toasts.warn(t!("ui.reindex.no_game_data").into_owned());
+        toasts.warn(t!("ui-reindex-no_game_data").into_owned());
         return;
     }
 
@@ -788,7 +788,7 @@ fn prepare(control: BrowserControl, candidates: Vec<ReindexCandidate>, confirm: 
                 None => Fetchable::NoCacheDirectory,
                 // The plan would be stale by the time the job running against the cache ends.
                 Some(_) if control.shell().cache.busy_untracked() => {
-                    control.shell().toasts().warn(t!("ui.reindex.busy_cache").into_owned());
+                    control.shell().toasts().warn(t!("ui-reindex-busy_cache").into_owned());
                     return;
                 }
                 Some(base) => match ask_repository(control, base, &missing).await {
@@ -808,11 +808,11 @@ async fn ask_repository(control: BrowserControl, base: PathBuf, missing: &[Relea
     let shell = control.shell();
     let services = shell.services();
     let Some(runtime) = services.runtime() else {
-        shell.toasts().warn(t!("ui.dialogs.download_plan_failed").into_owned());
+        shell.toasts().warn(t!("ui-dialogs-download_plan_failed").into_owned());
         return None;
     };
-    shell.toasts().info(t!("ui.reindex.planning").into_owned());
-    let job = services.jobs.start(Job { name: t!("ui.app.status_cache_planning").into_owned(), progress: None });
+    shell.toasts().info(t!("ui-reindex-planning").into_owned());
+    let job = services.jobs.start(Job { name: t!("ui-app-status_cache_planning").into_owned(), progress: None });
 
     let requests: Vec<(u32, Option<String>)> =
         missing.iter().map(|release| (release.build.0, Some(release.version_said()))).collect();
@@ -841,7 +841,7 @@ async fn ask_repository(control: BrowserControl, base: PathBuf, missing: &[Relea
         Ok(fetchable) => Some(fetchable),
         Err(reason) => {
             tracing::warn!("force re-index: the download could not be planned: {reason}");
-            shell.toasts().warn(t!("ui.dialogs.download_plan_failed").into_owned());
+            shell.toasts().warn(t!("ui-dialogs-download_plan_failed").into_owned());
             None
         }
     }
@@ -858,7 +858,7 @@ fn confirm_run(
 ) {
     let shell = control.shell();
     if summary.replays.is_empty() {
-        shell.toasts().warn(t!("ui.reindex.nothing_readable", count = summary.skipped()).into_owned());
+        shell.toasts().warn(t!("ui-reindex-nothing_readable", count = summary.skipped()).into_owned());
         return;
     }
     if summary.runs_unasked(confirm) {
@@ -889,7 +889,7 @@ fn confirm_run(
                         }
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(attr:data-testid = "force-reindex-ok", on:click = move |_| then.with_value(|then| then())) {
                             {ok.get_value()}
                         }
@@ -906,7 +906,7 @@ fn run(control: BrowserControl, summary: ReindexSummary, purpose: IndexPurpose, 
     let work = control.work;
     let shell = control.shell();
     if work.is_busy() {
-        shell.toasts().warn(t!("ui.reindex.busy_index").into_owned());
+        shell.toasts().warn(t!("ui-reindex-busy_index").into_owned());
         return;
     }
     let cancel = Arc::new(AtomicBool::new(false));
@@ -925,7 +925,7 @@ fn run(control: BrowserControl, summary: ReindexSummary, purpose: IndexPurpose, 
         Some(base) => match shell.hold_cache_for_downloads() {
             Some(held) => Some((base, held)),
             None => {
-                shell.toasts().warn(t!("ui.reindex.busy_cache").into_owned());
+                shell.toasts().warn(t!("ui-reindex-busy_cache").into_owned());
                 None
             }
         },
@@ -1006,7 +1006,7 @@ async fn download_held(
         held.finish(0, failed);
         return Fetched { unfetched, fetched: 0 };
     };
-    let name = t!("ui.app.status_cache_downloading").into_owned();
+    let name = t!("ui-app-status_cache_downloading").into_owned();
     let job = services.jobs.start(Job { name: name.clone(), progress: None });
     let proxy = proxy_url(services);
 
@@ -1114,20 +1114,20 @@ async fn read_again(
     let shell = control.shell();
     let services = shell.services();
     let (Some(pool), Some(runtime)) = (services.settings.pool(), services.runtime()) else {
-        let said = t!("ui.reindex.no_index").into_owned();
+        let said = t!("ui-reindex-no_index").into_owned();
         shell.toasts().failed(said.clone());
         work.end_reindex(said);
         return;
     };
     // Checked as the run was prepared; the setting can be cleared while a download runs.
     let Some(live_root) = install_replays_root(services) else {
-        let said = t!("ui.reindex.no_game_data").into_owned();
+        let said = t!("ui-reindex-no_game_data").into_owned();
         shell.toasts().failed(said.clone());
         work.end_reindex(said);
         return;
     };
 
-    let name = t!("ui.app.status_indexing").into_owned();
+    let name = t!("ui-app-status_indexing").into_owned();
     let job = services.jobs.start(Job { name: name.clone(), progress: Progress::new(0, replays.len() as u64) });
     work.shell_index
         .report_forced(ForcedPass::Reading(IndexProgress { total: replays.len() as u64, ..IndexProgress::default() }));
@@ -1191,8 +1191,8 @@ fn pass_report(purpose: &IndexPurpose, end: PassEnd, skipped: usize) -> PassRepo
     let (progress, stopped) = match end {
         PassEnd::BeforeReading => {
             let said = match purpose {
-                IndexPurpose::Refresh => t!("ui.reindex.stopped_before_reading"),
-                IndexPurpose::Fill(_) => t!("ui.index_folder.stopped_before_reading"),
+                IndexPurpose::Refresh => t!("ui-reindex-stopped_before_reading"),
+                IndexPurpose::Fill(_) => t!("ui-index_folder-stopped_before_reading"),
             };
             return PassReport { said: said.into_owned(), warns: true };
         }
@@ -1202,15 +1202,15 @@ fn pass_report(purpose: &IndexPurpose, end: PassEnd, skipped: usize) -> PassRepo
     let skipped = skipped as u64 + progress.total.saturating_sub(progress.done);
     let (indexed, failed) = (progress.indexed, progress.failed);
     let said = match (purpose, stopped) {
-        (IndexPurpose::Refresh, false) => t!("ui.reindex.done", indexed = indexed, failed = failed, skipped = skipped),
+        (IndexPurpose::Refresh, false) => t!("ui-reindex-done", indexed = indexed, failed = failed, skipped = skipped),
         (IndexPurpose::Refresh, true) => {
-            t!("ui.reindex.stopped", indexed = indexed, failed = failed, skipped = skipped)
+            t!("ui-reindex-stopped", indexed = indexed, failed = failed, skipped = skipped)
         }
         (IndexPurpose::Fill(_), false) => {
-            t!("ui.index_folder.done", indexed = indexed, failed = failed, skipped = skipped)
+            t!("ui-index_folder-done", indexed = indexed, failed = failed, skipped = skipped)
         }
         (IndexPurpose::Fill(_), true) => {
-            t!("ui.index_folder.stopped", indexed = indexed, failed = failed, skipped = skipped)
+            t!("ui-index_folder-stopped", indexed = indexed, failed = failed, skipped = skipped)
         }
     }
     .into_owned();
@@ -1365,7 +1365,7 @@ fn run_next_pass(control: BrowserControl) {
     });
     let Some((id, source, root)) = next else { return };
 
-    let name = t!("ui.replay_folders.indexing", dir = folder_name(&root)).into_owned();
+    let name = t!("ui-replay_folders-indexing", dir = folder_name(&root)).into_owned();
     let job = services.jobs.start(Job { name: name.clone(), progress: None });
     let cancel = Arc::new(AtomicBool::new(false));
     let stop = Arc::clone(&cancel);
@@ -1533,12 +1533,12 @@ fn import_constants(control: BrowserControl) {
     let build = match shell.services().game_data.state_untracked() {
         GameDataState::Ready(loaded) => loaded.build(),
         GameDataState::NoInstall | GameDataState::Loading { .. } | GameDataState::Failed(_) => {
-            shell.toasts().warn(t!("ui.replay.constants_no_build").into_owned());
+            shell.toasts().warn(t!("ui-replay-constants_no_build").into_owned());
             return;
         }
     };
     let asked = wows_toolkit_services::dialog::pick_file(
-        Some(&t!("ui.replay.constants_import_title")),
+        Some(&t!("ui-replay-constants_import_title")),
         Some(wows_toolkit_services::dialog::Filter { label: "JSON", extensions: &["json"] }),
     );
 
@@ -1547,13 +1547,13 @@ fn import_constants(control: BrowserControl) {
         let imported = blocking(move || wows_toolkit_services::constants::import(&path, build)).await;
         match imported {
             Ok(()) => {
-                shell.toasts().ok(t!("ui.replay.constants_imported", build = build).into_owned());
+                shell.toasts().ok(t!("ui-replay-constants_imported", build = build).into_owned());
                 if let Some(events) = control.work.events.get_value() {
                     events.send(ReplayBrowserEvent::ConstantsImported { build });
                 }
             }
             Err(reason) => {
-                shell.toasts().failed(t!("ui.replay.constants_import_failed", reason = reason).into_owned());
+                shell.toasts().failed(t!("ui-replay-constants_import_failed", reason = reason).into_owned());
             }
         }
     });
@@ -1570,27 +1570,27 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
     let toasts = shell.toasts();
     let work = control.work;
     let Some(mode) = services.settings.read_untracked(|settings| settings.data_sharing) else {
-        toasts.warn(t!("ui.replay.contribute_not_ready").into_owned());
+        toasts.warn(t!("ui-replay-contribute_not_ready").into_owned());
         return;
     };
     if mode == DataSharingMode::Off {
-        toasts.warn(t!("ui.replay.contribute_nothing_shared").into_owned());
+        toasts.warn(t!("ui-replay-contribute_nothing_shared").into_owned());
         return;
     }
     let Some(contributor) = Contributor::new(services) else {
-        toasts.warn(t!("ui.replay.contribute_not_ready").into_owned());
+        toasts.warn(t!("ui-replay-contribute_not_ready").into_owned());
         return;
     };
     let Some(listing) = control.selected_listing() else { return };
     let paths = listing.listed_paths();
     if paths.is_empty() {
-        toasts.warn(t!("ui.replay.contribute_none_listed").into_owned());
+        toasts.warn(t!("ui-replay-contribute_none_listed").into_owned());
         return;
     }
     // One pass at a time: two would read the same directory twice and, with the ledger ignored,
     // send every battle twice.
     if work.contributing.get_untracked() {
-        toasts.warn(t!("ui.replay.contribute_already_running").into_owned());
+        toasts.warn(t!("ui-replay-contribute_already_running").into_owned());
         return;
     }
     let total = paths.len();
@@ -1599,11 +1599,11 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
     work.spawn(async move {
         let job = services
             .jobs
-            .start(Job { name: t!("ui.replay.contributing", done = 1, total = total).into_owned(), progress: None });
+            .start(Job { name: t!("ui-replay-contributing", done = 1, total = total).into_owned(), progress: None });
         let mut sent = 0usize;
         for (index, path) in paths.into_iter().enumerate() {
             job.report(Job {
-                name: t!("ui.replay.contributing", done = index + 1, total = total).into_owned(),
+                name: t!("ui-replay-contributing", done = index + 1, total = total).into_owned(),
                 progress: Progress::new(index as u64, total as u64),
             });
 
@@ -1630,6 +1630,6 @@ fn contribute_all(control: BrowserControl, ledger: LedgerUse) {
         drop(job);
 
         work.contributing.set(false);
-        shell.toasts().ok(t!("ui.replay.contributed", sent = sent, total = total).into_owned());
+        shell.toasts().ok(t!("ui-replay-contributed", sent = sent, total = total).into_owned());
     });
 }

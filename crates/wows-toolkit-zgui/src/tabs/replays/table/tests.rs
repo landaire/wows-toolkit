@@ -281,7 +281,7 @@ fn bots_sharing_an_account_each_keep_their_own_row() {
     let heading = window.by_test_id("player-menu-name").expect("the menu names its player");
     let named = window.a11y(heading).and_then(|state| state.label);
     assert_eq!(named.as_deref(), Some("Bot_Bravo"), "the menu is the pressed bot's");
-    let copy_cell = t!("ui.replay.context.copy_cell").into_owned();
+    let copy_cell = t!("ui-replay-context-copy_cell").into_owned();
     assert!(window.by_role_and_label(Role::MenuItem, &copy_cell).is_some(), "the pressed cell is the bot's");
 }
 
@@ -553,7 +553,7 @@ fn pinning_a_column_from_its_header_is_saved_under_its_key() {
 
     window.right_click(header).expect("the header takes a right click");
     window.advance(Duration::from_millis(300));
-    let pin = t!("ui.replay.context.pin_column").into_owned();
+    let pin = t!("ui-replay-context-pin_column").into_owned();
     let item = window.by_role_and_label(Role::MenuItem, &pin).expect("the header menu offers to pin");
     window.click(item).expect("the item takes a click");
     window.advance(Duration::from_millis(300));
@@ -605,8 +605,8 @@ fn a_column_dragged_narrow_fits_an_open_detail_and_saves_only_the_drag() {
 #[test]
 fn only_a_menu_opened_on_a_cell_offers_to_copy_that_cell() {
     let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
-    let copy_cell = t!("ui.replay.context.copy_cell").into_owned();
-    let copy_row = t!("ui.replay.context.copy_row").into_owned();
+    let copy_cell = t!("ui-replay-context-copy_cell").into_owned();
+    let copy_row = t!("ui-replay-context-copy_row").into_owned();
 
     let name = window.by_test_id("player-name-1").expect("the first player's name is drawn");
     window.right_click(name).expect("the cell takes a right click");
@@ -645,7 +645,7 @@ fn the_dots_on_a_selected_row_keep_the_whole_selection() {
     let dots = window.by_test_id("player-actions-2").expect("the row has its actions");
     window.click(dots).expect("the dots take a click");
     window.advance(Duration::from_millis(300));
-    let copy_row = t!("ui.replay.context.copy_row").into_owned();
+    let copy_row = t!("ui-replay-context-copy_row").into_owned();
     assert!(window.by_role_and_label(Role::MenuItem, &copy_row).is_some(), "the dots open the row menu");
     assert_eq!(selected(&mut window), 2, "the dots leave the selection as it was");
 }
@@ -654,7 +654,7 @@ fn the_dots_on_a_selected_row_keep_the_whole_selection() {
 fn the_dots_name_their_menu_except_while_it_is_open() {
     let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
     let past_delay = landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150);
-    let hint = t!("ui.replay.row_actions_hint").into_owned();
+    let hint = t!("ui-replay-row_actions_hint").into_owned();
 
     let name = window.by_test_id("player-name-1").expect("the first player's name is drawn");
     window.hover(name).expect("the row takes the pointer");
@@ -666,7 +666,7 @@ fn the_dots_name_their_menu_except_while_it_is_open() {
 
     window.click(dots).expect("the dots take a click");
     window.advance(Duration::from_millis(300));
-    let copy_row = t!("ui.replay.context.copy_row").into_owned();
+    let copy_row = t!("ui-replay-context-copy_row").into_owned();
     assert!(window.by_role_and_label(Role::MenuItem, &copy_row).is_some(), "the dots open the row menu");
     window.hover(name).expect("the row takes the pointer");
     window.advance(Duration::from_millis(100));
@@ -739,7 +739,7 @@ fn an_open_detail_follows_a_column_pinned_after_it_opened() {
     let header = window.by_role_and_label(Role::ColumnHeader, &kills).expect("the Kills header is drawn");
     window.right_click(header).expect("the header takes a right click");
     window.advance(Duration::from_millis(300));
-    let pin = t!("ui.replay.context.pin_column").into_owned();
+    let pin = t!("ui-replay-context-pin_column").into_owned();
     let item = window.by_role_and_label(Role::MenuItem, &pin).expect("the header menu offers to pin");
     window.click(item).expect("the item takes a click");
     window.advance(Duration::from_millis(600));

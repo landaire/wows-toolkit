@@ -10,8 +10,8 @@ use egui_plot::PlotPoint;
 use egui_plot::PlotPoints;
 use egui_plot::Points;
 use egui_plot::Text;
+use wt_translations::t;
 
-use rust_i18n::t;
 use std::collections::HashMap;
 
 use wows_replays::types::GameParamId;
@@ -74,7 +74,7 @@ pub fn render_line_chart(
 ) -> Option<egui::Rect> {
     // Win rate doesn't make sense per-game (but rolling average win rate does)
     if stat == ChartableStat::WinRate && !rolling_average {
-        ui.label(t!("chart.win_rate_unavailable").as_ref());
+        ui.label(t!("chart-win_rate_unavailable").as_ref());
         return None;
     }
 
@@ -153,7 +153,7 @@ pub fn render_line_chart(
 
             let color =
                 crate::ui::theme::contrast::readable_on(Color32::from_rgb(100, 180, 255), ui.visuals().panel_fill);
-            ship_data.push((t!("chart.combined").into(), points, color));
+            ship_data.push((t!("chart-combined").into(), points, color));
         }
     } else {
         // Per-ship mode — group by ship_id, preserving first-seen order
@@ -226,13 +226,13 @@ pub fn render_line_chart(
     }
 
     if ship_data.is_empty() {
-        ui.label(t!("chart.no_data").as_ref());
+        ui.label(t!("chart-no_data").as_ref());
         return None;
     }
 
     let y_label: String = if rolling_average {
         match stat {
-            ChartableStat::WinRate => t!("stat.win_rate_pct").into(),
+            ChartableStat::WinRate => t!("stat-win_rate_pct").into(),
             _ => stat.name(),
         }
     } else {
@@ -246,9 +246,9 @@ pub fn render_line_chart(
     let group_response = ui.group(|ui| {
         // Chart title (centered)
         let title = if combined {
-            format!("{} {}", stat.name(), t!("chart.combined_suffix"))
+            format!("{} {}", stat.name(), t!("chart-combined_suffix"))
         } else if rolling_average {
-            format!("{} {}", stat.name(), t!("chart.rolling_average_suffix"))
+            format!("{} {}", stat.name(), t!("chart-rolling_average_suffix"))
         } else {
             stat.name()
         };
@@ -256,7 +256,7 @@ pub fn render_line_chart(
 
         let mut plot = Plot::new(egui::Id::unique(("line_chart", chart_id)))
             .legend(Legend::default())
-            .x_axis_label(t!("chart.game_number"))
+            .x_axis_label(t!("chart-game_number"))
             .y_axis_label(y_label)
             .auto_bounds([true, true])
             .include_y(0.0_f64.min(min_y));
@@ -342,13 +342,13 @@ pub fn render_bar_chart(
     }
 
     let y_label: String = match stat {
-        ChartableStat::Damage => t!("stat.avg_damage").into(),
-        ChartableStat::SpottingDamage => t!("stat.avg_spotting_damage").into(),
-        ChartableStat::Frags => t!("stat.avg_frags").into(),
-        ChartableStat::RawXp => t!("stat.avg_raw_xp").into(),
-        ChartableStat::BaseXp => t!("stat.avg_base_xp").into(),
-        ChartableStat::WinRate => t!("stat.win_rate_pct").into(),
-        ChartableStat::PersonalRating => t!("stat.avg_pr").into(),
+        ChartableStat::Damage => t!("stat-avg_damage").into(),
+        ChartableStat::SpottingDamage => t!("stat-avg_spotting_damage").into(),
+        ChartableStat::Frags => t!("stat-avg_frags").into(),
+        ChartableStat::RawXp => t!("stat-avg_raw_xp").into(),
+        ChartableStat::BaseXp => t!("stat-avg_base_xp").into(),
+        ChartableStat::WinRate => t!("stat-win_rate_pct").into(),
+        ChartableStat::PersonalRating => t!("stat-avg_pr").into(),
     };
 
     // Compute the minimum Y value across all bars so the axis starts at 0.min(min_value)
@@ -359,7 +359,7 @@ pub fn render_bar_chart(
         // Chart title (centered) - show "Avg" prefix for everything except Win Rate
         let title = match stat {
             ChartableStat::WinRate => stat.name(),
-            _ => t!("stat.avg_prefix", name = stat.name()).into(),
+            _ => t!("stat-avg_prefix", name = stat.name()).into(),
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 

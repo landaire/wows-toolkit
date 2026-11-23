@@ -28,10 +28,10 @@ use landaire_ui::PanelSide;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::unpacker::build::BuildNumber;
 use wows_toolkit_viewmodel::unpacker::game_params::DumpRequest;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -194,8 +194,8 @@ pub fn UnpackerTab() -> impl IntoView {
                 class = "wt-unpacker-dock",
                 menu = dock_menu_strings(locale),
                 strings = tab_menu_strings(locale),
-                close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
-                tabs_label = Signal::derive_local(locale.text("ui.tabs.unpacker")),
+                close_label = Signal::derive_local(locale.text("ui-tabs-close_panel")),
+                tabs_label = Signal::derive_local(locale.text("ui-tabs-unpacker")),
                 attr:data-testid = "unpacker-dock"
             )
         }
@@ -224,7 +224,7 @@ fn register_panels(model: UnpackerModel) {
     dock.register(
         PanelKind::new(QUEUE_KIND),
         PanelFactory::new(
-            |_: &PanelId| t!("ui.unpacker.extraction_queue").into_owned(),
+            |_: &PanelId| t!("ui-unpacker-extraction_queue").into_owned(),
             move |_: &PanelId| {
                 AnyView::new(move || {
                     locale.track();
@@ -347,11 +347,11 @@ fn Toolbar(model: UnpackerModel) -> impl IntoView {
     view! {
         row(class = "wt-unpacker-toolbar", attr:data-testid = "unpacker-toolbar") {
             Show(when = move || model.builds.with(|builds| builds.len() > 1)) {
-                text(class = "wt-unpacker-toolbar__label") {{t!("ui.unpacker.version").into_owned()}}
+                text(class = "wt-unpacker-toolbar__label") {{t!("ui-unpacker-version").into_owned()}}
                 Select(value = Binding::controlled(chosen, choose)) {
                     SelectTrigger(
                         size = SelectTriggerSize::Sm,
-                        label = t!("ui.unpacker.version").into_owned(),
+                        label = t!("ui-unpacker-version").into_owned(),
                         class = "wt-unpacker-toolbar__build",
                         attr:data-testid = "unpacker-build"
                     ) {
@@ -401,7 +401,7 @@ fn DumpMenu(model: UnpackerModel, enabled: Signal<bool, LocalStorage>) -> impl I
                     size = ButtonSize::IconSm,
                     variant = ButtonVariant::Ghost,
                     disabled = true,
-                    a11y:label = t!("ui.unpacker.dump_parameters").into_owned(),
+                    a11y:label = t!("ui-unpacker-dump_parameters").into_owned(),
                     attr:data-testid = "unpacker-dump-params"
                 ) {
                     AppIcon(glyph = Glyph::Database)
@@ -416,22 +416,22 @@ fn DumpMenu(model: UnpackerModel, enabled: Signal<bool, LocalStorage>) -> impl I
                 PopoverTrigger(
                     size = ButtonSize::IconSm,
                     variant = ButtonVariant::Ghost,
-                    a11y:label = t!("ui.unpacker.dump_parameters").into_owned(),
+                    a11y:label = t!("ui-unpacker-dump_parameters").into_owned(),
                     attr:data-testid = "unpacker-dump-params"
                 ) {
                     AppIcon(glyph = Glyph::Database)
                 }
                 PopoverContent(class = "wt-unpacker-dump", attr:data-testid = "unpacker-dump-menu") {
-                    text(class = "wt-unpacker-dump__heading") {{t!("ui.unpacker.whole_tree").into_owned()}}
+                    text(class = "wt-unpacker-dump__heading") {{t!("ui-unpacker-whole_tree").into_owned()}}
                     {whole.clone()}
-                    text(class = "wt-unpacker-dump__heading") {{t!("ui.unpacker.base_only").into_owned()}}
+                    text(class = "wt-unpacker-dump__heading") {{t!("ui-unpacker-base_only").into_owned()}}
                     {base.clone()}
                 }
             }
         })
     };
     let hover = move || {
-        if enabled.get() { t!("ui.unpacker.dump_parameters_tooltip") } else { t!("ui.unpacker.load_a_build") }
+        if enabled.get() { t!("ui-unpacker-dump_parameters_tooltip") } else { t!("ui-unpacker-load_a_build") }
             .into_owned()
     };
 

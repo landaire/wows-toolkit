@@ -20,7 +20,6 @@ use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use thiserror::Error;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
@@ -42,6 +41,7 @@ use wows_toolkit_viewmodel::stats::plot::PlotView;
 use wows_toolkit_viewmodel::stats::plot::has_drawable_area;
 use wows_toolkit_viewmodel::stats::plot::image;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::custom::Custom;
@@ -313,19 +313,19 @@ pub fn StatsChart(
                 box(class = "wt-chart__spacer")
                 box(class:wt-chart__gone = move || empty.get()) {
                     Button(size = ButtonSize::Xs, variant = ButtonVariant::Outline, attr:data-testid = "chart-copy-image", on:click = move |_| copy()) {
-                        {tr(locale, || t!("ui.stats.copy_image"))}
+                        {tr(locale, || t!("ui-stats-copy_image"))}
                     }
                 }
                 box(class:wt-chart__gone = move || view_state.with(PlotView::is_default)) {
                     Button(size = ButtonSize::Xs, variant = ButtonVariant::Outline, attr:data-testid = "chart-reset-view", on:click = move |_| view_state.set(PlotView::new())) {
-                        {tr(locale, || t!("ui.stats.reset_view"))}
+                        {tr(locale, || t!("ui-stats-reset_view"))}
                     }
                 }
             }
             text(class = "wt-chart__title", attr:data-testid = "chart-title") {{move || value_label(settings, model, locale)}}
             box(class = "wt-chart__body") {
                 box(class = "wt-chart__empty", class:wt-chart__gone = move || !empty.get(), attr:data-testid = "chart-empty") {
-                    {tr(locale, || t!("ui.stats.nothing_to_plot"))}
+                    {tr(locale, || t!("ui-stats-nothing_to_plot"))}
                 }
                 {plot.view(empty, element, model, locale)}
             }
@@ -391,8 +391,8 @@ impl PlotSurface {
             let data = model.with(|model| {
                 let (x_label, y_label) = settings.with(|settings| {
                     let x_label = match settings.mode {
-                        ChartMode::Bar => t!("ui.stats.column_ship").into_owned(),
-                        ChartMode::Line => t!("ui.stats.axis_game").into_owned(),
+                        ChartMode::Bar => t!("ui-stats-column_ship").into_owned(),
+                        ChartMode::Line => t!("ui-stats-axis_game").into_owned(),
                     };
                     (x_label, value_axis_label(model.stat, settings.mode, settings.running, settings.combined))
                 });
@@ -524,7 +524,7 @@ impl PlotSurface {
         locale.track();
         let hit = self.hit.get()?;
         let stat = model.with_untracked(|model| model.stat);
-        let language = rust_i18n::locale();
+        let language = wt_translations::locale();
         let text = self
             .handle
             .with_value(|handle| handle.update(|element| hover_text(&element.data, hit, stat, &language)))?;
@@ -695,11 +695,11 @@ fn copy_image(area: NodeRef, handle: StoredValue<CustomHandle<PlotElement>, Loca
         let Some(toasts) = toasts else { return };
         match copied {
             Ok(()) => {
-                toasts.ok(t!("ui.stats.copy_image_done").into_owned());
+                toasts.ok(t!("ui-stats-copy_image_done").into_owned());
             }
             Err(err) => {
                 tracing::warn!("stats: the chart image could not be copied: {err}");
-                toasts.failed(t!("ui.stats.copy_image_failed").into_owned());
+                toasts.failed(t!("ui-stats-copy_image_failed").into_owned());
             }
         }
     });
@@ -768,7 +768,7 @@ fn SettingsMenu(
         view! {
             row(class = "wt-chart__wrap", class:wt-chart__gone = move || model.with(|model| model.modes.len()) < 2) {
                 Toggle(pressed = all, size = ToggleSize::Sm, attr:data-testid = "chart-mode-filter-all") {
-                    {tr(locale, || t!("ui.stats.div_all"))}
+                    {tr(locale, || t!("ui-stats-div_all"))}
                 }
                 for group in move || model.with(|model| model.modes.clone()), key = |group: &String| group.clone() {
                     {group_toggle(settings, model, group)}
@@ -781,21 +781,21 @@ fn SettingsMenu(
         Tooltip {
             TooltipTrigger {
                 Popover {
-                    PopoverTrigger(size = ButtonSize::IconSm, variant = ButtonVariant::Outline, a11y:label = t!("ui.stats.settings").into_owned(), attr:data-testid = "chart-settings") {
+                    PopoverTrigger(size = ButtonSize::IconSm, variant = ButtonVariant::Outline, a11y:label = t!("ui-stats-settings").into_owned(), attr:data-testid = "chart-settings") {
                         AppIcon(glyph = Glyph::Settings)
                     }
                     PopoverContent(class = "wt-chart__menu", attr:data-testid = "chart-settings-menu") {
-                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.statistic"))}}
-                        StatPicker(stats = selectable, current = shown, label = "ui.stats.statistic", pick = pick_stat, test_id = "chart-stat", locale = locale)
-                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.chart"))}}
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui-stats-statistic"))}}
+                        StatPicker(stats = selectable, current = shown, label = "ui-stats-statistic", pick = pick_stat, test_id = "chart-stat", locale = locale)
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui-stats-chart"))}}
                         row(class = "wt-chart__wrap") {
                             {mode_toggle(ChartMode::Line)}
                             {mode_toggle(ChartMode::Bar)}
                         }
-                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.options"))}}
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui-stats-options"))}}
                         CheckRow(
                             checked = combined,
-                            label = Signal::derive_local(move || { locale.track(); t!("ui.stats.combine_ships").into_owned() }),
+                            label = Signal::derive_local(move || { locale.track(); t!("ui-stats-combine_ships").into_owned() }),
                             change = UnsyncCallback::new(move |on: bool| {
                                 let rated = rated.get_untracked();
                                 settings.update(|settings| model::set_combined(settings, on, rated));
@@ -807,7 +807,7 @@ fn SettingsMenu(
                             CheckRow(
                                 checked = Signal::derive_local(move || running.get() || combined.get()),
                                 disabled = combined,
-                                label = Signal::derive_local(move || { locale.track(); t!("ui.stats.running_average").into_owned() }),
+                                label = Signal::derive_local(move || { locale.track(); t!("ui-stats-running_average").into_owned() }),
                                 change = UnsyncCallback::new(move |on: bool| {
                                     let rated = rated.get_untracked();
                                     settings.update(|settings| model::set_running(settings, on, rated));
@@ -817,18 +817,18 @@ fn SettingsMenu(
                         }
                         CheckRow(
                             checked = flag(|settings| settings.show_values),
-                            label = Signal::derive_local(move || { locale.track(); t!("ui.stats.value_labels").into_owned() }),
+                            label = Signal::derive_local(move || { locale.track(); t!("ui-stats-value_labels").into_owned() }),
                             change = UnsyncCallback::new(move |on: bool| settings.update(|settings| settings.show_values = on)),
                             test_id = "chart-values"
                         )
                         // The chart's own narrowing, when it has been taken off the tab's bar. The tab's
                         // filters stay the default, so a reader who never opens this sees one set.
-                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.filters"))}}
+                        text(class = "wt-chart__heading") {{tr(locale, || t!("ui-stats-filters"))}}
                         Tooltip {
                             TooltipTrigger {
                                 CheckRow(
                                     checked = own,
-                                    label = Signal::derive_local(move || { locale.track(); t!("ui.stats.own_filters").into_owned() }),
+                                    label = Signal::derive_local(move || { locale.track(); t!("ui-stats-own_filters").into_owned() }),
                                     change = UnsyncCallback::new(move |on: bool| {
                                         let tab = filters.get_untracked();
                                         settings.update(|settings| model::set_own_filters(settings, on, &tab));
@@ -836,7 +836,7 @@ fn SettingsMenu(
                                     test_id = "chart-own-filters"
                                 )
                             }
-                            TooltipContent {{t!("ui.stats.own_filters_tooltip").into_owned()}}
+                            TooltipContent {{t!("ui-stats-own_filters_tooltip").into_owned()}}
                         }
                         column(class = "wt-chart__slot", class:wt-chart__gone = move || !own.get()) {
                             row(class = "wt-chart__wrap") {
@@ -849,7 +849,7 @@ fn SettingsMenu(
                     }
                 }
             }
-            TooltipContent {{tr(locale, || t!("ui.stats.settings"))}}
+            TooltipContent {{tr(locale, || t!("ui-stats-settings"))}}
         }
     }
 }
@@ -895,7 +895,7 @@ pub(super) fn StatPicker(
                 Command {
                     // Built again with the language, as the field's texts are fixed once it is built.
                     {move || view! {
-                        CommandInput(placeholder = t!("ui.stats.search_statistics").into_owned(), label = label())
+                        CommandInput(placeholder = t!("ui-stats-search_statistics").into_owned(), label = label())
                     }}
                     CommandList(label = label()) {
                         // Keyed by the translated name, so the options and what they are searched
@@ -906,7 +906,7 @@ pub(super) fn StatPicker(
                         }, key = |entry: &(ChartableStat, String)| entry.1.clone() {
                             {option(entry)}
                         }
-                        CommandEmpty {{tr(locale, || t!("ui.stats.no_statistic_matches"))}}
+                        CommandEmpty {{tr(locale, || t!("ui-stats-no_statistic_matches"))}}
                     }
                 }
             }
@@ -939,7 +939,7 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
     let count_label = move || {
         locale.track();
         let (selected, total) = counts();
-        t!("ui.stats.ship_selection_count", selected = selected, total = total).into_owned()
+        t!("ui-stats-ship_selection_count", selected = selected, total = total).into_owned()
     };
     let filter = Memo::new(move |_| FilterQuery::new(&query.get()));
     let visible = Memo::new(move |_| {
@@ -984,23 +984,23 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
                         variant = ButtonVariant::Outline,
                         class = "wt-chart__ships",
                         attr:data-narrowed = move || { let (selected, total) = counts(); Some((selected < total).to_string()) },
-                        a11y:label = move || format!("{}: {}", t!("ui.stats.filter_ships"), count_label()),
+                        a11y:label = move || format!("{}: {}", t!("ui-stats-filter_ships"), count_label()),
                         attr:data-testid = "chart-ship-filter"
                     ) {
                         AppIcon(glyph = Glyph::Funnel)
-                        text {{tr(locale, || t!("ui.stats.ships"))}}
+                        text {{tr(locale, || t!("ui-stats-ships"))}}
                         text(class = "wt-chart__dim") {{count_label}}
                     }
                     PopoverContent(class = "wt-chart__menu", dismiss_on_escape = escape.dismiss_on_escape(), attr:data-testid = "chart-ship-filter-menu") {
                         row(class = "wt-chart__heading-row") {
-                            text(class = "wt-chart__heading") {{tr(locale, || t!("ui.stats.ships"))}}
+                            text(class = "wt-chart__heading") {{tr(locale, || t!("ui-stats-ships"))}}
                             text(class = "wt-chart__dim") {{count_label}}
                         }
                         row(class = "wt-chart__row") {
                             box(class = "wt-chart__search") {
                                 Input(
                                     value = query,
-                                    placeholder = t!("ui.stats.search_ships").into_owned(),
+                                    placeholder = t!("ui-stats-search_ships").into_owned(),
                                     node_ref = escape.node_ref(),
                                     attr:data-testid = "chart-ship-search",
                                     on:key_down = move |ev| {
@@ -1011,11 +1011,11 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
                             box(class:wt-chart__gone = move || query.with(String::is_empty)) {
                                 Tooltip {
                                     TooltipTrigger {
-                                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui.stats.clear").into_owned(), attr:data-testid = "chart-ship-search-clear", on:click = move |_| query.set(String::new())) {
+                                        Button(size = ButtonSize::Sm, variant = ButtonVariant::Ghost, a11y:label = t!("ui-stats-clear").into_owned(), attr:data-testid = "chart-ship-search-clear", on:click = move |_| query.set(String::new())) {
                                             AppIcon(glyph = Glyph::X)
                                         }
                                     }
-                                    TooltipContent {{tr(locale, || t!("ui.stats.clear"))}}
+                                    TooltipContent {{tr(locale, || t!("ui-stats-clear"))}}
                                 }
                             }
                         }
@@ -1023,32 +1023,32 @@ fn ShipMenu(settings: RwSignal<ChartSettings>, model: Memo<ChartModel>, locale: 
                             Tooltip {
                                 TooltipTrigger {
                                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "chart-ships-all", on:click = move |_| pick_visible(true)) {
-                                        {tr(locale, || t!("ui.stats.all_ships"))}
+                                        {tr(locale, || t!("ui-stats-all_ships"))}
                                     }
                                 }
-                                TooltipContent {{tr(locale, || t!("ui.stats.all_ships_tooltip"))}}
+                                TooltipContent {{tr(locale, || t!("ui-stats-all_ships_tooltip"))}}
                             }
                             Tooltip {
                                 TooltipTrigger {
                                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, disabled = none_visible, attr:data-testid = "chart-ships-none", on:click = move |_| pick_visible(false)) {
-                                        {tr(locale, || t!("ui.stats.no_ships"))}
+                                        {tr(locale, || t!("ui-stats-no_ships"))}
                                     }
                                 }
-                                TooltipContent {{tr(locale, || t!("ui.stats.no_ships_tooltip"))}}
+                                TooltipContent {{tr(locale, || t!("ui-stats-no_ships_tooltip"))}}
                             }
                         }
                         text(
                             class = "wt-chart__dim",
                             class:wt-chart__gone = move || !(none_visible.get() && query.with(|query| !query.trim().is_empty())),
                             attr:data-testid = "chart-no-ship-matches"
-                        ) {{tr(locale, || t!("ui.stats.no_ship_matches"))}}
+                        ) {{tr(locale, || t!("ui-stats-no_ship_matches"))}}
                         for ship in move || visible.get(), key = |ship: &(GameParamId, String)| ship.0 {
                             {ship_row(ship)}
                         }
                     }
                 }
             }
-            TooltipContent {{tr(locale, || t!("ui.stats.filter_ships"))}}
+            TooltipContent {{tr(locale, || t!("ui-stats-filter_ships"))}}
         }
     }
 }

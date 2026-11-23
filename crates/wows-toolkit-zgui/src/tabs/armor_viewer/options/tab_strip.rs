@@ -3,9 +3,9 @@
 //! While a search is typed each tab carries how many tools and sections it kept, and a tab that
 //! kept none is dimmed and cannot be chosen.
 
-use rust_i18n::t;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
 use wows_toolkit_viewmodel::armor::options_panel::TabMatches;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -109,7 +109,7 @@ pub fn OptionTabStrip(workspace: ArmorWorkspace, matches: Signal<Option<TabMatch
         Tabs(
             value = value,
             orientation = Orientation::Vertical,
-            label = t!("ui.armor.option_tabs.label").into_owned(),
+            label = t!("ui-armor-option_tabs-label").into_owned(),
             class = "wt-armor-tabs",
             attr:data-testid = "armor-options-tabs"
         ) {
@@ -121,10 +121,10 @@ pub fn OptionTabStrip(workspace: ArmorWorkspace, matches: Signal<Option<TabMatch
 /// The name a tab is shown under.
 pub fn tab_name(tab: OptionsTab) -> String {
     match tab {
-        OptionsTab::Ship => t!("ui.armor.option_tabs.ship"),
-        OptionsTab::Layers => t!("ui.armor.option_tabs.layers"),
-        OptionsTab::Analysis => t!("ui.armor.option_tabs.analysis"),
-        OptionsTab::Display => t!("ui.armor.display"),
+        OptionsTab::Ship => t!("ui-armor-option_tabs-ship"),
+        OptionsTab::Layers => t!("ui-armor-option_tabs-layers"),
+        OptionsTab::Analysis => t!("ui-armor-option_tabs-analysis"),
+        OptionsTab::Display => t!("ui-armor-display"),
     }
     .into_owned()
 }
@@ -141,7 +141,7 @@ fn tab_trigger(locale: Locale, tab: OptionsTab, matches: Signal<Option<TabMatche
     let label = move || {
         locale.track();
         match kept() {
-            Some(count) => t!("ui.armor.option_tabs.tab_matches", tab = tab_name(tab), count = count).into_owned(),
+            Some(count) => t!("ui-armor-option_tabs-tab_matches", tab = tab_name(tab), count = count).into_owned(),
             None => tab_name(tab),
         }
     };

@@ -44,7 +44,7 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconSm,
                         attr:data-testid = "app-menu",
-                        a11y:label = locale.text("ui.menu.file")
+                        a11y:label = locale.text("ui-menu-file")
                     ) {
                         Icon(icon = ELLIPSIS)
                     }
@@ -53,21 +53,21 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
                             on_select = UnsyncCallback::new(move |()| shell.tactics.open()),
                             attr:data-testid = "app-menu-tactics-board"
                         ) {
-                            {locale.text("ui.windows.tactics_board")}
+                            {locale.text("ui-windows-tactics_board")}
                         }
                         MenuSeparator()
                         MenuItem(on_select = item(|services, shell| update::check_for_update(services, shell, Asked::ByHand))) {
-                            {locale.text("ui.menu.check_updates")}
+                            {locale.text("ui-menu-check_updates")}
                         }
                         MenuItem(on_select = item(|_, shell| crate::shell::about::show_about(shell))) {
-                            {locale.text("ui.menu.about")}
+                            {locale.text("ui-menu-about")}
                         }
                         MenuSeparator()
                         MenuItem(on_select = item(|_, _| desktop::open_url(ISSUES_URL))) {
-                            {locale.text("ui.buttons.create_issue")}
+                            {locale.text("ui-buttons-create_issue")}
                         }
                         MenuItem(on_select = item(|_, _| desktop::open_url(DISCORD_URL))) {
-                            {locale.text("ui.buttons.discord")}
+                            {locale.text("ui-buttons-discord")}
                         }
                         MenuSeparator()
                         MenuItem(on_select = UnsyncCallback::new(move |()| {
@@ -75,12 +75,12 @@ pub fn AppMenu(shell: Shell) -> impl IntoView {
                                 windows.quit();
                             }
                         })) {
-                            {locale.text("ui.menu.quit")}
+                            {locale.text("ui-menu-quit")}
                         }
                     }
                 }
             }
-            TooltipContent {{locale.text("ui.menu.file")}}
+            TooltipContent {{locale.text("ui-menu-file")}}
         }
     }
 }

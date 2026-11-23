@@ -8,13 +8,13 @@ use std::time::SystemTime;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wgc_auth::TokenExpiry;
 use wows_toolkit_launcher::AccountKey;
 use wows_toolkit_launcher::AccountStatus;
 use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::SessionStorage;
 use wows_toolkit_viewmodel::settings_drawer::Setting;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -151,7 +151,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                     attr:data-testid = "launcher-play-anyway",
                     on:click = move |_| close_then(Box::new(move || play(shell, model, account.key, PlayOrigin::Default)))
                 ) {
-                    {t!("ui.launcher.popover.play_anyway").into_owned()}
+                    {t!("ui-launcher-popover-play_anyway").into_owned()}
                 }
             }
             .into_view(),
@@ -164,13 +164,13 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
         column(class = "wt-account-popover__body") {
             InstallLine(shell = shell, model = model, open = open)
             Separator()
-            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.accounts")}}
+            text(class = "wt-launcher__dim") {{locale.text("ui-launcher-popover-accounts")}}
             KeyringHint(model = model)
             if move || rows.with(Vec::is_empty) {
-                text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-accounts") {{locale.text("ui.launcher.popover.no_accounts")}}
+                text(class = "wt-launcher__dim", attr:data-testid = "launcher-no-accounts") {{locale.text("ui-launcher-popover-no_accounts")}}
             } else {}
             if move || running.get() {
-                text(class = "wt-launcher__dim", attr:data-testid = "launcher-close-to-switch") {{locale.text("ui.launcher.popover.close_to_switch")}}
+                text(class = "wt-launcher__dim", attr:data-testid = "launcher-close-to-switch") {{locale.text("ui-launcher-popover-close_to_switch")}}
             } else {}
             for row in move || rows.get(), key = |row: &AccountRow| row.clone() {
                 AccountRowView(shell = shell, model = model, row = row, running = running, open = open)
@@ -185,7 +185,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                 attr:data-testid = "launcher-add-account",
                 on:click = move |_| close_then(Box::new(move || open_sign_in(shell, model, LoginTarget::NewAccount)))
             ) {
-                {locale.text("ui.launcher.popover.add_account")}
+                {locale.text("ui-launcher-popover-add_account")}
             }
             Button(
                 variant = ButtonVariant::Ghost,
@@ -194,7 +194,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                 attr:data-testid = "launcher-open-game-settings",
                 on:click = move |_| close_then(Box::new(move || crate::launcher::game_settings::open(shell, model)))
             ) {
-                {locale.text("ui.launcher.popover.game_settings")}
+                {locale.text("ui-launcher-popover-game_settings")}
             }
             Button(
                 variant = ButtonVariant::Ghost,
@@ -203,7 +203,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                 attr:data-testid = "launcher-open-setup",
                 on:click = move |_| close_then(Box::new(move || shell.settings_drawer.open_at(Setting::GameInstalls)))
             ) {
-                {locale.text("ui.launcher.popover.installs")}
+                {locale.text("ui-launcher-popover-installs")}
             }
             Button(
                 variant = ButtonVariant::Ghost,
@@ -213,7 +213,7 @@ pub fn AccountPopover(shell: Shell, model: LauncherModel, open: RwSignal<bool, L
                 attr:data-testid = "launcher-open-replay",
                 on:click = move |_| close_then(Box::new(move || replay::pick_and_open(shell, model)))
             ) {
-                {locale.text("ui.launcher.popover.open_replay")}
+                {locale.text("ui-launcher-popover-open_replay")}
             }
         }
     }
@@ -252,10 +252,10 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
         locale.track();
         let version = version.get().unwrap_or_default();
         let check = match catalog.get() {
-            CatalogView::Checking => t!("ui.launcher.checking_updates").into_owned(),
-            CatalogView::Found { updates, .. } if updates.is_empty() => t!("ui.launcher.up_to_date").into_owned(),
-            CatalogView::Found { .. } => t!("ui.launcher.popover.update_available").into_owned(),
-            CatalogView::Failed(_) => t!("ui.launcher.popover.check_failed").into_owned(),
+            CatalogView::Checking => t!("ui-launcher-checking_updates").into_owned(),
+            CatalogView::Found { updates, .. } if updates.is_empty() => t!("ui-launcher-up_to_date").into_owned(),
+            CatalogView::Found { .. } => t!("ui-launcher-popover-update_available").into_owned(),
+            CatalogView::Failed(_) => t!("ui-launcher-popover-check_failed").into_owned(),
             CatalogView::Nothing => String::new(),
         };
         format!("{version}   {check}").trim().to_owned()
@@ -265,13 +265,13 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
     view! {
         column(class = "wt-launcher__column", attr:data-testid = "launcher-install-line") {
             row(class = "wt-launcher__row") {
-                text(class = "wt-launcher__strong") {{locale.text("ui.launcher.popover.game")}}
+                text(class = "wt-launcher__strong") {{locale.text("ui-launcher-popover-game")}}
                 box(class = "wt-launcher__spacer")
             }
             {move || match install.get() {
                 None => AnyView::new(view! {
                     column(class = "wt-launcher__column") {
-                        text(class = "wt-launcher__dim", attr:data-testid = "launcher-install-none") {{locale.text("ui.launcher.popover.no_install")}}
+                        text(class = "wt-launcher__dim", attr:data-testid = "launcher-install-none") {{locale.text("ui-launcher-popover-no_install")}}
                         row(class = "wt-launcher__row wt-launcher__row--tight") {
                             Button(
                                 variant = ButtonVariant::Outline,
@@ -282,7 +282,7 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
                                     setup::open(shell, model);
                                 }
                             ) {
-                                {locale.text("ui.launcher.play.set_up_game")}
+                                {locale.text("ui-launcher-play-set_up_game")}
                             }
                             Button(
                                 variant = ButtonVariant::Ghost,
@@ -290,7 +290,7 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
                                 attr:data-testid = "launcher-install-add",
                                 on:click = move |_| add_install(model, shell)
                             ) {
-                                {locale.text("ui.launcher.add_install")}
+                                {locale.text("ui-launcher-add_install")}
                             }
                         }
                     }
@@ -318,7 +318,7 @@ fn InstallLine(shell: Shell, model: LauncherModel, open: RwSignal<bool, LocalSto
                                         }
                                     }
                                 ) {
-                                    {t!("ui.launcher.retry").into_owned()}
+                                    {t!("ui-launcher-retry").into_owned()}
                                 }
                             } else {}
                         }
@@ -357,37 +357,37 @@ fn AccountRowView(
     let signed_in = matches!(status, AccountStatus::Ready(_));
     let status_view = match status {
         AccountStatus::Ready(SessionStorage::Keyring) if is_default => {
-            AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.default")}} })
+            AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui-launcher-popover-default")}} })
         }
         AccountStatus::Ready(SessionStorage::Keyring) => {
-            AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.ready")}} })
+            AnyView::new(view! { text(class = "wt-launcher__dim") {{locale.text("ui-launcher-popover-ready")}} })
         }
         AccountStatus::Ready(SessionStorage::MemoryOnly) => AnyView::new(view! {
             Tooltip {
                 TooltipTrigger {
-                    text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.not_saved")}}
+                    text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui-launcher-popover-not_saved")}}
                 }
-                TooltipContent {{locale.text("ui.launcher.account.memory_only")}}
+                TooltipContent {{locale.text("ui-launcher-account-memory_only")}}
             }
         }),
         AccountStatus::Ready(SessionStorage::PlaintextFile) => AnyView::new(view! {
             Tooltip {
                 TooltipTrigger {
-                    text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui.launcher.popover.unencrypted")}}
+                    text(class = "wt-launcher__warn", attr:data-testid = not_saved_id) {{locale.text("ui-launcher-popover-unencrypted")}}
                 }
                 TooltipContent {
                     column(class = "wt-launcher__column") {
-                        text {{locale.text("ui.launcher.keyring.unencrypted")}}
-                        text {{locale.text("ui.launcher.keyring.how_detail")}}
+                        text {{locale.text("ui-launcher-keyring-unencrypted")}}
+                        text {{locale.text("ui-launcher-keyring-how_detail")}}
                     }
                 }
             }
         }),
         AccountStatus::NotLoaded | AccountStatus::Restoring => AnyView::new(view! {
-            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.popover.restoring")}}
+            text(class = "wt-launcher__dim") {{locale.text("ui-launcher-popover-restoring")}}
         }),
         AccountStatus::KeyringLocked => AnyView::new(view! {
-            text(class = "wt-launcher__warn", attr:data-testid = "launcher-keyring-locked") {{locale.text("ui.launcher.popover.keyring_locked")}}
+            text(class = "wt-launcher__warn", attr:data-testid = "launcher-keyring-locked") {{locale.text("ui-launcher-popover-keyring_locked")}}
         }),
         AccountStatus::Expired | AccountStatus::SignedOut => AnyView::new(view! {
             Button(
@@ -399,7 +399,7 @@ fn AccountRowView(
                     open_sign_in(shell, model, LoginTarget::Reauthenticate(key));
                 }
             ) {
-                {locale.text("ui.launcher.play.sign_in_again")}
+                {locale.text("ui-launcher-play-sign_in_again")}
             }
         }),
     };
@@ -456,7 +456,7 @@ fn AccountRowView(
                     size = ButtonSize::IconXs,
                     class = "wt-account-row__actions",
                     attr:data-testid = actions_id,
-                    a11y:label = locale.text("ui.launcher.popover.account_actions")
+                    a11y:label = locale.text("ui-launcher-popover-account_actions")
                 ) {
                     Icon(icon = ELLIPSIS)
                 }
@@ -466,7 +466,7 @@ fn AccountRowView(
                         attr:data-testid = make_default_id.clone(),
                         on_select = UnsyncCallback::new(move |()| make_default(model, key))
                     ) {
-                        {locale.text("ui.launcher.popover.make_default")}
+                        {locale.text("ui-launcher-popover-make_default")}
                     }
                     MenuItem(
                         disabled = Signal::derive_local(move || running.get() || !signed_in),
@@ -476,14 +476,14 @@ fn AccountRowView(
                             false
                         }))
                     ) {
-                        {locale.text("ui.launcher.popover.sign_out")}
+                        {locale.text("ui-launcher-popover-sign_out")}
                     }
                     MenuItem(
                         disabled = Signal::derive_local(move || running.get()),
                         attr:data-testid = forget_id.clone(),
                         on_select = UnsyncCallback::new(move |()| model.op(move |launcher, settings, env| launcher.forget(key, settings, env)))
                     ) {
-                        {locale.text("ui.launcher.popover.forget")}
+                        {locale.text("ui-launcher-popover-forget")}
                     }
                 }
             }
@@ -502,11 +502,11 @@ fn expiry_text(expiry: TokenExpiry, now: SystemTime) -> String {
     match expiry {
         TokenExpiry::KnownAt(at) => match at.duration_since(now) {
             Ok(remaining) => {
-                t!("ui.launcher.popover.expires_in", duration = wows_toolkit_launcher::format_duration(remaining))
+                t!("ui-launcher-popover-expires_in", duration = wows_toolkit_launcher::format_duration(remaining))
             }
-            Err(_) => t!("ui.launcher.popover.expired"),
+            Err(_) => t!("ui-launcher-popover-expired"),
         },
-        TokenExpiry::Unknown => t!("ui.launcher.popover.expiry_unknown"),
+        TokenExpiry::Unknown => t!("ui-launcher-popover-expiry_unknown"),
     }
     .into_owned()
 }

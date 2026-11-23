@@ -229,7 +229,7 @@ impl TrackerWindow {
     }
 
     fn show_current_match(&mut self) {
-        let label = rust_i18n::t!("ui.player_tracker.subtab_current_match").into_owned();
+        let label = wt_translations::t!("ui-player_tracker-subtab_current_match").into_owned();
         let tab = self.window.by_role_and_label(Role::Tab, &label).expect("the dock lists the Current Match section");
         self.window.click(tab).expect("the section's tab can be pressed");
         self.settle();
@@ -485,7 +485,7 @@ fn a_historical_row_opens_on_its_aliases_and_account_id() {
     assert!(tracker.has("tracker-account-id-7"), "the account id is offered to copy");
     let mut window = tracker.window;
     assert!(
-        window.by_label(&rust_i18n::t!("ui.player_tracker.aliases_hover", names = "Harvey42")).is_some(),
+        window.by_label(&wt_translations::t!("ui-player_tracker-aliases_hover", names = "Harvey42")).is_some(),
         "the alias is listed"
     );
 }

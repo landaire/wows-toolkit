@@ -265,8 +265,8 @@ impl WinRateMode {
     /// The translation key the scope selector reads from.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Overall => "ui.player_tracker.win_rate_overall",
-            Self::Ship => "ui.player_tracker.win_rate_ship",
+            Self::Overall => "ui-player_tracker-win_rate_overall",
+            Self::Ship => "ui-player_tracker-win_rate_ship",
         }
     }
 }
@@ -287,8 +287,8 @@ impl CurrentMatchViewMode {
     /// The translation key the density selector reads from.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Compact => "ui.player_tracker.view_compact",
-            Self::Detailed => "ui.player_tracker.view_detailed",
+            Self::Compact => "ui-player_tracker-view_compact",
+            Self::Detailed => "ui-player_tracker-view_detailed",
         }
     }
 }
@@ -356,19 +356,19 @@ pub fn win_rate_hover(stats: Option<&PlayerStatsOut>, locale: Option<&str>) -> O
         .into_iter()
         .filter_map(|(mode, rate, battles, damage)| {
             let (rate, battles) = (rate?, battles?);
-            let label = rust_i18n::t!(mode.label_key()).into_owned();
+            let label = wt_translations::t!(mode.label_key()).into_owned();
             let rate = format!("{rate:.1}%");
             let battles = crate::formatting::separate_number(battles, locale);
             let line = match damage {
-                Some(damage) => rust_i18n::t!(
-                    "ui.player_tracker.win_rate_hover_line_damage",
+                Some(damage) => wt_translations::t!(
+                    "ui-player_tracker-win_rate_hover_line_damage",
                     label = label,
                     rate = rate,
                     battles = battles,
                     damage = crate::formatting::separate_number(damage, locale)
                 ),
-                None => rust_i18n::t!(
-                    "ui.player_tracker.win_rate_hover_line",
+                None => wt_translations::t!(
+                    "ui-player_tracker-win_rate_hover_line",
                     label = label,
                     rate = rate,
                     battles = battles

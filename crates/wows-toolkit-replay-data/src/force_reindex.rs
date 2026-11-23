@@ -11,11 +11,11 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use jiff::civil::DateTime;
-use rust_i18n::t;
 use wows_data_mgr::download_repo::RemoteAvailability;
 use wows_data_mgr::download_repo::ResolvedBuild;
 use wows_toolkit_config::index::rows::IndexWriteMode;
 use wowsunpack::data::Version;
+use wt_translations::t;
 
 use crate::replay_index::ScopedReplay;
 use crate::replay_index::SourceScope;
@@ -133,24 +133,24 @@ impl IndexPurpose {
 
     pub fn confirm_title(&self) -> String {
         match self {
-            Self::Refresh => t!("ui.reindex.confirm_title"),
-            Self::Fill(_) => t!("ui.index_folder.confirm_title"),
+            Self::Refresh => t!("ui-reindex-confirm_title"),
+            Self::Fill(_) => t!("ui-index_folder-confirm_title"),
         }
         .into_owned()
     }
 
     pub fn confirm_ok(&self) -> String {
         match self {
-            Self::Refresh => t!("ui.reindex.confirm_ok"),
-            Self::Fill(_) => t!("ui.index_folder.confirm_ok"),
+            Self::Refresh => t!("ui-reindex-confirm_ok"),
+            Self::Fill(_) => t!("ui-index_folder-confirm_ok"),
         }
         .into_owned()
     }
 
     fn count_line(&self, count: usize) -> String {
         match self {
-            Self::Refresh => t!("ui.reindex.confirm_count", count = count),
-            Self::Fill(_) => t!("ui.index_folder.confirm_count", count = count),
+            Self::Refresh => t!("ui-reindex-confirm_count", count = count),
+            Self::Fill(_) => t!("ui-index_folder-confirm_count", count = count),
         }
         .into_owned()
     }
@@ -159,9 +159,9 @@ impl IndexPurpose {
     fn note(&self) -> Option<String> {
         let note = match self {
             Self::Refresh => return None,
-            Self::Fill(SourceScope::Live) => t!("ui.index_folder.note_live"),
+            Self::Fill(SourceScope::Live) => t!("ui-index_folder-note_live"),
             Self::Fill(SourceScope::Folder(root)) => {
-                t!("ui.index_folder.note_folder", dir = crate::paths::shown_path(root))
+                t!("ui-index_folder-note_folder", dir = crate::paths::shown_path(root))
             }
         };
 
@@ -377,7 +377,7 @@ impl ReindexSummary {
         if let Some(played) = self.played {
             lines.push(
                 t!(
-                    "ui.reindex.confirm_range",
+                    "ui-reindex-confirm_range",
                     oldest = played.oldest.strftime(SAID_DATE_FORMAT).to_string(),
                     newest = played.newest.strftime(SAID_DATE_FORMAT).to_string()
                 )
@@ -386,30 +386,30 @@ impl ReindexSummary {
         }
 
         if self.undated > 0 {
-            lines.push(t!("ui.reindex.confirm_undated", count = self.undated).into_owned());
+            lines.push(t!("ui-reindex-confirm_undated", count = self.undated).into_owned());
         }
 
         if !self.downloads.is_empty() {
-            lines.push(t!("ui.reindex.confirm_downloads").into_owned());
+            lines.push(t!("ui-reindex-confirm_downloads").into_owned());
             lines.extend(self.downloads.iter().map(build_line));
         }
 
         if !self.unobtainable.is_empty() {
             let count: usize = self.unobtainable.iter().map(|need| need.replays).sum();
             let said = match self.unobtainable_cause {
-                UnobtainableCause::NotPublished => t!("ui.reindex.confirm_unobtainable", count = count),
-                UnobtainableCause::NoCacheDirectory => t!("ui.reindex.confirm_no_cache_dir", count = count),
+                UnobtainableCause::NotPublished => t!("ui-reindex-confirm_unobtainable", count = count),
+                UnobtainableCause::NoCacheDirectory => t!("ui-reindex-confirm_no_cache_dir", count = count),
             };
             lines.push(said.into_owned());
             lines.extend(self.unobtainable.iter().map(build_line));
         }
 
         if self.no_build > 0 {
-            lines.push(t!("ui.reindex.confirm_no_build", count = self.no_build).into_owned());
+            lines.push(t!("ui-reindex-confirm_no_build", count = self.no_build).into_owned());
         }
 
         if self.no_version > 0 {
-            lines.push(t!("ui.reindex.confirm_no_version", count = self.no_version).into_owned());
+            lines.push(t!("ui-reindex-confirm_no_version", count = self.no_version).into_owned());
         }
 
         lines.extend(purpose.note());
@@ -476,7 +476,7 @@ pub fn version_said(version: &Version) -> String {
 /// One release's line in the confirmation.
 fn build_line(need: &BuildNeed) -> String {
     t!(
-        "ui.reindex.build_row",
+        "ui-reindex-build_row",
         version = need.release.version_said(),
         build = need.release.build.0,
         count = need.replays
@@ -552,15 +552,15 @@ mod tests {
         assert_eq!(
             summary.lines(&IndexPurpose::Refresh),
             [
-                t!("ui.reindex.confirm_count", count = 5).into_owned(),
-                t!("ui.reindex.confirm_range", oldest = "2023-01-03 10:00", newest = "2025-04-02 18:00").into_owned(),
-                t!("ui.reindex.confirm_undated", count = 1).into_owned(),
-                t!("ui.reindex.confirm_downloads").into_owned(),
-                t!("ui.reindex.build_row", version = "13.5.1", build = 200, count = 1).into_owned(),
-                t!("ui.reindex.confirm_unobtainable", count = 1).into_owned(),
-                t!("ui.reindex.build_row", version = "0.11.0", build = 50, count = 1).into_owned(),
-                t!("ui.reindex.confirm_no_build", count = 1).into_owned(),
-                t!("ui.reindex.confirm_no_version", count = 1).into_owned(),
+                t!("ui-reindex-confirm_count", count = 5).into_owned(),
+                t!("ui-reindex-confirm_range", oldest = "2023-01-03 10:00", newest = "2025-04-02 18:00").into_owned(),
+                t!("ui-reindex-confirm_undated", count = 1).into_owned(),
+                t!("ui-reindex-confirm_downloads").into_owned(),
+                t!("ui-reindex-build_row", version = "13.5.1", build = 200, count = 1).into_owned(),
+                t!("ui-reindex-confirm_unobtainable", count = 1).into_owned(),
+                t!("ui-reindex-build_row", version = "0.11.0", build = 50, count = 1).into_owned(),
+                t!("ui-reindex-confirm_no_build", count = 1).into_owned(),
+                t!("ui-reindex-confirm_no_version", count = 1).into_owned(),
             ]
         );
     }
@@ -577,14 +577,14 @@ mod tests {
         assert_eq!(
             summary.lines(&IndexPurpose::Fill(SourceScope::Folder(root.clone()))),
             [
-                t!("ui.index_folder.confirm_count", count = 2).into_owned(),
-                t!("ui.reindex.confirm_range", oldest = "2025-04-01 09:30", newest = "2025-04-02 18:00").into_owned(),
-                t!("ui.index_folder.note_folder", dir = crate::paths::shown_path(&root)).into_owned(),
+                t!("ui-index_folder-confirm_count", count = 2).into_owned(),
+                t!("ui-reindex-confirm_range", oldest = "2025-04-01 09:30", newest = "2025-04-02 18:00").into_owned(),
+                t!("ui-index_folder-note_folder", dir = crate::paths::shown_path(&root)).into_owned(),
             ]
         );
         assert_eq!(
             summary.lines(&IndexPurpose::Fill(SourceScope::Live)).last(),
-            Some(&t!("ui.index_folder.note_live").into_owned())
+            Some(&t!("ui-index_folder-note_live").into_owned())
         );
     }
 
@@ -621,7 +621,7 @@ mod tests {
         assert!(summary.downloads.is_empty());
         let unobtainable: usize = summary.unobtainable.iter().map(|need| need.replays).sum();
         let lines = summary.lines(&IndexPurpose::Refresh);
-        assert!(lines.contains(&t!("ui.reindex.confirm_no_cache_dir", count = unobtainable).into_owned()));
+        assert!(lines.contains(&t!("ui-reindex-confirm_no_cache_dir", count = unobtainable).into_owned()));
     }
 
     /// Build numbers are per server: the same number on another version is

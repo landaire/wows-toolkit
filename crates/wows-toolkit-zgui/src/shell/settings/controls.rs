@@ -7,7 +7,6 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_index::IndexMode;
@@ -17,6 +16,7 @@ use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::settings_drawer::EXPORT_FORMATS;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::platform::ColorScheme;
@@ -290,7 +290,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 on:click = move |_| desktop::open_data_directory()
             ) {
                 AppIcon(glyph = Glyph::FolderOpen)
-                text {{t!("ui.settings.wows.cache.open_folder").into_owned()}}
+                text {{t!("ui-settings-wows-cache-open_folder").into_owned()}}
             }
         }),
         Setting::Theme => AnyView::new(view! { ThemeTiles(shell = shell) }),
@@ -318,7 +318,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 let path = settings.read(|settings| settings.current_replay_path.display().to_string());
                 match path {
                     Some(path) if !path.is_empty() => path,
-                    _ => t!("ui.settings.not_set").into_owned(),
+                    _ => t!("ui-settings-not_set").into_owned(),
                 }
             };
             AnyView::new(view! {
@@ -370,7 +370,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 shell = shell,
                 setting = setting,
                 test_id = "session-display-name",
-                placeholder = t!("ui.collab.display_name_hint").into_owned(),
+                placeholder = t!("ui-collab-display_name_hint").into_owned(),
                 read = |settings: &StartupSettings| settings.collab_display_name.clone(),
                 commit = UnsyncCallback::new(move |name: String| {
                     let unchanged =
@@ -421,7 +421,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                         AppIcon(glyph = Glyph::AppWindow)
                     }
                 }
-                TooltipContent {{t!("ui.settings.twitch.get_token_tooltip").into_owned()}}
+                TooltipContent {{t!("ui-settings-twitch-get_token_tooltip").into_owned()}}
             }
         }),
         Setting::TwitchToken => AnyView::new(view! { TwitchTokenButton(shell = shell) }),
@@ -430,7 +430,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 shell = shell,
                 setting = setting,
                 test_id = "twitch-channel",
-                placeholder = t!("ui.settings.twitch.monitored_channel").into_owned(),
+                placeholder = t!("ui-settings-twitch-monitored_channel").into_owned(),
                 read = |settings: &StartupSettings| settings.twitch_channel.clone(),
                 commit = UnsyncCallback::new(move |channel: String| shell.set_twitch_channel(channel))
             )
@@ -464,7 +464,7 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 shell = shell,
                 setting = setting,
                 test_id = "mcp-port",
-                placeholder = t!("ui.settings.mcp.port_unset").into_owned(),
+                placeholder = t!("ui-settings-mcp-port_unset").into_owned(),
                 read = |settings: &StartupSettings| settings.mcp.port.map(|port| port.to_string()).unwrap_or_default(),
                 commit = UnsyncCallback::new(move |text: String| shell.commit_mcp_port(text))
             )
@@ -501,10 +501,10 @@ pub fn SettingNote(shell: Shell, setting: Setting, faults: Memo<Vec<SettingFault
         locale.track();
         match setting {
             Setting::DataSharing => services.settings.read(|settings| settings.data_sharing.description().to_owned()),
-            Setting::CodeIntegrity => Some(t!("ui.settings.app.code_integrity_tooltip").into_owned()),
+            Setting::CodeIntegrity => Some(t!("ui-settings-app-code_integrity_tooltip").into_owned()),
             Setting::Zoom => Some(crate::zoom::shortcuts_hint()),
             Setting::TwitchToken => match shell.twitch.paste()? {
-                TwitchPaste::Stored { who } => Some(t!("ui.settings.twitch.signed_in_as", who = who).into_owned()),
+                TwitchPaste::Stored { who } => Some(t!("ui-settings-twitch-signed_in_as", who = who).into_owned()),
                 // The fault says it.
                 TwitchPaste::Refused { .. } => None,
             },
@@ -890,13 +890,13 @@ fn WowsDirectory(shell: Shell) -> impl IntoView {
                 setting = Setting::WowsDirectory,
                 test_id = "wows-dir",
                 value = value,
-                placeholder = t!("ui.settings.wows.directory_hint").into_owned(),
+                placeholder = t!("ui-settings-wows-directory_hint").into_owned(),
                 invalid = Signal::derive_local(move || !setting_faults(shell, Setting::WowsDirectory).is_empty()),
                 commit = commit
             )
             Button(variant = ButtonVariant::Outline, size = ButtonSize::Sm, attr:data-testid = "wows-dir-browse", on:click = browse) {
                 AppIcon(glyph = Glyph::FolderOpen)
-                text {{t!("ui.settings.wows.browse").into_owned()}}
+                text {{t!("ui-settings-wows-browse").into_owned()}}
             }
         }
     }
@@ -952,7 +952,7 @@ fn CacheDirectory(shell: Shell) -> impl IntoView {
             )
             Button(variant = ButtonVariant::Outline, size = ButtonSize::Sm, attr:data-testid = "cache-dir-browse", on:click = browse) {
                 AppIcon(glyph = Glyph::FolderOpen)
-                text {{t!("ui.settings.wows.cache.browse").into_owned()}}
+                text {{t!("ui-settings-wows-cache-browse").into_owned()}}
             }
         }
     }
@@ -1095,7 +1095,7 @@ fn ZoomRow(shell: Shell) -> impl IntoView {
                 attr:data-testid = "reset-zoom",
                 on:click = move |_| shell.set_zoom(ZoomFactor::DEFAULT)
             ) {
-                {t!("ui.buttons.reset").into_owned()}
+                {t!("ui-buttons-reset").into_owned()}
             }
         }
     }
@@ -1113,7 +1113,7 @@ fn ReplayIndexControl(shell: Shell) -> impl IntoView {
         index.shown_progress().map(|step| {
             if step.skipped > 0 {
                 t!(
-                    "ui.settings.index.progress_skipped",
+                    "ui-settings-index-progress_skipped",
                     done = step.done,
                     total = step.total,
                     skipped = step.skipped,
@@ -1121,7 +1121,7 @@ fn ReplayIndexControl(shell: Shell) -> impl IntoView {
                 )
                 .into_owned()
             } else {
-                t!("ui.settings.index.progress", done = step.done, total = step.total, failed = step.failed)
+                t!("ui-settings-index-progress", done = step.done, total = step.total, failed = step.failed)
                     .into_owned()
             }
         })
@@ -1137,7 +1137,7 @@ fn ReplayIndexControl(shell: Shell) -> impl IntoView {
                     attr:data-testid = "index-build",
                     on:click = move |_| shell.build_replay_index(IndexMode::FillGaps)
                 ) {
-                    {t!("ui.settings.index.build").into_owned()}
+                    {t!("ui-settings-index-build").into_owned()}
                 }
                 // For rows an older parse decoded through constants that did not fit: nothing else
                 // can correct them (the egui app's Re-index All).
@@ -1150,20 +1150,20 @@ fn ReplayIndexControl(shell: Shell) -> impl IntoView {
                             attr:data-testid = "index-rebuild",
                             on:click = move |_| shell.build_replay_index(IndexMode::RefreshAll)
                         ) {
-                            {t!("ui.settings.index.rebuild").into_owned()}
+                            {t!("ui-settings-index-rebuild").into_owned()}
                         }
                     }
-                    TooltipContent {{t!("ui.settings.index.rebuild_hint").into_owned()}}
+                    TooltipContent {{t!("ui-settings-index-rebuild_hint").into_owned()}}
                 }
                 if move || index.is_indexing() {
-                    Spinner(label = t!("ui.app.status_indexing").into_owned())
+                    Spinner(label = t!("ui-app-status_indexing").into_owned())
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Sm,
                         attr:data-testid = "index-stop",
                         on:click = move |_| index.stop()
                     ) {
-                        {t!("ui.buttons.stop").into_owned()}
+                        {t!("ui-buttons-stop").into_owned()}
                     }
                 } else {}
             }
@@ -1191,10 +1191,10 @@ fn AutoExport(shell: Shell) -> impl IntoView {
     let directory = move || settings.read(|settings| settings.replay.auto_export_path.clone()).unwrap_or_default();
     let shown = move || {
         let directory = directory();
-        if directory.is_empty() { t!("ui.settings.not_set").into_owned() } else { directory }
+        if directory.is_empty() { t!("ui-settings-not_set").into_owned() } else { directory }
     };
     let choose = move |_: &mut zgui::view::EventCx<'_, zgui::view::events::Click>| {
-        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.settings.replay.export_path_hint"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-settings-replay-export_path_hint"));
         spawn_detached(async move {
             let Some(directory) = shell.chosen_path(asked).await else { return };
             let directory = directory.to_string_lossy().into_owned();
@@ -1236,7 +1236,7 @@ fn AutoExport(shell: Shell) -> impl IntoView {
                     attr:data-testid = "auto-export-choose",
                     on:click = choose
                 ) {
-                    {t!("ui.buttons.choose").into_owned()}
+                    {t!("ui-buttons-choose").into_owned()}
                 }
                 Tooltip {
                     TooltipTrigger(class = "wt-settings__clip") {
@@ -1261,13 +1261,13 @@ fn TwitchTokenButton(shell: Shell) -> impl IntoView {
     let pasted_wrong = move || matches!(twitch.paste(), Some(TwitchPaste::Refused { .. }));
     let label = move || {
         let key = if pasted_wrong() {
-            "ui.settings.twitch.paste_token_invalid"
+            "ui-settings-twitch-paste_token_invalid"
         } else {
             match twitch.status() {
-                TwitchStatus::Unset => "ui.settings.twitch.paste_token_no_token",
-                TwitchStatus::Checking => "ui.settings.twitch.paste_token_unvalidated",
-                TwitchStatus::Accepted { .. } => "ui.settings.twitch.paste_token_valid",
-                TwitchStatus::Refused => "ui.settings.twitch.paste_token_invalid",
+                TwitchStatus::Unset => "ui-settings-twitch-paste_token_no_token",
+                TwitchStatus::Checking => "ui-settings-twitch-paste_token_unvalidated",
+                TwitchStatus::Accepted { .. } => "ui-settings-twitch-paste_token_valid",
+                TwitchStatus::Refused => "ui-settings-twitch-paste_token_invalid",
             }
         };
         t!(key).into_owned()
@@ -1302,7 +1302,7 @@ fn TwitchTokenButton(shell: Shell) -> impl IntoView {
                     }
                 }
             }
-            TooltipContent {{t!("ui.settings.twitch.paste_token_tooltip").into_owned()}}
+            TooltipContent {{t!("ui-settings-twitch-paste_token_tooltip").into_owned()}}
         }
     }
 }

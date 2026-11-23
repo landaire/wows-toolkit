@@ -29,7 +29,6 @@ use landaire_ui::RowMode;
 use landaire_ui::Selection;
 use landaire_ui::SortDirection;
 use landaire_ui::Toasts;
-use rust_i18n::t;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::StoredArrangement;
 use wows_toolkit_replay_data::columns::cell_value;
@@ -46,6 +45,7 @@ use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::replay_sort::SortOrder;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::component;
 use zgui::prelude::AnyView;
 use zgui::prelude::ClipboardKind;
@@ -497,14 +497,14 @@ pub fn PlayerTable(
     let strings = Signal::derive_local(move || {
         locale.track();
         GridStrings {
-            pin: t!("ui.replay.context.pin_column").into_owned(),
-            unpin: t!("ui.replay.context.unpin_column").into_owned(),
+            pin: t!("ui-replay-context-pin_column").into_owned(),
+            unpin: t!("ui-replay-context-unpin_column").into_owned(),
             ..GridStrings::new()
         }
     });
     let label = Signal::derive_local(move || {
         locale.track();
-        t!("ui.tabs.replay_parser").into_owned()
+        t!("ui-tabs-replay_parser").into_owned()
     });
     let row_menu: RowMenu<RowId> = Rc::new(move |row: RowId| menu::row_menu(row, cx));
     let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));

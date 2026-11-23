@@ -14,7 +14,6 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
@@ -33,6 +32,7 @@ use wowsunpack::game_params::types::ParamData;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::Vehicle;
 use wowsunpack::recognized::Recognized;
+use wt_translations::t;
 use zgui::component;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -153,7 +153,7 @@ fn tooltip_of(window: &mut HeadlessWindow, test_id: &str) -> Vec<String> {
 }
 
 fn breakdown_line(mode_key: &str, battles: usize, rate: &str) -> String {
-    t!("ui.stats.win_rate_breakdown_line", mode = t!(mode_key), battles = battles, rate = rate).into_owned()
+    t!("ui-stats-win_rate_breakdown_line", mode = t!(mode_key), battles = battles, rate = rate).into_owned()
 }
 
 /// What a test drives the panel through after it is open.
@@ -551,9 +551,9 @@ fn the_overview_win_rate_counts_random_and_ranked_and_breaks_down_on_hover() {
     assert_eq!(window.texts_by_class("wt-stats-summary__record"), ["4W/4L", "(50.0%)"], "the other modes are left out");
     assert_eq!(band_of(&window, "stats-overview-record-rate"), Some("average"), "the rate takes its band's colour");
     let expected = [
-        t!("ui.stats.win_rate_rated_only").into_owned(),
-        breakdown_line("ui.stats.mode_random", 8, "50.0%"),
-        breakdown_line("ui.stats.mode_other", 4, "75.0%"),
+        t!("ui-stats-win_rate_rated_only").into_owned(),
+        breakdown_line("ui-stats-mode_random", 8, "50.0%"),
+        breakdown_line("ui-stats-mode_other", 4, "75.0%"),
     ]
     .join("\n");
     assert_eq!(tooltip_of(&mut window, "stats-overview-record"), [expected]);
@@ -603,9 +603,9 @@ fn a_ship_played_only_in_other_modes_shows_no_record_and_no_rating() {
     assert_eq!(band_of(&window, &format!("ship-win-rate-{KLEBER}")), None, "no rated battles, no colour");
     let hover = tooltip_of(&mut window, &format!("ship-win-rate-{YAMATO}"));
     let expected = [
-        t!("ui.stats.win_rate_rated_only").into_owned(),
-        breakdown_line("ui.stats.mode_random", 3, "66.7%"),
-        breakdown_line("ui.stats.mode_other", 1, "100.0%"),
+        t!("ui-stats-win_rate_rated_only").into_owned(),
+        breakdown_line("ui-stats-mode_random", 3, "66.7%"),
+        breakdown_line("ui-stats-mode_other", 1, "100.0%"),
     ]
     .join("\n");
     assert_eq!(hover, [expected]);

@@ -6,10 +6,10 @@ use std::sync::Arc;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::armor::options_panel::OptionSection;
 use wows_toolkit_viewmodel::armor::options_panel::OptionsTab;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -118,13 +118,13 @@ pub fn quick_toggles(workspace: ArmorWorkspace, viewport: ArmorViewportState) ->
     let mut items: Vec<AnyView> = Vec::new();
     if armor {
         items.push(toggle_item(
-            t!("ui.armor.show_hidden").into_owned(),
+            t!("ui-armor-show_hidden").into_owned(),
             Signal::derive_local(move || viewport.show_hidden_only()),
             no_armor,
             move |on| viewport.set_show_hidden_only(on),
         ));
         items.push(toggle_item(
-            t!("ui.armor.gaps").into_owned(),
+            t!("ui-armor-gaps").into_owned(),
             Signal::derive_local(move || viewport.gaps().shown),
             no_armor,
             move |on| viewport.set_show_gaps(on),
@@ -132,13 +132,13 @@ pub fn quick_toggles(workspace: ArmorWorkspace, viewport: ArmorViewportState) ->
     }
     if ship {
         items.push(toggle_item(
-            t!("ui.armor.splash_mode").into_owned(),
+            t!("ui-armor-splash_mode").into_owned(),
             Signal::derive_local(move || viewport.splash_state().shown),
             no_splash_data,
             move |on| viewport.set_splash_mode(on),
         ));
         items.push(toggle_item(
-            t!("ui.armor.splash_boxes").into_owned(),
+            t!("ui-armor-splash_boxes").into_owned(),
             Signal::derive_local(move || viewport.splash_state().boxes_shown),
             no_splash_data,
             move |on| viewport.set_show_splash_boxes(on),
@@ -146,7 +146,7 @@ pub fn quick_toggles(workspace: ArmorWorkspace, viewport: ArmorViewportState) ->
     }
 
     if armor {
-        let pen_check = t!("ui.armor.pen_check").into_owned();
+        let pen_check = t!("ui-armor-pen_check").into_owned();
         items.push(AnyView::new(view! {
             MenuItem(on_select = UnsyncCallback::new(move |()| workspace.open_section(OptionSection::PenCheck))) {
                 {pen_check}
@@ -155,14 +155,14 @@ pub fn quick_toggles(workspace: ArmorWorkspace, viewport: ArmorViewportState) ->
     }
     items.extend(show_textures_item(workspace, viewport));
     items.push(toggle_item(
-        t!("ui.armor.options_panel").into_owned(),
+        t!("ui-armor-options_panel").into_owned(),
         Signal::derive_local(move || workspace.options_open.get()),
         false,
         move |_| workspace.toggle_options(),
     ));
 
     items.push(AnyView::new(view! { MenuSeparator() }));
-    let export = t!("ui.armor.export_model").into_owned();
+    let export = t!("ui-armor-export_model").into_owned();
     let shell = Shell::current();
     items.push(AnyView::new(view! {
         MenuItem(disabled = no_armor, on_select = UnsyncCallback::new(move |()| open_export(shell, workspace, viewport))) {
@@ -261,8 +261,8 @@ fn tool_button(tool: Tool) -> AnyView {
 /// Rail toggle for "Show Hidden": the plates that are part of the combat model but that the game's
 /// own armor viewer never draws. A mode rather than an addition, so it reads as selected while on.
 fn hidden_plates_button(viewport: ArmorViewportState, filter: &RailFilter) -> Option<AnyView> {
-    let tooltip = t!("ui.armor.show_hidden_tooltip").into_owned();
-    let label = t!("ui.armor.show_hidden").into_owned();
+    let tooltip = t!("ui-armor-show_hidden_tooltip").into_owned();
+    let label = t!("ui-armor-show_hidden").into_owned();
     if !keeps_tool(filter, &label, &tooltip) {
         return None;
     }
@@ -283,8 +283,8 @@ fn hidden_plates_button(viewport: ArmorViewportState, filter: &RailFilter) -> Op
 /// Rail toggle for gap detection, which carries its own count: the number is the answer, so it is
 /// on the control rather than behind a hover.
 fn gaps_button(viewport: ArmorViewportState, cx: &SectionCx) -> Option<AnyView> {
-    let tooltip = t!("ui.armor.gaps_tooltip").into_owned();
-    let name = t!("ui.armor.gaps").into_owned();
+    let tooltip = t!("ui-armor-gaps_tooltip").into_owned();
+    let name = t!("ui-armor-gaps").into_owned();
     let count_now = cx.matching.and_then(|state| state.gaps);
     if !keeps_tool(&cx.filter, &counted_label(&name, count_now), &tooltip) {
         return None;
@@ -316,11 +316,11 @@ fn gaps_button(viewport: ArmorViewportState, cx: &SectionCx) -> Option<AnyView> 
 /// answer the mode exists to give. Refused on a hull that ships no splash file; the tooltip says so.
 fn splash_button(viewport: ArmorViewportState, cx: &SectionCx, has_data: bool) -> Option<AnyView> {
     let tooltip = if has_data {
-        t!("ui.armor.splash_tooltip_mode").into_owned()
+        t!("ui-armor-splash_tooltip_mode").into_owned()
     } else {
-        t!("ui.armor.splash_no_data").into_owned()
+        t!("ui-armor-splash_no_data").into_owned()
     };
-    let name = t!("ui.armor.splash_mode").into_owned();
+    let name = t!("ui-armor-splash_mode").into_owned();
     let count_now = cx.matching.and_then(|state| state.splash);
     if !keeps_tool(&cx.filter, &counted_label(&name, count_now), &tooltip) {
         return None;
@@ -345,8 +345,8 @@ fn splash_button(viewport: ArmorViewportState, cx: &SectionCx, has_data: bool) -
 /// Rail toggle for the splash-box outlines, which stand on their own: they are worth seeing while
 /// placing a burst and after it.
 fn splash_boxes_button(viewport: ArmorViewportState, filter: &RailFilter) -> Option<AnyView> {
-    let tooltip = t!("ui.armor.splash_tooltip").into_owned();
-    let label = t!("ui.armor.splash_boxes").into_owned();
+    let tooltip = t!("ui-armor-splash_tooltip").into_owned();
+    let label = t!("ui-armor-splash_boxes").into_owned();
     if !keeps_tool(filter, &label, &tooltip) {
         return None;
     }
@@ -391,10 +391,10 @@ fn export_button(
     features: Option<SceneFeatures>,
 ) -> Option<AnyView> {
     let tooltip = match features {
-        Some(SceneFeatures { ship: false, .. }) => t!("ui.model_view.export_tooltip").into_owned(),
-        Some(_) | None => t!("ui.armor.export_tooltip").into_owned(),
+        Some(SceneFeatures { ship: false, .. }) => t!("ui-model_view-export_tooltip").into_owned(),
+        Some(_) | None => t!("ui-armor-export_tooltip").into_owned(),
     };
-    let label = t!("ui.replay.section_export").into_owned();
+    let label = t!("ui-replay-section_export").into_owned();
     if !keeps_tool(filter, &label, &tooltip) {
         return None;
     }

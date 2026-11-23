@@ -30,13 +30,13 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use jiff::Timestamp;
-use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
 use wows_replays::types::AccountId;
 use wows_toolkit_viewmodel::player_tracker::record::BattleRoster;
 use wows_toolkit_viewmodel::player_tracker::record::record_roster;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::match_stats::MatchStatsRequest;
@@ -357,9 +357,9 @@ impl egui_dock::TabViewer for PlayerTrackerSubTabViewer<'_, '_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         let key = match tab {
-            PlayerTrackerSubTab::Historical => "ui.player_tracker.subtab_historical",
-            PlayerTrackerSubTab::CurrentMatch => "ui.player_tracker.subtab_current_match",
-            PlayerTrackerSubTab::Clans => "ui.player_tracker.subtab_clans",
+            PlayerTrackerSubTab::Historical => "ui-player_tracker-subtab_historical",
+            PlayerTrackerSubTab::CurrentMatch => "ui-player_tracker-subtab_current_match",
+            PlayerTrackerSubTab::Clans => "ui-player_tracker-subtab_clans",
         };
         t!(key).to_string().into()
     }

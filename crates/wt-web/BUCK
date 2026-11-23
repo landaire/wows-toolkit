@@ -31,7 +31,6 @@ workspace_library(
         "//third-party/rust:png",
         "//third-party/rust:rand",
         "//third-party/rust:ring",
-        "//third-party/rust:rust-i18n",
         "//third-party/rust:tracing",
         "//third-party/rust:tracing-subscriber",
         "//third-party/rust:tracing-wasm",

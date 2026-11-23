@@ -10,7 +10,6 @@ use std::time::Duration;
 use futures::StreamExt;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
-use rust_i18n::t;
 use wows_query::GameData;
 use wows_query::data::SharedCatalog;
 use wows_toolkit_viewmodel::mcp::McpAddressError;
@@ -19,6 +18,7 @@ use wows_toolkit_viewmodel::mcp::McpPort;
 use wows_toolkit_viewmodel::mcp::McpSettings;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::settings_drawer::Setting;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -235,11 +235,11 @@ impl Shell {
         // The server has no authentication; a row holding another address is reported on its own.
         if !settings.bind_address.is_loopback() {
             let input = settings.bind_address.to_string();
-            self.mcp_failed(t!("ui.settings.mcp.address_not_loopback", input = input).into_owned());
+            self.mcp_failed(t!("ui-settings-mcp-address_not_loopback", input = input).into_owned());
             return;
         }
         let Some(watchdog) = services.watchdog() else {
-            self.mcp_failed(t!("ui.mcp.no_watchdog").into_owned());
+            self.mcp_failed(t!("ui-mcp-no_watchdog").into_owned());
             return;
         };
 
@@ -270,9 +270,9 @@ impl Shell {
             McpEvent::Started { endpoint, .. } => {
                 let url = endpoint.url();
                 toasts.show(
-                    Notice::ok(t!("ui.mcp.started", url = url).into_owned())
+                    Notice::ok(t!("ui-mcp-started", url = url).into_owned())
                         .keyed(key)
-                        .action(t!("ui.mcp.copy_url").into_owned(), move || self.copy_text(url.clone())),
+                        .action(t!("ui-mcp-copy_url").into_owned(), move || self.copy_text(url.clone())),
                 );
             }
             McpEvent::Failed { failure, .. } => self.mcp_failed(failure_message(failure)),
@@ -287,10 +287,10 @@ impl Shell {
         let open = self.settings_drawer;
 
         toasts.show(
-            Notice::failed(t!("ui.mcp.start_failed", reason = reason).into_owned())
+            Notice::failed(t!("ui-mcp-start_failed", reason = reason).into_owned())
                 .keyed(ToastKey::new(MCP_TOAST))
                 .sticky()
-                .action_keeping_open(t!("ui.settings.panel.open").into_owned(), move || {
+                .action_keeping_open(t!("ui-settings-panel-open").into_owned(), move || {
                     open.open_at(Setting::McpPort);
                 }),
         );
@@ -360,7 +360,7 @@ fn share_loaded_build(shell: Shell) -> RenderEffect<()> {
 fn failure_message(failure: &StartFailure) -> String {
     match failure {
         StartFailure::PortInUse { address } => {
-            t!("ui.mcp.port_in_use", port = address.port(), address = address.ip()).into_owned()
+            t!("ui-mcp-port_in_use", port = address.port(), address = address.ip()).into_owned()
         }
         StartFailure::Listen { reason, .. } | StartFailure::Runtime { reason } | StartFailure::GaveUp { reason } => {
             reason.clone()

@@ -81,6 +81,7 @@ All notable changes to this project will be documented in this file.
 - *(zgui)* Keep open folders at the top of the armor viewer sidebar, the unpacker folder tree and the replay listing while their contents scroll past, as the egui app does
 - *(toolkit)* Re-indexing replays fills in the chart statistics of saved session battles recorded before those statistics were kept
 - *(zgui)* Faintly mark a replay's row in the listing while its tab title in the Replay Inspector is hovered, and date the match in the replay header, with how long ago it was on hover
+- *(toolkit)* Keep translations in [Fluent](https://projectfluent.org) files. A `translations/<language>.ftl` file next to the app overrides the messages it names
 
 ### Bug Fixes
 

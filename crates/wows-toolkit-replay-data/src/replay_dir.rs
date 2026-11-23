@@ -13,12 +13,12 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use rust_i18n::t;
 use wows_replays::ReplayFile;
 use wows_toolkit_services::supervision::NextStep;
 use wows_toolkit_services::supervision::PanicReport;
 use wows_toolkit_viewmodel::listing_row::ListedReplay;
 use wowsunpack::data::Version;
+use wt_translations::t;
 
 use crate::force_reindex::ReindexCandidate;
 use crate::load::GameDataCache;
@@ -203,12 +203,12 @@ impl WatchStopCause {
     /// words them.
     pub fn said(&self) -> String {
         match self {
-            Self::NoWatcher { error } => t!("error.file_watcher_creation", error = error).into_owned(),
-            Self::NotWatchable { error } => t!("error.replay_dir_watch", error = error).into_owned(),
-            Self::Backend { error } => t!("ui.replay_folders.watch_cause_backend", error = error).into_owned(),
-            Self::DirectoryGone => t!("ui.replay_folders.watch_cause_gone").into_owned(),
-            Self::Panicked { report } => t!("ui.replay_folders.watch_cause_panicked", error = report).into_owned(),
-            Self::Exited => t!("ui.replay_folders.watch_cause_exited").into_owned(),
+            Self::NoWatcher { error } => t!("error-file_watcher_creation", error = error).into_owned(),
+            Self::NotWatchable { error } => t!("error-replay_dir_watch", error = error).into_owned(),
+            Self::Backend { error } => t!("ui-replay_folders-watch_cause_backend", error = error).into_owned(),
+            Self::DirectoryGone => t!("ui-replay_folders-watch_cause_gone").into_owned(),
+            Self::Panicked { report } => t!("ui-replay_folders-watch_cause_panicked", error = report).into_owned(),
+            Self::Exited => t!("ui-replay_folders-watch_cause_exited").into_owned(),
         }
     }
 }

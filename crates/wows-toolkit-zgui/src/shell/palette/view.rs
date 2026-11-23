@@ -12,9 +12,9 @@ use landaire_ui::AncestorAttribute;
 use landaire_ui::LoadingPlacement;
 use landaire_ui::LoadingProps;
 use landaire_ui::MarkedTextProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::palette::PaletteMode;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -213,7 +213,7 @@ pub fn CommandPalette(shell: Shell) -> impl IntoView {
                 class = "zui-command__dialog wt-palette",
                 attr:data-testid = "palette"
             ) {
-                DialogTitle {{locale.text("ui.palette.title")}}
+                DialogTitle {{locale.text("ui-palette-title")}}
                 // Mounted with the surface, so the scrim stays unblurred through the exit as well.
                 {AncestorAttribute::new(PALETTE_OPEN_ATTRIBUTE, Signal::derive_local(|| true))}
                 {move || match shown.get() {
@@ -245,9 +245,9 @@ fn RootList(shell: Shell, query: RwSignal<String, LocalStorage>) -> impl IntoVie
 
     view! {
         Command(attr:data-testid = "palette-root") {
-            PaletteField(query = query, placeholder = t!("ui.palette.placeholder").into_owned())
+            PaletteField(query = query, placeholder = t!("ui-palette-placeholder").into_owned())
             HighlightFirst(rows = Signal::derive_local(move || rows.track()))
-            CommandList(label = t!("ui.palette.title").into_owned()) {
+            CommandList(label = t!("ui-palette-title").into_owned()) {
                 for row in move || rows.get(), key = |row: &RootRow| row.clone() {
                     CommandItem(
                         value = row.item.value(),
@@ -259,7 +259,7 @@ fn RootList(shell: Shell, query: RwSignal<String, LocalStorage>) -> impl IntoVie
                         {root_label(&row)}
                     }
                 }
-                CommandEmpty {{locale.text("ui.search.no_matches")}}
+                CommandEmpty {{locale.text("ui-search-no_matches")}}
             }
         }
     }
@@ -376,7 +376,7 @@ fn empty_message(rows: &ModeRows, searching: bool) -> AnyView {
             })
         }
         ModeRows::Unavailable(reason) => AnyView::new(view! { text {{reason.clone()}} }),
-        ModeRows::Ready(_) => AnyView::new(view! { text {{t!("ui.search.no_matches").into_owned()}} }),
+        ModeRows::Ready(_) => AnyView::new(view! { text {{t!("ui-search-no_matches").into_owned()}} }),
     }
 }
 
@@ -465,13 +465,13 @@ fn ModeHeader(mode: PaletteMode, back: UnsyncCallback<()>) -> impl IntoView {
                 attr:data-testid = "palette-back"
             ) {
                 Icon(icon = ARROW_LEFT)
-                text {{t!("ui.palette.title").into_owned()}}
+                text {{t!("ui-palette-title").into_owned()}}
             }
             box(class = "wt-palette__crumb") {
                 Icon(icon = CHEVRON_RIGHT)
             }
             text(attr:data-testid = "palette-mode-title") {{t!(mode.title_key()).into_owned()}}
-            text(class = "wt-palette__hint") {{t!("ui.palette.back_hint").into_owned()}}
+            text(class = "wt-palette__hint") {{t!("ui-palette-back_hint").into_owned()}}
         }
     }
 }
@@ -526,7 +526,7 @@ fn PaletteField(
     let mut semantics = A11yBinding::new(Role::ComboBox)
         .has_popup(HasPopup::Listbox)
         .expanded(|| true)
-        .label(t!("ui.palette.title").into_owned())
+        .label(t!("ui-palette-title").into_owned())
         .active_descendant(move || {
             listbox.map_or(zgui::vocab::NodeId(0), |listbox| {
                 zgui::vocab::NodeId(listbox.active_node().get().map_or(0, zgui::view::NodeId::as_u64))

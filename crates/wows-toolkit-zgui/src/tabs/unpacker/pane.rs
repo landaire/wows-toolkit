@@ -9,7 +9,6 @@ use std::sync::Arc;
 use landaire_ui::PanelWidth;
 use landaire_ui::TreeHandle;
 use landaire_ui::TreeModel;
-use rust_i18n::t;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
@@ -23,6 +22,7 @@ use wows_toolkit_viewmodel::unpacker::listing::containing_dir;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
 use wows_toolkit_viewmodel::unpacker::listing::filter_files;
 use wowsunpack::vfs::VfsPath;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
@@ -62,8 +62,8 @@ impl BrowserSource {
 
     pub const fn title_key(self) -> &'static str {
         match self {
-            Self::Pkg => "ui.unpacker.packages",
-            Self::AssetsBin => "ui.unpacker.assets_bin",
+            Self::Pkg => "ui-unpacker-packages",
+            Self::AssetsBin => "ui-unpacker-assets_bin",
         }
     }
 

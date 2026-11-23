@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_data_mgr::download_repo::BuildUpdateStatus;
 use wows_toolkit_services::game_data_cache::CacheJob;
@@ -16,6 +15,7 @@ use wows_toolkit_services::game_data_cache::CacheOutcome;
 use wows_toolkit_services::game_data_cache::CacheState;
 use wows_toolkit_services::game_data_cache::Progress as CacheProgress;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Get;
@@ -214,9 +214,9 @@ impl Shell {
             CacheOutcome::Checked { tip, updates } => {
                 let clean = updates.is_empty();
                 if clean {
-                    toasts.ok(t!("ui.messages.game_data_up_to_date").into_owned());
+                    toasts.ok(t!("ui-messages-game_data_up_to_date").into_owned());
                 } else {
-                    toasts.warn(t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned());
+                    toasts.warn(t!("ui-messages-game_data_updates_available", count = updates.len()).into_owned());
                 }
                 self.cache.state.update(|state| state.updates = updates);
                 if clean {
@@ -226,9 +226,9 @@ impl Shell {
             CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
                 if clean {
-                    toasts.ok(t!("ui.messages.game_data_cache_valid").into_owned());
+                    toasts.ok(t!("ui-messages-game_data_cache_valid").into_owned());
                 } else {
-                    toasts.warn(t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned());
+                    toasts.warn(t!("ui-messages-game_data_cache_invalid", count = repair.len()).into_owned());
                 }
                 self.cache.state.update(|state| state.repair = repair);
                 if clean {
@@ -246,9 +246,9 @@ impl Shell {
                     });
                 }
                 if failed.is_empty() {
-                    toasts.ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned());
+                    toasts.ok(t!("ui-messages-game_data_builds_downloaded", count = fetched).into_owned());
                 } else {
-                    let said = t!("ui.messages.game_data_download_failed").into_owned();
+                    let said = t!("ui-messages-game_data_download_failed").into_owned();
                     self.say_failure(said.clone());
                     self.cache.state.update(|state| state.failure = Some(said));
                 }
@@ -341,10 +341,10 @@ where
 /// What the status bar calls `job`.
 fn job_name(job: CacheJob) -> String {
     match job {
-        CacheJob::Checking => t!("ui.app.status_cache_checking"),
-        CacheJob::Validating => t!("ui.app.status_cache_validating"),
-        CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
-        CacheJob::Planning => t!("ui.app.status_cache_planning"),
+        CacheJob::Checking => t!("ui-app-status_cache_checking"),
+        CacheJob::Validating => t!("ui-app-status_cache_validating"),
+        CacheJob::Downloading => t!("ui-app-status_cache_downloading"),
+        CacheJob::Planning => t!("ui-app-status_cache_planning"),
     }
     .into_owned()
 }

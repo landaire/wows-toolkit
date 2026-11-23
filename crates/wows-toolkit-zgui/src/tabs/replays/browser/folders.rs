@@ -21,7 +21,6 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::motion_preference;
-use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::paths::folder_name;
@@ -36,6 +35,7 @@ use wows_toolkit_viewmodel::replay_folders::FolderHistory;
 use wows_toolkit_viewmodel::replay_folders::PINNED_FOLDERS;
 use wows_toolkit_viewmodel::replay_folders::PinnedFolders;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -300,11 +300,11 @@ impl FolderTab {
 
     pub fn label(&self) -> String {
         match &self.source {
-            FolderSource::Install => t!("ui.replay_folders.install").into_owned(),
+            FolderSource::Install => t!("ui-replay_folders-install").into_owned(),
             FolderSource::Chosen(root) => folder_name(root),
-            FolderSource::Dropped { number: DropNumber::FIRST, .. } => t!("ui.replay_folders.dropped").into_owned(),
+            FolderSource::Dropped { number: DropNumber::FIRST, .. } => t!("ui-replay_folders-dropped").into_owned(),
             FolderSource::Dropped { number, .. } => {
-                t!("ui.replay_folders.dropped_numbered", number = number.0).into_owned()
+                t!("ui-replay_folders-dropped_numbered", number = number.0).into_owned()
             }
         }
     }
@@ -476,7 +476,7 @@ impl BrowserControl {
                 Err(err) => {
                     tracing::warn!("the pinned replay directories could not be read: {err}");
                     self.pins_saved.set(SavedList::Unreadable);
-                    self.shell.toasts().failed(t!("ui.replay_folders.pins_unreadable").into_owned());
+                    self.shell.toasts().failed(t!("ui-replay_folders-pins_unreadable").into_owned());
                 }
             }
         });
@@ -850,14 +850,14 @@ impl BrowserControl {
                 self.open_folder(root);
                 return;
             }
-            self.shell.toasts().warn(t!("ui.replay_folders.recent_missing", dir = shown_path(&root)).into_owned());
+            self.shell.toasts().warn(t!("ui-replay_folders-recent_missing", dir = shown_path(&root)).into_owned());
             self.forget_recent(&root);
         });
     }
 
     /// Asks for a directory and lists it.
     pub fn browse_folder(self) {
-        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.replay.open_directory"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-replay-open_directory"));
         self.spawn(async move {
             if let Some(directory) = self.shell.chosen_path(asked).await {
                 self.open_folder(directory);
@@ -1037,7 +1037,7 @@ impl BrowserControl {
             ListingEvent::WatchResumed => {
                 let folder = self.tab(id).map(|tab| tab.label()).unwrap_or_default();
                 self.shell.toasts().show(
-                    Notice::ok(t!("ui.replay_folders.watch_resumed", folder = folder).into_owned())
+                    Notice::ok(t!("ui-replay_folders-watch_resumed", folder = folder).into_owned())
                         .keyed(watch_toast_key(id)),
                 );
             }
@@ -1056,7 +1056,7 @@ impl BrowserControl {
         let folder = self.tab(id).map(|tab| tab.label()).unwrap_or_default();
         let notice = Notice::warn(watch_stopped_said(&folder, cause, next).join(" "))
             .keyed(watch_toast_key(id))
-            .action(t!("ui.replay_folders.restart_watch").into_owned(), move || self.restart_folder_watch(id));
+            .action(t!("ui-replay_folders-restart_watch").into_owned(), move || self.restart_folder_watch(id));
         let notice = match next {
             NextStep::GaveUp => notice.sticky(),
             NextStep::Retry { .. } => notice,
@@ -1077,17 +1077,17 @@ fn watch_toast_key(id: FolderId) -> ToastKey {
 
 /// What is said when a tab's watch stops: why, then what happens next.
 fn watch_stopped_said(folder: &str, cause: &WatchStopCause, next: NextStep) -> [String; 2] {
-    let stopped = t!("ui.replay_folders.watch_stopped", folder = folder, cause = cause.said()).into_owned();
+    let stopped = t!("ui-replay_folders-watch_stopped", folder = folder, cause = cause.said()).into_owned();
     let then = match next {
         NextStep::Retry { attempt, delay } => t!(
-            "ui.replay_folders.watch_restarting",
+            "ui-replay_folders-watch_restarting",
             seconds = delay.as_secs(),
             attempt = attempt.get(),
             attempts = RestartPolicy::ATTEMPTS.get()
         )
         .into_owned(),
         NextStep::GaveUp => {
-            t!("ui.replay_folders.watch_gave_up", attempts = RestartPolicy::ATTEMPTS.get()).into_owned()
+            t!("ui-replay_folders-watch_gave_up", attempts = RestartPolicy::ATTEMPTS.get()).into_owned()
         }
     };
 
@@ -1179,7 +1179,7 @@ fn folder_notice(control: BrowserControl) -> Option<AnyView> {
     match tab.state {
         FolderState::Listed => None,
         FolderState::Checking => {
-            let said = t!("ui.replay_folders.checking", dir = shown_path(&root)).into_owned();
+            let said = t!("ui-replay_folders-checking", dir = shown_path(&root)).into_owned();
             Some(AnyView::new(view! {
                 Loading(label = said, placement = LoadingPlacement::Top, attr:data-testid = "replay-folder-checking")
             }))
@@ -1187,24 +1187,24 @@ fn folder_notice(control: BrowserControl) -> Option<AnyView> {
         FolderState::Missing => {
             let hint = tab.pinned.then(|| {
                 view! {
-                    text(class = "wt-folder-notice__hint") {{t!("ui.replay_folders.missing_hint").into_owned()}}
+                    text(class = "wt-folder-notice__hint") {{t!("ui-replay_folders-missing_hint").into_owned()}}
                 }
             });
             let (label, act) = if tab.pinned {
                 (
-                    t!("ui.replay_folders.unpin").into_owned(),
+                    t!("ui-replay_folders-unpin").into_owned(),
                     UnsyncCallback::new(move |()| control.pin_folder(selected, false)),
                 )
             } else {
                 (
-                    t!("ui.replay_folders.close").into_owned(),
+                    t!("ui-replay_folders-close").into_owned(),
                     UnsyncCallback::new(move |()| control.close_folder(selected)),
                 )
             };
             Some(AnyView::new(view! {
                 column(class = "wt-folder-notice", attr:data-testid = "replay-folder-missing") {
                     AppIcon(glyph = Glyph::TriangleAlert, class = "wt-folder-notice__icon")
-                    text {{t!("ui.replay_folders.missing", dir = shown_path(&root)).into_owned()}}
+                    text {{t!("ui-replay_folders-missing", dir = shown_path(&root)).into_owned()}}
                     {hint.map(IntoView::into_view)}
                     Button(
                         size = ButtonSize::Sm,
@@ -1301,7 +1301,7 @@ fn FolderTabView(
                                 control(
                                     class = "wt-watch-dot wt-watch-dot--stopped",
                                     attr:data-testid = format!("replay-folder-watch-stopped-{}", id.0),
-                                    a11y:label = t!("ui.replay_folders.restart_watch").into_owned(),
+                                    a11y:label = t!("ui-replay_folders-restart_watch").into_owned(),
                                     on:click = move |ev| {
                                         ev.stop_propagation();
                                         control.restart_folder_watch(id);
@@ -1319,7 +1319,7 @@ fn FolderTabView(
                                 control(
                                     class = "wt-folder-tab__close",
                                     attr:data-testid = format!("replay-folder-close-{}", id.0),
-                                    a11y:label = t!("ui.replay_folders.close").into_owned(),
+                                    a11y:label = t!("ui-replay_folders-close").into_owned(),
                                     on:click = move |ev| {
                                         ev.stop_propagation();
                                         control.close_folder(id);
@@ -1348,9 +1348,9 @@ fn tab_menu(control: BrowserControl, id: FolderId) -> Option<AnyView> {
     let pins_ready = control.pins_saved.get() == SavedList::Read;
     let pin = (chosen && !(!tab.pinned && tab.state == FolderState::Missing)).then(|| {
         let (label, pinned) = if tab.pinned {
-            (t!("ui.replay_folders.unpin").into_owned(), false)
+            (t!("ui-replay_folders-unpin").into_owned(), false)
         } else {
-            (t!("ui.replay_folders.pin").into_owned(), true)
+            (t!("ui-replay_folders-pin").into_owned(), true)
         };
         view! {
             MenuItem(disabled = !pins_ready, on_select = UnsyncCallback::new(move |()| control.pin_folder(id, pinned))) {{label}}
@@ -1359,14 +1359,14 @@ fn tab_menu(control: BrowserControl, id: FolderId) -> Option<AnyView> {
     let restart = control.watch_stopped(id).then(|| {
         view! {
             MenuItem(on_select = UnsyncCallback::new(move |()| control.restart_folder_watch(id))) {
-                {t!("ui.replay_folders.restart_watch").into_owned()}
+                {t!("ui-replay_folders-restart_watch").into_owned()}
             }
         }
     });
     let close = closable.then(|| {
         view! {
             MenuItem(on_select = UnsyncCallback::new(move |()| control.close_folder(id))) {
-                {t!("ui.replay_folders.close").into_owned()}
+                {t!("ui-replay_folders-close").into_owned()}
             }
         }
     });
@@ -1375,7 +1375,7 @@ fn tab_menu(control: BrowserControl, id: FolderId) -> Option<AnyView> {
         {pin.map(IntoView::into_view)}
         {restart.map(IntoView::into_view)}
         MenuItem(on_select = UnsyncCallback::new(move |()| control.refresh_folder(id))) {
-            {t!("ui.replay_folders.refresh").into_owned()}
+            {t!("ui-replay_folders-refresh").into_owned()}
         }
         {close.map(IntoView::into_view)}
     }))
@@ -1394,14 +1394,14 @@ pub(super) fn folder_tooltip(control: BrowserControl, id: FolderId) -> String {
     // Only an opened directory is looked for or found gone, and it always has a path.
     let dir = || shown.clone().unwrap_or_default();
     match tab.state {
-        FolderState::Checking => return t!("ui.replay_folders.checking", dir = dir()).into_owned(),
-        FolderState::Missing => return t!("ui.replay_folders.missing", dir = dir()).into_owned(),
+        FolderState::Checking => return t!("ui-replay_folders-checking", dir = dir()).into_owned(),
+        FolderState::Missing => return t!("ui-replay_folders-missing", dir = dir()).into_owned(),
         FolderState::Listed => {}
     }
 
     let dropped = match &tab.source {
         FolderSource::Dropped { files, .. } => {
-            Some(t!("ui.replay_folders.dropped_count", count = files.len()).into_owned())
+            Some(t!("ui-replay_folders-dropped_count", count = files.len()).into_owned())
         }
         FolderSource::Install | FolderSource::Chosen(_) => None,
     };
@@ -1412,16 +1412,16 @@ pub(super) fn folder_tooltip(control: BrowserControl, id: FolderId) -> String {
             match state {
                 Some(WatchState::Stopped { cause, next }) => {
                     lines.extend(watch_stopped_said(&tab.label(), &cause, next));
-                    lines.push(t!("ui.replay_folders.watch_restart_hint").into_owned());
+                    lines.push(t!("ui-replay_folders-watch_restart_hint").into_owned());
                 }
-                _ => lines.push(t!("ui.replay_folders.watched").into_owned()),
+                _ => lines.push(t!("ui-replay_folders-watched").into_owned()),
             }
         }
-        ListingWatch::Unwatched => lines.push(t!("ui.replay_folders.unwatched").into_owned()),
+        ListingWatch::Unwatched => lines.push(t!("ui-replay_folders-unwatched").into_owned()),
     }
     let unseen = control.unseen(id);
     if control.selected.get() != id && unseen > 0 {
-        lines.push(t!("ui.replay_folders.unseen", count = unseen).into_owned());
+        lines.push(t!("ui-replay_folders-unseen", count = unseen).into_owned());
     }
 
     lines.join("\n")

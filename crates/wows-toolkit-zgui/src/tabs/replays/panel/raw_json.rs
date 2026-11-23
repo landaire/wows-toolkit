@@ -11,7 +11,7 @@ use std::rc::Rc;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::geom::DevicePx;
@@ -225,10 +225,10 @@ pub fn RawJsonPanel(content: Rc<str>) -> impl IntoView {
         query.with(|query| !query.is_empty()).then(|| format!("{shown}/{total}"))
     };
     let nothing_found = Signal::derive_local(move || found.with(|found| found.is_empty()));
-    let search_label = t!("ui.replay.debug.search").into_owned();
-    let previous_label = t!("ui.replay.debug.previous_match").into_owned();
+    let search_label = t!("ui-replay-debug-search").into_owned();
+    let previous_label = t!("ui-replay-debug-previous_match").into_owned();
     let previous_tip = previous_label.clone();
-    let next_label = t!("ui.replay.debug.next_match").into_owned();
+    let next_label = t!("ui-replay-debug-next_match").into_owned();
     let next_tip = next_label.clone();
 
     view! {
@@ -283,7 +283,7 @@ pub fn RawJsonPanel(content: Rc<str>) -> impl IntoView {
                     on:click = move |_| shell.copy_text(content.to_string())
                 ) {
                     AppIcon(glyph = wows_toolkit_icons::Glyph::Copy)
-                    text {{t!("ui.buttons.copy").into_owned()}}
+                    text {{t!("ui-buttons-copy").into_owned()}}
                 }
             }
             ScrollArea(class = "wt-rp-json__body", orientation = Orientation::Both) {

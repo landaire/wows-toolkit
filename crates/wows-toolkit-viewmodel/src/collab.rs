@@ -1,6 +1,6 @@
 //! What a collaborative session tells the reader.
 
-use rust_i18n::t;
+use wt_translations::t;
 
 /// What a session token is prefixed with, so a paste can be checked before it
 /// is sent anywhere.
@@ -65,16 +65,16 @@ impl SessionNotice {
 
     pub fn text(&self) -> String {
         match self {
-            Self::Started => t!("ui.messages.session_started").into_owned(),
-            Self::Connected => t!("ui.messages.connected_to_session").into_owned(),
-            Self::UserJoined { name } => t!("ui.messages.user_joined", name = name).into_owned(),
-            Self::UserLeft { name } => t!("ui.messages.user_left", name = name).into_owned(),
-            Self::UserTimedOut { name } => t!("ui.messages.user_timeout", name = name).into_owned(),
-            Self::HostOpenedReplay { name } => t!("ui.messages.host_opened_replay", name = name).into_owned(),
-            Self::HostClosedReplay => t!("ui.messages.host_closed_replay").into_owned(),
-            Self::Ended => t!("ui.messages.session_ended").into_owned(),
-            Self::Failed { reason } => t!("ui.messages.session_error", msg = reason).into_owned(),
-            Self::Rejected { reason } => t!("ui.messages.session_rejected", reason = reason).into_owned(),
+            Self::Started => t!("ui-messages-session_started").into_owned(),
+            Self::Connected => t!("ui-messages-connected_to_session").into_owned(),
+            Self::UserJoined { name } => t!("ui-messages-user_joined", name = name).into_owned(),
+            Self::UserLeft { name } => t!("ui-messages-user_left", name = name).into_owned(),
+            Self::UserTimedOut { name } => t!("ui-messages-user_timeout", name = name).into_owned(),
+            Self::HostOpenedReplay { name } => t!("ui-messages-host_opened_replay", name = name).into_owned(),
+            Self::HostClosedReplay => t!("ui-messages-host_closed_replay").into_owned(),
+            Self::Ended => t!("ui-messages-session_ended").into_owned(),
+            Self::Failed { reason } => t!("ui-messages-session_error", msg = reason).into_owned(),
+            Self::Rejected { reason } => t!("ui-messages-session_rejected", reason = reason).into_owned(),
         }
     }
 }
@@ -93,8 +93,8 @@ pub enum SessionFailure {
 impl SessionFailure {
     pub fn text(&self) -> String {
         match self {
-            Self::InvalidToken => t!("ui.collab.invalid_token", error = TOKEN_PREFIX).into_owned(),
-            Self::NoRuntime => t!("ui.collab.no_runtime").into_owned(),
+            Self::InvalidToken => t!("ui-collab-invalid_token", error = TOKEN_PREFIX).into_owned(),
+            Self::NoRuntime => t!("ui-collab-no_runtime").into_owned(),
             Self::Session(reason) => reason.clone(),
         }
     }

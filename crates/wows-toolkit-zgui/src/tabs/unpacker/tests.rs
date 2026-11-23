@@ -10,7 +10,6 @@ use std::time::Duration;
 use landaire_ui::Appearance;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
-use rust_i18n::t;
 use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
 use wowsunpack::vfs::FileSystem;
 use wowsunpack::vfs::MemoryFS;
@@ -19,6 +18,7 @@ use wowsunpack::vfs::SeekAndWrite;
 use wowsunpack::vfs::VfsMetadata;
 use wowsunpack::vfs::VfsPath;
 use wowsunpack::vfs::VfsResult;
+use wt_translations::t;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::prelude::GetUntracked;
@@ -437,7 +437,7 @@ fn a_filter_result_shows_its_folder() {
     let row = tab.window.by_test_id("unpacker-pkg-row-0").expect("the match has a row");
     tab.window.right_click(row).expect("the row takes a secondary click");
     tab.settle();
-    let label = t!("ui.unpacker.reveal_in_tree").into_owned();
+    let label = t!("ui-unpacker-reveal_in_tree").into_owned();
     let item = tab.window.by_role_and_label(Role::MenuItem, &label).expect("the menu offers the folder");
     tab.window.click(item).expect("the item can be pressed");
     tab.settle();
@@ -702,11 +702,11 @@ fn the_viewer_context_menu_selects_all_and_copies() {
     let text = tab.window.by_test_id("unpacker-viewer-text").expect("the XML opens as text");
     tab.window.right_click(text).expect("the text can be right-clicked");
     tab.settle();
-    let copy_label = t!("ui.buttons.copy").into_owned();
+    let copy_label = t!("ui-buttons-copy").into_owned();
     let copy = tab.window.by_role_and_label(Role::MenuItem, &copy_label).expect("the menu offers Copy");
     assert!(tab.window.a11y(copy).is_some_and(|state| state.disabled), "nothing is selected to copy");
 
-    let select_all_label = t!("ui.buttons.select_all").into_owned();
+    let select_all_label = t!("ui-buttons-select_all").into_owned();
     let select_all =
         tab.window.by_role_and_label(Role::MenuItem, &select_all_label).expect("the menu offers Select All");
     tab.window.click(select_all).expect("Select All can be chosen");

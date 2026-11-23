@@ -434,7 +434,7 @@ fn playing_walks_the_track_and_stops_at_its_end() {
     click(&mut window, "replay-renderer-play");
     assert_eq!(
         window.a11y(find(&window, "replay-renderer-play")).and_then(|state| state.label),
-        Some(rust_i18n::t!("ui.replay.renderer.pause").into_owned()),
+        Some(wt_translations::t!("ui-replay-renderer-pause").into_owned()),
         "a playing transport offers to pause"
     );
     window.advance(Duration::from_secs(5));
@@ -443,7 +443,7 @@ fn playing_walks_the_track_and_stops_at_its_end() {
     assert!(!session.playback.with_untracked(Playback::is_playing), "and it stops there");
     assert_eq!(
         window.a11y(find(&window, "replay-renderer-play")).and_then(|state| state.label),
-        Some(rust_i18n::t!("ui.replay.renderer.play").into_owned())
+        Some(wt_translations::t!("ui-replay-renderer-play").into_owned())
     );
 }
 
@@ -683,7 +683,7 @@ fn an_export_reports_its_progress_over_the_video() {
     window.advance(Duration::from_millis(16));
     assert!(window.by_test_id("replay-renderer-export-overlay").is_some(), "the wait for the encoder is shown");
     assert!(
-        window.by_label(&rust_i18n::t!("ui.renderer.preparing_export")).is_some(),
+        window.by_label(&wt_translations::t!("ui-renderer-preparing_export")).is_some(),
         "and named while there is nothing to measure"
     );
 
@@ -872,7 +872,7 @@ fn an_unreadable_battle_says_it_has_no_events() {
 
     click(&mut window, "replay-renderer-timeline-toggle");
     let said = window.texts_by_class("wt-renderer-timeline__said").concat();
-    assert_eq!(said, rust_i18n::t!("ui.replay.timeline_no_events"), "the timeline says so");
+    assert_eq!(said, wt_translations::t!("ui-replay-timeline_no_events"), "the timeline says so");
     assert!(is_disabled(&mut window, "replay-renderer-next-event"));
 }
 

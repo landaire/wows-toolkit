@@ -24,7 +24,6 @@ use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
 use landaire_ui::PanelRegistry;
 use landaire_ui::SplitAxis;
-use rust_i18n::t;
 use wows_replays::types::GameClock;
 use wows_toolkit_armor::load_model::ModelLoadRequest;
 use wows_toolkit_armor::load_model::ProblemReason;
@@ -52,6 +51,7 @@ use wows_toolkit_viewmodel::settings::XrayHighlight;
 use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::game_types::GameParamId;
+use wt_translations::t;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
@@ -946,7 +946,7 @@ impl ArmorWorkspace {
 
         self.spawn(async move {
             let _job = services.jobs.start(Job {
-                name: t!("ui.armor.loading_named_ship", ship = display_name).into_owned(),
+                name: t!("ui-armor-loading_named_ship", ship = display_name).into_owned(),
                 progress: None,
             });
             let asked = request.clone();
@@ -995,7 +995,7 @@ impl ArmorWorkspace {
 
         self.spawn(async move {
             let _job = services.jobs.start(Job {
-                name: t!("ui.armor.loading_named_ship", ship = display_name).into_owned(),
+                name: t!("ui-armor-loading_named_ship", ship = display_name).into_owned(),
                 progress: None,
             });
             let assets = Arc::clone(&bundle.assets);

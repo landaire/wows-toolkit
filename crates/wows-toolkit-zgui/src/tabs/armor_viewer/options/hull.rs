@@ -9,7 +9,6 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_armor::visibility::TriState;
@@ -19,6 +18,7 @@ use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::game_params::keys::ComponentType;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -111,7 +111,7 @@ pub fn config_body(cx: &SectionCx) -> Option<AnyView> {
 fn no_choices() -> AnyView {
     AnyView::new(view! {
         text(class = "wt-armor-hull__dim", attr:data-testid = "armor-hull-no-choices") {{
-            t!("ui.armor.option_tabs.no_choices").into_owned()
+            t!("ui-armor-option_tabs-no_choices").into_owned()
         }}
     })
 }
@@ -133,7 +133,7 @@ pub fn parts_body(cx: &SectionCx) -> Option<AnyView> {
         let query = RailFilter::new(&part_filter.get());
         query.is_active().then(|| match_count(&query, &counted))
     });
-    let field = tree_field("armor-part-filter", part_filter, t!("ui.armor.filter_parts").into_owned(), field_matches);
+    let field = tree_field("armor-part-filter", part_filter, t!("ui-armor-filter_parts").into_owned(), field_matches);
     let tree_rows = {
         let filter = filter.clone();
         let groups = Rc::clone(&groups);
@@ -153,7 +153,7 @@ pub fn parts_body(cx: &SectionCx) -> Option<AnyView> {
     };
     let opaque = filtered_checkbox(
         "armor-hull-vis-opaque".to_owned(),
-        t!("ui.armor.opaque").into_owned(),
+        t!("ui-armor-opaque").into_owned(),
         Signal::derive_local(move || viewport.hull_opaque()),
         false,
         &filter,
@@ -188,13 +188,13 @@ pub fn parts_body(cx: &SectionCx) -> Option<AnyView> {
                 size = ButtonSize::Xs,
                 attr:data-testid = "armor-hull-vis-all",
                 on:click = move |_| set_meshes(viewport, &all_names, true)
-            ) {{t!("ui.armor.all_btn").into_owned()}}
+            ) {{t!("ui-armor-all_btn").into_owned()}}
             Button(
                 variant = ButtonVariant::Outline,
                 size = ButtonSize::Xs,
                 attr:data-testid = "armor-hull-vis-none",
                 on:click = move |_| set_meshes(viewport, &none_names, false)
-            ) {{t!("ui.armor.none_btn").into_owned()}}
+            ) {{t!("ui-armor-none_btn").into_owned()}}
             {opaque}
         }
     };
@@ -241,7 +241,7 @@ fn choice_row(heading: MarkedLabel, choices: Vec<AnyView>) -> AnyView {
 /// hull.
 fn hull_upgrade_row(viewport: ArmorViewportState, armor: &LoadedShipArmor, filter: &RailFilter) -> Option<AnyView> {
     let stock_key = armor.hull_upgrade_names[0].0.clone();
-    let heading = t!("ui.armor.upgrade").into_owned();
+    let heading = t!("ui-armor-upgrade").into_owned();
     let inner = within(filter, &heading);
     let kept: Vec<&(String, String)> =
         armor.hull_upgrade_names.iter().filter(|(_, label)| inner.keeps(label)).collect();
@@ -330,10 +330,10 @@ fn module_alternative_row(
 
 /// The hull level of detail choices, 0 labelled as the highest.
 fn lod_row(viewport: ArmorViewportState, armor: &LoadedShipArmor, filter: &RailFilter) -> Option<AnyView> {
-    let heading = t!("ui.armor.lod").into_owned();
+    let heading = t!("ui-armor-lod").into_owned();
     let inner = within(filter, &heading);
     let kept: Vec<(usize, String)> = (0..armor.hull_lod_count)
-        .map(|lod| (lod, if lod == 0 { t!("ui.armor.lod_highest").into_owned() } else { lod.to_string() }))
+        .map(|lod| (lod, if lod == 0 { t!("ui-armor-lod_highest").into_owned() } else { lod.to_string() }))
         .filter(|(_, label)| inner.keeps(label))
         .collect();
     if kept.is_empty() {
@@ -368,11 +368,11 @@ fn lod_row(viewport: ArmorViewportState, armor: &LoadedShipArmor, filter: &RailF
 /// filtering only the schemes whose names match are kept, each group held open; `None` when none
 /// match.
 fn camo_picker(viewport: ArmorViewportState, armor: &LoadedShipArmor, filter: &RailFilter) -> Option<AnyView> {
-    let heading = t!("ui.armor.camouflage").into_owned();
+    let heading = t!("ui-armor-camouflage").into_owned();
     let inner = within(filter, &heading);
     let mut rows: Vec<AnyView> = Vec::new();
 
-    let none_label = t!("ui.armor.camo_none").into_owned();
+    let none_label = t!("ui-armor-camo_none").into_owned();
     if inner.keeps(&none_label) {
         rows.push(camo_choice(viewport, "armor-camo-none".to_owned(), inner.marked(none_label), None));
     }
@@ -388,9 +388,9 @@ fn camo_picker(viewport: ArmorViewportState, armor: &LoadedShipArmor, filter: &R
     }
 
     for (origin, key) in [
-        (CamoOrigin::Universal, "ui.armor.camo_group_universal"),
-        (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
-        (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
+        (CamoOrigin::Universal, "ui-armor-camo_group_universal"),
+        (CamoOrigin::Expendable, "ui-armor-camo_group_expendable"),
+        (CamoOrigin::LegacyScan, "ui-armor-camo_group_other"),
     ] {
         let label = t!(key).into_owned();
         let group_filter = within(&inner, &label);

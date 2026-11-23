@@ -4,10 +4,10 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use rust_i18n::t;
 use wows_toolkit_armor::splash;
 use wows_toolkit_armor::visibility::SidebarHighlightKey;
 use wows_toolkit_armor::visibility::TriState;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -133,13 +133,13 @@ fn bulk_switches(viewport: ArmorViewportState) -> AnyView {
                     size = ButtonSize::Xs,
                     attr:data-testid = "armor-splash-zones-all",
                     on:click = move |_| viewport.set_every_splash_box_checked(true)
-                ) {{t!("ui.armor.all_btn").into_owned()}}
+                ) {{t!("ui-armor-all_btn").into_owned()}}
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Xs,
                     attr:data-testid = "armor-splash-zones-none",
                     on:click = move |_| viewport.set_every_splash_box_checked(false)
-                ) {{t!("ui.armor.none_btn").into_owned()}}
+                ) {{t!("ui-armor-none_btn").into_owned()}}
             }
             box(class = "wt-armor-splash__rule") {}
         }

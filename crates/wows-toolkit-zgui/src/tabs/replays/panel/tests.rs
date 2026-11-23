@@ -13,7 +13,6 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
@@ -39,6 +38,7 @@ use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wowsunpack::rating_scope::RatingScope;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -279,7 +279,7 @@ fn the_match_line_dates_the_battle_and_its_hover_says_how_long_ago() {
     window.hover(date).expect("the date has a box");
     window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
     let age = relative_age_text(played_at, Timestamp::now());
-    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui.replay.match_age", age = age).into_owned()]);
+    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui-replay-match_age", age = age).into_owned()]);
 }
 
 /// The Replays tab's table slot draws the battle's player table, whose rows open the expanded
@@ -344,7 +344,7 @@ fn an_unrated_battle_shows_a_dash_in_place_of_the_pr_badge() {
     }
     model.populate_personal_ratings(&fixture_personal_rating_data());
     assert!(model.rows.iter().all(|row| row.personal_rating.is_none()), "an unrated battle is not rated");
-    let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+    let hover = t!("ui-personal_rating-unrated_hover").into_owned();
     let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
 
     let tile = window.by_test_id(PR_TILE_ID).expect("the PR tile is shown");
@@ -387,7 +387,7 @@ fn the_mc_badge_reports_the_self_rows_match_contribution_and_explains_it() {
 fn an_unrated_battles_mc_badge_is_a_dash_that_says_why() {
     let mut model = rated();
     model.match_contribution_withheld = Some(MatchContributionWithheld::UnratedBattle);
-    let explained = t!("ui.rating.mc_unrated_battle_type").into_owned();
+    let explained = t!("ui-rating-mc_unrated_battle_type").into_owned();
     let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
 
     let tile = window.by_test_id(BI_TILE_ID).expect("the MC tile is shown");
@@ -474,7 +474,7 @@ fn the_chat_toggle_explains_itself_only_when_off() {
     let toggle = window.by_test_id("replay-chat-toggle").expect("the toggle is shown");
     window.hover(toggle).expect("the toggle takes the pointer");
     window.advance(past_delay);
-    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui.replay.no_chat").into_owned()]);
+    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui-replay-no_chat").into_owned()]);
 
     let mut model = model_at_expected_values();
     model.chat = vec![chat_message()];
@@ -500,7 +500,7 @@ fn a_rows_raw_metadata_opens_in_the_side_panel_and_closes() {
     assert!(window.by_attribute("data-icon", "panel-right-close").is_some(), "the close shows the panel going right");
     window.hover(close).expect("the close takes the pointer");
     window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
-    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui.replay.close_side_panel").into_owned()]);
+    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui-replay-close_side_panel").into_owned()]);
 
     window.click(close).expect("clickable");
     window.advance(Duration::from_millis(600));
@@ -909,7 +909,7 @@ fn the_timeline_retries_a_failed_read_and_copies_an_event() {
     window.click(row).expect("clickable");
     window.advance(Duration::from_millis(300));
     let toasts = window.texts_by_class("lui-toasts").concat();
-    assert!(toasts.contains(&t!("ui.replay.timeline_event_copied").into_owned()), "{toasts:?}");
+    assert!(toasts.contains(&t!("ui-replay-timeline_event_copied").into_owned()), "{toasts:?}");
 }
 
 /// A filter set while the events are still being read holds once they land.
@@ -1014,7 +1014,7 @@ fn the_actions_menu_opens_the_timeline_beside_the_table() {
     window.advance(Duration::from_millis(600));
     let titles = window.texts_by_class("wt-rp-side__title");
     assert!(
-        titles.contains(&t!("ui.replay.debug.player_metadata").into_owned()),
+        titles.contains(&t!("ui-replay-debug-player_metadata").into_owned()),
         "the table's row opened its metadata: {titles:?}"
     );
 }

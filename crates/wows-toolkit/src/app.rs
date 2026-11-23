@@ -1,4 +1,3 @@
-use rust_i18n::t;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -24,6 +23,7 @@ use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::TabStyle;
 use egui_dock::TabViewer;
+use wt_translations::t;
 
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
@@ -182,11 +182,11 @@ fn replay_tab_search_scope(
 /// caller and a test can see whether it is enabled.
 fn replay_search_menu_entry(ui: &mut Ui, scope: TabSearchScope) -> egui::Response {
     let enabled = matches!(scope, TabSearchScope::Source(_));
-    let response = ui.add_enabled(enabled, egui::Button::new(t!("ui.tabs.search_these_replays")));
+    let response = ui.add_enabled(enabled, egui::Button::new(t!("ui-tabs-search_these_replays")));
     if enabled {
         response
     } else {
-        response.on_disabled_hover_text(t!("ui.tabs.search_these_replays_unavailable").into_owned())
+        response.on_disabled_hover_text(t!("ui-tabs-search_these_replays_unavailable").into_owned())
     }
 }
 
@@ -212,7 +212,7 @@ impl ToolkitTabViewer<'_> {
     /// root, which is the only thing distinguishing two directory tabs from
     /// each other.
     fn tab_title(&self, tab: &Tab) -> String {
-        use rust_i18n::t;
+        use wt_translations::t;
         if let Tab::Replays(id) = tab
             && *id != WorkspaceId::LIVE
         {
@@ -227,7 +227,7 @@ impl ToolkitTabViewer<'_> {
                 .filter(|title| !title.is_empty());
             let title = match named {
                 Some(title) => title,
-                None => t!("ui.tabs.replay_directory").into_owned(),
+                None => t!("ui-tabs-replay_directory").into_owned(),
             };
             return wt_translations::icon_t(icons::FOLDER_OPEN, &title);
         }
@@ -240,22 +240,22 @@ impl ToolkitTabViewer<'_> {
                 .map(|pane| crate::ui::replay_parser::shorten_root(&pane.root))
                 .filter(|dir| !dir.is_empty());
             let title = match named {
-                Some(dir) => t!("ui.tabs.directory_stats", dir = dir).into_owned(),
-                None => t!("ui.tabs.stats").into_owned(),
+                Some(dir) => t!("ui-tabs-directory_stats", dir = dir).into_owned(),
+                None => t!("ui-tabs-stats").into_owned(),
             };
             return wt_translations::icon_t(icons::CHART_BAR, &title);
         }
         let (icon, key) = match tab {
-            Tab::Unpacker => (icons::ARCHIVE, "ui.tabs.unpacker"),
-            Tab::Settings => (icons::GEAR_FINE, "ui.tabs.settings"),
-            Tab::Replays(_) => (icons::MAGNIFYING_GLASS, "ui.tabs.replay_parser"),
-            Tab::PlayerTracker => (icons::DETECTIVE, "ui.tabs.player_tracker"),
-            Tab::ModManager => (icons::WRENCH, "ui.tabs.mod_manager"),
-            Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
-            Tab::Stats | Tab::DirectoryStats(_) => (icons::CHART_BAR, "ui.tabs.stats"),
-            Tab::Search => (icons::MAGNIFYING_GLASS, "ui.tabs.search"),
+            Tab::Unpacker => (icons::ARCHIVE, "ui-tabs-unpacker"),
+            Tab::Settings => (icons::GEAR_FINE, "ui-tabs-settings"),
+            Tab::Replays(_) => (icons::MAGNIFYING_GLASS, "ui-tabs-replay_parser"),
+            Tab::PlayerTracker => (icons::DETECTIVE, "ui-tabs-player_tracker"),
+            Tab::ModManager => (icons::WRENCH, "ui-tabs-mod_manager"),
+            Tab::ArmorViewer => (icons::SHIELD, "ui-tabs-armor_viewer"),
+            Tab::Stats | Tab::DirectoryStats(_) => (icons::CHART_BAR, "ui-tabs-stats"),
+            Tab::Search => (icons::MAGNIFYING_GLASS, "ui-tabs-search"),
             #[cfg(all(feature = "launcher", target_os = "linux"))]
-            Tab::Launcher => (icons::ROCKET_LAUNCH, "ui.tabs.launcher"),
+            Tab::Launcher => (icons::ROCKET_LAUNCH, "ui-tabs-launcher"),
         };
         wt_translations::icon_t(icon, &t!(key))
     }
@@ -343,7 +343,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             && ui
                 .add_enabled(
                     self.tab_state.build_cache.is_some(),
-                    egui::Button::new(t!("ui.stats.open_directory_stats")),
+                    egui::Button::new(t!("ui-stats-open_directory_stats")),
                 )
                 .clicked()
         {
@@ -639,7 +639,7 @@ enum DownloadPromptAction {
 /// The window the offer is drawn in, shared with the layout test so that what
 /// the test measures is the window the user sees.
 fn download_prompt_window() -> egui::Window<'static> {
-    egui::Window::new(t!("ui.windows.download_game_data"))
+    egui::Window::new(t!("ui-windows-download_game_data"))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -654,16 +654,16 @@ fn draw_download_prompt(
     let mut action = DownloadPromptAction::None;
 
     ui.set_width(size.width);
-    ui.label(t!("ui.dialogs.download_game_data_intro"));
+    ui.label(t!("ui-dialogs-download_game_data_intro"));
     ui.add_space(8.0);
 
     // Ticking dozens of rows one at a time is not an interaction.
     if prompt.candidates.len() > 1 {
         ui.horizontal(|ui| {
-            if ui.add_enabled(prompt.can_check_all(), egui::Button::new(t!("ui.buttons.check_all"))).clicked() {
+            if ui.add_enabled(prompt.can_check_all(), egui::Button::new(t!("ui-buttons-check_all"))).clicked() {
                 prompt.set_all_selectable(true);
             }
-            if ui.add_enabled(prompt.can_uncheck_all(), egui::Button::new(t!("ui.buttons.uncheck_all"))).clicked() {
+            if ui.add_enabled(prompt.can_uncheck_all(), egui::Button::new(t!("ui-buttons-uncheck_all"))).clicked() {
                 prompt.set_all_selectable(false);
             }
         });
@@ -675,13 +675,13 @@ fn draw_download_prompt(
             ui.horizontal(|ui| {
                 let selectable = candidate.is_selectable();
                 ui.add_enabled(selectable, egui::Checkbox::without_text(&mut candidate.selected));
-                ui.label(t!("ui.dialogs.download_build_row", version = &candidate.version, build = candidate.build));
+                ui.label(t!("ui-dialogs-download_build_row", version = &candidate.version, build = candidate.build));
                 if let Some(count) = candidate.replays_needing {
-                    ui.label(RichText::new(t!("ui.dialogs.download_replays_needing", count = count)).weak());
+                    ui.label(RichText::new(t!("ui-dialogs-download_replays_needing", count = count)).weak());
                 }
                 let availability = match &candidate.availability {
                     Some(availability) => availability_label(availability),
-                    None => t!("ui.dialogs.download_availability_resolving").into_owned(),
+                    None => t!("ui-dialogs-download_availability_resolving").into_owned(),
                 };
                 // Truncated rather than wrapped, so a long availability line
                 // cannot widen the dialog back out.
@@ -695,11 +695,11 @@ fn draw_download_prompt(
         DownloadPlanState::Idle | DownloadPlanState::Planning => {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(t!("ui.dialogs.download_plan_pending"));
+                ui.label(t!("ui-dialogs-download_plan_pending"));
             });
         }
         DownloadPlanState::Ready(plan) => {
-            ui.label(t!("ui.dialogs.download_objects_to_fetch", count = plan.unique_missing_objects));
+            ui.label(t!("ui-dialogs-download_objects_to_fetch", count = plan.unique_missing_objects));
         }
         DownloadPlanState::Failed(message) => {
             ui.label(RichText::new(message.as_str()).color(ui.sem().error));
@@ -710,16 +710,16 @@ fn draw_download_prompt(
     ui.horizontal(|ui| {
         let ready = matches!(prompt.plan, DownloadPlanState::Ready(_));
         let can_download = ready && prompt.candidates.iter().any(|c| c.is_downloadable());
-        if ui.add_enabled(can_download, egui::Button::new(t!("ui.buttons.download"))).clicked() {
+        if ui.add_enabled(can_download, egui::Button::new(t!("ui-buttons-download"))).clicked() {
             action = DownloadPromptAction::Download;
         }
         // Without this the dialog is a dead end after a network blip: nothing
         // is resolved, so every checkbox is disabled and no selection change
         // can ask the planner again.
-        if prompt.can_retry() && ui.button(t!("ui.buttons.retry")).clicked() {
+        if prompt.can_retry() && ui.button(t!("ui-buttons-retry")).clicked() {
             action = DownloadPromptAction::Retry;
         }
-        if ui.button(t!("ui.buttons.dismiss")).clicked() {
+        if ui.button(t!("ui-buttons-dismiss")).clicked() {
             action = DownloadPromptAction::Dismiss;
         }
     });
@@ -784,10 +784,10 @@ impl DownloadCandidate {
 /// and rendering them alike states the wrong one.
 const fn availability_key(availability: &RemoteAvailability) -> &'static str {
     match availability {
-        RemoteAvailability::Exact => "ui.dialogs.download_availability_exact",
-        RemoteAvailability::Nearest { .. } => "ui.dialogs.download_availability_nearest",
-        RemoteAvailability::Unpublished => "ui.dialogs.download_availability_unpublished",
-        RemoteAvailability::Unreachable => "ui.dialogs.download_availability_unreachable",
+        RemoteAvailability::Exact => "ui-dialogs-download_availability_exact",
+        RemoteAvailability::Nearest { .. } => "ui-dialogs-download_availability_nearest",
+        RemoteAvailability::Unpublished => "ui-dialogs-download_availability_unpublished",
+        RemoteAvailability::Unreachable => "ui-dialogs-download_availability_unreachable",
     }
 }
 
@@ -963,7 +963,7 @@ impl GameDataDownloadPrompt {
             return;
         }
         if matches!(self.plan, DownloadPlanState::Planning) {
-            self.plan = DownloadPlanState::Failed(t!("ui.dialogs.download_plan_failed").into_owned());
+            self.plan = DownloadPlanState::Failed(t!("ui-dialogs-download_plan_failed").into_owned());
         }
     }
 
@@ -1376,9 +1376,10 @@ impl WowsToolkitApp {
         crate::ui::theme::apply(&cc.egui_ctx, state.tab_state.persisted.read().settings.app.theme);
         state.tab_state.active_theme = cc.egui_ctx.theme();
 
-        // Apply locale to rust-i18n
-        if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale {
-            rust_i18n::set_locale(locale);
+        if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale
+            && let Err(error) = wt_translations::set_locale(locale)
+        {
+            tracing::warn!(%error, "keeping the default interface language");
         }
 
         // Check if the application panicked
@@ -1733,7 +1734,7 @@ impl WowsToolkitApp {
                         if !shown_replay_spinner {
                             shown_replay_spinner = true;
                             ui.spinner();
-                            ui.label(t!("ui.labels.loading_replays", count = pending_replay_count));
+                            ui.label(t!("ui-labels-loading_replays", count = pending_replay_count));
                         }
                         task.check_completion(ui.ctx())
                     } else if matches!(task.kind, BackgroundTaskKind::DownloadingGameData { .. })
@@ -1744,11 +1745,11 @@ impl WowsToolkitApp {
                             if download_total > 0 {
                                 ui.add(
                                     egui::ProgressBar::new(download_done as f32 / download_total as f32)
-                                        .text(t!("ui.messages.downloading_game_data")),
+                                        .text(t!("ui-messages-downloading_game_data")),
                                 );
                             } else {
                                 ui.spinner();
-                                ui.label(t!("ui.messages.downloading_game_data"));
+                                ui.label(t!("ui-messages-downloading_game_data"));
                             }
                         }
                         task.check_completion(ui.ctx())
@@ -1898,7 +1899,7 @@ impl WowsToolkitApp {
                 .collect();
 
             if let Some(rx) = &self.tab_state.unpacker_progress {
-                if ui.button(t!("ui.buttons.stop")).clicked() {
+                if ui.button(t!("ui-buttons-stop")).clicked() {
                     UNPACKER_STOP.store(true, Ordering::Relaxed);
                 }
                 let mut done = false;
@@ -1984,11 +1985,11 @@ impl WowsToolkitApp {
                     self.latest_release = Some(*release);
                 }
                 NetworkResult::AppUpToDate => {
-                    self.tab_state.toasts.lock().success(t!("ui.messages.app_up_to_date"));
+                    self.tab_state.toasts.lock().success(t!("ui-messages-app_up_to_date"));
                 }
                 NetworkResult::AppUpdateCheckFailed(msg) => {
                     warn!("App update check failed: {}", msg);
-                    self.tab_state.toasts.lock().error(t!("ui.messages.update_check_failed"));
+                    self.tab_state.toasts.lock().error(t!("ui-messages-update_check_failed"));
                 }
                 NetworkResult::ConstantsFetched { data, commit } => {
                     wows_toolkit_viewmodel::bug_report::record_constants_fetch(
@@ -2026,7 +2027,7 @@ impl WowsToolkitApp {
                     );
                     if !self.constants_update_error_shown {
                         self.constants_update_error_shown = true;
-                        self.tab_state.toasts.lock().error(t!("ui.messages.constants_fetch_failed")).duration(None);
+                        self.tab_state.toasts.lock().error(t!("ui-messages-constants_fetch_failed")).duration(None);
                     }
                 }
                 NetworkResult::PersonalRatingDataFetched(data) => {
@@ -2210,10 +2211,10 @@ impl WowsToolkitApp {
                     self.tab_state.live_workspace.set_replay_files(replays);
                     self.tab_state.browser_state.reset_filters();
 
-                    self.tab_state.toasts.lock().success(t!("ui.messages.game_data_loaded"));
+                    self.tab_state.toasts.lock().success(t!("ui-messages-game_data_loaded"));
 
                     if no_replays {
-                        self.tab_state.toasts.lock().warning(t!("ui.messages.no_replays_detected"));
+                        self.tab_state.toasts.lock().warning(t!("ui-messages-no_replays_detected"));
                     }
 
                     self.check_constants_version_mismatch();
@@ -2221,11 +2222,11 @@ impl WowsToolkitApp {
                 BackgroundTaskCompletion::BuildDataLoaded { build } => {
                     self.tab_state.selected_browser_build = build;
                     self.tab_state.browser_state.reset_filters();
-                    self.tab_state.toasts.lock().success(t!("ui.messages.build_loaded", build = build));
+                    self.tab_state.toasts.lock().success(t!("ui-messages-build_loaded", build = build));
                 }
                 BackgroundTaskCompletion::GameDataDownloaded { downloaded, failures } => {
                     for (requested_build, build) in &downloaded {
-                        self.tab_state.toasts.lock().success(t!("ui.messages.game_data_downloaded", build = build));
+                        self.tab_state.toasts.lock().success(t!("ui-messages-game_data_downloaded", build = build));
 
                         // The data that was missing is now on disk, so an
                         // earlier failure to find it says nothing about this
@@ -2247,7 +2248,7 @@ impl WowsToolkitApp {
                         self.tab_state
                             .toasts
                             .lock()
-                            .error(t!("ui.messages.game_data_build_download_failed", build = build));
+                            .error(t!("ui-messages-game_data_build_download_failed", build = build));
                     }
 
                     // Reopen the replay that triggered the download. Attempted
@@ -2275,13 +2276,13 @@ impl WowsToolkitApp {
                         // can short-circuit without per-build requests.
                         self.tab_state.persisted.write().settings.game.game_data_repo_commit = Some(tip);
                         self.tab_state.game_data_updates.clear();
-                        self.tab_state.toasts.lock().success(t!("ui.messages.game_data_up_to_date"));
+                        self.tab_state.toasts.lock().success(t!("ui-messages-game_data_up_to_date"));
                     } else {
                         // Leave the stored commit untouched until the user updates,
                         // so a later check re-detects these builds.
                         let count = updates.len();
                         self.tab_state.game_data_updates = updates;
-                        self.tab_state.toasts.lock().info(t!("ui.messages.game_data_updates_available", count = count));
+                        self.tab_state.toasts.lock().info(t!("ui-messages-game_data_updates_available", count = count));
                     }
                 }
                 BackgroundTaskCompletion::GameDataValidated { tip, builds } => {
@@ -2302,11 +2303,11 @@ impl WowsToolkitApp {
                         // tip so a later update check can short-circuit.
                         self.tab_state.persisted.write().settings.game.game_data_repo_commit = Some(tip);
                         self.tab_state.game_data_repair.clear();
-                        self.tab_state.toasts.lock().success(t!("ui.messages.game_data_cache_valid"));
+                        self.tab_state.toasts.lock().success(t!("ui-messages-game_data_cache_valid"));
                     } else {
                         let count = repair.len();
                         self.tab_state.game_data_repair = repair;
-                        self.tab_state.toasts.lock().warning(t!("ui.messages.game_data_cache_invalid", count = count));
+                        self.tab_state.toasts.lock().warning(t!("ui-messages-game_data_cache_invalid", count = count));
                     }
                 }
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
@@ -2362,7 +2363,7 @@ impl WowsToolkitApp {
                                 self.focus_tab(&Tab::Replays(self.tab_state.active_workspace_id()));
                             }
                         }
-                        self.tab_state.toasts.lock().success(t!("ui.messages.replay_loaded"));
+                        self.tab_state.toasts.lock().success(t!("ui-messages-replay_loaded"));
                         self.try_update_constants();
                     }
                 }
@@ -2410,12 +2411,12 @@ impl WowsToolkitApp {
                     self.tab_state.search_tab.note_reindex_completed(indexed);
                     if indexed > 0 {
                         self.tab_state.toasts.lock().success(t!(
-                            "ui.messages.replays_indexed",
+                            "ui-messages-replays_indexed",
                             indexed = indexed,
                             total = total
                         ));
                     } else {
-                        self.tab_state.toasts.lock().info(t!("ui.messages.replays_already_indexed", total = total));
+                        self.tab_state.toasts.lock().info(t!("ui-messages-replays_already_indexed", total = total));
                     }
                 }
                 BackgroundTaskCompletion::DirectoryIngested { workspace, source, failures } => {
@@ -2449,7 +2450,7 @@ impl WowsToolkitApp {
                             self.tab_state
                                 .toasts
                                 .lock()
-                                .warning(t!("ui.messages.directory_replays_skipped", skipped = skipped));
+                                .warning(t!("ui-messages-directory_replays_skipped", skipped = skipped));
                         }
 
                         // Listed, but with no stats behind their rows, so the
@@ -2459,7 +2460,7 @@ impl WowsToolkitApp {
                             self.tab_state
                                 .toasts
                                 .lock()
-                                .warning(t!("ui.messages.directory_replays_not_indexed", count = failures.not_indexed));
+                                .warning(t!("ui-messages-directory_replays_not_indexed", count = failures.not_indexed));
                         }
                     }
                 }
@@ -3249,7 +3250,7 @@ impl WowsToolkitApp {
                 self.tab_state
                     .toasts
                     .lock()
-                    .error(t!("ui.messages.twitch_token_invalid"))
+                    .error(t!("ui-messages-twitch_token_invalid"))
                     .duration(None)
                     .closable(true);
             }
@@ -3262,23 +3263,23 @@ impl WowsToolkitApp {
                 ctx.memory(|m| m.focused() == Some(crate::tab_state::TabState::wows_dir_field_id()));
             if should_arm_wows_dir_error(wows_dir_invalid, wows_dir_field_focused, &mut self.shown_wows_dir_error) {
                 error!("World of Warships directory is not valid");
-                self.tab_state.toasts.lock().error(t!("ui.messages.wows_dir_invalid")).duration(None).closable(true);
+                self.tab_state.toasts.lock().error(t!("ui-messages-wows_dir_invalid")).duration(None).closable(true);
             }
 
             self.tab_state.settings_needs_attention = wows_dir_invalid || twitch_token_failed;
         }
 
         if self.build_consent_window_open {
-            egui::Window::new(t!("ui.windows.build_consent")).collapsible(false).show(ctx, |ui| {
-                ui.label(t!("ui.dialogs.build_consent_message"));
+            egui::Window::new(t!("ui-windows-build_consent")).collapsible(false).show(ctx, |ui| {
+                ui.label(t!("ui-dialogs-build_consent_message"));
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.buttons.send_replays")).clicked() {
+                    if ui.button(t!("ui-buttons-send_replays")).clicked() {
                         self.set_data_sharing_choice(DataSharingMode::Replays);
                     }
-                    if ui.button(t!("ui.buttons.send_build_data")).clicked() {
+                    if ui.button(t!("ui-buttons-send_build_data")).clicked() {
                         self.set_data_sharing_choice(DataSharingMode::BuildData);
                     }
-                    if ui.button(t!("ui.buttons.send_nothing")).clicked() {
+                    if ui.button(t!("ui-buttons-send_nothing")).clicked() {
                         self.set_data_sharing_choice(DataSharingMode::Off);
                     }
                 });
@@ -3286,10 +3287,10 @@ impl WowsToolkitApp {
         }
 
         if self.replay_migration_window_open {
-            egui::Window::new(t!("ui.windows.replay_migration")).collapsible(false).show(ctx, |ui| {
-                ui.label(t!("ui.dialogs.replay_migration_message"));
+            egui::Window::new(t!("ui-windows-replay_migration")).collapsible(false).show(ctx, |ui| {
+                ui.label(t!("ui-dialogs-replay_migration_message"));
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.buttons.switch_to_replays")).clicked() {
+                    if ui.button(t!("ui-buttons-switch_to_replays")).clicked() {
                         self.replay_migration_window_open = false;
                         {
                             let mut p = self.tab_state.persisted.write();
@@ -3297,7 +3298,7 @@ impl WowsToolkitApp {
                             p.settings.integrations.data_sharing_mode = DataSharingMode::Replays;
                         }
                     }
-                    if ui.button(t!("ui.buttons.keep_current")).clicked() {
+                    if ui.button(t!("ui-buttons-keep_current")).clicked() {
                         self.replay_migration_window_open = false;
                         self.tab_state.persisted.write().settings.app.replay_consent_prompt_shown = true;
                     }
@@ -3310,10 +3311,10 @@ impl WowsToolkitApp {
         }
 
         if self.refresh_persisted_data_window_open {
-            egui::Window::new(t!("ui.windows.refresh_persisted_data")).collapsible(false).show(ctx, |ui| {
-                ui.label(t!("ui.dialogs.refresh_persisted_data_message"));
+            egui::Window::new(t!("ui-windows-refresh_persisted_data")).collapsible(false).show(ctx, |ui| {
+                ui.label(t!("ui-dialogs-refresh_persisted_data_message"));
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.buttons.refresh_persisted_data_confirm")).clicked() {
+                    if ui.button(t!("ui-buttons-refresh_persisted_data_confirm")).clicked() {
                         self.refresh_persisted_data_window_open = false;
                         if let Some(deps) = crate::task::ReconcileIndexDeps::from_tab_state(&self.tab_state) {
                             update_background_task!(
@@ -3326,7 +3327,7 @@ impl WowsToolkitApp {
                             );
                         }
                     }
-                    if ui.button(t!("ui.buttons.cancel")).clicked() {
+                    if ui.button(t!("ui-buttons-cancel")).clicked() {
                         self.refresh_persisted_data_window_open = false;
                     }
                 });
@@ -3341,25 +3342,25 @@ impl WowsToolkitApp {
                 self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".into());
             let native_name = wt_translations::language_name(&detected_locale).unwrap_or("English");
 
-            egui::Window::new(t!("dialog.select_language"))
+            egui::Window::new(t!("dialog-select_language"))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label(t!("dialog.machine_translation_warning"));
+                    ui.label(t!("dialog-machine_translation_warning"));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         // "Continue in English" button
-                        if ui.button(t!("dialog.continue_in_english")).clicked() {
+                        if ui.button(t!("dialog-continue_in_english")).clicked() {
                             let mut p = self.tab_state.persisted.write();
                             p.settings.app.locale = Some("en".into());
-                            rust_i18n::set_locale("en");
+                            wt_translations::set_language(wt_translations::Language::ENGLISH);
                             p.settings.app.language_selection_shown = true;
                             drop(p);
                             self.language_selection_open = false;
                         }
                         // "Continue in <detected language>" button
-                        let continue_label = t!("dialog.continue_in_language");
+                        let continue_label = t!("dialog-continue_in_language");
                         // For English TOML the label is the same, but for translated TOMLs
                         // it will be in the detected language. Show native name as fallback.
                         let label = if continue_label == "Continue in English" {
@@ -3386,7 +3387,7 @@ impl WowsToolkitApp {
 
         if let Some(error) = self.error_to_show.as_ref() {
             if self.show_error_window {
-                egui::Window::new(t!("ui.windows.error")).open(&mut self.show_error_window).show(ctx, |ui| {
+                egui::Window::new(t!("ui-windows-error")).open(&mut self.show_error_window).show(ctx, |ui| {
                     build_error_window(ui, error);
                 });
             } else {
@@ -3395,7 +3396,7 @@ impl WowsToolkitApp {
         }
 
         if self.show_about_window {
-            egui::Window::new(t!("ui.windows.about")).open(&mut self.show_about_window).show(ctx, |ui| {
+            egui::Window::new(t!("ui-windows-about")).open(&mut self.show_about_window).show(ctx, |ui| {
                 build_about_window(ui);
             });
         }
@@ -3472,9 +3473,9 @@ impl WowsToolkitApp {
 
     fn show_panic_window(&mut self, ctx: &Context) {
         if let Some(panic_info) = self.panic_info.as_mut() {
-            egui::Window::new(t!("ui.windows.crash_detected")).open(&mut self.panic_window_open).show(ctx, |ui| {
+            egui::Window::new(t!("ui-windows-crash_detected")).open(&mut self.panic_window_open).show(ctx, |ui| {
                 ui.vertical(|ui| {
-                    ui.label(t!("ui.dialogs.crash_message"));
+                    ui.label(t!("ui-dialogs-crash_message"));
                     ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         ui.scope(|ui| {
                             let style = ui.style_mut();
@@ -3484,21 +3485,21 @@ impl WowsToolkitApp {
                         });
                     });
                     ui.horizontal(|ui| {
-                        if ui.button(t!("ui.buttons.copy")).clicked() {
+                        if ui.button(t!("ui-buttons-copy")).clicked() {
                             Context::copy_text(ctx, panic_info.clone());
                         }
-                        if ui.button(wt_translations::icon_t(icons::GITHUB_LOGO, &t!("ui.buttons.github"))).clicked() {
+                        if ui.button(wt_translations::icon_t(icons::GITHUB_LOGO, &t!("ui-buttons-github"))).clicked() {
                             ui.ctx().open_url(OpenUrl::new_tab(
                                 "https://github.com/landaire/wows-toolkit/issues/new/choose",
                             ));
                         }
-                        if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked()
+                        if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui-buttons-discord"))).clicked()
                         {
                             ui.ctx().open_url(OpenUrl::new_tab(rot13("uggcf://qvfpbeq.tt/EWXjXHw7eu")));
                         }
                     });
-                    ui.collapsing(t!("ui.buttons.more_options"), |ui| {
-                        ui.label(t!("ui.dialogs.crash_clear_settings"));
+                    ui.collapsing(t!("ui-buttons-more_options"), |ui| {
+                        ui.label(t!("ui-dialogs-crash_clear_settings"));
                         ui.scope(|ui| {
                             let error = ui.sem().error;
                             let label = crate::ui::theme::contrast::label_on(error);
@@ -3516,7 +3517,7 @@ impl WowsToolkitApp {
                             visuals.widgets.hovered.fg_stroke.color = label;
                             visuals.widgets.active.fg_stroke.color = label;
 
-                            if ui.button(t!("ui.buttons.clear_settings")).clicked() {
+                            if ui.button(t!("ui-buttons-clear_settings")).clicked() {
                                 *self.tab_state.persisted.write() = Default::default();
                             }
                         });
@@ -3541,11 +3542,11 @@ impl WowsToolkitApp {
                     asset.name.contains("windows") && asset.name.ends_with(".zip") && !asset.name.contains("tools")
                 });
             if let Some(asset) = asset {
-                egui::Window::new(t!("ui.windows.update_available")).open(&mut self.update_window_open).show(
+                egui::Window::new(t!("ui-windows-update_available")).open(&mut self.update_window_open).show(
                     ctx,
                     |ui| {
                         ui.vertical(|ui| {
-                            ui.label(t!("ui.dialogs.update_message", tag = tag));
+                            ui.label(t!("ui-dialogs-update_message", tag = tag));
                             if let Some(notes) = notes.as_mut() {
                                 ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
                                     CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
@@ -3554,7 +3555,7 @@ impl WowsToolkitApp {
                             ui.horizontal(|ui| {
                                 #[cfg(target_os = "windows")]
                                 {
-                                    if ui.button(t!("ui.buttons.install_update")).clicked() {
+                                    if ui.button(t!("ui-buttons-install_update")).clicked() {
                                         let task = Some(crate::task::start_download_update_task(
                                             &self.runtime,
                                             asset,
@@ -3567,9 +3568,9 @@ impl WowsToolkitApp {
                                 #[cfg(not(target_os = "windows"))]
                                 {
                                     let _ = asset;
-                                    ui.label(t!("ui.dialogs.update_windows_only"));
+                                    ui.label(t!("ui-dialogs-update_windows_only"));
                                 }
-                                if ui.button(t!("ui.buttons.view_release")).clicked() {
+                                if ui.button(t!("ui-buttons-view_release")).clicked() {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
                             });
@@ -3629,7 +3630,7 @@ impl WowsToolkitApp {
         match mismatch_status {
             Some(true) => {
                 self.constants_version_mismatch = true;
-                self.tab_state.toasts.lock().warning(t!("ui.messages.constants_version_mismatch")).duration(None);
+                self.tab_state.toasts.lock().warning(t!("ui-messages-constants_version_mismatch")).duration(None);
 
                 // The on-disk constants file is stale; delete it so the versioned
                 // system doesn't treat it as an exact match, then request a fresh fetch.
@@ -3679,14 +3680,14 @@ impl WowsToolkitApp {
                         );
                     }
 
-                    self.tab_state.toasts.lock().success(t!("ui.messages.constants_updated"));
+                    self.tab_state.toasts.lock().success(t!("ui-messages-constants_updated"));
                 } else if !self.constants_update_error_shown {
                     self.constants_update_error_shown = true;
                     warn!("Failed to fetch versioned constants during rebuild");
                     self.tab_state
                         .toasts
                         .lock()
-                        .error(t!("ui.messages.versioned_constants_rebuild_failed"))
+                        .error(t!("ui-messages-versioned_constants_rebuild_failed"))
                         .duration(None);
                 }
             }
@@ -3701,7 +3702,7 @@ impl WowsToolkitApp {
             Ok(parsed) => parsed,
             Err(e) => {
                 warn!("constants import failed: {e}");
-                self.tab_state.toasts.lock().error(t!("ui.messages.constants_import_failed", error = e.to_string()));
+                self.tab_state.toasts.lock().error(t!("ui-messages-constants_import_failed", error = e.to_string()));
                 return;
             }
         };
@@ -3717,7 +3718,7 @@ impl WowsToolkitApp {
                     self.tab_state
                         .toasts
                         .lock()
-                        .error(t!("ui.messages.constants_import_failed", error = e.to_string()));
+                        .error(t!("ui-messages-constants_import_failed", error = e.to_string()));
                     return;
                 }
             };
@@ -3735,7 +3736,7 @@ impl WowsToolkitApp {
         match loaded_build {
             Some(loaded) if loaded != installed.build => {
                 self.tab_state.toasts.lock().warning(t!(
-                    "ui.messages.constants_imported_other_build",
+                    "ui-messages-constants_imported_other_build",
                     build = installed.build.to_string(),
                     loaded = loaded.to_string()
                 ));
@@ -3744,7 +3745,7 @@ impl WowsToolkitApp {
                 self.tab_state
                     .toasts
                     .lock()
-                    .success(t!("ui.messages.constants_imported", build = installed.build.to_string()));
+                    .success(t!("ui-messages-constants_imported", build = installed.build.to_string()));
             }
         }
 
@@ -3758,7 +3759,7 @@ impl WowsToolkitApp {
     fn copy_latest_log(&mut self, ctx: &Context) {
         let dir = log_dir();
         let Some(path) = newest_log_file(&dir) else {
-            self.tab_state.toasts.lock().error(t!("ui.messages.log_not_found", dir = dir.display().to_string()));
+            self.tab_state.toasts.lock().error(t!("ui-messages-log_not_found", dir = dir.display().to_string()));
             return;
         };
 
@@ -3773,13 +3774,13 @@ impl WowsToolkitApp {
                 let kb = payload.len() as f64 / 1024.0;
                 Context::copy_text(ctx, payload);
                 self.tab_state.toasts.lock().success(t!(
-                    "ui.messages.log_copied",
+                    "ui-messages-log_copied",
                     bytes = format!("{kb:.1}"),
                     file = file_name
                 ));
             }
             Err(e) => {
-                self.tab_state.toasts.lock().error(t!("ui.messages.log_copy_failed", error = e.to_string()));
+                self.tab_state.toasts.lock().error(t!("ui-messages-log_copy_failed", error = e.to_string()));
             }
         }
     }
@@ -3806,7 +3807,7 @@ impl WowsToolkitApp {
         .discord_code_block();
 
         Context::copy_text(ctx, report);
-        self.tab_state.toasts.lock().success(t!("ui.messages.bug_report_info_copied"));
+        self.tab_state.toasts.lock().success(t!("ui-messages-bug_report_info_copied"));
     }
 
     fn show_err_window(&mut self, err: Report) {
@@ -3907,7 +3908,7 @@ impl WowsToolkitApp {
         let Some(output_base) = output_base else {
             // Naming the cause, because Retry cannot fix it: no amount of
             // pressing it resolves a cache directory that is not configured.
-            prompt.plan = DownloadPlanState::Failed(t!("ui.dialogs.download_plan_no_cache_dir").into_owned());
+            prompt.plan = DownloadPlanState::Failed(t!("ui-dialogs-download_plan_no_cache_dir").into_owned());
             return;
         };
         update_background_task!(
@@ -3964,7 +3965,7 @@ impl WowsToolkitApp {
     fn spawn_game_data_download(&mut self, prompt: &GameDataDownloadPrompt) -> bool {
         let cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
         let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
-            self.tab_state.toasts.lock().error(t!("ui.messages.game_data_download_failed"));
+            self.tab_state.toasts.lock().error(t!("ui-messages-game_data_download_failed"));
             return false;
         };
 
@@ -4080,7 +4081,7 @@ impl WowsToolkitApp {
         let mut confirmed = false;
         let mut dismissed = false;
 
-        egui::Window::new(t!("ui.windows.confirm"))
+        egui::Window::new(t!("ui-windows-confirm"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -4088,10 +4089,10 @@ impl WowsToolkitApp {
                 ui.label(message);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.buttons.yes")).clicked() {
+                    if ui.button(t!("ui-buttons-yes")).clicked() {
                         confirmed = true;
                     }
-                    if ui.button(t!("ui.buttons.no")).clicked() {
+                    if ui.button(t!("ui-buttons-no")).clicked() {
                         dismissed = true;
                     }
                 });
@@ -4194,25 +4195,25 @@ impl WowsToolkitApp {
         let mut proceed = false;
         let mut cancel = false;
 
-        egui::Window::new(t!("ui.windows.network_warning"))
+        egui::Window::new(t!("ui-windows-network_warning"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label(t!("ui.dialogs.p2p_warning"));
+                ui.label(t!("ui-dialogs-p2p_warning"));
                 ui.add_space(4.0);
-                ui.hyperlink_to(t!("ui.labels.more_info"), "https://landaire.github.io/wows-toolkit/networking");
+                ui.hyperlink_to(t!("ui-labels-more_info"), "https://landaire.github.io/wows-toolkit/networking");
                 ui.add_space(8.0);
                 {
                     let mut p = self.tab_state.persisted.write();
-                    ui.checkbox(&mut p.settings.collab.suppress_p2p_ip_warning, t!("ui.labels.suppress_warning"));
+                    ui.checkbox(&mut p.settings.collab.suppress_p2p_ip_warning, t!("ui-labels-suppress_warning"));
                 }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.buttons.continue_")).clicked() {
+                    if ui.button(t!("ui-buttons-continue_")).clicked() {
                         proceed = true;
                     }
-                    if ui.button(t!("ui.buttons.cancel")).clicked() {
+                    if ui.button(t!("ui-buttons-cancel")).clicked() {
                         cancel = true;
                     }
                 });
@@ -4352,24 +4353,24 @@ impl WowsToolkitApp {
         for event in events {
             match event {
                 crate::collab::SessionEvent::Started => {
-                    self.tab_state.toasts.lock().info(t!("ui.messages.session_started"));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-session_started"));
                 }
                 crate::collab::SessionEvent::UserJoined(user) => {
-                    self.tab_state.toasts.lock().info(t!("ui.messages.user_joined", name = &user.name));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-user_joined", name = &user.name));
                 }
                 crate::collab::SessionEvent::UserLeft { name, timed_out, .. } => {
                     if timed_out {
-                        self.tab_state.toasts.lock().warning(t!("ui.messages.user_timeout", name = name));
+                        self.tab_state.toasts.lock().warning(t!("ui-messages-user_timeout", name = name));
                     } else {
-                        self.tab_state.toasts.lock().info(t!("ui.messages.user_left", name = name));
+                        self.tab_state.toasts.lock().info(t!("ui-messages-user_left", name = name));
                     }
                 }
                 crate::collab::SessionEvent::Ended => {
-                    self.tab_state.toasts.lock().info(t!("ui.messages.session_ended"));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-session_ended"));
                     session_ended = true;
                 }
                 crate::collab::SessionEvent::Error(msg) => {
-                    self.tab_state.toasts.lock().error(t!("ui.messages.session_error", msg = msg));
+                    self.tab_state.toasts.lock().error(t!("ui-messages-session_error", msg = msg));
                     session_ended = true;
                 }
                 _ => {}
@@ -4446,7 +4447,7 @@ impl WowsToolkitApp {
         for event in events {
             match event {
                 crate::collab::SessionEvent::Started => {
-                    self.tab_state.toasts.lock().info(t!("ui.messages.connected_to_session"));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-connected_to_session"));
                 }
                 crate::collab::SessionEvent::SessionInfoReceived { open_replays } => {
                     tracing::debug!("SessionInfoReceived: {} open replay(s)", open_replays.len());
@@ -4455,7 +4456,7 @@ impl WowsToolkitApp {
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                     for replay in open_replays.into_iter().take(2) {
-                        self.tab_state.toasts.lock().info(t!("ui.messages.joined_session", name = &replay.replay_name));
+                        self.tab_state.toasts.lock().info(t!("ui-messages-joined_session", name = &replay.replay_name));
                         let viewer = crate::replay::renderer::launch_client_renderer(
                             replay.replay_name,
                             replay.map_image_png,
@@ -4506,7 +4507,7 @@ impl WowsToolkitApp {
                         self.tab_state.replay_open_timestamps.pop_front();
                     }
                     if self.tab_state.replay_open_timestamps.len() >= 5 {
-                        self.tab_state.toasts.lock().error(t!("ui.messages.replay_spam_protection"));
+                        self.tab_state.toasts.lock().error(t!("ui-messages-replay_spam_protection"));
                         if let Some(ref handle) = self.tab_state.client_session {
                             let _ = handle.command_tx.send(crate::collab::SessionCommand::Stop);
                         }
@@ -4533,7 +4534,7 @@ impl WowsToolkitApp {
                     let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
-                    self.tab_state.toasts.lock().info(t!("ui.messages.host_opened_replay", name = replay_name));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-host_opened_replay", name = replay_name));
                     let viewer = crate::replay::renderer::launch_client_renderer(
                         replay_name,
                         map_image_png,
@@ -4575,20 +4576,20 @@ impl WowsToolkitApp {
                         renderers.remove(pos);
                     }
                     self.tab_state.session_state.lock().viewport_sinks.remove(&replay_id);
-                    self.tab_state.toasts.lock().info(t!("ui.messages.host_closed_replay"));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-host_closed_replay"));
                 }
                 crate::collab::SessionEvent::Error(msg) => {
-                    self.tab_state.toasts.lock().error(t!("ui.messages.session_error_generic", msg = msg));
+                    self.tab_state.toasts.lock().error(t!("ui-messages-session_error_generic", msg = msg));
                     self.cleanup_client_session();
                     return;
                 }
                 crate::collab::SessionEvent::Rejected(reason) => {
-                    self.tab_state.toasts.lock().error(t!("ui.messages.session_rejected", reason = reason));
+                    self.tab_state.toasts.lock().error(t!("ui-messages-session_rejected", reason = reason));
                     self.tab_state.client_session = None;
                     return;
                 }
                 crate::collab::SessionEvent::Ended => {
-                    self.tab_state.toasts.lock().info(t!("ui.messages.session_ended"));
+                    self.tab_state.toasts.lock().info(t!("ui-messages-session_ended"));
                     self.cleanup_client_session();
                     return;
                 }
@@ -4661,7 +4662,7 @@ impl WowsToolkitApp {
         match self.tab_state.open_directory_stats(root) {
             Some(id) => self.focus_tab(&Tab::DirectoryStats(id)),
             None => {
-                self.tab_state.toasts.lock().warning(t!("ui.stats.directory_stats_unavailable"));
+                self.tab_state.toasts.lock().warning(t!("ui-stats-directory_stats_unavailable"));
             }
         }
     }
@@ -4687,7 +4688,7 @@ impl WowsToolkitApp {
             }
             SearchOpenAction::Render => {
                 if !request.path.exists() {
-                    self.tab_state.toasts.lock().warning(t!("ui.search.open_missing"));
+                    self.tab_state.toasts.lock().warning(t!("ui-search-open_missing"));
                     return;
                 }
                 // No workspace is opened for a render: the renderer is a window
@@ -4697,7 +4698,7 @@ impl WowsToolkitApp {
                 let ws_id = self.tab_state.workspace_for_replay_path(&request.path);
                 let viewer = &mut ToolkitTabViewer { tab_state: &mut self.tab_state };
                 if !viewer.launch_replay_render(&request.path, ws_id) {
-                    self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
+                    self.tab_state.toasts.lock().error(t!("ui-messages-replay_load_failed"));
                 }
             }
         }
@@ -4714,12 +4715,12 @@ impl WowsToolkitApp {
             Some(SearchOpenTarget::Existing(id)) => Some(id),
             Some(SearchOpenTarget::Opened { id, root }) => {
                 self.start_directory_scan(id, root.clone());
-                self.tab_state.toasts.lock().info(t!("ui.search.opened_directory", dir = root.display()));
+                self.tab_state.toasts.lock().info(t!("ui-search-opened_directory", dir = root.display()));
                 Some(id)
             }
             None => {
                 warn!("cannot open {}: it names no directory", path.display());
-                self.tab_state.toasts.lock().error(t!("ui.search.open_no_directory"));
+                self.tab_state.toasts.lock().error(t!("ui-search-open_no_directory"));
                 None
             }
         }
@@ -4739,7 +4740,7 @@ impl WowsToolkitApp {
                 Ok(replay) => replay,
                 Err(error) => {
                     warn!("could not open replay {}: {error}", path.display());
-                    self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
+                    self.tab_state.toasts.lock().error(t!("ui-messages-replay_load_failed"));
                     return false;
                 }
             },
@@ -4981,31 +4982,31 @@ impl eframe::App for WowsToolkitApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
-                    ui.menu_button(t!("ui.menu.file"), |ui| {
-                        if ui.button(t!("ui.menu.check_updates")).clicked() {
+                    ui.menu_button(t!("ui-menu-file"), |ui| {
+                        if ui.button(t!("ui-menu-check_updates")).clicked() {
                             self.manual_update_requested = true;
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.button(t!("ui.menu.about")).clicked() {
+                        if ui.button(t!("ui-menu-about")).clicked() {
                             self.show_about_window = true;
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.button(t!("ui.menu.licenses")).clicked() {
+                        if ui.button(t!("ui-menu-licenses")).clicked() {
                             self.licenses_window.open();
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.button(t!("ui.menu.quit")).clicked() {
+                        if ui.button(t!("ui-menu-quit")).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
                     ui.add_space(16.0);
                 }
 
-                if ui.button(wt_translations::icon_t(icons::BUG, &t!("ui.buttons.create_issue"))).clicked() {
+                if ui.button(wt_translations::icon_t(icons::BUG, &t!("ui-buttons-create_issue"))).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
                 }
 
-                if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
+                if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui-buttons-discord"))).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab(rot13("uggcf://qvfpbeq.tt/EWXjXHw7eu")));
                 }
             });
@@ -5163,21 +5164,21 @@ fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::data::wo
 
 fn build_about_window(ui: &mut egui::Ui) {
     ui.vertical(|ui| {
-        ui.label(t!("ui.labels.made_by"));
-        ui.label(t!("ui.labels.credits"));
+        ui.label(t!("ui-labels-made_by"));
+        ui.label(t!("ui-labels-credits"));
         ui.horizontal(|ui| {
-            ui.label(t!("ui.labels.pr_credits"));
-            ui.hyperlink_to(t!("ui.labels.more_info"), "https://wows-numbers.com/personal/rating");
+            ui.label(t!("ui-labels-pr_credits"));
+            ui.hyperlink_to(t!("ui-labels-more_info"), "https://wows-numbers.com/personal/rating");
         });
-        if ui.button(t!("ui.buttons.view_github")).clicked() {
+        if ui.button(t!("ui-buttons-view_github")).clicked() {
             ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit"));
         }
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            ui.label(t!("ui.labels.powered_by"));
+            ui.label(t!("ui-labels-powered_by"));
             ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-            ui.label(t!("ui.labels.and"));
+            ui.label(t!("ui-labels-and"));
             ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
             ui.label(".");
         });
@@ -5186,7 +5187,7 @@ fn build_about_window(ui: &mut egui::Ui) {
 
 fn build_error_window(ui: &mut egui::Ui, error: &str) {
     ui.vertical(|ui| {
-        ui.label(wt_translations::icon_t(icons::WARNING, &t!("ui.labels.error_occurred")));
+        ui.label(wt_translations::icon_t(icons::WARNING, &t!("ui-labels-error_occurred")));
         ui.label(error);
     });
 }
@@ -5619,13 +5620,13 @@ mod replay_tab_search_tests {
         assert_eq!(replay_tab_search_scope(WorkspaceId(42), None, Some(SourceId(9))), TabSearchScope::Unresolved);
     }
 
-    /// The entry's label is the translated string, not the key: rust-i18n
-    /// returns the key itself when the catalog has no entry, so comparing it
+    /// The entry's label is the translated string, not the id: a message
+    /// missing from the catalog formats as its id, so comparing it
     /// against a literal is the only check that proves the text was written.
     #[test]
     fn the_menu_entry_is_labelled_from_the_catalog() {
-        assert_eq!(t!("ui.tabs.search_these_replays"), "Search these replays");
-        assert_eq!(t!("ui.tabs.search_these_replays_unavailable"), "These replays have not been indexed yet");
+        assert_eq!(t!("ui-tabs-search_these_replays"), "Search these replays");
+        assert_eq!(t!("ui-tabs-search_these_replays_unavailable"), "These replays have not been indexed yet");
     }
 
     /// A workspace with no source that is also not open behaves the same as a
@@ -5711,7 +5712,7 @@ mod download_prompt_tests {
         ] {
             let label = availability_label(&availability);
             assert!(
-                !label.contains("ui.dialogs."),
+                !label.contains("ui-dialogs-"),
                 "no catalog entry for {}: got {label}",
                 availability_key(&availability)
             );
@@ -5724,20 +5725,20 @@ mod download_prompt_tests {
     #[test]
     fn every_dialog_string_has_a_catalog_entry() {
         for key in [
-            "ui.dialogs.download_game_data_intro",
-            "ui.dialogs.download_build_row",
-            "ui.dialogs.download_replays_needing",
-            "ui.dialogs.download_availability_resolving",
-            "ui.dialogs.download_plan_pending",
-            "ui.dialogs.download_objects_to_fetch",
-            "ui.dialogs.download_plan_failed",
-            "ui.dialogs.download_plan_no_cache_dir",
-            "ui.windows.download_game_data",
-            "ui.buttons.download",
-            "ui.buttons.dismiss",
-            "ui.buttons.retry",
-            "ui.buttons.check_all",
-            "ui.buttons.uncheck_all",
+            "ui-dialogs-download_game_data_intro",
+            "ui-dialogs-download_build_row",
+            "ui-dialogs-download_replays_needing",
+            "ui-dialogs-download_availability_resolving",
+            "ui-dialogs-download_plan_pending",
+            "ui-dialogs-download_objects_to_fetch",
+            "ui-dialogs-download_plan_failed",
+            "ui-dialogs-download_plan_no_cache_dir",
+            "ui-windows-download_game_data",
+            "ui-buttons-download",
+            "ui-buttons-dismiss",
+            "ui-buttons-retry",
+            "ui-buttons-check_all",
+            "ui-buttons-uncheck_all",
         ] {
             let rendered = t!(key).into_owned();
             assert_ne!(rendered, key, "no catalog entry for {key}");
@@ -5751,8 +5752,8 @@ mod download_prompt_tests {
     /// and no hint of the cause.
     #[test]
     fn a_missing_cache_directory_is_not_reported_as_a_planning_failure() {
-        let generic = t!("ui.dialogs.download_plan_failed").into_owned();
-        let no_cache_dir = t!("ui.dialogs.download_plan_no_cache_dir").into_owned();
+        let generic = t!("ui-dialogs-download_plan_failed").into_owned();
+        let no_cache_dir = t!("ui-dialogs-download_plan_no_cache_dir").into_owned();
 
         assert_ne!(generic, no_cache_dir, "the cause the user can act on must not read as the generic failure");
     }
@@ -6908,41 +6909,29 @@ mod shipbuilds_batch_dispatch_tests {
 }
 
 #[cfg(test)]
-mod i18n_stack_tests {
-    /// The `i18n!()` lazy static needs ~1.2 MB of stack to initialize in debug
-    /// builds. Each test runs on its own harness thread, so without a raised
-    /// default stack (see `.cargo/config.toml`) whichever test reached `t!()`
-    /// first aborted the whole binary with STATUS_STACK_OVERFLOW.
-    ///
-    /// This has no assertion because the failure mode is a hard crash, not a
-    /// wrong value: if the stack is too small again, this dies and takes the
-    /// run with it, which is the signal.
-    #[test]
-    fn initializing_i18n_does_not_overflow_a_test_thread() {
-        crate::init_i18n();
-    }
+mod translation_tests {
+    use wt_translations::Language;
+    use wt_translations::SUPPORTED_LANGUAGES;
 
-    /// The catalogs are no longer compiled in by `i18n!()`; they are parsed
-    /// from embedded source at startup. A backend that silently loaded nothing
-    /// would still let every `t!()` "work", echoing the key back instead of
-    /// translating it, and most assertions would never notice.
+    /// A catalog that silently loaded nothing would still let every `t!()`
+    /// "work", echoing the id back instead of translating it, and most
+    /// assertions would never notice.
     #[test]
-    fn translations_resolve_to_text_rather_than_echoing_the_key() {
-        crate::init_i18n();
+    fn translations_resolve_to_text_rather_than_echoing_the_id() {
+        let german = Language::from_code("de").expect("de is supported");
 
-        assert_eq!(rust_i18n::t!("meta.language_name", locale = "en"), "English");
-        assert_eq!(rust_i18n::t!("meta.language_name", locale = "de"), "Deutsch");
+        assert_eq!(wt_translations::t!("meta-language_name", locale = Language::ENGLISH), "English");
+        assert_eq!(wt_translations::t!("meta-language_name", locale = german), "Deutsch");
     }
 
     /// Every bundled locale has to survive parsing, not just the one the test
     /// machine happens to run in.
     #[test]
     fn every_bundled_locale_is_loaded() {
-        crate::init_i18n();
-
-        for (locale, _) in wt_translations::embedded::EMBEDDED {
-            let name = rust_i18n::t!("meta.language_name", locale = locale);
-            assert!(!name.contains("meta.language_name"), "{locale} did not load: got {name:?}");
+        for info in SUPPORTED_LANGUAGES {
+            let language = Language::from_code(info.code).expect("listed languages are supported");
+            let name = wt_translations::t!("meta-language_name", locale = language);
+            assert_ne!(name, "meta-language_name", "{} did not load", info.code);
         }
     }
 }

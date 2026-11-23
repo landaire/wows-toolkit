@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use rust_i18n::t;
 use wgc_catalog::known_games::KnownGame;
 use wows_toolkit_launcher::AccountKey;
 use wows_toolkit_launcher::AccountStatus;
@@ -18,6 +17,7 @@ use wows_toolkit_launcher::LoginTarget;
 use wows_toolkit_launcher::RunnerState;
 use wows_toolkit_launcher::SessionStorage;
 use wows_toolkit_launcher::sign_in_failure_key;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 use crate::update_background_task;
@@ -583,7 +583,7 @@ impl ToolkitTabViewer<'_> {
                 ui.weak("No saved accounts.");
             }
             if launcher.keyring_prompt_ahead(&settings) {
-                ui.weak(t!("ui.launcher.keyring.unlock_hint"));
+                ui.weak(t!("ui-launcher-keyring-unlock_hint"));
             }
             for account in &settings.accounts {
                 let key = account.key;
@@ -681,7 +681,7 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                     });
-                    ui.label(t!("ui.launcher.account.email"));
+                    ui.label(t!("ui-launcher-account-email"));
                     let field = ui.text_edit_singleline(&mut form.username);
                     credentials_entered |= field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
@@ -835,11 +835,11 @@ fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, 
             match storage {
                 SessionStorage::Keyring => {}
                 SessionStorage::PlaintextFile => {
-                    ui.colored_label(WARN_COLOR, t!("ui.launcher.popover.unencrypted"))
-                        .on_hover_text(t!("ui.launcher.keyring.unencrypted"));
+                    ui.colored_label(WARN_COLOR, t!("ui-launcher-popover-unencrypted"))
+                        .on_hover_text(t!("ui-launcher-keyring-unencrypted"));
                 }
                 SessionStorage::MemoryOnly => {
-                    ui.weak(t!("ui.launcher.account.memory_only"));
+                    ui.weak(t!("ui-launcher-account-memory_only"));
                 }
             }
         }
@@ -850,7 +850,7 @@ fn show_account_status(ui: &mut egui::Ui, launcher: &Launcher, key: AccountKey, 
             ui.weak("Signed out");
         }
         AccountStatus::KeyringLocked => {
-            ui.colored_label(WARN_COLOR, t!("ui.launcher.popover.keyring_locked"));
+            ui.colored_label(WARN_COLOR, t!("ui-launcher-popover-keyring_locked"));
         }
     }
 }

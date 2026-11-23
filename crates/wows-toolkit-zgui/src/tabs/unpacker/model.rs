@@ -16,7 +16,6 @@ use landaire_ui::DockTarget;
 use landaire_ui::PanelEntry;
 use landaire_ui::PanelId;
 use landaire_ui::PanelKind;
-use rust_i18n::t;
 use wows_toolkit_services::dialog::Answer;
 use wows_toolkit_viewmodel::settings::keys as setting_keys;
 use wows_toolkit_viewmodel::unpacker::build::BuildNumber;
@@ -43,6 +42,7 @@ use wows_toolkit_viewmodel::unpacker::search::scan;
 use wows_toolkit_viewmodel::unpacker::viewer;
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
 use wowsunpack::vfs::VfsPath;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
@@ -200,7 +200,7 @@ impl UnpackerModel {
     }
 
     pub fn browse_for_output_dir(self) {
-        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.unpacker.extraction_output"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-unpacker-extraction_output"));
         self.spawn(async move {
             let Some(picked) = chosen(self.shell, asked).await else { return };
             self.store_output_dir(picked.to_string_lossy().into_owned());
@@ -254,7 +254,7 @@ impl UnpackerModel {
 
         self.pkg.set_loading();
         self.assets.set_loading();
-        let job = self.services.jobs.start(Job { name: t!("ui.replay.loading").into_owned(), progress: None });
+        let job = self.services.jobs.start(Job { name: t!("ui-replay-loading").into_owned(), progress: None });
         self.load_job.set_value(Some(job));
         self.spawn(async move {
             let loading = async move {
@@ -275,7 +275,7 @@ impl UnpackerModel {
                 // The package pane is walked while assets.bin is read.
                 self.load_job.with_value(|job| {
                     if let Some(job) = job {
-                        job.report(Job { name: t!("ui.unpacker.loading_assets").into_owned(), progress: None });
+                        job.report(Job { name: t!("ui-unpacker-loading_assets").into_owned(), progress: None });
                     }
                 });
                 let package = self.adopt_vfs(BrowserSource::Pkg, package_vfs.clone());
@@ -387,14 +387,14 @@ impl UnpackerModel {
         });
         let services = self.services;
         self.spawn(async move {
-            let job = services.jobs.start(Job { name: t!("ui.unpacker.counting_files").into_owned(), progress: None });
+            let job = services.jobs.start(Job { name: t!("ui-unpacker-counting_files").into_owned(), progress: None });
             while let Some(mut progress) = progress_rx.next().await {
                 // A fast run reports faster than a frame; only the newest report is drawn.
                 while let Ok(newer) = progress_rx.try_recv() {
                     progress = newer;
                 }
                 job.report(Job {
-                    name: t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned(),
+                    name: t!("ui-unpacker-extracting", done = progress.written, total = progress.total).into_owned(),
                     progress: Progress::new(progress.written as u64, progress.total as u64),
                 });
                 self.extract.set(ExtractState::Running(progress));
@@ -532,7 +532,7 @@ impl UnpackerModel {
         let name = path.filename();
         let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).to_string();
         let asked = wows_toolkit_services::dialog::save_file(
-            Some(&t!("ui.unpacker.extract_as_json")),
+            Some(&t!("ui-unpacker-extract_as_json")),
             &format!("{stem}.json"),
             None,
         );
@@ -544,7 +544,7 @@ impl UnpackerModel {
             })
             .await;
             self.dump_status.set(Some(match written {
-                Ok(()) => t!("ui.unpacker.prototype_written").into_owned(),
+                Ok(()) => t!("ui-unpacker-prototype_written").into_owned(),
                 Err(err) => err,
             }));
         });
@@ -553,17 +553,17 @@ impl UnpackerModel {
     /// Writes the loaded build's parameters out as `request` asks.
     pub fn dump_game_params(self, request: DumpRequest) {
         let (Some(vfs), Some(build)) = (self.package_vfs.get_untracked(), self.selected_build.get_untracked()) else {
-            self.dump_status.set(Some(t!("ui.unpacker.load_a_build").into_owned()));
+            self.dump_status.set(Some(t!("ui-unpacker-load_a_build").into_owned()));
             return;
         };
-        let title = t!("ui.unpacker.save_parameters_title");
+        let title = t!("ui-unpacker-save_parameters_title");
         let asked = wows_toolkit_services::dialog::save_file(Some(&title), &request.file_name(), None);
         let services = self.services;
         self.spawn(async move {
             let Some(path) = chosen(self.shell, asked).await else { return };
-            self.dump_status.set(Some(t!("ui.unpacker.writing").into_owned()));
+            self.dump_status.set(Some(t!("ui-unpacker-writing").into_owned()));
             let _job =
-                services.jobs.start(Job { name: t!("ui.unpacker.dump_parameters").into_owned(), progress: None });
+                services.jobs.start(Job { name: t!("ui-unpacker-dump_parameters").into_owned(), progress: None });
             let written = long_job(move || {
                 request.write(&vfs, &path, |vfs| {
                     wows_toolkit_replay_data::load::load_game_params(vfs, build.0)
@@ -572,7 +572,7 @@ impl UnpackerModel {
             })
             .await;
             self.dump_status.set(Some(match written {
-                Ok(()) => t!("ui.unpacker.parameters_written").into_owned(),
+                Ok(()) => t!("ui-unpacker-parameters_written").into_owned(),
                 Err(err) => err.to_string(),
             }));
         });
@@ -599,7 +599,7 @@ async fn chosen(shell: Shell, asked: impl Future<Output = Answer>) -> Option<Pat
     // an unreachable pattern.
     asked.await.unwrap_or_else(|err| {
         tracing::error!("file dialog could not be opened: {err}");
-        shell.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+        shell.toasts().failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
         None
     })
 }

@@ -3,9 +3,9 @@
 //! A GPU encode of a long battle takes a while; a software one takes several times that, which is
 //! worth knowing before the wait rather than after.
 
-use rust_i18n::t;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
 use wows_toolkit_viewmodel::notices::Notice;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
@@ -90,17 +90,17 @@ pub fn ExportNotice(session: RendererSession) -> impl IntoView {
                     AlertDialogDescription {{notice.message()}}
                 }
                 CheckRow(
-                    label = t!("ui.labels.suppress_warning").into_owned(),
+                    label = t!("ui-labels-suppress_warning").into_owned(),
                     test_id = "notice-suppress".to_owned(),
                     checked = ticked,
                     on_change = suppress
                 )
                 AlertDialogFooter {
                     AlertDialogCancel(size = ButtonSize::Sm, attr:data-testid = "notice-cancel") {
-                        {t!("ui.buttons.cancel").into_owned()}
+                        {t!("ui-buttons-cancel").into_owned()}
                     }
                     AlertDialogAction(size = ButtonSize::Sm, attr:data-testid = "notice-continue", on:click = move |_| go_ahead()) {
-                        {t!("ui.buttons.continue_").into_owned()}
+                        {t!("ui-buttons-continue_").into_owned()}
                     }
                 }
             }

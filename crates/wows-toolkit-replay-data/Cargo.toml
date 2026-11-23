@@ -35,9 +35,6 @@ notify = "8.2.0"
 rkyv = { workspace = true }
 # A preview that cannot be read reports its cause chain.
 rootcause = { workspace = true }
-# The column hovers are user-facing strings. `i18n!` generates its lookup per
-# crate; the catalog behind it is parsed once per process.
-rust-i18n = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The replay index store.

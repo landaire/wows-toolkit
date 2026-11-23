@@ -50,7 +50,6 @@ ZGUI_DEPS = [
     "//third-party/rust:rmcp",
     "//third-party/rust:resvg",
     "//third-party/rust:rootcause",
-    "//third-party/rust:rust-i18n",
     "//third-party/rust:rustls",
     "//third-party/rust:schemars",
     "//third-party/rust:serde",

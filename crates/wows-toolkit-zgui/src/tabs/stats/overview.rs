@@ -12,7 +12,6 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -28,6 +27,7 @@ use wows_toolkit_viewmodel::stats::session_personal_rating;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::translations::translate_achievement_description;
 use wowsunpack::game_params::translations::translate_achievement_name;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -272,7 +272,7 @@ pub fn StatsOverview(
                 box(class = "wt-stats-empty") {
                     text {{move || {
                         locale.track();
-                        t!("ui.stats.no_games").into_owned()
+                        t!("ui-stats-no_games").into_owned()
                     }}}
                 }
             } else {
@@ -306,7 +306,7 @@ pub(super) fn loaded_build(services: Services) -> Option<Arc<wows_toolkit_replay
 /// left out with none: a rate over the other modes would not be the one the rating sits beside.
 fn summary_line(computed: &Computed) -> AnyView {
     let summary = &computed.summary;
-    let locale = wows_toolkit_viewmodel::locale();
+    let locale = wt_translations::locale();
     let rated = summary.records.rated();
     let record = rated.win_rate().map(|rate| {
         let label = rated.label();
@@ -340,7 +340,7 @@ fn summary_line(computed: &Computed) -> AnyView {
         AnyView::new(view! {
             row(class = "wt-stats-summary__fact", attr:data-testid = "stats-overview-rating") {
                 {rule}
-                text {{t!("ui.stats.pr").into_owned()}}
+                text {{t!("ui-stats-pr").into_owned()}}
                 RatingChip(text = chip, category = category)
             }
         })
@@ -351,18 +351,18 @@ fn summary_line(computed: &Computed) -> AnyView {
         AnyView::new(view! {
             row(class = "wt-stats-summary__fact", attr:data-testid = "stats-overview-battle-impact") {
                 box(class = "wt-stats-rule") {}
-                text {{t!("ui.stats.mc").into_owned()}}
+                text {{t!("ui-stats-mc").into_owned()}}
                 RatingChip(text = chip, category = category)
             }
         })
     });
-    let frags = t!("ui.stats.frags", count = summary.total_frags).into_owned();
+    let frags = t!("ui-stats-frags", count = summary.total_frags).into_owned();
     let best_frags = summary
         .best_frags
-        .map(|(ship, count)| t!("ui.stats.best_frags", ship = computed.ship_name(ship), count = count).into_owned());
+        .map(|(ship, count)| t!("ui-stats-best_frags", ship = computed.ship_name(ship), count = count).into_owned());
     let best_damage = summary.best_damage.map(|(ship, damage)| {
-        let damage = wows_toolkit_viewmodel::formatting::separate_number(damage, Some(&locale));
-        t!("ui.stats.max_damage", ship = computed.ship_name(ship), damage = damage).into_owned()
+        let damage = wows_toolkit_viewmodel::formatting::separate_number(damage, Some(locale));
+        t!("ui-stats-max_damage", ship = computed.ship_name(ship), damage = damage).into_owned()
     });
     let facts: Vec<AnyView> = [Some(frags), best_frags, best_damage]
         .into_iter()
@@ -451,7 +451,7 @@ fn Achievements(computed: Memo<Computed>, art: GameArt) -> impl IntoView {
                         box(class = "wt-stats-chevron", attr:data-open = open_attr) {
                             Icon(icon = CHEVRON_RIGHT, size = IconSize::Sm)
                         }
-                        text {{locale.text("ui.replay.sections.achievements")}}
+                        text {{locale.text("ui-replay-sections-achievements")}}
                     }
                     text(class = "wt-stats-dim-small", class = TABULAR_CLASS) {{move || shown.with(Vec::len).to_string()}}
                 }
@@ -505,39 +505,38 @@ fn AchievementTile(earned: ShownAchievement, art: GameArt) -> impl IntoView {
 
 /// The per-ship table, newest played first.
 fn ship_table(computed: Memo<Computed>) -> AnyView {
-    let locale = wows_toolkit_viewmodel::locale();
+    let locale = wt_translations::locale();
     let rows = Signal::derive_local(move || computed.with(|computed| computed.ships.clone()));
     let ship_width = ColumnSizing::Fixed(ColumnWidth(200.0));
     let number_width = ColumnSizing::Fixed(ColumnWidth(96.0));
-    let damage_locale = locale.clone();
     let columns = vec![
-        GridColumn::new("ship", t!("ui.stats.column_ship").into_owned(), |ship: &OverviewShip| ship.name.clone())
+        GridColumn::new("ship", t!("ui-stats-column_ship").into_owned(), |ship: &OverviewShip| ship.name.clone())
             .text(|ship| ship.name.clone())
             .sizing(ship_width),
-        GridColumn::new("battles", t!("ui.stats.column_battles").into_owned(), |ship: &OverviewShip| {
+        GridColumn::new("battles", t!("ui-stats-column_battles").into_owned(), |ship: &OverviewShip| {
             ship.info.total_games().to_string()
         })
         .text(|ship| ship.info.total_games().to_string())
         .sizing(number_width),
-        GridColumn::new("win_rate", t!("ui.stats.column_win_rate").into_owned(), win_rate_cell)
+        GridColumn::new("win_rate", t!("ui-stats-column_win_rate").into_owned(), win_rate_cell)
             .text(|ship| optional_percent(ship.info.rated_win_rate()))
             .sizing(number_width),
-        GridColumn::new("pr", t!("ui.replay.column.personal_rating").into_owned(), rating_cell)
+        GridColumn::new("pr", t!("ui-replay-column-personal_rating").into_owned(), rating_cell)
             .text(|ship| {
                 ship.rating.as_ref().map(|rating| format!("{:.0}", rating.pr)).unwrap_or_else(|| "-".to_owned())
             })
             .sizing(number_width),
-        GridColumn::new("mc", t!("ui.replay.column.match_contribution").into_owned(), match_contribution_cell)
+        GridColumn::new("mc", t!("ui-replay-column-match_contribution").into_owned(), match_contribution_cell)
             .text(|ship| {
                 ship.match_contribution.map(|mc| format!("{:.0}", mc.average)).unwrap_or_else(|| "-".to_owned())
             })
             .sizing(number_width),
-        GridColumn::new("avg_damage", t!("ui.stats.column_avg_damage").into_owned(), move |ship: &OverviewShip| {
-            optional_number(ship.info.avg_damage(), &damage_locale)
+        GridColumn::new("avg_damage", t!("ui-stats-column_avg_damage").into_owned(), move |ship: &OverviewShip| {
+            optional_number(ship.info.avg_damage(), locale)
         })
-        .text(move |ship| optional_number(ship.info.avg_damage(), &locale))
+        .text(move |ship| optional_number(ship.info.avg_damage(), locale))
         .sizing(number_width),
-        GridColumn::new("avg_frags", t!("ui.stats.column_avg_frags").into_owned(), |ship: &OverviewShip| {
+        GridColumn::new("avg_frags", t!("ui-stats-column_avg_frags").into_owned(), |ship: &OverviewShip| {
             optional_decimal(ship.info.avg_frags())
         })
         .text(|ship| optional_decimal(ship.info.avg_frags()))
@@ -551,7 +550,7 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
             columns = columns,
             row_key = |ship: &OverviewShip| ship.info.ship_id(),
             selection_mode = GridSelectionMode::None,
-            label = t!("ui.stats.ships").into_owned(),
+            label = t!("ui-stats-ships").into_owned(),
             class = TABULAR_CLASS,
             attr:data-testid = "stats-overview-ships"
         )
@@ -589,7 +588,7 @@ fn rating_cell(ship: &OverviewShip) -> AnyView {
                 text(attr:data-testid = test_id) {"-"}
             });
         }
-        let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+        let hover = t!("ui-personal_rating-unrated_hover").into_owned();
         let label = hover.clone();
         return AnyView::new(view! {
             Tooltip {

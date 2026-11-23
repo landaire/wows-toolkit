@@ -4,9 +4,9 @@
 //! counts: Random and Ranked. The other modes are kept apart so the rate can
 //! be broken down on hover rather than diluted by them.
 
-use rust_i18n::t;
 use wowsunpack::rating_scope::RatedBattle;
 use wowsunpack::rating_scope::RatingScope;
+use wt_translations::t;
 
 use super::PerGameStat;
 
@@ -94,17 +94,17 @@ impl RecordBreakdown {
     /// battles and win rate.
     pub fn hover_text(&self) -> String {
         let kinds = [
-            (t!("ui.stats.mode_random"), self.random),
-            (t!("ui.stats.mode_ranked"), self.ranked),
-            (t!("ui.stats.mode_other"), self.other),
+            (t!("ui-stats-mode_random"), self.random),
+            (t!("ui-stats-mode_ranked"), self.ranked),
+            (t!("ui-stats-mode_other"), self.other),
         ];
 
-        let mut lines = vec![t!("ui.stats.win_rate_rated_only").into_owned()];
+        let mut lines = vec![t!("ui-stats-win_rate_rated_only").into_owned()];
         for (kind, record) in kinds {
             let Some(rate) = record.win_rate() else { continue };
             lines.push(
                 t!(
-                    "ui.stats.win_rate_breakdown_line",
+                    "ui-stats-win_rate_breakdown_line",
                     mode = kind,
                     battles = record.battles(),
                     rate = format!("{rate:.1}%")

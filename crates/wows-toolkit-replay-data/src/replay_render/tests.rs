@@ -2834,8 +2834,8 @@ fn an_export_reports_its_progress_over_the_video() {
     let partway = ExportProgress { done: 40, total: 100, stage: ExportStage::Encoding };
     assert_eq!(partway.fraction(), Some(0.4));
 
-    assert_eq!(ExportStage::Encoding.label_key(), "ui.renderer.encoding");
-    assert_eq!(ExportStage::Muxing.label_key(), "ui.renderer.muxing", "and the wait after the last frame is named");
+    assert_eq!(ExportStage::Encoding.label_key(), "ui-renderer-encoding");
+    assert_eq!(ExportStage::Muxing.label_key(), "ui-renderer-muxing", "and the wait after the last frame is named");
 }
 
 /// A wide viewport fills its sides as the map is zoomed into, and stays square

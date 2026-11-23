@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use landaire_ui::TABULAR_CLASS;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::elements::Focus;
@@ -363,10 +363,10 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
         if find.query.with(String::is_empty) {
             String::new()
         } else if total == 0 {
-            t!("ui.unpacker.find_none").into_owned()
+            t!("ui-unpacker-find_none").into_owned()
         } else {
             let current = find.current.get().map_or(0, |at| at + 1);
-            t!("ui.unpacker.find_count", current = current, total = total).into_owned()
+            t!("ui-unpacker-find_count", current = current, total = total).into_owned()
         }
     };
 
@@ -385,8 +385,8 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     Input(
                         value = find.query,
                         node_ref = find.field,
-                        placeholder = t!("ui.unpacker.find").into_owned(),
-                        label = t!("ui.unpacker.find").into_owned(),
+                        placeholder = t!("ui-unpacker-find").into_owned(),
+                        label = t!("ui-unpacker-find").into_owned(),
                         class = "wt-text__find-field",
                         attr:data-testid = "unpacker-find-field",
                         on:key_down = on_field_key
@@ -394,7 +394,7 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     Toggle(
                         pressed = match_case,
                         size = ToggleSize::Sm,
-                        label = t!("ui.unpacker.find_match_case").into_owned(),
+                        label = t!("ui-unpacker-find_match_case").into_owned(),
                         attr:data-testid = "unpacker-find-match-case"
                     ) {
                         AppIcon(glyph = Glyph::CaseSensitive)
@@ -403,7 +403,7 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     Button(
                         size = ButtonSize::IconSm,
                         variant = ButtonVariant::Ghost,
-                        a11y:label = t!("ui.unpacker.find_previous").into_owned(),
+                        a11y:label = t!("ui-unpacker-find_previous").into_owned(),
                         attr:data-testid = "unpacker-find-previous",
                         disabled = no_matches,
                         on:click = move |_| find.step(false, geometry)
@@ -413,7 +413,7 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     Button(
                         size = ButtonSize::IconSm,
                         variant = ButtonVariant::Ghost,
-                        a11y:label = t!("ui.unpacker.find_next").into_owned(),
+                        a11y:label = t!("ui-unpacker-find_next").into_owned(),
                         attr:data-testid = "unpacker-find-next",
                         disabled = no_matches,
                         on:click = move |_| find.step(true, geometry)
@@ -423,7 +423,7 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                     Button(
                         size = ButtonSize::IconSm,
                         variant = ButtonVariant::Ghost,
-                        a11y:label = t!("ui.unpacker.find_close").into_owned(),
+                        a11y:label = t!("ui-unpacker-find_close").into_owned(),
                         attr:data-testid = "unpacker-find-close",
                         on:click = move |_| find.close(root)
                     ) {
@@ -483,10 +483,10 @@ pub fn TextView(lines: Lines, title: String) -> impl IntoView {
                 }
                 ContextMenuContent(attr:data-testid = "unpacker-viewer-menu") {
                     MenuItem(disabled = nothing_chosen, on_select = UnsyncCallback::new(move |()| copy_selection())) {
-                        {t!("ui.buttons.copy").into_owned()}
+                        {t!("ui-buttons-copy").into_owned()}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| select_all())) {
-                        {t!("ui.buttons.select_all").into_owned()}
+                        {t!("ui-buttons-select_all").into_owned()}
                     }
                 }
             }

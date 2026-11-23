@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use landaire_ui::Appearance;
 use landaire_ui::test_support::HeadlessWindow;
-use rust_i18n::t;
 use wows_toolkit_config::queries;
 use wows_toolkit_replay_data::simulated_watch;
 use wows_toolkit_viewmodel::replay_folders::FolderHistory;
@@ -18,6 +17,7 @@ use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::session::AppOpened;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use wows_toolkit_viewmodel::stats::setting_keys;
+use wt_translations::t;
 use zgui::vocab::Role;
 
 use super::folders::BrowserControl;
@@ -184,7 +184,7 @@ fn set_and_add_say_why_they_are_off_in_a_session_since_the_app_opened() {
     let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
     window.right_click(header).expect("the group header has a box");
     window.advance(Duration::from_millis(300));
-    for key in ["ui.replay.context.set_session_stats_one", "ui.replay.context.add_session_stats_one"] {
+    for key in ["ui-replay-context-set_session_stats_one", "ui-replay-context-add_session_stats_one"] {
         let item = window.by_role_and_label(Role::MenuItem, &t!(key)).unwrap_or_else(|| panic!("the menu lists {key}"));
         assert_eq!(window.a11y(item).map(|state| state.disabled), Some(true), "{key} is off");
     }
@@ -262,8 +262,8 @@ fn set_as_session_stats_brings_the_stats_tab_forward_on_its_overview() {
     let (mut window, control, _replays, _dir) = open_install(open(), 1);
     let shell = control.shell();
     shell.services().session.restart_for_test(opened(), vec![game(STARTED[2])]);
-    let overview = t!("ui.stats.overview").into_owned();
-    let ships = t!("ui.stats.ships").into_owned();
+    let overview = t!("ui-stats-overview").into_owned();
+    let ships = t!("ui-stats-ships").into_owned();
 
     shell.select(TabKey::App(AppTab::Stats));
     settle_in_real_time(&mut window);
@@ -275,8 +275,8 @@ fn set_as_session_stats_brings_the_stats_tab_forward_on_its_overview() {
     shell.select(TabKey::App(AppTab::ReplayInspector));
     settle_in_real_time(&mut window);
     let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
-    pick(&mut window, header, &t!("ui.replay.context.set_session_stats_one"));
-    let yes = window.by_role_and_label(Role::Button, &t!("ui.buttons.yes")).expect("Set asks first");
+    pick(&mut window, header, &t!("ui-replay-context-set_session_stats_one"));
+    let yes = window.by_role_and_label(Role::Button, &t!("ui-buttons-yes")).expect("Set asks first");
     window.click(yes).expect("the confirmation has a box");
     settle_in_real_time(&mut window);
 

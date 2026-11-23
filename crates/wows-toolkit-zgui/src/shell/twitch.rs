@@ -7,13 +7,13 @@ use std::sync::Arc;
 use futures::future::AbortHandle;
 use landaire_ui::Notice;
 use landaire_ui::ToastKey;
-use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_toolkit_services::twitch::PollError;
 use wows_toolkit_services::twitch::Session;
 use wows_toolkit_viewmodel::settings_drawer::Setting;
 use wows_toolkit_viewmodel::twitch::Token;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
+use wt_translations::t;
 use zgui::prelude::ClipboardKind;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
@@ -203,7 +203,7 @@ impl Shell {
     /// what comes back is which account it belongs to, or which part of the paste was wrong.
     pub fn paste_twitch_token(self) {
         let empty = move || {
-            self.twitch.paste.set(Some(TwitchPaste::Refused { reason: t!("ui.collab.clipboard_empty").into_owned() }));
+            self.twitch.paste.set(Some(TwitchPaste::Refused { reason: t!("ui-collab-clipboard_empty").into_owned() }));
         };
         let reading = self.clipboard.with_value(|clipboard| {
             clipboard.as_ref().map(|clipboard| {
@@ -258,10 +258,10 @@ impl Shell {
         let Some(toasts) = self.try_toasts() else { return };
         let open = self.settings_drawer;
         toasts.show(
-            Notice::warn(t!("ui.messages.twitch_token_invalid").into_owned())
+            Notice::warn(t!("ui-messages-twitch_token_invalid").into_owned())
                 .keyed(ToastKey::new(STUCK_TWITCH_TOKEN))
                 .sticky()
-                .action_keeping_open(t!("ui.settings.panel.open").into_owned(), move || {
+                .action_keeping_open(t!("ui-settings-panel-open").into_owned(), move || {
                     open.open_at(Setting::TwitchToken);
                 }),
         );

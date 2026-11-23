@@ -1,10 +1,10 @@
 //! The launch option fields and the runner choice, as Settings drawer controls.
 
-use rust_i18n::t;
 use wgc_launch::Runner;
 use wgc_launch::RunnerChoice;
 use wows_toolkit_launcher::LauncherSettings;
 use wows_toolkit_launcher::RunnerState;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::RwSignal;
@@ -45,18 +45,18 @@ impl RunnerLine {
         };
 
         let name = match runner.runner() {
-            Runner::Native => t!("ui.launcher.runner.native"),
-            Runner::SteamProton { proton, .. } => t!("ui.launcher.runner.steam_proton", name = proton.name()),
-            Runner::Umu { proton: Some(proton), .. } => t!("ui.launcher.runner.umu", name = proton.name()),
-            Runner::Umu { proton: None, .. } => t!("ui.launcher.runner.umu_default"),
+            Runner::Native => t!("ui-launcher-runner-native"),
+            Runner::SteamProton { proton, .. } => t!("ui-launcher-runner-steam_proton", name = proton.name()),
+            Runner::Umu { proton: Some(proton), .. } => t!("ui-launcher-runner-umu", name = proton.name()),
+            Runner::Umu { proton: None, .. } => t!("ui-launcher-runner-umu_default"),
         };
         let work = runner.first_run_work();
         let mut first_run = Vec::new();
         if work.prefix_creation {
-            first_run.push(t!("ui.launcher.runner.first_run_prefix").into_owned());
+            first_run.push(t!("ui-launcher-runner-first_run_prefix").into_owned());
         }
         if !work.umu_downloads.is_empty() {
-            first_run.push(t!("ui.launcher.runner.first_run_download").into_owned());
+            first_run.push(t!("ui-launcher-runner-first_run_download").into_owned());
         }
 
         Self::Found { runner: name.into_owned(), first_run }
@@ -98,9 +98,9 @@ impl LaunchText {
 
     fn label_key(self) -> &'static str {
         match self {
-            Self::Args => "ui.settings.launcher.launch_args",
-            Self::Env => "ui.settings.launcher.environment",
-            Self::SafeModeArgs => "ui.settings.launcher.safe_mode_args",
+            Self::Args => "ui-settings-launcher-launch_args",
+            Self::Env => "ui-settings-launcher-environment",
+            Self::SafeModeArgs => "ui-settings-launcher-safe_mode_args",
         }
     }
 }
@@ -142,14 +142,14 @@ pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
         column(class = "wt-launcher__column wt-launcher__column--wide") {
             {move || match line.get() {
                 RunnerLine::Looking => AnyView::new(view! {
-                    text(class = "wt-launcher__dim", attr:data-testid = "launcher-runner-looking") {{t!("ui.launcher.runner.looking").into_owned()}}
+                    text(class = "wt-launcher__dim", attr:data-testid = "launcher-runner-looking") {{t!("ui-launcher-runner-looking").into_owned()}}
                 }),
                 RunnerLine::Found { runner, first_run } => AnyView::new(view! {
                     text(class = "wt-launcher__text", attr:data-testid = "launcher-runner-found") {{runner}}
                     text(class = "wt-launcher__dim") {{first_run.join(" ")}}
                 }),
                 RunnerLine::Missing(error) => AnyView::new(view! {
-                    text(class = "wt-launcher__warn", attr:data-testid = "launcher-runner-missing") {{t!("ui.launcher.runner.needed").into_owned()}}
+                    text(class = "wt-launcher__warn", attr:data-testid = "launcher-runner-missing") {{t!("ui-launcher-runner-needed").into_owned()}}
                     text(class = "wt-launcher__dim") {{error}}
                 }),
             }}
@@ -160,7 +160,7 @@ pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
                     attr:data-testid = "launcher-runner-choose",
                     on:click = move |_| choose_proton(model, shell)
                 ) {
-                    {locale.text("ui.launcher.runner.choose")}
+                    {locale.text("ui-launcher-runner-choose")}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -169,7 +169,7 @@ pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
                     attr:data-testid = "launcher-runner-automatic",
                     on:click = move |_| model.set_runner(RunnerChoice::Auto)
                 ) {
-                    {locale.text("ui.launcher.runner.automatic")}
+                    {locale.text("ui-launcher-runner-automatic")}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -177,7 +177,7 @@ pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
                     attr:data-testid = "launcher-runner-detect",
                     on:click = move |_| model.probe_runner()
                 ) {
-                    {locale.text("ui.launcher.runner.detect")}
+                    {locale.text("ui-launcher-runner-detect")}
                 }
             }
         }
@@ -186,7 +186,7 @@ pub fn RunnerControl(model: LauncherModel, shell: Shell) -> impl IntoView {
 
 /// Asks for a Proton build's folder and plays through it with Steam.
 fn choose_proton(model: LauncherModel, shell: Shell) {
-    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.launcher.runner.choose"));
+    let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-launcher-runner-choose"));
     // Detached: the drawer or setup step that asked can close before the reader answers.
     spawn_detached(async move {
         let Some(proton_dir) = shell.chosen_path(asked).await else { return };

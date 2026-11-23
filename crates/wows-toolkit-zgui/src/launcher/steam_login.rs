@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::Signal;
@@ -72,21 +72,21 @@ pub fn WgcLoginControl(model: LauncherModel, path: PathBuf, test_id: String, bri
                         attr:data-testid = switch_id.clone()
                     )
                     Label(node_ref = name, control = control, class = "wt-launcher__text") {
-                        {locale.text("ui.launcher.wgc_login.label")}
+                        {locale.text("ui-launcher-wgc_login-label")}
                     }
                 }
                 {status_line.clone()}
                 if move || !brief {
                     column(class = "wt-launcher__column") {
-                        text(class = "wt-launcher__dim") {{locale.text("ui.launcher.wgc_login.about")}}
-                        text(class = "wt-launcher__dim") {{locale.text("ui.launcher.wgc_login.steam_accounts")}}
+                        text(class = "wt-launcher__dim") {{locale.text("ui-launcher-wgc_login-about")}}
+                        text(class = "wt-launcher__dim") {{locale.text("ui-launcher-wgc_login-steam_accounts")}}
                         Button(
                             variant = ButtonVariant::Ghost,
                             size = ButtonSize::Xs,
                             attr:data-testid = help_id.get_value(),
                             on:click = move |_| desktop::open_url(STEAM_ACCOUNT_HELP)
                         ) {
-                            {locale.text("ui.launcher.wgc_login.steam_accounts_link")}
+                            {locale.text("ui-launcher-wgc_login-steam_accounts_link")}
                         }
                     }
                 } else {}
@@ -98,17 +98,17 @@ pub fn WgcLoginControl(model: LauncherModel, path: PathBuf, test_id: String, bri
 /// The line under the switch saying where the Game Center files stand.
 fn status(status: WgcLoginStatus, test_id: String) -> AnyView {
     let words = match &status {
-        WgcLoginStatus::Ready => t!("ui.launcher.wgc_login.ready"),
+        WgcLoginStatus::Ready => t!("ui-launcher-wgc_login-ready"),
         WgcLoginStatus::Fetchable { size } => {
-            t!("ui.launcher.wgc_login.fetchable", size = humansize::format_size(*size, humansize::DECIMAL))
+            t!("ui-launcher-wgc_login-fetchable", size = humansize::format_size(*size, humansize::DECIMAL))
         }
         WgcLoginStatus::Downloading { percent: Some(percent) } => {
-            t!("ui.launcher.wgc_login.downloading", percent = percent)
+            t!("ui-launcher-wgc_login-downloading", percent = percent)
         }
-        WgcLoginStatus::Downloading { percent: None } => t!("ui.launcher.wgc_login.downloading_unknown"),
-        WgcLoginStatus::Checking => t!("ui.launcher.wgc_login.checking"),
-        WgcLoginStatus::NeedsSignIn => t!("ui.launcher.wgc_login.needs_sign_in"),
-        WgcLoginStatus::Unavailable(error) => t!("ui.launcher.wgc_login.unavailable", error = error.as_str()),
+        WgcLoginStatus::Downloading { percent: None } => t!("ui-launcher-wgc_login-downloading_unknown"),
+        WgcLoginStatus::Checking => t!("ui-launcher-wgc_login-checking"),
+        WgcLoginStatus::NeedsSignIn => t!("ui-launcher-wgc_login-needs_sign_in"),
+        WgcLoginStatus::Unavailable(error) => t!("ui-launcher-wgc_login-unavailable", error = error.as_str()),
     }
     .into_owned();
     let busy = matches!(status, WgcLoginStatus::Checking | WgcLoginStatus::Downloading { .. });

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::Signal;
@@ -52,7 +52,7 @@ fn stage_view(
         DownloadStage::Running => AnyView::new(view! { Running(model = model, target = target, key = key) }),
         DownloadStage::Paused => AnyView::new(view! {
             row(class = "wt-launcher__row") {
-                text(class = "wt-launcher__dim") {{locale.text("ui.launcher.paused")}}
+                text(class = "wt-launcher__dim") {{locale.text("ui-launcher-paused")}}
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Sm,
@@ -65,27 +65,27 @@ fn stage_view(
                         }
                     }
                 ) {
-                    {locale.text("ui.launcher.resume")}
+                    {locale.text("ui-launcher-resume")}
                 }
             }
         }),
         DownloadStage::Installed { skipped_deltas: 0 } => AnyView::new(view! {
-            text(class = "wt-launcher__ok") {{locale.text("ui.launcher.installed")}}
+            text(class = "wt-launcher__ok") {{locale.text("ui-launcher-installed")}}
         }),
         DownloadStage::Installed { skipped_deltas } => AnyView::new(view! {
             text(class = "wt-launcher__warn") {{move || {
                 locale.track();
-                t!("ui.launcher.installed_skipped", count = skipped_deltas).into_owned()
+                t!("ui-launcher-installed_skipped", count = skipped_deltas).into_owned()
             }}}
         }),
         DownloadStage::Failed(detail) => AnyView::new(view! {
             text(class = "wt-launcher__error") {{move || {
                 locale.track();
-                t!("ui.launcher.download_failed", error = detail.as_str()).into_owned()
+                t!("ui-launcher-download_failed", error = detail.as_str()).into_owned()
             }}}
         }),
         DownloadStage::Cancelled => AnyView::new(view! {
-            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.cancelled")}}
+            text(class = "wt-launcher__dim") {{locale.text("ui-launcher-cancelled")}}
         }),
     }
 }
@@ -124,7 +124,7 @@ fn Running(model: LauncherModel, target: DownloadTarget, key: PathBuf) -> impl I
                     attr:data-testid = format!("launcher-pause-{slot}"),
                     on:click = move |_| model.pause_download(&pause_key)
                 ) {
-                    {locale.text("ui.launcher.pause")}
+                    {locale.text("ui-launcher-pause")}
                 }
                 Button(
                     variant = ButtonVariant::Ghost,
@@ -132,7 +132,7 @@ fn Running(model: LauncherModel, target: DownloadTarget, key: PathBuf) -> impl I
                     attr:data-testid = format!("launcher-cancel-{slot}"),
                     on:click = move |_| model.cancel_download(&key)
                 ) {
-                    {locale.text("ui.launcher.cancel")}
+                    {locale.text("ui-launcher-cancel")}
                 }
             }
             text(class = "wt-launcher__text wt-launcher__truncate") {{line}}

@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use rust_i18n::t;
 use wows_toolkit_viewmodel::mcp::McpAddressError;
+use wt_translations::t;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::StoredValue;
 use zgui::reactive::on_cleanup_local;
@@ -52,19 +52,19 @@ impl SettingFault {
     /// What the row's note says about it, in the current language.
     pub fn message(&self) -> String {
         match self {
-            Self::WowsDirInvalid => t!("ui.messages.wows_dir_invalid").into_owned(),
+            Self::WowsDirInvalid => t!("ui-messages-wows_dir_invalid").into_owned(),
             Self::TwitchPasteRefused { reason } | Self::CacheDownloadFailed { reason } => reason.clone(),
-            Self::TwitchTokenRefused => t!("ui.messages.twitch_token_invalid").into_owned(),
-            Self::AutoExportMissing => t!("ui.settings.replay.export_path_missing").into_owned(),
+            Self::TwitchTokenRefused => t!("ui-messages-twitch_token_invalid").into_owned(),
+            Self::AutoExportMissing => t!("ui-settings-replay-export_path_missing").into_owned(),
             Self::CacheRepairNeeded { builds } => {
-                t!("ui.settings.wows.cache.repair_needed", count = builds).into_owned()
+                t!("ui-settings-wows-cache-repair_needed", count = builds).into_owned()
             }
-            Self::McpAddressInvalid { input } => t!("ui.settings.mcp.address_invalid", input = input).into_owned(),
+            Self::McpAddressInvalid { input } => t!("ui-settings-mcp-address_invalid", input = input).into_owned(),
             Self::McpAddressNotLoopback { input } => {
-                t!("ui.settings.mcp.address_not_loopback", input = input).into_owned()
+                t!("ui-settings-mcp-address_not_loopback", input = input).into_owned()
             }
-            Self::McpPortInvalid { input } => t!("ui.settings.mcp.port_invalid", input = input).into_owned(),
-            Self::McpPortInUse => t!("ui.settings.mcp.port_in_use").into_owned(),
+            Self::McpPortInvalid { input } => t!("ui-settings-mcp-port_invalid", input = input).into_owned(),
+            Self::McpPortInUse => t!("ui-settings-mcp-port_in_use").into_owned(),
         }
     }
 }

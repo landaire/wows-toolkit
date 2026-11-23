@@ -930,7 +930,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                         data.player_tracker.write().set_match_stats_for(
                             started_at,
                             crate::ui::player_tracker::MatchStatsState::Failed(
-                                rust_i18n::t!("ui.player_tracker.roster_unavailable").into(),
+                                wt_translations::t!("ui-player_tracker-roster_unavailable").into(),
                             ),
                         );
                     }
@@ -1654,10 +1654,10 @@ pub enum IngestStage {
 impl IngestStage {
     pub const fn key(&self) -> &'static str {
         match self {
-            Self::Scanning(_) => "ui.replay.listing_scanning",
-            Self::Downloading(_) => "ui.replay.listing_downloading",
-            Self::LoadingData { .. } => "ui.replay.listing_loading_data",
-            Self::Reading(_) => "ui.replay.listing_reading",
+            Self::Scanning(_) => "ui-replay-listing_scanning",
+            Self::Downloading(_) => "ui-replay-listing_downloading",
+            Self::LoadingData { .. } => "ui-replay-listing_loading_data",
+            Self::Reading(_) => "ui-replay-listing_reading",
         }
     }
 

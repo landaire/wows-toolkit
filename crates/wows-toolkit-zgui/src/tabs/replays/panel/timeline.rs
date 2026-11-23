@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -172,21 +172,21 @@ pub fn TimelinePanel(state: TimelineState, source: TimelineSource, read: ReadEve
         on_pick: UnsyncCallback::new(move |picked: PickedEvent| {
             let Some(text) = events.with_untracked(|events| events.event_text(picked.index)) else { return };
             shell.copy_text(text);
-            shell.toasts().ok(t!("ui.replay.timeline_event_copied").into_owned());
+            shell.toasts().ok(t!("ui-replay-timeline_event_copied").into_owned());
         }),
     };
     let escape = cx.escape();
     let content = move || match reading.get() {
         Reading::Failed(reason) => AnyView::new(view! {
             column(class = "wt-replay-timeline__failed", attr:data-testid = "replay-timeline-failed") {
-                text {{t!("ui.replay.timeline_failed", error = reason).into_owned()}}
+                text {{t!("ui-replay-timeline_failed", error = reason).into_owned()}}
                 Button(
                     variant = ButtonVariant::Outline,
                     size = ButtonSize::Sm,
                     attr:data-testid = "replay-timeline-retry",
                     on:click = move |_| retry.run(())
                 ) {
-                    {t!("ui.replay.timeline_retry").into_owned()}
+                    {t!("ui-replay-timeline_retry").into_owned()}
                 }
             }
         }),
@@ -217,7 +217,7 @@ fn SaveButton(events: RwSignal<BattleEvents, LocalStorage>, map: String) -> impl
     let save = move || {
         let text = events.with_untracked(BattleEvents::save_text);
         let asked = wows_toolkit_services::dialog::save_file(
-            Some(t!("ui.replay.timeline").as_ref()),
+            Some(t!("ui-replay-timeline").as_ref()),
             &format!("{map} - Match Timeline.txt"),
             None,
         );
@@ -226,18 +226,18 @@ fn SaveButton(events: RwSignal<BattleEvents, LocalStorage>, map: String) -> impl
                 Ok(Some(path)) => path,
                 Ok(None) => return,
                 Err(err) => {
-                    shell.toasts().failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+                    shell.toasts().failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
                     return;
                 }
             };
             let shown = path.display().to_string();
             match blocking(move || std::fs::write(&path, text)).await {
                 Ok(()) => {
-                    shell.toasts().ok(t!("ui.replay.timeline_saved", path = shown).into_owned());
+                    shell.toasts().ok(t!("ui-replay-timeline_saved", path = shown).into_owned());
                 }
                 Err(err) => {
                     tracing::warn!("replay timeline: the timeline was not saved: {err}");
-                    shell.toasts().failed(t!("ui.replay.timeline_save_failed", error = err).into_owned());
+                    shell.toasts().failed(t!("ui-replay-timeline_save_failed", error = err).into_owned());
                 }
             }
         });
@@ -251,7 +251,7 @@ fn SaveButton(events: RwSignal<BattleEvents, LocalStorage>, map: String) -> impl
             attr:data-testid = "replay-timeline-save",
             on:click = move |_| save()
         ) {
-            {t!("ui.replay.save_to_file").into_owned()}
+            {t!("ui-replay-save_to_file").into_owned()}
         }
     }
 }

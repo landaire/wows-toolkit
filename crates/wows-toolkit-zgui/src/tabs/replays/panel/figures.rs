@@ -6,7 +6,6 @@ use landaire_ui::CountUpProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replay_insights::match_contribution::MatchContributionResult;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
@@ -14,6 +13,7 @@ use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::separate_number;
 use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
+use wt_translations::t;
 use zgui::component;
 use zgui::view;
 use zgui::view::AnyView;
@@ -102,9 +102,9 @@ pub fn StatTiles(
     let mut tiles: Vec<AnyView> = Vec::new();
     let figures = own.map(|own| {
         [
-            ("replay-damage-tile", t!("stat.damage"), own.damage.map(i128::from)),
-            ("replay-base-xp-tile", t!("ui.replay.column.base_xp"), own.base_xp.map(i128::from)),
-            ("replay-kills-tile", t!("ui.replay.column.kills"), own.kills.map(i128::from)),
+            ("replay-damage-tile", t!("stat-damage"), own.damage.map(i128::from)),
+            ("replay-base-xp-tile", t!("ui-replay-column-base_xp"), own.base_xp.map(i128::from)),
+            ("replay-kills-tile", t!("ui-replay-column-kills"), own.kills.map(i128::from)),
         ]
     });
     for (id, label, value) in figures.into_iter().flatten() {
@@ -122,8 +122,8 @@ pub fn StatTiles(
     }
 
     if let Some(BattleRating::Unrated) = rating {
-        let label = t!("ui.replay.column.personal_rating").into_owned();
-        let hover = t!("ui.personal_rating.unrated_hover").into_owned();
+        let label = t!("ui-replay-column-personal_rating").into_owned();
+        let hover = t!("ui-personal_rating-unrated_hover").into_owned();
         let said = hover.clone();
         tiles.push(AnyView::new(view! {
             Tooltip {
@@ -145,7 +145,7 @@ pub fn StatTiles(
     let ratings = [
         rated.map(|rating| RatingTile {
             id: PR_TILE_ID,
-            name: t!("ui.replay.column.personal_rating").into_owned(),
+            name: t!("ui-replay-column-personal_rating").into_owned(),
             value: rating.pr,
             category: rating.category,
             said: personal_rating_label(&rating),
@@ -153,7 +153,7 @@ pub fn StatTiles(
         }),
         match_contribution.map(|rating| RatingTile {
             id: BI_TILE_ID,
-            name: t!("ui.replay.column.match_contribution").into_owned(),
+            name: t!("ui-replay-column-match_contribution").into_owned(),
             value: rating.mc,
             category: rating.category,
             said: match_contribution_label(&rating),
@@ -201,7 +201,7 @@ struct RatingTile {
 
 /// The MC tile of a battle MC does not apply to.
 fn unrated_tile() -> AnyView {
-    let label = t!("ui.replay.column.match_contribution").into_owned();
+    let label = t!("ui-replay-column-match_contribution").into_owned();
     let explained = MatchContributionWithheld::UnratedBattle.explanation();
     let said = explained.clone();
 
@@ -223,7 +223,7 @@ fn unrated_tile() -> AnyView {
 /// Each side's total either side of a bar split in proportion to them, allies on the left.
 #[component]
 pub fn DamageSplit(allies: u64, enemies: u64) -> impl IntoView {
-    let label = t!("ui.replay.team_damage").into_owned();
+    let label = t!("ui-replay-team_damage").into_owned();
     let total = format!("({})", separate_number(i128::from(allies) + i128::from(enemies)));
     let shares = DamageShares::new(allies, enemies);
 

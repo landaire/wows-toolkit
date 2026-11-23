@@ -21,9 +21,9 @@ use landaire_ui::PanelWidth;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -463,7 +463,7 @@ pub fn category_test_id(section: SettingsSection) -> String {
 
 /// `name`, saying a setting under it needs attention when one is `faulted`.
 fn fault_label(name: String, faulted: bool) -> String {
-    if faulted { t!("ui.settings.panel.in_error", name = name).into_owned() } else { name }
+    if faulted { t!("ui-settings-panel-in_error", name = name).into_owned() } else { name }
 }
 
 /// The gear at the end of the tab strip, which opens and shuts the drawer.
@@ -475,7 +475,7 @@ pub fn SettingsButton(shell: Shell) -> impl IntoView {
     let faulted = Memo::new(move |_| any_faulted(shell));
     let tip = move || {
         locale.track();
-        fault_label(t!("ui.tabs.settings").into_owned(), faulted.get())
+        fault_label(t!("ui-tabs-settings").into_owned(), faulted.get())
     };
 
     view! {
@@ -511,9 +511,9 @@ pub fn SettingsDrawer(shell: Shell) -> impl IntoView {
     view! {
         Drawer(
             open = shell.settings_drawer.open,
-            label = t!("ui.tabs.settings").into_owned(),
+            label = t!("ui-tabs-settings").into_owned(),
             width = DRAWER_WIDTH,
-            a11y:label = locale.text("ui.tabs.settings"),
+            a11y:label = locale.text("ui-tabs-settings"),
             attr:data-testid = "settings-drawer"
         ) {
             DrawerContent(shell = shell)
@@ -564,8 +564,8 @@ fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl 
     let services = Services::current();
     let locale = services.locale;
     let control = shell.settings_drawer;
-    let close_label = locale.text("ui.settings.panel.close");
-    let clear_label = locale.text("ui.buttons.clear");
+    let close_label = locale.text("ui-settings-panel-close");
+    let clear_label = locale.text("ui-buttons-clear");
 
     let typed = RwSignal::new_local(String::new());
     let query = Signal::derive_local(move || FilterQuery::new(&typed.get()));
@@ -603,7 +603,7 @@ fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl 
     view! {
         row(class = "wt-settings__head") {
             AppIcon(glyph = Glyph::Settings)
-            text(class = "wt-settings__title") {{locale.text("ui.tabs.settings")}}
+            text(class = "wt-settings__title") {{locale.text("ui-tabs-settings")}}
             Tooltip {
                 TooltipTrigger {
                     Button(
@@ -630,9 +630,9 @@ fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl 
                     view! {
                         InputGroupInput(
                             value = typed,
-                            placeholder = t!("ui.settings.panel.search_placeholder").into_owned(),
+                            placeholder = t!("ui-settings-panel-search_placeholder").into_owned(),
                             node_ref = search,
-                            a11y:label = t!("ui.settings.panel.search_placeholder").into_owned(),
+                            a11y:label = t!("ui-settings-panel-search_placeholder").into_owned(),
                             attr:data-testid = "settings-search",
                             on:key_down = move |ev| {
                                 escape.key_down(ev);
@@ -660,14 +660,14 @@ fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl 
         {move || match loaded.get() {
             SettingsRead::Loading => AnyView::new(view! {
                 Loading(
-                    label = Signal::derive_local(locale.text("ui.settings.loading")),
+                    label = Signal::derive_local(locale.text("ui-settings-loading")),
                     placement = LoadingPlacement::Top,
                     attr:data-testid = "settings-loading"
                 )
             }),
             SettingsRead::Failed(reason) => AnyView::new(view! {
                 column(class = "wt-settings__status") {
-                    text(class = "wt-settings__failed") {{locale.text("ui.settings.load_failed")}}
+                    text(class = "wt-settings__failed") {{locale.text("ui-settings-load_failed")}}
                     text(class = "wt-settings__reason") {{reason.clone()}}
                 }
             }),
@@ -681,7 +681,7 @@ fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl 
                 on:click = move |_| page.set(DrawerPage::Licenses)
             ) {
                 AppIcon(glyph = Glyph::FileText)
-                text {{locale.text("ui.settings.licenses.title")}}
+                text {{locale.text("ui-settings-licenses-title")}}
             }
         }
     }
@@ -753,8 +753,8 @@ fn SettingsBody(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> impl 
     let count = move || {
         locale.track();
         match rows.get().len() {
-            1 => t!("ui.settings.panel.count_one").into_owned(),
-            count => t!("ui.settings.panel.count", count = count).into_owned(),
+            1 => t!("ui-settings-panel-count_one").into_owned(),
+            count => t!("ui-settings-panel-count", count = count).into_owned(),
         }
     };
 
@@ -769,8 +769,8 @@ fn SettingsBody(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> impl 
                 }
             }
             if move || rows.get().is_empty() {
-                text(class = "wt-settings__no-match", attr:data-testid = "settings-no-match", a11y:label = locale.text("ui.settings.panel.no_matches")) {
-                    {locale.text("ui.settings.panel.no_matches")}
+                text(class = "wt-settings__no-match", attr:data-testid = "settings-no-match", a11y:label = locale.text("ui-settings-panel-no_matches")) {
+                    {locale.text("ui-settings-panel-no_matches")}
                 }
             } else {
                 scroll(class = "wt-settings__scroll", node_ref = viewport, attr:data-testid = "settings-drawer-scroll") {

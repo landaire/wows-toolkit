@@ -12,9 +12,9 @@ use egui_commonmark::CommonMarkViewer;
 use egui_extras::Column;
 use egui_extras::TableBuilder;
 use parking_lot::Mutex;
-use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
+use wt_translations::t;
 
 use crate::app::ToolkitTabViewer;
 
@@ -228,7 +228,7 @@ impl ToolkitTabViewer<'_> {
         let mut mod_manager_info = std::mem::take(&mut self.tab_state.persisted.write().mod_manager_info);
         let mod_manager_info = &mut mod_manager_info;
         egui::Panel::left("mod_manager_left").show(ui, |ui| {
-            ui.heading(t!("ui.mod_manager.category_filters"));
+            ui.heading(t!("ui-mod_manager-category_filters"));
 
             for (macro_group, categories) in &mut mod_manager_info.categories {
                 CollapsingHeader::new(&*macro_group).default_open(true).show(ui, |ui| {
@@ -246,19 +246,19 @@ impl ToolkitTabViewer<'_> {
                 ui.vertical(|ui| {
                     ui.heading(&selected_mod.meta.name);
                     ui.horizontal(|ui| {
-                        if ui.checkbox(&mut selected_mod.enabled, t!("ui.mod_manager.enabled")).changed() {
+                        if ui.checkbox(&mut selected_mod.enabled, t!("ui-mod_manager-enabled")).changed() {
                             self.tab_state
                                 .mod_action_sender
                                 .send(selected_mod.clone())
                                 .expect("failed to send selected mod on mod_action_sender");
                         }
                         ui.hyperlink_to(
-                            wt_translations::icon_t(icons::BROWSER, &t!("ui.mod_manager.mod_home")),
+                            wt_translations::icon_t(icons::BROWSER, &t!("ui-mod_manager-mod_home")),
                             &selected_mod.meta.repo_url,
                         );
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
                             ui.hyperlink_to(
-                                wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.mod_manager.discord_thread")),
+                                wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui-mod_manager-discord_thread")),
                                 discord_url,
                             );
                         }
@@ -278,11 +278,11 @@ impl ToolkitTabViewer<'_> {
 
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.mod_manager.save_config"))).clicked();
-                ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.mod_manager.load_config"))).clicked();
+                ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui-mod_manager-save_config"))).clicked();
+                ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui-mod_manager-load_config"))).clicked();
                 ui.add(
                     egui::TextEdit::singleline(&mut mod_manager_info.filter_text)
-                        .hint_text(t!("ui.mod_manager.filter")),
+                        .hint_text(t!("ui-mod_manager-filter")),
                 );
             });
 
@@ -300,16 +300,16 @@ impl ToolkitTabViewer<'_> {
                 table
                     .header(20.0, |mut header| {
                         header.col(|ui| {
-                            ui.strong(t!("ui.mod_manager.column.enabled"));
+                            ui.strong(t!("ui-mod_manager-column-enabled"));
                         });
                         header.col(|ui| {
-                            ui.strong(t!("ui.mod_manager.column.name"));
+                            ui.strong(t!("ui-mod_manager-column-name"));
                         });
                         header.col(|ui| {
-                            ui.strong(t!("ui.mod_manager.column.author"));
+                            ui.strong(t!("ui-mod_manager-column-author"));
                         });
                         header.col(|ui| {
-                            ui.strong(t!("ui.mod_manager.column.category"));
+                            ui.strong(t!("ui-mod_manager-column-category"));
                         });
                     })
                     .body(|mut body| {

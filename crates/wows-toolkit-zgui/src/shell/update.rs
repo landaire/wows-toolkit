@@ -7,9 +7,9 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::future::LocalBoxFuture;
 use landaire_ui::MarkdownProps;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
-use rust_i18n::t;
 use wows_toolkit_services::update::Downloaded;
 use wows_toolkit_viewmodel::update::Release;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
@@ -186,10 +186,10 @@ fn describe_download(step: Downloaded) -> String {
     match step.total {
         Some(total) => {
             let total = humansize::format_size(total, humansize::BINARY);
-            t!("ui.messages.update_downloading", read = read, total = total).into_owned()
+            t!("ui-messages-update_downloading", read = read, total = total).into_owned()
         }
         // A server that did not say how much there is leaves only how much has arrived.
-        None => t!("ui.messages.update_downloading_unknown", read = read).into_owned(),
+        None => t!("ui-messages-update_downloading_unknown", read = read).into_owned(),
     }
 }
 
@@ -219,7 +219,7 @@ pub fn check_for_update(services: Services, shell: Shell, asked: Asked) {
     // Shown for a check by hand even when it joins the startup one, so the click is seen to work.
     if asked == Asked::ByHand && flow.asked_job.with_value(Option::is_none) {
         let job =
-            services.jobs.start(Job { name: t!("ui.messages.checking_app_updates").into_owned(), progress: None });
+            services.jobs.start(Job { name: t!("ui-messages-checking_app_updates").into_owned(), progress: None });
         flow.asked_job.set_value(Some(job));
     }
     // A check by hand during the startup one takes that one over, so its answer is said.
@@ -243,14 +243,14 @@ pub fn check_for_update(services: Services, shell: Shell, asked: Asked) {
         match found {
             Ok(Some(release)) => offer_update(services, shell, release),
             Ok(None) if asked == Asked::ByHand => {
-                shell.toasts().ok(t!("ui.messages.app_up_to_date").into_owned());
+                shell.toasts().ok(t!("ui-messages-app_up_to_date").into_owned());
             }
             Ok(None) => {}
             Err(error) => {
                 let reason = describe_failure(&error);
                 tracing::warn!("Update check failed: {reason}");
                 if asked == Asked::ByHand {
-                    notices::show_error(shell, format!("{}\n\n{reason}", t!("ui.messages.update_check_failed")));
+                    notices::show_error(shell, format!("{}\n\n{reason}", t!("ui-messages-update_check_failed")));
                 }
             }
         }
@@ -265,12 +265,12 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
         let release_url = StoredValue::new(release.html_url.clone());
         let install_url = StoredValue::new(asset_url.clone());
         let can_install = cfg!(target_os = "windows") && asset_url.is_some();
-        let version = StoredValue::new(t!("ui.dialogs.update_message", tag = release.tag_name).into_owned());
+        let version = StoredValue::new(t!("ui-dialogs-update_message", tag = release.tag_name).into_owned());
         let notes = StoredValue::new(release.body.clone().filter(|notes| !notes.trim().is_empty()));
         let hint = StoredValue::new(if !cfg!(target_os = "windows") {
-            Some(t!("ui.dialogs.update_windows_only").into_owned())
+            Some(t!("ui-dialogs-update_windows_only").into_owned())
         } else if asset_url.is_none() {
-            Some(t!("ui.dialogs.update_asset_pending").into_owned())
+            Some(t!("ui-dialogs-update_asset_pending").into_owned())
         } else {
             None
         });
@@ -284,7 +284,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
             HostedDialog(handle = handle) {
                 DialogContent(dismiss_on_outside_press = false, attr:data-testid = "update-offer") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.windows.update_available").into_owned()}}
+                        DialogTitle {{t!("ui-windows-update_available").into_owned()}}
                     }
                     column(class = "wt-update") {
                         text(class = "wt-update__version", attr:data-testid = "update-version") {{version.get_value()}}
@@ -292,7 +292,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
                         // own: where they start and stop is the frame, not a guess from headings.
                         {notes.get_value().map(|notes| view! {
                             column {
-                                text(class = "wt-update__notes-head") {{t!("ui.dialogs.update_notes").into_owned()}}
+                                text(class = "wt-update__notes-head") {{t!("ui-dialogs-update_notes").into_owned()}}
                                 box(class = "wt-update__notes") {
                                     Markdown(source = notes, on_link = open_link, attr:data-testid = "update-notes")
                                 }
@@ -310,7 +310,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
                             attr:data-testid = "update-view-release",
                             on:click = move |_| desktop::open_url(&release_url.get_value())
                         ) {
-                            {t!("ui.buttons.view_release").into_owned()}
+                            {t!("ui-buttons-view_release").into_owned()}
                         }
                         {can_install.then(|| {
                             view! {
@@ -324,7 +324,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
                                         install_update(services, shell, url);
                                     }
                                 ) {
-                                    {t!("ui.buttons.install_update").into_owned()}
+                                    {t!("ui-buttons-install_update").into_owned()}
                                 }
                             }.into_view()
                         })}
@@ -334,7 +334,7 @@ fn offer_update(services: Services, shell: Shell, release: Release) {
                             attr:data-testid = "update-close",
                             on:click = move |_| handle.close()
                         ) {
-                            {t!("ui.buttons.cancel").into_owned()}
+                            {t!("ui-buttons-cancel").into_owned()}
                         }
                     }
                 }
@@ -352,7 +352,7 @@ fn install_update(services: Services, shell: Shell, asset_url: String) {
     }
     flow.status.set(UpdateStatus::Installing);
 
-    let job = services.jobs.start(Job { name: t!("ui.messages.update_starting").into_owned(), progress: None });
+    let job = services.jobs.start(Job { name: t!("ui-messages-update_starting").into_owned(), progress: None });
     let (reports, mut progress) = futures::channel::mpsc::unbounded::<Downloaded>();
     let installing = flow.source.get_value().install(services, asset_url, reports);
 

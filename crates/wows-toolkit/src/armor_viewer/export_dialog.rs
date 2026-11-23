@@ -13,7 +13,6 @@ pub use wows_toolkit_viewmodel::armor::export::draft_to_options;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::gltf_export::CamoOrigin;
@@ -23,6 +22,7 @@ use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::size_estimate::ExportSizeModel;
 use wowsunpack::export::size_estimate::SchemeLadderStatus;
 use wowsunpack::export::size_estimate::SizeEstimate;
+use wt_translations::t;
 
 /// The subset of `ExportDraft` that changes `SizeEstimate`, plus the
 /// `ExportDialog::load_generation` a `size_model` belongs to (a fresh load
@@ -305,7 +305,7 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
         dialog.phase = ExportPhase::Editing;
     }
 
-    egui::Window::new(t!("ui.armor.export_model").as_ref())
+    egui::Window::new(t!("ui-armor-export_model").as_ref())
         .collapsible(false)
         .resizable(true)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -354,7 +354,7 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 // which case it shows its own small spinners for the LoD slider
                 // and camo list instead of gating the whole panel on them.
                 if let ExportMetaState::Failed(e) = &dialog.meta {
-                    ui.colored_label(ui.visuals().error_fg_color, t!("ui.armor.load_failed", error = e).as_ref());
+                    ui.colored_label(ui.visuals().error_fg_color, t!("ui-armor-load_failed", error = e).as_ref());
                 } else {
                     let meta = match &dialog.meta {
                         ExportMetaState::Loaded(meta) => Some(meta),
@@ -379,16 +379,16 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.add(egui::Spinner::new().size(14.0));
-                    ui.label(t!("ui.armor.export.exporting", ship = dialog.display_name.as_str()).as_ref());
+                    ui.label(t!("ui-armor-export-exporting", ship = dialog.display_name.as_str()).as_ref());
                 });
             }
 
             ui.add_space(8.0);
-            ui.label(t!("ui.armor.export_disclaimer").as_ref());
+            ui.label(t!("ui-armor-export_disclaimer").as_ref());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let ready = matches!(dialog.meta, ExportMetaState::Loaded(_)) && !exporting;
-                if ui.add_enabled(ready, egui::Button::new(t!("ui.armor.export_button").as_ref())).clicked() {
+                if ui.add_enabled(ready, egui::Button::new(t!("ui-armor-export_button").as_ref())).clicked() {
                     let (sender, inbox) = egui_inbox::UiInbox::channel();
                     dialog.phase = ExportPhase::Exporting(inbox);
                     outcome = DialogOutcome::Export { options: Box::new(draft_to_options(&dialog.draft)), sender };
@@ -397,7 +397,7 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 // reports its own result, so dismissing the dialog here costs
                 // nothing and is the only way to get rid of one whose worker
                 // panicked (which sends nothing back, ever).
-                let close_label = if exporting { t!("ui.armor.export.close_button") } else { t!("ui.buttons.cancel") };
+                let close_label = if exporting { t!("ui-armor-export-close_button") } else { t!("ui-buttons-cancel") };
                 if ui.button(close_label.as_ref()).clicked() {
                     outcome = DialogOutcome::Cancelled;
                 }
@@ -448,7 +448,7 @@ fn controls(
         // builds) spent for nothing, once per stray click.
         ui.add_enabled_ui(meta.is_some(), |ui| {
             ui.horizontal(|ui| {
-                ui.label(t!("ui.armor.export.hull").as_ref());
+                ui.label(t!("ui-armor-export-hull").as_ref());
                 egui::ComboBox::from_id_salt("export_hull_combo").selected_text(selected_label).show_ui(ui, |ui| {
                     for (i, (key, label)) in hull_upgrades.iter().enumerate() {
                         let is_selected = draft.hull.as_ref() == Some(key) || (draft.hull.is_none() && i == 0);
@@ -463,7 +463,7 @@ fn controls(
     }
 
     ui.horizontal(|ui| {
-        ui.label(t!("ui.armor.export.contents").as_ref());
+        ui.label(t!("ui-armor-export-contents").as_ref());
         for contents in [ExportContents::Mesh, ExportContents::Armor, ExportContents::MeshAndArmor] {
             ui.radio_value(&mut draft.contents, contents, t!(contents_label_key(contents)).as_ref());
         }
@@ -474,9 +474,9 @@ fn controls(
             ui.add_enabled(
                 draft.contents.includes_mesh(),
                 egui::Slider::new(&mut draft.lod, 0..=meta.hull_lod_count.saturating_sub(1))
-                    .text(t!("ui.armor.export.lod")),
+                    .text(t!("ui-armor-export-lod")),
             )
-            .on_hover_text(t!("ui.armor.export.lod_tooltip").as_ref());
+            .on_hover_text(t!("ui-armor-export-lod_tooltip").as_ref());
         }
         Some(_) => {}
         None => loading_placeholder(ui),
@@ -484,7 +484,7 @@ fn controls(
 
     ui.add_enabled_ui(draft.contents.includes_mesh(), |ui| {
         ui.horizontal(|ui| {
-            ui.label(t!("ui.armor.export.res").as_ref());
+            ui.label(t!("ui-armor-export-res").as_ref());
             egui::ComboBox::from_id_salt("export_texture_res_combo")
                 .selected_text(t!(draft.texture_res.label_key()).as_ref())
                 .show_ui(ui, |ui| {
@@ -498,12 +498,12 @@ fn controls(
     match meta {
         Some(meta) if !meta.camo_schemes.is_empty() => {
             ui.add_enabled_ui(draft.contents.includes_mesh(), |ui| {
-                ui.label(t!("ui.armor.export.camos").as_ref());
+                ui.label(t!("ui-armor-export-camos").as_ref());
                 ui.horizontal(|ui| {
-                    if ui.button(t!("ui.armor.export.camo_select_none").as_ref()).clicked() {
+                    if ui.button(t!("ui-armor-export-camo_select_none").as_ref()).clicked() {
                         draft.camos.clear();
                     }
-                    if ui.button(t!("ui.armor.export.camo_reset").as_ref()).clicked() {
+                    if ui.button(t!("ui-armor-export-camo_reset").as_ref()).clicked() {
                         draft.camos.clear();
                         if let Some(id) = default_camo(&meta.camo_schemes) {
                             draft.camos.insert(id);
@@ -525,7 +525,7 @@ fn controls(
                     // with no indication the export still has a well-defined
                     // appearance -- the stock one, same as the viewer's own picker.
                     ui.add_enabled_ui(false, |ui| {
-                        let _ = ui.selectable_label(draft.camos.is_empty(), t!("ui.armor.camo_none").as_ref());
+                        let _ = ui.selectable_label(draft.camos.is_empty(), t!("ui-armor-camo_none").as_ref());
                     });
                     for info in &ship_infos {
                         camo_checkbox(ui, draft, info);
@@ -533,9 +533,9 @@ fn controls(
                 });
 
                 for (origin, key) in [
-                    (CamoOrigin::Universal, "ui.armor.camo_group_universal"),
-                    (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
-                    (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
+                    (CamoOrigin::Universal, "ui-armor-camo_group_universal"),
+                    (CamoOrigin::Expendable, "ui-armor-camo_group_expendable"),
+                    (CamoOrigin::LegacyScan, "ui-armor-camo_group_other"),
                 ] {
                     let mut group: Vec<&CamoSchemeInfo> =
                         meta.camo_schemes.iter().filter(|i| i.origin == origin).collect();
@@ -584,7 +584,7 @@ fn camo_checkbox(ui: &mut egui::Ui, draft: &mut ExportDraft, info: &CamoSchemeIn
 fn loading_placeholder(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.add(egui::Spinner::new().size(12.0));
-        ui.label(t!("ui.armor.export.loading_details").as_ref());
+        ui.label(t!("ui-armor-export-loading_details").as_ref());
     });
 }
 
@@ -598,8 +598,8 @@ fn size_estimate_label(ui: &mut egui::Ui, estimate: &SizeEstimate) {
     let total = humansize::format_size(estimate.total(), humansize::BINARY);
     let geometry = humansize::format_size(estimate.geometry_bytes, humansize::BINARY);
     let textures = humansize::format_size(estimate.texture_bytes, humansize::BINARY);
-    ui.label(t!("ui.armor.export.size_estimate", size = total).as_ref())
-        .on_hover_text(t!("ui.armor.export.size_breakdown", geometry = geometry, textures = textures).as_ref());
+    ui.label(t!("ui-armor-export-size_estimate", size = total).as_ref())
+        .on_hover_text(t!("ui-armor-export-size_breakdown", geometry = geometry, textures = textures).as_ref());
 }
 
 /// Renders the size estimate, a spinner while it is unavailable, or an
@@ -687,9 +687,9 @@ fn size_line(
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
-                        t!("ui.armor.export.size_incomplete", count = failed_ids.len()).as_ref(),
+                        t!("ui-armor-export-size_incomplete", count = failed_ids.len()).as_ref(),
                     );
-                    if ui.button(t!("ui.buttons.retry").as_ref()).clicked() {
+                    if ui.button(t!("ui-buttons-retry").as_ref()).clicked() {
                         for id in &failed_ids {
                             model.clear_failed_scheme_ladders(*id);
                         }

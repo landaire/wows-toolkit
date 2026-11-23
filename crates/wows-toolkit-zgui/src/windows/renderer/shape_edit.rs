@@ -9,7 +9,6 @@ use landaire_ui::Rgb;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_replay_data::replay_render::annotate::PickedShape;
 use wows_toolkit_replay_data::replay_render::annotate::ShapeEdit;
@@ -20,6 +19,7 @@ use wows_toolkit_replay_data::replay_render::annotate::shape_size;
 use wt_collab_client::geometry::ENEMY_COLOR;
 use wt_collab_client::geometry::FRIENDLY_COLOR;
 use wt_collab_client::types::Annotation;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Memo;
@@ -101,7 +101,7 @@ pub fn ShapeEditPopup(session: RendererSession) -> impl IntoView {
             box(
                 class = "wt-renderer-shape-edit",
                 attr:data-testid = "replay-renderer-shape-edit",
-                a11y:label = t!("ui.renderer.annotations.edit").into_owned(),
+                a11y:label = t!("ui-renderer-annotations-edit").into_owned(),
                 style:left = left,
                 style:top = top,
                 on:pointer_down = move |ev| ev.stop_propagation(),
@@ -129,7 +129,7 @@ fn ShapeFields(session: RendererSession, picked: Memo<Option<PickedShape>>, anno
         shape_filled(&annotation).map(|_| AnyView::new(view! { FilledField(session = session, picked = picked) }));
     let side = matches!(annotation, Annotation::Ship { .. })
         .then(|| AnyView::new(view! { SideField(session = session, picked = picked) }));
-    let delete = t!("ui.renderer.annotations.action_delete").into_owned();
+    let delete = t!("ui-renderer-annotations-action_delete").into_owned();
     let label = delete.clone();
 
     view! {
@@ -170,7 +170,7 @@ fn SizeField(session: RendererSession, picked: Memo<Option<PickedShape>>, unit: 
     let range = unit.range();
     let bounds =
         NumberRange::new(f64::from(unit.step())).with_min(f64::from(*range.start())).with_max(f64::from(*range.end()));
-    let named = t!("ui.renderer.annotations.size").into_owned();
+    let named = t!("ui-renderer-annotations-size").into_owned();
 
     view! {
         row(class = "wt-renderer-shape-edit__field") {
@@ -196,7 +196,7 @@ fn ColorField(session: RendererSession, picked: Memo<Option<PickedShape>>) -> im
         let [red, green, blue, _] = color.unwrap_or_default();
         Rgb::from_channels(red, green, blue)
     });
-    let named = t!("ui.renderer.annotations.color").into_owned();
+    let named = t!("ui-renderer-annotations-color").into_owned();
 
     view! {
         row(class = "wt-renderer-shape-edit__field") {
@@ -219,7 +219,7 @@ fn FilledField(session: RendererSession, picked: Memo<Option<PickedShape>>) -> i
         let filled = picked.with(|picked| picked.as_ref().and_then(|picked| shape_filled(&picked.annotation)));
         if filled == Some(true) { Checked::Yes } else { Checked::No }
     });
-    let named = t!("ui.renderer.annotations.filled").into_owned();
+    let named = t!("ui-renderer-annotations-filled").into_owned();
     let control = NodeRef::new();
     let name = NodeRef::new();
 
@@ -249,7 +249,7 @@ fn SideField(session: RendererSession, picked: Memo<Option<PickedShape>>) -> imp
         Some(Rgb::from_channels(red, green, blue).to_string())
     };
     let named = move || {
-        let key = if friendly() { "ui.tactics.side_friendly" } else { "ui.tactics.side_enemy" };
+        let key = if friendly() { "ui-tactics-side_friendly" } else { "ui-tactics-side_enemy" };
         t!(key).into_owned()
     };
 

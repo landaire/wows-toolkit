@@ -24,7 +24,6 @@ use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_replays::types::GameParamId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -37,6 +36,7 @@ use wows_toolkit_viewmodel::stats::table::ship_summaries;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wowsunpack::game_params::types::GameParamProvider;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::prelude::ClipboardKind;
@@ -324,7 +324,7 @@ impl ShipsCx {
             }
         });
         if let Some(toasts) = self.toasts {
-            toasts.ok(t!("ui.stats.copied").into_owned());
+            toasts.ok(t!("ui-stats-copied").into_owned());
         }
     }
 }
@@ -348,8 +348,8 @@ pub fn StatsShips(
         let games = games.get();
         let games: Vec<&PerGameStat> = games.iter().collect();
         // Grouped the way the reader's language groups digits.
-        let figures = wows_toolkit_viewmodel::locale();
-        ship_summaries(&games, personal_rating.get().as_deref(), Some(&figures))
+        let figures = wt_translations::locale();
+        ship_summaries(&games, personal_rating.get().as_deref(), Some(figures))
             .into_iter()
             .map(Arc::new)
             .collect::<Vec<_>>()
@@ -413,7 +413,7 @@ pub fn StatsShips(
     };
     let placeholder = move || {
         locale.track();
-        t!("ui.stats.search_ships").into_owned()
+        t!("ui-stats-search_ships").into_owned()
     };
     let escape = EscapeClears::new(query);
 
@@ -421,7 +421,7 @@ pub fn StatsShips(
         column(class = "wt-stats-ships", attr:data-testid = "stats-ships") {
             if move || summaries.with(Vec::is_empty) {
                 box(class = "wt-stats-ships__empty") {
-                    text {{locale.text("ui.stats.no_games")}}
+                    text {{locale.text("ui-stats-no_games")}}
                 }
             } else {
                 row(class = "wt-stats-ships__search") {
@@ -440,21 +440,21 @@ pub fn StatsShips(
                                 Button(
                                     variant = ButtonVariant::Ghost,
                                     size = ButtonSize::IconSm,
-                                    a11y:label = locale.text("ui.stats.clear"),
+                                    a11y:label = locale.text("ui-stats-clear"),
                                     attr:data-testid = "stats-ships-clear-search",
                                     on:click = move |_| query.set(String::new())
                                 ) {
                                     AppIcon(glyph = Glyph::X)
                                 }
                             }
-                            TooltipContent {{locale.text("ui.stats.clear")}}
+                            TooltipContent {{locale.text("ui-stats-clear")}}
                         }
                     } else {}
                     text(class = "wt-stats-ships__count", class = TABULAR_CLASS, attr:data-testid = "stats-ships-count") {{count}}
                 }
                 if move || rows.with(Vec::is_empty) {
                     box(class = "wt-stats-ships__empty") {
-                        text {{locale.text("ui.stats.no_ship_matches")}}
+                        text {{locale.text("ui-stats-no_ship_matches")}}
                     }
                 } else {
                     {move || {
@@ -474,38 +474,37 @@ fn ship_grid(
     sort: RwSignal<Option<ColumnSort>, LocalStorage>,
     clearable: bool,
 ) -> AnyView {
-    let locale = wows_toolkit_viewmodel::locale();
+    let locale = wt_translations::locale();
     let number = ColumnSizing::Fixed(ColumnWidth(96.0));
-    let damage_locale = locale.clone();
     let columns = vec![
-        GridColumn::new(SortKey::Ship.id(), t!("ui.stats.column_ship").into_owned(), move |row: &ShipRow| {
+        GridColumn::new(SortKey::Ship.id(), t!("ui-stats-column_ship").into_owned(), move |row: &ShipRow| {
             ship_cell(cx, row)
         })
         .text(|row| row.ship.clone())
         .sizing(ColumnSizing::Fixed(ColumnWidth(240.0)))
         .sortable(true),
-        GridColumn::new(SortKey::Battles.id(), t!("ui.stats.column_battles").into_owned(), |row: &ShipRow| {
+        GridColumn::new(SortKey::Battles.id(), t!("ui-stats-column_battles").into_owned(), |row: &ShipRow| {
             row.performance.total_games().to_string()
         })
         .text(|row| row.performance.total_games().to_string())
         .sizing(number)
         .align(ColumnAlign::End)
         .sortable(true),
-        GridColumn::new(SortKey::WinRate.id(), t!("ui.stats.column_win_rate").into_owned(), win_rate_cell)
+        GridColumn::new(SortKey::WinRate.id(), t!("ui-stats-column_win_rate").into_owned(), win_rate_cell)
             .text(|row| optional_percent(row.performance.rated_win_rate()))
             .sizing(number)
             .align(ColumnAlign::End)
             .sortable(true),
         GridColumn::new(
             SortKey::AvgDamage.id(),
-            t!("ui.stats.column_avg_damage").into_owned(),
-            move |row: &ShipRow| optional_number(row.performance.avg_damage(), &damage_locale),
+            t!("ui-stats-column_avg_damage").into_owned(),
+            move |row: &ShipRow| optional_number(row.performance.avg_damage(), locale),
         )
-        .text(move |row| optional_number(row.performance.avg_damage(), &locale))
+        .text(move |row| optional_number(row.performance.avg_damage(), locale))
         .sizing(number)
         .align(ColumnAlign::End)
         .sortable(true),
-        GridColumn::new(SortKey::AvgFrags.id(), t!("ui.stats.column_avg_frags").into_owned(), |row: &ShipRow| {
+        GridColumn::new(SortKey::AvgFrags.id(), t!("ui-stats-column_avg_frags").into_owned(), |row: &ShipRow| {
             optional_decimal(row.performance.avg_frags())
         })
         .text(|row| optional_decimal(row.performance.avg_frags()))
@@ -541,7 +540,7 @@ fn ship_grid(
             expanded = cx.expanded,
             on_row_click = UnsyncCallback::new(move |ship| cx.toggle(ship)),
             row_menu = row_menu,
-            label = t!("ui.stats.ships").into_owned(),
+            label = t!("ui-stats-ships").into_owned(),
             attr:data-testid = "stats-ships-grid"
         )
     })
@@ -665,7 +664,7 @@ fn ship_cell(cx: ShipsCx, row: &ShipRow) -> AnyView {
 /// button that forgets the ship's games.
 fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
     let ship = row.ship_id;
-    let hint = t!("ui.stats.leave_out_ship_hint", ship = row.ship.as_str()).into_owned();
+    let hint = t!("ui-stats-leave_out_ship_hint", ship = row.ship.as_str()).into_owned();
     let tip = {
         let hint = hint.clone();
         move || hint.clone()
@@ -697,7 +696,7 @@ fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
                     DropdownMenuTrigger(
                         variant = ButtonVariant::Ghost,
                         size = ButtonSize::IconSm,
-                        a11y:label = t!("ui.stats.copy_table").into_owned(),
+                        a11y:label = t!("ui-stats-copy_table").into_owned(),
                         attr:data-testid = format!("ship-copy-{ship}")
                     ) {
                         AppIcon(glyph = Glyph::Copy)
@@ -707,21 +706,21 @@ fn actions_cell(cx: ShipsCx, row: &ShipRow, clearable: bool) -> AnyView {
                     }
                 }
             }
-            TooltipContent {{t!("ui.stats.copy_table").into_owned()}}
+            TooltipContent {{t!("ui-stats-copy_table").into_owned()}}
         }
     };
     let clear = clearable.then(|| {
         let armed = move || cx.armed.get() == Some(ship);
         let name = row.ship.clone();
-        let hint = t!("ui.stats.remove_games_hint", ship = name).into_owned();
+        let hint = t!("ui-stats-remove_games_hint", ship = name).into_owned();
         let label = {
             let hint = hint.clone();
-            move || if armed() { t!("ui.stats.clear_ship_confirm").into_owned() } else { hint.clone() }
+            move || if armed() { t!("ui-stats-clear_ship_confirm").into_owned() } else { hint.clone() }
         };
         let accessible = {
             let hint = hint.clone();
             move || {
-                if armed() { format!("{}: {hint}", t!("ui.stats.clear_ship_confirm")) } else { hint.clone() }
+                if armed() { format!("{}: {hint}", t!("ui-stats-clear_ship_confirm")) } else { hint.clone() }
             }
         };
         let glyph = Signal::derive_local(move || if armed() { Glyph::CircleCheck } else { Glyph::Eraser });
@@ -770,20 +769,20 @@ fn copy_items(cx: ShipsCx, summary: ShipRow) -> AnyView {
             attr:data-testid = format!("copy-markdown-{ship}"),
             on_select = UnsyncCallback::new(move |()| cx.copy(markdown.clone()))
         ) {
-            {t!("ui.stats.copy_markdown").into_owned()}
+            {t!("ui-stats-copy_markdown").into_owned()}
         }
         MenuItem(
             attr:data-testid = format!("copy-csv-{ship}"),
             on_select = UnsyncCallback::new(move |()| cx.copy(csv.clone()))
         ) {
-            {t!("ui.stats.copy_csv").into_owned()}
+            {t!("ui-stats-copy_csv").into_owned()}
         }
     })
 }
 
 fn leave_out_item(cx: ShipsCx, summary: &ShipRow) -> AnyView {
     let ship = summary.ship_id;
-    let label = t!("ui.stats.leave_out_ship_hint", ship = summary.ship.as_str()).into_owned();
+    let label = t!("ui-stats-leave_out_ship_hint", ship = summary.ship.as_str()).into_owned();
 
     AnyView::new(view! {
         MenuItem(

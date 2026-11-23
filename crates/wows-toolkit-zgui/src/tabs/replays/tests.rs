@@ -13,7 +13,6 @@ use landaire_ui::PanelKind;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_core::pseudonym;
 use wows_toolkit_config::index::query;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
@@ -23,6 +22,7 @@ use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use wt_collab_client::OpenReplay;
+use wt_translations::t;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
@@ -203,7 +203,7 @@ fn the_replay_tab_menu_is_translated() {
     window.right_click(tab).expect("the tab has a box");
     window.advance(Duration::from_millis(400));
 
-    for key in ["ui.tabs.close_tab", "ui.tabs.close_other_tabs", "ui.tabs.close_tabs_to_the_right"] {
+    for key in ["ui-tabs-close_tab", "ui-tabs-close_other_tabs", "ui-tabs-close_tabs_to_the_right"] {
         let label = t!(key).into_owned();
         assert!(window.by_role_and_label(Role::MenuItem, &label).is_some(), "the menu offers {label}");
     }
@@ -353,7 +353,7 @@ fn the_open_menu_opens_a_picked_replay() {
     let trigger = window.by_test_id("replay-listing-open").expect("the header has an open button");
     window.click(trigger).expect("the open button has a box");
     window.advance(Duration::from_millis(300));
-    let file = t!("ui.replay.open_file").into_owned();
+    let file = t!("ui-replay-open_file").into_owned();
     let item = window.by_role_and_label(Role::MenuItem, &file).expect("the menu offers a replay file");
 
     wows_toolkit_services::dialog::take_asked();
@@ -878,5 +878,5 @@ fn sending_every_replay_before_the_settings_load_says_so() {
     window.advance(Duration::from_millis(400));
 
     let toasts = window.texts_by_class("lui-toasts").concat();
-    assert!(toasts.contains(t!("ui.replay.contribute_not_ready").as_ref()), "{toasts:?}");
+    assert!(toasts.contains(t!("ui-replay-contribute_not_ready").as_ref()), "{toasts:?}");
 }

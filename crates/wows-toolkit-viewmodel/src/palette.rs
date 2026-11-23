@@ -1,10 +1,10 @@
 //! The command palette's parts both desktop front ends share: its cascading modes and the rows
 //! the replay index offers.
 
-use rust_i18n::t;
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::index::query_text::print_query;
 use wows_toolkit_config::index::rows::IndexError;
+use wt_translations::t;
 
 use crate::name_lookup::PlayerLookup;
 use crate::name_lookup::ShipLookup;
@@ -37,34 +37,34 @@ impl PaletteMode {
     /// What the root entry that enters this mode is called.
     pub const fn label_key(self) -> &'static str {
         match self {
-            Self::Players => "ui.palette.search_players",
-            Self::MyShips => "ui.palette.my_matches_in_ship",
-            Self::ArmorShips => "ui.palette.open_ship_in_armor_viewer",
-            Self::ShipToolShips => "ui.palette.open_ship_in_shiptool",
-            Self::ReindexVersions => "ui.reindex.palette_by_version",
-            Self::ReplayFolders => "ui.replay.open_directory",
+            Self::Players => "ui-palette-search_players",
+            Self::MyShips => "ui-palette-my_matches_in_ship",
+            Self::ArmorShips => "ui-palette-open_ship_in_armor_viewer",
+            Self::ShipToolShips => "ui-palette-open_ship_in_shiptool",
+            Self::ReindexVersions => "ui-reindex-palette_by_version",
+            Self::ReplayFolders => "ui-replay-open_directory",
         }
     }
 
     /// What the layer is called in its header, after the root's name.
     pub const fn title_key(self) -> &'static str {
         match self {
-            Self::Players => "ui.palette.players_title",
-            Self::MyShips => "ui.palette.my_ships_title",
-            Self::ArmorShips => "ui.palette.armor_ships_title",
-            Self::ShipToolShips => "ui.palette.shiptool_ships_title",
-            Self::ReindexVersions => "ui.reindex.versions_title",
-            Self::ReplayFolders => "ui.replay_folders.recent_title",
+            Self::Players => "ui-palette-players_title",
+            Self::MyShips => "ui-palette-my_ships_title",
+            Self::ArmorShips => "ui-palette-armor_ships_title",
+            Self::ShipToolShips => "ui-palette-shiptool_ships_title",
+            Self::ReindexVersions => "ui-reindex-versions_title",
+            Self::ReplayFolders => "ui-replay_folders-recent_title",
         }
     }
 
     pub const fn placeholder_key(self) -> &'static str {
         match self {
-            Self::Players => "ui.palette.players_placeholder",
-            Self::MyShips => "ui.palette.my_ships_placeholder",
-            Self::ArmorShips | Self::ShipToolShips => "ui.palette.armor_ships_placeholder",
-            Self::ReindexVersions => "ui.reindex.versions_placeholder",
-            Self::ReplayFolders => "ui.replay_folders.recent_placeholder",
+            Self::Players => "ui-palette-players_placeholder",
+            Self::MyShips => "ui-palette-my_ships_placeholder",
+            Self::ArmorShips | Self::ShipToolShips => "ui-palette-armor_ships_placeholder",
+            Self::ReindexVersions => "ui-reindex-versions_placeholder",
+            Self::ReplayFolders => "ui-replay_folders-recent_placeholder",
         }
     }
 }
@@ -132,7 +132,7 @@ pub fn seeded_searches(lookup: &IndexLookup, query: &FilterQuery) -> Vec<SeededS
                     clan => format!("[{clan}] {}", player.latest_name),
                 };
                 SeededSearch {
-                    label: format!("{named} -- {}", t!("ui.palette.matches_found", count = player.match_count)),
+                    label: format!("{named} -- {}", t!("ui-palette-matches_found", count = player.match_count)),
                     query: print_query(&seed::matches_with_player(player.account_id)),
                 }
             })
@@ -141,7 +141,7 @@ pub fn seeded_searches(lookup: &IndexLookup, query: &FilterQuery) -> Vec<SeededS
             .find(query, MODE_LIMIT)
             .into_iter()
             .map(|ship| SeededSearch {
-                label: format!("{} -- {}", ship.ship_name, t!("ui.palette.matches_found", count = ship.match_count)),
+                label: format!("{} -- {}", ship.ship_name, t!("ui-palette-matches_found", count = ship.match_count)),
                 query: print_query(&seed::my_matches_in_ship(ship.ship_id)),
             })
             .collect(),

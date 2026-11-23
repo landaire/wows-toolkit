@@ -9,7 +9,6 @@ use landaire_ui::SliderRange;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_armor::trajectory::ArcId;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
@@ -17,6 +16,7 @@ use wows_toolkit_viewmodel::armor::penetration::Ifhe;
 use wows_toolkit_viewmodel::armor::plate_detail::flat_check;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::ShellInfo;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::elements::Focus;
@@ -142,7 +142,7 @@ pub fn TrajectoryPanel(
         Signal::derive_local(move || f64::from(viewport.cast_range().value())),
         move |range: f64| viewport.set_cast_range(Km::new(range as f32)),
     );
-    let range_label = t!("ui.armor.trajectory_range").into_owned();
+    let range_label = t!("ui-armor-trajectory_range").into_owned();
 
     let plates_open = RwSignal::new_local(false);
     let markers = move || markers(viewport);
@@ -155,7 +155,7 @@ pub fn TrajectoryPanel(
     view! {
         column(class = "wt-armor-trajectory", attr:data-testid = "armor-trajectory") {
             column(class = "wt-armor-trajectory__group") {
-                text(class = "wt-armor-trajectory__heading") {{locale.text("ui.armor.trajectory_next_cast")}}
+                text(class = "wt-armor-trajectory__heading") {{locale.text("ui-armor-trajectory_next_cast")}}
                 FiringControls(pen = pen, on_open_pen_check = on_open_pen_check)
                 SliderField(
                     value = next_range,
@@ -173,7 +173,7 @@ pub fn TrajectoryPanel(
                         labelled_by = ricochet_name,
                         attr:data-testid = "armor-trajectory-ricochet"
                     )
-                    Label(node_ref = ricochet_name, control = ricochet_box) {{locale.text("ui.armor.continue_ricochet")}}
+                    Label(node_ref = ricochet_name, control = ricochet_box) {{locale.text("ui-armor-continue_ricochet")}}
                 }
             }
             {markers}
@@ -195,7 +195,7 @@ fn FiringControls(
         let (ships, firing, shell_index) =
             pen.with(|pen| (pen.ships.clone(), pen.firing_ship.clone(), pen.firing_shell));
         if ships.is_empty() {
-            let tip = t!("ui.armor.trajectory_add_ship_tooltip").into_owned();
+            let tip = t!("ui-armor-trajectory_add_ship_tooltip").into_owned();
             return AnyView::new(view! {
                 Tooltip {
                     TooltipTrigger(class = "wt-armor-trajectory__wide") {
@@ -210,7 +210,7 @@ fn FiringControls(
                                 }
                             }
                         ) {
-                            {t!("ui.armor.trajectory_add_ship").into_owned()}
+                            {t!("ui-armor-trajectory_add_ship").into_owned()}
                         }
                     }
                     TooltipContent {{tip.clone()}}
@@ -220,16 +220,16 @@ fn FiringControls(
 
         let selected = ships.iter().find(|ship| Some(ship.param_index.as_str()) == firing.as_deref()).cloned();
         let ship_label = selected.as_ref().map_or_else(
-            || t!("ui.armor.trajectory_select_ship").into_owned(),
-            |ship| format!("{} {}", t!("ui.armor.trajectory_ship"), ship.display_name),
+            || t!("ui-armor-trajectory_select_ship").into_owned(),
+            |ship| format!("{} {}", t!("ui-armor-trajectory_ship"), ship.display_name),
         );
         let cast = selected.map(|ship| CastShell { ship, shell_index });
         let active_shell = cast.as_ref().and_then(CastShell::fired_index);
         let shell_label = cast
             .as_ref()
             .and_then(CastShell::shell)
-            .map(|shell| format!("{} {}", t!("ui.armor.trajectory_shell"), shell_name(shell)))
-            .unwrap_or_else(|| t!("ui.armor.trajectory_select_shell").into_owned());
+            .map(|shell| format!("{} {}", t!("ui-armor-trajectory_shell"), shell_name(shell)))
+            .unwrap_or_else(|| t!("ui-armor-trajectory_select_shell").into_owned());
         let shells = cast.map(|cast| cast.ship.shells).unwrap_or_default();
         let no_shells = shells.is_empty();
 
@@ -262,8 +262,8 @@ fn FiringControls(
                     .collect()
             })
         };
-        let ship_tip = format!("{}\n{}", ship_label, t!("ui.armor.trajectory_ship_tooltip"));
-        let shell_tip = t!("ui.armor.trajectory_shell_tooltip").into_owned();
+        let ship_tip = format!("{}\n{}", ship_label, t!("ui-armor-trajectory_ship_tooltip"));
+        let shell_tip = t!("ui-armor-trajectory_shell_tooltip").into_owned();
 
         AnyView::new(view! {
             column(class = "wt-armor-trajectory__pickers") {
@@ -327,8 +327,8 @@ fn menu_item(label: String, active: bool, choose: impl Fn() + 'static) -> AnyVie
 fn markers(viewport: ArmorViewportState) -> AnyView {
     let arcs = viewport.arcs();
     if arcs.is_empty() {
-        let title = t!("ui.armor.cast.empty").into_owned();
-        let prompt = t!("ui.armor.cast.prompt", key = ModifierKey::Shift.label()).into_owned();
+        let title = t!("ui-armor-cast-empty").into_owned();
+        let prompt = t!("ui-armor-cast-prompt", key = ModifierKey::Shift.label()).into_owned();
         return AnyView::new(view! {
             row(class = "wt-armor-trajectory__empty", attr:data-testid = "armor-trajectory-empty") {
                 AppIcon(glyph = Glyph::Crosshair, class = "wt-armor-trajectory__empty-icon")
@@ -344,7 +344,7 @@ fn markers(viewport: ArmorViewportState) -> AnyView {
         arcs.iter().enumerate().map(|(index, arc)| marker(viewport, index, arc, Some(arc.id) == selected)).collect();
     let pick_hint = selected.is_none().then(|| {
         AnyView::new(view! {
-            text(class = "wt-armor-trajectory__hint") {{t!("ui.armor.arc_pick_hint").into_owned()}}
+            text(class = "wt-armor-trajectory__hint") {{t!("ui-armor-arc_pick_hint").into_owned()}}
         })
     });
 
@@ -359,7 +359,7 @@ fn markers(viewport: ArmorViewportState) -> AnyView {
                     attr:data-testid = "armor-trajectory-clear",
                     on:click = move |_| viewport.clear_trajectories()
                 ) {
-                    {t!("ui.armor.trajectory_clear").into_owned()}
+                    {t!("ui-armor-trajectory_clear").into_owned()}
                 }
             }
             {pick_hint}
@@ -369,7 +369,7 @@ fn markers(viewport: ArmorViewportState) -> AnyView {
             }
             // The simulation is read off the game's own data but is not the game's own code, which
             // is worth saying where its verdicts are read.
-            text(class = "wt-armor-trajectory__caveat") {{t!("ui.armor.arc_simulation_caveat").into_owned()}}
+            text(class = "wt-armor-trajectory__caveat") {{t!("ui-armor-arc_simulation_caveat").into_owned()}}
             {angle_legend()}
         }
     })
@@ -378,8 +378,8 @@ fn markers(viewport: ArmorViewportState) -> AnyView {
 /// The label and tooltip keys of an isolation, and its test id stem.
 fn isolate_keys(what: Isolate) -> (&'static str, &'static str, &'static str) {
     match what {
-        Isolate::Plates => ("ui.armor.arc_isolate_plates", "ui.armor.arc_isolate_plates_tooltip", "plates"),
-        Isolate::Zones => ("ui.armor.arc_isolate_zones", "ui.armor.arc_isolate_zones_tooltip", "zones"),
+        Isolate::Plates => ("ui-armor-arc_isolate_plates", "ui-armor-arc_isolate_plates_tooltip", "plates"),
+        Isolate::Zones => ("ui-armor-arc_isolate_zones", "ui-armor-arc_isolate_zones_tooltip", "zones"),
     }
 }
 
@@ -410,7 +410,7 @@ fn isolate_all(viewport: ArmorViewportState, what: Isolate) -> AnyView {
 fn marker(viewport: ArmorViewportState, index: usize, arc: &ArcSummary, selected: bool) -> AnyView {
     let id = arc.id;
     let number = index + 1;
-    let tip = t!("ui.armor.arc_marker_tooltip", number = number).into_owned();
+    let tip = t!("ui-armor-arc_marker_tooltip", number = number).into_owned();
     let label = tip.clone();
     let color = swatch_css(arc.color.rgba());
 
@@ -457,13 +457,13 @@ fn editor(
     let color = swatch_css(held.color.rgba());
     let title = move || {
         let (index, _) = viewport.arc(id)?;
-        Some(t!("ui.armor.arc_heading", number = index + 1).into_owned())
+        Some(t!("ui-armor-arc_heading", number = index + 1).into_owned())
     };
     let summary = move || {
         let (_, arc) = viewport.arc(id)?;
         Some(
             t!(
-                "ui.armor.arc_summary",
+                "ui-armor-arc_summary",
                 hits = arc.hits,
                 armor = format!("{:.0}", arc.total_armor.value()),
                 range = format!("{:.1}", arc.range.value()),
@@ -500,7 +500,7 @@ fn editor(
         }),
         move |range: f64| viewport.set_arc_range(id, Km::new(range as f32)),
     );
-    let delete_tip = t!("ui.armor.arc_delete").into_owned();
+    let delete_tip = t!("ui-armor-arc_delete").into_owned();
     let delete_label = delete_tip.clone();
 
     Some(AnyView::new(view! {
@@ -532,7 +532,7 @@ fn editor(
                 value = range,
                 range = CAST_RANGE_SLIDER,
                 reset_to = DEFAULT_CAST_RANGE,
-                label = t!("ui.armor.trajectory_range").into_owned(),
+                label = t!("ui-armor-trajectory_range").into_owned(),
                 attr:data-testid = "armor-arc-range"
             )
             row(class = "wt-armor-trajectory__row") {
@@ -586,7 +586,7 @@ fn arc_shell_picker(
 ) -> AnyView {
     let label = held
         .and_then(|cast| Some(format!("{} {}", cast.ship.display_name, shell_name(cast.shell()?))))
-        .unwrap_or_else(|| t!("ui.armor.trajectory_select_shell").into_owned());
+        .unwrap_or_else(|| t!("ui-armor-trajectory_select_shell").into_owned());
     let held_key = held.and_then(|cast| Some((cast.ship.param_index.clone(), cast.fired_index()?)));
     let disabled = ships.iter().all(|ship| ship.shells.is_empty());
     // Built each time the menu opens its content, from data held here so the builder is `Copy`.
@@ -608,7 +608,7 @@ fn arc_shell_picker(
                 .collect()
         })
     };
-    let tip = t!("ui.armor.trajectory_shell_tooltip").into_owned();
+    let tip = t!("ui-armor-trajectory_shell_tooltip").into_owned();
 
     AnyView::new(view! {
         Tooltip {
@@ -641,7 +641,7 @@ fn shell_name(shell: &ShellInfo) -> String {
 /// What the impact markers' colours mean, which is how square each strike was.
 fn angle_legend() -> AnyView {
     let keys: Vec<AnyView> =
-        [("good", "ui.armor.angle_good"), ("mid", "ui.armor.angle_mid"), ("bad", "ui.armor.angle_bad")]
+        [("good", "ui-armor-angle_good"), ("mid", "ui-armor-angle_mid"), ("bad", "ui-armor-angle_bad")]
             .into_iter()
             .map(|(angle, key)| {
                 AnyView::new(view! {
@@ -668,7 +668,7 @@ fn plates(
     open: RwSignal<bool, LocalStorage>,
 ) -> AnyView {
     let shown = open.get();
-    let heading = t!("ui.armor.plates.heading", count = arc.detail.plates.len()).into_owned();
+    let heading = t!("ui-armor-plates-heading", count = arc.detail.plates.len()).into_owned();
     let list = shown.then(|| {
         let ifhe = Ifhe::from_enabled(pen.with(|pen| pen.ifhe));
         let shell = arc.shell.as_ref().and_then(CastShell::shell);

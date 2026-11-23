@@ -143,7 +143,8 @@ insta = { version = "1.48", features = ["yaml"] }
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 sha2 = "0.10"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
-rust-i18n = "3.1.5"
+fluent-bundle = "0.16"
+unic-langid = "0.9"
 sys-locale = "0.3"
 # landaire-contrib/zgui, branch `main`.
 zgui = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }

@@ -1138,7 +1138,7 @@ pub struct ParsedReplay {
     pub perspectives: Perspectives,
     /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
     /// for the debug-mode raw-metadata viewer (mirrors the egui app's
-    /// `ui.replay.debug.raw_metadata` button, `ui/replay_parser/mod.rs`
+    /// `ui-replay-debug-raw_metadata` button, `ui/replay_parser/mod.rs`
     /// ~3018-3034). Falls back to the unparsed raw string when it does not
     /// parse as JSON, rather than panicking like the egui app's `.expect()`.
     pub raw_metadata_json: String,

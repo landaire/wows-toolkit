@@ -4,8 +4,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use landaire_ui::PanelSide;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::prelude::Get;
@@ -31,12 +31,12 @@ impl AppTab {
 
     pub const fn label_key(self) -> &'static str {
         match self {
-            Self::ReplayInspector => "ui.tabs.replay_parser",
-            Self::Stats => "ui.tabs.stats",
-            Self::PlayerTracker => "ui.tabs.player_tracker",
-            Self::Search => "ui.tabs.search",
-            Self::ArmorViewer => "ui.tabs.model_viewer",
-            Self::Unpacker => "ui.tabs.unpacker",
+            Self::ReplayInspector => "ui-tabs-replay_parser",
+            Self::Stats => "ui-tabs-stats",
+            Self::PlayerTracker => "ui-tabs-player_tracker",
+            Self::Search => "ui-tabs-search",
+            Self::ArmorViewer => "ui-tabs-model_viewer",
+            Self::Unpacker => "ui-tabs-unpacker",
         }
     }
 
@@ -83,7 +83,7 @@ pub struct DirectoryStatsTab {
 
 impl DirectoryStatsTab {
     pub fn label(&self) -> String {
-        t!("ui.tabs.directory_stats", dir = wows_toolkit_replay_data::paths::shortened_path(&self.root)).into_owned()
+        t!("ui-tabs-directory_stats", dir = wows_toolkit_replay_data::paths::shortened_path(&self.root)).into_owned()
     }
 }
 
@@ -132,9 +132,9 @@ pub const fn panel_glyph(side: PanelSide) -> Glyph {
 /// The side's name, for a panel that has no better one, such as a dock's.
 pub fn panel_side_name(side: PanelSide) -> String {
     match side {
-        PanelSide::Left => t!("ui.app.panel_left"),
-        PanelSide::Right => t!("ui.app.panel_right"),
-        PanelSide::Bottom => t!("ui.app.panel_bottom"),
+        PanelSide::Left => t!("ui-app-panel_left"),
+        PanelSide::Right => t!("ui-app-panel_right"),
+        PanelSide::Bottom => t!("ui-app-panel_bottom"),
     }
     .into_owned()
 }

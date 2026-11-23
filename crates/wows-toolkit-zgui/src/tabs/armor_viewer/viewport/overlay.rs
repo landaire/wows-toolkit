@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use rust_i18n::t;
 use wows_replay_insights::hull_impact::into_hull_frame;
 use wows_replay_insights::hull_impact::into_mesh_space;
 use wows_replay_insights::hull_impact::into_model_axes;
@@ -21,6 +20,7 @@ use wows_toolkit_armor::viewport::gizmo;
 use wows_toolkit_armor::viewport::types::Vec2;
 use wows_toolkit_armor::viewport::types::Vec3;
 use wows_toolkit_armor::waterline_grid;
+use wt_translations::t;
 use zgui::app::LineRequest;
 use zgui::app::Shaper;
 use zgui::canvas::Ink;
@@ -140,10 +140,10 @@ pub(super) enum Cardinal {
 impl Cardinal {
     fn label(self) -> String {
         let key = match self {
-            Cardinal::North => "ui.armor.compass.north",
-            Cardinal::East => "ui.armor.compass.east",
-            Cardinal::South => "ui.armor.compass.south",
-            Cardinal::West => "ui.armor.compass.west",
+            Cardinal::North => "ui-armor-compass-north",
+            Cardinal::East => "ui-armor-compass-east",
+            Cardinal::South => "ui-armor-compass-south",
+            Cardinal::West => "ui-armor-compass-west",
         };
         t!(key).into_owned()
     }

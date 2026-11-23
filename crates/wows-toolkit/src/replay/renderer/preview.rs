@@ -62,11 +62,11 @@ impl PreviewError {
     /// superseded bake stores nothing.
     pub(crate) const fn key(&self) -> &'static str {
         match self {
-            Self::NoGameDataForVersion { .. } => "ui.replay.preview_no_game_data",
-            Self::UnreadableReplay => "ui.replay.preview_unreadable",
-            Self::UnknownClientVersion { .. } => "ui.replay.preview_unknown_version",
-            Self::NoMapInfo { .. } => "ui.replay.preview_no_map",
-            Self::Cancelled => "ui.replay.preview_cancelled",
+            Self::NoGameDataForVersion { .. } => "ui-replay-preview_no_game_data",
+            Self::UnreadableReplay => "ui-replay-preview_unreadable",
+            Self::UnknownClientVersion { .. } => "ui-replay-preview_unknown_version",
+            Self::NoMapInfo { .. } => "ui-replay-preview_no_map",
+            Self::Cancelled => "ui-replay-preview_cancelled",
         }
     }
 

@@ -41,7 +41,6 @@ use landaire_ui::Share;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use serde::Serialize;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::queries;
@@ -67,6 +66,7 @@ use wows_toolkit_viewmodel::stats::saved_charts;
 use wows_toolkit_viewmodel::stats::saved_charts::CHARTS_SETTINGS_KEY;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
 use wows_toolkit_viewmodel::stats::setting_keys;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -689,13 +689,13 @@ pub fn StatsBody(
                             charts_error.set(None);
                             load_charts(services, dock, charts, slot_owner, next_chart_id, persistence, open_chart);
                         }
-                    }) {{t!("ui.buttons.retry").into_owned()}}
+                    }) {{t!("ui-buttons-retry").into_owned()}}
                     Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline, attr:data-testid = "stats-keep-current-layout", on:click = move |_| {
                         if !retry_save {
                             charts_error.set(None);
                         }
                         keep_current_layout(services, dock, charts, persistence);
-                    }) {{t!("ui.stats.keep_current_layout").into_owned()}}
+                    }) {{t!("ui-stats-keep_current_layout").into_owned()}}
                 }
             }
             .into_view()
@@ -712,9 +712,9 @@ pub fn StatsBody(
             let tip = move || {
                 locale.track();
                 if since_opened.get() {
-                    t!("ui.stats.clear_unavailable_since").into_owned()
+                    t!("ui-stats-clear_unavailable_since").into_owned()
                 } else {
-                    t!("ui.stats.clear_tooltip").into_owned()
+                    t!("ui-stats-clear_tooltip").into_owned()
                 }
             };
             view! {
@@ -726,7 +726,7 @@ pub fn StatsBody(
                             }
                         }) {
                             AppIcon(glyph = Glyph::Eraser)
-                            text {{t!("ui.stats.clear").into_owned()}}
+                            text {{t!("ui-stats-clear").into_owned()}}
                         }
                     }
                     TooltipContent {{tip}}
@@ -770,9 +770,9 @@ pub fn StatsBody(
     let empty_text = move || {
         locale.track();
         match shared.scope() {
-            SessionScope::Manual => t!("ui.stats.session_empty_manual").into_owned(),
+            SessionScope::Manual => t!("ui-stats-session_empty_manual").into_owned(),
             SessionScope::SinceAppOpened => {
-                t!("ui.stats.session_empty_since", time = opened_label(shared.opened())).into_owned()
+                t!("ui-stats-session_empty_since", time = opened_label(shared.opened())).into_owned()
             }
         }
     };
@@ -791,7 +791,7 @@ pub fn StatsBody(
                     }
                 }) {
                     AppIcon(glyph = Glyph::EyeOff)
-                    text {{move || { locale.track(); t!("ui.stats.games_left_out", count = left_out_count.get()).into_owned() }}}
+                    text {{move || { locale.track(); t!("ui-stats-games_left_out", count = left_out_count.get()).into_owned() }}}
                 }
             }
             .into_view()
@@ -806,10 +806,10 @@ pub fn StatsBody(
                             editor.edit(|filters| *filters = StatsFilters::default());
                         }) {
                             AppIcon(glyph = Glyph::RotateCcw)
-                            text {{move || { locale.track(); t!("ui.stats.reset_filters").into_owned() }}}
+                            text {{move || { locale.track(); t!("ui-stats-reset_filters").into_owned() }}}
                         }
                     }
-                    TooltipContent {{move || { locale.track(); t!("ui.stats.reset_filters_tooltip").into_owned() }}}
+                    TooltipContent {{move || { locale.track(); t!("ui-stats-reset_filters_tooltip").into_owned() }}}
                 }
             }
             .into_view()
@@ -833,11 +833,11 @@ pub fn StatsBody(
                                     attr:data-testid = "stats-limit-enabled"
                                 )
                                 Label(node_ref = limit_name, control = limit_box) {
-                                    {move || { locale.track(); t!("ui.stats.limit_to_recent").into_owned() }}
+                                    {move || { locale.track(); t!("ui-stats-limit_to_recent").into_owned() }}
                                 }
                             }
                         }
-                        TooltipContent {{t!("ui.stats.limit_to_recent_tooltip").into_owned()}}
+                        TooltipContent {{t!("ui-stats-limit_to_recent_tooltip").into_owned()}}
                     }
                     NumberInput(
                         value = limit_value,
@@ -850,7 +850,7 @@ pub fn StatsBody(
                 }
                 Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
                 row(class = "wt-stats__group") {
-                    text(class = "wt-stats__dim") {{move || { locale.track(); t!("ui.stats.division_label").into_owned() }}}
+                    text(class = "wt-stats__dim") {{move || { locale.track(); t!("ui-stats-division_label").into_owned() }}}
                     {division_toggle(DivisionFilter::All, "stats-division-all")}
                     {division_toggle(DivisionFilter::SoloOnly, "stats-division-solo")}
                     {division_toggle(DivisionFilter::DivOnly, "stats-division-div")}
@@ -866,14 +866,14 @@ pub fn StatsBody(
                 Separator(orientation = SeparatorOrientation::Vertical, class = "wt-stats__rule")
                 AddChartMenu(add = UnsyncCallback::new(add_chart), rated = rated)
                 box(class = "wt-stats__spacer") {}
-                {(scope == StatsScope::Sample).then(|| view! { text(class = "wt-stats__dim", attr:data-testid = "stats-sample-notice") {{t!("ui.stats.sample_notice").into_owned()}} }.into_view())}
+                {(scope == StatsScope::Sample).then(|| view! { text(class = "wt-stats__dim", attr:data-testid = "stats-sample-notice") {{t!("ui-stats-sample_notice").into_owned()}} }.into_view())}
                 {charts_error_view}
                 {move || clear_error.get().map(|reason| view! { text(class = "wt-stats__error", attr:data-testid = "stats-clear-error") {{reason}} }.into_view())}
                 {clear_button}
             }
             if move || session_empty.get() {
                 column(class = "wt-stats__empty", attr:data-testid = "stats-session-empty") {
-                    text(class = "wt-stats__empty-title") {{move || { locale.track(); t!("ui.stats.session_empty_title").into_owned() }}}
+                    text(class = "wt-stats__empty-title") {{move || { locale.track(); t!("ui-stats-session_empty_title").into_owned() }}}
                     text(class = "wt-stats__empty-text") {{empty_text}}
                 }
             } else {
@@ -882,8 +882,8 @@ pub fn StatsBody(
                     class = "wt-stats__dock",
                     menu = dock_menu_strings(locale),
                     strings = tab_menu_strings(locale),
-                    close_label = Signal::derive_local(locale.text("ui.tabs.close_panel")),
-                    tabs_label = Signal::derive_local(locale.text("ui.tabs.stats")),
+                    close_label = Signal::derive_local(locale.text("ui-tabs-close_panel")),
+                    tabs_label = Signal::derive_local(locale.text("ui-tabs-stats")),
                     attr:data-testid = match scope {
                         StatsScope::Session => "stats-dock",
                         StatsScope::Directory => "directory-stats-dock",
@@ -953,14 +953,14 @@ fn register_panels(dock: DockState, sources: PanelSources) {
     dock.register(
         PanelKind::new(OVERVIEW_KIND),
         PanelFactory::new(
-            |_| t!("ui.stats.overview").into_owned(),
+            |_| t!("ui-stats-overview").into_owned(),
             move |_| AnyView::new(view! { StatsOverview(games = filtered, personal_rating = personal_rating) }),
         ),
     );
     dock.register(
         PanelKind::new(SHIPS_KIND),
         PanelFactory::new(
-            |_| t!("ui.stats.ships").into_owned(),
+            |_| t!("ui-stats-ships").into_owned(),
             move |_| {
                 let on_clear_ship = UnsyncCallback::new(move |ship: GameParamId| {
                     if session.is_some() {
@@ -988,7 +988,7 @@ fn register_panels(dock: DockState, sources: PanelSources) {
     dock.register(
         PanelKind::new(MATCHES_KIND),
         PanelFactory::new(
-            |_| t!("ui.stats.matches").into_owned(),
+            |_| t!("ui-stats-matches").into_owned(),
             move |_| AnyView::new(view! { StatsMatches(games = games, editor = editor) }),
         ),
     );
@@ -1064,10 +1064,10 @@ fn chart_id(panel: &PanelId) -> Option<ChartId> {
 fn chart_title(settings: &ChartSettings) -> String {
     let stat = settings.stat.label();
     match settings.mode {
-        ChartMode::Bar if !settings.stat.is_rate() => t!("stat.avg_prefix", name = stat).into_owned(),
+        ChartMode::Bar if !settings.stat.is_rate() => t!("stat-avg_prefix", name = stat).into_owned(),
         ChartMode::Bar => stat,
-        ChartMode::Line if settings.combined => format!("{stat} {}", t!("chart.combined_suffix")),
-        ChartMode::Line if settings.running => format!("{stat} {}", t!("chart.rolling_average_suffix")),
+        ChartMode::Line if settings.combined => format!("{stat} {}", t!("chart-combined_suffix")),
+        ChartMode::Line if settings.running => format!("{stat} {}", t!("chart-rolling_average_suffix")),
         ChartMode::Line => stat,
     }
 }
@@ -1338,8 +1338,8 @@ impl ChartRow {
     fn save_failed(self, err: &SaveError) -> String {
         let reason = err.to_string();
         match self {
-            Self::Settings => t!("ui.stats.charts_save_failed", reason = reason),
-            Self::Layout => t!("ui.stats.layout_save_failed", reason = reason),
+            Self::Settings => t!("ui-stats-charts_save_failed", reason = reason),
+            Self::Layout => t!("ui-stats-layout_save_failed", reason = reason),
         }
         .into_owned()
     }
@@ -1400,13 +1400,13 @@ fn confirm_clear_session(services: Services, shell: Shell, clear_error: RwSignal
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "stats-clear-dialog") {
                     AlertDialogHeader {
-                        AlertDialogTitle {{t!("ui.stats.clear").into_owned()}}
-                        AlertDialogDescription {{t!("confirm.clear_all_session_stats").into_owned()}}
+                        AlertDialogTitle {{t!("ui-stats-clear").into_owned()}}
+                        AlertDialogDescription {{t!("confirm-clear_all_session_stats").into_owned()}}
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(attr:data-testid = "stats-clear-confirm", on:click = move |_| clear_session(services, clear_error)) {
-                            {t!("ui.stats.clear").into_owned()}
+                            {t!("ui-stats-clear").into_owned()}
                         }
                     }
                 }
@@ -1436,7 +1436,7 @@ fn clear_ship(services: Services, clear_error: RwSignal<Option<String>>, ship: G
 
 fn report_clear_failure(clear_error: RwSignal<Option<String>>, reason: &str) {
     tracing::warn!("stats: the session was not cleared: {reason}");
-    clear_error.set(Some(t!("ui.stats.clear_failed", reason = reason).into_owned()));
+    clear_error.set(Some(t!("ui-stats-clear_failed", reason = reason).into_owned()));
 }
 
 /// The game mode filter: every mode, or the ones ticked. `change` gets `None` for every mode and
@@ -1449,14 +1449,14 @@ fn ModeMenu(
 ) -> impl IntoView {
     let selected = move || filters.with(|filters| filters.game_modes.len());
     let label = move || match selected() {
-        0 => t!("ui.stats.mode_label").into_owned(),
-        count => format!("{} ({count})", t!("ui.stats.mode_label")),
+        0 => t!("ui-stats-mode_label").into_owned(),
+        count => format!("{} ({count})", t!("ui-stats-mode_label")),
     };
     let all = Binding::controlled(Signal::derive_local(move || selected() == 0), move |_: bool| change.run(None));
     // The selected modes by name, or All while none narrows the games.
     let tooltip = move || {
         if selected() == 0 {
-            return t!("ui.stats.div_all").into_owned();
+            return t!("ui-stats-div_all").into_owned();
         }
         filters.with(|filters| {
             modes.with(|modes| {
@@ -1482,8 +1482,8 @@ fn ModeMenu(
                         attr:data-testid = "stats-mode-filter-trigger"
                     ) {{label}}
                     DropdownMenuContent(attr:data-testid = "stats-mode-filter") {
-                        MenuLabel {{t!("ui.stats.mode_label").into_owned()}}
-                        MenuCheckboxItem(checked = all, close_on_select = false, attr:data-testid = "stats-mode-all") {{t!("ui.stats.div_all").into_owned()}}
+                        MenuLabel {{t!("ui-stats-mode_label").into_owned()}}
+                        MenuCheckboxItem(checked = all, close_on_select = false, attr:data-testid = "stats-mode-all") {{t!("ui-stats-div_all").into_owned()}}
                         for mode in move || modes.get().into_iter().collect::<Vec<_>>(), key = |mode: &String| mode.clone() {
                             {mode_item(filters, change, mode)}
                         }
@@ -1517,12 +1517,12 @@ fn AddChartMenu(add: UnsyncCallback<ChartableStat>, rated: Signal<bool>) -> impl
     let stats = Signal::derive_local(move || selectable_stats(ChartMode::Line, true, false, rated.get()));
     let hint = Signal::derive_local(move || {
         locale.track();
-        t!("ui.stats.add_chart").into_owned()
+        t!("ui-stats-add_chart").into_owned()
     });
 
     view! {
         box(class = "wt-stats__add-chart") {
-            StatPicker(stats = stats, current = hint, label = "ui.stats.add_chart", pick = add, test_id = "stats-add-chart", locale = locale)
+            StatPicker(stats = stats, current = hint, label = "ui-stats-add_chart", pick = add, test_id = "stats-add-chart", locale = locale)
         }
     }
 }

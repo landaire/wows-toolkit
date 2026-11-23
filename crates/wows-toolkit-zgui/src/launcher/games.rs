@@ -1,8 +1,8 @@
 //! Installing a game fresh: each known game, the version a fresh install gets, and the install
 //! itself.
 
-use rust_i18n::t;
 use wgc_catalog::known_games::KnownGame;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Memo;
 use zgui::reactive::Signal;
@@ -33,8 +33,8 @@ pub fn GamesList(model: LauncherModel, shell: Shell) -> impl IntoView {
 
     view! {
         column(class = "wt-launcher__column wt-launcher__column--wide") {
-            text(class = "wt-launcher__heading") {{locale.text("ui.launcher.install_heading")}}
-            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.install_hint")}}
+            text(class = "wt-launcher__heading") {{locale.text("ui-launcher-install_heading")}}
+            text(class = "wt-launcher__dim") {{locale.text("ui-launcher-install_hint")}}
             {games}
         }
     }
@@ -57,23 +57,23 @@ fn GameRow(model: LauncherModel, shell: Shell, index: usize) -> impl IntoView {
                     GameVersion::Checking => AnyView::new(view! {
                         row(class = "wt-launcher__row wt-launcher__row--tight") {
                             Spinner()
-                            text(class = "wt-launcher__dim") {{locale.text("ui.launcher.checking_version")}}
+                            text(class = "wt-launcher__dim") {{locale.text("ui-launcher-checking_version")}}
                         }
                     }),
                     GameVersion::Version(version) => AnyView::new(view! {
                         text(class = "wt-launcher__text") {{move || {
                             locale.track();
-                            t!("ui.launcher.version", version = version.as_str()).into_owned()
+                            t!("ui-launcher-version", version = version.as_str()).into_owned()
                         }}}
                     }),
                     GameVersion::Unreported => AnyView::new(view! {
-                        text(class = "wt-launcher__dim") {{locale.text("ui.launcher.version_unreported")}}
+                        text(class = "wt-launcher__dim") {{locale.text("ui-launcher-version_unreported")}}
                     }),
                     GameVersion::Unavailable(detail) => AnyView::new(view! {
                         row(class = "wt-launcher__row") {
                             text(class = "wt-launcher__dim") {{move || {
                                 locale.track();
-                                t!("ui.launcher.unavailable", error = detail.as_str()).into_owned()
+                                t!("ui-launcher-unavailable", error = detail.as_str()).into_owned()
                             }}}
                             Button(
                                 variant = ButtonVariant::Ghost,
@@ -84,7 +84,7 @@ fn GameRow(model: LauncherModel, shell: Shell, index: usize) -> impl IntoView {
                                     false
                                 })
                             ) {
-                                {locale.text("ui.launcher.retry")}
+                                {locale.text("ui-launcher-retry")}
                             }
                         }
                     }),
@@ -100,7 +100,7 @@ fn GameRow(model: LauncherModel, shell: Shell, index: usize) -> impl IntoView {
                     attr:data-testid = format!("launcher-install-game-{index}"),
                     on:click = move |_| install_game(model, shell, game)
                 ) {
-                    {locale.text("ui.launcher.install")}
+                    {locale.text("ui-launcher-install")}
                 }
             }
         }
@@ -110,7 +110,7 @@ fn GameRow(model: LauncherModel, shell: Shell, index: usize) -> impl IntoView {
 /// Asks where to install `game`, and installs it there.
 fn install_game(model: LauncherModel, shell: Shell, game: &'static KnownGame) {
     let asked = wows_toolkit_services::dialog::pick_folder_in(
-        &t!("ui.launcher.install_title"),
+        &t!("ui-launcher-install_title"),
         &wgc_download::default_install_dir(),
     );
     // Detached: the drawer or setup step that asked can close before the reader answers.

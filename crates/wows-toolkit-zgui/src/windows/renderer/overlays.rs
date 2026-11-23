@@ -4,7 +4,6 @@
 //! Elements rather than part of the frame: none of it is part of the battle, it moves between
 //! rasters, and it stays out of an exported video.
 
-use rust_i18n::t;
 use wows_toolkit_replay_data::replay_render::annotate::ANNOTATION_ACTIONS;
 use wows_toolkit_replay_data::replay_render::annotate::HANDLE_RADIUS;
 use wows_toolkit_replay_data::replay_render::annotate::TOOLS;
@@ -13,6 +12,7 @@ use wows_toolkit_replay_data::replay_render::collab::ping_ring;
 use wows_toolkit_replay_data::replay_render::view::MapView;
 use wows_toolkit_services::collab::CollabLink;
 use wt_collab_client::protocol::CursorScope;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -256,10 +256,10 @@ fn ShortcutSheet() -> impl IntoView {
     view! {
         box(class = "wt-renderer-annotations__corner") {
             column(class = "wt-renderer-annotations__sheet", attr:data-testid = "replay-renderer-shortcuts") {
-                text {{t!("ui.renderer.annotations.shortcuts_title").into_owned()}}
-                text(class = "wt-renderer-annotations__heading") {{t!("ui.renderer.annotations.shortcuts_tools").into_owned()}}
+                text {{t!("ui-renderer-annotations-shortcuts_title").into_owned()}}
+                text(class = "wt-renderer-annotations__heading") {{t!("ui-renderer-annotations-shortcuts_tools").into_owned()}}
                 {tools}
-                text(class = "wt-renderer-annotations__heading") {{t!("ui.renderer.annotations.shortcuts_actions").into_owned()}}
+                text(class = "wt-renderer-annotations__heading") {{t!("ui-renderer-annotations-shortcuts_actions").into_owned()}}
                 {actions}
             }
         }

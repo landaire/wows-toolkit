@@ -1,6 +1,6 @@
 //! The card a hover preview is shown in, beside the hovered row.
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -244,7 +244,7 @@ fn PreviewMap(preview: HoverPreview) -> impl IntoView {
         MapArea::Failed(reason) => reason,
         _ => String::new(),
     };
-    let loading = t!("ui.replay.preview_loading").into_owned();
+    let loading = t!("ui-replay-preview_loading").into_owned();
 
     move || {
         let loading = loading.clone();

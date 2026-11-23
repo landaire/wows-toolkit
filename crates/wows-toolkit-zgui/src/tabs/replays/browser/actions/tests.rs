@@ -207,7 +207,7 @@ fn a_chosen_folder_gets_a_source_of_its_own_and_search_scopes_to_it() {
 fn the_index_button_says_why_it_is_not_offered() {
     let (mut window, control) = open();
 
-    let without_install = t!("ui.replay.game_data_failed", error = t!("ui.messages.wows_dir_not_set")).into_owned();
+    let without_install = t!("ui-replay-game_data_failed", error = t!("ui-messages-wows_dir_not_set")).into_owned();
     assert_eq!(index_offer(control), Offer::Disabled(without_install.clone()));
     window.advance(Duration::from_millis(100));
     let button = window.by_test_id("replay-listing-index").expect("the header shows the index button");
@@ -216,7 +216,7 @@ fn the_index_button_says_why_it_is_not_offered() {
     assert_eq!(state.label, Some(without_install), "and says why");
 
     control.work.reindexing.set(true);
-    assert_eq!(index_offer(control), Offer::Disabled(t!("ui.reindex.busy_index").into_owned()));
+    assert_eq!(index_offer(control), Offer::Disabled(t!("ui-reindex-busy_index").into_owned()));
     control.work.reindexing.set(false);
 }
 
@@ -263,7 +263,7 @@ fn the_palette_offers_versions_newest_first_and_asks_before_reindexing() {
     window.press_character('k', Modifiers::PRIMARY);
     window.advance(Duration::from_millis(400));
     // Typed rather than clicked: the entry sits below the root list's visible rows.
-    window.type_text(&t!("ui.reindex.palette_by_version"));
+    window.type_text(&t!("ui-reindex-palette_by_version"));
     window.advance(Duration::from_millis(400));
     window.press_key(zgui::vocab::NamedKey::Enter, Modifiers::NONE);
     window.advance(Duration::from_millis(400));
@@ -274,7 +274,7 @@ fn the_palette_offers_versions_newest_first_and_asks_before_reindexing() {
     versions.sort();
     versions.reverse();
     for (row, version) in versions.iter().enumerate() {
-        let expected = t!("ui.reindex.version_row", version = version_said(version), count = 1).into_owned();
+        let expected = t!("ui-reindex-version_row", version = version_said(version), count = 1).into_owned();
         assert_eq!(label(&mut window, &format!("palette-row-{row}")), Some(expected));
     }
     assert!(window.by_test_id("palette-row-3").is_none(), "one row per version");
@@ -283,8 +283,8 @@ fn the_palette_offers_versions_newest_first_and_asks_before_reindexing() {
     settle_until(&mut window, "the re-index asks first", |window| window.by_test_id("force-reindex-summary").is_some());
 
     let expected = [
-        t!("ui.reindex.confirm_count", count = 1).into_owned(),
-        t!("ui.reindex.confirm_range", oldest = "2026-02-14 21:56", newest = "2026-02-14 21:56").into_owned(),
+        t!("ui-reindex-confirm_count", count = 1).into_owned(),
+        t!("ui-reindex-confirm_range", oldest = "2026-02-14 21:56", newest = "2026-02-14 21:56").into_owned(),
     ]
     .join("\n");
     assert_eq!(
@@ -346,9 +346,9 @@ fn indexing_a_folder_asks_first_and_reads_only_what_its_source_lacks() {
     settle_until(&mut window, "indexing asks first", |window| window.by_test_id("force-reindex-summary").is_some());
 
     let expected = [
-        t!("ui.index_folder.confirm_count", count = 2).into_owned(),
-        t!("ui.reindex.confirm_range", oldest = "2026-01-07 18:27", newest = "2026-02-14 21:56").into_owned(),
-        t!("ui.index_folder.note_folder", dir = shown_path(&root)).into_owned(),
+        t!("ui-index_folder-confirm_count", count = 2).into_owned(),
+        t!("ui-reindex-confirm_range", oldest = "2026-01-07 18:27", newest = "2026-02-14 21:56").into_owned(),
+        t!("ui-index_folder-note_folder", dir = shown_path(&root)).into_owned(),
     ]
     .join("\n");
     assert_eq!(label(&mut window, "force-reindex-summary"), Some(expected));
@@ -357,7 +357,7 @@ fn indexing_a_folder_asks_first_and_reads_only_what_its_source_lacks() {
     settle_until(&mut window, "the pass ends", |_| !control.work.is_busy());
     window.advance(Duration::from_millis(400));
 
-    let said = t!("ui.index_folder.done", indexed = 0, failed = 2, skipped = 0).into_owned();
+    let said = t!("ui-index_folder-done", indexed = 0, failed = 2, skipped = 0).into_owned();
     assert!(window.by_label(&said).is_some(), "the end of the pass is said with its counts: {said}");
 }
 
@@ -714,7 +714,7 @@ fn a_forced_reindex_stopped_before_reading_says_so() {
     index.stop();
     settle_until(&mut window, "the pass ends", |_| !control.work.reindexing.get_untracked());
 
-    assert_eq!(index.outcome(), Some(t!("ui.reindex.stopped_before_reading").into_owned()));
+    assert_eq!(index.outcome(), Some(t!("ui-reindex-stopped_before_reading").into_owned()));
     assert!(!index.is_indexing(), "and no longer shows it running");
     let offer = control.work.offer.get_value().expect("the tab handed over its offer");
     assert!(offer.was_offered(build), "the summary's build is not offered again");
@@ -740,8 +740,8 @@ fn a_forced_reindex_does_not_fetch_while_the_cache_is_busy() {
     settle_until(&mut window, "the pass ends", |_| !control.work.reindexing.get_untracked());
 
     let toasts = window.texts_by_class("lui-toasts").concat();
-    assert!(toasts.contains(t!("ui.reindex.busy_cache").as_ref()), "{toasts:?}");
-    let read_nothing = t!("ui.reindex.done", indexed = 0, failed = 0, skipped = 1).into_owned();
+    assert!(toasts.contains(t!("ui-reindex-busy_cache").as_ref()), "{toasts:?}");
+    let read_nothing = t!("ui-reindex-done", indexed = 0, failed = 0, skipped = 1).into_owned();
     assert_eq!(control.work.shell_index.outcome(), Some(read_nothing), "the replay was left out");
     assert!(control.shell().cache.busy_untracked(), "the cache is still the other job's");
     drop(held);
@@ -781,7 +781,7 @@ fn downloads_hold_the_cache_until_their_worker_exits() {
     let cancel = Arc::new(AtomicBool::new(false));
 
     let answered = download(shell, cache.path().to_path_buf(), held, vec![release], Arc::clone(&cancel));
-    let downloading = t!("ui.app.status_cache_downloading").into_owned();
+    let downloading = t!("ui-app-status_cache_downloading").into_owned();
     settle_until(&mut window, "the download starts", |_| {
         services.jobs.running().iter().any(|job| job.name == downloading)
     });

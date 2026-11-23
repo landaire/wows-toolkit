@@ -5,7 +5,6 @@ use landaire_ui::Toasts;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_minimap_renderer::timing::SPEED_LADDER;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
@@ -23,6 +22,7 @@ use wows_toolkit_replay_data::replay_render::view::PixelDensity;
 use wows_toolkit_replay_data::replay_render::view::SCROLL_LINE_PX;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
 use wows_toolkit_services::collab::CollabLink;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::elements::Focus;
@@ -157,7 +157,7 @@ const CSS: &str = css!(
 
 /// What a docked renderer names on the status bar: the shortcut sheet its key shows while held.
 pub const SHORTCUTS_MODE: ModeHint =
-    ModeHint { key: ModifierKey::Primary, name_key: "ui.renderer.annotations.shortcuts_title" };
+    ModeHint { key: ModifierKey::Primary, name_key: "ui-renderer-annotations-shortcuts_title" };
 
 /// A replay played back on its minimap, with its transport.
 #[component]
@@ -191,11 +191,11 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
 
     let body = move || match session.status.get() {
         Status::Baking => AnyView::new(view! {
-            Loading(label = t!("ui.replay.renderer.baking").into_owned(), attr:data-testid = "replay-renderer-baking")
+            Loading(label = t!("ui-replay-renderer-baking").into_owned(), attr:data-testid = "replay-renderer-baking")
         }),
         Status::Failed(reason) => AnyView::new(view! {
             column(class = "wt-renderer__state", attr:data-testid = "replay-renderer-failed") {
-                text(class = "wt-renderer__state-title") {{t!("ui.replay.renderer.failed").into_owned()}}
+                text(class = "wt-renderer__state-title") {{t!("ui-replay-renderer-failed").into_owned()}}
                 text(class = "wt-renderer__state-reason") {{reason}}
             }
         }),
@@ -346,8 +346,8 @@ fn ExportOverlay(session: RendererSession) -> impl IntoView {
         Some(match progress.fraction() {
             None => AnyView::new(view! {
                 row(class = "wt-renderer__export-waiting") {
-                    Spinner(label = t!("ui.renderer.preparing_export").into_owned())
-                    text {{t!("ui.renderer.preparing_export").into_owned()}}
+                    Spinner(label = t!("ui-renderer-preparing_export").into_owned())
+                    text {{t!("ui-renderer-preparing_export").into_owned()}}
                 }
             }),
             Some(done) => AnyView::new(view! {
@@ -406,9 +406,9 @@ fn PlayButton(session: RendererSession, refused: Signal<bool, LocalStorage>) -> 
     let playing = move || session.playback.with(Playback::is_playing);
     move || {
         let (glyph, label_key) = if playing() {
-            (Glyph::Pause, "ui.replay.renderer.pause")
+            (Glyph::Pause, "ui-replay-renderer-pause")
         } else {
-            (Glyph::Play, "ui.replay.renderer.play")
+            (Glyph::Play, "ui-replay-renderer-play")
         };
         view! {
             TransportButton(glyph = glyph, label_key = label_key, test_id = "replay-renderer-play",
@@ -468,25 +468,25 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 }
             }
             row(class = "wt-renderer__controls") {
-                TransportButton(glyph = Glyph::SkipBack, label_key = "ui.renderer.controls.jump_to_start",
+                TransportButton(glyph = Glyph::SkipBack, label_key = "ui-renderer-controls-jump_to_start",
                     test_id = "replay-renderer-jump-to-start", disabled = refused,
                     on_press = press(|session| session.go_to(FrameIndex::FIRST)))
-                TransportButton(glyph = Glyph::Rewind, label_key = "ui.renderer.controls.previous_event",
+                TransportButton(glyph = Glyph::Rewind, label_key = "ui-renderer-controls-previous_event",
                     test_id = "replay-renderer-previous-event",
                     disabled = Signal::derive_local(move || !ready() || !has_previous()),
                     on_press = jump(RendererSession::jump_to_previous_event))
-                TransportButton(glyph = Glyph::RotateCcw, label_key = "ui.renderer.controls.back_10s",
+                TransportButton(glyph = Glyph::RotateCcw, label_key = "ui-renderer-controls-back_10s",
                     test_id = "replay-renderer-back-10s", disabled = refused,
                     on_press = press(|session| session.seek_by(-SEEK_STEP)))
                 PlayButton(session = session, refused = refused)
-                TransportButton(glyph = Glyph::RotateCw, label_key = "ui.renderer.controls.forward_10s",
+                TransportButton(glyph = Glyph::RotateCw, label_key = "ui-renderer-controls-forward_10s",
                     test_id = "replay-renderer-forward-10s", disabled = refused,
                     on_press = press(|session| session.seek_by(SEEK_STEP)))
-                TransportButton(glyph = Glyph::FastForward, label_key = "ui.renderer.controls.next_event",
+                TransportButton(glyph = Glyph::FastForward, label_key = "ui-renderer-controls-next_event",
                     test_id = "replay-renderer-next-event",
                     disabled = Signal::derive_local(move || !ready() || !has_next()),
                     on_press = jump(RendererSession::jump_to_next_event))
-                TransportButton(glyph = Glyph::SkipForward, label_key = "ui.renderer.controls.jump_to_end",
+                TransportButton(glyph = Glyph::SkipForward, label_key = "ui-renderer-controls-jump_to_end",
                     test_id = "replay-renderer-jump-to-end", disabled = refused,
                     on_press = press(|session| {
                         if let Some(track) = session.track_untracked() {
@@ -512,7 +512,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                     attr:data-testid = "replay-renderer-zoom-reset",
                     on:click = move |_| session.set_view(MapViewport::default())
                 ) {
-                    {t!("ui.buttons.reset").into_owned()}
+                    {t!("ui-buttons-reset").into_owned()}
                 }
                 box(class = "wt-renderer__rule")
                 box(class = "wt-renderer__speed", attr:data-testid = "replay-renderer-speed") {
@@ -523,7 +523,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                             }
                         })
                     ) {
-                        SelectTrigger(class = "wt-renderer__speed-trigger", a11y:label = t!("ui.renderer.controls.speed").into_owned()) {
+                        SelectTrigger(class = "wt-renderer__speed-trigger", a11y:label = t!("ui-renderer-controls-speed").into_owned()) {
                             SelectValue()
                         }
                         SelectContent {
@@ -537,7 +537,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 // Withdrawn while a session runs: an export stops playback, and the rest of the
                 // session watches this end's.
                 Show(when = move || !session.collab.with(CollabLink::is_active)) {
-                    TransportButton(glyph = Glyph::Download, label_key = "ui.replay.renderer.export_video",
+                    TransportButton(glyph = Glyph::Download, label_key = "ui-replay-renderer-export_video",
                         test_id = "replay-renderer-export", disabled = refused,
                         on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::File)))
                 }
@@ -545,14 +545,14 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 OptionsPopover(session = session)
                 TimelinePopover(session = session)
                 Show(when = move || !session.popped_out.get()) {
-                    TransportButton(glyph = Glyph::SquareArrowOutUpRight, label_key = "ui.replay.renderer.pop_out",
+                    TransportButton(glyph = Glyph::SquareArrowOutUpRight, label_key = "ui-replay-renderer-pop_out",
                         test_id = "replay-renderer-pop-out", disabled = Signal::stored_local(false),
                         on_press = UnsyncCallback::new(move |()| {
                             crate::windows::renderer::pop_out(session);
                         }))
                 }
                 Show(when = move || !session.collab.with(CollabLink::is_active)) {
-                    TransportButton(glyph = Glyph::Clipboard, label_key = "ui.replay.renderer.export_clipboard",
+                    TransportButton(glyph = Glyph::Clipboard, label_key = "ui-replay-renderer-export_clipboard",
                         test_id = "replay-renderer-clipboard", disabled = refused,
                         on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::Clipboard)))
                 }

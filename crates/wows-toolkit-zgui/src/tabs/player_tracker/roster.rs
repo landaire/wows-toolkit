@@ -13,7 +13,7 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
+use wt_translations::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_core::rating_scope::RatingScope;
 use wows_replays::types::AccountId;
@@ -117,12 +117,12 @@ pub fn sniper_hover_text(candidates: &[SniperCandidate]) -> String {
             out.push_str("\n\n");
         }
         let minutes: Vec<String> = candidate.minutes.iter().map(i64::to_string).collect();
-        out.push_str(&t!("ui.twitch.possible_name", name = candidate.login));
+        out.push_str(&t!("ui-twitch-possible_name", name = candidate.login));
         out.push('\n');
-        out.push_str(&t!("ui.twitch.seen_minutes", minutes = minutes.join(", ")));
+        out.push_str(&t!("ui-twitch-seen_minutes", minutes = minutes.join(", ")));
     }
     out.push_str("\n\n");
-    out.push_str(&t!("ui.twitch.click_to_copy"));
+    out.push_str(&t!("ui-twitch-click_to_copy"));
     out
 }
 
@@ -162,12 +162,12 @@ pub fn CurrentMatchSection(model: TrackerModel) -> impl IntoView {
     let status = move || {
         locale.track();
         if live.source.with(Option::is_none) {
-            return Some((t!("ui.player_tracker.live_no_directory").into_owned(), false));
+            return Some((t!("ui-player_tracker-live_no_directory").into_owned(), false));
         }
         if !live.checked.get() {
-            return Some((t!("ui.player_tracker.live_checking").into_owned(), true));
+            return Some((t!("ui-player_tracker-live_checking").into_owned(), true));
         }
-        live.live_match.with(Option::is_none).then(|| (t!("ui.player_tracker.live_none").into_owned(), false))
+        live.live_match.with(Option::is_none).then(|| (t!("ui-player_tracker-live_none").into_owned(), false))
     };
 
     let body = move || {
@@ -259,10 +259,10 @@ fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
             Select(value = Binding::controlled(value, choose)) {
                 SelectTrigger(
                     size = SelectTriggerSize::Sm,
-                    label = t!("ui.player_tracker.debug_replay_picker").into_owned(),
+                    label = t!("ui-player_tracker-debug_replay_picker").into_owned(),
                     attr:data-testid = "tracker-debug-replay-trigger"
                 ) {
-                    SelectValue(placeholder = t!("ui.player_tracker.debug_replay_none").into_owned())
+                    SelectValue(placeholder = t!("ui-player_tracker-debug_replay_none").into_owned())
                 }
                 SelectContent {
                     for entry in move || choices.get().into_iter().enumerate().collect::<Vec<_>>(),
@@ -280,9 +280,9 @@ fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
             }
             Tooltip {
                 TooltipTrigger {
-                    text(class = "wt-tracker-small wt-tracker-dim") {{t!("ui.player_tracker.debug_replay_picker").into_owned()}}
+                    text(class = "wt-tracker-small wt-tracker-dim") {{t!("ui-player_tracker-debug_replay_picker").into_owned()}}
                 }
-                TooltipContent {{t!("ui.player_tracker.debug_replay_picker_hover").into_owned()}}
+                TooltipContent {{t!("ui-player_tracker-debug_replay_picker_hover").into_owned()}}
             }
         }
     }
@@ -343,12 +343,12 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
             // A failure is reported even while the ships are unresolved: a build that did not load
             // is why they are unresolved.
             StatsState::Failed(reason) => {
-                Some((t!("ui.player_tracker.stats_unavailable", reason = reason).into_owned(), false))
+                Some((t!("ui-player_tracker-stats_unavailable", reason = reason).into_owned(), false))
             }
-            _ if !resolved => Some((t!("ui.player_tracker.live_loading_build").into_owned(), true)),
-            StatsState::Scanning => Some((t!("ui.player_tracker.stats_resolving").into_owned(), true)),
+            _ if !resolved => Some((t!("ui-player_tracker-live_loading_build").into_owned(), true)),
+            StatsState::Scanning => Some((t!("ui-player_tracker-stats_resolving").into_owned(), true)),
             StatsState::Held | StatsState::Fetching => {
-                Some((t!("ui.player_tracker.stats_fetching").into_owned(), true))
+                Some((t!("ui-player_tracker-stats_fetching").into_owned(), true))
             }
             StatsState::Idle | StatsState::Ready(_) => None,
         })
@@ -385,7 +385,7 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
             view! {
                 row(class = "wt-tracker-teams") {
                     TeamColumn(
-                        title = t!("ui.player_tracker.allies").into_owned(),
+                        title = t!("ui-player_tracker-allies").into_owned(),
                         side = "ally",
                         rows = roster.friendly.clone(),
                         context = context.clone(),
@@ -393,7 +393,7 @@ fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
                     )
                     box(class = "wt-tracker-teams__rule")
                     TeamColumn(
-                        title = t!("ui.player_tracker.enemies").into_owned(),
+                        title = t!("ui-player_tracker-enemies").into_owned(),
                         side = "enemy",
                         rows = roster.enemy.clone(),
                         context = context,
@@ -440,21 +440,21 @@ fn TeamColumn(
         .as_ref()
         .and_then(|stats| team_average_personal_rating(&rows, stats, context.mode, context.rating_scope));
     let unrated = (!context.rating_scope.is_rated())
-        .then(|| unrated_text(format!("{}: -", t!("stat.avg_pr")), format!("tracker-team-{side}-avg-pr-unrated")));
-    let players = t!("ui.player_tracker.team_players", count = rows.len()).into_owned();
+        .then(|| unrated_text(format!("{}: -", t!("stat-avg_pr")), format!("tracker-team-{side}-avg-pr-unrated")));
+    let players = t!("ui-player_tracker-team_players", count = rows.len()).into_owned();
 
     let mut headings = vec![
-        ("name", t!("ui.player_tracker.column.player_name").into_owned()),
-        ("ship", t!("ui.player_tracker.win_rate_ship").into_owned()),
+        ("name", t!("ui-player_tracker-column-player_name").into_owned()),
+        ("ship", t!("ui-player_tracker-win_rate_ship").into_owned()),
     ];
     // Compact names the one scope its figures come from. Detailed stacks both scopes in each
     // column, and the ship cell labels the second line.
     let scope = (!context.is_detailed()).then(|| t!(context.mode.label_key()).into_owned());
     for key in [
-        "ui.player_tracker.column.win_rate",
-        "ui.player_tracker.column.personal_rating",
-        "ui.player_tracker.column.avg_damage",
-        "ui.player_tracker.column.battles",
+        "ui-player_tracker-column-win_rate",
+        "ui-player_tracker-column-personal_rating",
+        "ui-player_tracker-column-avg_damage",
+        "ui-player_tracker-column-battles",
     ] {
         let heading = match &scope {
             Some(scope) => scoped_heading(scope, key),
@@ -462,7 +462,7 @@ fn TeamColumn(
         };
         headings.push(("stat", heading));
     }
-    headings.push(("met", t!("ui.player_tracker.column.encounters").into_owned()));
+    headings.push(("met", t!("ui-player_tracker-column-encounters").into_owned()));
     let indexed: Vec<(usize, LiveRosterRow)> = rows.into_iter().enumerate().collect();
 
     view! {
@@ -476,7 +476,7 @@ fn TeamColumn(
                         attr:data-band = rating_band_name(PersonalRatingCategory::from_win_rate(rate)),
                         attr:data-testid = format!("tracker-team-{side}-avg-wr")
                     ) {
-                        {t!("ui.player_tracker.team_average_win_rate", rate = format!("{rate:.1}%")).into_owned()}
+                        {t!("ui-player_tracker-team_average_win_rate", rate = format!("{rate:.1}%")).into_owned()}
                     }
                 }.into_view())}
                 {rating.map(|pr| view! {
@@ -485,7 +485,7 @@ fn TeamColumn(
                         attr:data-band = rating_band_name(PersonalRatingCategory::from_pr(pr)),
                         attr:data-testid = format!("tracker-team-{side}-avg-pr")
                     ) {
-                        {format!("{}: {pr:.0}", t!("stat.avg_pr"))}
+                        {format!("{}: {pr:.0}", t!("stat-avg_pr"))}
                     }
                 }.into_view())}
                 {unrated.map(IntoView::into_view)}
@@ -539,11 +539,11 @@ fn RosterRow(
             let last = tracked
                 .last_visible_timestamp(context.count_division_mates)
                 .map(|at| history::last_seen_text(Some(at), Timestamp::now()))
-                .unwrap_or_else(|| t!("ui.player_tracker.never_encountered").into_owned());
-            t!("ui.player_tracker.encounters_hover", total = tracked.arena_ids.len(), range = met, last = last)
+                .unwrap_or_else(|| t!("ui-player_tracker-never_encountered").into_owned());
+            t!("ui-player_tracker-encounters_hover", total = tracked.arena_ids.len(), range = met, last = last)
                 .into_owned()
         }
-        _ => t!("ui.player_tracker.never_encountered").into_owned(),
+        _ => t!("ui-player_tracker-never_encountered").into_owned(),
     };
     let met_hover = StoredValue::new(met_hover);
     let note = tracked.map(|tracked| tracked.notes.clone()).filter(|notes| !notes.trim().is_empty());
@@ -637,7 +637,7 @@ fn twitch_chip(side: &'static str, index: usize, candidates: Option<Vec<SniperCa
     let test_id = StoredValue::new(format!("tracker-twitch-{side}-{index}"));
     let copy = move |login: String| {
         shell.copy_text(login.clone());
-        shell.toasts().ok(t!("ui.twitch.copied", name = login).into_owned());
+        shell.toasts().ok(t!("ui-twitch-copied", name = login).into_owned());
     };
 
     if let [only] = candidates.as_slice() {
@@ -719,15 +719,15 @@ fn row_menu(side: &'static str, index: usize, row: &LiveRosterRow, label: &str, 
                 DropdownMenuContent {
                     MenuItem(on_select = UnsyncCallback::new(move |()| desktop::open_url(&numbers.get_value()))) {
                         AppIcon(glyph = Glyph::SquareArrowOutUpRight)
-                        text {{t!("ui.player_tracker.open_wows_numbers").into_owned()}}
+                        text {{t!("ui-player_tracker-open_wows_numbers").into_owned()}}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| desktop::open_url(&builds.get_value()))) {
                         AppIcon(glyph = Glyph::SquareArrowOutUpRight)
-                        text {{t!("ui.player_tracker.open_shipbuilds").into_owned()}}
+                        text {{t!("ui-player_tracker-open_shipbuilds").into_owned()}}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| TrackerModel::find_player_matches(shell, account))) {
                         AppIcon(glyph = Glyph::Search)
-                        text {{t!("ui.player_tracker.find_matches").into_owned()}}
+                        text {{t!("ui-player_tracker-find_matches").into_owned()}}
                     }
                 }
             }
@@ -769,7 +769,7 @@ fn ship_cell(side: &'static str, index: usize, row: &LiveRosterRow, detailed: bo
                 text(
                     class = "wt-tracker-truncate wt-tracker-small wt-tracker-faint",
                     attr:data-testid = format!("tracker-roster-{side}-{index}-ship-stats")
-                ) {{t!("ui.player_tracker.ship_stats").into_owned()}}
+                ) {{t!("ui-player_tracker-ship_stats").into_owned()}}
             }
         }
     })
@@ -817,9 +817,9 @@ fn scope_lines(
     // A hidden profile, a service with nothing, and a service out of reach are three answers.
     if !matches!(status, PlayerStatsStatus::Ok) {
         let (glyph, hover) = match status {
-            PlayerStatsStatus::Hidden => (Glyph::EyeOff, t!("ui.player_tracker.stats_hidden")),
-            PlayerStatsStatus::Unavailable => (Glyph::TriangleAlert, t!("ui.player_tracker.stats_no_data")),
-            PlayerStatsStatus::Unknown | PlayerStatsStatus::Ok => (Glyph::Info, t!("ui.player_tracker.stats_no_data")),
+            PlayerStatsStatus::Hidden => (Glyph::EyeOff, t!("ui-player_tracker-stats_hidden")),
+            PlayerStatsStatus::Unavailable => (Glyph::TriangleAlert, t!("ui-player_tracker-stats_no_data")),
+            PlayerStatsStatus::Unknown | PlayerStatsStatus::Ok => (Glyph::Info, t!("ui-player_tracker-stats_no_data")),
         };
         let hover = StoredValue::new(hover.into_owned());
         let status_id = StoredValue::new(id.clone());
@@ -860,8 +860,8 @@ fn scope_lines(
             let id = StoredValue::new(format!("{id}-pr"));
             let hover = StoredValue::new(
                 t!(match mode {
-                    WinRateMode::Overall => "ui.player_tracker.pr_overall_hover",
-                    WinRateMode::Ship => "ui.player_tracker.pr_ship_hover",
+                    WinRateMode::Overall => "ui-player_tracker-pr_overall_hover",
+                    WinRateMode::Ship => "ui-player_tracker-pr_ship_hover",
                 })
                 .into_owned(),
             );
@@ -893,7 +893,7 @@ fn scope_lines(
 
 /// `text` in place of a rating in a match no rating applies to, with the reason as its hover.
 fn unrated_text(text: String, test_id: String) -> AnyView {
-    let hover = StoredValue::new(t!("ui.personal_rating.unrated_hover").into_owned());
+    let hover = StoredValue::new(t!("ui-personal_rating-unrated_hover").into_owned());
     let test_id = StoredValue::new(test_id);
 
     AnyView::new(view! {

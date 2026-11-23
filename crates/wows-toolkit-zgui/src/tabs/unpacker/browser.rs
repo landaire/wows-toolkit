@@ -25,7 +25,6 @@ use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
 use landaire_ui::TreeStripes;
 use landaire_ui::WidthRange;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_viewmodel::formatting::byte_size;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry;
@@ -33,6 +32,7 @@ use wows_toolkit_viewmodel::unpacker::listing::breadcrumbs;
 use wows_toolkit_viewmodel::unpacker::viewer::FileGlyph;
 use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
 use wows_toolkit_viewmodel::unpacker::viewer::is_viewable;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -166,15 +166,15 @@ pub fn BrowserPane(model: UnpackerModel, pane: Pane) -> impl IntoView {
     let body = move || match pane.state.get() {
         PaneState::Empty => AnyView::new(view! {
             box(class = "wt-pane__state", attr:data-testid = format!("unpacker-{fragment}-empty")) {
-                text {{t!("ui.unpacker.no_game_data").into_owned()}}
+                text {{t!("ui-unpacker-no_game_data").into_owned()}}
             }
         }),
         PaneState::Loading => AnyView::new(view! {
-            Loading(label = t!("ui.replay.loading").into_owned(), attr:data-testid = format!("unpacker-{fragment}-loading"))
+            Loading(label = t!("ui-replay-loading").into_owned(), attr:data-testid = format!("unpacker-{fragment}-loading"))
         }),
         PaneState::Failed(reason) => AnyView::new(view! {
             box(class = "wt-pane__state", attr:data-testid = format!("unpacker-{fragment}-failed")) {
-                text {{t!("ui.unpacker.load_failed", error = reason).into_owned()}}
+                text {{t!("ui-unpacker-load_failed", error = reason).into_owned()}}
             }
         }),
         PaneState::Ready(_) => AnyView::new(view! { ReadyPane(model = model, pane = pane) }),
@@ -196,7 +196,7 @@ fn ReadyPane(model: UnpackerModel, pane: Pane) -> impl IntoView {
             open = pane.sidebar_open,
             width = pane.sidebar_width,
             range = range,
-            resize_label = t!("ui.unpacker.collapse_folders").into_owned(),
+            resize_label = t!("ui-unpacker-collapse_folders").into_owned(),
             attr:data-testid = format!("unpacker-{fragment}-split")
         ) {
             SidePanel(slot) {
@@ -206,7 +206,7 @@ fn ReadyPane(model: UnpackerModel, pane: Pane) -> impl IntoView {
                 Show(when = move || !pane.sidebar_open.get()) {
                     ExpandRail(
                         side = PanelSide::Left,
-                        label = t!("ui.unpacker.expand_folders").into_owned(),
+                        label = t!("ui-unpacker-expand_folders").into_owned(),
                         attr:data-testid = format!("unpacker-{fragment}-tree-rail"),
                         on:click = move |_| pane.sidebar_open.set(true)
                     )
@@ -242,15 +242,15 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
             row(class = "wt-pane__bar") {
                 CollapseButton(
                     side = PanelSide::Left,
-                    label = t!("ui.unpacker.collapse_folders").into_owned(),
+                    label = t!("ui-unpacker-collapse_folders").into_owned(),
                     attr:data-testid = format!("unpacker-{fragment}-tree-collapse"),
                     on:click = move |_| pane.sidebar_open.set(false)
                 )
                 AppIcon(glyph = Glyph::Search)
                 Input(
                     value = pane.filter,
-                    placeholder = t!("ui.unpacker.filter_files").into_owned(),
-                    label = t!("ui.unpacker.filter_files").into_owned(),
+                    placeholder = t!("ui-unpacker-filter_files").into_owned(),
+                    label = t!("ui-unpacker-filter_files").into_owned(),
                     class = "wt-pane__field",
                     attr:data-testid = format!("unpacker-{fragment}-filter"),
                     on:key_down = move |ev| {
@@ -272,13 +272,13 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                 )
             }
             column(class = "wt-pane__search") {
-                text(class = "wt-pane__strong") {{t!("ui.unpacker.search_in_files").into_owned()}}
+                text(class = "wt-pane__strong") {{t!("ui-unpacker-search_in_files").into_owned()}}
                 row(class = "wt-pane__row") {
                     AppIcon(glyph = Glyph::Search)
                     Input(
                         value = pane.search_query,
-                        placeholder = t!("ui.unpacker.search_hint").into_owned(),
-                        label = t!("ui.unpacker.search_hint").into_owned(),
+                        placeholder = t!("ui-unpacker-search_hint").into_owned(),
+                        label = t!("ui-unpacker-search_hint").into_owned(),
                         class = "wt-pane__field",
                         attr:data-testid = format!("unpacker-{fragment}-search"),
                         on:key_down = move |ev| on_search_key(search_escape, ev)
@@ -286,8 +286,8 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                 }
                 Input(
                     value = pane.path_filter,
-                    placeholder = t!("ui.unpacker.path_filter_hint").into_owned(),
-                    label = t!("ui.unpacker.path_filter_hint").into_owned(),
+                    placeholder = t!("ui-unpacker-path_filter_hint").into_owned(),
+                    label = t!("ui-unpacker-path_filter_hint").into_owned(),
                     attr:data-testid = format!("unpacker-{fragment}-path-filter"),
                     on:key_down = move |ev| on_search_key(path_escape, ev)
                 )
@@ -297,7 +297,7 @@ fn Sidebar(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     attr:data-testid = format!("unpacker-{fragment}-search-run"),
                     on:click = move |_| start_search()
                 ) {
-                    {t!("ui.tabs.search").into_owned()}
+                    {t!("ui-tabs-search").into_owned()}
                 }
             }
         }
@@ -362,7 +362,7 @@ fn Listing(model: UnpackerModel, pane: Pane) -> impl IntoView {
             row(class = "wt-crumbs", attr:data-testid = format!("unpacker-{fragment}-crumbs")) {{crumbs}}
             row(class = "wt-listing-head") {
                 text(class = format!("wt-listing-head__count {TABULAR_CLASS}")) {
-                    {move || t!("ui.unpacker.item_count", count = count.get()).into_owned()}
+                    {move || t!("ui-unpacker-item_count", count = count.get()).into_owned()}
                 }
                 Button(
                     size = ButtonSize::Sm,
@@ -372,7 +372,7 @@ fn Listing(model: UnpackerModel, pane: Pane) -> impl IntoView {
                     on:click = move |_| model.queue_listed(&pane.rows.with_untracked(|rows| rows.all()))
                 ) {
                     AppIcon(glyph = Glyph::HardDrive)
-                    text {{t!("ui.unpacker.queue_all_files").into_owned()}}
+                    text {{t!("ui-unpacker-queue_all_files").into_owned()}}
                 }
             }
             // Named, since a bare number and a bare word at the end of a row say nothing about
@@ -380,9 +380,9 @@ fn Listing(model: UnpackerModel, pane: Pane) -> impl IntoView {
             row(class = "wt-columns") {
                 box(class = "wt-file__queue")
                 box(class = "wt-file__glyph")
-                text(class = "wt-file__name") {{t!("ui.unpacker.column.name").into_owned()}}
-                text(class = "wt-file__size") {{t!("ui.unpacker.column.size").into_owned()}}
-                text(class = "wt-file__type") {{t!("ui.unpacker.column.type_col").into_owned()}}
+                text(class = "wt-file__name") {{t!("ui-unpacker-column-name").into_owned()}}
+                text(class = "wt-file__size") {{t!("ui-unpacker-column-size").into_owned()}}
+                text(class = "wt-file__type") {{t!("ui-unpacker-column-type_col").into_owned()}}
             }
             box(class = "wt-files") {
                 Tree(
@@ -436,7 +436,7 @@ fn file_row_content(model: UnpackerModel, pane: Pane, ix: usize, entry: ListingE
             }
         }
     };
-    let hover = if entry.is_dir { t!("ui.unpacker.queue_folder") } else { t!("ui.unpacker.queue_file") }.into_owned();
+    let hover = if entry.is_dir { t!("ui-unpacker-queue_folder") } else { t!("ui-unpacker-queue_file") }.into_owned();
     let label = hover.clone();
     let glyph = if entry.is_dir {
         AnyView::new(view! { AppIcon(glyph = Glyph::Folder, class = "wt-file__dir") })
@@ -493,7 +493,7 @@ fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> Option<MenuItems> 
         let reveal = filtered.then(|| {
             view! {
                 MenuItem(on_select = UnsyncCallback::new(move |()| model.reveal(source, revealed.clone()))) {
-                    {t!("ui.unpacker.reveal_in_tree").into_owned()}
+                    {t!("ui-unpacker-reveal_in_tree").into_owned()}
                 }
             }
         });
@@ -501,7 +501,7 @@ fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> Option<MenuItems> 
         let viewable = viewable.then(|| {
             view! {
                 MenuItem(on_select = UnsyncCallback::new(move |()| model.open_viewer(viewed.clone()))) {
-                    {t!("ui.unpacker.view_contents").into_owned()}
+                    {t!("ui-unpacker-view_contents").into_owned()}
                 }
             }
         });
@@ -509,10 +509,10 @@ fn row_menu(model: UnpackerModel, pane: Pane, key: RowKey) -> Option<MenuItems> 
         let decodable = decodable.then(|| {
             view! {
                 MenuItem(on_select = UnsyncCallback::new(move |()| model.open_json_viewer(shown.clone()))) {
-                    {t!("ui.unpacker.view_as_json").into_owned()}
+                    {t!("ui-unpacker-view_as_json").into_owned()}
                 }
                 MenuItem(on_select = UnsyncCallback::new(move |()| model.extract_as_json(written.clone()))) {
-                    {t!("ui.unpacker.extract_as_json").into_owned()}
+                    {t!("ui-unpacker-extract_as_json").into_owned()}
                 }
             }
         });

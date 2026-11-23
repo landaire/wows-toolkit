@@ -125,12 +125,12 @@ impl TimePeriod {
     /// The translation key the period selector reads from.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::LastHour => "ui.player_tracker.period.past_hour",
-            Self::LastSixHours => "ui.player_tracker.period.past_six_hours",
-            Self::LastDay => "ui.player_tracker.period.past_day",
-            Self::LastWeek => "ui.player_tracker.period.past_week",
-            Self::LastMonth => "ui.player_tracker.period.past_month",
-            Self::AllTime => "ui.player_tracker.period.all_time",
+            Self::LastHour => "ui-player_tracker-period-past_hour",
+            Self::LastSixHours => "ui-player_tracker-period-past_six_hours",
+            Self::LastDay => "ui-player_tracker-period-past_day",
+            Self::LastWeek => "ui-player_tracker-period-past_week",
+            Self::LastMonth => "ui-player_tracker-period-past_month",
+            Self::AllTime => "ui-player_tracker-period-all_time",
         }
     }
 
@@ -176,11 +176,11 @@ impl SortColumn {
     /// The translation key the column's heading reads from.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Name => "ui.player_tracker.column.player_name",
-            Self::Clan => "ui.player_tracker.column.clan",
-            Self::TotalEncounters => "ui.player_tracker.column.total_encounters",
-            Self::Encounters => "ui.player_tracker.column.encounters_in_range",
-            Self::LastEncountered => "ui.player_tracker.column.last_encountered",
+            Self::Name => "ui-player_tracker-column-player_name",
+            Self::Clan => "ui-player_tracker-column-clan",
+            Self::TotalEncounters => "ui-player_tracker-column-total_encounters",
+            Self::Encounters => "ui-player_tracker-column-encounters_in_range",
+            Self::LastEncountered => "ui-player_tracker-column-last_encountered",
         }
     }
 
@@ -660,12 +660,12 @@ impl ClanSortColumn {
     /// The translation key the column's heading reads from.
     pub fn label_key(self) -> &'static str {
         match self {
-            Self::Clan => "ui.player_tracker.column.clan",
-            Self::Members => "ui.player_tracker.column.members",
-            Self::Encounters => "ui.player_tracker.column.matches",
-            Self::EncountersInRange => "ui.player_tracker.column.encounters_in_range",
-            Self::Sightings => "ui.player_tracker.column.sightings",
-            Self::LastEncountered => "ui.player_tracker.column.last_encountered",
+            Self::Clan => "ui-player_tracker-column-clan",
+            Self::Members => "ui-player_tracker-column-members",
+            Self::Encounters => "ui-player_tracker-column-matches",
+            Self::EncountersInRange => "ui-player_tracker-column-encounters_in_range",
+            Self::Sightings => "ui-player_tracker-column-sightings",
+            Self::LastEncountered => "ui-player_tracker-column-last_encountered",
         }
     }
 

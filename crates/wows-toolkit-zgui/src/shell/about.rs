@@ -1,6 +1,6 @@
 //! Who made this, what it is built on, and where to look next.
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::GetValue;
@@ -28,9 +28,9 @@ pub const PROJECT_URL: &str = "https://github.com/landaire/wows-toolkit";
 fn about_lines() -> Vec<String> {
     vec![
         format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION")),
-        t!("ui.labels.made_by").into_owned(),
-        t!("ui.labels.credits").into_owned(),
-        format!("{} {PR_INFO_URL}", t!("ui.labels.pr_credits")),
+        t!("ui-labels-made_by").into_owned(),
+        t!("ui-labels-credits").into_owned(),
+        format!("{} {PR_INFO_URL}", t!("ui-labels-pr_credits")),
         PROJECT_URL.to_owned(),
     ]
 }
@@ -45,15 +45,15 @@ pub fn show_about(shell: Shell) {
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "about-dialog") {
                     AlertDialogHeader {
-                        AlertDialogTitle {{t!("ui.windows.about").into_owned()}}
+                        AlertDialogTitle {{t!("ui-windows-about").into_owned()}}
                         for line in move || lines.get_value(), key = |line: &String| line.clone() {
                             AlertDialogDescription {{line}}
                         }
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(on:click = move |_| desktop::open_url(PROJECT_URL)) {
-                            {t!("ui.buttons.view_github").into_owned()}
+                            {t!("ui-buttons-view_github").into_owned()}
                         }
                     }
                 }

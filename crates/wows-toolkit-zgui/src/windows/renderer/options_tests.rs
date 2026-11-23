@@ -10,7 +10,6 @@ use std::time::Duration;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::ExportSpeed;
 use wows_minimap_renderer::ExportTiming;
@@ -38,6 +37,7 @@ use wows_toolkit_replay_data::replay_render::view::FrameSize;
 use wows_toolkit_replay_data::replay_render::view::WindowPoint;
 use wowsunpack::data::Version;
 use wowsunpack::game_types::AdvantageLevel;
+use wt_translations::t;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
@@ -220,8 +220,8 @@ fn the_video_timing_reaches_the_next_export_and_says_what_it_comes_to() {
     click(&mut window, "replay-renderer-settings-toggle");
     let timing = || session.export.with_untracked(|export| export.settings.timing);
     let said = |window: &HeadlessWindow| window.texts_by_class("wt-renderer-options__timing-result").concat();
-    let plays_at = |speed: &str| t!("ui.renderer.settings.export_timing_result_speed", speed = speed).into_owned();
-    let runs = |length: &str| t!("ui.renderer.settings.export_timing_result_length", length = length).into_owned();
+    let plays_at = |speed: &str| t!("ui-renderer-settings-export_timing_result_speed", speed = speed).into_owned();
+    let runs = |length: &str| t!("ui-renderer-settings-export_timing_result_length", length = length).into_owned();
 
     assert_eq!(timing(), ExportTiming::Length(VideoLength::DEFAULT));
     assert_eq!(said(&window), plays_at("8"), "eight minutes of battle fitted into one");

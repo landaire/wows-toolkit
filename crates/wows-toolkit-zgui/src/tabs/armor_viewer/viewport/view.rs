@@ -9,13 +9,13 @@ use landaire_ui::LoadingProps;
 use landaire_ui::OverlaySurfaceProps;
 use landaire_ui::PointerTipProps;
 use landaire_ui::TipClearance;
-use rust_i18n::t;
 use wows_toolkit_armor::catalog::translate_name;
 use wows_toolkit_armor::hull_picking::MeshTooltip;
 use wows_toolkit_armor::load_ship::ArmorTriangleTooltip;
 use wows_toolkit_armor::load_ship::PlateKey;
 use wows_toolkit_armor::viewport::types::Vec2;
 use wowsunpack::export::gltf_export::thickness_to_color;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::custom::CustomHandle;
@@ -457,7 +457,7 @@ pub fn ArmorViewport(state: ArmorViewportState) -> impl IntoView {
                         text(class = "wt-armor-viewport__disclaimer", attr:data-testid = "armor-viewport-disclaimer") {{
                             move || {
                                 locale.track();
-                                t!("ui.armor.ballistic_disclaimer").into_owned()
+                                t!("ui-armor-ballistic_disclaimer").into_owned()
                             }
                         }}
                     }
@@ -516,8 +516,8 @@ fn stand_in(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
     let said = state
         .read(|model| {
             let status = match &model.gpu {
-                GpuState::Waiting => Some(t!("ui.armor.initializing").into_owned()),
-                GpuState::Failed(reason) => Some(t!("ui.armor.init_failed", reason = reason).into_owned()),
+                GpuState::Waiting => Some(t!("ui-armor-initializing").into_owned()),
+                GpuState::Failed(reason) => Some(t!("ui-armor-init_failed", reason = reason).into_owned()),
                 GpuState::Ready(_) => None,
             };
             // A load in flight replaces whatever is drawn, so the subject on screen is never
@@ -535,7 +535,7 @@ fn stand_in(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
                 });
             }
             if model.current_armor.is_none() {
-                return Some(StandIn::Message(status.unwrap_or_else(|| t!("ui.armor.select_ship").into_owned())));
+                return Some(StandIn::Message(status.unwrap_or_else(|| t!("ui-armor-select_ship").into_owned())));
             }
             status.map(StandIn::Message)
         })
@@ -543,13 +543,13 @@ fn stand_in(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
 
     Some(match said {
         StandIn::Loading(name) => {
-            let label = t!("ui.armor.loading_named_ship", ship = name).into_owned();
+            let label = t!("ui-armor-loading_named_ship", ship = name).into_owned();
             AnyView::new(view! {
                 Loading(label = label, class = "wt-armor-viewport__said", attr:data-testid = "armor-viewport-loading")
             })
         }
         StandIn::Initializing => {
-            let label = t!("ui.armor.initializing").into_owned();
+            let label = t!("ui-armor-initializing").into_owned();
             AnyView::new(view! {
                 Loading(
                     label = label,
@@ -672,9 +672,9 @@ fn cast_hint(state: ArmorViewportState, locale: Locale, note: MissNote) -> Optio
     let (said, test_id) = match miss {
         Some(miss) => {
             let said = match miss {
-                CastMiss::NothingUnderPointer => t!("ui.armor.cast.miss_nothing_under_pointer"),
-                CastMiss::ThicknessUnknown => t!("ui.armor.cast.miss_thickness_unknown"),
-                CastMiss::NoPlateOnPath => t!("ui.armor.cast.miss_no_plate_on_path"),
+                CastMiss::NothingUnderPointer => t!("ui-armor-cast-miss_nothing_under_pointer"),
+                CastMiss::ThicknessUnknown => t!("ui-armor-cast-miss_thickness_unknown"),
+                CastMiss::NoPlateOnPath => t!("ui-armor-cast-miss_no_plate_on_path"),
             };
             (said, "armor-viewport-cast-miss")
         }
@@ -683,7 +683,7 @@ fn cast_hint(state: ArmorViewportState, locale: Locale, note: MissNote) -> Optio
             if !invite {
                 return None;
             }
-            (t!("ui.armor.cast.prompt", key = ModifierKey::Shift.label()), "armor-viewport-cast-hint")
+            (t!("ui-armor-cast-prompt", key = ModifierKey::Shift.label()), "armor-viewport-cast-hint")
         }
     };
     let said = said.into_owned();
@@ -751,7 +751,7 @@ fn tooltip(state: ArmorViewportState, locale: Locale) -> Option<AnyView> {
             })
         }
         Hover::Plate { tooltip, zone, material } => {
-            let hint = t!("ui.armor.cast_here_hint", key = ModifierKey::Shift.label()).into_owned();
+            let hint = t!("ui-armor-cast_here_hint", key = ModifierKey::Shift.label()).into_owned();
             plate_tooltip(&tooltip, &zone, &material, &hint)
         }
         Hover::Mesh(tooltip) => {
@@ -841,7 +841,7 @@ fn export_confirm(state: ArmorViewportState, locale: Locale, shell: Option<Shell
             on:wheel = move |ev| ev.stop_propagation()
         ) {
             OverlaySurface(class = "wt-armor-viewport__confirm") {
-                text(class = "wt-armor-viewport__confirm-title") {{t!("ui.armor.export_model").into_owned()}}
+                text(class = "wt-armor-viewport__confirm-title") {{t!("ui-armor-export_model").into_owned()}}
                 text(class = "wt-armor-viewport__confirm-body") {{body}}
                 row(class = "wt-armor-viewport__confirm-actions") {
                     Button(
@@ -850,7 +850,7 @@ fn export_confirm(state: ArmorViewportState, locale: Locale, shell: Option<Shell
                         attr:data-testid = "armor-export-confirm-cancel",
                         on:click = move |_| state.cancel_export()
                     ) {
-                        {t!("ui.buttons.cancel").into_owned()}
+                        {t!("ui-buttons-cancel").into_owned()}
                     }
                     Button(
                         size = ButtonSize::Sm,
@@ -861,7 +861,7 @@ fn export_confirm(state: ArmorViewportState, locale: Locale, shell: Option<Shell
                             }
                         }
                     ) {
-                        {t!("ui.armor.export_button").into_owned()}
+                        {t!("ui-armor-export_button").into_owned()}
                     }
                 }
             }

@@ -22,13 +22,13 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use futures::future::LocalBoxFuture;
-use rust_i18n::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_services::dialog::Answer;
 use wows_toolkit_viewmodel::palette::PaletteMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::text_filter::FilterKey;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
+use wt_translations::t;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -94,26 +94,26 @@ impl RootCommand {
     /// What the entry says, in the reader's language.
     pub fn label(self) -> String {
         let key = match self {
-            Self::GoTo(tab) => return t!("ui.palette.go_to", tab = tab.label()).into_owned(),
+            Self::GoTo(tab) => return t!("ui-palette-go_to", tab = tab.label()).into_owned(),
             Self::SetTheme(theme) => {
-                return t!("ui.palette.set_theme", theme = t!(theme.label_key())).into_owned();
+                return t!("ui-palette-set_theme", theme = t!(theme.label_key())).into_owned();
             }
-            Self::OpenSettings => "ui.settings.panel.open",
-            Self::AdvancedSearch => "ui.palette.advanced_search",
-            Self::GamesIDiedIn => "ui.palette.games_i_died_in",
-            Self::GamesIWon => "ui.palette.games_i_won",
-            Self::OpenReplayFile => "ui.replay.open_manually",
-            Self::IndexAllReplays => "ui.settings.replay.index_all_replays",
-            Self::ReindexAll => "ui.reindex.palette_all",
-            Self::RefreshPersistedData => "ui.replay.refresh_persisted_data",
+            Self::OpenSettings => "ui-settings-panel-open",
+            Self::AdvancedSearch => "ui-palette-advanced_search",
+            Self::GamesIDiedIn => "ui-palette-games_i_died_in",
+            Self::GamesIWon => "ui-palette-games_i_won",
+            Self::OpenReplayFile => "ui-replay-open_manually",
+            Self::IndexAllReplays => "ui-settings-replay-index_all_replays",
+            Self::ReindexAll => "ui-reindex-palette_all",
+            Self::RefreshPersistedData => "ui-replay-refresh_persisted_data",
             Self::Launcher(command) => command.label_key(),
-            Self::ImportConstants => "ui.replay.import_constants",
-            Self::SendAllReplays => "ui.palette.send_all_replays",
-            Self::SendAllReplaysAgain => "ui.palette.send_all_replays_again",
-            Self::CopyLatestLog => "ui.replay.copy_latest_log",
-            Self::CopyBugReportInfo => "ui.replay.copy_bug_report_info",
-            Self::SampleStats => "ui.palette.sample_stats",
-            Self::RestoreStats => "ui.palette.restore_stats",
+            Self::ImportConstants => "ui-replay-import_constants",
+            Self::SendAllReplays => "ui-palette-send_all_replays",
+            Self::SendAllReplaysAgain => "ui-palette-send_all_replays_again",
+            Self::CopyLatestLog => "ui-replay-copy_latest_log",
+            Self::CopyBugReportInfo => "ui-replay-copy_bug_report_info",
+            Self::SampleStats => "ui-palette-sample_stats",
+            Self::RestoreStats => "ui-palette-restore_stats",
         };
 
         t!(key).into_owned()
@@ -134,11 +134,11 @@ pub enum LauncherCommand {
 impl LauncherCommand {
     const fn label_key(self) -> &'static str {
         match self {
-            Self::PlayAs(_) => "ui.launcher.palette.play",
-            Self::GameSettings => "ui.launcher.palette.game_settings",
-            Self::AddAccount => "ui.launcher.palette.add_account",
-            Self::UpdateGame => "ui.launcher.palette.update",
-            Self::OpenReplayInGame => "ui.launcher.palette.open_replay",
+            Self::PlayAs(_) => "ui-launcher-palette-play",
+            Self::GameSettings => "ui-launcher-palette-game_settings",
+            Self::AddAccount => "ui-launcher-palette-add_account",
+            Self::UpdateGame => "ui-launcher-palette-update",
+            Self::OpenReplayInGame => "ui-launcher-palette-open_replay",
         }
     }
 
@@ -175,9 +175,9 @@ impl PaletteTheme {
 
     const fn label_key(self) -> &'static str {
         match self {
-            Self::System => "ui.settings.app.theme_system",
-            Self::Dark => "ui.settings.app.theme_dark",
-            Self::Light => "ui.settings.app.theme_light",
+            Self::System => "ui-settings-app-theme_system",
+            Self::Dark => "ui-settings-app-theme_dark",
+            Self::Light => "ui-settings-app-theme_light",
         }
     }
 
@@ -695,7 +695,7 @@ pub(crate) async fn chosen(shell: Shell, asked: impl Future<Output = Answer>) ->
     asked.await.unwrap_or_else(|err| {
         tracing::error!("file dialog could not be opened: {err}");
         if let Some(toasts) = shell.try_toasts() {
-            toasts.failed(t!("ui.dialogs.file_dialog_failed", reason = err).into_owned());
+            toasts.failed(t!("ui-dialogs-file_dialog_failed", reason = err).into_owned());
         }
         None
     })

@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wows_toolkit_viewmodel::text_filter::MatchScore;
 use wowsunpack::export::model_catalog::BuildingKind;
@@ -28,6 +27,7 @@ use wowsunpack::export::ship_parts::MiscParent;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::types::tier_roman;
 use wowsunpack::game_types::GameParamId;
+use wt_translations::t;
 
 use crate::catalog::HiddenReason;
 use crate::catalog::NationGroup;
@@ -209,13 +209,13 @@ pub fn row_tooltip(kind: &RowKind, skin_uses: &[SkinUse], missing: Option<Geomet
     for skin in skin_uses {
         for exterior in &skin.exteriors {
             text.push('\n');
-            text.push_str(&t!("ui.models.skin_replaces", model = skin.stock.stem(), exterior = exterior));
+            text.push_str(&t!("ui-models-skin_replaces", model = skin.stock.stem(), exterior = exterior));
         }
     }
 
     let missing = match missing {
-        Some(GeometryAvailability::Absent) => Some(t!("ui.models.geometry_absent")),
-        Some(GeometryAvailability::NoGeometry) => Some(t!("ui.models.geometry_none")),
+        Some(GeometryAvailability::Absent) => Some(t!("ui-models-geometry_absent")),
+        Some(GeometryAvailability::NoGeometry) => Some(t!("ui-models-geometry_none")),
         Some(GeometryAvailability::Present) | None => None,
     };
     if let Some(missing) = missing {
@@ -534,14 +534,14 @@ pub fn build_tree(
     builder.rows.insert(SEPARATOR_ID.into(), RowKind::Separator);
     items.push(SidebarItem {
         id: SEPARATOR_ID.into(),
-        label: t!("ui.models.heading").into_owned(),
+        label: t!("ui-models-heading").into_owned(),
         disabled: true,
         children: ItemChildren::Leaf,
     });
 
     match sources.models {
-        ModelSection::Loading => items.push(builder.status_row(t!("ui.models.loading").into_owned())),
-        ModelSection::Unavailable => items.push(builder.status_row(t!("ui.models.unavailable").into_owned())),
+        ModelSection::Loading => items.push(builder.status_row(t!("ui-models-loading").into_owned())),
+        ModelSection::Unavailable => items.push(builder.status_row(t!("ui-models-unavailable").into_owned())),
         ModelSection::Ready(index) => {
             let model_matches = search.and_then(|search| search.models.as_ref());
             for (folder, matches) in paired(&index.folders, members(model_matches)) {
@@ -612,8 +612,8 @@ pub fn part_row_id(ship: &VehicleParamIndex, part: &ShipPartKey) -> RowId {
 
 fn hidden_reason_label(reason: HiddenReason) -> String {
     let key = match reason {
-        HiddenReason::ClanRental => "ui.armor.hidden_ship.clan_rental",
-        HiddenReason::OtherClass => "ui.armor.hidden_ship.other_class",
+        HiddenReason::ClanRental => "ui-armor-hidden_ship-clan_rental",
+        HiddenReason::OtherClass => "ui-armor-hidden_ship-other_class",
     };
 
     t!(key).into_owned()
@@ -621,13 +621,13 @@ fn hidden_reason_label(reason: HiddenReason) -> String {
 
 fn model_group_label(group: ModelGroupKind) -> String {
     let key = match group {
-        ModelGroupKind::Gameplay => "ui.models.group.gameplay",
-        ModelGroupKind::Building => "ui.models.group.building",
-        ModelGroupKind::Character => "ui.models.group.character",
-        ModelGroupKind::Location => "ui.models.group.location",
-        ModelGroupKind::Port => "ui.models.group.port",
-        ModelGroupKind::Style => "ui.models.group.style",
-        ModelGroupKind::Other => "ui.models.group.other",
+        ModelGroupKind::Gameplay => "ui-models-group-gameplay",
+        ModelGroupKind::Building => "ui-models-group-building",
+        ModelGroupKind::Character => "ui-models-group-character",
+        ModelGroupKind::Location => "ui-models-group-location",
+        ModelGroupKind::Port => "ui-models-group-port",
+        ModelGroupKind::Style => "ui-models-group-style",
+        ModelGroupKind::Other => "ui-models-group-other",
     };
 
     t!(key).into_owned()
@@ -637,9 +637,9 @@ fn model_group_label(group: ModelGroupKind) -> String {
 /// one of the groups no species names.
 fn building_kind_label(kind: &BuildingKind) -> String {
     let species = match kind {
-        BuildingKind::Weapon => return t!("ui.models.building.weapon").into_owned(),
-        BuildingKind::Unassigned => return t!("ui.models.building.unassigned").into_owned(),
-        BuildingKind::Unspecified => return t!("ui.models.building.unspecified").into_owned(),
+        BuildingKind::Weapon => return t!("ui-models-building-weapon").into_owned(),
+        BuildingKind::Unassigned => return t!("ui-models-building-unassigned").into_owned(),
+        BuildingKind::Unspecified => return t!("ui-models-building-unspecified").into_owned(),
         BuildingKind::Unrecognized(species) => return species.clone(),
         BuildingKind::Complex => "Complex",
         BuildingKind::CoastalArtillery => "CoastalArtillery",
@@ -658,7 +658,7 @@ fn building_kind_label(kind: &BuildingKind) -> String {
 fn folder_label(name: &FolderName) -> String {
     match name {
         FolderName::Nation { display_name, .. } => display_name.clone(),
-        FolderName::Common => t!("ui.models.common").into_owned(),
+        FolderName::Common => t!("ui-models-common").into_owned(),
         FolderName::Group(group) => model_group_label(*group),
         FolderName::Kind(kind) => model_kind_label(*kind),
         FolderName::SubKind(sub_kind) => model_sub_kind_label(sub_kind),
@@ -671,16 +671,16 @@ fn folder_label(name: &FolderName) -> String {
 
 pub fn mount_group_label(group: MountGroup) -> String {
     let key = match group {
-        MountGroup::MainBattery => "ui.models.part.main_battery",
-        MountGroup::Secondaries => "ui.models.part.secondaries",
-        MountGroup::AntiAircraft => "ui.models.part.anti_aircraft",
-        MountGroup::Torpedoes => "ui.models.part.torpedoes",
-        MountGroup::Directors => "ui.models.part.directors",
-        MountGroup::Finders => "ui.models.part.finders",
-        MountGroup::Radars => "ui.models.part.radars",
-        MountGroup::DepthCharges => "ui.models.part.depth_charges",
-        MountGroup::Aircraft => "ui.models.part.aircraft",
-        MountGroup::Other => "ui.models.part.other",
+        MountGroup::MainBattery => "ui-models-part-main_battery",
+        MountGroup::Secondaries => "ui-models-part-secondaries",
+        MountGroup::AntiAircraft => "ui-models-part-anti_aircraft",
+        MountGroup::Torpedoes => "ui-models-part-torpedoes",
+        MountGroup::Directors => "ui-models-part-directors",
+        MountGroup::Finders => "ui-models-part-finders",
+        MountGroup::Radars => "ui-models-part-radars",
+        MountGroup::DepthCharges => "ui-models-part-depth_charges",
+        MountGroup::Aircraft => "ui-models-part-aircraft",
+        MountGroup::Other => "ui-models-part-other",
     };
 
     t!(key).into_owned()
@@ -688,7 +688,7 @@ pub fn mount_group_label(group: MountGroup) -> String {
 
 fn variant_label(kind: &ModelVariantKind, path: &ModelPath) -> String {
     match kind {
-        ModelVariantKind::Dead => t!("ui.models.variant.dead").into_owned(),
+        ModelVariantKind::Dead => t!("ui-models-variant-dead").into_owned(),
         ModelVariantKind::Section(suffix) => suffix.clone(),
         ModelVariantKind::Skin => path.stem().to_string(),
     }
@@ -815,7 +815,7 @@ impl Builder<'_, '_, '_, '_> {
         // The tiers do not filter buildings, so only a search counts them.
         let searching = self.search.is_some_and(|search| search.query.is_active());
         let with_count = |label: String, count: usize| if searching { format!("{label} ({count})") } else { label };
-        let label = with_count(t!("ui.armor.fortifications").into_owned(), rows.len());
+        let label = with_count(t!("ui-armor-fortifications").into_owned(), rows.len());
         let wanted = self.opens_ships();
         self.folder(FORTIFICATIONS_ID.into(), label, RowKind::BuildingGroup, wanted, |b| {
             rows.chunk_by(|(left, _), (right, _)| left.kind == right.kind)
@@ -888,7 +888,7 @@ impl Builder<'_, '_, '_, '_> {
         let hull: Vec<&HullRow> = parts.hull.iter().filter(|row| listed(&row.filter_fields)).collect();
         if !hull.is_empty() {
             let id: RowId = format!("armor-part-{ship}-group-hull").into();
-            items.push(self.folder(id, t!("ui.models.part.hull").into_owned(), RowKind::PartFolder, wanted, |b| {
+            items.push(self.folder(id, t!("ui-models-part-hull").into_owned(), RowKind::PartFolder, wanted, |b| {
                 hull.iter().map(|row| b.hull_row(ship, row)).collect()
             }));
         }
@@ -908,7 +908,7 @@ impl Builder<'_, '_, '_, '_> {
         let misc: Vec<&PartRow> = parts.misc.iter().filter(|part| listed(&part.filter_fields)).collect();
         if !misc.is_empty() {
             let id: RowId = format!("armor-part-{ship}-group-misc").into();
-            items.push(self.folder(id, t!("ui.models.part.misc").into_owned(), RowKind::PartFolder, wanted, |b| {
+            items.push(self.folder(id, t!("ui-models-part-misc").into_owned(), RowKind::PartFolder, wanted, |b| {
                 misc.iter().map(|part| b.part_row(ship, part)).collect()
             }));
         }
@@ -1032,7 +1032,7 @@ impl Builder<'_, '_, '_, '_> {
             let kind = RowKind::Model(variant.path.clone());
             self.mark_geometry(&id, variant.geometry);
             if variant.kind == ModelVariantKind::Skin {
-                self.notes.insert(id.clone(), RowNote::Tag(t!("ui.models.variant.skin").into_owned()));
+                self.notes.insert(id.clone(), RowNote::Tag(t!("ui-models-variant-skin").into_owned()));
             }
 
             if variant.variants.is_empty() {

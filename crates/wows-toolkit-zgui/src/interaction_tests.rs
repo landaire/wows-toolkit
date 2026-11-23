@@ -9,9 +9,9 @@ use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use tokio::runtime::Runtime;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::view;
 use zgui::vocab::Modifiers;
@@ -224,7 +224,7 @@ fn the_tab_menu_is_translated() {
     window.right_click(element).expect("the tab takes a right click");
     settle(&mut window);
 
-    for key in ["ui.tabs.close_tab", "ui.tabs.close_other_tabs", "ui.tabs.close_tabs_to_the_right"] {
+    for key in ["ui-tabs-close_tab", "ui-tabs-close_other_tabs", "ui-tabs-close_tabs_to_the_right"] {
         assert!(window.by_role_and_label(Role::MenuItem, &t!(key)).is_some(), "{key} is in the menu");
     }
 }
@@ -295,17 +295,17 @@ fn the_status_bar_names_one_job_and_counts_several() {
 
     let first = jobs.start(Job { name: "First job".to_owned(), progress: Progress::new(1, 4) });
     settle(&mut window);
-    let one_of_four = format!("First job {}", t!("ui.app.status_of", done = 1, total = 4));
+    let one_of_four = format!("First job {}", t!("ui-app-status_of", done = 1, total = 4));
     assert_eq!(label(&mut window, WORK), Some(one_of_four));
 
     first.report(Job { name: "First job".to_owned(), progress: Progress::new(2, 4) });
     settle(&mut window);
-    let two_of_four = format!("First job {}", t!("ui.app.status_of", done = 2, total = 4));
+    let two_of_four = format!("First job {}", t!("ui-app-status_of", done = 2, total = 4));
     assert_eq!(label(&mut window, WORK), Some(two_of_four), "a later report replaces the earlier one");
 
     let second = jobs.start(Job { name: "Second job".to_owned(), progress: None });
     settle(&mut window);
-    assert_eq!(label(&mut window, WORK), Some(t!("ui.app.status_tasks", count = 2).into_owned()));
+    assert_eq!(label(&mut window, WORK), Some(t!("ui-app-status_tasks", count = 2).into_owned()));
 
     drop(first);
     settle(&mut window);

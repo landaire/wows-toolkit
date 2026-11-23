@@ -2,16 +2,6 @@
 //! replay index pass, shared by the desktop front ends. Blocking functions and
 //! plain data only: each front end schedules them on its own executor.
 
-rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
-
-/// Sets the language every `t!` in this crate reads.
-///
-/// `rust_i18n` keeps its locale per crate, so a front end setting its own
-/// does not reach these strings.
-pub fn set_locale(code: &str) {
-    rust_i18n::set_locale(code);
-}
-
 pub mod browser_tree;
 pub mod cap_layout_store;
 pub mod columns;

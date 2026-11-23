@@ -18,7 +18,6 @@ use std::sync::Arc;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_toolkit_armor::hull_picking::HullMeshIndex;
 use wows_toolkit_armor::load_ship::LoadedShipArmor;
 use wows_toolkit_armor::textures::LocatedTexture;
@@ -34,6 +33,7 @@ use wowsunpack::export::material_textures::TextureFiles;
 use wowsunpack::export::material_textures::TextureFilesError;
 use wowsunpack::game_data::mod_folder;
 use wowsunpack::vfs::VfsPath;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
@@ -143,7 +143,7 @@ pub fn show_textures_item(workspace: ArmorWorkspace, viewport: ArmorViewportStat
             attr:data-testid = "armor-menu-show-textures",
             on_select = UnsyncCallback::new(move |()| workspace.show_textures(focus))
         ) {
-            {t!("ui.armor.textures.show_textures").into_owned()}
+            {t!("ui-armor-textures-show_textures").into_owned()}
         }
     }))
 }
@@ -207,7 +207,7 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
         move || {
             let index = hovered.get()?;
             let material = section.armor.texture_inventory.get()?.materials().get(index)?;
-            let said = t!("ui.armor.textures.under_pointer", material = material_name(material)).into_owned();
+            let said = t!("ui-armor-textures-under_pointer", material = material_name(material)).into_owned();
             Some(
                 view! { text(class = "wt-armor-textures__pointer", attr:data-testid = "armor-textures-pointer") {{said}} },
             )
@@ -217,7 +217,7 @@ pub fn body(cx: &SectionCx) -> Option<AnyView> {
 
     Some(AnyView::new(view! {
         column(class = "wt-armor-textures", attr:data-testid = "armor-textures") {
-            text(class = "wt-armor-textures__dim") {{t!("ui.armor.textures.hint").into_owned()}}
+            text(class = "wt-armor-textures__dim") {{t!("ui-armor-textures-hint").into_owned()}}
             {pointer}
             {rows}
         }
@@ -245,9 +245,9 @@ impl Section {
     fn rows(&self, hovered: Memo<Option<usize>>) -> Vec<AnyView> {
         if !self.ready.get() {
             let waiting = match self.workspace.library.models() {
-                ModelsState::Failed => t!("ui.models.unavailable"),
+                ModelsState::Failed => t!("ui-models-unavailable"),
                 ModelsState::NotStarted | ModelsState::Loading | ModelsState::Ready(_) => {
-                    t!("ui.armor.textures.reading")
+                    t!("ui-armor-textures-reading")
                 }
             };
             return vec![AnyView::new(view! {
@@ -424,7 +424,7 @@ fn texture_rows(material: &SceneMaterial) -> Vec<TextureRow> {
         match texture {
             TextureLookup::Found(located) => located_row(role, located),
             TextureLookup::Unresolved(path_id) => {
-                let unresolved = t!("ui.armor.textures.unresolved").into_owned();
+                let unresolved = t!("ui-armor-textures-unresolved").into_owned();
                 TextureRow {
                     role,
                     file: MarkedLabel::plain(format!("0x{path_id:016X}")),
@@ -439,7 +439,7 @@ fn texture_rows(material: &SceneMaterial) -> Vec<TextureRow> {
     let matched = material
         .name_matched_albedo
         .iter()
-        .map(|located| located_row(t!("ui.armor.textures.role_name_matched").into_owned(), located));
+        .map(|located| located_row(t!("ui-armor-textures-role_name_matched").into_owned(), located));
 
     properties.chain(matched).collect()
 }
@@ -455,10 +455,10 @@ fn located_row(role: String, located: &LocatedTexture) -> TextureRow {
             }
             (details(files), files.files.iter().map(|file| file.path.clone()).collect())
         }
-        Err(TextureFilesError::Absent { .. }) => (t!("ui.armor.textures.absent").into_owned(), Vec::new()),
+        Err(TextureFilesError::Absent { .. }) => (t!("ui-armor-textures-absent").into_owned(), Vec::new()),
         // The header is unreadable but the file is there to override.
         Err(TextureFilesError::Header { path }) => {
-            (t!("ui.armor.textures.unreadable").into_owned(), vec![path.clone()])
+            (t!("ui-armor-textures-unreadable").into_owned(), vec![path.clone()])
         }
     };
 
@@ -468,15 +468,15 @@ fn located_row(role: String, located: &LocatedTexture) -> TextureRow {
 /// "BC7RgbaUnorm, 1024x1024, 2 files, 1.3 MiB": what the game shows at its highest texture
 /// quality, and what the files take.
 fn details(files: &TextureFiles) -> String {
-    let format = files.format.map_or_else(|| t!("ui.armor.textures.unknown_format").into_owned(), |f| f.to_string());
+    let format = files.format.map_or_else(|| t!("ui-armor-textures-unknown_format").into_owned(), |f| f.to_string());
     // The list always holds the referenced file, so it has a largest.
     let size = files.largest().map(|size| size.to_string()).unwrap_or_default();
     let bytes = byte_size(files.files.iter().map(|file| file.bytes).sum());
 
     match files.files.len() {
-        1 => t!("ui.armor.textures.details_one", format = format, size = size, bytes = bytes).into_owned(),
+        1 => t!("ui-armor-textures-details_one", format = format, size = size, bytes = bytes).into_owned(),
         count => {
-            t!("ui.armor.textures.details", format = format, size = size, count = count, bytes = bytes).into_owned()
+            t!("ui-armor-textures-details", format = format, size = size, count = count, bytes = bytes).into_owned()
         }
     }
 }
@@ -484,11 +484,11 @@ fn details(files: &TextureFiles) -> String {
 /// What a texture property is for, in the reader's words where the property is a common one.
 fn role(property: PropertyName) -> String {
     let key = match property {
-        PropertyName::Known("diffuseMap") => "ui.armor.textures.role_albedo",
-        PropertyName::Known("normalMap") => "ui.armor.textures.role_normal",
-        PropertyName::Known("metallicGlossMap") => "ui.armor.textures.role_metal_gloss",
-        PropertyName::Known("ambientOcclusionMap") => "ui.armor.textures.role_ambient_occlusion",
-        PropertyName::Known("detailMap") => "ui.armor.textures.role_detail",
+        PropertyName::Known("diffuseMap") => "ui-armor-textures-role_albedo",
+        PropertyName::Known("normalMap") => "ui-armor-textures-role_normal",
+        PropertyName::Known("metallicGlossMap") => "ui-armor-textures-role_metal_gloss",
+        PropertyName::Known("ambientOcclusionMap") => "ui-armor-textures-role_ambient_occlusion",
+        PropertyName::Known("detailMap") => "ui-armor-textures-role_detail",
         PropertyName::Known(_) | PropertyName::Unknown(_) => return property.to_string(),
     };
 
@@ -499,7 +499,7 @@ fn role(property: PropertyName) -> String {
 fn material_name(material: &SceneMaterial) -> String {
     match &material.mfm_path {
         Some(path) => path.rsplit('/').next().unwrap_or(path).to_string(),
-        None => t!("ui.armor.textures.no_material").into_owned(),
+        None => t!("ui-armor-textures-no_material").into_owned(),
     }
 }
 
@@ -507,7 +507,7 @@ fn material_name(material: &SceneMaterial) -> String {
 fn summary(inventory: &SceneTextures) -> AnyView {
     let textures: HashSet<&str> =
         inventory.materials().iter().flat_map(SceneMaterial::located).map(|located| located.path.as_str()).collect();
-    let said = t!("ui.armor.textures.summary", materials = inventory.materials().len(), textures = textures.len())
+    let said = t!("ui-armor-textures-summary", materials = inventory.materials().len(), textures = textures.len())
         .into_owned();
 
     AnyView::new(view! { text(class = "wt-armor-textures__dim", attr:data-testid = "armor-textures-summary") {{said}} })
@@ -535,7 +535,7 @@ fn read_inventory(workspace: ArmorWorkspace, armor: &Arc<LoadedShipArmor>) {
         }
         let armor = Arc::clone(&armor);
         spawn_local(async move {
-            let job = services.jobs.start(Job { name: t!("ui.armor.textures.reading").into_owned(), progress: None });
+            let job = services.jobs.start(Job { name: t!("ui-armor-textures-reading").into_owned(), progress: None });
             long_job(move || {
                 armor.textures(&models.library);
             })
@@ -612,7 +612,7 @@ fn shared(items: &Rc<dyn Fn() -> Vec<AnyView>>) -> impl Fn() -> Vec<AnyView> + '
 fn copy_item(shell: Shell, test_id: &'static str, paths: Vec<String>) -> AnyView {
     AnyView::new(view! {
         MenuItem(attr:data-testid = test_id, on_select = UnsyncCallback::new(move |()| copy_paths(shell, &paths))) {
-            {t!("ui.armor.textures.copy_path").into_owned()}
+            {t!("ui-armor-textures-copy_path").into_owned()}
         }
     })
 }
@@ -620,8 +620,8 @@ fn copy_item(shell: Shell, test_id: &'static str, paths: Vec<String>) -> AnyView
 /// Copies where each of `files` goes to replace the packaged one.
 fn override_item(shell: Shell, services: Services, files: Vec<String>) -> AnyView {
     let label = match files.len() {
-        1 => t!("ui.armor.textures.copy_override").into_owned(),
-        count => t!("ui.armor.textures.copy_overrides", count = count).into_owned(),
+        1 => t!("ui-armor-textures-copy_override").into_owned(),
+        count => t!("ui-armor-textures-copy_overrides", count = count).into_owned(),
     };
     let copy = move |()| match override_paths(services, &files) {
         Ok(paths) => copy_paths(shell, &paths),
@@ -640,7 +640,7 @@ fn unpacker_item(shell: Shell, path: String) -> AnyView {
 
     AnyView::new(view! {
         MenuItem(attr:data-testid = "armor-textures-show-in-unpacker", on_select = UnsyncCallback::new(reveal)) {
-            {t!("ui.armor.textures.show_in_unpacker").into_owned()}
+            {t!("ui-armor-textures-show_in_unpacker").into_owned()}
         }
     })
 }
@@ -649,7 +649,7 @@ fn extract_item(shell: Shell, workspace: ArmorWorkspace, files: Vec<String>) -> 
     let extract = move |()| {
         let Some(bundle) = workspace.library.ready_untracked() else { return };
         let vfs = bundle.assets.vfs().clone();
-        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui.armor.textures.extract_title"));
+        let asked = wows_toolkit_services::dialog::pick_folder(&t!("ui-armor-textures-extract_title"));
         let files = files.clone();
         let services = workspace.services;
         spawn_local(async move {
@@ -657,7 +657,7 @@ fn extract_item(shell: Shell, workspace: ArmorWorkspace, files: Vec<String>) -> 
             let placements = match placements(&files, &folder) {
                 Ok(placements) => placements,
                 Err(err) => {
-                    shell.toasts().warn(t!("ui.armor.textures.extract_failed", reason = err.to_string()));
+                    shell.toasts().warn(t!("ui-armor-textures-extract_failed", reason = err.to_string()));
                     return;
                 }
             };
@@ -672,7 +672,7 @@ fn extract_item(shell: Shell, workspace: ArmorWorkspace, files: Vec<String>) -> 
 
     AnyView::new(view! {
         MenuItem(attr:data-testid = "armor-textures-extract", on_select = UnsyncCallback::new(extract)) {
-            {t!("ui.armor.textures.extract").into_owned()}
+            {t!("ui-armor-textures-extract").into_owned()}
         }
     })
 }
@@ -684,20 +684,20 @@ fn confirm_replace(extraction: Extraction, existing: usize) {
     let folder = extraction.folder.display().to_string();
     shell.dialogs.open(move |handle| {
         let open = RwSignal::new_local(true);
-        let description = t!("ui.armor.textures.replace_description", count = existing, folder = folder).into_owned();
+        let description = t!("ui-armor-textures-replace_description", count = existing, folder = folder).into_owned();
         let description = StoredValue::new_local(description);
         let extraction = StoredValue::new_local(extraction.clone());
         AnyView::new(view! {
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "armor-textures-replace-dialog") {
                     AlertDialogHeader {
-                        AlertDialogTitle {{t!("ui.armor.textures.replace_title").into_owned()}}
+                        AlertDialogTitle {{t!("ui-armor-textures-replace_title").into_owned()}}
                         AlertDialogDescription {{description.get_value()}}
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(attr:data-testid = "armor-textures-replace-confirm", on:click = move |_| extraction.get_value().run()) {
-                            {t!("ui.armor.textures.replace").into_owned()}
+                            {t!("ui-armor-textures-replace").into_owned()}
                         }
                     }
                 }
@@ -721,16 +721,16 @@ impl Extraction {
         let Self { shell, services, vfs, folder, placements } = self;
         spawn_local(async move {
             let job =
-                services.jobs.start(Job { name: t!("ui.armor.textures.extracting").into_owned(), progress: None });
+                services.jobs.start(Job { name: t!("ui-armor-textures-extracting").into_owned(), progress: None });
             let written = long_job(move || write_placements(&vfs, &placements)).await;
             drop(job);
             match written {
                 Ok(count) => {
                     let folder = folder.display().to_string();
-                    shell.toasts().ok(t!("ui.armor.textures.extracted", count = count, folder = folder));
+                    shell.toasts().ok(t!("ui-armor-textures-extracted", count = count, folder = folder));
                 }
                 Err(err) => {
-                    shell.toasts().warn(t!("ui.armor.textures.extract_failed", reason = err.to_string()));
+                    shell.toasts().warn(t!("ui-armor-textures-extract_failed", reason = err.to_string()));
                 }
             }
         });
@@ -739,8 +739,8 @@ impl Extraction {
 
 fn copy_paths(shell: Shell, paths: &[String]) {
     let said = match paths {
-        [path] => t!("ui.models.path_copied", path = path).into_owned(),
-        paths => t!("ui.armor.textures.paths_copied", count = paths.len()).into_owned(),
+        [path] => t!("ui-models-path_copied", path = path).into_owned(),
+        paths => t!("ui-armor-textures-paths_copied", count = paths.len()).into_owned(),
     };
     shell.copy_text(paths.join("\n"));
     shell.toasts().ok(said);
@@ -752,9 +752,9 @@ fn override_paths(services: Services, files: &[String]) -> Result<Vec<String>, S
         .settings
         .read_untracked(|settings| settings.wows_dir.clone())
         .filter(|dir| !dir.is_empty())
-        .ok_or_else(|| t!("ui.armor.load_settings").into_owned())?;
+        .ok_or_else(|| t!("ui-armor-load_settings").into_owned())?;
     let GameDataState::Ready(loaded) = services.game_data.state_untracked() else {
-        return Err(t!("ui.armor.textures.no_build").into_owned());
+        return Err(t!("ui-armor-textures-no_build").into_owned());
     };
     let folder = mod_folder(Path::new(&wows_dir), loaded.build()).map_err(|err| err.to_string())?;
 

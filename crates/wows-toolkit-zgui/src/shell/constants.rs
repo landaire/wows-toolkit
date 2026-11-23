@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rust_i18n::t;
 use wows_toolkit_services::constants::BUILDS_PER_SWEEP;
+use wt_translations::t;
 use zgui::task::blocking;
 
 use crate::services::Job;
@@ -87,9 +87,9 @@ async fn follow(shell: Shell, worker: &ConstantsWorker, wanted: Wanted, install:
         Step::Generating => {
             tracing::info!(build, "constants: generating from the installed client");
             if let Some(toasts) = shell.try_toasts() {
-                toasts.info(t!("ui.replay.constants_generating", version = label).into_owned());
+                toasts.info(t!("ui-replay-constants_generating", version = label).into_owned());
             }
-            let name = t!("ui.app.status_constants_generating", version = label).into_owned();
+            let name = t!("ui-app-status_constants_generating", version = label).into_owned();
             generating = Some(services.jobs.start(Job { name, progress: None }));
         }
     })
@@ -106,7 +106,7 @@ fn say(shell: Shell, label: &str, outcome: &Outcome, generated: bool) {
     match outcome {
         Outcome::Current { provenance: Provenance::Generated { took }, .. } => {
             if let Some(toasts) = shell.try_toasts() {
-                toasts.ok(t!("ui.replay.constants_generated", version = label, seconds = seconds(*took)).into_owned());
+                toasts.ok(t!("ui-replay-constants_generated", version = label, seconds = seconds(*took)).into_owned());
             }
         }
         // The caller says what was fetched, all builds at once.
@@ -129,14 +129,14 @@ fn say(shell: Shell, label: &str, outcome: &Outcome, generated: bool) {
 fn release_label(wanted: &Wanted) -> String {
     match &wanted.release {
         Some(release) => release.clone(),
-        None => t!("ui.replay.constants_build_label", build = wanted.build).into_owned(),
+        None => t!("ui-replay-constants_build_label", build = wanted.build).into_owned(),
     }
 }
 
 /// Why a build's constants could not be updated, and what decoding uses instead.
 fn failure_said(label: &str, missed: &Missed, fallback: Fallback) -> String {
     t!(
-        "ui.replay.constants_generation_failed",
+        "ui-replay-constants_generation_failed",
         version = label,
         reason = missed.to_string(),
         fallback = fallback_said(fallback)
@@ -146,9 +146,9 @@ fn failure_said(label: &str, missed: &Missed, fallback: Fallback) -> String {
 
 fn fallback_said(fallback: Fallback) -> String {
     match fallback {
-        Fallback::Kept => t!("ui.replay.constants_fallback_kept"),
-        Fallback::Published { build } => t!("ui.replay.constants_fallback_published", build = build),
-        Fallback::Embedded => t!("ui.replay.constants_fallback_embedded"),
+        Fallback::Kept => t!("ui-replay-constants_fallback_kept"),
+        Fallback::Published { build } => t!("ui-replay-constants_fallback_published", build = build),
+        Fallback::Embedded => t!("ui-replay-constants_fallback_embedded"),
     }
     .into_owned()
 }

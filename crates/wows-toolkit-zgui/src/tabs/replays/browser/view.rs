@@ -26,7 +26,6 @@ use landaire_ui::TreeMenu;
 use landaire_ui::TreeProps;
 use landaire_ui::TreeRow;
 use landaire_ui::TreeStripes;
-use rust_i18n::t;
 use wows_toolkit_config::ListingRowElement;
 use wows_toolkit_config::ListingRowElements;
 use wows_toolkit_config::index::rows::MatchOutcome;
@@ -43,6 +42,7 @@ use wows_toolkit_viewmodel::personal_rating::chip_hue;
 use wows_toolkit_viewmodel::personal_rating::chip_text;
 use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::stats::session::SessionScope;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -307,14 +307,14 @@ pub fn ListingView(listing: Listing, events: BrowserEvents) -> impl IntoView {
         }),
         Shown::Empty(dir) => AnyView::new(view! {
             column(class = "wt-listing__state", attr:data-testid = "replay-listing-empty") {
-                text {{t!("ui.replay.no_replays_in", folder = shown_path(&dir)).into_owned()}}
-                text(class = "wt-listing__state-hint") {{t!("ui.replay.drop_folder_hint").into_owned()}}
+                text {{t!("ui-replay-no_replays_in", folder = shown_path(&dir)).into_owned()}}
+                text(class = "wt-listing__state-hint") {{t!("ui-replay-drop_folder_hint").into_owned()}}
             }
         }),
         Shown::GameData(version) => {
             let said = match version {
-                Some(version) => t!("ui.replay.loading_game_data_version", version = version).into_owned(),
-                None => t!("ui.replay.loading_game_data").into_owned(),
+                Some(version) => t!("ui-replay-loading_game_data_version", version = version).into_owned(),
+                None => t!("ui-replay-loading_game_data").into_owned(),
             };
             AnyView::new(view! {
                 Loading(label = said, placement = LoadingPlacement::Top, attr:data-testid = "replay-listing-loading")
@@ -369,9 +369,9 @@ fn follow_thumbnails(listing: Listing, thumbnails: Thumbnails, services: Service
 fn ScanLoading(listing: Listing) -> impl IntoView {
     let caption = move || match listing.progress.get() {
         Some(progress) if progress.total > 0 => {
-            t!("ui.replay.scanning_count", done = progress.done, total = progress.total).into_owned()
+            t!("ui-replay-scanning_count", done = progress.done, total = progress.total).into_owned()
         }
-        _ => t!("ui.replay.scanning").into_owned(),
+        _ => t!("ui-replay-scanning").into_owned(),
     };
     let fraction = move || {
         let progress = listing.progress.get()?;
@@ -443,7 +443,7 @@ fn ListingRows(
             sticky_branches = true,
             on_activate = on_activate,
             context_menu = menu,
-            label = t!("ui.replay.listing_caption").into_owned(),
+            label = t!("ui-replay-listing_caption").into_owned(),
             attr:data-testid = "replay-listing-rows"
         )
     }
@@ -511,7 +511,7 @@ fn row_view(
         NodeKey::Unreadable(path) => {
             let content = move || {
                 let unreadable = listing.tree.with(|tree| tree.unreadable(&path).cloned())?;
-                let said = t!("ui.replay_folders.unreadable_replay", error = unreadable.error).into_owned();
+                let said = t!("ui-replay_folders-unreadable_replay", error = unreadable.error).into_owned();
                 Some(view! {
                     row(class = "wt-row", attr:data-testid = format!("replay-row-unreadable-{}", path.display())) {
                         AppIcon(glyph = Glyph::TriangleAlert, class = "wt-row__unreadable-icon")
@@ -570,7 +570,7 @@ fn leaf_view(
         view! {
             AppIcon(
                 glyph = Glyph::Twitch,
-                label = t!("ui.replay.hover.twitch").into_owned(),
+                label = t!("ui-replay-hover-twitch").into_owned(),
                 class = "wt-row__twitch",
                 attr:data-testid = "replay-row-twitch"
             )
@@ -604,16 +604,16 @@ fn leaf_view(
             }
         })
     };
-    let pr_name = t!("ui.replay.column.personal_rating");
+    let pr_name = t!("ui-replay-column-personal_rating");
     let pr = match leaf.personal_rating.filter(|_| elements.personal_rating) {
         Some(BattleRating::Rated(rating)) => Some(rating_chip("pr", &pr_name, rating.pr)),
         Some(BattleRating::Unrated) => {
-            Some(unrated_chip("pr", UNRATED_LEAF_ID, t!("ui.personal_rating.unrated_hover").into_owned()))
+            Some(unrated_chip("pr", UNRATED_LEAF_ID, t!("ui-personal_rating-unrated_hover").into_owned()))
         }
         None => None,
     };
     let mc = match leaf.match_contribution.filter(|_| elements.match_contribution) {
-        Some(LeafMc::Rated(value)) => Some(rating_chip("mc", &t!("ui.replay.column.match_contribution"), value)),
+        Some(LeafMc::Rated(value)) => Some(rating_chip("mc", &t!("ui-replay-column-match_contribution"), value)),
         Some(LeafMc::Unrated) => {
             Some(unrated_chip("mc", UNRATED_MC_LEAF_ID, MatchContributionWithheld::UnratedBattle.explanation()))
         }
@@ -670,7 +670,7 @@ fn leaf_view(
                     {division.map(IntoView::into_view)}
                     {twitch.map(IntoView::into_view)}
                     Show(when = move || tagged.get()) {
-                        text(class = "wt-row__new", attr:data-testid = "replay-row-new") {{t!("ui.replay.new_tag").into_owned()}}
+                        text(class = "wt-row__new", attr:data-testid = "replay-row-new") {{t!("ui-replay-new_tag").into_owned()}}
                     }
                 }
                 {stats.map(IntoView::into_view)}
@@ -768,10 +768,10 @@ fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey
                 let (listed, revealed) = (listed.clone(), revealed.clone());
                 view! {
                     MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
-                        {t!("ui.replay.context.copy_path").into_owned()}
+                        {t!("ui-replay-context-copy_path").into_owned()}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| wows_toolkit_services::child_process::reveal_in_file_manager(&revealed))) {
-                        {t!("ui.replay.context.show_in_explorer").into_owned()}
+                        {t!("ui-replay-context-show_in_explorer").into_owned()}
                     }
                 }
             }))
@@ -799,8 +799,8 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
             let (events, paths) = (events.clone(), paths.clone());
             confirm(
                 shell,
-                t!("ui.replay.context.set_session_stats_one").into_owned(),
-                t!("confirm.set_as_session_stats").into_owned(),
+                t!("ui-replay-context-set_session_stats_one").into_owned(),
+                t!("confirm-set_as_session_stats").into_owned(),
                 move || events.send(ReplayBrowserEvent::SessionStats { paths: paths.clone(), replace: true }),
             );
         })
@@ -810,23 +810,23 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
 
     view! {
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToVideo(paths.clone()))) {
-            {label("ui.replay.context.render_to_video", "ui.replay.context.render_to_video_many")}
+            {label("ui-replay-context-render_to_video", "ui-replay-context-render_to_video_many")}
         }
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToClipboard(paths.clone()))) {
-            {label("ui.replay.context.render_to_clipboard", "ui.replay.context.render_to_clipboard_many")}
+            {label("ui-replay-context-render_to_clipboard", "ui-replay-context-render_to_clipboard_many")}
         }
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
-            {t!("ui.replay.context.copy_replays", count = count).into_owned()}
+            {t!("ui-replay-context-copy_replays", count = count).into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
-            {t!("ui.replay.context.copy_paths", count = count).into_owned()}
+            {t!("ui-replay-context-copy_paths", count = count).into_owned()}
         }
         MenuItem(disabled = session_off, on_select = set_session) {
-            {label("ui.replay.context.set_session_stats_one", "ui.replay.context.set_session_stats_many")}
+            {label("ui-replay-context-set_session_stats_one", "ui-replay-context-set_session_stats_many")}
         }
         MenuItem(disabled = session_off, on_select = send(ReplayBrowserEvent::SessionStats { paths, replace: false })) {
-            {label("ui.replay.context.add_session_stats_one", "ui.replay.context.add_session_stats_many")}
+            {label("ui-replay-context-add_session_stats_one", "ui-replay-context-add_session_stats_many")}
         }
         {unavailable.map(session_unavailable_line)}
         MenuSeparator()
@@ -863,33 +863,33 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         let (copied, listed) = (batch.clone(), batch.clone());
         view! {
             MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
-                {t!("ui.replay.context.copy_replays", count = many).into_owned()}
+                {t!("ui-replay-context-copy_replays", count = many).into_owned()}
             }
             MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
-                {t!("ui.replay.context.copy_paths", count = many).into_owned()}
+                {t!("ui-replay-context-copy_paths", count = many).into_owned()}
             }
-            {item(t!("ui.replay.context.render_to_video_many", count = many).into_owned(), ReplayBrowserEvent::RenderManyToVideo(batch.clone()))}
-            {item(t!("ui.replay.context.render_to_clipboard_many", count = many).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(batch.clone()))}
+            {item(t!("ui-replay-context-render_to_video_many", count = many).into_owned(), ReplayBrowserEvent::RenderManyToVideo(batch.clone()))}
+            {item(t!("ui-replay-context-render_to_clipboard_many", count = many).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(batch.clone()))}
             MenuSeparator()
         }
     });
     // A batch is rendered from the items above; a lone row renders itself.
     let single_items = batch.is_empty().then(|| {
         view! {
-            {item(t!("ui.replay.context.render_to_video").into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
-            {item(t!("ui.replay.context.render_to_clipboard").into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
+            {item(t!("ui-replay-context-render_to_video").into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
+            {item(t!("ui-replay-context-render_to_clipboard").into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
         }
     });
 
     let (set_label, add_label) = if count == 1 {
         (
-            t!("ui.replay.context.set_session_stats_one").into_owned(),
-            t!("ui.replay.context.add_session_stats_one").into_owned(),
+            t!("ui-replay-context-set_session_stats_one").into_owned(),
+            t!("ui-replay-context-add_session_stats_one").into_owned(),
         )
     } else {
         (
-            t!("ui.replay.context.set_session_stats_many", count = count).into_owned(),
-            t!("ui.replay.context.add_session_stats_many", count = count).into_owned(),
+            t!("ui-replay-context-set_session_stats_many", count = count).into_owned(),
+            t!("ui-replay-context-add_session_stats_many", count = count).into_owned(),
         )
     };
     let set_session = {
@@ -900,8 +900,8 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
             let paths = paths.clone();
             confirm(
                 shell,
-                t!("ui.replay.context.set_session_stats_one").into_owned(),
-                t!("confirm.set_as_session_stats").into_owned(),
+                t!("ui-replay-context-set_session_stats_one").into_owned(),
+                t!("confirm-set_as_session_stats").into_owned(),
                 move || events.send(ReplayBrowserEvent::SessionStats { paths: paths.clone(), replace: true }),
             );
         })
@@ -920,11 +920,11 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
                 match wows_toolkit_viewmodel::controls::read_scheme(newest.vfs()) {
                     Some(groups) => controls::open(shell, groups),
                     None => {
-                        toasts.warn(t!("ui.replay.controls.unavailable").into_owned());
+                        toasts.warn(t!("ui-replay-controls-unavailable").into_owned());
                     }
                 }
             })) {
-                {t!("ui.replay.context.show_replay_controls").into_owned()}
+                {t!("ui-replay-context-show_replay_controls").into_owned()}
             }
         }
     });
@@ -935,12 +935,12 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
                 let (dir, replay) = (PathBuf::from(&dir), replay.clone());
                 confirm(
                     shell,
-                    t!("ui.replay.context.open_in_game").into_owned(),
-                    t!("confirm.open_in_game").into_owned(),
+                    t!("ui-replay-context-open_in_game").into_owned(),
+                    t!("confirm-open_in_game").into_owned(),
                     move || files::open_replay_in_game(shell, &dir, &replay),
                 );
             })) {
-                {t!("ui.replay.context.open_in_game").into_owned()}
+                {t!("ui-replay-context-open_in_game").into_owned()}
             }
         }
     });
@@ -950,9 +950,9 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
 
     AnyView::new(view! {
         {batch_items.map(IntoView::into_view)}
-        {item(t!("ui.collab.open").into_owned(), ReplayBrowserEvent::Open(path.clone()))}
-        {item(t!("ui.replay.context.open_in_new_tab").into_owned(), ReplayBrowserEvent::OpenInNewTab(path.clone()))}
-        {item(t!("ui.replay.context.render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
+        {item(t!("ui-collab-open").into_owned(), ReplayBrowserEvent::Open(path.clone()))}
+        {item(t!("ui-replay-context-open_in_new_tab").into_owned(), ReplayBrowserEvent::OpenInNewTab(path.clone()))}
+        {item(t!("ui-replay-context-render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
         {single_items.map(IntoView::into_view)}
         MenuSeparator()
         MenuItem(disabled = session_off, on_select = set_session) {{set_label}}
@@ -961,13 +961,13 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         MenuItem(on_select = reindex) {{force_reindex_label(count)}}
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), std::slice::from_ref(&copied)))) {
-            {t!("ui.replay.context.copy_replay").into_owned()}
+            {t!("ui-replay-context-copy_replay").into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
-            {t!("ui.replay.context.copy_path").into_owned()}
+            {t!("ui-replay-context-copy_path").into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| wows_toolkit_services::child_process::reveal_in_file_manager(&revealed))) {
-            {t!("ui.replay.context.show_in_explorer").into_owned()}
+            {t!("ui-replay-context-show_in_explorer").into_owned()}
         }
         {controls.map(IntoView::into_view)}
         {in_game.map(IntoView::into_view)}
@@ -976,9 +976,9 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
 
 fn force_reindex_label(count: usize) -> String {
     if count == 1 {
-        t!("ui.reindex.context_one").into_owned()
+        t!("ui-reindex-context_one").into_owned()
     } else {
-        t!("ui.reindex.context_many", count = count).into_owned()
+        t!("ui-reindex-context_many", count = count).into_owned()
     }
 }
 
@@ -990,7 +990,7 @@ fn session_unavailable() -> Option<String> {
         return None;
     }
 
-    Some(t!("ui.stats.session_set_add_unavailable", time = opened_label(session.opened())).into_owned())
+    Some(t!("ui-stats-session_set_add_unavailable", time = opened_label(session.opened())).into_owned())
 }
 
 fn session_unavailable_line(reason: String) -> AnyView {
@@ -1014,8 +1014,8 @@ fn confirm(shell: Shell, title: String, description: String, then: impl Fn() + '
                         AlertDialogDescription {{description.get_value()}}
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.no").into_owned()}}
-                        AlertDialogAction(on:click = move |_| then.with_value(|then| then())) {{t!("ui.buttons.yes").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-no").into_owned()}}
+                        AlertDialogAction(on:click = move |_| then.with_value(|then| then())) {{t!("ui-buttons-yes").into_owned()}}
                     }
                 }
             }

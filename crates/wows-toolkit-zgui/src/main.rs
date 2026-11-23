@@ -77,11 +77,6 @@
 //! language.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// The path deliberately holds no locale files: `TranslationsBackend` supplies them, parsed at
-// startup. Pointed at the real catalogs, `i18n!()` needs a stack frame larger than a thread gets by
-// default.
-rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
-
 mod app_icon;
 mod cli;
 mod desktop;
@@ -244,7 +239,7 @@ mod translation_keys {
     use std::path::Path;
     use std::path::PathBuf;
 
-    /// The literal keys of every `t!` call under `src`. A key is dotted and has no spaces, which is
+    /// The literal keys of every `t!` call under `src`. A key is hyphenated and has no spaces, which is
     /// how a match inside a comment is told from a real one.
     fn keys_in_source(root: &Path) -> Vec<String> {
         let mut keys = Vec::new();
@@ -274,7 +269,7 @@ mod translation_keys {
                     let Some(end) = source[from..].find('"') else { break };
                     let key = &source[from..from + end];
                     from += end;
-                    if key.contains('.') && !key.contains(' ') {
+                    if key.contains('-') && !key.contains(' ') {
                         keys.push(key.to_owned());
                     }
                 }
@@ -292,7 +287,7 @@ mod translation_keys {
         keys.sort();
         keys.dedup();
         for key in keys {
-            let rendered = rust_i18n::t!(&key).into_owned();
+            let rendered = wt_translations::t!(&key).into_owned();
             assert_ne!(rendered, key, "no catalog entry for {key}");
             assert!(!rendered.trim().is_empty(), "empty catalog entry for {key}");
         }

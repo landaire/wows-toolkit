@@ -10,28 +10,28 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use rust_i18n::t;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::ExclusionReason;
 use wows_replay_insights::fire_chance::analysis::FormulaOp;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
 use wows_replay_insights::fire_chance::analysis::UnattributedFireReason;
 use wt_translations::keys;
+use wt_translations::t;
 
 /// "N fires", singular at one.
 pub fn fires_text(fires: u32) -> Cow<'static, str> {
     if fires == 1 {
-        return t!("ui.replay.sections.fire_chance_fires_one");
+        return t!("ui-replay-sections-fire_chance_fires_one");
     }
-    t!("ui.replay.sections.fire_chance_fires", fires = fires)
+    t!("ui-replay-sections-fire_chance_fires", fires = fires)
 }
 
 /// "N eligible hits", singular at one.
 pub fn eligible_hits_text(hits: u32) -> Cow<'static, str> {
     if hits == 1 {
-        return t!("ui.replay.sections.fire_chance_eligible_hits_one");
+        return t!("ui-replay-sections-fire_chance_eligible_hits_one");
     }
-    t!("ui.replay.sections.fire_chance_eligible_hits", hits = hits)
+    t!("ui-replay-sections-fire_chance_eligible_hits", hits = hits)
 }
 
 /// "N fires / M eligible hits", the counts a rate stands on.
@@ -49,15 +49,15 @@ pub fn counts_text(fires: u32, hits: u32) -> String {
 pub fn ships_text(fire_chance: &EffectiveFireChance) -> Cow<'static, str> {
     let ships = fire_chance.ships_with_trials();
     if ships == 1 {
-        return t!("ui.replay.sections.fire_chance_ships_one");
+        return t!("ui-replay-sections-fire_chance_ships_one");
     }
-    t!("ui.replay.sections.fire_chance_ships", ships = ships)
+    t!("ui-replay-sections-fire_chance_ships", ships = ships)
 }
 
 /// The expected-fires note beside the observed count, when there is one.
 pub fn expected_fires_text(fire_chance: &EffectiveFireChance) -> Option<String> {
     let expected = fire_chance.expected_fires?;
-    Some(t!("ui.replay.sections.fire_chance_expected_fires", fires = format!("{expected:.1}")).into_owned())
+    Some(t!("ui-replay-sections-fire_chance_expected_fires", fires = format!("{expected:.1}")).into_owned())
 }
 
 /// Sample-count headline: fires and eligible hits summed over every target
@@ -71,7 +71,7 @@ pub fn expected_fires_text(fire_chance: &EffectiveFireChance) -> Option<String> 
 /// hits says so in words rather than showing a total nothing stands behind.
 pub fn headline_text(fire_chance: &EffectiveFireChance) -> String {
     if fire_chance.eligible_hits == 0 {
-        return t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned();
+        return t!("ui-replay-sections-fire_chance_no_eligible_hits").into_owned();
     }
     format!("{}   {}", counts_text(fire_chance.fires, fire_chance.eligible_hits), ships_text(fire_chance))
 }
@@ -119,8 +119,8 @@ pub fn no_target_ship_line(fire_chance: &EffectiveFireChance) -> Option<String> 
     }
     let label = count_label(
         hits,
-        "ui.replay.sections.fire_chance_no_target_ship",
-        "ui.replay.sections.fire_chance_no_target_ship_one",
+        "ui-replay-sections-fire_chance_no_target_ship",
+        "ui-replay-sections-fire_chance_no_target_ship_one",
     );
     Some(format!("{hits} {label}"))
 }
@@ -157,7 +157,7 @@ pub fn copy_text(
     localize_source: &dyn Fn(&str) -> String,
     localize_ship: &dyn Fn(&PerShipFireChance) -> String,
 ) -> String {
-    let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned()];
+    let mut lines = vec![t!("ui-replay-sections-fire_chance").into_owned()];
     lines.extend(headline_lines(fire_chance));
     lines.push(String::new());
     lines.push(breakdown_text(fire_chance, localize_source, localize_ship));
@@ -176,13 +176,13 @@ pub fn fire_chance_per_ship_line(
 ) -> String {
     let rate_text = match ship.rate() {
         Some(rate) => format!("{:.1}%  {}", rate * 100.0, counts_text(ship.fires, ship.eligible_hits)),
-        None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
+        None => t!("ui-replay-sections-fire_chance_no_eligible_hits").into_owned(),
     };
     match ship.expected_rate() {
         Some(expected) => format!(
             "{}   {rate_text}   {} {:.1}%",
             localize_ship(ship),
-            t!("ui.replay.sections.fire_chance_expected"),
+            t!("ui-replay-sections-fire_chance_expected"),
             expected * 100.0
         ),
         None => format!("{}   {rate_text}", localize_ship(ship)),
@@ -212,7 +212,7 @@ pub fn fire_chance_formula_lines(
             None => step.modifier.clone(),
         })
         .collect();
-    let base_label = t!("ui.replay.sections.fire_chance_formula_base").into_owned();
+    let base_label = t!("ui-replay-sections-fire_chance_formula_base").into_owned();
     // 2-char slot for the step lines' "x "/"+ " prefix, so the base line's
     // label starts in the same column as a step's name even though it carries
     // no operator symbol of its own.
@@ -224,7 +224,7 @@ pub fn fire_chance_formula_lines(
         .max()
         .unwrap_or(0);
 
-    let mut lines = vec![t!("ui.replay.sections.fire_chance_formula").into_owned()];
+    let mut lines = vec![t!("ui-replay-sections-fire_chance_formula").into_owned()];
     lines.push(format!("  {:prefix_width$}{base_label:<name_width$} {:.1}%", "", base * 100.0));
     for (step, name) in formula.iter().zip(&names) {
         let (symbol, value_text) = match step.op {
@@ -241,7 +241,7 @@ pub fn fire_chance_formula_lines(
         lines.push(format!(
             "  = {:.1}%   ({} {:.1}%)",
             raw * 100.0,
-            t!("ui.replay.sections.fire_chance_formula_clamped"),
+            t!("ui-replay-sections-fire_chance_formula_clamped"),
             clamped * 100.0
         ));
     } else {
@@ -346,11 +346,11 @@ pub fn fire_chance_tally_rows(tally: &FireChanceTally<'_>, heads: &[TallyRow]) -
         tally.he_hits_on_a_ship,
         count_label(
             tally.he_hits_on_a_ship,
-            "ui.replay.sections.fire_chance_he_hits",
-            "ui.replay.sections.fire_chance_he_hits_one",
+            "ui-replay-sections-fire_chance_he_hits",
+            "ui-replay-sections-fire_chance_he_hits_one",
         ),
     ));
-    rows.push(TallyRow::new(1, tally.eligible_hits, t!("ui.replay.sections.fire_chance_eligible")));
+    rows.push(TallyRow::new(1, tally.eligible_hits, t!("ui-replay-sections-fire_chance_eligible")));
 
     let mut excluded: Vec<(&ExclusionReason, &u32)> =
         tally.exclusions.iter().filter(|(_, count)| **count > 0).collect();
@@ -359,7 +359,7 @@ pub fn fire_chance_tally_rows(tally: &FireChanceTally<'_>, heads: &[TallyRow]) -
         excluded.into_iter().map(|(reason, count)| TallyRow::new(1, *count, t!(keys::exclusion_reason_key(*reason)))),
     );
     if tally.not_applicable > 0 {
-        rows.push(TallyRow::new(1, tally.not_applicable, t!("ui.replay.sections.fire_chance_not_applicable")));
+        rows.push(TallyRow::new(1, tally.not_applicable, t!("ui-replay-sections-fire_chance_not_applicable")));
     }
     rows
 }
@@ -372,8 +372,8 @@ pub fn fire_chance_battle_tally_rows(fire_chance: &EffectiveFireChance) -> Vec<T
         fire_chance.he_shells_fired,
         count_label(
             fire_chance.he_shells_fired,
-            "ui.replay.sections.fire_chance_shells_fired",
-            "ui.replay.sections.fire_chance_shells_fired_one",
+            "ui-replay-sections-fire_chance_shells_fired",
+            "ui-replay-sections-fire_chance_shells_fired_one",
         ),
     );
     fire_chance_tally_rows(&fire_chance.into(), std::slice::from_ref(&fired))
@@ -400,11 +400,11 @@ pub fn fire_chance_ribbon_rows(fire_chance: &EffectiveFireChance) -> Vec<TallyRo
             fire_chance.set_fire_ribbons,
             count_label(
                 fire_chance.set_fire_ribbons,
-                "ui.replay.sections.fire_chance_ribbons",
-                "ui.replay.sections.fire_chance_ribbons_one",
+                "ui-replay-sections-fire_chance_ribbons",
+                "ui-replay-sections-fire_chance_ribbons_one",
             ),
         ),
-        TallyRow::new(1, fire_chance.fires, t!("ui.replay.sections.fire_chance_ribbons_credited")),
+        TallyRow::new(1, fire_chance.fires, t!("ui-replay-sections-fire_chance_ribbons_credited")),
     ];
     if fire_chance.unattributed_fires == 0 {
         return rows;
@@ -412,7 +412,7 @@ pub fn fire_chance_ribbon_rows(fire_chance: &EffectiveFireChance) -> Vec<TallyRo
     rows.push(TallyRow::new(
         1,
         fire_chance.unattributed_fires,
-        t!("ui.replay.sections.fire_chance_ribbons_uncredited"),
+        t!("ui-replay-sections-fire_chance_ribbons_uncredited"),
     ));
     let mut reasons: Vec<(&UnattributedFireReason, &u32)> =
         fire_chance.unattributed_reasons.iter().filter(|(_, count)| **count > 0).collect();
@@ -451,7 +451,7 @@ pub fn fire_chance_per_ship_lines(
     if fire_chance.per_ship.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![t!("ui.replay.sections.fire_chance_per_ship").into_owned()];
+    let mut lines = vec![t!("ui-replay-sections-fire_chance_per_ship").into_owned()];
     for ship in sorted_per_ship(fire_chance) {
         lines.push(format!("  {}", fire_chance_per_ship_line(ship, localize_ship)));
         lines.extend(fire_chance_rows_to_lines(&fire_chance_tally_rows(&ship.into(), &[]), "    "));
@@ -821,8 +821,8 @@ mod breakdown_tests {
     }
 
     /// The key match is exhaustive, so a stale arm is a compile error, but a key
-    /// naming a string the toml does not carry is not. `rust-i18n` returns the
-    /// key itself when it cannot resolve one, which is what this catches.
+    /// naming a string the catalog does not carry is not. `t!` returns the
+    /// id itself when it cannot resolve one, which is what this catches.
     #[test]
     fn every_breakdown_key_resolves_to_a_string() {
         const EXCLUSIONS: [ExclusionReason; 12] = [
@@ -849,19 +849,19 @@ mod breakdown_tests {
             UnattributedFireReason::NoHitInWindow,
         ];
         const LABELS: [&str; 13] = [
-            "ui.replay.sections.fire_chance_breakdown",
-            "ui.replay.sections.fire_chance_shells_fired",
-            "ui.replay.sections.fire_chance_shells_fired_one",
-            "ui.replay.sections.fire_chance_he_hits",
-            "ui.replay.sections.fire_chance_he_hits_one",
-            "ui.replay.sections.fire_chance_no_target_ship",
-            "ui.replay.sections.fire_chance_no_target_ship_one",
-            "ui.replay.sections.fire_chance_eligible",
-            "ui.replay.sections.fire_chance_not_applicable",
-            "ui.replay.sections.fire_chance_ribbons",
-            "ui.replay.sections.fire_chance_ribbons_one",
-            "ui.replay.sections.fire_chance_ribbons_credited",
-            "ui.replay.sections.fire_chance_ribbons_uncredited",
+            "ui-replay-sections-fire_chance_breakdown",
+            "ui-replay-sections-fire_chance_shells_fired",
+            "ui-replay-sections-fire_chance_shells_fired_one",
+            "ui-replay-sections-fire_chance_he_hits",
+            "ui-replay-sections-fire_chance_he_hits_one",
+            "ui-replay-sections-fire_chance_no_target_ship",
+            "ui-replay-sections-fire_chance_no_target_ship_one",
+            "ui-replay-sections-fire_chance_eligible",
+            "ui-replay-sections-fire_chance_not_applicable",
+            "ui-replay-sections-fire_chance_ribbons",
+            "ui-replay-sections-fire_chance_ribbons_one",
+            "ui-replay-sections-fire_chance_ribbons_credited",
+            "ui-replay-sections-fire_chance_ribbons_uncredited",
         ];
 
         let mut keys: Vec<&'static str> = EXCLUSIONS.iter().map(|r| keys::exclusion_reason_key(*r)).collect();

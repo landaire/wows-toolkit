@@ -9,7 +9,6 @@ use std::time::Duration;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
-use rust_i18n::t;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_replays::types::GameClock;
@@ -28,6 +27,7 @@ use wt_collab_client::drawing::Stroke;
 use wt_collab_client::drawing::Tool;
 use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::types::Annotation;
+use wt_translations::t;
 use zgui::component;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
@@ -543,7 +543,7 @@ fn the_primary_modifier_shows_the_shortcut_sheet() {
     let bottom = |rect: &Rect<DevicePx, Device>| rect.origin.y.0 + rect.size.height.0;
     assert!(right(&viewport) - right(&sheet) < 16.0, "in the right-hand corner: {sheet:?} in {viewport:?}");
     assert!(bottom(&viewport) - bottom(&sheet) < 16.0, "at the bottom: {sheet:?} in {viewport:?}");
-    assert!(window.by_label(&t!("ui.renderer.annotations.tool_measurement")).is_some(), "the tools are listed");
+    assert!(window.by_label(&t!("ui-renderer-annotations-tool_measurement")).is_some(), "the tools are listed");
 
     window.press_key(NamedKey::Escape, Modifiers::NONE);
     settle(&mut window);
@@ -633,8 +633,8 @@ fn a_picked_ship_gets_a_handle_and_a_chooser() {
 
     click(&mut window, "replay-renderer-tools-toggle");
     assert!(window.by_test_id("replay-renderer-ship-chooser").is_some(), "the chooser is up");
-    assert!(window.by_label(&t!("ui.renderer.annotations.no_ship")).is_some(), "saying no ship is chosen yet");
-    assert!(window.by_label(&t!("ui.renderer.annotations.ship_hint")).is_some(), "with a search to find one by");
+    assert!(window.by_label(&t!("ui-renderer-annotations-no_ship")).is_some(), "saying no ship is chosen yet");
+    assert!(window.by_label(&t!("ui-renderer-annotations-ship_hint")).is_some(), "with a search to find one by");
 
     let search = window.by_test_id("replay-renderer-ship-search").expect("the search is drawn");
     let typed = |window: &mut HeadlessWindow| window.a11y(search).and_then(|state| state.value).unwrap_or_default();
@@ -765,7 +765,7 @@ fn locked_annotations_refuse_the_tools() {
     let toggle = window.by_test_id("replay-renderer-tools-toggle").expect("the tools control is drawn");
     let shown = window.a11y(toggle).expect("the control is described");
     assert!(shown.disabled, "refused while locked");
-    assert_eq!(shown.label, Some(t!("ui.renderer.annotations.locked").into_owned()), "and says why");
+    assert_eq!(shown.label, Some(t!("ui-renderer-annotations-locked").into_owned()), "and says why");
 
     window.drag_from(window_point(session, (200.0, 200.0)), window_point(session, (320.0, 260.0)), 4);
     settle(&mut window);

@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use landaire_ui::LoadingLineProps;
 use rootcause::Report;
-use rust_i18n::t;
 use wows_toolkit_armor::assets::ModelAssets;
 use wows_toolkit_armor::load_model::ModelLoadRequest;
 use wows_toolkit_armor::load_model::building_has_armor;
@@ -44,6 +43,7 @@ use wowsunpack::export::size_estimate::SchemeLadders;
 use wowsunpack::export::size_estimate::SizeEstimate;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
@@ -336,8 +336,8 @@ impl ExportModel {
 
     fn title(&self) -> String {
         let heading = match &self.target {
-            ExportTarget::Ship { .. } => t!("ui.armor.export_model"),
-            ExportTarget::Model { .. } => t!("ui.model_view.export_title"),
+            ExportTarget::Ship { .. } => t!("ui-armor-export_model"),
+            ExportTarget::Model { .. } => t!("ui-model_view-export_title"),
         };
         format!("{heading} - {}", self.display_name)
     }
@@ -575,7 +575,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
             .collect();
         AnyView::new(view! {
             row(class = "wt-armor-export__row") {
-                text(class = "wt-armor-export__label") {{t!("ui.armor.export.hull").into_owned()}}
+                text(class = "wt-armor-export__label") {{t!("ui-armor-export-hull").into_owned()}}
                 row(class = "wt-armor-export__control") {
                     {buttons}
                 }
@@ -599,12 +599,12 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
         AnyView::new(view! {
             column {
                 row(class = "wt-armor-export__row") {
-                    text(class = "wt-armor-export__label") {{t!("ui.armor.export.lod").into_owned()}}
+                    text(class = "wt-armor-export__label") {{t!("ui-armor-export-lod").into_owned()}}
                     row(class = "wt-armor-export__control") {
                         {buttons}
                     }
                 }
-                text(class = "wt-armor-export__hint") {{t!("ui.armor.export.lod_tooltip").into_owned()}}
+                text(class = "wt-armor-export__hint") {{t!("ui-armor-export-lod_tooltip").into_owned()}}
             }
         })
     };
@@ -635,7 +635,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
         }
         AnyView::new(view! {
             row(class = "wt-armor-export__row") {
-                text(class = "wt-armor-export__label") {{t!("ui.armor.export.camos").into_owned()}}
+                text(class = "wt-armor-export__label") {{t!("ui-armor-export-camos").into_owned()}}
                 CamoList(dialog = dialog)
             }
         })
@@ -648,7 +648,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
         })?;
         Some(AnyView::new(view! {
             text(class = "wt-armor-export__error", attr:data-testid = "armor-export-failed") {
-                {t!("ui.armor.load_failed", error = why).into_owned()}
+                {t!("ui-armor-load_failed", error = why).into_owned()}
             }
         }))
     };
@@ -656,7 +656,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
     let size = move || match model.with(|model| model.size_line().0) {
         SizeLine::Silent => AnyView::new(()),
         SizeLine::Waiting => AnyView::new(view! {
-            LoadingLine(label = t!("ui.armor.export.loading_details").into_owned(), attr:data-testid = "armor-export-size-waiting")
+            LoadingLine(label = t!("ui-armor-export-loading_details").into_owned(), attr:data-testid = "armor-export-size-waiting")
         }),
         SizeLine::Known(estimate) => {
             let total = humansize::format_size(estimate.total(), humansize::BINARY);
@@ -664,9 +664,9 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
             let textures = humansize::format_size(estimate.texture_bytes, humansize::BINARY);
             AnyView::new(view! {
                 column(attr:data-testid = "armor-export-size") {
-                    text(class = "wt-armor-export__text") {{t!("ui.armor.export.size_estimate", size = total).into_owned()}}
+                    text(class = "wt-armor-export__text") {{t!("ui-armor-export-size_estimate", size = total).into_owned()}}
                     text(class = "wt-armor-export__dim") {
-                        {t!("ui.armor.export.size_breakdown", geometry = geometry, textures = textures).into_owned()}
+                        {t!("ui-armor-export-size_breakdown", geometry = geometry, textures = textures).into_owned()}
                     }
                 }
             })
@@ -676,14 +676,14 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
             let failed = StoredValue::new_local(failed);
             AnyView::new(view! {
                 row(class = "wt-armor-export__line") {
-                    text(class = "wt-armor-export__warn") {{t!("ui.armor.export.size_incomplete", count = count).into_owned()}}
+                    text(class = "wt-armor-export__warn") {{t!("ui-armor-export-size_incomplete", count = count).into_owned()}}
                     Button(
                         variant = ButtonVariant::Outline,
                         size = ButtonSize::Sm,
                         attr:data-testid = "armor-export-size-retry",
                         on:click = move |_| dialog.price_again(failed.get_value())
                     ) {
-                        {t!("ui.buttons.retry").into_owned()}
+                        {t!("ui-buttons-retry").into_owned()}
                     }
                 }
             })
@@ -700,7 +700,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
                 }
                 column(class = "wt-armor-export", attr:data-testid = "armor-export-dialog") {
                     row(class = "wt-armor-export__row") {
-                        text(class = "wt-armor-export__label") {{t!("ui.armor.export.contents").into_owned()}}
+                        text(class = "wt-armor-export__label") {{t!("ui-armor-export-contents").into_owned()}}
                         row(class = "wt-armor-export__control") {
                             {contents}
                         }
@@ -708,7 +708,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
                     {hulls}
                     {lods}
                     row(class = "wt-armor-export__row", attr:data-textured = move || textured().then(|| "true".to_owned())) {
-                        text(class = "wt-armor-export__label") {{t!("ui.armor.export.res").into_owned()}}
+                        text(class = "wt-armor-export__label") {{t!("ui-armor-export-res").into_owned()}}
                         row(class = "wt-armor-export__control") {
                             {resolutions}
                         }
@@ -717,7 +717,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
                     {failed}
                     {size}
                     // Where the models come from, beside a button that writes one to disk.
-                    text(class = "wt-armor-export__dim") {{t!("ui.armor.export_disclaimer").into_owned()}}
+                    text(class = "wt-armor-export__dim") {{t!("ui-armor-export_disclaimer").into_owned()}}
                 }
                 DialogFooter {
                     Button(
@@ -726,7 +726,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
                         attr:data-testid = "armor-export-cancel",
                         on:click = move |_| handle.close()
                     ) {
-                        {t!("ui.buttons.cancel").into_owned()}
+                        {t!("ui-buttons-cancel").into_owned()}
                     }
                     Button(
                         size = ButtonSize::Sm,
@@ -734,7 +734,7 @@ fn ExportDialogView(dialog: ExportDialog, handle: DialogHandle, shell: Shell) ->
                         attr:data-testid = "armor-export-confirm",
                         on:click = move |_| confirm(shell, dialog, handle)
                     ) {
-                        {t!("ui.armor.export_button").into_owned()}
+                        {t!("ui-armor-export_button").into_owned()}
                     }
                 }
             }
@@ -823,7 +823,7 @@ fn CamoList(dialog: ExportDialog) -> impl IntoView {
                     attr:data-testid = "armor-export-camo-none",
                     on:click = move |_| dialog.edit(|draft| draft.camos.clear())
                 ) {
-                    {t!("ui.armor.export.camo_select_none").into_owned()}
+                    {t!("ui-armor-export-camo_select_none").into_owned()}
                 }
                 Button(
                     variant = ButtonVariant::Outline,
@@ -832,7 +832,7 @@ fn CamoList(dialog: ExportDialog) -> impl IntoView {
                     attr:data-testid = "armor-export-camo-reset",
                     on:click = move |_| model.update(ExportModel::reset_camos)
                 ) {
-                    {t!("ui.armor.export.camo_reset").into_owned()}
+                    {t!("ui-armor-export-camo_reset").into_owned()}
                 }
             }
             // Not a control: nothing ticked is what it names.
@@ -841,7 +841,7 @@ fn CamoList(dialog: ExportDialog) -> impl IntoView {
                 class:wt-armor-export__strong = none_ticked,
                 attr:data-testid = "armor-export-camo-stock"
             ) {
-                {t!("ui.armor.camo_none").into_owned()}
+                {t!("ui-armor-camo_none").into_owned()}
             }
             {groups}
         }
@@ -904,7 +904,7 @@ pub fn write_glb(
         // file is written either way.
         let _job = (!shell.is_unmounted()).then(|| {
             services.jobs.start(Job {
-                name: t!("ui.armor.export.exporting", ship = display_name.as_str()).into_owned(),
+                name: t!("ui-armor-export-exporting", ship = display_name.as_str()).into_owned(),
                 progress: None,
             })
         });
@@ -926,7 +926,7 @@ pub fn refuse_while_exporting(shell: Shell) -> bool {
         return false;
     }
     if let Some(toasts) = shell.try_toasts() {
-        toasts.info(t!("ui.armor.export.already_running").into_owned());
+        toasts.info(t!("ui-armor-export-already_running").into_owned());
     }
 
     true
@@ -941,9 +941,9 @@ fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlb
             tracing::info!("armor viewer: exported {ship} to {}", path.display());
             let message = match size {
                 Some(bytes) => {
-                    t!("ui.armor.export.exported_with_size", ship = ship, size = byte_size(bytes)).into_owned()
+                    t!("ui-armor-export-exported_with_size", ship = ship, size = byte_size(bytes)).into_owned()
                 }
-                None => t!("ui.armor.export.exported", ship = ship).into_owned(),
+                None => t!("ui-armor-export-exported", ship = ship).into_owned(),
             };
             if let Some(toasts) = toasts {
                 toasts.ok(message);
@@ -952,7 +952,7 @@ fn report_export(shell: Shell, written: Result<(PathBuf, Option<u64>), ExportGlb
         Err(err) => {
             tracing::error!("armor viewer: failed to export {ship}: {err}");
             if let Some(toasts) = toasts {
-                toasts.failed(t!("ui.armor.export.export_failed", error = err.to_string()).into_owned());
+                toasts.failed(t!("ui-armor-export-export_failed", error = err.to_string()).into_owned());
             }
         }
     }
@@ -978,7 +978,7 @@ fn read_ship_meta(assets: &ShipAssets, param_index: &str, hull: Option<String>) 
     let vehicle = param
         .as_ref()
         .and_then(|param| param.vehicle().cloned())
-        .ok_or_else(|| t!("ui.armor.export.vehicle_not_found").into_owned())?;
+        .ok_or_else(|| t!("ui-armor-export-vehicle_not_found").into_owned())?;
     // No textures and no armor: this read is for the levels of detail and the camo list, and
     // reading either would cost far more than they do.
     let probe =
@@ -1051,9 +1051,9 @@ fn camo_groups(schemes: &[CamoSchemeInfo]) -> Vec<CamoGroup<'_>> {
     let mut groups = Vec::new();
     for (origin, heading) in [
         (CamoOrigin::ShipSpecific, None),
-        (CamoOrigin::Universal, Some("ui.armor.camo_group_universal")),
-        (CamoOrigin::Expendable, Some("ui.armor.camo_group_expendable")),
-        (CamoOrigin::LegacyScan, Some("ui.armor.camo_group_other")),
+        (CamoOrigin::Universal, Some("ui-armor-camo_group_universal")),
+        (CamoOrigin::Expendable, Some("ui-armor-camo_group_expendable")),
+        (CamoOrigin::LegacyScan, Some("ui-armor-camo_group_other")),
     ] {
         let mut group: Vec<&CamoSchemeInfo> = schemes.iter().filter(|scheme| scheme.origin == origin).collect();
         if group.is_empty() {

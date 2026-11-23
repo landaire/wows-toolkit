@@ -5,11 +5,11 @@ use landaire_ui::Rgb;
 use landaire_ui::SliderFieldProps;
 use landaire_ui::SliderLabelPlacement;
 use landaire_ui::SliderRange;
-use rust_i18n::t;
 use wows_toolkit_armor::upload::DisplaySettings;
 use wows_toolkit_armor::viewport::types::LightingSettings;
 use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Signal;
@@ -111,7 +111,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
     // The legend belongs to the workspace, not to this viewport, but the reader looks for it here.
     let legend = filtered_checkbox(
         "armor-display-legend".to_owned(),
-        t!("ui.armor.show_armor_thickness").into_owned(),
+        t!("ui-armor-show_armor_thickness").into_owned(),
         Signal::derive_local(move || workspace.legend.get().visible),
         false,
         filter,
@@ -126,7 +126,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
             setting_checkbox(
                 viewport,
                 "armor-display-plate-edges",
-                t!("ui.armor.plate_edges").into_owned(),
+                t!("ui-armor-plate_edges").into_owned(),
                 filter,
                 |d| d.show_plate_edges,
                 |d, on| d.show_plate_edges = on,
@@ -134,7 +134,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
             setting_checkbox(
                 viewport,
                 "armor-display-zero-mm",
-                t!("ui.armor.zero_mm_plates").into_owned(),
+                t!("ui-armor-zero_mm_plates").into_owned(),
                 filter,
                 |d| d.show_zero_mm,
                 |d, on| d.show_zero_mm = on,
@@ -143,7 +143,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
     });
     let opacity_rows = armor.then(|| {
         // A marker control with nothing to act on is left out.
-        let marker_label = t!("ui.armor.marker_opacity").into_owned();
+        let marker_label = t!("ui-armor-marker_opacity").into_owned();
         let marker = (filter.keeps(&marker_label) && cx.matching.is_none_or(|state| state.markers)).then(|| {
             let filter = filter.clone();
             AnyView::new(view! {
@@ -164,7 +164,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
         });
         [
             labeled_slider_row(
-                t!("ui.armor.armor_opacity").into_owned(),
+                t!("ui-armor-armor_opacity").into_owned(),
                 Signal::derive_local(move || {
                     viewport.read(|model| f64::from(model.display_settings.armor_opacity)).unwrap_or(0.0)
                 }),
@@ -188,13 +188,13 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
             setting_checkbox(
                 viewport,
                 "armor-display-waterline",
-                t!("ui.armor.waterline").into_owned(),
+                t!("ui-armor-waterline").into_owned(),
                 filter,
                 |d| d.show_waterline,
                 |d, on| d.show_waterline = on,
             ),
             labeled_slider_row(
-                t!("ui.armor.opacity").into_owned(),
+                t!("ui-armor-opacity").into_owned(),
                 Signal::derive_local(move || {
                     viewport.read(|model| f64::from(model.display_settings.waterline_opacity)).unwrap_or(0.0)
                 }),
@@ -217,7 +217,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
             setting_checkbox(
                 viewport,
                 "armor-display-grid",
-                t!("ui.armor.grid").into_owned(),
+                t!("ui-armor-grid").into_owned(),
                 filter,
                 |d| d.show_grid,
                 |d, on| d.show_grid = on,
@@ -225,7 +225,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
             setting_checkbox(
                 viewport,
                 "armor-display-length-marks",
-                t!("ui.armor.length_marks").into_owned(),
+                t!("ui-armor-length_marks").into_owned(),
                 filter,
                 |d| d.show_length_marks,
                 |d, on| d.show_length_marks = on,
@@ -233,7 +233,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
             setting_checkbox(
                 viewport,
                 "armor-display-ship-center",
-                t!("ui.armor.ship_center").into_owned(),
+                t!("ui-armor-ship_center").into_owned(),
                 filter,
                 |d| d.show_ship_center,
                 |d, on| d.show_ship_center = on,
@@ -244,7 +244,7 @@ fn model_rows(cx: &SectionCx, armor: bool, ship: bool, filter: &RailFilter) -> O
         // Heeling the hull over is what says whether a belt is still a belt at the angle the ship
         // is fighting at.
         .chain([labeled_slider_row(
-            t!("ui.armor.roll").into_owned(),
+            t!("ui-armor-roll").into_owned(),
             Signal::derive_local(move || f64::from(viewport.model_roll_deg())),
             const { SliderRange::new(-ROLL_LIMIT_DEG, ROLL_LIMIT_DEG, 0.5) },
             0.0,
@@ -285,7 +285,7 @@ fn camera_rings_group(
 
     let shown = filtered_checkbox(
         "armor-camera-rings".to_owned(),
-        t!("ui.armor.show_camera_rings").into_owned(),
+        t!("ui-armor-show_camera_rings").into_owned(),
         Signal::derive_local(move || viewport.camera_rings().shown),
         !has_modes,
         filter,
@@ -296,7 +296,7 @@ fn camera_rings_group(
             AnyView::new(view! {
                 column(class = "wt-armor-display__tight") {
                     {shown}
-                    text(class = "wt-armor-display__dim") {{t!("ui.armor.no_ship_loaded").into_owned()}}
+                    text(class = "wt-armor-display__dim") {{t!("ui-armor-no_ship_loaded").into_owned()}}
                 }
             })
         });
@@ -328,14 +328,14 @@ fn camera_rings_group(
 
     let zoom_path = filtered_checkbox(
         "armor-camera-zoom-path".to_owned(),
-        t!("ui.armor.show_camera_zoom_path").into_owned(),
+        t!("ui-armor-show_camera_zoom_path").into_owned(),
         Signal::derive_local(move || viewport.camera_rings().zoom_path),
         off,
         filter,
         move |on| change_rings(viewport, |rings| rings.zoom_path = on),
     );
     // Offered only while the zoom path is drawn.
-    let zoom_path_kept = [t!("ui.armor.zoom_path_regular_fov"), t!("ui.armor.zoom_path_max_fov")]
+    let zoom_path_kept = [t!("ui-armor-zoom_path_regular_fov"), t!("ui-armor-zoom_path_max_fov")]
         .iter()
         .any(|label| filter.keeps(label))
         && matching.is_none_or(|state| state.zoom_path);
@@ -353,7 +353,7 @@ fn camera_rings_group(
         (!mode_buttons.is_empty())
             .then(|| AnyView::new(view! { row(class = "wt-armor-display__choices") {{mode_buttons}} })),
         labeled_slider_row(
-            t!("ui.armor.camera_fov").into_owned(),
+            t!("ui-armor-camera_fov").into_owned(),
             Signal::derive_local(move || f64::from(viewport.camera_rings().fov)),
             const { SliderRange::new(0.0, 1.0, 0.01) },
             0.0,
@@ -362,7 +362,7 @@ fn camera_rings_group(
             move |value| change_rings(viewport, |rings| rings.fov = value as f32),
         ),
         labeled_slider_row(
-            t!("ui.armor.camera_height").into_owned(),
+            t!("ui-armor-camera_height").into_owned(),
             Signal::derive_local(move || f64::from(viewport.camera_rings().height)),
             const { SliderRange::new(-1.0, 1.0, 0.01) },
             0.0,
@@ -389,7 +389,7 @@ fn perspective_rows(viewport: ArmorViewportState, filter: &RailFilter, matching:
     let on = move || viewport.perspective().enabled;
     let mut rows: Vec<AnyView> = filtered_checkbox(
         "armor-camera-perspective".to_owned(),
-        t!("ui.armor.camera_perspective").into_owned(),
+        t!("ui-armor-camera_perspective").into_owned(),
         Signal::derive_local(on),
         false,
         filter,
@@ -400,10 +400,10 @@ fn perspective_rows(viewport: ArmorViewportState, filter: &RailFilter, matching:
 
     // Offered only while the lock is on.
     let locked_kept = [
-        t!("ui.armor.perspective_fov"),
-        t!("ui.armor.perspective_projection"),
-        t!("ui.armor.perspective_proj_game"),
-        t!("ui.armor.perspective_proj_center"),
+        t!("ui-armor-perspective_fov"),
+        t!("ui-armor-perspective_projection"),
+        t!("ui-armor-perspective_proj_game"),
+        t!("ui-armor-perspective_proj_center"),
     ]
     .iter()
     .any(|label| filter.keeps(label))
@@ -428,7 +428,7 @@ fn zoom_path_choices(
     [
         filtered_checkbox(
             "armor-camera-zoom-path-fov".to_owned(),
-            t!("ui.armor.zoom_path_regular_fov").into_owned(),
+            t!("ui-armor-zoom_path_regular_fov").into_owned(),
             Signal::derive_local(move || viewport.camera_rings().zoom_path_at_fov),
             off,
             filter,
@@ -436,7 +436,7 @@ fn zoom_path_choices(
         ),
         filtered_checkbox(
             "armor-camera-zoom-path-max".to_owned(),
-            t!("ui.armor.zoom_path_max_fov").into_owned(),
+            t!("ui-armor-zoom_path_max_fov").into_owned(),
             Signal::derive_local(move || viewport.camera_rings().zoom_path_at_max_fov),
             off,
             filter,
@@ -452,7 +452,7 @@ fn zoom_path_choices(
 fn locked_rows(viewport: ArmorViewportState, filter: &RailFilter) -> Vec<AnyView> {
     let mut rows: Vec<AnyView> = Vec::new();
     rows.extend(labeled_slider_row(
-        t!("ui.armor.perspective_fov").into_owned(),
+        t!("ui-armor-perspective_fov").into_owned(),
         Signal::derive_local(move || f64::from(viewport.perspective().camera.fov_deg)),
         const { SliderRange::new(30.0, 120.0, 1.0) },
         f64::from(CameraPerspective::default().fov_deg),
@@ -461,10 +461,10 @@ fn locked_rows(viewport: ArmorViewportState, filter: &RailFilter) -> Vec<AnyView
         move |value| viewport.set_perspective_fov(value as f32),
     ));
 
-    let projection = t!("ui.armor.perspective_projection").into_owned();
+    let projection = t!("ui-armor-perspective_projection").into_owned();
     let modes = [
-        ("armor-perspective-proj-game", t!("ui.armor.perspective_proj_game").into_owned(), LookMode::Game),
-        ("armor-perspective-proj-center", t!("ui.armor.perspective_proj_center").into_owned(), LookMode::ThroughCenter),
+        ("armor-perspective-proj-game", t!("ui-armor-perspective_proj_game").into_owned(), LookMode::Game),
+        ("armor-perspective-proj-center", t!("ui-armor-perspective_proj_center").into_owned(), LookMode::ThroughCenter),
     ];
     // The heading names the choice, so a match on it keeps both buttons.
     let heading = filter.label(projection.clone());
@@ -536,7 +536,7 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
 
     let enabled = filtered_checkbox(
         "armor-display-lighting-enabled".to_owned(),
-        t!("ui.armor.lighting_enabled").into_owned(),
+        t!("ui-armor-lighting_enabled").into_owned(),
         Signal::derive_local(move || viewport.lighting().enabled),
         false,
         filter,
@@ -546,11 +546,11 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
     let presets: Vec<AnyView> = [
         (
             "armor-lighting-preset-ingame",
-            t!("ui.armor.lighting_preset_ingame").into_owned(),
+            t!("ui-armor-lighting_preset_ingame").into_owned(),
             LightingSettings::in_game as fn() -> LightingSettings,
         ),
-        ("armor-lighting-preset-flat", t!("ui.armor.lighting_preset_flat").into_owned(), LightingSettings::flat),
-        ("armor-lighting-preset-studio", t!("ui.armor.lighting_preset_studio").into_owned(), LightingSettings::studio),
+        ("armor-lighting-preset-flat", t!("ui-armor-lighting_preset_flat").into_owned(), LightingSettings::flat),
+        ("armor-lighting-preset-studio", t!("ui-armor-lighting_preset_studio").into_owned(), LightingSettings::studio),
     ]
     .into_iter()
     .filter_map(|(id, label, preset)| {
@@ -572,31 +572,31 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
         (!presets.is_empty()).then(|| AnyView::new(view! { row(class = "wt-armor-display__choices") {{presets}} })),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_flat").into_owned(),
+            t!("ui-armor-lighting_flat").into_owned(),
             const { SliderRange::new(0.0, 1.5, 0.01) },
             factory.flat_intensity,
             off,
             filter,
             |lighting| &mut lighting.flat_intensity,
         ),
-        lighting_color(viewport, t!("ui.armor.lighting_ambient_color").into_owned(), off, filter, |lighting| {
+        lighting_color(viewport, t!("ui-armor-lighting_ambient_color").into_owned(), off, filter, |lighting| {
             &mut lighting.flat_color
         }),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_intensity").into_owned(),
+            t!("ui-armor-lighting_intensity").into_owned(),
             const { SliderRange::new(0.0, 1.5, 0.01) },
             factory.key_intensity,
             off,
             filter,
             |lighting| &mut lighting.key_intensity,
         ),
-        lighting_color(viewport, t!("ui.armor.lighting_key_color").into_owned(), off, filter, |lighting| {
+        lighting_color(viewport, t!("ui-armor-lighting_key_color").into_owned(), off, filter, |lighting| {
             &mut lighting.key_color
         }),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_azimuth").into_owned(),
+            t!("ui-armor-lighting_azimuth").into_owned(),
             const { SliderRange::new(0.0, 360.0, 1.0) },
             factory.azimuth_deg,
             off,
@@ -605,7 +605,7 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
         ),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_elevation").into_owned(),
+            t!("ui-armor-lighting_elevation").into_owned(),
             const { SliderRange::new(-90.0, 90.0, 1.0) },
             factory.elevation_deg,
             off,
@@ -614,7 +614,7 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
         ),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_rim").into_owned(),
+            t!("ui-armor-lighting_rim").into_owned(),
             const { SliderRange::new(0.0, 1.0, 0.01) },
             factory.rim_strength,
             off,
@@ -623,7 +623,7 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
         ),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_specular").into_owned(),
+            t!("ui-armor-lighting_specular").into_owned(),
             const { SliderRange::new(0.0, 1.0, 0.01) },
             factory.specular_strength,
             off,
@@ -632,7 +632,7 @@ fn lighting_group(viewport: ArmorViewportState, filter: &RailFilter) -> Option<A
         ),
         lighting_slider(
             viewport,
-            t!("ui.armor.lighting_shininess").into_owned(),
+            t!("ui-armor-lighting_shininess").into_owned(),
             const { SliderRange::new(1.0, 128.0, 1.0) },
             factory.shininess,
             off,
@@ -694,7 +694,7 @@ pub(super) fn labeled_slider_row(
                 disabled = disabled,
                 label = label,
                 label_placement = SliderLabelPlacement::Outside,
-                reset_label = t!("ui.buttons.reset").into_owned(),
+                reset_label = t!("ui-buttons-reset").into_owned(),
                 class = "wt-armor-display__slider"
             )
         }

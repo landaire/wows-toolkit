@@ -3,10 +3,10 @@
 //! The egui app asks the same questions and record the answers in the rows all of them
 //! read, so a reader who answered in one is not asked again in another.
 
-use rust_i18n::t;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::keys;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -133,24 +133,24 @@ fn ask_build_consent(shell: Shell) {
             Dialog(open = open) {
                 DialogContent(dismiss_on_outside_press = false, dismiss_on_escape = false, dismiss_control = false, attr:data-testid = "first-run-build-consent") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.windows.build_consent").into_owned()}}
-                        DialogDescription(class = "wt-first-run") {{t!("ui.dialogs.build_consent_message").into_owned()}}
+                        DialogTitle {{t!("ui-windows-build_consent").into_owned()}}
+                        DialogDescription(class = "wt-first-run") {{t!("ui-dialogs-build_consent_message").into_owned()}}
                     }
                     DialogFooter {
                         Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline,
                             attr:data-testid = "first-run-consent-replays",
                             on:click = choose(DataSharingMode::Replays)) {
-                            {t!("ui.buttons.send_replays").into_owned()}
+                            {t!("ui-buttons-send_replays").into_owned()}
                         }
                         Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline,
                             attr:data-testid = "first-run-consent-builds",
                             on:click = choose(DataSharingMode::BuildData)) {
-                            {t!("ui.buttons.send_build_data").into_owned()}
+                            {t!("ui-buttons-send_build_data").into_owned()}
                         }
                         Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline,
                             attr:data-testid = "first-run-consent-nothing",
                             on:click = choose(DataSharingMode::Off)) {
-                            {t!("ui.buttons.send_nothing").into_owned()}
+                            {t!("ui-buttons-send_nothing").into_owned()}
                         }
                     }
                 }
@@ -170,8 +170,8 @@ fn ask_replay_migration(shell: Shell) {
             Dialog(open = open) {
                 DialogContent(dismiss_on_outside_press = false, dismiss_on_escape = false, dismiss_control = false, attr:data-testid = "first-run-replay-migration") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.windows.replay_migration").into_owned()}}
-                        DialogDescription(class = "wt-first-run") {{t!("ui.dialogs.replay_migration_message").into_owned()}}
+                        DialogTitle {{t!("ui-windows-replay_migration").into_owned()}}
+                        DialogDescription(class = "wt-first-run") {{t!("ui-dialogs-replay_migration_message").into_owned()}}
                     }
                     DialogFooter {
                         Button(size = ButtonSize::Sm,
@@ -181,7 +181,7 @@ fn ask_replay_migration(shell: Shell) {
                                 shell.services().settings.save(keys::REPLAY_CONSENT_SHOWN, &true);
                                 asked.answered();
                             }) {
-                            {t!("ui.buttons.switch_to_replays").into_owned()}
+                            {t!("ui-buttons-switch_to_replays").into_owned()}
                         }
                         Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline,
                             attr:data-testid = "first-run-migration-keep",
@@ -190,7 +190,7 @@ fn ask_replay_migration(shell: Shell) {
                                 shell.services().settings.save(keys::REPLAY_CONSENT_SHOWN, &true);
                                 asked.answered();
                             }) {
-                            {t!("ui.buttons.keep_current").into_owned()}
+                            {t!("ui-buttons-keep_current").into_owned()}
                         }
                     }
                 }
@@ -210,7 +210,7 @@ fn ask_language(shell: Shell, detected: LanguageCode) {
         // The catalogue's own label, which reads in the detected language once that catalogue is
         // loaded; in English it names the language instead.
         let keep_label = StoredValue::new({
-            let offered = t!("dialog.continue_in_language").into_owned();
+            let offered = t!("dialog-continue_in_language").into_owned();
             if offered == "Continue in English" { format!("Continue in {native}") } else { offered }
         });
         let kept = StoredValue::new(detected.clone());
@@ -219,8 +219,8 @@ fn ask_language(shell: Shell, detected: LanguageCode) {
             Dialog(open = open) {
                 DialogContent(dismiss_on_outside_press = false, dismiss_on_escape = false, dismiss_control = false, attr:data-testid = "first-run-language") {
                     DialogHeader {
-                        DialogTitle {{t!("dialog.select_language").into_owned()}}
-                        DialogDescription(class = "wt-first-run") {{t!("dialog.machine_translation_warning").into_owned()}}
+                        DialogTitle {{t!("dialog-select_language").into_owned()}}
+                        DialogDescription(class = "wt-first-run") {{t!("dialog-machine_translation_warning").into_owned()}}
                     }
                     DialogFooter {
                         Button(size = ButtonSize::Sm, variant = ButtonVariant::Outline,
@@ -230,7 +230,7 @@ fn ask_language(shell: Shell, detected: LanguageCode) {
                                 shell.services().settings.save(keys::LANGUAGE_SELECTION_SHOWN, &true);
                                 asked.answered();
                             }) {
-                            {t!("dialog.continue_in_english").into_owned()}
+                            {t!("dialog-continue_in_english").into_owned()}
                         }
                         Button(size = ButtonSize::Sm,
                             attr:data-testid = "first-run-language-keep",

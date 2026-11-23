@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use rust_i18n::t;
 use wows_replay_insights::hull_impact::LoggedHit;
 use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
@@ -45,6 +44,7 @@ use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::Radians;
 use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::models::geometry::SplashBox;
+use wt_translations::t;
 
 use super::depth_cues::landed;
 use super::model::Burst;
@@ -437,7 +437,7 @@ impl ViewportModel {
     /// it had been hit.
     pub(super) fn hit_readout(&self) -> Option<String> {
         let health = self.hit_health?;
-        Some(t!("ui.armor.realtime_readout", health = format!("{health:.0}"), hits = self.hits.len()).into_owned())
+        Some(t!("ui-armor-realtime_readout", health = format!("{health:.0}"), hits = self.hits.len()).into_owned())
     }
 
     /// Whether a replay is following this ship.
@@ -478,7 +478,7 @@ impl ViewportModel {
         let marks = self.length_marks.as_ref().filter(|_| self.display_settings.show_length_marks)?.marks();
         let (length, beam) = (Reading::of_size(marks.length()).text(), Reading::of_size(marks.beam()).text());
 
-        Some(t!("ui.armor.length_readout", length = length, beam = beam).into_owned())
+        Some(t!("ui-armor-length_readout", length = length, beam = beam).into_owned())
     }
 
     /// Whether the openings in the armor are marked, and how many there were.

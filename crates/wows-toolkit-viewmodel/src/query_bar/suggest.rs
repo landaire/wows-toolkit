@@ -1,8 +1,8 @@
 //! Suggestion sourcing and ranking for the query bar's dropdown.
 
-use rust_i18n::t;
 use wowsunpack::game_types::GameMode;
 use wowsunpack::game_types::PersonalRatingCategory;
+use wt_translations::t;
 
 use crate::query_bar::label::bool_label;
 use crate::query_bar::label::class_label;
@@ -195,13 +195,13 @@ pub static PRESETS: &[Preset] = &[
 
 fn preset_translation_key(key: &str) -> &'static str {
     match key {
-        "divmate_test_ship" => "ui.search.suggest.preset_divmate_test_ship",
-        "no_enemy_cv" => "ui.search.suggest.preset_no_enemy_cv",
-        "all_enemies_died" => "ui.search.suggest.preset_all_enemies_died",
-        "high_damage_enemies" => "ui.search.suggest.preset_high_damage_enemies",
-        "stream_sniper" => "ui.search.suggest.preset_stream_sniper",
-        "i_survived" => "ui.search.suggest.preset_i_survived",
-        "i_disconnected" => "ui.search.suggest.preset_i_disconnected",
+        "divmate_test_ship" => "ui-search-suggest-preset_divmate_test_ship",
+        "no_enemy_cv" => "ui-search-suggest-preset_no_enemy_cv",
+        "all_enemies_died" => "ui-search-suggest-preset_all_enemies_died",
+        "high_damage_enemies" => "ui-search-suggest-preset_high_damage_enemies",
+        "stream_sniper" => "ui-search-suggest-preset_stream_sniper",
+        "i_survived" => "ui-search-suggest-preset_i_survived",
+        "i_disconnected" => "ui-search-suggest-preset_i_disconnected",
         other => unreachable!("preset {other} has no translation key"),
     }
 }
@@ -210,11 +210,11 @@ fn preset_translation_key(key: &str) -> &'static str {
 /// and a scope the "stat fields cross every scope, everything else gets
 /// `Anyone`" rule would not produce on its own.
 const EXPLICIT_FIELD_SHORTCUTS: &[(&str, RosterField, Scope, &str)] = &[
-    ("my_damage", RosterField::Damage, Scope::SelfPlayer, "ui.search.suggest.my_damage"),
-    ("enemy_ship", RosterField::Ship, Scope::Enemy, "ui.search.suggest.enemy_ship"),
-    ("allied_ship", RosterField::Ship, Scope::Ally, "ui.search.suggest.allied_ship"),
-    ("player_in_match", RosterField::Account, Scope::Anyone, "ui.search.suggest.player_in_match"),
-    ("someone_in_division", RosterField::Name, Scope::Division, "ui.search.suggest.someone_in_division"),
+    ("my_damage", RosterField::Damage, Scope::SelfPlayer, "ui-search-suggest-my_damage"),
+    ("enemy_ship", RosterField::Ship, Scope::Enemy, "ui-search-suggest-enemy_ship"),
+    ("allied_ship", RosterField::Ship, Scope::Ally, "ui-search-suggest-allied_ship"),
+    ("player_in_match", RosterField::Account, Scope::Anyone, "ui-search-suggest-player_in_match"),
+    ("someone_in_division", RosterField::Name, Scope::Division, "ui-search-suggest-someone_in_division"),
 ];
 
 /// The full `(stat field) x (scope)` cross product, minus `(Damage,
@@ -280,11 +280,11 @@ const REMAINING_FIELDS: &[RosterField] = &[
 
 fn scope_word(scope: Scope) -> std::borrow::Cow<'static, str> {
     match scope {
-        Scope::SelfPlayer => t!("ui.search.suggest.scope_self"),
-        Scope::Ally => t!("ui.search.suggest.scope_ally"),
-        Scope::Enemy => t!("ui.search.suggest.scope_enemy"),
-        Scope::Division => t!("ui.search.suggest.scope_division"),
-        Scope::Anyone => t!("ui.search.suggest.scope_anyone"),
+        Scope::SelfPlayer => t!("ui-search-suggest-scope_self"),
+        Scope::Ally => t!("ui-search-suggest-scope_ally"),
+        Scope::Enemy => t!("ui-search-suggest-scope_enemy"),
+        Scope::Division => t!("ui-search-suggest-scope_division"),
+        Scope::Anyone => t!("ui-search-suggest-scope_anyone"),
     }
 }
 

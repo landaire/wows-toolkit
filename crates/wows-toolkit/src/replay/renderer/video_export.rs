@@ -600,7 +600,7 @@ pub(super) fn render_video_blocking(
         powerup_icons,
         wows_minimap_renderer::drawing::SidePanelLayout::from_options(&options),
     );
-    target.set_text_resolver(std::sync::Arc::new(crate::LocalizedTextResolver));
+    target.set_text_resolver(std::sync::Arc::new(wt_translations::DefaultTextResolver));
 
     // Drive the parse via MergedReplays so a single code path handles both the
     // standalone case (zero alt replays, single primary) and the merged case

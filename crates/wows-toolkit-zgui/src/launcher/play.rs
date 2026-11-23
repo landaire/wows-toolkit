@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
+use wt_translations::t;
 use wows_toolkit_icons::Glyph;
 use wows_toolkit_launcher::AccountKey;
 use wows_toolkit_launcher::AccountStatus;
@@ -231,7 +231,7 @@ fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
                     class = "wt-play__chevron",
                     class:wt-play-primary = primary,
                     attr:data-testid = "launcher-play-menu",
-                    a11y:label = t!("ui.launcher.play.menu").into_owned()
+                    a11y:label = t!("ui-launcher-play-menu").into_owned()
                 ) {
                     AppIcon(glyph = Glyph::ChevronDown)
                 }
@@ -342,13 +342,13 @@ fn launch_route_words(state: &PlayState) -> Vec<String> {
         }
         _ => return Vec::new(),
     };
-    let first = if steam { t!("ui.launcher.play.play_through_steam") } else { t!("ui.launcher.play.play") };
+    let first = if steam { t!("ui-launcher-play-play_through_steam") } else { t!("ui-launcher-play-play") };
 
     vec![
         first.into_owned(),
-        t!("ui.launcher.play.starting").into_owned(),
-        t!("ui.launcher.play.running").into_owned(),
-        t!("ui.launcher.play.in_battle").into_owned(),
+        t!("ui-launcher-play-starting").into_owned(),
+        t!("ui-launcher-play-running").into_owned(),
+        t!("ui-launcher-play-in_battle").into_owned(),
     ]
 }
 
@@ -361,21 +361,21 @@ fn optional(view: Option<AnyView>) -> AnyView {
 fn label(state: &PlayState) -> String {
     match state {
         PlayState::Loading | PlayState::AddAccount | PlayState::Restoring(_) | PlayState::Play(_) => {
-            t!("ui.launcher.play.play")
+            t!("ui-launcher-play-play")
         }
-        PlayState::SetUpGame => t!("ui.launcher.play.set_up_game"),
-        PlayState::SetUpRunner => t!("ui.launcher.play.set_up_runner"),
-        PlayState::SignInAgain(_) => t!("ui.launcher.play.sign_in_again"),
+        PlayState::SetUpGame => t!("ui-launcher-play-set_up_game"),
+        PlayState::SetUpRunner => t!("ui-launcher-play-set_up_runner"),
+        PlayState::SignInAgain(_) => t!("ui-launcher-play-sign_in_again"),
         PlayState::Update { size, .. } => {
-            t!("ui.launcher.play.update", size = humansize::format_size(*size, humansize::DECIMAL))
+            t!("ui-launcher-play-update", size = humansize::format_size(*size, humansize::DECIMAL))
         }
-        PlayState::Updating { percent: Some(percent), .. } => t!("ui.launcher.play.updating", percent = percent),
-        PlayState::Updating { percent: None, .. } => t!("ui.launcher.play.updating_unknown"),
-        PlayState::Paused { .. } => t!("ui.launcher.play.paused"),
-        PlayState::PlayThroughSteam { .. } => t!("ui.launcher.play.play_through_steam"),
-        PlayState::Starting { .. } => t!("ui.launcher.play.starting"),
-        PlayState::Running { .. } => t!("ui.launcher.play.running"),
-        PlayState::InBattle { .. } => t!("ui.launcher.play.in_battle"),
+        PlayState::Updating { percent: Some(percent), .. } => t!("ui-launcher-play-updating", percent = percent),
+        PlayState::Updating { percent: None, .. } => t!("ui-launcher-play-updating_unknown"),
+        PlayState::Paused { .. } => t!("ui-launcher-play-paused"),
+        PlayState::PlayThroughSteam { .. } => t!("ui-launcher-play-play_through_steam"),
+        PlayState::Starting { .. } => t!("ui-launcher-play-starting"),
+        PlayState::Running { .. } => t!("ui-launcher-play-running"),
+        PlayState::InBattle { .. } => t!("ui-launcher-play-in_battle"),
     }
     .into_owned()
 }
@@ -447,11 +447,11 @@ fn launch(shell: Shell, model: LauncherModel, account: AccountKey, safe_mode: bo
     match &err {
         PlayError::NotSignedIn { key, .. } => open_sign_in(shell, model, LoginTarget::Reauthenticate(*key)),
         PlayError::NoInstall { .. } => {
-            shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+            shell.toasts().failed(t!("ui-launcher-launch_failed", error = err.to_string()).into_owned());
             shell.settings_drawer.open_at(Setting::GameInstalls);
         }
         _ => {
-            shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+            shell.toasts().failed(t!("ui-launcher-launch_failed", error = err.to_string()).into_owned());
         }
     }
 }
@@ -466,7 +466,7 @@ fn play_through_steam(shell: Shell, model: LauncherModel, install: PathBuf) {
         (played, false)
     });
     if let Some(Err(err)) = played {
-        shell.toasts().failed(t!("ui.launcher.launch_failed", error = err.to_string()).into_owned());
+        shell.toasts().failed(t!("ui-launcher-launch_failed", error = err.to_string()).into_owned());
     }
 }
 
@@ -487,7 +487,7 @@ pub fn SafeModeCheck(model: LauncherModel, test_id: &'static str) -> impl IntoVi
                 attr:data-testid = test_id
             )
             Label(node_ref = name, control = control) {
-                {locale.text("ui.launcher.popover.play_safe_mode")}
+                {locale.text("ui-launcher-popover-play_safe_mode")}
             }
         }
     }
@@ -495,7 +495,7 @@ pub fn SafeModeCheck(model: LauncherModel, test_id: &'static str) -> impl IntoVi
 
 /// Says why a launch failed after Play returned, and opens the setting that can fix it.
 pub fn report_launch_failure(shell: Shell, failure: &LaunchFailure) {
-    shell.toasts().failed(t!("ui.launcher.launch_failed", error = failure.to_string()).into_owned());
+    shell.toasts().failed(t!("ui-launcher-launch_failed", error = failure.to_string()).into_owned());
     match failure {
         LaunchFailure::Runner(_) | LaunchFailure::Prefix(_) | LaunchFailure::NoWinePrefix => {
             shell.settings_drawer.open_at(Setting::GameRunner);
@@ -516,7 +516,7 @@ pub fn report_launch_failure(shell: Shell, failure: &LaunchFailure) {
 /// install, and updates it in place once the install's own folder is chosen. The update is a
 /// delta against that install's files, so no other folder can take it.
 pub fn start_update(shell: Shell, model: LauncherModel, install: PathBuf) {
-    let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui.launcher.download_title"), &install);
+    let asked = wows_toolkit_services::dialog::pick_folder_in(&t!("ui-launcher-download_title"), &install);
     // Detached: the popover or palette that asked has closed before the picker answers.
     spawn_detached(async move {
         let Some(dest) = shell.chosen_path(asked).await else { return };
@@ -525,12 +525,12 @@ pub fn start_update(shell: Shell, model: LauncherModel, install: PathBuf) {
         }
         if !same_folder(&dest, &install) {
             let path = install.display().to_string();
-            shell.toasts().failed(t!("ui.launcher.update_in_place", path = path).into_owned());
+            shell.toasts().failed(t!("ui-launcher-update_in_place", path = path).into_owned());
             return;
         }
         let started = model.run(move |launcher, _, env| (launcher.start_download(install, dest, env), false));
         if let Some(Err(err)) = started {
-            shell.toasts().failed(t!("ui.launcher.download_failed", error = err.to_string()).into_owned());
+            shell.toasts().failed(t!("ui-launcher-download_failed", error = err.to_string()).into_owned());
         }
     });
 }

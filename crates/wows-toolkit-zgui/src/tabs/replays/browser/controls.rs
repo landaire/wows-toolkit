@@ -2,9 +2,9 @@
 
 use std::rc::Rc;
 
-use rust_i18n::t;
 use wows_toolkit_viewmodel::controls::CommandGroup;
 use wows_toolkit_viewmodel::controls::ReplayCommand;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::StoredValue;
 use zgui::reactive::prelude::WithValue;
@@ -54,7 +54,7 @@ pub fn open(shell: Shell, groups: Vec<CommandGroup>) {
             HostedDialog(handle = handle) {
                 DialogContent(class = "wt-controls", attr:data-testid = "replay-controls") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.replay.controls.window_title").into_owned()}}
+                        DialogTitle {{t!("ui-replay-controls-window_title").into_owned()}}
                     }
                     column(class = "wt-controls__body") {
                         for group in move || groups.with_value(|groups| groups.as_ref().clone()), key = |group: &CommandGroup| group.title {

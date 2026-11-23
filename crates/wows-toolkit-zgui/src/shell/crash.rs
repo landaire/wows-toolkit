@@ -1,6 +1,6 @@
 //! What the last run's crash left behind, and what a bug report is made of.
 
-use rust_i18n::t;
+use wt_translations::t;
 use zgui::css;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -86,8 +86,8 @@ pub fn show_crash_report(shell: Shell, report: String) {
             HostedDialog(handle = handle) {
                 DialogContent(dismiss_on_outside_press = false, attr:data-testid = "crash-report") {
                     DialogHeader {
-                        DialogTitle {{t!("ui.windows.crash_detected").into_owned()}}
-                        DialogDescription {{t!("ui.dialogs.crash_message").into_owned()}}
+                        DialogTitle {{t!("ui-windows-crash_detected").into_owned()}}
+                        DialogDescription {{t!("ui-dialogs-crash_message").into_owned()}}
                     }
                     column(class = "wt-crash") {
                         text(class = "wt-crash__report", attr:data-testid = "crash-report-scroll") {{report.with_value(|report| report.trim().to_owned())}}
@@ -98,7 +98,7 @@ pub fn show_crash_report(shell: Shell, report: String) {
                                 attr:data-testid = "crash-report-github",
                                 on:click = move |_| desktop::open_url(ISSUES_URL)
                             ) {
-                                {t!("ui.buttons.github").into_owned()}
+                                {t!("ui-buttons-github").into_owned()}
                             }
                             Button(
                                 size = ButtonSize::Sm,
@@ -106,7 +106,7 @@ pub fn show_crash_report(shell: Shell, report: String) {
                                 attr:data-testid = "crash-report-discord",
                                 on:click = move |_| desktop::open_url(DISCORD_URL)
                             ) {
-                                {t!("ui.buttons.discord").into_owned()}
+                                {t!("ui-buttons-discord").into_owned()}
                             }
                             Button(
                                 size = ButtonSize::Sm,
@@ -115,7 +115,7 @@ pub fn show_crash_report(shell: Shell, report: String) {
                                 attr:data-testid = "crash-report-clear-settings",
                                 on:click = move |_| confirm_clear_settings(shell)
                             ) {
-                                {t!("ui.buttons.clear_settings").into_owned()}
+                                {t!("ui-buttons-clear_settings").into_owned()}
                             }
                         }
                     }
@@ -125,7 +125,7 @@ pub fn show_crash_report(shell: Shell, report: String) {
                             variant = ButtonVariant::Outline,
                             on:click = move |_| handle.close()
                         ) {
-                            {t!("ui.buttons.cancel").into_owned()}
+                            {t!("ui-buttons-cancel").into_owned()}
                         }
                         Button(
                             node_ref = copy,
@@ -133,11 +133,11 @@ pub fn show_crash_report(shell: Shell, report: String) {
                             attr:data-testid = "crash-report-copy",
                             on:click = move |_| {
                                 shell.copy_text(report.get_value());
-                                shell.toasts().ok(t!("ui.stats.copied").into_owned());
+                                shell.toasts().ok(t!("ui-stats-copied").into_owned());
                                 handle.close();
                             }
                         ) {
-                            {t!("ui.buttons.copy").into_owned()}
+                            {t!("ui-buttons-copy").into_owned()}
                         }
                     }
                 }
@@ -155,17 +155,17 @@ fn confirm_clear_settings(shell: Shell) {
             AlertDialog(open = open, on_open_change = handle.on_open_change()) {
                 AlertDialogContent(attr:data-testid = "crash-clear-settings-confirm") {
                     AlertDialogHeader {
-                        AlertDialogTitle {{t!("ui.buttons.clear_settings").into_owned()}}
-                        AlertDialogDescription {{t!("ui.dialogs.crash_clear_settings").into_owned()}}
+                        AlertDialogTitle {{t!("ui-buttons-clear_settings").into_owned()}}
+                        AlertDialogDescription {{t!("ui-dialogs-crash_clear_settings").into_owned()}}
                     }
                     AlertDialogFooter {
-                        AlertDialogCancel {{t!("ui.buttons.cancel").into_owned()}}
+                        AlertDialogCancel {{t!("ui-buttons-cancel").into_owned()}}
                         AlertDialogAction(
                             variant = ButtonVariant::Destructive,
                             attr:data-testid = "crash-clear-settings-ok",
                             on:click = move |_| shell.services().settings.clear()
                         ) {
-                            {t!("ui.buttons.clear_settings").into_owned()}
+                            {t!("ui-buttons-clear_settings").into_owned()}
                         }
                     }
                 }
@@ -200,14 +200,14 @@ pub fn copy_bug_report_info(shell: Shell) {
     .discord_code_block();
 
     shell.copy_text(report);
-    shell.toasts().ok(t!("ui.messages.bug_report_info_copied").into_owned());
+    shell.toasts().ok(t!("ui-messages-bug_report_info_copied").into_owned());
 }
 
 /// Puts the newest log file on the clipboard, for a bug report.
 pub fn copy_latest_log(shell: Shell) {
     let Some(path) = wows_toolkit_services::logging::newest_log() else {
         let dir = wows_toolkit_services::logging::log_dir().display().to_string();
-        shell.toasts().warn(t!("ui.messages.log_not_found", dir = dir).into_owned());
+        shell.toasts().warn(t!("ui-messages-log_not_found", dir = dir).into_owned());
         return;
     };
 
@@ -216,10 +216,10 @@ pub fn copy_latest_log(shell: Shell) {
             let bytes = contents.len() / 1024;
             let named = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
             shell.copy_text(contents);
-            shell.toasts().ok(t!("ui.messages.log_copied", bytes = bytes, file = named).into_owned());
+            shell.toasts().ok(t!("ui-messages-log_copied", bytes = bytes, file = named).into_owned());
         }
         Err(err) => {
-            shell.toasts().failed(t!("ui.messages.log_copy_failed", error = err).into_owned());
+            shell.toasts().failed(t!("ui-messages-log_copy_failed", error = err).into_owned());
         }
     }
 }
@@ -281,7 +281,7 @@ mod tests {
 
         let dir = wows_toolkit_services::logging::log_dir().display().to_string();
         let toasts = window.texts_by_class("zui-toast").concat();
-        assert!(toasts.contains(rust_i18n::t!("ui.messages.log_not_found", dir = dir).as_ref()), "{toasts}");
+        assert!(toasts.contains(wt_translations::t!("ui-messages-log_not_found", dir = dir).as_ref()), "{toasts}");
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod tests {
 
         assert!(window.by_test_id("crash-report").is_none(), "copying closes the report");
         let toasts = window.texts_by_class("zui-toast").concat();
-        assert!(toasts.contains(rust_i18n::t!("ui.stats.copied").as_ref()), "{toasts}");
+        assert!(toasts.contains(wt_translations::t!("ui-stats-copied").as_ref()), "{toasts}");
     }
 
     #[test]

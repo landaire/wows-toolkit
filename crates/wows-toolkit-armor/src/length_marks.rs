@@ -3,9 +3,9 @@
 //! side, so a reader can see how long each part of the model is. Model space
 //! is ship-model space, so [`ShipModelDistance`] reads it in metres.
 
-use rust_i18n::t;
 use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::ShipModelDistance;
+use wt_translations::t;
 
 use crate::viewport::types::Vec3;
 
@@ -63,8 +63,8 @@ impl Reading {
     pub fn text(&self) -> String {
         let value = self.number();
         match self.unit {
-            LengthUnit::Meters => t!("ui.armor.length_metres", value = value).into_owned(),
-            LengthUnit::Centimeters => t!("ui.armor.length_centimetres", value = value).into_owned(),
+            LengthUnit::Meters => t!("ui-armor-length_metres", value = value).into_owned(),
+            LengthUnit::Centimeters => t!("ui-armor-length_centimetres", value = value).into_owned(),
         }
     }
 }
@@ -182,7 +182,7 @@ impl LengthMarks {
 pub struct MarkLabels {
     marks: LengthMarks,
     /// The language `texts` are written in.
-    locale: String,
+    language: wt_translations::Language,
     along: Vec<Mark>,
     across: Vec<Mark>,
     /// The distance of each step of the spacing, as written. The length and
@@ -199,7 +199,7 @@ impl MarkLabels {
             .map(|step| Reading::of(marks.step_distance(step), marks.spacing).text())
             .collect();
 
-        Self { marks, locale: rust_i18n::locale().to_string(), along, across, texts }
+        Self { marks, language: wt_translations::language(), along, across, texts }
     }
 
     pub fn marks(&self) -> &LengthMarks {
@@ -208,7 +208,7 @@ impl MarkLabels {
 
     /// Whether the texts are in the language in use.
     pub fn is_current(&self) -> bool {
-        *rust_i18n::locale() == *self.locale
+        wt_translations::language() == self.language
     }
 
     /// The marks labelled beside the grid on the sides nearer the camera:

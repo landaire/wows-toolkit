@@ -33,6 +33,7 @@ use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::minimap_preview::PreviewError;
 use wows_toolkit_replay_data::minimap_preview::bake_track;
 use wows_toolkit_replay_data::replay_render::options::playback_options;
+use wt_translations::Language;
 
 const USAGE: &str = "usage: export_demo_track <replay> <game dir> <output> \
                      [--from SECONDS] [--to SECONDS] [--interval SECONDS] [--activity]";
@@ -318,15 +319,16 @@ fn export(args: &Args) -> Result<(), ExportError> {
         }),
     };
 
-    let translations = wt_translations::TranslationsBackend::load();
     let toggles = TOGGLES
         .iter()
         .filter(|toggle| !WITHHELD_TOGGLES.contains(&toggle.id))
         .map(|toggle| {
-            let label = rust_i18n::Backend::translate(&translations, "en", toggle.label_key)
-                .ok_or(ExportError::NoLabel { key: toggle.label_key })?;
+            if !wt_translations::has_message(Language::ENGLISH, toggle.label_key) {
+                return Err(ExportError::NoLabel { key: toggle.label_key });
+            }
 
-            Ok(OfferedToggle { id: toggle.id.to_owned(), label: label.to_owned() })
+            let label = wt_translations::t!(toggle.label_key, locale = Language::ENGLISH).into_owned();
+            Ok(OfferedToggle { id: toggle.id.to_owned(), label })
         })
         .collect::<Result<Vec<_>, ExportError>>()?;
 

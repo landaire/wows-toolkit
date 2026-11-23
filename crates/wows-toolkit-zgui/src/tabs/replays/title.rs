@@ -6,9 +6,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use rust_i18n::t;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wowsunpack::vfs::VfsPath;
+use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::Callable;
@@ -102,11 +102,11 @@ pub fn ReplayTabTitle(
 
     let body = move || match title.get() {
         PanelTitle::Reading => AnyView::new(view! {
-            Spinner(label = t!("ui.replay.loading").into_owned())
-            text(class = "wt-replay-title__text") {{t!("ui.replay.loading").into_owned()}}
+            Spinner(label = t!("ui-replay-loading").into_owned())
+            text(class = "wt-replay-title__text") {{t!("ui-replay-loading").into_owned()}}
         }),
         PanelTitle::Failed => AnyView::new(view! {
-            text(class = "wt-replay-title__text") {{t!("ui.messages.replay_load_failed").into_owned()}}
+            text(class = "wt-replay-title__text") {{t!("ui-messages-replay_load_failed").into_owned()}}
         }),
         PanelTitle::Read { title, ship } => {
             // Art read for the ship shown before this one is not drawn beside it.

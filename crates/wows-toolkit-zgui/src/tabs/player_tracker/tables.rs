@@ -13,7 +13,6 @@ use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
-use rust_i18n::t;
 use wows_core::pseudonym::NameDisplay;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::rows::TwitchSightings;
@@ -27,6 +26,7 @@ use wows_toolkit_viewmodel::player_tracker::SortOrder;
 use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 use wows_toolkit_viewmodel::player_tracker::encounter_severity;
 use wows_toolkit_viewmodel::player_tracker::history;
+use wt_translations::t;
 use zgui::component;
 use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
@@ -222,7 +222,7 @@ fn LastSeen(at: Option<Timestamp>) -> impl IntoView {
 /// follow `names`, as the replay listing's do.
 pub fn twitch_hover(sightings: &TwitchSightings, names: NameDisplay) -> String {
     let logins: Vec<String> = sightings.logins.iter().map(|login| names.player_name(&login.0).into_owned()).collect();
-    t!("ui.player_tracker.twitch_seen_hover", logins = logins.join(", "), count = sightings.battles).into_owned()
+    t!("ui-player_tracker-twitch_seen_hover", logins = logins.join(", "), count = sightings.battles).into_owned()
 }
 
 /// The Twitch glyph a player matched to a chat login carries. A player never matched has none.
@@ -295,14 +295,14 @@ pub fn PlayersSection(model: TrackerModel) -> impl IntoView {
                     )
                 }
             }
-            {table_body(state, count, "ui.player_tracker.loading_players", "ui.player_tracker.no_players", move || {
+            {table_body(state, count, "ui-player_tracker-loading_players", "ui-player_tracker-no_players", move || {
                 AnyView::new(view! {
                     VirtualList(
                         count = count,
                         measured = MeasuredRows::new(ROW_HEIGHT).keyed(move |index| {
                             rows.with(|rows| rows.get(index).map(|row| row.facet.account_id.raw()))
                         }),
-                        label = t!("ui.player_tracker.subtab_players").into_owned(),
+                        label = t!("ui-player_tracker-subtab_players").into_owned(),
                         class = "wt-tracker-list",
                         row = move |index: usize| view! { PlayerListRow(model = model, shell = shell, index = index) }
                     )
@@ -365,7 +365,7 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
                 LastSeen(at = row.last_seen)
                 IconButton(
                     glyph = Glyph::Search,
-                    hover = t!("ui.player_tracker.find_matches").into_owned(),
+                    hover = t!("ui-player_tracker-find_matches").into_owned(),
                     test_id = format!("tracker-find-player-{}", account.raw()),
                     on_press = move || TrackerModel::find_player_matches(shell, account)
                 )
@@ -373,7 +373,7 @@ fn PlayerRowView(model: TrackerModel, shell: Shell, index: usize, row: PlayerRow
                     {move || {
                         let note = note.get();
                         let faint = note.is_none();
-                        let hover = note.unwrap_or_else(|| t!("ui.player_tracker.notes_hint").into_owned());
+                        let hover = note.unwrap_or_else(|| t!("ui-player_tracker-notes_hint").into_owned());
                         view! {
                             IconButton(
                                 glyph = Glyph::NotebookPen,
@@ -413,14 +413,14 @@ fn PlayerDetail(model: TrackerModel, shell: Shell, account: AccountId) -> impl I
             aliases.sort();
             let mut lines = Vec::new();
             if !aliases.is_empty() {
-                lines.push(t!("ui.player_tracker.aliases_hover", names = aliases.join(", ")).into_owned());
+                lines.push(t!("ui-player_tracker-aliases_hover", names = aliases.join(", ")).into_owned());
             }
             let exact = history::last_seen_timestamp_text(player.last_visible_timestamp(show_division_mates));
             if !exact.is_empty() {
-                lines.push(t!("ui.player_tracker.last_encountered_exact", timestamp = exact).into_owned());
+                lines.push(t!("ui-player_tracker-last_encountered_exact", timestamp = exact).into_owned());
             }
             let count = player.visible_arena_ids(show_division_mates).count();
-            lines.push(t!("ui.player_tracker.arena_count", count = count).into_owned());
+            lines.push(t!("ui-player_tracker-arena_count", count = count).into_owned());
             lines
         });
         if let Some(hover) = model.twitch.with(|twitch| twitch.get(&account).map(|seen| twitch_hover(seen, names))) {
@@ -443,11 +443,11 @@ fn PlayerDetail(model: TrackerModel, shell: Shell, account: AccountId) -> impl I
                         attr:data-testid = format!("tracker-account-id-{}", account.raw()),
                         on:click = move |_| {
                             shell.copy_text(copied.clone());
-                            shell.toasts().ok(t!("ui.player_tracker.copied_wg_id", id = copied.clone()).into_owned());
+                            shell.toasts().ok(t!("ui-player_tracker-copied_wg_id", id = copied.clone()).into_owned());
                         }
                     ) {{id}}
                 }
-                TooltipContent {{t!("ui.player_tracker.copy_wg_id").into_owned()}}
+                TooltipContent {{t!("ui-player_tracker-copy_wg_id").into_owned()}}
             }
             for line in move || lines.get(), key = |line: &String| line.clone() {
                 text(class = "wt-tracker-dim wt-tracker-small") {{line}}
@@ -455,7 +455,7 @@ fn PlayerDetail(model: TrackerModel, shell: Shell, account: AccountId) -> impl I
             if move || model.editing_note.get() == Some(account) {
                 NoteEditor(model = model, account = account)
             } else {
-                text(class = "wt-tracker-dim wt-tracker-small") {{move || { locale.track(); t!("ui.player_tracker.notes_hint").into_owned() }}}
+                text(class = "wt-tracker-dim wt-tracker-small") {{move || { locale.track(); t!("ui-player_tracker-notes_hint").into_owned() }}}
             }
         }
     }
@@ -472,8 +472,8 @@ fn NoteEditor(model: TrackerModel, account: AccountId) -> impl IntoView {
         column(class = "wt-tracker-note") {
             Input(
                 value = value,
-                placeholder = t!("ui.player_tracker.notes_hint").into_owned(),
-                label = t!("ui.player_tracker.notes_hint").into_owned(),
+                placeholder = t!("ui-player_tracker-notes_hint").into_owned(),
+                label = t!("ui-player_tracker-notes_hint").into_owned(),
                 class = "wt-tracker-note__field",
                 attr:data-testid = "tracker-note-input",
                 on:key_down = move |ev| {
@@ -486,7 +486,7 @@ fn NoteEditor(model: TrackerModel, account: AccountId) -> impl IntoView {
             box(class = "wt-tracker-note__status") {
                 {move || model.note_error.get().map(|reason| view! {
                     text(class = "wt-tracker-note__error wt-tracker-small", attr:data-testid = "tracker-note-error") {
-                        {t!("ui.player_tracker.note_not_saved", reason = reason).into_owned()}
+                        {t!("ui-player_tracker-note_not_saved", reason = reason).into_owned()}
                     }
                 }.into_view())}
             }
@@ -523,14 +523,14 @@ pub fn ClansSection(model: TrackerModel) -> impl IntoView {
                     )
                 }
             }
-            {table_body(state, count, "ui.player_tracker.loading_clans", "ui.player_tracker.clan_no_data", move || {
+            {table_body(state, count, "ui-player_tracker-loading_clans", "ui-player_tracker-clan_no_data", move || {
                 AnyView::new(view! {
                     VirtualList(
                         count = count,
                         measured = MeasuredRows::new(ROW_HEIGHT).keyed(move |index| {
                             clans.with(|clans| clans.get(index).map(|row| row.clan.clone()))
                         }),
-                        label = t!("ui.player_tracker.subtab_clans").into_owned(),
+                        label = t!("ui-player_tracker-subtab_clans").into_owned(),
                         class = "wt-tracker-list",
                         row = move |index: usize| view! { ClanListRow(model = model, shell = shell, index = index) }
                     )
@@ -561,7 +561,7 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow, na
     let find_tag = tag.clone();
     // The tag and both battle counts read in the tone the in-range count deserves.
     let tone = severity(row.matches_in_range);
-    let sightings_hover = t!("ui.player_tracker.clan_sightings_hover", range = row.sightings_in_range).into_owned();
+    let sightings_hover = t!("ui-player_tracker-clan_sightings_hover", range = row.sightings_in_range).into_owned();
     let sightings = separate_number(row.sightings as i64, None);
     let members = row.members.clone();
     let tag_marks = model.query.with_untracked(|query| marks(query, &shown_tag));
@@ -589,7 +589,7 @@ fn ClanRowView(model: TrackerModel, shell: Shell, index: usize, row: ClanRow, na
                 LastSeen(at = Some(row.last_seen))
                 IconButton(
                     glyph = Glyph::Search,
-                    hover = t!("ui.player_tracker.find_clan_matches").into_owned(),
+                    hover = t!("ui-player_tracker-find_clan_matches").into_owned(),
                     test_id = format!("tracker-find-clan-{tag}"),
                     on_press = move || TrackerModel::find_clan_matches(shell, &find_tag)
                 )
@@ -630,12 +630,12 @@ fn ClanMembers(
                 row(class = "wt-tracker-member") {
                     IconButton(
                         glyph = Glyph::Search,
-                        hover = t!("ui.player_tracker.find_matches").into_owned(),
+                        hover = t!("ui-player_tracker-find_matches").into_owned(),
                         test_id = format!("tracker-find-member-{}", member.0.raw()),
                         on_press = move || TrackerModel::find_player_matches(shell, member.0)
                     )
                     text(class = "wt-tracker-small") {{member.1.clone()}}
-                    text(class = "wt-tracker-small wt-tracker-dim") {{t!("ui.player_tracker.clan_member_matches", count = member.2).into_owned()}}
+                    text(class = "wt-tracker-small wt-tracker-dim") {{t!("ui-player_tracker-clan_member_matches", count = member.2).into_owned()}}
                 }
             }
         }

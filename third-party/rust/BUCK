@@ -3072,41 +3072,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "base62-2.2.6.crate",
-    sha256 = "a3a647dce9631f152a99ec16cfc09267ae55fe280d5dc288964027d458076323",
-    size_bytes = 19295,
-    strip_prefix = "base62-2.2.6",
-    urls = ["https://static.crates.io/crates/base62/2.2.6/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "base62-2",
-    srcs = [":base62-2.2.6.crate"],
-    crate = "base62",
-    crate_root = "base62-2.2.6.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "base62",
-        "CARGO_MANIFEST_DIR": "base62-2.2.6.crate",
-        "CARGO_PKG_AUTHORS": "François Bernier <frankbernier@gmail.com>:Chai T. Rex <ChaiTRex@users.noreply.github.com>",
-        "CARGO_PKG_DESCRIPTION": "A Base62 encoding/decoding library",
-        "CARGO_PKG_NAME": "base62",
-        "CARGO_PKG_REPOSITORY": "https://github.com/fbernier/base62",
-        "CARGO_PKG_VERSION": "2.2.6",
-        "CARGO_PKG_VERSION_MAJOR": "2",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "6",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "alloc",
-        "default",
-    ],
-    visibility = [],
-)
-
-http_archive(
     name = "base64-0.13.1.crate",
     sha256 = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8",
     size_bytes = 61002,
@@ -8088,7 +8053,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":data-encoding-2",
-        ":syn-1",
+        ":syn-3",
     ],
 )
 
@@ -12330,6 +12295,123 @@ cargo.rust_library(
     visibility = [],
 )
 
+alias(
+    name = "fluent-bundle",
+    actual = ":fluent-bundle-0.16",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "fluent-bundle-0.16.0.crate",
+    sha256 = "01203cb8918f5711e73891b347816d932046f95f54207710bda99beaeb423bf4",
+    size_bytes = 35301,
+    strip_prefix = "fluent-bundle-0.16.0",
+    urls = ["https://static.crates.io/crates/fluent-bundle/0.16.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "fluent-bundle-0.16",
+    srcs = [":fluent-bundle-0.16.0.crate"],
+    crate = "fluent_bundle",
+    crate_root = "fluent-bundle-0.16.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "fluent_bundle",
+        "CARGO_MANIFEST_DIR": "fluent-bundle-0.16.0.crate",
+        "CARGO_PKG_AUTHORS": "Caleb Maclennan <caleb@alerque.com>:Bruce Mitchener <bruce.mitchener@gmail.com:Zibi Braniecki <zibi@unicode.org>:Staś Małolepszy <stas@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "A low-level implementation of a collection of localization messages for a single locale for Project Fluent, a localization system designed to unleash the entire expressive power of natural language translations. ",
+        "CARGO_PKG_NAME": "fluent-bundle",
+        "CARGO_PKG_REPOSITORY": "https://github.com/projectfluent/fluent-rs",
+        "CARGO_PKG_VERSION": "0.16.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "16",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":fluent-langneg-0.13",
+        ":fluent-syntax-0.12",
+        ":intl-memoizer-0.5",
+        ":intl_pluralrules-7",
+        ":rustc-hash-2",
+        ":self_cell-1",
+        ":smallvec-1",
+        ":unic-langid-0.9",
+    ],
+)
+
+http_archive(
+    name = "fluent-langneg-0.13.1.crate",
+    sha256 = "7eebbe59450baee8282d71676f3bfed5689aeab00b27545e83e5f14b1195e8b0",
+    size_bytes = 11383,
+    strip_prefix = "fluent-langneg-0.13.1",
+    urls = ["https://static.crates.io/crates/fluent-langneg/0.13.1/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "fluent-langneg-0.13",
+    srcs = [":fluent-langneg-0.13.1.crate"],
+    crate = "fluent_langneg",
+    crate_root = "fluent-langneg-0.13.1.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "fluent_langneg",
+        "CARGO_MANIFEST_DIR": "fluent-langneg-0.13.1.crate",
+        "CARGO_PKG_AUTHORS": "Zibi Braniecki <gandalf@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "A library for language and locale negotiation. ",
+        "CARGO_PKG_NAME": "fluent-langneg",
+        "CARGO_PKG_REPOSITORY": "https://github.com/projectfluent/fluent-langneg-rs",
+        "CARGO_PKG_VERSION": "0.13.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [":unic-langid-0.9"],
+)
+
+http_archive(
+    name = "fluent-syntax-0.12.0.crate",
+    sha256 = "54f0d287c53ffd184d04d8677f590f4ac5379785529e5e08b1c8083acdd5c198",
+    size_bytes = 32438,
+    strip_prefix = "fluent-syntax-0.12.0",
+    urls = ["https://static.crates.io/crates/fluent-syntax/0.12.0/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "fluent-syntax-0.12",
+    srcs = [":fluent-syntax-0.12.0.crate"],
+    crate = "fluent_syntax",
+    crate_root = "fluent-syntax-0.12.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "fluent_syntax",
+        "CARGO_MANIFEST_DIR": "fluent-syntax-0.12.0.crate",
+        "CARGO_PKG_AUTHORS": "Caleb Maclennan <caleb@alerque.com>:Bruce Mitchener <bruce.mitchener@gmail.com:Zibi Braniecki <zibi@unicode.org>:Staś Małolepszy <stas@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "A low-level parser, AST, and serializer API for the syntax used by Project Fluent, a localization system designed to unleash the entire expressive power of natural language translations. ",
+        "CARGO_PKG_NAME": "fluent-syntax",
+        "CARGO_PKG_REPOSITORY": "https://github.com/projectfluent/fluent-rs",
+        "CARGO_PKG_VERSION": "0.12.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "12",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [
+        ":memchr-2",
+        ":thiserror-2",
+    ],
+)
+
 http_archive(
     name = "flume-0.11.1.crate",
     sha256 = "da0e4dd2a88388a1f4ccc7c9ce104604dab68d9f408dc34cd45823d5a9069095",
@@ -13881,84 +13963,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-)
-
-http_archive(
-    name = "globset-0.4.20.crate",
-    sha256 = "07c34a9410465b45bd9787443bc7370f37735bad04b0f0cd57ff1a3186c98988",
-    size_bytes = 29724,
-    strip_prefix = "globset-0.4.20",
-    urls = ["https://static.crates.io/crates/globset/0.4.20/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "globset-0.4",
-    srcs = [":globset-0.4.20.crate"],
-    crate = "globset",
-    crate_root = "globset-0.4.20.crate/src/lib.rs",
-    edition = "2024",
-    env = {
-        "CARGO_CRATE_NAME": "globset",
-        "CARGO_MANIFEST_DIR": "globset-0.4.20.crate",
-        "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Cross platform single glob and glob set matching. Glob set matching is the process of matching one or more glob patterns against a single candidate path simultaneously, and returning all of the globs that matched. ",
-        "CARGO_PKG_NAME": "globset",
-        "CARGO_PKG_REPOSITORY": "https://github.com/BurntSushi/ripgrep/tree/master/crates/globset",
-        "CARGO_PKG_VERSION": "0.4.20",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "4",
-        "CARGO_PKG_VERSION_PATCH": "20",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "log",
-    ],
-    visibility = [],
-    deps = [
-        ":aho-corasick-1",
-        ":bstr-1",
-        ":log-0.4",
-        ":regex-automata-0.4",
-        ":regex-syntax-0.8",
-    ],
-)
-
-http_archive(
-    name = "globwalk-0.8.1.crate",
-    sha256 = "93e3af942408868f6934a7b85134a3230832b9977cf66125df2f9edcfce4ddcc",
-    size_bytes = 13705,
-    strip_prefix = "globwalk-0.8.1",
-    urls = ["https://static.crates.io/crates/globwalk/0.8.1/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "globwalk-0.8",
-    srcs = [":globwalk-0.8.1.crate"],
-    crate = "globwalk",
-    crate_root = "globwalk-0.8.1.crate/src/lib.rs",
-    edition = "2015",
-    env = {
-        "CARGO_CRATE_NAME": "globwalk",
-        "CARGO_MANIFEST_DIR": "globwalk-0.8.1.crate",
-        "CARGO_PKG_AUTHORS": "Gilad Naaman <gilad@naaman.io>",
-        "CARGO_PKG_DESCRIPTION": "Glob-matched recursive file system walking.",
-        "CARGO_PKG_NAME": "globwalk",
-        "CARGO_PKG_REPOSITORY": "https://github.com/gilnaa/globwalk",
-        "CARGO_PKG_VERSION": "0.8.1",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "1",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":bitflags-1",
-        ":ignore-0.4",
-        ":walkdir-2",
-    ],
 )
 
 http_archive(
@@ -16691,51 +16695,6 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "ignore-0.4.33.crate",
-    sha256 = "00b69833ed729dc5aa7d19541d96d6cf8e9137194207a04916d658e43168402f",
-    size_bytes = 73872,
-    strip_prefix = "ignore-0.4.33",
-    urls = ["https://static.crates.io/crates/ignore/0.4.33/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "ignore-0.4",
-    srcs = [":ignore-0.4.33.crate"],
-    crate = "ignore",
-    crate_root = "ignore-0.4.33.crate/src/lib.rs",
-    edition = "2024",
-    env = {
-        "CARGO_CRATE_NAME": "ignore",
-        "CARGO_MANIFEST_DIR": "ignore-0.4.33.crate",
-        "CARGO_PKG_AUTHORS": "Andrew Gallant <jamslam@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "A fast library for efficiently matching ignore files such as `.gitignore` against file paths. ",
-        "CARGO_PKG_NAME": "ignore",
-        "CARGO_PKG_REPOSITORY": "https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore",
-        "CARGO_PKG_VERSION": "0.4.33",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "4",
-        "CARGO_PKG_VERSION_PATCH": "33",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    platform = {
-        "windows-msvc": dict(
-            deps = [":winapi-util-0.1"],
-        ),
-    },
-    visibility = [],
-    deps = [
-        ":crossbeam-deque-0.8",
-        ":globset-0.4",
-        ":log-0.4",
-        ":memchr-2",
-        ":regex-automata-0.4",
-        ":same-file-1",
-        ":walkdir-2",
-    ],
-)
-
 alias(
     name = "image",
     actual = ":image-0.25",
@@ -17333,6 +17292,73 @@ cargo.rust_library(
         ":similar-2",
         ":tempfile-3",
     ],
+)
+
+http_archive(
+    name = "intl-memoizer-0.5.3.crate",
+    sha256 = "310da2e345f5eb861e7a07ee182262e94975051db9e4223e909ba90f392f163f",
+    size_bytes = 12171,
+    strip_prefix = "intl-memoizer-0.5.3",
+    urls = ["https://static.crates.io/crates/intl-memoizer/0.5.3/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "intl-memoizer-0.5",
+    srcs = [":intl-memoizer-0.5.3.crate"],
+    crate = "intl_memoizer",
+    crate_root = "intl-memoizer-0.5.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "intl_memoizer",
+        "CARGO_MANIFEST_DIR": "intl-memoizer-0.5.3.crate",
+        "CARGO_PKG_AUTHORS": "Caleb Maclennan <caleb@alerque.com>:Bruce Mitchener <bruce.mitchener@gmail.com:Zibi Braniecki <zibi@unicode.org>:Staś Małolepszy <stas@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "A memoizer specifically tailored for storing lazy-initialized intl formatters for Project Fluent, a localization system designed to unleash the entire expressive power of natural language translations. ",
+        "CARGO_PKG_NAME": "intl-memoizer",
+        "CARGO_PKG_REPOSITORY": "https://github.com/projectfluent/fluent-rs",
+        "CARGO_PKG_VERSION": "0.5.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":type-map-0.5",
+        ":unic-langid-0.9",
+    ],
+)
+
+http_archive(
+    name = "intl_pluralrules-7.0.2.crate",
+    sha256 = "078ea7b7c29a2b4df841a7f6ac8775ff6074020c6776d48491ce2268e068f972",
+    size_bytes = 9201,
+    strip_prefix = "intl_pluralrules-7.0.2",
+    urls = ["https://static.crates.io/crates/intl_pluralrules/7.0.2/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "intl_pluralrules-7",
+    srcs = [":intl_pluralrules-7.0.2.crate"],
+    crate = "intl_pluralrules",
+    crate_root = "intl_pluralrules-7.0.2.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "intl_pluralrules",
+        "CARGO_MANIFEST_DIR": "intl_pluralrules-7.0.2.crate",
+        "CARGO_PKG_AUTHORS": "Kekoa Riggin <kekoariggin@gmail.com>:Zibi Braniecki <zbraniecki@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "Unicode Plural Rules categorizer for numeric input.",
+        "CARGO_PKG_NAME": "intl_pluralrules",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zbraniecki/pluralrules",
+        "CARGO_PKG_VERSION": "7.0.2",
+        "CARGO_PKG_VERSION_MAJOR": "7",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [":unic-langid-0.9"],
 )
 
 http_archive(
@@ -18111,43 +18137,6 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
-)
-
-http_archive(
-    name = "itertools-0.11.0.crate",
-    sha256 = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57",
-    size_bytes = 125074,
-    strip_prefix = "itertools-0.11.0",
-    urls = ["https://static.crates.io/crates/itertools/0.11.0/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "itertools-0.11",
-    srcs = [":itertools-0.11.0.crate"],
-    crate = "itertools",
-    crate_root = "itertools-0.11.0.crate/src/lib.rs",
-    edition = "2018",
-    env = {
-        "CARGO_CRATE_NAME": "itertools",
-        "CARGO_MANIFEST_DIR": "itertools-0.11.0.crate",
-        "CARGO_PKG_AUTHORS": "bluss",
-        "CARGO_PKG_DESCRIPTION": "Extra iterator adaptors, iterator methods, free functions, and macros.",
-        "CARGO_PKG_NAME": "itertools",
-        "CARGO_PKG_REPOSITORY": "https://github.com/rust-itertools/itertools",
-        "CARGO_PKG_VERSION": "0.11.0",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "11",
-        "CARGO_PKG_VERSION_PATCH": "0",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "use_alloc",
-        "use_std",
-    ],
-    visibility = [],
-    deps = [":either-1"],
 )
 
 alias(
@@ -23381,42 +23370,6 @@ buildscript_run(
         ),
     },
     version = "1.3.0",
-)
-
-http_archive(
-    name = "normpath-1.5.2.crate",
-    sha256 = "b11ce00d2594068e8a27c9146fdc5cf9f3ac38eb42c7cd34d05fea618873ac9f",
-    size_bytes = 22824,
-    strip_prefix = "normpath-1.5.2",
-    urls = ["https://static.crates.io/crates/normpath/1.5.2/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "normpath-1",
-    srcs = [":normpath-1.5.2.crate"],
-    crate = "normpath",
-    crate_root = "normpath-1.5.2.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "normpath",
-        "CARGO_MANIFEST_DIR": "normpath-1.5.2.crate",
-        "CARGO_PKG_AUTHORS": "dylni",
-        "CARGO_PKG_DESCRIPTION": "More reliable path manipulation ",
-        "CARGO_PKG_NAME": "normpath",
-        "CARGO_PKG_REPOSITORY": "https://github.com/dylni/normpath",
-        "CARGO_PKG_VERSION": "1.5.2",
-        "CARGO_PKG_VERSION_MAJOR": "1",
-        "CARGO_PKG_VERSION_MINOR": "5",
-        "CARGO_PKG_VERSION_PATCH": "2",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    platform = {
-        "windows-msvc": dict(
-            deps = [":windows-sys-0.61"],
-        ),
-    },
-    visibility = [],
 )
 
 alias(
@@ -29005,7 +28958,6 @@ cargo.rust_library(
     features = [
         "default",
         "proc-macro",
-        "span-locations",
     ],
     rustc_flags = ["@$(location :proc-macro2-1-build-script-run[rustc_flags])"],
     visibility = [],
@@ -29034,7 +28986,6 @@ cargo.rust_binary(
     features = [
         "default",
         "proc-macro",
-        "span-locations",
     ],
     visibility = [],
 )
@@ -29055,7 +29006,6 @@ buildscript_run(
     features = [
         "default",
         "proc-macro",
-        "span-locations",
     ],
     version = "1.0.107",
 )
@@ -29244,7 +29194,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":heck-0.5",
-        ":itertools-0.11",
+        ":itertools-0.14",
         ":log-0.4",
         ":multimap-0.10",
         ":petgraph-0.8",
@@ -29289,7 +29239,7 @@ cargo.rust_library(
     visibility = [],
     deps = [
         ":anyhow-1",
-        ":itertools-0.11",
+        ":itertools-0.14",
         ":proc-macro2-1",
         ":quote-1",
         ":syn-2",
@@ -33005,140 +32955,6 @@ cxx_library(
     visibility = [],
 )
 
-alias(
-    name = "rust-i18n",
-    actual = ":rust-i18n-3",
-    visibility = ["PUBLIC"],
-)
-
-http_archive(
-    name = "rust-i18n-3.1.5.crate",
-    sha256 = "fda2551fdfaf6cc5ee283adc15e157047b92ae6535cf80f6d4962d05717dc332",
-    size_bytes = 21074,
-    strip_prefix = "rust-i18n-3.1.5",
-    urls = ["https://static.crates.io/crates/rust-i18n/3.1.5/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "rust-i18n-3",
-    srcs = [":rust-i18n-3.1.5.crate"],
-    crate = "rust_i18n",
-    crate_root = "rust-i18n-3.1.5.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "rust_i18n",
-        "CARGO_MANIFEST_DIR": "rust-i18n-3.1.5.crate",
-        "CARGO_PKG_AUTHORS": "Jason Lee <huacnlee@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "Rust I18n is use Rust codegen for load YAML file storage translations on compile time, and give you a t! macro for simply get translation texts.",
-        "CARGO_PKG_NAME": "rust-i18n",
-        "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/rust-i18n",
-        "CARGO_PKG_VERSION": "3.1.5",
-        "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "5",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":once_cell-1",
-        ":rust-i18n-macro-3",
-        ":rust-i18n-support-3",
-        ":smallvec-1",
-    ],
-)
-
-http_archive(
-    name = "rust-i18n-macro-3.1.5.crate",
-    sha256 = "22baf7d7f56656d23ebe24f6bb57a5d40d2bce2a5f1c503e692b5b2fa450f965",
-    size_bytes = 16828,
-    strip_prefix = "rust-i18n-macro-3.1.5",
-    urls = ["https://static.crates.io/crates/rust-i18n-macro/3.1.5/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "rust-i18n-macro-3",
-    srcs = [":rust-i18n-macro-3.1.5.crate"],
-    crate = "rust_i18n_macro",
-    crate_root = "rust-i18n-macro-3.1.5.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "rust_i18n_macro",
-        "CARGO_MANIFEST_DIR": "rust-i18n-macro-3.1.5.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Macro for rust-i18n crate.",
-        "CARGO_PKG_NAME": "rust-i18n-macro",
-        "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/rust-i18n",
-        "CARGO_PKG_VERSION": "3.1.5",
-        "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "5",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    proc_macro = True,
-    visibility = [],
-    deps = [
-        ":glob-0.3",
-        ":once_cell-1",
-        ":proc-macro2-1",
-        ":quote-1",
-        ":rust-i18n-support-3",
-        ":serde-1",
-        ":serde_json-1",
-        ":serde_yaml-0.9",
-        ":syn-2",
-    ],
-)
-
-http_archive(
-    name = "rust-i18n-support-3.1.5.crate",
-    sha256 = "940ed4f52bba4c0152056d771e563b7133ad9607d4384af016a134b58d758f19",
-    size_bytes = 17137,
-    strip_prefix = "rust-i18n-support-3.1.5",
-    urls = ["https://static.crates.io/crates/rust-i18n-support/3.1.5/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "rust-i18n-support-3",
-    srcs = [":rust-i18n-support-3.1.5.crate"],
-    crate = "rust_i18n_support",
-    crate_root = "rust-i18n-support-3.1.5.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "rust_i18n_support",
-        "CARGO_MANIFEST_DIR": "rust-i18n-support-3.1.5.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Support for rust-i18n crate.",
-        "CARGO_PKG_NAME": "rust-i18n-support",
-        "CARGO_PKG_REPOSITORY": "https://github.com/longbridge/rust-i18n",
-        "CARGO_PKG_VERSION": "3.1.5",
-        "CARGO_PKG_VERSION_MAJOR": "3",
-        "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "5",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":arc-swap-1",
-        ":base62-2",
-        ":globwalk-0.8",
-        ":itertools-0.11",
-        ":lazy_static-1",
-        ":normpath-1",
-        ":once_cell-1",
-        ":proc-macro2-1",
-        ":regex-1",
-        ":serde-1",
-        ":serde_json-1",
-        ":serde_yaml-0.9",
-        ":siphasher-1",
-        ":toml-0.8",
-        ":triomphe-0.1",
-    ],
-)
-
 http_archive(
     name = "rustc-demangle-0.1.28.crate",
     sha256 = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb",
@@ -35336,39 +35152,6 @@ cargo.rust_library(
 )
 
 http_archive(
-    name = "serde_spanned-0.6.9.crate",
-    sha256 = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3",
-    size_bytes = 10210,
-    strip_prefix = "serde_spanned-0.6.9",
-    urls = ["https://static.crates.io/crates/serde_spanned/0.6.9/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "serde_spanned-0.6",
-    srcs = [":serde_spanned-0.6.9.crate"],
-    crate = "serde_spanned",
-    crate_root = "serde_spanned-0.6.9.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "serde_spanned",
-        "CARGO_MANIFEST_DIR": "serde_spanned-0.6.9.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Serde-compatible spanned Value",
-        "CARGO_PKG_NAME": "serde_spanned",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_VERSION": "0.6.9",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "6",
-        "CARGO_PKG_VERSION_PATCH": "9",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["serde"],
-    visibility = [],
-    deps = [":serde-1"],
-)
-
-http_archive(
     name = "serde_spanned-1.1.1.crate",
     sha256 = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26",
     size_bytes = 11025,
@@ -35439,44 +35222,6 @@ cargo.rust_library(
         ":itoa-1",
         ":ryu-1",
         ":serde-1",
-    ],
-)
-
-http_archive(
-    name = "serde_yaml-0.9.34+deprecated.crate",
-    sha256 = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47",
-    size_bytes = 65290,
-    strip_prefix = "serde_yaml-0.9.34+deprecated",
-    urls = ["https://static.crates.io/crates/serde_yaml/0.9.34+deprecated/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "serde_yaml-0.9",
-    srcs = [":serde_yaml-0.9.34+deprecated.crate"],
-    crate = "serde_yaml",
-    crate_root = "serde_yaml-0.9.34+deprecated.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "serde_yaml",
-        "CARGO_MANIFEST_DIR": "serde_yaml-0.9.34+deprecated.crate",
-        "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "YAML data format for Serde",
-        "CARGO_PKG_NAME": "serde_yaml",
-        "CARGO_PKG_REPOSITORY": "https://github.com/dtolnay/serde-yaml",
-        "CARGO_PKG_VERSION": "0.9.34+deprecated",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "9",
-        "CARGO_PKG_VERSION_PATCH": "34",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-    deps = [
-        ":indexmap-2",
-        ":itoa-1",
-        ":ryu-1",
-        ":serde-1",
-        ":unsafe-libyaml-0.2",
     ],
 )
 
@@ -40188,6 +39933,7 @@ cargo.rust_library(
     },
     features = [
         "alloc",
+        "default",
         "zerovec",
     ],
     visibility = [],
@@ -40758,48 +40504,6 @@ cargo.rust_library(
     ],
 )
 
-http_archive(
-    name = "toml-0.8.23.crate",
-    sha256 = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362",
-    size_bytes = 36050,
-    strip_prefix = "toml-0.8.23",
-    urls = ["https://static.crates.io/crates/toml/0.8.23/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "toml-0.8",
-    srcs = [":toml-0.8.23.crate"],
-    crate = "toml",
-    crate_root = "toml-0.8.23.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "toml",
-        "CARGO_MANIFEST_DIR": "toml-0.8.23.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A native Rust encoder and decoder of TOML-formatted files and streams. Provides implementations of the standard Serialize/Deserialize traits for TOML data to facilitate deserializing and serializing Rust structures. ",
-        "CARGO_PKG_NAME": "toml",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_VERSION": "0.8.23",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "8",
-        "CARGO_PKG_VERSION_PATCH": "23",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "display",
-        "parse",
-    ],
-    visibility = [],
-    deps = [
-        ":serde-1",
-        ":serde_spanned-0.6",
-        ":toml_datetime-0.6",
-        ":toml_edit-0.22",
-    ],
-)
-
 alias(
     name = "toml",
     actual = ":toml-1",
@@ -40850,39 +40554,6 @@ cargo.rust_library(
         ":toml_writer-1",
         ":winnow-1",
     ],
-)
-
-http_archive(
-    name = "toml_datetime-0.6.11.crate",
-    sha256 = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c",
-    size_bytes = 16125,
-    strip_prefix = "toml_datetime-0.6.11",
-    urls = ["https://static.crates.io/crates/toml_datetime/0.6.11/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "toml_datetime-0.6",
-    srcs = [":toml_datetime-0.6.11.crate"],
-    crate = "toml_datetime",
-    crate_root = "toml_datetime-0.6.11.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "toml_datetime",
-        "CARGO_MANIFEST_DIR": "toml_datetime-0.6.11.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A TOML-compatible datetime type",
-        "CARGO_PKG_NAME": "toml_datetime",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_VERSION": "0.6.11",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "6",
-        "CARGO_PKG_VERSION_PATCH": "11",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = ["serde"],
-    visibility = [],
-    deps = [":serde-1"],
 )
 
 http_archive(
@@ -40957,50 +40628,6 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [":serde_core-1"],
-)
-
-http_archive(
-    name = "toml_edit-0.22.27.crate",
-    sha256 = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a",
-    size_bytes = 78602,
-    strip_prefix = "toml_edit-0.22.27",
-    urls = ["https://static.crates.io/crates/toml_edit/0.22.27/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "toml_edit-0.22",
-    srcs = [":toml_edit-0.22.27.crate"],
-    crate = "toml_edit",
-    crate_root = "toml_edit-0.22.27.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "toml_edit",
-        "CARGO_MANIFEST_DIR": "toml_edit-0.22.27.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "Yet another format-preserving TOML parser.",
-        "CARGO_PKG_NAME": "toml_edit",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_VERSION": "0.22.27",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "22",
-        "CARGO_PKG_VERSION_PATCH": "27",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "display",
-        "parse",
-        "serde",
-    ],
-    visibility = [],
-    deps = [
-        ":indexmap-2",
-        ":serde-1",
-        ":serde_spanned-0.6",
-        ":toml_datetime-0.6",
-        ":toml_write-0.1",
-        ":winnow-0.7",
-    ],
 )
 
 http_archive(
@@ -41114,42 +40741,6 @@ cargo.rust_library(
     ],
     visibility = [],
     deps = [":winnow-1"],
-)
-
-http_archive(
-    name = "toml_write-0.1.2.crate",
-    sha256 = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801",
-    size_bytes = 15660,
-    strip_prefix = "toml_write-0.1.2",
-    urls = ["https://static.crates.io/crates/toml_write/0.1.2/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "toml_write-0.1",
-    srcs = [":toml_write-0.1.2.crate"],
-    crate = "toml_write",
-    crate_root = "toml_write-0.1.2.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "toml_write",
-        "CARGO_MANIFEST_DIR": "toml_write-0.1.2.crate",
-        "CARGO_PKG_AUTHORS": "",
-        "CARGO_PKG_DESCRIPTION": "A low-level interface for writing out TOML ",
-        "CARGO_PKG_NAME": "toml_write",
-        "CARGO_PKG_REPOSITORY": "https://github.com/toml-rs/toml",
-        "CARGO_PKG_VERSION": "0.1.2",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "2",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "alloc",
-        "default",
-        "std",
-    ],
-    visibility = [],
 )
 
 http_archive(
@@ -41798,19 +41389,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "16",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "arc-swap",
-        "default",
-        "serde",
-        "stable_deref_trait",
-        "std",
-    ],
     visibility = [],
-    deps = [
-        ":arc-swap-1",
-        ":serde-1",
-        ":stable_deref_trait-1",
-    ],
 )
 
 http_archive(
@@ -42367,6 +41946,77 @@ cargo.rust_library(
         ":stfu8-0.2",
         ":thiserror-1",
     ],
+)
+
+alias(
+    name = "unic-langid",
+    actual = ":unic-langid-0.9",
+    visibility = ["PUBLIC"],
+)
+
+http_archive(
+    name = "unic-langid-0.9.6.crate",
+    sha256 = "a28ba52c9b05311f4f6e62d5d9d46f094bd6e84cb8df7b3ef952748d752a7d05",
+    size_bytes = 9031,
+    strip_prefix = "unic-langid-0.9.6",
+    urls = ["https://static.crates.io/crates/unic-langid/0.9.6/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "unic-langid-0.9",
+    srcs = [":unic-langid-0.9.6.crate"],
+    crate = "unic_langid",
+    crate_root = "unic-langid-0.9.6.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "unic_langid",
+        "CARGO_MANIFEST_DIR": "unic-langid-0.9.6.crate",
+        "CARGO_PKG_AUTHORS": "Zibi Braniecki <gandalf@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "API for managing Unicode Language Identifiers",
+        "CARGO_PKG_NAME": "unic-langid",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zbraniecki/unic-locale",
+        "CARGO_PKG_VERSION": "0.9.6",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "6",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
+    deps = [":unic-langid-impl-0.9"],
+)
+
+http_archive(
+    name = "unic-langid-impl-0.9.6.crate",
+    sha256 = "dce1bf08044d4b7a94028c93786f8566047edc11110595914de93362559bc658",
+    size_bytes = 90020,
+    strip_prefix = "unic-langid-impl-0.9.6",
+    urls = ["https://static.crates.io/crates/unic-langid-impl/0.9.6/download"],
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "unic-langid-impl-0.9",
+    srcs = [":unic-langid-impl-0.9.6.crate"],
+    crate = "unic_langid_impl",
+    crate_root = "unic-langid-impl-0.9.6.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "unic_langid_impl",
+        "CARGO_MANIFEST_DIR": "unic-langid-impl-0.9.6.crate",
+        "CARGO_PKG_AUTHORS": "Zibi Braniecki <gandalf@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "API for managing Unicode Language Identifiers",
+        "CARGO_PKG_NAME": "unic-langid-impl",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zbraniecki/unic-locale",
+        "CARGO_PKG_VERSION": "0.9.6",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "6",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [":tinystr-0.8"],
 )
 
 alias(
@@ -42941,37 +42591,6 @@ cargo.rust_library(
         ":crypto-common-0.1",
         ":subtle-2",
     ],
-)
-
-http_archive(
-    name = "unsafe-libyaml-0.2.11.crate",
-    sha256 = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861",
-    size_bytes = 62101,
-    strip_prefix = "unsafe-libyaml-0.2.11",
-    urls = ["https://static.crates.io/crates/unsafe-libyaml/0.2.11/download"],
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "unsafe-libyaml-0.2",
-    srcs = [":unsafe-libyaml-0.2.11.crate"],
-    crate = "unsafe_libyaml",
-    crate_root = "unsafe-libyaml-0.2.11.crate/src/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "unsafe_libyaml",
-        "CARGO_MANIFEST_DIR": "unsafe-libyaml-0.2.11.crate",
-        "CARGO_PKG_AUTHORS": "David Tolnay <dtolnay@gmail.com>",
-        "CARGO_PKG_DESCRIPTION": "libyaml transpiled to rust by c2rust",
-        "CARGO_PKG_NAME": "unsafe-libyaml",
-        "CARGO_PKG_REPOSITORY": "https://github.com/dtolnay/unsafe-libyaml",
-        "CARGO_PKG_VERSION": "0.2.11",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "2",
-        "CARGO_PKG_VERSION_PATCH": "11",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
 )
 
 http_archive(
