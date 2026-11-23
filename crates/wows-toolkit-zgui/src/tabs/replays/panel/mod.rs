@@ -28,9 +28,11 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use jiff::Timestamp;
 use landaire_ui::FadeInProps;
 use landaire_ui::LoadingLineProps;
 use landaire_ui::TableSkeletonProps;
+use landaire_ui::TippedProps;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
@@ -53,6 +55,8 @@ use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::model::battle_title;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
+use wows_toolkit_viewmodel::formatting::relative_age_text;
+use wows_toolkit_viewmodel::listing_row::listed_date_time;
 use wows_toolkit_viewmodel::personal_rating::BattleRating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
@@ -1188,11 +1192,11 @@ fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
         let names = names.get();
         loaded.with(|loaded| {
             let loaded = loaded.as_ref()?;
-            let mut context = loaded.model.with(|model| model.context.clone());
+            let (mut context, played_at) = loaded.model.with(|model| (model.context.clone(), model.timestamp));
             if names.is_pseudonym() {
                 context.anonymize();
             }
-            Some(context)
+            Some(MatchLine { context, played_at })
         })
     };
     let figures = move || {
@@ -1223,7 +1227,7 @@ fn HeaderBand(header: HeaderCx, run_count: bool) -> impl IntoView {
     view! {
         column(class = "wt-rp-band", attr:data-result = result) {
             HeaderRow(header = header)
-            MatchContextSlot(context = Signal::derive_local(context))
+            MatchContextSlot(line = Signal::derive_local(context))
             row(class = "wt-rp-figures") {{figures}}
         }
     }
@@ -1309,10 +1313,20 @@ fn OutcomeBadge(result: BattleResult) -> impl IntoView {
     }
 }
 
+/// What the line under the header says: which match, and when it was played.
+#[derive(Clone, Debug, PartialEq)]
+struct MatchLine {
+    context: MatchContext,
+    played_at: Timestamp,
+}
+
 /// The match line, once a battle is read.
 #[component]
-fn MatchContextSlot(#[prop(into)] context: Signal<Option<MatchContext>, LocalStorage>) -> impl IntoView {
-    move || context.get().map(|context| AnyView::new(view! { MatchContextLine(context = context) }))
+fn MatchContextSlot(#[prop(into)] line: Signal<Option<MatchLine>, LocalStorage>) -> impl IntoView {
+    move || {
+        line.get()
+            .map(|line| AnyView::new(view! { MatchContextLine(context = line.context, played_at = line.played_at) }))
+    }
 }
 
 /// Spawns `work` under `owner`, so it outlives the menu or effect that started it and ends with
@@ -1366,10 +1380,11 @@ fn follow<T: 'static>(effect: impl FnMut(Option<T>) -> T + 'static) {
 /// What the egui line puts between its fields.
 const SEPARATOR: &str = "-";
 
-/// Who was recording and which match, separated as the egui line separates them. Wraps rather
-/// than running off a narrow panel; a separator wraps with the field after it.
+/// Who was recording, which match and when it was played, separated as the egui line separates
+/// them. The date reads as the listing's rows write it, and its hover says how long ago that was.
+/// Wraps rather than running off a narrow panel; a separator wraps with the field after it.
 #[component]
-fn MatchContextLine(context: MatchContext) -> impl IntoView {
+fn MatchContextLine(context: MatchContext, played_at: Timestamp) -> impl IntoView {
     let who = match context.clan_tag.as_ref() {
         Some(clan) => format!("{clan} {}", context.player_name),
         None => context.player_name.clone(),
@@ -1378,7 +1393,8 @@ fn MatchContextLine(context: MatchContext) -> impl IntoView {
         .into_iter()
         .filter(|text| !text.is_empty())
         .collect();
-    let items: Vec<AnyView> = fields
+    let date_separator = (!fields.is_empty()).then_some(SEPARATOR);
+    let mut items: Vec<AnyView> = fields
         .into_iter()
         .enumerate()
         .map(|(at, text)| {
@@ -1391,6 +1407,19 @@ fn MatchContextLine(context: MatchContext) -> impl IntoView {
             })
         })
         .collect();
+    // Derived rather than stored, so the hover reads the age as it is drawn, not as the panel was.
+    let age = Signal::derive_local(move || {
+        t!("ui.replay.match_age", age = relative_age_text(played_at, Timestamp::now())).into_owned()
+    });
+    items.push(AnyView::new(view! {
+        row(class = "wt-rp-context__item") {
+            {date_separator.map(|separator| view! { text {{separator}} })}
+            Tipped(tip = age) {
+                text(class = "wt-rp-context__date") {{listed_date_time(played_at)}}
+            }
+        }
+    }));
+
     view! { row(class = "wt-rp-context", attr:data-testid = "replay-match-context") {{items}} }
 }
 

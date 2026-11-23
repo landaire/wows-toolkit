@@ -7,6 +7,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use jiff::SignedDuration;
+use jiff::Timestamp;
 use landaire_ui::test_support::Drawing;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
@@ -30,6 +32,8 @@ use wows_toolkit_replay_data::test_support::FIXTURE_PR_SHIP_ID;
 use wows_toolkit_replay_data::test_support::base_row;
 use wows_toolkit_replay_data::test_support::fixture_empty_battle_report;
 use wows_toolkit_replay_data::test_support::fixture_personal_rating_data;
+use wows_toolkit_viewmodel::formatting::relative_age_text;
+use wows_toolkit_viewmodel::listing_row::listed_date_time;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::rating_breakdown::MatchContributionWithheld;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
@@ -257,6 +261,25 @@ fn the_header_names_the_match_and_flags_missing_results() {
     let Opened { window } =
         open(Opening { seed: Some(loaded(model_at_expected_values(), true)), ..Opening::default() });
     assert!(window.by_test_id("replay-incomplete-results").is_none());
+}
+
+/// The match line ends in the battle's date as the listing writes it, and resting on the date
+/// says how long ago the battle was played.
+#[test]
+fn the_match_line_dates_the_battle_and_its_hover_says_how_long_ago() {
+    let played_at = Timestamp::now() - SignedDuration::from_hours(75);
+    let model = ReplayReportModel { timestamp: played_at, ..model_at_expected_values() };
+    let Opened { mut window } = open(Opening { seed: Some(loaded(model, true)), ..Opening::default() });
+
+    assert_eq!(window.texts_by_class("wt-rp-context__date"), [listed_date_time(played_at)]);
+    let line = window.texts_by_class("wt-rp-context").concat();
+    assert!(line.ends_with(&listed_date_time(played_at)), "the date ends the line: {line}");
+
+    let date = window.by_class("wt-rp-context__date").expect("the date is drawn");
+    window.hover(date).expect("the date has a box");
+    window.advance(landaire_ui::TOOLTIP_DELAY + Duration::from_millis(150));
+    let age = relative_age_text(played_at, Timestamp::now());
+    assert_eq!(window.texts_by_class("lui-tooltip"), [t!("ui.replay.match_age", age = age).into_owned()]);
 }
 
 /// The Replays tab's table slot draws the battle's player table, whose rows open the expanded

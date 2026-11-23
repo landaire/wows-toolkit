@@ -346,6 +346,8 @@ pub struct BrowserControl {
     history_dropped: StoredValue<Vec<PathBuf>, LocalStorage>,
     /// The grouping every listing shows, as the settings keep it.
     pub(super) grouping: RwSignal<ReplayGrouping, LocalStorage>,
+    /// The replay whose open tab's title the pointer is on, whose rows are marked.
+    pointed: RwSignal<Option<PathBuf>, LocalStorage>,
     next_id: StoredValue<u64, LocalStorage>,
     /// The number the next tab of dropped replays is named by.
     next_drop: StoredValue<DropNumber, LocalStorage>,
@@ -384,6 +386,7 @@ impl BrowserControl {
             history_saved: RwSignal::new_local(SavedList::NotRead),
             history_dropped: StoredValue::new_local(Vec::new()),
             grouping: RwSignal::new_local(ReplayGrouping::default()),
+            pointed: RwSignal::new_local(None),
             next_id: StoredValue::new_local(1),
             next_drop: StoredValue::new_local(DropNumber::FIRST),
             timers: StoredValue::new_local(Timers::current()),
@@ -550,6 +553,23 @@ impl BrowserControl {
         for listing in listings {
             listing.mark_opened(path);
         }
+    }
+
+    /// Marks `path`'s rows as the replay whose open tab's title the pointer is on.
+    pub fn point_at(self, path: PathBuf) {
+        self.pointed.set(Some(path));
+    }
+
+    /// The pointer left the title of `path`'s tab. A title entered since keeps its mark.
+    pub fn unpoint(self, path: &Path) {
+        if self.pointed.with_untracked(|pointed| pointed.as_deref() == Some(path)) {
+            self.pointed.set(None);
+        }
+    }
+
+    /// Whether `path` is the replay whose open tab's title the pointer is on. Reactive.
+    pub fn is_pointed(self, path: &Path) -> bool {
+        self.pointed.with(|pointed| pointed.as_deref() == Some(path))
     }
 
     /// Whether the install's listing holds `path`.

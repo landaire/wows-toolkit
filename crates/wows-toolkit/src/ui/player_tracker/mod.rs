@@ -19,11 +19,11 @@ pub(crate) use model::encounter_severity_color;
 pub(crate) use model::expanded_rows;
 pub(crate) use model::row_offset;
 pub(crate) use model::sort_header_label;
+pub(crate) use wows_toolkit_viewmodel::formatting::relative_age_text;
 pub(crate) use wows_toolkit_viewmodel::player_tracker::history::encounters_in_range;
 pub(crate) use wows_toolkit_viewmodel::player_tracker::history::exact_timestamp_text;
 pub(crate) use wows_toolkit_viewmodel::player_tracker::history::last_seen_text;
 pub(crate) use wows_toolkit_viewmodel::player_tracker::history::last_seen_timestamp_text;
-pub(crate) use wows_toolkit_viewmodel::player_tracker::history::relative_age_text;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;

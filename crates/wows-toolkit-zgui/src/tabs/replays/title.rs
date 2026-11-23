@@ -1,6 +1,9 @@
-//! A replay tab's title: a spinner while the battle is read, then the
-//! recording player's flag and ship class, pointing right, beside "{ship} - {map}".
+//! A replay tab's title: a spinner while the battle is read, then the recording player's flag and
+//! ship class, pointing right, beside "{ship} - {map}". It reports the pointer entering and leaving
+//! it, so the listing can mark the replay's rows.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use rust_i18n::t;
@@ -8,11 +11,13 @@ use wows_toolkit_replay_data::load::LoadedGameData;
 use wowsunpack::vfs::VfsPath;
 use zgui::component;
 use zgui::css;
+use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
+use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::Set;
@@ -21,7 +26,9 @@ use zgui::task::blocking;
 use zgui::task::spawn_local;
 use zgui::view;
 use zgui::view::AnyView;
+use zgui::view::EventCx;
 use zgui::view::IntoView;
+use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::PropValue;
 use zgui_image::ImageBytes;
@@ -50,12 +57,23 @@ struct ShipArt {
     class: Option<String>,
 }
 
+/// Where the pointer is, as a replay tab's title reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TitlePointer {
+    Entered,
+    Left,
+}
+
 #[component]
 pub fn ReplayTabTitle(
     #[prop(into)] title: Signal<PanelTitle, LocalStorage>,
     /// The build the battle was read through. Its art comes before the newest build's.
     #[prop(into)]
     battle_build: Signal<Option<Arc<LoadedGameData>>, LocalStorage>,
+    /// Hears the pointer enter and leave the title. A title taken down with the pointer on it
+    /// reports it left.
+    #[prop(optional)]
+    on_pointer: Option<UnsyncCallback<TitlePointer>>,
 ) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let services = Services::current();
@@ -107,9 +125,37 @@ pub fn ReplayTabTitle(
             })
         }
     };
+    let inside = Rc::new(Cell::new(false));
+    let report = {
+        let inside = Rc::clone(&inside);
+        move |pointer: TitlePointer| {
+            inside.set(pointer == TitlePointer::Entered);
+            if let Some(on_pointer) = on_pointer {
+                on_pointer.run(pointer);
+            }
+        }
+    };
+    let enter = {
+        let report = report.clone();
+        move |_: &mut EventCx<'_, events::PointerEnter>| report(TitlePointer::Entered)
+    };
+    let leave = {
+        let report = report.clone();
+        move |_: &mut EventCx<'_, events::PointerLeave>| report(TitlePointer::Left)
+    };
+    on_cleanup_local(move || {
+        if inside.get() {
+            report(TitlePointer::Left);
+        }
+    });
 
     view! {
-        row(class = "wt-replay-title", attr:data-testid = "replay-tab-title") {{body}}
+        row(
+            class = "wt-replay-title",
+            attr:data-testid = "replay-tab-title",
+            on:pointer_enter = enter,
+            on:pointer_leave = leave
+        ) {{body}}
     }
 }
 

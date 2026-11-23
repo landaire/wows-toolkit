@@ -1,5 +1,9 @@
-//! Number formatting, shared so a figure reads the same in both front ends.
+//! Number and age formatting, shared so a figure reads the same in both front ends.
 
+use jiff::Timestamp;
+use jiff::Unit;
+use jiff::ZonedDifference;
+use jiff::tz::TimeZone;
 use language_tags::LanguageTag;
 use thousands::Separable;
 
@@ -32,6 +36,22 @@ pub fn byte_size(bytes: u64) -> String {
         unit += 1;
     }
     if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
+}
+
+/// How long before `now` a past `timestamp` was, to the minute, in jiff's friendly span format.
+pub fn relative_age_text(timestamp: Timestamp, now: Timestamp) -> String {
+    let timestamp = timestamp.to_zoned(TimeZone::system());
+    let now = now.to_zoned(TimeZone::system());
+    let delta = now
+        .since(
+            ZonedDifference::new(&timestamp)
+                .smallest(Unit::Minute)
+                .largest(Unit::Year)
+                .mode(jiff::RoundMode::HalfExpand),
+        )
+        .expect("failed to calculate the age of a timestamp");
+
+    format!("{delta:#}")
 }
 
 #[cfg(test)]

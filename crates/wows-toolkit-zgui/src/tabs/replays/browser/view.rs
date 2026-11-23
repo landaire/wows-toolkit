@@ -87,6 +87,7 @@ use crate::preview::card::HoverPreviewCardProps;
 use crate::services::GameDataState;
 use crate::services::Services;
 use crate::shell::Shell;
+use crate::tabs::replays::browser::BrowserControl;
 use crate::tabs::replays::browser::BrowserEvents;
 use crate::tabs::replays::browser::ReplayBrowserEvent;
 use crate::tabs::replays::browser::controls;
@@ -153,6 +154,7 @@ const CSS: &str = css!(
         from { background-color: color-mix(in srgb, var(--lui-color-accent) 30%, transparent); }
         to { background-color: transparent; }
     }
+    .wt-row-pointed { background-color: color-mix(in srgb, var(--lui-color-accent) 16%, transparent); }
     .wt-row__edge { flex: none; width: 3px; align-self: stretch; }
     .wt-row__edge--win { background-color: var(--wt-color-win); }
     .wt-row__edge--loss { background-color: var(--wt-color-loss); }
@@ -262,6 +264,14 @@ enum Shown {
     /// install says, when it says one.
     GameData(Option<String>),
     Rows,
+}
+
+/// The handles a replay row reads beyond its own facts.
+#[derive(Clone, Copy)]
+struct LeafSources {
+    listing: Listing,
+    control: BrowserControl,
+    thumbnails: Thumbnails,
 }
 
 /// One listing: its rows once it has some, what it is doing until then.
@@ -400,6 +410,7 @@ fn ListingRows(
     // Every element is shown until the settings are read, as the setting's own default is.
     let elements =
         Memo::new(move |_| services.settings.read(|settings| settings.replay.listing_row_elements).unwrap_or_default());
+    let control = events.control;
     let activate_events = events.clone();
     // Enter or a double-click opens a replay, and opens or closes a group, as a click on it does.
     let on_activate = UnsyncCallback::new(move |key: NodeKey| match key {
@@ -419,7 +430,7 @@ fn ListingRows(
     view! {
         Tree(
             model = model,
-            row = move |row: TreeRow<NodeKey>| row_view(listing, preview, thumbnails, elements, row),
+            row = move |row: TreeRow<NodeKey>| row_view(listing, control, preview, thumbnails, elements, row),
             row_height = ROW_HEIGHT,
             expanded = listing.expanded,
             selection = listing.selection,
@@ -440,6 +451,7 @@ fn ListingRows(
 
 fn row_view(
     listing: Listing,
+    control: BrowserControl,
     preview: HoverPreview,
     thumbnails: Thumbnails,
     elements: Memo<ListingRowElements>,
@@ -472,7 +484,8 @@ fn row_view(
             let content = move || {
                 let leaf = listing.tree.with(|tree| tree.leaf(&leaf_path).cloned())?;
                 let elements = elements.get();
-                Some(leaf_view(listing, thumbnails, leaf_path.clone(), leaf, elements, depth, glowed))
+                let sources = LeafSources { listing, control, thumbnails };
+                Some(leaf_view(sources, leaf_path.clone(), leaf, elements, depth, glowed))
             };
             let enter = move |_: &mut EventCx<'_, events::PointerEnter>| {
                 let map_name = listing.tree.with_untracked(|tree| tree.leaf(&path).map(|leaf| leaf.map_name.clone()));
@@ -516,10 +529,10 @@ fn row_view(
 
 /// What a replay row draws: the outcome edge, the map, the identity line with its tags and the
 /// stats line, less the elements the reader hides. The map is set in by `depth`, since the tree
-/// indents nothing. `glowed` is how long the row had glowed when it was made.
+/// indents nothing. `glowed` is how long the row had glowed when it was made. The row is tinted
+/// while the pointer is on the title of its replay's open tab.
 fn leaf_view(
-    listing: Listing,
-    thumbnails: Thumbnails,
+    sources: LeafSources,
     path: PathBuf,
     leaf: LeafRow,
     elements: ListingRowElements,
@@ -529,15 +542,18 @@ fn leaf_view(
     // Under a group the map starts 24px in from the edge, as the other front end's does.
     const LEVEL_INSET: f32 = 17.0;
 
+    let LeafSources { listing, control, thumbnails } = sources;
+
     let edge = match leaf.outcome {
         MatchOutcome::Win => "wt-row__edge wt-row__edge--win",
         MatchOutcome::Loss => "wt-row__edge wt-row__edge--loss",
         MatchOutcome::Draw => "wt-row__edge wt-row__edge--draw",
         MatchOutcome::Unknown => "wt-row__edge",
     };
-    let (tagged_path, glow_path) = (path.clone(), path.clone());
+    let (tagged_path, glow_path, pointed_path) = (path.clone(), path.clone(), path.clone());
     let tagged = Signal::derive_local(move || listing.arrivals.with(|arrivals| arrivals.contains(&tagged_path)));
     let glowing = Signal::derive_local(move || listing.glowing.with(|glowing| glowing.contains(&glow_path)));
+    let pointed = Signal::derive_local(move || control.is_pointed(&pointed_path));
     let glow_delay = glowed.map(|elapsed| format!("-{}ms", elapsed.as_millis()));
     let space = leaf.map_name.clone();
     let thumb = move || match thumbnails.get(&space) {
@@ -642,6 +658,7 @@ fn leaf_view(
         row(
             class = "wt-row",
             class:wt-row-arrived = glowing,
+            class:wt-row-pointed = pointed,
             style:animation-delay = move || glow_delay.clone(),
             attr:data-testid = format!("replay-row-{}", path.display())
         ) {

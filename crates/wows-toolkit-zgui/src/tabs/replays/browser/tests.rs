@@ -68,6 +68,8 @@ use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::tabs::replays::BUILT;
+use crate::tabs::replays::workspace::Docked;
+use crate::tabs::replays::workspace::OpenTarget;
 use crate::tabs::replays::workspace::ReplayWorkspace;
 use crate::theme::rating_band_name;
 
@@ -673,6 +675,52 @@ fn an_arrival_opened_from_elsewhere_is_not_tagged() {
     assert_eq!(workspace().open_replays(), std::slice::from_ref(&landed.path));
     assert!(!landed.is_new(), "opening it takes the tag off");
     assert!(window.by_test_id("replay-row-new").is_none());
+}
+
+/// Resting on an open replay's tab title marks that replay's row in the listing, and no other,
+/// until the pointer leaves the title.
+#[test]
+fn resting_on_a_replay_tab_title_marks_its_row() {
+    let (mut window, control) = open();
+    control.adopt_pinned_folders(PinnedFolders::default());
+    let (_dir, root) = replay_dir(2);
+    control.open_folder(root.clone());
+    settle_in_real_time(&mut window);
+    let [first, second] = [root.join(FIXTURES[0]), root.join(FIXTURES[1])];
+    for path in [&first, &second] {
+        workspace().open(path.clone(), OpenTarget::NewTab).expect("the replay opens a tab");
+    }
+    settle_in_real_time(&mut window);
+    assert!(window.all_by_class("wt-row-pointed").is_empty(), "no row is marked before a title is pointed at");
+
+    // The tabs run left to right in the order the replays opened.
+    let mut titles = window.all_by_attribute("data-testid", "replay-tab-title");
+    titles.sort_by(|left, right| {
+        let x = |title: &Element| window.bounds(*title).expect("the title has a box").origin.x.0;
+        x(left).total_cmp(&x(right))
+    });
+    let [first_title, second_title] = titles[..] else { panic!("two replay tabs are open: {titles:?}") };
+
+    window.hover(first_title).expect("the title has a box");
+    window.advance(Duration::from_millis(50));
+    assert_eq!(window.all_by_class("wt-row-pointed"), [row(&window, &first)], "the first replay's row is marked");
+
+    window.hover(second_title).expect("the title has a box");
+    window.advance(Duration::from_millis(50));
+    assert_eq!(window.all_by_class("wt-row-pointed"), [row(&window, &second)], "the mark follows the pointer");
+
+    let away = row(&window, &first);
+    window.hover(away).expect("the row has a box");
+    window.advance(Duration::from_millis(50));
+    assert!(window.all_by_class("wt-row-pointed").is_empty(), "leaving the title clears the mark");
+
+    // The last tab, so no other slides under the pointer as it goes.
+    window.hover(second_title).expect("the title has a box");
+    window.advance(Duration::from_millis(50));
+    assert_eq!(window.all_by_class("wt-row-pointed"), [row(&window, &second)]);
+    workspace().remove(&Docked::Replay(second.clone()));
+    window.advance(Duration::from_millis(50));
+    assert!(window.all_by_class("wt-row-pointed").is_empty(), "closing the pointed tab clears the mark");
 }
 
 /// Enter on a group header opens or closes the group, as a click on it does.

@@ -56,6 +56,7 @@ use crate::tabs::replays::panel::TabOpening;
 use crate::tabs::replays::player_table_slot;
 use crate::tabs::replays::session_stats;
 use crate::tabs::replays::title::ReplayTabTitleProps;
+use crate::tabs::replays::title::TitlePointer;
 use crate::windows::renderer::session::ArmorRequest;
 use crate::windows::renderer::session::RenderRequest;
 use crate::windows::renderer::session::RendererSession;
@@ -216,14 +217,25 @@ impl ReplayWorkspace {
                     _ => AnyView::new(()),
                 },
             )
-            .with_title(move |id| match Docked::of(id).and_then(|docked| self.control_of(&docked)) {
-                Some(control) => AnyView::new(view! {
-                    ReplayTabTitle(
-                        title = Signal::derive_local(move || control.title()),
-                        battle_build = Signal::derive_local(move || control.battle_build())
-                    )
-                }),
-                None => AnyView::new(()),
+            .with_title(move |id| match Docked::of(id) {
+                Some(Docked::Replay(path)) => {
+                    let Some(control) = self.control_of(&Docked::Replay(path.clone())) else {
+                        return AnyView::new(());
+                    };
+                    let browser = self.browser;
+                    let on_pointer = UnsyncCallback::new(move |pointer: TitlePointer| match pointer {
+                        TitlePointer::Entered => browser.point_at(path.clone()),
+                        TitlePointer::Left => browser.unpoint(&path),
+                    });
+                    AnyView::new(view! {
+                        ReplayTabTitle(
+                            title = Signal::derive_local(move || control.title()),
+                            battle_build = Signal::derive_local(move || control.battle_build()),
+                            on_pointer = on_pointer
+                        )
+                    })
+                }
+                _ => AnyView::new(()),
             }),
         );
         dock.register(

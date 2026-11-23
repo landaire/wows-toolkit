@@ -5,27 +5,10 @@
 //! than twice.
 
 use jiff::Timestamp;
-use jiff::Unit;
-use jiff::ZonedDifference;
 use jiff::tz::TimeZone;
 
 use super::tracked::TrackedPlayer;
-
-/// Human-readable "how long ago" for a past timestamp.
-pub fn relative_age_text(timestamp: Timestamp, now: Timestamp) -> String {
-    let timestamp = timestamp.to_zoned(TimeZone::system());
-    let now = now.to_zoned(TimeZone::system());
-    let delta = now
-        .since(
-            ZonedDifference::new(&timestamp)
-                .smallest(Unit::Minute)
-                .largest(Unit::Year)
-                .mode(jiff::RoundMode::HalfExpand),
-        )
-        .expect("failed to calculate the age of an encounter timestamp");
-
-    format!("{delta:#}")
-}
+use crate::formatting::relative_age_text;
 
 /// Absolute local-time rendering of a timestamp, for the hover behind a
 /// relative age.

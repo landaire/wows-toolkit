@@ -5,6 +5,8 @@
 //! Shared so the listing reads the same in both front ends; each draws the
 //! assembled lines with its own text layout.
 
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use rust_i18n::t;
 use wows_core::pseudonym;
 use wows_core::rating_scope::RatingScope;
@@ -136,6 +138,17 @@ fn strip_seconds(time: &str) -> &str {
     }
 
     rest
+}
+
+/// When a battle started, as a listing row outside a date group writes it:
+/// `dd.mm.yyyy HH:MM` local time. Written in the replay header's format first,
+/// so the seconds go as they do from the row of the same replay.
+pub fn listed_date_time(at: Timestamp) -> String {
+    const HEADER_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
+
+    let header = at.to_zoned(TimeZone::system()).strftime(HEADER_DATE_FORMAT).to_string();
+
+    strip_seconds(&header).to_owned()
 }
 
 /// Stats read off a fully parsed replay held in memory.
@@ -821,6 +834,19 @@ mod tests {
         assert_eq!(strip_seconds(""), "");
         // No space and no colons at all: nothing for the helper to find.
         assert_eq!(strip_seconds("not_a_timestamp"), "not_a_timestamp");
+    }
+
+    /// A battle's start written from its timestamp reads as the listing row
+    /// of the same replay writes it from the header.
+    #[test]
+    fn a_listed_date_reads_as_the_rows_timestamp() {
+        let started = jiff::civil::date(2026, 7, 28)
+            .at(14, 23, 5, 0)
+            .to_zoned(TimeZone::system())
+            .expect("the time exists in the local zone")
+            .timestamp();
+
+        assert_eq!(listed_date_time(started), timestamp_for(&identity(), ReplayGrouping::None));
     }
 
     #[test]
