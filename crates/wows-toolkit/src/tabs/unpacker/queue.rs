@@ -101,11 +101,7 @@ pub fn QueuePanel(model: UnpackerModel) -> impl IntoView {
     let busy = Signal::derive_local(move || model.extract.with(|state| state.is_busy()));
     let has_output_dir = Signal::derive_local(move || !model.output_dir.with(String::is_empty));
     let decode = Signal::derive_local(move || Checked::from(model.prototypes.get() == PrototypeOutput::DecodeToJson));
-    let extract_label = move || match count.get() {
-        0 => t!("ui-unpacker-extract").into_owned(),
-        1 => t!("ui-unpacker-extract_one").into_owned(),
-        count => t!("ui-unpacker-extract_many", count = count).into_owned(),
-    };
+    let extract_label = move || t!("ui-unpacker-extract", count = count.get()).into_owned();
     let status = move || model.extract.with(|state| state.status()).unwrap_or_default();
     let fraction = Signal::derive_local(move || {
         model.extract.with(|state| state.progress().map(|progress| f64::from(progress.fraction()) * 100.0))

@@ -752,10 +752,7 @@ fn SettingsBody(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> impl 
 
     let count = move || {
         locale.track();
-        match rows.get().len() {
-            1 => t!("ui-settings-panel-count_one").into_owned(),
-            count => t!("ui-settings-panel-count", count = count).into_owned(),
-        }
+        t!("ui-settings-panel-count", count = rows.get().len()).into_owned()
     };
 
     view! {

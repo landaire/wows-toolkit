@@ -11,20 +11,16 @@ dialog-select_language = Обрати мову
 dialog-machine_translation_warning = Більшість перекладів було згенеровано машинним перекладом і можуть бути неточними.
 
 ## ui.tabs
-ui-tabs-launcher = Запуск гри
 ui-tabs-unpacker = Розпакувальник ресурсів
 ui-tabs-settings = Налаштування
 ui-tabs-replay_parser = Інспектор реплеїв
-ui-tabs-replay_directory = Каталог реплеїв
 ui-tabs-player_tracker = Відстеження гравців
-ui-tabs-mod_manager = Менеджер модів
 ui-tabs-armor_viewer = Перегляд броні
 ui-tabs-model_viewer = Перегляд моделей
 ui-tabs-stats = Статистика
 ui-tabs-directory_stats = Статистика { $dir }
 ui-tabs-close_directory_stats = Закрити статистику каталогу
 ui-tabs-search = Пошук
-ui-tabs-search_these_replays = Шукати в цих реплеях
 ui-tabs-search_these_replays_unavailable = Ці реплеї ще не проіндексовано
 ui-tabs-zoom_in_panel = Збільшити
 ui-tabs-zoom_out_panel = Зменшити
@@ -55,12 +51,10 @@ ui-buttons-github = GitHub
 ui-buttons-view_github = Переглянути проєкт на GitHub
 ui-buttons-choose = Обрати...
 ui-buttons-reset = Скинути
+ui-buttons-clear = Очистити
 ui-buttons-select_all = Вибрати все
 ui-buttons-download = Завантажити
-ui-buttons-dismiss = Відхилити
 ui-buttons-retry = Повторити
-ui-buttons-check_all = Позначити все
-ui-buttons-uncheck_all = Зняти позначки
 ui-buttons-refresh_persisted_data_confirm = Оновити
 
 ## ui.menu
@@ -68,14 +62,12 @@ ui-menu-file = Файл
 ui-menu-check_updates = Перевірити оновлення
 ui-menu-about = Про програму
 ui-menu-quit = Вийти
-ui-menu-licenses = Ліцензії
 
 ## ui.windows
 ui-windows-build_consent = Згода на збір даних про збірки
 ui-windows-replay_migration = Перехід на надсилання реплеїв
 ui-windows-crash_detected = Виявлено збій програми
 ui-windows-update_available = Доступне оновлення
-ui-windows-confirm = Підтвердження
 ui-windows-network_warning = Попередження про мережу
 ui-windows-download_game_data = Завантаження даних гри
 ui-windows-error = Помилка
@@ -87,7 +79,6 @@ ui-windows-minimize = Згорнути
 ui-windows-maximize = Розгорнути
 ui-windows-restore = Відновити
 ui-windows-close = Закрити
-ui-windows-licenses = Ліцензії
 
 ## ui.dialogs
 ui-dialogs-build_consent_message = Чи бажаєте ви надсилати інформацію про збірки гравців з рангових та випадкових боїв розробнику? Цей збір даних допомагає спільноті масово аналізувати збірки гравців. Ви можете відмовитися будь-коли в налаштуваннях.
@@ -102,8 +93,12 @@ ui-dialogs-p2p_warning = Спільні сесії використовують 
 ui-dialogs-software_encode_message = Підтримуваний GPU-кодувальник відео не знайдено, тому експорт кодуватиметься програмно. Це значно повільніше, і довгий бій може зайняти кілька хвилин.
 ui-dialogs-download_game_data_intro = Деяким реплеям потрібні дані гри, які не встановлено. Оберіть збірки для завантаження.
 ui-dialogs-download_build_row = Версія { $version } (збірка { $build })
-ui-dialogs-download_replays_needing = потрібно для { $count } реплеїв
-ui-dialogs-download_availability_resolving = перевірка репозиторію
+ui-dialogs-download_replays_needing = потрібно для { $count ->
+    [one] { $count } реплею
+    [few] { $count } реплеїв
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+}
 ui-dialogs-download_availability_exact = опубліковано
 ui-dialogs-download_availability_nearest = точного збігу немає, найближча - { $version } (збірка { $build })
 ui-dialogs-download_availability_unpublished = ніколи не публікувалося
@@ -120,11 +115,8 @@ ui-labels-error_occurred = Сталася помилка:
 ui-labels-made_by = Автор: landaire.
 ui-labels-credits = Подяка Trackpad, TTaro, lkolbly за їхній внесок.
 ui-labels-pr_credits = Дані та формула розрахунку персонального рейтингу (PR) надані WoWs Numbers.
-ui-labels-powered_by = Працює на{" "}
-ui-labels-and = {" "}та{" "}
 ui-labels-suppress_warning = Більше не показувати
 ui-labels-more_info = Детальніше
-ui-labels-loading_replays = Завантаження { $count } реплеїв...
 ui-labels-app_version = Версія { $version }
 ui-labels-project_license = WoWs Toolkit поширюється за ліцензією { $license }.
 ui-labels-third_party_notices = Повідомлення сторонніх компонентів
@@ -139,35 +131,36 @@ ui-messages-app_up_to_date = Програма оновлена
 ui-messages-checking_app_updates = Перевірка оновлень застосунку...
 ui-messages-update_starting = Завантаження оновлення...
 ui-messages-update_check_failed = Не вдалося перевірити оновлення програми
-ui-messages-constants_fetch_failed = Не вдалося отримати оновлену карту даних реплеїв. Повторна спроба пізніше.
 ui-messages-game_data_loaded = Дані гри успішно завантажено
-ui-messages-no_replays_detected = Реплеї не виявлено — чи правильно вказано каталог WoWs?
-ui-messages-build_loaded = Завантажено збірку { $build }
-ui-messages-downloading_game_data = Завантаження даних гри...
-ui-messages-game_data_downloaded = Завантажено дані гри для збірки { $build }
-ui-messages-game_data_builds_downloaded = Завантажено ігрові дані для { $count } версії(й)
+ui-messages-no_replays_detected = Реплеї не виявлено. Чи правильно вказано каталог WoWs?
+ui-messages-game_data_builds_downloaded = Завантажено ігрові дані для { $count ->
+    [one] { $count } версії
+    [few] { $count } версій
+    [many] { $count } версій
+   *[other] { $count } версій
+}
 ui-messages-game_data_download_failed = Не вдалося завантажити дані гри
-ui-messages-game_data_build_download_failed = Не вдалося завантажити дані гри для збірки { $build }
-ui-messages-checking_game_data_updates = Перевірка оновлень даних гри...
 ui-messages-game_data_up_to_date = Дані гри актуальні
-ui-messages-game_data_updates_available = Новіші дані доступні для кешованих збірок: { $count }
-ui-messages-validating_game_data = Перевірка кешу даних гри...
+ui-messages-game_data_updates_available = { $count ->
+    [one] Для { $count } кешованої збірки доступні новіші дані
+    [few] Для { $count } кешованих збірок доступні новіші дані
+    [many] Для { $count } кешованих збірок доступні новіші дані
+   *[other] Для { $count } кешованих збірок доступні новіші дані
+}
 ui-messages-game_data_cache_valid = Кеш даних гри дійсний і відповідає віддаленому репозиторію
-ui-messages-game_data_cache_invalid = Застарілих або пошкоджених кешованих збірок: { $count }
-ui-messages-replay_loaded = Реплей успішно завантажено
+ui-messages-game_data_cache_invalid = { $count ->
+    [one] { $count } кешована збірка застаріла або пошкоджена
+    [few] { $count } кешовані збірки застарілі або пошкоджені
+    [many] { $count } кешованих збірок застарілі або пошкоджені
+   *[other] { $count } кешованих збірок застарілі або пошкоджені
+}
 ui-messages-replay_load_failed = Не вдалося завантажити реплей
 ui-messages-twitch_token_invalid = Токен Twitch недійсний або закінчився. Будь ласка, оновіть його в налаштуваннях.
 ui-messages-wows_dir_invalid = Каталог World of Warships недійсний. Перевірте шлях у налаштуваннях.
 ui-messages-wows_dir_not_set = Каталог World of Warships не задано
-ui-messages-twitch_token_expired = Токен Twitch недійсний або закінчився
-ui-messages-versioned_constants_rebuild_failed = Не вдалося отримати версійні константи під час перебудови. Повторна спроба пізніше.
 ui-messages-constants_version_mismatch =
     Версія файлу карти даних реплеїв не відповідає версії гри.
     Результати після бою можуть бути неточними. Будь ласка, зачекайте, поки розробники оновлять карту на сервері.
-ui-messages-constants_updated = Файл карти даних реплеїв успішно оновлено
-ui-messages-constants_imported = Встановлено карту даних реплеїв для версії { $build }
-ui-messages-constants_imported_other_build = Встановлено карту даних реплеїв для версії { $build }, яка не є поточно завантаженою ({ $loaded })
-ui-messages-constants_import_failed = Не вдалося імпортувати карту даних реплеїв: { $error }
 ui-messages-session_started = Сесію розпочато
 ui-messages-user_joined = { $name } приєднався
 ui-messages-user_timeout = { $name } — тайм-аут
@@ -175,23 +168,17 @@ ui-messages-user_left = { $name } покинув сесію
 ui-messages-session_ended = Сесію завершено
 ui-messages-session_error = Помилка сесії: { $msg }
 ui-messages-connected_to_session = Підключено до сесії
-ui-messages-joined_session = Приєднався до сесії: { $name }
-ui-messages-replay_spam_protection = Від'єднано: хост занадто швидко відкриває реплеї
 ui-messages-host_opened_replay = Хост відкрив реплей: { $name }
 ui-messages-host_closed_replay = Хост закрив реплей
-ui-messages-session_error_generic = Сесія: { $msg }
 ui-messages-session_rejected = Сесію відхилено: { $reason }
-ui-messages-indexing_replays = Індексація реплеїв...
-ui-messages-indexing_replays_progress = Індексація реплеїв ({ $done }/{ $total })
-ui-messages-replays_indexed = Проіндексовано { $indexed } з { $total } реплеїв
-ui-messages-replays_already_indexed = Усі { $total } реплеїв уже проіндексовано
-ui-messages-loading_row_summaries = Завантаження деталей реплеїв...
-ui-messages-reading_replay_directory = Читання каталогу реплеїв...
-ui-messages-directory_replays_skipped = Пропущено реплеїв, які не вдалося прочитати: { $skipped }
 ui-messages-drop_not_a_replay = Це не файл реплею
 ui-messages-drop_not_replays = Це не файли реплеїв
-ui-messages-drop_skipped = Пропущено перетягнутих файлів, що не є реплеями чи теками: { $count }
-ui-messages-directory_replays_not_indexed = Показано реплеїв без деталей бою: { $count }
+ui-messages-drop_skipped = Пропущено { $count ->
+    [one] { $count } перетягнутий файл, що не є реплеєм чи текою
+    [few] { $count } перетягнуті файли, що не є реплеями чи теками
+    [many] { $count } перетягнутих файлів, що не є реплеями чи теками
+   *[other] { $count } перетягнутих файлів, що не є реплеями чи теками
+}
 ui-messages-log_copied = Скопійовано { $bytes } КБ з { $file } до буфера обміну
 ui-messages-log_copy_failed = Не вдалося прочитати файл журналу: { $error }
 ui-messages-log_not_found = У { $dir } не знайдено файлу журналу
@@ -203,7 +190,6 @@ stat-frags = Фраги
 stat-raw_xp = Чистий XP
 stat-base_xp = Базовий XP
 stat-win_rate = Відсоток перемог
-stat-win_rate_pct = Відсоток перемог (%)
 stat-personal_rating = Персональний рейтинг
 stat-match_contribution = Внесок у бій
 stat-capture_points = Очки захоплення
@@ -211,27 +197,17 @@ stat-planes_shot_down = Збито літаків
 stat-anti_air_damage = Шкода ППО
 stat-survival_rate = Відсоток виживання
 stat-torpedoes_spotted = Виявлено торпед
-stat-avg_damage = Середня шкода
-stat-avg_spotting_damage = Середня шкода по засвіту
-stat-avg_frags = Середні фраги
-stat-avg_raw_xp = Середній чистий XP
-stat-avg_base_xp = Середній базовий XP
 stat-avg_pr = Середній PR
-stat-avg_mc = Сер. MC
 stat-avg_prefix = Сер. { $name }
 
 ## chart
-chart-game_number = Гра №
 chart-combined = Загальне
 chart-combined_suffix = (Загальне)
 chart-rolling_average_suffix = (Ковзне середнє)
-chart-no_data = Немає даних для обраних кораблів
-chart-win_rate_unavailable = Відсоток перемог недоступний для поігрових лінійних графіків (увімкніть ковзне середнє або використовуйте стовпчасту діаграму)
 
 ## confirm
 confirm-open_in_game = Це запустить World of Warships. Продовжити?
 confirm-clear_all_session_stats = Це очистить усю статистику сесії. Продовжити?
-confirm-clear_ship_session_stats = Це видалить усі ігри для цього корабля зі статистики сесії. Продовжити?
 confirm-set_as_session_stats = Це замінить вашу поточну статистику сесії. Продовжити?
 
 ## error
@@ -239,16 +215,10 @@ error-file_watcher_creation = Не вдалося створити спосте�
 error-replay_dir_watch = Не вдалося відстежувати каталог реплеїв: { $error }
 
 ## ui.settings.app
-ui-settings-app-heading = Налаштування програми
-ui-settings-app-description = Загальна поведінка та зовнішній вигляд програми
 ui-settings-app-check_for_updates = Перевіряти оновлення при запуску
 ui-settings-app-enable_logging = Увімкнути журналювання (набуде чинності після перезапуску)
 ui-settings-app-enable_logging_tooltip = Записувати журнали налагодження у файл у каталозі даних програми. Корисно для діагностики.
 ui-settings-app-data_sharing_mode = Надсилання даних (рангові та випадкові бої)
-ui-settings-app-data_sharing_off = Нічого не надсилати
-ui-settings-app-data_sharing_build_data = Надсилати дані збірок на ShipBuilds.com
-ui-settings-app-data_sharing_replays = Надсилати реплеї на ShipBuilds.com
-ui-settings-app-zoom_factor = Масштаб (Ctrl + та Ctrl - також змінюють цей параметр)
 ui-settings-app-theme = Тема
 ui-settings-app-theme_system = Системна
 ui-settings-app-theme_dark = Темна
@@ -259,14 +229,11 @@ ui-settings-app-code_integrity_automatic = Автоматично
 ui-settings-app-code_integrity_always = Завжди
 ui-settings-app-code_integrity_never = Ніколи
 ui-settings-app-language = Мова
-ui-settings-app-open_data_dir = Відкрити папку даних програми
 ui-settings-app-open_data_dir_tooltip = Відкрити папку даних програми (налаштування, журнали, кешовані дані) у файловому менеджері.
 ui-settings-app-proxy_url = HTTP-проксі
-ui-settings-app-proxy_url_hint = host:port, або залиште порожнім, щоб використовувати системні налаштування проксі (діє після перезапуску)
 ui-settings-app-proxy_url_hint_live = host:port, або залиште порожнім, щоб використовувати системні налаштування проксі
 
 ## ui.settings.wows
-ui-settings-wows-heading = Налаштування World of Warships
 ui-settings-wows-description = Шлях до встановленого World of Warships
 ui-settings-wows-directory_hint = Каталог World of Warships
 ui-settings-wows-browse = Огляд...
@@ -275,51 +242,48 @@ ui-settings-wows-browse = Огляд...
 ui-settings-wows-cache-heading = Кеш ігрових даних
 ui-settings-wows-cache-description = Вивантажені ігрові дані, щоб реплеї старих версій відкривалися
 ui-settings-wows-cache-auto_dump = Кешувати ігрові дані для сумісності зі старими повторами
-ui-settings-wows-cache-directory_label = Каталог кешу:
 ui-settings-wows-cache-browse = Огляд
 ui-settings-wows-cache-open_folder = Відкрити папку
 ui-settings-wows-cache-delete_old = Видалити старі версії
-ui-settings-wows-cache-stats = Кеш ігрових даних: { $size } у { $count } версії(ях)
+ui-settings-wows-cache-stats = Кеш ігрових даних: { $size } у { $count ->
+    [one] { $count } версії
+    [few] { $count } версіях
+    [many] { $count } версіях
+   *[other] { $count } версіях
+}
 ui-settings-wows-cache-check_updates = Перевірити оновлення
 ui-settings-wows-cache-actions = Дії з кешем
 ui-settings-wows-cache-actions_tooltip = Перевірити оновлення або цілісність кешованих версій
 ui-settings-wows-cache-update_all = Оновити все
-ui-settings-wows-cache-updates_available = Новіші дані доступні для кешованих збірок: { $count }
+ui-settings-wows-cache-updates_available = { $count ->
+    [one] Для { $count } кешованої збірки доступні новіші дані
+    [few] Для { $count } кешованих збірок доступні новіші дані
+    [many] Для { $count } кешованих збірок доступні новіші дані
+   *[other] Для { $count } кешованих збірок доступні новіші дані
+}
 ui-settings-wows-cache-validate = Перевірити кеш
-ui-settings-wows-cache-validate_tooltip = Звірити кожну кешовану збірку з віддаленим репозиторієм і перевірити цілісність файлів
 ui-settings-wows-cache-repair = Виправити
-ui-settings-wows-cache-repair_needed = Застарілих або пошкоджених кешованих збірок: { $count }
-
-## ui.task
-ui-task-batch_render_progress = Рендеринг { $current }/{ $total }: { $name }
+ui-settings-wows-cache-repair_needed = { $count ->
+    [one] { $count } кешована збірка застаріла або пошкоджена
+    [few] { $count } кешовані збірки застарілі або пошкоджені
+    [many] { $count } кешованих збірок застарілі або пошкоджені
+   *[other] { $count } кешованих збірок застарілі або пошкоджені
+}
 
 ## ui.settings.replay
-ui-settings-replay-heading = Налаштування реплеїв
-ui-settings-replay-description = Налаштуйте, які стовпці відображаються в таблиці результатів реплеїв
 ui-settings-replay-show_raw_xp = Показувати чистий XP
 ui-settings-replay-show_entity_id = Показувати ID сутності
 ui-settings-replay-show_observed_damage = Показувати спостережену шкоду
 ui-settings-replay-enable_previews = Показувати перегляд мінікарти при наведенні
 ui-settings-replay-enable_previews_tooltip = При наведенні на реплей він читається та відтворюється у фоні, щоб створити циклічний перегляд мінікарти. Вимкніть це на повільних носіях.
-ui-settings-replay-show_fires = Показувати пожежі
-ui-settings-replay-show_floods = Показувати затоплення
-ui-settings-replay-show_citadels = Показувати влучання в цитадель
-ui-settings-replay-show_crits = Показувати критичні влучання по модулях
 ui-settings-replay-auto_export_data = Автоекспорт даних
-ui-settings-replay-format_json = JSON
-ui-settings-replay-format_csv = CSV
-ui-settings-replay-format_cbor = CBOR
 ui-settings-replay-export_path_hint = Каталог автоекспорту даних
 ui-settings-replay-export_path_missing = Каталог не існує. Експорт даних до нього неможливий.
 ui-settings-replay-index_all_replays = Проіндексувати всі реплеї
-ui-settings-replay-reindex_all_replays = Переіндексувати всі реплеї
-ui-settings-replay-reindex_all_replays_hover = Повторно розібрати та проіндексувати кожен реплей, включно з уже проіндексованими. Використовуйте це після оновлення, яке додає нові дані індексу (напр. персональний рейтинг, статус від'єднання), щоб доповнити наявні записи.
 ui-settings-replay-show_heals = Показувати лікування
 ui-settings-replay-current_path = Поточний шлях до реплеїв
 
 ## ui.settings.session
-ui-settings-session-heading = Налаштування сесії
-ui-settings-session-description = Параметри спільних сесій перегляду реплеїв
 ui-settings-session-display_name = Відображуване ім'я
 ui-settings-session-suppress_ip_warning = Не показувати попередження про IP-адресу P2P
 ui-settings-session-ip_warning_tooltip = Спільні сесії використовують однорангову мережу. Інші користувачі в сесії можуть бачити вашу IP-адресу.
@@ -327,8 +291,6 @@ ui-settings-session-disable_auto_open = Вимкнути автовідкрит�
 ui-settings-session-auto_open_tooltip = При увімкненні вікна сесії (реплеї, тактичні дошки) не відкриватимуться автоматично. Ви все одно зможете відкрити їх зі спливаючого вікна сесії.
 
 ## ui.settings.twitch
-ui-settings-twitch-heading = Налаштування Twitch
-ui-settings-twitch-description = Підключення до Twitch для інтеграції чату та відстеження гравців
 ui-settings-twitch-get_token = Отримати токен авторизації
 ui-settings-twitch-get_token_tooltip = Ми використовуємо сторінку авторизації Chatterino, оскільки вона надає токен з необхідними дозволами (по суті, токен модератора з правами чату), і це усуває потребу для розробника WoWs Toolkit розміщувати власну сторінку авторизації, яка давала б такий самий результат.
 ui-settings-twitch-paste_token_no_token = Вставити токен (токен не задано)
@@ -341,29 +303,18 @@ ui-settings-twitch-signed_in_as = Вхід виконано як { $who }
 
 ## ui.replay
 ui-replay-copy_bug_report_info = Копіювати інформацію для звіту про помилку
-ui-replay-collapse_listing = Згорнути список реплеїв
-ui-replay-expand_listing = Розгорнути список реплеїв
 ui-replay-match_age = { $age } тому
 ui-replay-listing_caption = Реплеї
-ui-replay-listing_reading = Читання { $done } з { $total }...
-ui-replay-listing_scanning = Сканування { $done } з { $total }...
-ui-replay-listing_downloading = Завантаження даних гри, { $done } з { $total } файлів...
-ui-replay-listing_loading_data = Завантаження даних гри для { $version } ({ $index } з { $count })...
 ui-replay-loading_game_data_version = Завантаження ігрових даних для { $version }...
 ui-replay-spectator = Спостерігач
 ui-replay-loading = Завантаження...
 ui-replay-preview_loading = Створення перегляду...
-ui-replay-preview_empty = Немає руху для показу
 ui-replay-preview_no_game_data = Немає даних гри для версії клієнта { $value }
-ui-replay-preview_unreadable = Не вдалося прочитати цей реплей
 ui-replay-preview_unreadable_because = Не вдалося прочитати цей реплей: { $value }
 ui-replay-preview_unwalkable = Не вдалося обробити бій цього реплею: { $value }
 ui-replay-preview_unknown_version = Цей реплей повідомляє нечитану версію клієнта: { $value }
 ui-replay-preview_no_map = Немає даних карти для { $value }
-ui-replay-preview_cancelled = Перегляд замінено новішим
 ui-replay-preview_render_failed = Не вдалося намалювати попередній перегляд: { $value }
-ui-replay-no_selection = Натисніть на реплей для перегляду або двічі клацніть, щоб відкрити в новій вкладці
-ui-replay-workspace_closed = Цю робочу область реплею закрито
 ui-replay-incomplete_results = Неповні результати бою
 ui-replay-incomplete_results_tooltip = Реплей ще не містить результатів бою. Дані будуть автоматично перезавантажені після закінчення бою та додавання результатів до реплею.
 ui-replay-no_chat = У цьому реплеї не було надіслано повідомлень у чат
@@ -380,11 +331,20 @@ ui-replay-hide_my_stats = Приховати статистику мого те�
 ui-replay-open_manually = Відкрити файл реплею вручну...
 ui-replay-open_directory = Відкрити каталог реплеїв...
 ui-replay-search_these_replays = Шукати в цих реплеях
-ui-replay-reading_directory = Отримання списку реплеїв у { $dir }
 ui-replay-import_constants = Імпортувати файл constants.json...
 ui-replay-refresh_persisted_data = Оновити збережені дані реплеїв...
-ui-replay-contributing = Надсилання { $done } з { $total } реплеїв
-ui-replay-contributed = Надіслано { $sent } з { $total } реплеїв
+ui-replay-contributing = Надсилання { $done } з { $total ->
+    [one] { $total } реплею
+    [few] { $total } реплеїв
+    [many] { $total } реплеїв
+   *[other] { $total } реплеїв
+}
+ui-replay-contributed = Надіслано { $sent } з { $total ->
+    [one] { $total } реплею
+    [few] { $total } реплеїв
+    [many] { $total } реплеїв
+   *[other] { $total } реплеїв
+}
 ui-replay-contribute_nothing_shared = Спочатку виберіть у налаштуваннях, чим ділитися
 ui-replay-contribute_none_listed = Немає реплеїв для надсилання
 ui-replay-contribute_not_ready = Реплеї можна надіслати після завантаження ігрових даних і налаштувань
@@ -394,7 +354,12 @@ ui-replay-auto_exported = Бій експортовано до { $file }
 ui-replay-opened_new_battle = Відкрито новий бій: { $battle }
 ui-replay-new_battle_listed = Новий бій: { $battle }
 ui-replay-results_arrived = Отримано результати бою { $battle }
-ui-replay-constants_written = Завантажено карти результатів для { $count } версії(й)
+ui-replay-constants_written = { $count ->
+    [one] Завантажено карту результатів для { $count } версії
+    [few] Завантажено карти результатів для { $count } версій
+    [many] Завантажено карти результатів для { $count } версій
+   *[other] Завантажено карти результатів для { $count } версій
+}
 ui-replay-constants_import_title = Імпорт constants.json
 ui-replay-constants_imported = Карту результатів для версії { $build } імпортовано
 ui-replay-constants_import_failed = Карту не імпортовано: { $reason }
@@ -410,13 +375,20 @@ ui-replay-constants_fallback_published = Використовуються кон
 ui-replay-constants_fallback_embedded = Використовуються вбудовані константи.
 ui-replay-copy_latest_log = Копіювати останній журнал до буфера обміну
 ui-replay-load_alt_perspective = Завантажити перспективу іншої команди...
-ui-replay-load_alt_perspective_tooltip = Об'єднати запис того самого бою від іншого гравця з поточним реплеєм. Розкриває позиції ворогів, збірки, торпеди, артилерію та спорядження з іншої перспективи.
-ui-replay-load_alt_perspective_disabled_tooltip = Спочатку відкрийте реплей або перейдіть до нього.
 ui-replay-load_alt_perspective_failed = Не вдалося об'єднати реплей: { $error }
-ui-replay-load_alt_perspective_limit = Цей бій уже переглядається через { $limit } інших записів
-ui-replay-consumable_charges_remaining = Залишилось { $remaining } із { $total } зарядів
+ui-replay-load_alt_perspective_limit = Цей бій уже переглядається через { $limit ->
+    [one] { $limit } інший запис
+    [few] { $limit } інші записи
+    [many] { $limit } інших записів
+   *[other] { $limit } інших записів
+}
+ui-replay-consumable_charges_remaining = Залишилось { $remaining } із { $total ->
+    [one] { $total } заряду
+    [few] { $total } зарядів
+    [many] { $total } зарядів
+   *[other] { $total } зарядів
+}
 ui-replay-consumable_charges_unlimited = Використано { $used } (необмежені заряди)
-ui-replay-consumable_header_consumable = Спорядження
 ui-replay-consumable_header_remaining = Залишилось
 ui-replay-consumable_header_total = Усього
 ui-replay-consumable_charges_infinite = ∞
@@ -452,10 +424,8 @@ ui-replay-check_game_data = Перевірити ігрові дані
 ui-replay-check_game_data_tooltip = Перевірити ігрові дані, потрібні реплеям у цьому каталозі
 ui-replay-close_side_panel = Закрити панель
 ui-replay-nda = NDA
-ui-replay-render = Рендер
 ui-replay-chat = Чат
 ui-replay-game_chat = Ігровий чат
-ui-replay-copy_all = Копіювати все
 ui-replay-save_to_file = Зберегти у файл
 ui-replay-chat_copied = Чат скопійовано
 ui-replay-copy_message = Копіювати повідомлення
@@ -469,16 +439,18 @@ ui-replay-row_not_indexed = не проіндексовано
 ui-replay-hover_survived = Вижив
 ui-replay-hover_sunk = Потоплено
 ui-replay-hover_not_indexed = Не проіндексовано
-ui-replay-row_kills = знищень: { $count }
+ui-replay-row_kills = { $count ->
+    [one] { $count } знищення
+    [few] { $count } знищення
+    [many] { $count } знищень
+   *[other] { $count } знищень
+}
 ui-replay-row_survived = живий
 ui-replay-row_sunk = потоплений
 ui-replay-row_division = Дивізіон: { $members }
-ui-replay-export_chat_save = Чат: зберегти у файл
-ui-replay-export_chat_copy = Чат: копіювати
 ui-replay-export_results_json = Результати: JSON
 ui-replay-export_results_cbor = Результати: CBOR
 ui-replay-export_results_csv = Результати: CSV
-ui-replay-timeline_filter = Фільтр
 ui-replay-timeline_filter_all = Усі
 ui-replay-timeline_filter_none = Немає
 ui-replay-timeline_search_hint = Пошук корабля або гравця
@@ -510,27 +482,54 @@ ui-replay-context-pin_column = Закріпити стовпець
 ui-replay-context-unpin_column = Відкріпити стовпець
 ui-replay-context-copied = Скопійовано
 ui-replay-context-copy_path = Копіювати шлях
-ui-replay-context-copy_replay = Копіювати реплей
-ui-replay-context-copy_replays = Копіювати { $count } реплеїв
-ui-replay-context-copy_paths = Копіювати шляхи ({ $count })
+ui-replay-context-copy_replays = { $count ->
+    [1] Копіювати реплей
+    [one] Копіювати { $count } реплей
+    [few] Копіювати { $count } реплеї
+    [many] Копіювати { $count } реплеїв
+   *[other] Копіювати { $count } реплеїв
+}
+ui-replay-context-copy_paths = { $count ->
+    [1] Копіювати шлях
+    [one] Копіювати { $count } шлях
+    [few] Копіювати { $count } шляхи
+    [many] Копіювати { $count } шляхів
+   *[other] Копіювати { $count } шляхів
+}
 ui-replay-context-show_in_explorer = Показати у провіднику
 ui-replay-context-show_replay_controls = Показати керування реплеєм
 ui-replay-context-open_in_game = Відкрити у грі
 ui-replay-context-render_replay = Рендерити реплей
-ui-replay-context-set_session_stats_one = Задати як статистику сесії (1 реплей)
-ui-replay-context-set_session_stats_many = Задати як статистику сесії ({ $count } реплеїв)
-ui-replay-context-add_session_stats_one = Додати до статистики сесії (1 реплей)
-ui-replay-context-add_session_stats_many = Додати до статистики сесії ({ $count } реплеїв)
-ui-replay-context-render_to_video = Експорт у відео
-ui-replay-context-render_to_video_many = Експорт { $count } повторів у відео
-ui-replay-context-render_to_clipboard = Експорт у буфер обміну
-ui-replay-context-render_to_clipboard_many = Експорт { $count } повторів у буфер обміну
+ui-replay-context-set_session_stats = Задати як статистику сесії ({ $count ->
+    [one] { $count } реплей
+    [few] { $count } реплеї
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+})
+ui-replay-context-add_session_stats = Додати до статистики сесії ({ $count ->
+    [one] { $count } реплей
+    [few] { $count } реплеї
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+})
+ui-replay-context-render_to_video = { $count ->
+    [1] Експорт у відео
+    [one] Експорт { $count } реплею у відео
+    [few] Експорт { $count } реплеїв у відео
+    [many] Експорт { $count } реплеїв у відео
+   *[other] Експорт { $count } реплеїв у відео
+}
+ui-replay-context-render_to_clipboard = { $count ->
+    [1] Експорт у буфер обміну
+    [one] Експорт { $count } реплею у буфер обміну
+    [few] Експорт { $count } реплеїв у буфер обміну
+    [many] Експорт { $count } реплеїв у буфер обміну
+   *[other] Експорт { $count } реплеїв у буфер обміну
+}
 
 ## ui.replay.column
-ui-replay-column-actions = Дії
 ui-replay-column-player_name = Ім'я гравця
 ui-replay-column-base_xp = Базовий XP
-ui-replay-column-raw_xp = Чистий XP
 ui-replay-column-ship_name = Назва корабля
 ui-replay-column-hits = Влучання
 ui-replay-column-heals = Ремонти
@@ -539,7 +538,6 @@ ui-replay-column-heals_no_repair_tooltip = Цей корабель не має �
 ui-replay-column-kills = Знищення
 ui-replay-column-observed_damage = Спостережена шкода
 ui-replay-column-actual_damage = Фактична шкода
-ui-replay-column-spotting_damage = Шкода по засвіту
 ui-replay-column-potential_damage = Потенційна шкода
 ui-replay-column-time_lived = Час життя
 ui-replay-column-fires = Пожежі
@@ -556,7 +554,6 @@ ui-replay-column-match_contribution = MC
 ui-rating-personal_rating = Персональний рейтинг
 ui-rating-match_contribution = Внесок у бій
 ui-rating-versus_average = порівняно із середнім
-ui-rating-average = Середнє
 ui-rating-damage = Шкода
 ui-rating-kills = Знищення
 ui-rating-wins = Перемога
@@ -578,12 +575,30 @@ ui-rating-detail-team_damage_share = { $share }% шкоди команди по 
 ui-rating-detail-tanking = Потенційна шкода: { $potential }, { $class }x від середнього для класу, { $team }x від рівної частки команди
 ui-rating-detail-spotting = Шкода по засвіту: { $damage } (середнє для класу { $baseline }), засвічено HP кораблів: { $ships } (середнє { $ships_baseline })
 ui-rating-detail-objectives = Очки рахунку: { $capture } за захоплення, { $block } за блокування, { $reset } за збиття захоплення, { $battle_end } за утримання наприкінці, { $hold } за утримання (з коефіцієнтом 1/4)
-ui-rating-detail-anti_air_planes = Ударних літаків: { $strike }, винищувачів і розвідників: { $support }
+ui-rating-detail-anti_air_planes = { $strike ->
+    [one] { $strike } ударний літак
+    [few] { $strike } ударні літаки
+    [many] { $strike } ударних літаків
+   *[other] { $strike } ударних літаків
+}, { $support ->
+    [one] { $support } винищувач або розвідник
+    [few] { $support } винищувачі та розвідники
+    [many] { $support } винищувачів і розвідників
+   *[other] { $support } винищувачів і розвідників
+}
 ui-rating-detail-anti_air_damage = Шкода ППО: { $damage }
-ui-rating-detail-torpedo_warnings = Помічено загрозливих торпед: { $threatening }
-ui-rating-detail-torpedo_warnings_one = Помічено 1 загрозливу торпеду
-ui-rating-detail-critical_bursts = Критичних залпів: { $count }: { $bursts }. Видно лише для кораблів поблизу гравця, що записував
-ui-rating-detail-critical_bursts_one = 1 критичний залп: { $bursts }. Видно лише для кораблів поблизу гравця, що записував
+ui-rating-detail-torpedo_warnings = { $threatening ->
+    [one] Помічено { $threatening } загрозливу торпеду
+    [few] Помічено { $threatening } загрозливі торпеди
+    [many] Помічено { $threatening } загрозливих торпед
+   *[other] Помічено { $threatening } загрозливих торпед
+}
+ui-rating-detail-critical_bursts = { $count ->
+    [one] { $count } критичний залп
+    [few] { $count } критичні залпи
+    [many] { $count } критичних залпів
+   *[other] { $count } критичних залпів
+}: { $bursts }. Видно лише для кораблів поблизу гравця, що записував
 ui-rating-detail-critical_burst = { $share }% { $ship } за { $seconds } с
 ui-rating-detail-critical_burst_at_once = { $share }% { $ship } одразу
 
@@ -596,21 +611,10 @@ ui-rating-basis-dynamic = Динамічний
 ui-rating-basis-static_explained = Статичний: порівняння з фіксованою константою або базовим значенням класу
 ui-rating-basis-dynamic_explained = Динамічний: порівняння з очікуваними значеннями wows-numbers або з іншими гравцями цього бою
 
-## ui.replay.filter
-ui-replay-filter-raw_xp = Чистий XP
-ui-replay-filter-entity_id = ID сутності
-ui-replay-filter-observed_damage = Спостережена шкода
-ui-replay-filter-heals = Ремонти
-ui-replay-filter-fires = Пожежі
-ui-replay-filter-floods = Затоплення
-ui-replay-filter-citadels = Цитаделі
-ui-replay-filter-crits = Критичні влучання по модулях
-
 ## ui.replay.group
 ui-replay-group-date = Дата
 ui-replay-group-ship = Корабель
 ui-replay-group-none = Немає
-ui-replay-group-prefix = Група: { $label }
 
 ## ui.replay.player
 ui-replay-player-hidden_profile = У гравця прихований профіль
@@ -633,19 +637,29 @@ ui-replay-sections-modules_none = Немає модулів
 ui-replay-sections-signals = Сигнали:
 ui-replay-sections-loadout = Комплектація:
 ui-replay-sections-loadout_none = Немає комплектації
-ui-replay-sections-abilities = Здібності:
-ui-replay-sections-abilities_none = Немає здібностей
 ui-replay-sections-captain_skills = Навички командира:
 ui-replay-sections-captain_skills_none = Немає навичок командира
 ui-replay-sections-consumables = Спорядження:
 ui-replay-sections-fire_chance = Ефективний шанс підпалу
 ui-replay-sections-fire_chance_expected = очікувано
-ui-replay-sections-fire_chance_fires = пожеж: { $fires }
-ui-replay-sections-fire_chance_fires_one = 1 пожежа
-ui-replay-sections-fire_chance_eligible_hits = { $hits } влучань, що могли її спричинити
-ui-replay-sections-fire_chance_eligible_hits_one = 1 влучання, що могло її спричинити
-ui-replay-sections-fire_chance_ships = по { $ships } кораблях-цілях
-ui-replay-sections-fire_chance_ships_one = по 1 кораблю-цілі
+ui-replay-sections-fire_chance_fires = { $fires ->
+    [one] { $fires } пожежа
+    [few] { $fires } пожежі
+    [many] { $fires } пожеж
+   *[other] { $fires } пожеж
+}
+ui-replay-sections-fire_chance_eligible_hits = { $hits ->
+    [one] { $hits } влучання, що могло її спричинити
+    [few] { $hits } влучання, що могли її спричинити
+    [many] { $hits } влучань, що могли її спричинити
+   *[other] { $hits } влучань, що могли її спричинити
+}
+ui-replay-sections-fire_chance_ships = по { $ships ->
+    [one] { $ships } кораблю-цілі
+    [few] { $ships } кораблях-цілях
+    [many] { $ships } кораблях-цілях
+   *[other] { $ships } кораблях-цілях
+}
 ui-replay-sections-fire_chance_expected_fires = очікувано пожеж: { $fires }
 ui-replay-sections-fire_chance_per_ship = По кожній цілі
 ui-replay-sections-fire_chance_no_eligible_hits = немає влучань, що могли спричинити пожежу
@@ -653,15 +667,31 @@ ui-replay-sections-fire_chance_formula = Формула шансу підпал�
 ui-replay-sections-fire_chance_formula_base = базовий burnProb
 ui-replay-sections-fire_chance_formula_clamped = обмежено
 ui-replay-sections-fire_chance_breakdown = Розбір
-ui-replay-sections-fire_chance_shells_fired = випущено снарядів ОФ
-ui-replay-sections-fire_chance_shells_fired_one = випущено снаряд ОФ
-ui-replay-sections-fire_chance_he_hits = влучань ОФ по кораблю
-ui-replay-sections-fire_chance_he_hits_one = влучання ОФ по кораблю
-ui-replay-sections-fire_chance_no_target_ship = влучань ОФ без прив'язки до корабля-цілі
-ui-replay-sections-fire_chance_no_target_ship_one = влучання ОФ без прив'язки до корабля-цілі
+ui-replay-sections-fire_chance_shells_fired = { $count ->
+    [one] випущений снаряд ОФ
+    [few] випущені снаряди ОФ
+    [many] випущених снарядів ОФ
+   *[other] випущених снарядів ОФ
+}
+ui-replay-sections-fire_chance_he_hits = { $count ->
+    [one] влучання ОФ по кораблю
+    [few] влучання ОФ по кораблю
+    [many] влучань ОФ по кораблю
+   *[other] влучань ОФ по кораблю
+}
+ui-replay-sections-fire_chance_no_target_ship = { $count ->
+    [one] влучання ОФ без прив'язки до корабля-цілі
+    [few] влучання ОФ без прив'язки до корабля-цілі
+    [many] влучань ОФ без прив'язки до корабля-цілі
+   *[other] влучань ОФ без прив'язки до корабля-цілі
+}
 ui-replay-sections-fire_chance_eligible = могли спричинити пожежу
-ui-replay-sections-fire_chance_ribbons = стрічок SetFire
-ui-replay-sections-fire_chance_ribbons_one = стрічка SetFire
+ui-replay-sections-fire_chance_ribbons = { $count ->
+    [one] стрічка SetFire
+    [few] стрічки SetFire
+    [many] стрічок SetFire
+   *[other] стрічок SetFire
+}
 ui-replay-sections-fire_chance_ribbons_credited = зараховано снаряду
 ui-replay-sections-fire_chance_ribbons_uncredited = не зараховано
 ui-replay-sections-fire_chance_unattributed_no_burn_state = немає зміни стану горіння для зіставлення
@@ -694,19 +724,9 @@ ui-replay-debug-raw_metadata = Необроблені метадані
 ui-replay-debug-raw_results = Сирі результати
 ui-replay-debug-mapped_results = Зіставлені результати
 ui-replay-debug-player_metadata = Метадані гравця
-ui-replay-debug-no_results_packet = Цей реплей не містить пакета результатів бою
-ui-replay-debug-raw_json_tooltip = Необроблені результати бою у форматі серіалізації WG.
-ui-replay-debug-mapped_json_tooltip = Результати бою з позиційними масивами, перетвореними на іменовані поля.
-ui-replay-debug-results_raw_json = Результати бою: вихідний JSON
-ui-replay-debug-results_mapped_json = Результати бою: розмічений JSON
 ui-replay-debug-search = Пошук
 ui-replay-debug-previous_match = Попередній збіг (Shift+Enter)
 ui-replay-debug-next_match = Наступний збіг (Enter)
-
-## ui.replay.results
-ui-replay-results-victory = Перемога
-ui-replay-results-defeat = Поразка
-ui-replay-results-draw = Нічия
 
 ## ui.replay.controls
 ui-replay-controls-window_title = Керування реплеєм
@@ -714,7 +734,7 @@ ui-replay-controls-unavailable = Керування недоступне (comman
 
 ## ui.collab
 ui-collab-session = Сесія
-ui-collab-starting = Запуск сесії…
+ui-collab-starting = Запуск сесії...
 ui-collab-session_active = Сесія активна
 ui-collab-connected_to_session = Підключено до сесії
 ui-collab-session_token = Токен сесії:
@@ -722,14 +742,11 @@ ui-collab-toggle_visibility = Перемкнути видимість токен
 ui-collab-copy_token = Копіювати токен
 ui-collab-token_copied = Токен скопійовано до буфера обміну
 ui-collab-copy_web_link = Копіювати вебпосилання
-ui-collab-copy_web_link_tooltip = Копіювати посилання для вебклієнта
 ui-collab-web_link_copied = Вебпосилання скопійовано до буфера обміну
 ui-collab-copy_localhost_link = Копіювати посилання localhost
-ui-collab-copy_localhost_tooltip = Копіювати посилання localhost (розробка)
 ui-collab-localhost_copied = Посилання localhost скопійовано до буфера обміну
 ui-collab-connected_count = { $count } підключено
 ui-collab-promote_cohost = Підвищити до співведучого
-ui-collab-promoted_cohost = { $name } підвищено до співведучого
 ui-collab-permissions = Дозволи
 ui-collab-lock_annotations = Заблокувати анотації
 ui-collab-lock_settings = Заблокувати налаштування
@@ -741,7 +758,6 @@ ui-collab-role_cohost = Співведучий
 ui-collab-you = (ви)
 ui-collab-display_name = Відображуване ім'я:
 ui-collab-display_name_hint = Ваше ім'я...
-ui-collab-display_name_error = Будь ласка, введіть відображуване ім'я
 ui-collab-enter_display_name = Спочатку введіть відображуване ім'я
 ui-collab-host_session = Створити сесію
 ui-collab-start_session = Почати сесію
@@ -756,8 +772,6 @@ ui-collab-waiting_for_frames = Очікування даних бою
 ui-collab-open = Відкрити
 ui-collab-open_for_everyone = Відкрити для всіх
 ui-collab-tactics_board = Тактична дошка
-ui-collab-max_boards = Максимум { $count } тактичних дощок відкрито
-ui-collab-waiting_for_data = Очікування завантаження даних гри…
 
 ## battle
 battle-victory = ПЕРЕМОГА
@@ -782,8 +796,6 @@ finish_type-score_excess = Ліміт очок перевищено
 ## ui.stats
 ui-stats-overview = Огляд
 ui-stats-sample_notice = Зразкові дані, а не записані бої
-ui-stats-limit = Ліміт
-ui-stats-division = Дивізіон:
 ui-stats-div_all = Усі
 ui-stats-div_solo = Соло
 ui-stats-div_div = Дивізіон
@@ -794,8 +806,12 @@ ui-stats-mode_label = Режим:
 ui-stats-clear = Очистити
 ui-stats-pr = PR:
 ui-stats-mc = MC:
-ui-stats-frags_count = { $count } фрагів
-ui-stats-best_frags = Найкращий: { $ship } ({ $count } знищень)
+ui-stats-best_frags = Найкращий: { $ship } ({ $count ->
+    [one] { $count } знищення
+    [few] { $count } знищення
+    [many] { $count } знищень
+   *[other] { $count } знищень
+})
 ui-stats-max_damage = Макс. шкода: { $ship } ({ $damage })
 ui-stats-copy_markdown = Копіювати як Markdown
 ui-stats-copy_image = Копіювати як зображення
@@ -803,16 +819,8 @@ ui-stats-copy_image_done = Графік скопійовано до буфера
 ui-stats-copy_image_failed = Не вдалося скопіювати графік
 ui-stats-copy_csv = Копіювати як CSV
 ui-stats-remove_games_hint = Видалити всі ігри на { $ship } (Ctrl+Click для пропуску підтвердження)
-ui-stats-no_stats = Статистика сесії недоступна. Спочатку зіграйте кілька боїв!
 ui-stats-settings = Налаштування
-ui-stats-chart_type = Тип графіка
-ui-stats-stat_label = Показник:
-ui-stats-chart_line = Лінійний
-ui-stats-chart_bar = Стовпчастий
 ui-stats-options = Параметри
-ui-stats-combined = Загальне
-ui-stats-rolling_avg = Ковзне середнє
-ui-stats-labels = Підписи
 ui-stats-ships = Кораблі
 ui-stats-filter_ships = Фільтр кораблів графіка
 ui-stats-all_ships = Усі
@@ -824,12 +832,10 @@ ui-stats-no_statistic_matches = Немає показників, що відпо
 ui-stats-ship_selection_count = Вибрано { $selected } з { $total }
 ui-stats-all_ships_tooltip = Вибрати всі відповідні кораблі
 ui-stats-no_ships_tooltip = Скасувати вибір відповідних кораблів
-ui-stats-copy_as_image = Копіювати як зображення
 ui-stats-limit_to_recent = Лише останні бої
 ui-stats-limit_to_recent_tooltip = Обмеження діє для кожного корабля в розділах «Кораблі» та «Графіки» і для всіх боїв в «Огляді».
 ui-stats-division_label = Дивізіон:
 ui-stats-add_chart = Додати графік
-ui-stats-clear_confirm = Очистити всі бої?
 ui-stats-clear_tooltip = Забути всі записані бої
 ui-stats-clear_failed = Не очищено: { $reason }
 ui-stats-clear_ship_confirm = Натисніть ще раз, щоб забути бої цього корабля
@@ -842,23 +848,42 @@ ui-stats-column_battles = Бої
 ui-stats-column_win_rate = Відсоток перемог
 ui-stats-column_avg_damage = Сер. шкода
 ui-stats-column_avg_frags = Середні фраги
-ui-stats-frags = { $count } фрагів
+ui-stats-frags = { $count ->
+    [one] { $count } фраг
+    [few] { $count } фраги
+    [many] { $count } фрагів
+   *[other] { $count } фрагів
+}
 ui-stats-statistic = Показник
 ui-stats-open_directory_stats = Статистика каталогу
 ui-stats-open_directory_stats_tooltip = Відкрити статистику для всіх реплеїв у цьому каталозі та його підкаталогах
 ui-stats-directory_stats_unavailable = Ігрові дані ще завантажуються
 ui-stats-directory_reading_task = Читання реплеїв для статистики каталогу...
 ui-stats-directory_walking = Пошук реплеїв...
-ui-stats-directory_scanning = Перевірка { $done } з { $total } реплеїв...
-ui-stats-directory_reading = Читання { $done } з { $total } реплеїв...
+ui-stats-directory_scanning = Перевірка { $done } з { $total ->
+    [one] { $total } реплею...
+    [few] { $total } реплеїв...
+    [many] { $total } реплеїв...
+   *[other] { $total } реплеїв...
+}
+ui-stats-directory_reading = Читання { $done } з { $total ->
+    [one] { $total } реплею...
+    [few] { $total } реплеїв...
+    [many] { $total } реплеїв...
+   *[other] { $total } реплеїв...
+}
 ui-stats-directory_reload = Перезавантажити
 ui-stats-directory_reload_tooltip = Прочитати реплеї цього каталогу знову
-ui-stats-directory_skipped = Пропущено реплеїв: { $count }
+ui-stats-directory_skipped = { $count ->
+    [one] Пропущено { $count } реплей
+    [few] Пропущено { $count } реплеї
+    [many] Пропущено { $count } реплеїв
+   *[other] Пропущено { $count } реплеїв
+}
 ui-stats-directory_skipped_detail =
     Не читаються: { $unreadable }
     Немає ігрових даних для їхньої версії: { $missing_build }
     Немає результатів бою: { $no_results }
-ui-stats-directory_no_games = Жоден реплей у цьому каталозі не містить результатів бою
 ui-stats-chart = Графік
 ui-stats-combine_ships = Об'єднати кораблі
 ui-stats-running_average = Ковзне середнє
@@ -870,8 +895,12 @@ ui-stats-session_manual = Вручну
 ui-stats-session_since_opened = Із запуску застосунку
 ui-stats-session_manual_tooltip = Сесія містить зіграні бої та реплеї, які ви задали або додали зі списку реплеїв. Вона зберігається між запусками.
 ui-stats-session_since_opened_tooltip = Сесія містить усі бої, що почалися о { $time } або пізніше, коли було запущено застосунок. Ваша ручна сесія зберігається й повернеться після перемикання на «Вручну».
-ui-stats-session_battles_one = 1 бій
-ui-stats-session_battles_many = боїв: { $count }
+ui-stats-session_battles = { $count ->
+    [one] { $count } бій
+    [few] { $count } бої
+    [many] { $count } боїв
+   *[other] { $count } боїв
+}
 ui-stats-session_chip_manual = Сесія: { $battles }
 ui-stats-session_chip_since = Сесія з { $time }: { $battles }
 ui-stats-session_empty_title = У цій сесії ще немає боїв
@@ -902,7 +931,12 @@ ui-stats-leave_out_ship_hint = Виключити { $ship } зі статист�
 ui-stats-keep_all_games = Враховувати всі бої
 ui-stats-keep_all_games_tooltip = Знову враховувати всі вручну виключені бої
 ui-stats-left_out_only = Лише виключені
-ui-stats-match_count = { $shown } з { $total } боїв, виключено: { $left_out }
+ui-stats-match_count = { $shown } з { $total ->
+    [one] { $total } бою
+    [few] { $total } боїв
+    [many] { $total } боїв
+   *[other] { $total } боїв
+}, виключено: { $left_out }
 ui-stats-no_matches = Немає боїв, що відповідають поточним фільтрам
 ui-stats-search_matches = Пошук за кораблем...
 ui-stats-ship_filter_tooltip = Виберіть, які кораблі враховуються в статистиці
@@ -911,7 +945,12 @@ ui-stats-leave_out_ships_tooltip = Виключити всі відповідн�
 ui-stats-dates = Дати
 ui-stats-all_dates = Усі дати
 ui-stats-clear_dates = Показати всі дати
-ui-stats-games_left_out = Виключено боїв: { $count }
+ui-stats-games_left_out = { $count ->
+    [one] Виключено { $count } бій
+    [few] Виключено { $count } бої
+    [many] Виключено { $count } боїв
+   *[other] Виключено { $count } боїв
+}
 ui-stats-reset_filters = Скинути фільтри
 ui-stats-reset_filters_tooltip = Показати всі бої: без ліміту, періоду, загону, режиму та виключених кораблів і боїв
 
@@ -923,12 +962,10 @@ ui-stats-table-average = Середнє
 
 ## ui.player_tracker
 ui-player_tracker-clear_stats = Очистити статистику
-ui-player_tracker-player_filter = Фільтр гравців
 ui-player_tracker-populate_from_replays = Заповнити дані з реплеїв
 ui-player_tracker-find_matches = Знайти бої
 ui-player_tracker-open_wows_numbers = Відкрити на wows-numbers
 ui-player_tracker-open_shipbuilds = Відкрити збірки на shipbuilds
-ui-player_tracker-subtab_historical = Історія
 ui-player_tracker-subtab_players = Гравці
 ui-player_tracker-filter_hint = Фільтр за гравцем або кланом...
 ui-player_tracker-time_period = Період
@@ -943,55 +980,77 @@ ui-player_tracker-loading_clans = Завантаження кланів...
 ui-player_tracker-loading_players = Завантаження гравців...
 ui-player_tracker-index_failed = Не вдалося прочитати індекс: { $reason }
 ui-player_tracker-no_players = Немає проіндексованих гравців за цей період
-ui-player_tracker-notes_title = Нотатки: { $name }
 ui-player_tracker-note_not_saved = Не збережено: { $reason }
 ui-player_tracker-subtab_current_match = Поточний бій
-ui-player_tracker-your_team = Ваша команда ({ $count })
-ui-player_tracker-enemy_team = Ворожа команда ({ $count })
-ui-player_tracker-no_live_match = Бій не триває. Склад команд з'явиться, коли ви увійдете в бій.
-ui-player_tracker-encounters_hover = Помічено { $total } разів усього, { $range } за обраний період. Востаннє: { $last }.
+ui-player_tracker-encounters_hover = Помічено { $total ->
+    [one] { $total } раз
+    [few] { $total } рази
+    [many] { $total } разів
+   *[other] { $total } разів
+} усього, { $range } за обраний період. Востаннє: { $last }.
 ui-player_tracker-never_encountered = Раніше не траплявся
 ui-player_tracker-copy_wg_id = Натисніть, щоб скопіювати WG ID
 ui-player_tracker-copied_wg_id = Скопійовано WG ID { $id }
 ui-player_tracker-aliases_hover = Також відомий як: { $names }
 ui-player_tracker-notes_hint = Нотатки про цього гравця
-ui-player_tracker-arena_count = записано боїв: { $count }
+ui-player_tracker-arena_count = { $count ->
+    [one] записано { $count } бій
+    [few] записано { $count } бої
+    [many] записано { $count } боїв
+   *[other] записано { $count } боїв
+}
 ui-player_tracker-last_encountered_exact = Остання зустріч { $timestamp }
 ui-player_tracker-subtab_clans = Клани
 ui-player_tracker-clan_no_data = Зустрічей з кланами ще не записано.
 ui-player_tracker-find_clan_matches = Знайти бої зі згадкою цього тегу. В індексі немає окремого поля клану, тому імена гравців із цим тегом теж збігатимуться.
 ui-player_tracker-clan_sightings_hover = { $range } з них припадає на обраний період.
-ui-player_tracker-clan_member_matches = помічено в { $count } боях
+ui-player_tracker-clan_member_matches = помічено в { $count ->
+    [one] { $count } бою
+    [few] { $count } боях
+    [many] { $count } боях
+   *[other] { $count } боях
+}
 ui-player_tracker-show_division_mates = Показувати напарників по дивізіону
 ui-player_tracker-show_division_mates_hover = Враховувати бої, які ви зіграли в дивізіоні. Вимкнено за замовчуванням, адже тих гравців ви зустріли там лише тому, що самі їх запросили. Інші бої проти тих самих гравців враховуються завжди.
 ui-player_tracker-seen_in_twitch_chat = Помічений у чаті Twitch
 ui-player_tracker-seen_in_twitch_chat_hover = Показувати лише гравців, чиє ім'я збіглося з логіном із чату Twitch під час бою з вами.
-ui-player_tracker-twitch_seen_hover = Помічений у чаті Twitch як { $logins } у { $count } боях з вами
+ui-player_tracker-twitch_seen_hover = Помічений у чаті Twitch як { $logins } у { $count ->
+    [one] { $count } бою
+    [few] { $count } боях
+    [many] { $count } боях
+   *[other] { $count } боях
+} з вами
 ui-player_tracker-win_rate_overall = Загалом
 ui-player_tracker-win_rate_ship = Корабель
 ui-player_tracker-view_compact = Компактний
 ui-player_tracker-view_detailed = Детальний
 ui-player_tracker-ship_stats = Статистика корабля
-ui-player_tracker-win_rate_mode_hover = Показувати статистику акаунта або цього корабля. Колір рядка, PR, кількість боїв і середня шкода залежать від цього вибору.
 ui-player_tracker-stats_resolving = Читання складу бою...
 ui-player_tracker-stats_fetching = Отримання статистики гравців...
-ui-player_tracker-stats_rate_limited = Обмеження частоти запитів, повтор через { $wait }
 ui-player_tracker-stats_unavailable = Статистика недоступна: { $reason }
-ui-player_tracker-roster_unavailable = Не вдалося прочитати склад бою з реплею
 ui-player_tracker-stats_hidden = Профіль цього гравця прихований
 ui-player_tracker-stats_no_data = Немає статистики для цього гравця
-ui-player_tracker-stats_unplayed_ship = На цьому кораблі боїв не записано
 ui-player_tracker-pr_overall_hover = PR акаунта по всіх кораблях
 ui-player_tracker-pr_ship_hover = PR на цьому кораблі
-ui-player_tracker-avg_damage = Середня шкода
-ui-player_tracker-win_rate_hover_line = { $label }: { $rate } за { $battles } боїв
-ui-player_tracker-win_rate_hover_line_damage = { $label }: { $rate } за { $battles } боїв, середня шкода { $damage }
+ui-player_tracker-win_rate_hover_line = { $label }: { $rate } за { $count ->
+    [one] { $battles } бій
+    [few] { $battles } бої
+    [many] { $battles } боїв
+   *[other] { $battles } боїв
+}
+ui-player_tracker-win_rate_hover_line_damage = { $label }: { $rate } за { $count ->
+    [one] { $battles } бій
+    [few] { $battles } бої
+    [many] { $battles } боїв
+   *[other] { $battles } боїв
+}, середня шкода { $damage }
 ui-player_tracker-team_average_win_rate = Сер. WR: { $rate }
-ui-player_tracker-team_players = Гравців: { $count }
-ui-player_tracker-row_win_rate = WR { $rate }
-ui-player_tracker-row_personal_rating = PR { $value }
-ui-player_tracker-row_battles = боїв: { $count }
-ui-player_tracker-row_seen = Помічено x{ $total }
+ui-player_tracker-team_players = { $count ->
+    [one] { $count } гравець
+    [few] { $count } гравці
+    [many] { $count } гравців
+   *[other] { $count } гравців
+}
 ui-player_tracker-debug_replay_picker = Налагодження: вважати реплей поточним боєм
 ui-player_tracker-debug_replay_picker_hover = Завантажує склад команд завершеного реплею в цю вкладку, щоб перевірити шлях отримання статистики поза боєм.
 ui-player_tracker-debug_replay_none = Оберіть реплей
@@ -1019,29 +1078,13 @@ ui-player_tracker-period-past_week = За останній тиждень
 ui-player_tracker-period-past_month = За останній місяць
 ui-player_tracker-period-all_time = За весь час
 
-
 ## ui.twitch
 ui-twitch-possible_name = Можливе ім'я на стрімі: { $name }
 ui-twitch-seen_minutes = Помічено через { $minutes } хвилин після початку бою
 ui-twitch-click_to_copy = Натисніть, щоб скопіювати
 ui-twitch-copied = Скопійовано { $name }
-## ui.mod_manager
-ui-mod_manager-category_filters = Фільтри категорій
-ui-mod_manager-enabled = Увімкнено
-ui-mod_manager-mod_home = Домашня сторінка моду
-ui-mod_manager-discord_thread = Тема схвалення в Discord
-ui-mod_manager-save_config = Зберегти конфігурацію модів
-ui-mod_manager-load_config = Завантажити конфігурацію модів
-ui-mod_manager-filter = Фільтр
-
-## ui.mod_manager.column
-ui-mod_manager-column-enabled = Увімкнено
-ui-mod_manager-column-name = Назва
-ui-mod_manager-column-author = Автор
-ui-mod_manager-column-category = Категорія
 
 ## ui.renderer
-ui-renderer-loading = Завантаження даних реплею...
 ui-renderer-preparing_export = Підготовка експорту...
 ui-renderer-encoding = Кодування
 ui-renderer-muxing = Мультиплексування
@@ -1053,7 +1096,7 @@ ui-renderer-advantage-score_projection = Прогноз очок
 ui-renderer-advantage-fleet_power = Потужність флоту
 ui-renderer-advantage-strategic_threat = Стратегічна загроза
 ui-renderer-advantage-total = Разом
-ui-renderer-advantage-hp_incomplete = Дані HP/кораблів неповні — показано лише фактори очок
+ui-renderer-advantage-hp_incomplete = Дані HP/кораблів неповні. Показано лише фактори очок
 
 ## ui.renderer.context
 ui-renderer-context-show_trail = Показати слід
@@ -1069,39 +1112,30 @@ ui-renderer-context-enable_all = Увімкнути все
 ui-renderer-context-disable_all = Вимкнути все
 ui-renderer-context-disable_other_ranges = Вимкнути всі інші дальності
 ui-renderer-context-enable_all_ranges = Увімкнути дальності всіх кораблів
-ui-renderer-context-show_armor = Показати броню в реальному часі
 ui-renderer-context-realtime_armor = Показати броню в реальному часі
 
 ## ui.renderer.controls
 ui-renderer-controls-jump_to_start = Перейти до початку
 ui-renderer-controls-previous_event = Попередня подія (Shift+Left)
 ui-renderer-controls-back_10s = Назад 10 с (Left)
-ui-renderer-controls-pause = Пауза (Space)
-ui-renderer-controls-play = Відтворення (Space)
 ui-renderer-controls-forward_10s = Вперед 10 с (Right)
 ui-renderer-controls-next_event = Наступна подія (Shift+Right)
 ui-renderer-controls-jump_to_end = Перейти до кінця
-ui-renderer-controls-save_as_video = Зберегти як відео
-ui-renderer-controls-copy_to_clipboard = Записати відео до буфера обміну
 ui-renderer-controls-speed = Швидкість відтворення
 
 ## ui.renderer.settings
 ui-renderer-settings-title = Параметри відображення
 ui-renderer-settings-hp_bars = Смуги HP
-ui-renderer-settings-ship_settings = Налаштування кораблів
 ui-renderer-settings-armament = Озброєння
 ui-renderer-settings-dead_ships = Знищені кораблі
 ui-renderer-settings-dead_ship_names = Назви знищених кораблів
 ui-renderer-settings-player_names = Імена гравців
 ui-renderer-settings-ship_ranges = Дальності кораблів
-ui-renderer-settings-self_ship_ranges = Дальності власного корабля
 ui-renderer-settings-ship_names = Назви кораблів
 ui-renderer-settings-camera_direction = Напрямок башт
-ui-renderer-settings-trail_settings = Налаштування слідів
 ui-renderer-settings-heat_trail = Тепловий слід
 ui-renderer-settings-speed_trails = Сліди швидкості
 ui-renderer-settings-dead_ship_trails = Сліди знищених кораблів
-ui-renderer-settings-map_settings = Налаштування карти
 ui-renderer-settings-buildings = Будівлі
 ui-renderer-settings-capture_points = Точки захоплення
 ui-renderer-settings-consumables = Спорядження
@@ -1109,7 +1143,6 @@ ui-renderer-settings-planes = Літаки
 ui-renderer-settings-smoke = Димова завіса
 ui-renderer-settings-torpedoes = Торпеди
 ui-renderer-settings-tracers = Трасери
-ui-renderer-settings-hud_settings = Налаштування HUD
 ui-renderer-settings-battle_result = Результат бою
 ui-renderer-settings-buff_counters = Лічильники підсилень
 ui-renderer-settings-chat_label = Чат
@@ -1146,21 +1179,11 @@ ui-unpacker-filter_files = Фільтр файлів...
 ui-unpacker-search_in_files = Пошук у файлах
 ui-unpacker-search_hint = Пошук у файлах...
 ui-unpacker-path_filter_hint = Фільтр шляху (напр. *.xml)
-ui-unpacker-queue_all = Додати все до черги
 ui-unpacker-queue_all_files = Додати всі файли до черги
-ui-unpacker-empty_directory = Порожній каталог
-ui-unpacker-stop_search_tooltip = Зупинити пошук
-ui-unpacker-no_matches = Збігів не знайдено.
 ui-unpacker-view_as_json = Переглянути як JSON
 ui-unpacker-extract_as_json = Видобути як JSON
 ui-unpacker-view_contents = Переглянути вміст
 ui-unpacker-version = Версія:
-ui-unpacker-game_params = GameParams
-ui-unpacker-base_as_json = Базовий як JSON
-ui-unpacker-as_json = Як JSON
-ui-unpacker-as_cbor = Як CBOR
-ui-unpacker-as_json_minimal = Як JSON (мінімальний / трансформований)
-ui-unpacker-as_cbor_minimal = Як CBOR (мінімальний / трансформований)
 ui-unpacker-decode_prototypes = Декодувати прототипи як JSON
 ui-unpacker-decode_prototypes_tooltip = Декодувати підтримувані прототипи Assets.bin (.visual, .model, .mfm) у JSON при видобуванні
 ui-unpacker-extraction_queue = Черга видобування
@@ -1169,16 +1192,18 @@ ui-unpacker-expand_folders = Розгорнути дерево тек
 ui-unpacker-clear_all = Очистити все
 ui-unpacker-browse = Огляд
 ui-unpacker-output_dir_hint = Каталог виведення...
-ui-unpacker-go_to_directory = Перейти до каталогу
 ui-unpacker-remove_from_queue = Видалити з черги
 ui-unpacker-queue_folder = Додати всю папку до черги
 ui-unpacker-queue_file = Додати файл до черги
 ui-unpacker-extraction_output = Розпакувати до
 ui-unpacker-queue_empty = Позначте файл або теку в списку, щоб додати до черги
-ui-unpacker-show_queue = Черга розпакування
-ui-unpacker-double_click_open = Подвійний клік для відкриття
 ui-unpacker-packages = Пакети
-ui-unpacker-item_count = Елементів: { $count }
+ui-unpacker-item_count = { $count ->
+    [one] { $count } елемент
+    [few] { $count } елементи
+    [many] { $count } елементів
+   *[other] { $count } елементів
+}
 ui-unpacker-search_title = Пошук: { $query }
 ui-unpacker-search_in = у { $source }
 ui-unpacker-image_decode_failed = Не вдалося декодувати зображення: { $reason }
@@ -1196,11 +1221,25 @@ ui-unpacker-queued_count = У черзі: { $count }
 ui-unpacker-counting_files = Підрахунок файлів...
 ui-unpacker-extracting = Розпакування { $done } з { $total }
 ui-unpacker-extract_failed = Помилка розпакування: { $reason }
-ui-unpacker-extracted = Розпаковано файлів: { $count }
-ui-unpacker-cancelled = Скасовано після { $count } файлів
-ui-unpacker-extract = Розпакувати
-ui-unpacker-extract_one = Розпакувати 1 елемент
-ui-unpacker-extract_many = Розпакувати елементи ({ $count })
+ui-unpacker-extracted = Розпаковано { $count ->
+    [one] { $count } файл
+    [few] { $count } файли
+    [many] { $count } файлів
+   *[other] { $count } файлів
+}
+ui-unpacker-cancelled = Скасовано після { $count ->
+    [one] { $count } файлу
+    [few] { $count } файлів
+    [many] { $count } файлів
+   *[other] { $count } файлів
+}
+ui-unpacker-extract = { $count ->
+    [0] Розпакувати
+    [one] Розпакувати { $count } елемент
+    [few] Розпакувати { $count } елементи
+    [many] Розпакувати { $count } елементів
+   *[other] Розпакувати { $count } елементів
+}
 ui-unpacker-choose_directory = Спочатку виберіть каталог для розпакування
 ui-unpacker-dump_parameters = Експортувати GameParams
 ui-unpacker-dump_parameters_tooltip = Експортувати GameParams.data цієї версії
@@ -1216,17 +1255,10 @@ ui-unpacker-base_only = Лише базові параметри
 ui-unpacker-column-name = Назва
 ui-unpacker-column-size = Розмір
 ui-unpacker-column-type_col = Тип
-ui-unpacker-column-path = Шлях
-ui-unpacker-column-file = Файл
-ui-unpacker-column-offset = Зміщення
-ui-unpacker-column-context = Контекст
 
 ## ui.armor
 ui-armor-load_settings = Завантажте дані гри в налаштуваннях, щоб використовувати перегляд броні.
-ui-armor-gpu_unavailable = Стан GPU-рендера недоступний.
-ui-armor-loading_ship = Завантаження даних корабля...
 ui-armor-load_failed = Не вдалося завантажити дані корабля: { $error }
-ui-armor-ship_load_failed = Не вдалося завантажити { $ship }: { $reason }
 ui-armor-empty = Порожньо
 ui-armor-mirror_cameras = Дзеркалити камери
 ui-armor-sync_options = Синхронізація параметрів
@@ -1240,33 +1272,28 @@ ui-armor-show_hidden_ships_tooltip = Показувати й кораблі, я�
 ui-armor-compare_split = Порівняти в новій панелі
 ui-armor-open_in_new_tab = Відкрити в новій вкладці
 ui-armor-export_model = Експортувати модель корабля
-ui-armor-armor_thickness = Товщина броні
 ui-armor-export_disclaimer = Ці 3D-моделі та текстури є інтелектуальною власністю Wargaming, і будь-яке використання цих моделей має відповідати законодавству вашої країни.
 ui-armor-export_button = Експорт
-ui-armor-armor_toggle = Броня
-ui-armor-armor_tooltip = Перемкнути видимість зон броні
 ui-armor-hull_toggle = Корпус
-ui-armor-hull_tooltip = Перемкнути видимість частин корпусу
-ui-armor-splash_toggle = Сплеш
 ui-armor-splash_tooltip = Перемкнути видимість зон сплешу
 ui-armor-show_hidden = Показати приховані
 ui-armor-show_hidden_tooltip = Перемкнути видимість (можливо) прихованих панелей
 ui-armor-gaps = Зазори
 ui-armor-gaps_tooltip = Підсвітити граничні ребра, де бронеплити не з'єднуються (можливі зазори)
 ui-armor-display = Відображення
-ui-armor-display_tooltip = Налаштування відображення (Ctrl+S)
 ui-armor-marker_opacity = Прозорість маркерів
-ui-armor-save_defaults = Зберегти за замовчуванням
-ui-armor-export_tab = Експорт
 ui-armor-export_tooltip = Експортувати модель корабля у файл OBJ
 ui-armor-pen_check = Перевірка пробиття
-ui-armor-pen_check_tooltip = Налаштувати снаряди для порівняння пробиття
 ui-armor-trajectory = Траєкторія
-ui-armor-trajectory_on = Траєкторія [УВІМК]
 ui-armor-trajectory_range = Дальність
 ui-armor-trajectory_clear = Очистити все
 ui-armor-arc_heading = Траєкторія { $number }
-ui-armor-arc_summary = Влучань: { $hits }, { $armor } мм на { $range } км
+ui-armor-arc_summary = { $hits ->
+    [one] { $hits } влучання
+    [few] { $hits } влучання
+    [many] { $hits } влучань
+   *[other] { $hits } влучань
+}, { $armor } мм на { $range } км
 ui-armor-arc_delete = Видалити цю траєкторію
 ui-armor-arc_isolate_plates = Ізолювати плити
 ui-armor-arc_isolate_plates_tooltip = Показати лише бронеплити, які перетнула ця траєкторія
@@ -1285,7 +1312,6 @@ ui-armor-arc_plate_unknown = незаписана плита
 ui-armor-angle_good = менше 30 град
 ui-armor-angle_mid = від 30 до 45 град
 ui-armor-angle_bad = понад 45 град
-ui-armor-trajectory_tooltip = Натисніть на броню для симуляції траєкторій снарядів (Ctrl+T)
 ui-armor-trajectory_ship = Корабель:
 ui-armor-trajectory_select_ship = Оберіть корабель
 ui-armor-trajectory_ship_tooltip = Оберіть корабель, снаряд якого використовується для траєкторії
@@ -1296,18 +1322,14 @@ ui-armor-trajectory_select_shell = Оберіть снаряд
 ui-armor-trajectory_shell_tooltip = Оберіть снаряд для симуляції траєкторій
 ui-armor-continue_ricochet = Продовжити після рикошету
 ui-armor-splash_mode = Сплеш
-ui-armor-splash_on = Сплеш [УВІМК]
 ui-armor-splash_no_data = Немає даних про сплеш для цього корабля
 ui-armor-splash_no_shells = Додайте корабель зі снарядами HE/SAP до списку порівняння
 ui-armor-splash_tooltip_mode = Натисніть на броню для візуалізації об'єму шкоди від сплешу HE
-ui-armor-loading_armor = Завантаження корабля...
 ui-armor-select_ship = Оберіть корабель зі списку
-ui-armor-pen_check_label = Перевірка пробиття
 ui-armor-all_btn = Усі
 ui-armor-none_btn = Немає
 ui-armor-opaque = Непрозорий
 ui-armor-upgrade = Модернізація:
-ui-armor-camo = Камуфляж:
 ui-armor-camo_none = Стоковий (немає)
 ui-armor-camo_group_universal = Універсальні камуфляжі
 ui-armor-camo_group_expendable = Витратні камуфляжі
@@ -1316,7 +1338,12 @@ ui-armor-show_armor_thickness = Показати легенду товщини �
 ui-armor-plate_edges = Краї плит
 ui-armor-waterline = Ватерлінія
 ui-armor-camera_rings = Кільця камери
-ui-armor-realtime_readout = { $health } HP  -  влучань: { $hits }
+ui-armor-realtime_readout = { $health } HP  -  { $hits ->
+    [one] { $hits } влучання
+    [few] { $hits } влучання
+    [many] { $hits } влучань
+   *[other] { $hits } влучань
+}
 ui-armor-show_camera_rings = Показати кільця камери
 ui-armor-camera_fov = Кут огляду камери
 ui-armor-camera_height = Висота камери
@@ -1341,7 +1368,6 @@ ui-armor-tree_matches = Збігів: { $count }
 ui-armor-tree_no_matches = Немає збігів
 ui-armor-no_matching_options = Немає налаштувань, що відповідають фільтру
 ui-armor-opacity = Прозорість
-ui-armor-ship_hull = Корпус корабля
 ui-armor-opaque_hull = Непрозорий корпус
 ui-armor-lighting = Підсвічування корпусу
 ui-armor-lighting_enabled = Увімкнути підсвічування
@@ -1357,20 +1383,16 @@ ui-armor-lighting_specular = Відзеркалення
 ui-armor-lighting_shininess = Блиск
 ui-armor-lighting_key_color = Колір основного світла
 ui-armor-lighting_ambient_color = Колір фонового світла
-ui-armor-pop_out = Відокремити
 ui-armor-zero_mm_plates = Плити 0 мм
 ui-armor-armor_opacity = Прозорість броні
 ui-armor-ballistic_disclaimer = Балістичні результати ґрунтуються на зворотній розробці/оцінках роботи симуляції
 ui-armor-roll = Крен
-ui-armor-ctrl_click_solo = Ctrl+click для виділення
 ui-armor-reset_plates = Скинути плити
-ui-armor-visibility = Видимість
 ui-armor-armor_options = Броня
 ui-armor-no_ship_loaded = Корабель не завантажено
 ui-armor-lod = LOD:
 ui-armor-lod_highest = 0 (найвищий)
 ui-armor-camouflage = Камуфляж
-ui-armor-search_ships = Пошук кораблів...
 ui-armor-ships = Кораблі
 ui-armor-compare = Порівняти
 ui-armor-compare_tooltip = Відкрити нову панель порівняння або клацніть корабель правою кнопкою, щоб порівняти саме його
@@ -1394,14 +1416,12 @@ ui-armor-zone_toggle_tooltip = Показує або приховує всі п�
 ui-armor-mode_solo_zone = лише зона
 ui-armor-mode_cast_trajectory = випустити траєкторію
 ui-armor-loading_catalog = Завантаження каталогу кораблів...
-ui-armor-catalog_failed = Не вдалося завантажити каталог кораблів: { $reason }
 ui-armor-legend_collapse = Згорнути
 ui-armor-legend_hide = Сховати легенду
 ui-armor-armor_thickness_title = Товщина броні
 ui-armor-initializing = Ініціалізація 3D-вікна...
 ui-armor-init_failed = Не вдалося ініціалізувати вікно перегляду броні: { $reason }
 ui-armor-loading_named_ship = Завантаження { $ship }...
-ui-armor-rendering = Рендеринг...
 ui-armor-options = Параметри
 
 ## ui.armor.compass
@@ -1411,23 +1431,33 @@ ui-armor-compass-south = Пд
 ui-armor-compass-west = Зх
 
 ## ui.armor.realtime
-ui-armor-realtime-loading = Завантаження броні корабля...
-ui-armor-realtime-waiting = Очікування даних корабля...
 ui-armor-realtime-incoming_fire = Вхідний вогонь
 ui-armor-realtime-attacker_filter = Фільтр атакуючих
 ui-armor-realtime-all_enemies = Усі вороги
 ui-armor-realtime-show_secondaries = Показати допоміжне озброєння
-ui-armor-realtime-auto_scroll = Автопрокрутка
 ui-armor-realtime-seek_to_salvo = Перейти до залпу
-ui-armor-realtime-deselect = Зняти виділення
-ui-armor-realtime-select_all = Обрати все
 ui-armor-realtime-no_data = Дані про снаряди більше недоступні
 ui-armor-realtime-sim_agrees = Симуляція збігається
-ui-armor-realtime-sim_unchecked = Не вдалося симулювати снарядів: { $count }
+ui-armor-realtime-sim_unchecked = { $count ->
+    [one] Не вдалося симулювати { $count } снаряд
+    [few] Не вдалося симулювати { $count } снаряди
+    [many] Не вдалося симулювати { $count } снарядів
+   *[other] Не вдалося симулювати { $count } снарядів
+}
 ui-armor-realtime-sim_rng_zone = Зона випадковості ({ $angle } град. у { $from }-{ $to })
 ui-armor-realtime-sim_disagrees = Симуляція: { $sim } / Сервер: { $server }
 ui-armor-realtime-no_armor_hit = Бронеплити не уражено
-ui-armor-realtime-tracked = Відстежено залпів: { $salvos }, снарядів: { $shells }
+ui-armor-realtime-tracked = Відстежено { $salvos ->
+    [one] { $salvos } залп
+    [few] { $salvos } залпи
+    [many] { $salvos } залпів
+   *[other] { $salvos } залпів
+}, { $shells ->
+    [one] { $shells } снаряд
+    [few] { $shells } снаряди
+    [many] { $shells } снарядів
+   *[other] { $shells } снарядів
+}
 ui-armor-realtime-nothing_landed = По цьому кораблю ще нічого не влучило
 ui-armor-realtime-shells = { $count }x
 ui-armor-realtime-salvo_shell = { $caliber } мм { $shell }
@@ -1458,10 +1488,8 @@ advantage-moderate = Помірна
 advantage-weak = Слабка
 
 ## ui.search
-ui-search-undo = Скасувати останню зміну запиту
 ui-search-edit_value = Змінити значення
 ui-search-add_filter = Додати фільтр
-ui-search-redo = Повернути скасовану зміну
 ui-search-pill_select = Вибрати
 ui-search-pill_deselect = Скасувати вибір
 ui-search-pill_group_all = Групувати через «і»
@@ -1477,7 +1505,12 @@ ui-search-outcome_draw = Нічия
 ui-search-outcome_unknown = Невідомо
 ui-search-bool_true = так
 ui-search-bool_false = ні
-ui-search-match_count = боїв: { $count }
+ui-search-match_count = { $count ->
+    [one] { $count } бій
+    [few] { $count } бої
+    [many] { $count } боїв
+   *[other] { $count } боїв
+}
 ui-search-row_actions_hint = Дії з реплеєм (або клацніть рядок правою кнопкою)
 ui-search-looking_up_values = Пошук значень...
 ui-search-type_a_query = Введіть запит і натисніть Enter
@@ -1485,15 +1518,14 @@ ui-search-parse_failed = Не вдалося розібрати запит: { $r
 ui-search-searching = Пошук...
 ui-search-failed = Помилка пошуку: { $reason }
 ui-search-no_matches = Збігів немає
-ui-search-game_mode_gap_hint_one = 1 проіндексований бій не має записаного режиму гри. Виконайте переіндексацію всіх реплеїв у налаштуваннях, щоб заповнити його.
-ui-search-game_mode_gap_hint = Проіндексованих боїв без записаного режиму гри: { $count }. Виконайте переіндексацію всіх реплеїв у налаштуваннях, щоб заповнити їх.
+ui-search-game_mode_gap_hint = { $count ->
+    [one] { $count } проіндексований бій не має записаного режиму гри. Виконайте переіндексацію всіх реплеїв у налаштуваннях, щоб заповнити його.
+    [few] { $count } проіндексовані бої не мають записаного режиму гри. Виконайте переіндексацію всіх реплеїв у налаштуваннях, щоб заповнити їх.
+    [many] { $count } проіндексованих боїв не мають записаного режиму гри. Виконайте переіндексацію всіх реплеїв у налаштуваннях, щоб заповнити їх.
+   *[other] { $count } проіндексованих боїв не мають записаного режиму гри. Виконайте переіндексацію всіх реплеїв у налаштуваннях, щоб заповнити їх.
+}
 ui-search-open = Відкрити
 ui-search-open_missing = Файл реплею більше не існує
-ui-search-opened_directory = Відкрито { $dir }, щоб вмістити цей реплей
-ui-search-open_no_directory = Не вдалося визначити, до якого каталогу належить цей реплей
-ui-search-path_copied = Шлях до реплею скопійовано до буфера обміну
-ui-search-preview_map = Переглянути карту
-ui-search-preview_and_render = Наведіть для перегляду, натисніть для рендеру
 ui-search-free_text = містить "{ $text }"
 ui-search-quant_any = будь-хто
 ui-search-quant_none = ніхто
@@ -1527,23 +1559,6 @@ ui-search-suggest-scope_enemy = У ворога
 ui-search-suggest-scope_division = У дивізіоні
 ui-search-suggest-scope_anyone = У будь-кого
 
-## ui.search.bar
-ui-search-bar-hint = Фільтрувати реплеї
-ui-search-bar-and_word = і
-ui-search-bar-or_word = або
-ui-search-bar-not_word = не
-ui-search-bar-group_and = Згрупувати через І
-ui-search-bar-group_or = Згрупувати через АБО
-ui-search-bar-negate = Заперечити
-ui-search-bar-delete = Видалити
-ui-search-bar-clear_selection = Зняти виділення
-ui-search-bar-ungroup = Натисніть, щоб розпустити цю групу
-ui-search-bar-flip_connector = Натисніть, щоб перемкнути І та АБО
-ui-search-bar-context_preset = Шаблон
-ui-search-bar-context_match = Бій
-ui-search-bar-context_roster = Склад
-ui-search-bar-no_suggestions = Немає збігів
-
 ## ui.search.field
 ui-search-field-outcome = Результат
 ui-search-field-map = Карта
@@ -1558,7 +1573,6 @@ ui-search-field-stat_spotting = Засвіт
 ui-search-field-stat_potential = Потенційна шкода
 ui-search-field-stat_received = Отримана шкода
 ui-search-field-stat_pr = PR
-ui-search-field-stat_mc = MC
 ui-search-field-rating = Рейтинг
 ui-search-field-stat_survived = Вижив
 ui-search-field-stat_disconnected = Від'єднався
@@ -1644,7 +1658,6 @@ ui-search-value-game_mode_pinata_event = Піньята (подія)
 ui-search-value-game_mode_respawns = Відродження
 ui-search-value-game_mode_respawns_sectors = Відродження: сектори
 
-
 ## ui.search.column
 ui-search-column-date = Дата
 ui-search-column-map = Карта
@@ -1664,8 +1677,23 @@ ui-settings-index-rebuild = Переіндексувати все
 ui-settings-index-rebuild_hint = Прочитати кожен реплей знову, щоб виправити рядки, які старіший розбір обробив неправильно. «Побудувати індекс» читає лише відсутнє.
 ui-settings-index-progress = Прочитано { $done } з { $total }, не вдалося: { $failed }
 ui-settings-index-progress_skipped = Прочитано { $done } з { $total }, уже наявні: { $skipped }, не вдалося: { $failed }
-ui-settings-index-built = Проіндексовано реплеїв: { $indexed }, не вдалося прочитати: { $failed }
-ui-settings-index-built_with_skipped = Проіндексовано реплеїв: { $indexed }, уже наявні: { $skipped }, не вдалося прочитати: { $failed }
+ui-settings-index-built = Проіндексовано { $indexed ->
+    [one] { $indexed } реплей
+    [few] { $indexed } реплеї
+    [many] { $indexed } реплеїв
+   *[other] { $indexed } реплеїв
+}, не вдалося прочитати: { $failed }
+ui-settings-index-built_with_skipped = Проіндексовано { $indexed ->
+    [one] { $indexed } реплей
+    [few] { $indexed } реплеї
+    [many] { $indexed } реплеїв
+   *[other] { $indexed } реплеїв
+}, { $skipped ->
+    [one] { $skipped } уже був в індексі
+    [few] { $skipped } уже були в індексі
+    [many] { $skipped } уже були в індексі
+   *[other] { $skipped } уже були в індексі
+}, не вдалося прочитати: { $failed }
 
 ## ui.settings
 ui-settings-loading = Завантаження налаштувань...
@@ -1676,8 +1704,12 @@ ui-settings-not_set = (не задано)
 ui-settings-panel-mcp = Сервер MCP
 ui-settings-panel-open = Відкрити налаштування
 ui-settings-panel-search_placeholder = Пошук налаштувань
-ui-settings-panel-count_one = 1 налаштування
-ui-settings-panel-count = Налаштувань: { $count }
+ui-settings-panel-count = { $count ->
+    [one] { $count } налаштування
+    [few] { $count } налаштування
+    [many] { $count } налаштувань
+   *[other] { $count } налаштувань
+}
 ui-settings-panel-no_matches = Немає налаштувань, що відповідають запиту
 ui-settings-panel-close = Закрити налаштування
 ui-settings-panel-in_error = { $name }: налаштування потребує уваги
@@ -1728,13 +1760,38 @@ ui-app-status_cache_downloading = Завантаження ігрових дан
 ui-app-status_cache_planning = Запит переліку опублікованих ігрових даних
 ui-app-drop_to_load = Відпустіть, щоб завантажити { $file }
 ui-app-drop_to_list = Відпустіть, щоб показати повтори з { $folder }
-ui-app-drop_to_list_replays = Відпустіть, щоб показати реплеї ({ $count })
-ui-app-drop_to_list_folders = Відпустіть, щоб показати реплеї з тек ({ $count })
+ui-app-drop_to_list_replays = Відпустіть, щоб показати { $count ->
+    [one] { $count } реплей
+    [few] { $count } реплеї
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+}
+ui-app-drop_to_list_folders = Відпустіть, щоб показати реплеї з { $count ->
+    [one] { $count } теки
+    [few] { $count } тек
+    [many] { $count } тек
+   *[other] { $count } тек
+}
 ui-app-drop_to_open_and_list = Відпустіть, щоб відкрити { $file } і показати реплеї з { $folders }
-ui-app-drop_to_list_replays_and_folders = Відпустіть, щоб показати реплеї ({ $count }) і реплеї з { $folders }
-ui-app-drop_folder_count = тек: { $count }
+ui-app-drop_to_list_replays_and_folders = Відпустіть, щоб показати { $count ->
+    [one] { $count } реплей
+    [few] { $count } реплеї
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+} і реплеї з { $folders }
+ui-app-drop_folder_count = { $count ->
+    [one] { $count } тека
+    [few] { $count } теки
+    [many] { $count } тек
+   *[other] { $count } тек
+}
 ui-app-reading_replay = Читання { $replay }
-ui-app-reading_replays = Читання реплеїв: { $count }
+ui-app-reading_replays = Читання { $count ->
+    [one] { $count } реплею
+    [few] { $count } реплеїв
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+}
 ui-app-status_constants_generating = Оновлення ігрових констант для { $version }
 ui-app-worker_constants = Обробник ігрових констант
 ui-app-worker_live_match = Стеження за боєм
@@ -1744,7 +1801,12 @@ ui-app-worker_stalled = { $worker }: не відповідає
 ui-app-worker_stopped = { $worker }: зупинено
 ui-app-status_indexing = Індексування реплеїв
 ui-app-status_of = { $done } з { $total }
-ui-app-status_tasks = Виконується завдань: { $count }
+ui-app-status_tasks = { $count ->
+    [one] Виконується { $count } завдання
+    [few] Виконуються { $count } завдання
+    [many] Виконується { $count } завдань
+   *[other] Виконується { $count } завдань
+}
 ui-app-status_show_panel = Показати панель: { $panel }
 ui-app-status_hide_panel = Сховати панель: { $panel }
 ui-app-panel_left = Ліва
@@ -1777,8 +1839,12 @@ ui-palette-armor_ship_row = { $name } -- рівень { $tier }, { $class }, { $
 ui-palette-back_hint = Esc: назад
 ui-palette-ships_loading = Завантаження списку кораблів...
 ui-palette-ships_unavailable = Немає списку кораблів: { $reason }
-ui-palette-matches_found = Збігів: { $count }
-ui-palette-nothing_indexed = Ще нічого не проіндексовано
+ui-palette-matches_found = { $count ->
+    [one] { $count } збіг
+    [few] { $count } збіги
+    [many] { $count } збігів
+   *[other] { $count } збігів
+}
 ui-palette-sample_stats = Налагодження: показати зразкові дані у статистиці
 ui-palette-restore_stats = Налагодження: показати записані дані у статистиці
 
@@ -1802,10 +1868,30 @@ ui-replay-renderer-export_copied = Відео скопійовано до буф
 ui-replay-renderer-export_not_written = Не вдалося відрендерити відео: { $reason }
 ui-replay-renderer-pop_out = Відкрити в окремому вікні
 ui-replay-renderer-export_path_unusable = У це розташування неможливо записати
-ui-replay-renderer-batch_started = Рендер реплеїв ({ $count }) до { $dir }
-ui-replay-renderer-batch_finished = Відрендерено реплеїв: { $written }; не вдалося: { $failed }
-ui-replay-renderer-batch_all_written = Відрендерено реплеїв: { $written }
-ui-replay-renderer-batch_copied = Відрендерено реплеїв: { $written }, їх поміщено до буфера обміну
+ui-replay-renderer-batch_started = Рендер { $count ->
+    [one] { $count } реплею
+    [few] { $count } реплеїв
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+} до { $dir }
+ui-replay-renderer-batch_finished = Відрендерено { $written ->
+    [one] { $written } реплей
+    [few] { $written } реплеї
+    [many] { $written } реплеїв
+   *[other] { $written } реплеїв
+}; не вдалося відрендерити: { $failed }
+ui-replay-renderer-batch_all_written = Відрендерено { $written ->
+    [one] { $written } реплей
+    [few] { $written } реплеї
+    [many] { $written } реплеїв
+   *[other] { $written } реплеїв
+}
+ui-replay-renderer-batch_copied = { $written ->
+    [one] Відрендерено { $written } реплей і поміщено його до буфера обміну
+    [few] Відрендерено { $written } реплеї і поміщено їх до буфера обміну
+    [many] Відрендерено { $written } реплеїв і поміщено їх до буфера обміну
+   *[other] Відрендерено { $written } реплеїв і поміщено їх до буфера обміну
+}
 ui-replay-renderer-batch_not_copied = Відрендерено до { $dir }, але буфер обміну їх не прийняв: { $reason }
 ui-replay-renderer-batch_progress = Рендер { $done } з { $total }: { $replay }
 ui-replay-renderer-baking = Читання реплею та обробка бою...
@@ -1862,19 +1948,11 @@ ui-armor-pen-hover_a_plate = Наведіть на плиту корабля, щ
 ui-armor-pen-awaiting_plate = наведіть на плиту
 ui-armor-pen-clear_all = Очистити все
 ui-armor-pen-remove = Прибрати з порівняння
-ui-armor-pen-title = Пробиття
-ui-armor-pen-title_tooltip = Перевірити дію снарядів корабля на плиту
-ui-armor-pen-ship = Корабель, що стріляє
 ui-armor-pen-firing_ship_tooltip = Використовувати снаряди цього корабля для траєкторій
 ui-armor-pen-use_for_trajectory = Для траєкторії
-ui-armor-pen-pick_ship = Оберіть корабель, що стріляє по цьому
-ui-armor-pen-enter_thickness = Введіть товщину плити
 ui-armor-pen-no_shells = { $ship } не має снарядів головного калібру
-ui-armor-pen-plate = Плита
-ui-armor-pen-mm = мм
 ui-armor-pen-ifhe = IFHE
 ui-armor-pen-ifhe_tooltip = Інерційний детонатор ОФ-снарядів збільшує пробиття ОФ-снарядів на чверть
-ui-armor-pen-last_hovered = Остання наведена: { $plate }
 ui-armor-pen-penetrates = пробиває
 ui-armor-pen-shatters = не пробиває
 ui-armor-pen-angle_dependent = залежить від кута
@@ -1909,14 +1987,17 @@ ui-armor-export-camo_reset = Скинути до типових
 ui-armor-export-loading_details = Завантаження...
 ui-armor-export-size_estimate = Орієнтовний розмір файлу: { $size }
 ui-armor-export-size_breakdown = Геометрія { $geometry } (точно), текстури { $textures } (орієнтовно)
-ui-armor-export-size_incomplete = Не вдалося оцінити камуфляжі ({ $count }); розмір може бути неповним
+ui-armor-export-size_incomplete = Не вдалося оцінити { $count ->
+    [one] { $count } камуфляж
+    [few] { $count } камуфляжі
+    [many] { $count } камуфляжів
+   *[other] { $count } камуфляжів
+}; розмір може бути неповним
 ui-armor-export-exporting = Експорт { $ship }...
-ui-armor-export-close_button = Закрити
 ui-armor-export-already_running = Експорт уже виконується
 ui-armor-export-exported = Експортовано { $ship }
 ui-armor-export-exported_with_size = Експортовано { $ship } ({ $size })
 ui-armor-export-vehicle_not_found = Корабель не знайдено
-ui-armor-export-create_file_failed = Не вдалося створити файл: { $error }
 ui-armor-export-export_failed = Помилка експорту: { $error }
 
 ## ui.armor.outcome
@@ -1974,8 +2055,23 @@ ui-tactics-scan_replays_tooltip = Прочитати з реплеїв розт�
 ui-tactics-scan_needs_game_data = Спочатку завантажте версію гри
 ui-tactics-scan_running = Читання реплеїв...
 ui-tactics-scan_progress = Читання реплеїв... { $read } / { $total }
-ui-tactics-scan_done = Прочитано реплеїв: { $total }, знайдено нових розташувань: { $added }
-ui-tactics-session_boards_full = У сесії вже відкрито дошок: { $limit }, тому ця дошка залишається на своїй мапі
+ui-tactics-scan_done = Прочитано { $total ->
+    [one] { $total } реплей
+    [few] { $total } реплеї
+    [many] { $total } реплеїв
+   *[other] { $total } реплеїв
+} і знайдено { $added ->
+    [one] { $added } нове розташування
+    [few] { $added } нові розташування
+    [many] { $added } нових розташувань
+   *[other] { $added } нових розташувань
+}
+ui-tactics-session_boards_full = У сесії вже відкрито { $limit ->
+    [one] { $limit } дошку
+    [few] { $limit } дошки
+    [many] { $limit } дошок
+   *[other] { $limit } дошок
+}, тому ця дошка залишається на своїй мапі
 ui-tactics-placing = Розміщення { $ship }
 ui-tactics-side_friendly = Союзник
 ui-tactics-side_enemy = Противник
@@ -2029,14 +2125,17 @@ ui-launcher-cancel = Скасувати
 ui-launcher-resume = Продовжити
 ui-launcher-paused = Завантаження призупинено; підготовлені файли збережено.
 ui-launcher-installed = Встановлено
-ui-launcher-installed_skipped = Встановлено (пропущено дельта-частин: { $count }; ще не підтримуються, завантажено, але не застосовано)
+ui-launcher-installed_skipped = Встановлено (пропущено { $count ->
+    [one] { $count } дельта-частину
+    [few] { $count } дельта-частини
+    [many] { $count } дельта-частин
+   *[other] { $count } дельта-частин
+}: ще не підтримуються, завантажено, але не застосовано)
 ui-launcher-download_failed = Помилка завантаження: { $error }
 ui-launcher-update_in_place = Оновлення встановлюється в теку самої інсталяції. Виберіть { $path }, щоб оновити її.
 ui-launcher-cancelled = Завантаження скасовано.
 ui-launcher-launch_failed = Помилка запуску: { $error }
 ui-launcher-use_for_toolkit = Використовувати в Toolkit
-ui-launcher-not_set = не задано
-ui-launcher-browse = Огляд...
 ui-launcher-install_heading = Встановити гру
 ui-launcher-install_hint = Нове встановлення займає десятки ГБ.
 ui-launcher-install_title = Куди встановити гру
@@ -2104,25 +2203,70 @@ ui-replay-damage_share-hold = Утримуйте { $key } для інверсі�
 ui-replay-damage_share-release = Відпустіть { $key }, щоб повернутися.
 
 ## ui.reindex
-ui-reindex-context_one = Примусово переіндексувати
-ui-reindex-context_many = Примусово переіндексувати реплеї: { $count }
+ui-reindex-context = { $count ->
+    [1] Примусово переіндексувати
+    [one] Примусово переіндексувати { $count } реплей
+    [few] Примусово переіндексувати { $count } реплеї
+    [many] Примусово переіндексувати { $count } реплеїв
+   *[other] Примусово переіндексувати { $count } реплеїв
+}
 ui-reindex-palette_by_version = Примусова переіндексація реплеїв: за версією
 ui-reindex-palette_all = Примусова переіндексація реплеїв: усі
 ui-reindex-versions_title = Примусова переіндексація реплеїв: за версією
 ui-reindex-versions_placeholder = Фільтр версій гри...
-ui-reindex-version_row = { $version } -- реплеїв: { $count }
+ui-reindex-version_row = { $version } -- { $count ->
+    [one] { $count } реплей
+    [few] { $count } реплеї
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+}
 ui-reindex-no_versions = У жодному реплеї зі списку не вказано версію гри
 ui-reindex-confirm_title = Примусова переіндексація реплеїв
 ui-reindex-confirm_ok = Переіндексувати
-ui-reindex-confirm_count = Реплеї ({ $count }) буде прочитано знову, а їхні записи в індексі перезаписано.
+ui-reindex-confirm_count = { $count ->
+    [one] { $count } реплей буде прочитано знову, а його запис в індексі перезаписано.
+    [few] { $count } реплеї буде прочитано знову, а їхні записи в індексі перезаписано.
+    [many] { $count } реплеїв буде прочитано знову, а їхні записи в індексі перезаписано.
+   *[other] { $count } реплеїв буде прочитано знову, а їхні записи в індексі перезаписано.
+}
 ui-reindex-confirm_range = Зіграно з { $oldest } по { $newest }.
-ui-reindex-confirm_undated = Реплеї для читання ({ $count }) не мають читабельної дати бою і не входять до цього діапазону.
+ui-reindex-confirm_undated = { $count ->
+    [one] { $count } реплей для читання не має читабельної дати бою і не входить до цього діапазону.
+    [few] { $count } реплеї для читання не мають читабельної дати бою і не входять до цього діапазону.
+    [many] { $count } реплеїв для читання не мають читабельної дати бою і не входять до цього діапазону.
+   *[other] { $count } реплеїв для читання не мають читабельної дати бою і не входять до цього діапазону.
+}
 ui-reindex-confirm_downloads = Спочатку буде завантажено ігрові дані для цих версій:
-ui-reindex-confirm_unobtainable = Для цих версій неможливо отримати ігрові дані, тому їхні реплеї ({ $count }) пропускаються:
-ui-reindex-confirm_no_cache_dir = Не задано теку кешу ігрових даних, тому ігрові дані для цих версій неможливо завантажити, і їхні реплеї ({ $count }) пропускаються:
-ui-reindex-confirm_no_build = У реплеях ({ $count }) не вказано збірку гри, їх пропущено.
-ui-reindex-confirm_no_version = У реплеях ({ $count }) не вказано читабельну версію гри, їх пропущено.
-ui-reindex-build_row = { $version } (збірка { $build }): реплеїв: { $count }
+ui-reindex-confirm_unobtainable = Для цих версій неможливо отримати ігрові дані, тому { $count ->
+    [one] { $count } їхній реплей пропускається:
+    [few] { $count } їхні реплеї пропускаються:
+    [many] { $count } їхніх реплеїв пропускаються:
+   *[other] { $count } їхніх реплеїв пропускаються:
+}
+ui-reindex-confirm_no_cache_dir = Не задано теку кешу ігрових даних, тому ігрові дані для цих версій неможливо завантажити, і { $count ->
+    [one] { $count } їхній реплей пропускається:
+    [few] { $count } їхні реплеї пропускаються:
+    [many] { $count } їхніх реплеїв пропускаються:
+   *[other] { $count } їхніх реплеїв пропускаються:
+}
+ui-reindex-confirm_no_build = { $count ->
+    [one] У { $count } реплеї не вказано збірку гри, його пропущено.
+    [few] У { $count } реплеях не вказано збірку гри, їх пропущено.
+    [many] У { $count } реплеях не вказано збірку гри, їх пропущено.
+   *[other] У { $count } реплеях не вказано збірку гри, їх пропущено.
+}
+ui-reindex-confirm_no_version = { $count ->
+    [one] У { $count } реплеї не вказано читабельну версію гри, його пропущено.
+    [few] У { $count } реплеях не вказано читабельну версію гри, їх пропущено.
+    [many] У { $count } реплеях не вказано читабельну версію гри, їх пропущено.
+   *[other] У { $count } реплеях не вказано читабельну версію гри, їх пропущено.
+}
+ui-reindex-build_row = { $version } (збірка { $build }): { $count ->
+    [one] { $count } реплей
+    [few] { $count } реплеї
+    [many] { $count } реплеїв
+   *[other] { $count } реплеїв
+}
 ui-reindex-nothing_listed = У списку немає реплеїв для переіндексації.
 ui-reindex-nothing_readable = Жоден із цих реплеїв не можна переіндексувати: для них немає ігрових даних (пропущено: { $count }).
 ui-reindex-no_game_data = Реплеї неможливо прочитати, доки не вказано теку гри.
@@ -2130,7 +2274,12 @@ ui-reindex-busy_index = Індексація вже виконується.
 ui-reindex-busy_cache = Завдання ігрових даних уже виконується. Спробуйте ще раз після його завершення.
 ui-reindex-planning = Перевірка доступних ігрових даних...
 ui-reindex-no_index = Індекс реплеїв не відкрито, тому нічого не переіндексовано.
-ui-reindex-done = Переіндексовано реплеїв: { $indexed }; пропущено: { $skipped }, не вдалося прочитати: { $failed }
+ui-reindex-done = Переіндексовано { $indexed ->
+    [one] { $indexed } реплей
+    [few] { $indexed } реплеї
+    [many] { $indexed } реплеїв
+   *[other] { $indexed } реплеїв
+}; пропущено: { $skipped }, не вдалося прочитати: { $failed }
 ui-reindex-stopped = Переіндексацію зупинено: переіндексовано { $indexed }, пропущено { $skipped }, не вдалося прочитати { $failed }
 ui-reindex-stopped_before_reading = Переіндексацію зупинено до читання будь-якого реплею.
 
@@ -2138,13 +2287,23 @@ ui-reindex-stopped_before_reading = Переіндексацію зупинен�
 ui-index_folder-tooltip = Проіндексувати всі реплеї з цього списку, яких ще немає в індексі реплеїв
 ui-index_folder-confirm_title = Індексація реплеїв
 ui-index_folder-confirm_ok = Індексувати
-ui-index_folder-confirm_count = Реплеї з цього списку, яких ще немає в індексі реплеїв ({ $count }), буде прочитано й додано до нього.
+ui-index_folder-confirm_count = { $count ->
+    [one] { $count } реплей із цього списку ще немає в індексі реплеїв, його буде прочитано й додано до нього.
+    [few] { $count } реплеї з цього списку ще немає в індексі реплеїв, їх буде прочитано й додано до нього.
+    [many] { $count } реплеїв з цього списку ще немає в індексі реплеїв, їх буде прочитано й додано до нього.
+   *[other] { $count } реплеїв з цього списку ще немає в індексі реплеїв, їх буде прочитано й додано до нього.
+}
 ui-index_folder-note_live = Проіндексовані реплеї додаються до індексу реплеїв, який використовують Пошук і Відстеження гравців.
 ui-index_folder-note_folder = Проіндексовані реплеї додаються до індексу реплеїв під власним джерелом цього каталогу ({ $dir }). Пошук і список гравців у Відстеженні гравців їх враховують. Список кланів у Відстеженні гравців читає лише реплеї самої гри.
 ui-index_folder-nothing_listed = У цьому списку немає реплеїв для індексації.
 ui-index_folder-nothing_missing = Усі реплеї в цьому списку вже проіндексовано.
 ui-index_folder-unreadable_index = Не вдалося прочитати індекс реплеїв.
-ui-index_folder-done = Проіндексовано реплеїв: { $indexed }; пропущено: { $skipped }, не вдалося прочитати: { $failed }
+ui-index_folder-done = Проіндексовано { $indexed ->
+    [one] { $indexed } реплей
+    [few] { $indexed } реплеї
+    [many] { $indexed } реплеїв
+   *[other] { $indexed } реплеїв
+}; пропущено: { $skipped }, не вдалося прочитати: { $failed }
 ui-index_folder-stopped = Індексацію зупинено: проіндексовано { $indexed }, пропущено { $skipped }, не вдалося прочитати { $failed }
 ui-index_folder-stopped_before_reading = Індексацію зупинено до читання будь-якого реплею.
 
@@ -2152,7 +2311,12 @@ ui-index_folder-stopped_before_reading = Індексацію зупинено �
 ui-replay_folders-install = Гра
 ui-replay_folders-watched = Відстежується: нові та змінені реплеї з'являються тут
 ui-replay_folders-unwatched = Не відстежується: скористайтеся «Оновити», щоб перечитати
-ui-replay_folders-unseen = { $count } нових або змінених реплеїв з останнього перегляду
+ui-replay_folders-unseen = { $count ->
+    [one] { $count } новий або змінений реплей з останнього перегляду
+    [few] { $count } нові або змінені реплеї з останнього перегляду
+    [many] { $count } нових або змінених реплеїв з останнього перегляду
+   *[other] { $count } нових або змінених реплеїв з останнього перегляду
+}
 ui-replay_folders-missing = Цей каталог більше не існує: { $dir }
 ui-replay_folders-missing_hint = Він відкриватиметься тут під час кожного запуску, доки ви його не відкріпите.
 ui-replay_folders-pin = Закріпити
@@ -2173,7 +2337,12 @@ ui-replay_folders-source_failed = Не вдається проіндексува
 ui-replay_folders-restart_watch = Перезапустити відстеження
 ui-replay_folders-watch_stopped = Відстеження { $folder } зупинено: { $cause }.
 ui-replay_folders-watch_restarting = Перезапуск через { $seconds } с (спроба { $attempt } з { $attempts }).
-ui-replay_folders-watch_gave_up = Перезапуск не вдався { $attempts } рази, нові спроби не виконуються.
+ui-replay_folders-watch_gave_up = Перезапуск не вдався { $attempts ->
+    [one] { $attempts } раз
+    [few] { $attempts } рази
+    [many] { $attempts } разів
+   *[other] { $attempts } разів
+}, нові спроби не виконуються.
 ui-replay_folders-watch_restart_hint = Натисніть червону крапку або виберіть «Перезапустити відстеження» в меню вкладки, щоб перезапустити його зараз.
 ui-replay_folders-watch_resumed = Відстеження { $folder } відновлено.
 ui-replay_folders-watch_cause_backend = файлова система повідомила про помилку: { $error }
@@ -2182,7 +2351,12 @@ ui-replay_folders-watch_cause_panicked = внутрішня помилка: { $e
 ui-replay_folders-watch_cause_exited = відстеження неочікувано завершилося
 ui-replay_folders-dropped = Перетягнуті
 ui-replay_folders-dropped_numbered = Перетягнуті { $number }
-ui-replay_folders-dropped_count = Перетягнутих реплеїв: { $count }
+ui-replay_folders-dropped_count = { $count ->
+    [one] { $count } перетягнутий реплей
+    [few] { $count } перетягнуті реплеї
+    [many] { $count } перетягнутих реплеїв
+   *[other] { $count } перетягнутих реплеїв
+}
 ui-replay_folders-dropped_no_source = Перетягнуті реплеї індексуються разом із власними каталогами. Відкрийте каталог, щоб шукати в ньому або проіндексувати його.
 ui-replay_folders-unreadable_replay = Не вдалося прочитати: { $error }
 
@@ -2347,14 +2521,28 @@ ui-armor-textures-title = Текстури
 ui-armor-textures-hint = Гра читає файл у теці res_mods збірки замість запакованого файлу з тим самим шляхом. Клацніть текстуру правою кнопкою, щоб скопіювати цей шлях.
 ui-armor-textures-under_pointer = Під курсором: { $material }
 ui-armor-textures-reading = Читання текстур...
-ui-armor-textures-summary = Матеріалів: { $materials }, текстур: { $textures }
+ui-armor-textures-summary = { $materials ->
+    [one] { $materials } матеріал
+    [few] { $materials } матеріали
+    [many] { $materials } матеріалів
+   *[other] { $materials } матеріалів
+}, { $textures ->
+    [one] { $textures } текстура
+    [few] { $textures } текстури
+    [many] { $textures } текстур
+   *[other] { $textures } текстур
+}
 ui-armor-textures-no_material = Немає матеріалу
 ui-armor-textures-unresolved = Шляху немає в assets.bin
 ui-armor-textures-absent = Немає у встановлених пакетах
 ui-armor-textures-unreadable = Не вдалося прочитати заголовок DDS
 ui-armor-textures-unknown_format = Невідомий формат
-ui-armor-textures-details_one = { $format }, { $size }, 1 файл, { $bytes }
-ui-armor-textures-details = { $format }, { $size }, файлів: { $count }, { $bytes }
+ui-armor-textures-details = { $format }, { $size }, { $count ->
+    [one] { $count } файл
+    [few] { $count } файли
+    [many] { $count } файлів
+   *[other] { $count } файлів
+}, { $bytes }
 ui-armor-textures-role_albedo = Альбедо
 ui-armor-textures-role_normal = Нормалі
 ui-armor-textures-role_metal_gloss = Метал-глянець
@@ -2362,19 +2550,39 @@ ui-armor-textures-role_ambient_occlusion = Фонове затінення
 ui-armor-textures-role_detail = Деталізація
 ui-armor-textures-role_name_matched = Альбедо, знайдено за назвою файлу
 ui-armor-textures-copy_path = Копіювати шлях
-ui-armor-textures-copy_override = Копіювати шлях res_mods
-ui-armor-textures-copy_overrides = Копіювати шляхи res_mods ({ $count })
-ui-armor-textures-paths_copied = Скопійовано шляхів: { $count }
+ui-armor-textures-copy_overrides = { $count ->
+    [1] Копіювати шлях res_mods
+    [one] Копіювати { $count } шлях res_mods
+    [few] Копіювати { $count } шляхи res_mods
+    [many] Копіювати { $count } шляхів res_mods
+   *[other] Копіювати { $count } шляхів res_mods
+}
+ui-armor-textures-paths_copied = Скопійовано { $count ->
+    [one] { $count } шлях
+    [few] { $count } шляхи
+    [many] { $count } шляхів
+   *[other] { $count } шляхів
+}
 ui-armor-textures-no_build = Ігрові дані не завантажено, тому теку модів збірки невідомо.
 ui-armor-textures-show_in_unpacker = Показати в розпакувальнику ресурсів
 ui-armor-textures-show_textures = Показати текстури
 ui-armor-textures-extract = Видобути файли...
 ui-armor-textures-extract_title = Видобути файли текстур до
 ui-armor-textures-extracting = Видобування файлів текстур...
-ui-armor-textures-extracted = Видобуто файлів: { $count } до { $folder }
+ui-armor-textures-extracted = Видобуто { $count ->
+    [one] { $count } файл
+    [few] { $count } файли
+    [many] { $count } файлів
+   *[other] { $count } файлів
+} до { $folder }
 ui-armor-textures-extract_failed = Не вдалося видобути файли текстур: { $reason }
 ui-armor-textures-replace_title = Замінити наявні файли?
-ui-armor-textures-replace_description = Деякі з цих файлів ({ $count }) уже є в { $folder }. Видобування замінить їх.
+ui-armor-textures-replace_description = { $count ->
+    [one] { $count } з цих файлів уже є в { $folder }. Видобування замінить його.
+    [few] { $count } з цих файлів уже є в { $folder }. Видобування замінить їх.
+    [many] { $count } з цих файлів уже є в { $folder }. Видобування замінить їх.
+   *[other] { $count } з цих файлів уже є в { $folder }. Видобування замінить їх.
+}
 ui-armor-textures-replace = Замінити
 
 ## ui.settings.mcp

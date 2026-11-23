@@ -243,10 +243,7 @@ impl RatingBreakdown {
         }
 
         if let (Some(score), Some(detection)) = (parts.torpedo_warnings, result.torpedo_detection) {
-            let detail = match detection.threatening {
-                1 => t!("ui-rating-detail-torpedo_warnings_one"),
-                count => t!("ui-rating-detail-torpedo_warnings", threatening = count),
-            };
+            let detail = t!("ui-rating-detail-torpedo_warnings", threatening = detection.threatening);
             lines.push(mc_line(MatchContributionFactor::TorpedoWarnings, score, detail.into()));
         }
 
@@ -267,10 +264,7 @@ impl RatingBreakdown {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            let detail = match bursts.len() {
-                1 => t!("ui-rating-detail-critical_bursts_one", bursts = listed),
-                count => t!("ui-rating-detail-critical_bursts", count = count, bursts = listed),
-            };
+            let detail = t!("ui-rating-detail-critical_bursts", count = bursts.len(), bursts = listed);
             lines.push(mc_line(MatchContributionFactor::CriticalBursts, score, detail.into()));
         }
 

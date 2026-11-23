@@ -15,20 +15,16 @@ dialog-machine_translation_warning = La plupart des traductions ont été géné
 # -- Titres des onglets --
 
 ## ui.tabs
-ui-tabs-launcher = Lanceur
 ui-tabs-unpacker = Extracteur de ressources
 ui-tabs-settings = Paramètres
 ui-tabs-replay_parser = Inspecteur de replays
-ui-tabs-replay_directory = Répertoire de replays
 ui-tabs-player_tracker = Suivi des joueurs
-ui-tabs-mod_manager = Gestionnaire de mods
 ui-tabs-armor_viewer = Visualiseur de blindage
 ui-tabs-model_viewer = Visualiseur de modèles
 ui-tabs-stats = Statistiques
 ui-tabs-directory_stats = Stats de { $dir }
 ui-tabs-close_directory_stats = Fermer les stats du répertoire
 ui-tabs-search = Recherche
-ui-tabs-search_these_replays = Rechercher dans ces replays
 ui-tabs-search_these_replays_unavailable = Ces replays n'ont pas encore été indexés
 ui-tabs-zoom_in_panel = Agrandir
 ui-tabs-zoom_out_panel = Réduire
@@ -61,12 +57,10 @@ ui-buttons-github = GitHub
 ui-buttons-view_github = Voir le projet sur GitHub
 ui-buttons-choose = Choisir...
 ui-buttons-reset = Réinitialiser
+ui-buttons-clear = Effacer
 ui-buttons-select_all = Tout sélectionner
 ui-buttons-download = Télécharger
-ui-buttons-dismiss = Ignorer
 ui-buttons-retry = Réessayer
-ui-buttons-check_all = Tout cocher
-ui-buttons-uncheck_all = Tout décocher
 ui-buttons-refresh_persisted_data_confirm = Actualiser
 
 # -- Éléments de menu --
@@ -76,7 +70,6 @@ ui-menu-file = Fichier
 ui-menu-check_updates = Vérifier les mises à jour
 ui-menu-about = À propos
 ui-menu-quit = Quitter
-ui-menu-licenses = Licences
 
 # -- Titres des fenêtres --
 
@@ -85,7 +78,6 @@ ui-windows-build_consent = Consentement de collecte de builds
 ui-windows-replay_migration = Passer au partage de replays
 ui-windows-crash_detected = Plantage de l'application détecté
 ui-windows-update_available = Mise à jour disponible
-ui-windows-confirm = Confirmer
 ui-windows-network_warning = Avertissement réseau
 ui-windows-download_game_data = Télécharger les données de jeu
 ui-windows-error = Erreur
@@ -97,7 +89,6 @@ ui-windows-minimize = Réduire
 ui-windows-maximize = Agrandir
 ui-windows-restore = Restaurer
 ui-windows-close = Fermer
-ui-windows-licenses = Licences
 
 # -- Texte des dialogues / messages --
 
@@ -114,8 +105,10 @@ ui-dialogs-p2p_warning = Les sessions collaboratives utilisent un réseau pair-�
 ui-dialogs-software_encode_message = Aucun encodeur vidéo GPU compatible n'a été trouvé, cet export sera donc encodé de manière logicielle. C'est beaucoup plus lent, et une longue bataille peut prendre plusieurs minutes.
 ui-dialogs-download_game_data_intro = Certains replays nécessitent des données de jeu qui ne sont pas installées. Choisissez les builds à télécharger.
 ui-dialogs-download_build_row = Version { $version } (build { $build })
-ui-dialogs-download_replays_needing = requis par { $count } replay(s)
-ui-dialogs-download_availability_resolving = vérification du dépôt
+ui-dialogs-download_replays_needing = requis par { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+}
 ui-dialogs-download_availability_exact = publié
 ui-dialogs-download_availability_nearest = aucune correspondance exacte, la plus proche est { $version } (build { $build })
 ui-dialogs-download_availability_unpublished = jamais publié
@@ -134,11 +127,8 @@ ui-labels-error_occurred = Une erreur est survenue :
 ui-labels-made_by = Créé par landaire.
 ui-labels-credits = Merci à Trackpad, TTaro, lkolbly pour leurs contributions.
 ui-labels-pr_credits = Les données et la formule de calcul de la cote personnelle (PR) sont fournies par WoWs Numbers.
-ui-labels-powered_by = Propulsé par{" "}
-ui-labels-and = {" "}et{" "}
 ui-labels-suppress_warning = Ne plus afficher ce message
 ui-labels-more_info = Plus d'informations
-ui-labels-loading_replays = Chargement de { $count } replays...
 ui-labels-app_version = Version { $version }
 ui-labels-project_license = WoWs Toolkit est distribué sous la licence { $license }.
 ui-labels-third_party_notices = Mentions de tiers
@@ -155,35 +145,30 @@ ui-messages-app_up_to_date = L'application est à jour
 ui-messages-checking_app_updates = Recherche de mises à jour de l'application...
 ui-messages-update_starting = Téléchargement de la mise à jour...
 ui-messages-update_check_failed = Échec de la vérification des mises à jour
-ui-messages-constants_fetch_failed = Échec de la récupération du fichier de correspondance des replays. Nouvelle tentative ultérieure.
 ui-messages-game_data_loaded = Données de jeu chargées avec succès
-ui-messages-no_replays_detected = Aucun replay détecté — votre répertoire WoWs est-il correctement configuré ?
-ui-messages-build_loaded = Build { $build } chargé
-ui-messages-downloading_game_data = Téléchargement des données de jeu...
-ui-messages-game_data_downloaded = Données de jeu téléchargées pour le build { $build }
-ui-messages-game_data_builds_downloaded = Données de jeu téléchargées pour { $count } version(s)
+ui-messages-no_replays_detected = Aucun replay détecté. Votre répertoire WoWs est-il correctement configuré ?
+ui-messages-game_data_builds_downloaded = Données de jeu téléchargées pour { $count ->
+    [one] { $count } version
+   *[other] { $count } versions
+}
 ui-messages-game_data_download_failed = Impossible de télécharger les données de jeu
-ui-messages-game_data_build_download_failed = Impossible de télécharger les données de jeu du build { $build }
-ui-messages-checking_game_data_updates = Recherche de mises à jour des données de jeu...
 ui-messages-game_data_up_to_date = Les données de jeu sont à jour
-ui-messages-game_data_updates_available = { $count } build(s) en cache disposent de données plus récentes
-ui-messages-validating_game_data = Validation du cache des données de jeu...
+ui-messages-game_data_updates_available = { $count ->
+    [one] { $count } build en cache dispose de données plus récentes
+   *[other] { $count } builds en cache disposent de données plus récentes
+}
 ui-messages-game_data_cache_valid = Le cache des données de jeu est valide et correspond au dépôt distant
-ui-messages-game_data_cache_invalid = { $count } build(s) en cache sont obsolètes ou corrompus
-ui-messages-replay_loaded = Replay chargé avec succès
+ui-messages-game_data_cache_invalid = { $count ->
+    [one] { $count } build en cache est obsolète ou corrompu
+   *[other] { $count } builds en cache sont obsolètes ou corrompus
+}
 ui-messages-replay_load_failed = Échec du chargement du replay
 ui-messages-twitch_token_invalid = Le jeton Twitch est invalide ou expiré. Veuillez le mettre à jour dans les Paramètres.
 ui-messages-wows_dir_invalid = Le répertoire World of Warships n'est pas valide. Vérifiez le chemin dans les Paramètres.
 ui-messages-wows_dir_not_set = Le répertoire de World of Warships n'est pas défini
-ui-messages-twitch_token_expired = Le jeton Twitch est invalide ou expiré
-ui-messages-versioned_constants_rebuild_failed = Échec de la récupération des constantes versionnées lors de la reconstruction. Nouvelle tentative ultérieure.
 ui-messages-constants_version_mismatch =
     La version du fichier de correspondance des replays ne correspond pas à la version du jeu.
     Les résultats d'après-bataille peuvent être inexacts. Veuillez patienter pendant que les mainteneurs du projet mettent à jour le fichier sur le serveur.
-ui-messages-constants_updated = Fichier de correspondance des replays mis à jour avec succès
-ui-messages-constants_imported = Correspondance des données de replay installée pour la version { $build }
-ui-messages-constants_imported_other_build = Correspondance des données de replay installée pour la version { $build }, qui n'est pas la version actuellement chargée ({ $loaded })
-ui-messages-constants_import_failed = Impossible d'importer la correspondance des données de replay : { $error }
 ui-messages-session_started = Session démarrée
 ui-messages-user_joined = { $name } a rejoint
 ui-messages-user_timeout = { $name } a expiré
@@ -191,23 +176,15 @@ ui-messages-user_left = { $name } a quitté
 ui-messages-session_ended = Session terminée
 ui-messages-session_error = Erreur de session : { $msg }
 ui-messages-connected_to_session = Connecté à la session
-ui-messages-joined_session = Session rejointe : { $name }
-ui-messages-replay_spam_protection = Déconnecté : l'hôte ouvre les replays trop rapidement
 ui-messages-host_opened_replay = L'hôte a ouvert un replay : { $name }
 ui-messages-host_closed_replay = L'hôte a fermé un replay
-ui-messages-session_error_generic = Session : { $msg }
 ui-messages-session_rejected = Session refusée : { $reason }
-ui-messages-indexing_replays = Indexation des replays...
-ui-messages-indexing_replays_progress = Indexation des replays ({ $done }/{ $total })
-ui-messages-replays_indexed = { $indexed } replay(s) indexés sur { $total }
-ui-messages-replays_already_indexed = Les { $total } replay(s) sont déjà indexés
-ui-messages-loading_row_summaries = Chargement des détails des replays...
-ui-messages-reading_replay_directory = Lecture du répertoire de replays...
-ui-messages-directory_replays_skipped = { $skipped } replay(s) ignorés car illisibles
 ui-messages-drop_not_a_replay = Ce n'est pas un fichier replay
 ui-messages-drop_not_replays = Ce ne sont pas des fichiers de replay
-ui-messages-drop_skipped = { $count } fichier(s) déposé(s) ignoré(s) : ni replays ni dossiers
-ui-messages-directory_replays_not_indexed = { $count } replay(s) listés sans détails de match
+ui-messages-drop_skipped = { $count ->
+    [one] { $count } fichier déposé ignoré : ni replay ni dossier
+   *[other] { $count } fichiers déposés ignorés : ni replays ni dossiers
+}
 ui-messages-log_copied = { $bytes } Ko copiés de { $file } vers le presse-papiers
 ui-messages-log_copy_failed = Impossible de lire un fichier journal : { $error }
 ui-messages-log_not_found = Aucun fichier journal trouvé dans { $dir }
@@ -221,7 +198,6 @@ stat-frags = Éliminations
 stat-raw_xp = XP brut
 stat-base_xp = XP de base
 stat-win_rate = Taux de victoire
-stat-win_rate_pct = Taux de victoire (%)
 stat-personal_rating = Cote personnelle
 stat-match_contribution = Contribution au combat
 stat-capture_points = Points de capture
@@ -229,29 +205,19 @@ stat-planes_shot_down = Avions abattus
 stat-anti_air_damage = Dégâts antiaériens
 stat-survival_rate = Taux de survie
 stat-torpedoes_spotted = Torpilles repérées
-stat-avg_damage = Dégâts moy.
-stat-avg_spotting_damage = Dégâts de repérage moy.
-stat-avg_frags = Élim. moy.
-stat-avg_raw_xp = XP brut moy.
-stat-avg_base_xp = XP de base moy.
 stat-avg_pr = PR moy.
-stat-avg_mc = MC moy.
 stat-avg_prefix = { $name } moy.
 
 ## chart
-chart-game_number = Partie n°
 chart-combined = Combiné
 chart-combined_suffix = (Combiné)
 chart-rolling_average_suffix = (Moyenne glissante)
-chart-no_data = Aucune donnée disponible pour les navires sélectionnés
-chart-win_rate_unavailable = Le taux de victoire n'est pas disponible pour les graphiques en ligne par partie (activez la Moyenne glissante ou utilisez un graphique en barres)
 
 # -- Dialogues de confirmation --
 
 ## confirm
 confirm-open_in_game = Cela va lancer World of Warships. Continuer ?
 confirm-clear_all_session_stats = Cela va effacer toutes les statistiques de session. Continuer ?
-confirm-clear_ship_session_stats = Cela va supprimer toutes les parties de ce navire des statistiques de session. Continuer ?
 confirm-set_as_session_stats = Cela va remplacer vos statistiques de session actuelles. Continuer ?
 
 # -- Messages d'erreur --
@@ -263,16 +229,10 @@ error-replay_dir_watch = Échec de la surveillance du répertoire de replays : {
 # -- Paramètres --
 
 ## ui.settings.app
-ui-settings-app-heading = Paramètres de l'application
-ui-settings-app-description = Comportement général et apparence de l'application
 ui-settings-app-check_for_updates = Vérifier les mises à jour au démarrage
 ui-settings-app-enable_logging = Activer la journalisation (prend effet au redémarrage)
 ui-settings-app-enable_logging_tooltip = Écrire les journaux de débogage dans un fichier du répertoire de données de l'application. Utile pour le dépannage.
 ui-settings-app-data_sharing_mode = Partage de données (batailles classées et aléatoires)
-ui-settings-app-data_sharing_off = Ne rien envoyer
-ui-settings-app-data_sharing_build_data = Envoyer les builds à ShipBuilds.com
-ui-settings-app-data_sharing_replays = Envoyer les replays à ShipBuilds.com
-ui-settings-app-zoom_factor = Facteur de zoom (Ctrl + et Ctrl - modifient également ceci)
 ui-settings-app-theme = Thème
 ui-settings-app-theme_system = Système
 ui-settings-app-theme_dark = Sombre
@@ -283,14 +243,11 @@ ui-settings-app-code_integrity_automatic = Automatique
 ui-settings-app-code_integrity_always = Toujours
 ui-settings-app-code_integrity_never = Jamais
 ui-settings-app-language = Langue
-ui-settings-app-open_data_dir = Ouvrir le dossier de données de l'application
 ui-settings-app-open_data_dir_tooltip = Ouvrir le dossier de données de l'application (paramètres, journaux, données en cache) dans votre gestionnaire de fichiers.
 ui-settings-app-proxy_url = Proxy HTTP
-ui-settings-app-proxy_url_hint = hôte:port, ou laisser vide pour utiliser les paramètres proxy du système (prend effet au redémarrage)
 ui-settings-app-proxy_url_hint_live = hôte:port, ou laisser vide pour utiliser les paramètres proxy du système
 
 ## ui.settings.wows
-ui-settings-wows-heading = Paramètres de World of Warships
 ui-settings-wows-description = Chemin vers votre installation de World of Warships
 ui-settings-wows-directory_hint = Répertoire de World of Warships
 ui-settings-wows-browse = Parcourir...
@@ -299,51 +256,42 @@ ui-settings-wows-browse = Parcourir...
 ui-settings-wows-cache-heading = Cache des données de jeu
 ui-settings-wows-cache-description = Données de jeu extraites, pour que les replays des anciennes versions s'ouvrent toujours
 ui-settings-wows-cache-auto_dump = Mettre en cache les données du jeu pour la compatibilité des anciens replays
-ui-settings-wows-cache-directory_label = Répertoire du cache :
 ui-settings-wows-cache-browse = Parcourir
 ui-settings-wows-cache-open_folder = Ouvrir le dossier
 ui-settings-wows-cache-delete_old = Supprimer les anciennes versions
-ui-settings-wows-cache-stats = Cache des données : { $size } dans { $count } version(s)
+ui-settings-wows-cache-stats = Cache des données : { $size } dans { $count ->
+    [one] { $count } version
+   *[other] { $count } versions
+}
 ui-settings-wows-cache-check_updates = Vérifier les mises à jour
 ui-settings-wows-cache-actions = Actions du cache
 ui-settings-wows-cache-actions_tooltip = Rechercher des mises à jour ou vérifier les versions en cache
 ui-settings-wows-cache-update_all = Tout mettre à jour
-ui-settings-wows-cache-updates_available = { $count } build(s) en cache disposent de données plus récentes
+ui-settings-wows-cache-updates_available = { $count ->
+    [one] { $count } build en cache dispose de données plus récentes
+   *[other] { $count } builds en cache disposent de données plus récentes
+}
 ui-settings-wows-cache-validate = Valider le cache
-ui-settings-wows-cache-validate_tooltip = Vérifier chaque build en cache par rapport au dépôt distant et contrôler l'intégrité des fichiers
 ui-settings-wows-cache-repair = Réparer
-ui-settings-wows-cache-repair_needed = { $count } build(s) en cache sont obsolètes ou corrompus
-
-## ui.task
-ui-task-batch_render_progress = Rendu { $current }/{ $total } : { $name }
+ui-settings-wows-cache-repair_needed = { $count ->
+    [one] { $count } build en cache est obsolète ou corrompu
+   *[other] { $count } builds en cache sont obsolètes ou corrompus
+}
 
 ## ui.settings.replay
-ui-settings-replay-heading = Paramètres des replays
-ui-settings-replay-description = Configurer les colonnes affichées dans le tableau des résultats de replay
 ui-settings-replay-show_raw_xp = Afficher le XP brut
 ui-settings-replay-show_entity_id = Afficher l'ID d'entité
 ui-settings-replay-show_observed_damage = Afficher les dégâts observés
 ui-settings-replay-enable_previews = Afficher l'aperçu de la minicarte au survol
 ui-settings-replay-enable_previews_tooltip = Survoler un replay le lit et le rejoue en arrière-plan pour construire un aperçu animé de la minicarte. Désactivez cette option sur un stockage lent.
-ui-settings-replay-show_fires = Afficher les incendies
-ui-settings-replay-show_floods = Afficher les inondations
-ui-settings-replay-show_citadels = Afficher les citadelles
-ui-settings-replay-show_crits = Afficher les coups critiques sur modules
 ui-settings-replay-auto_export_data = Export automatique des données
-ui-settings-replay-format_json = JSON
-ui-settings-replay-format_csv = CSV
-ui-settings-replay-format_cbor = CBOR
 ui-settings-replay-export_path_hint = Répertoire d'export automatique
 ui-settings-replay-export_path_missing = Le répertoire n'existe pas. Aucune donnée ne peut y être exportée.
 ui-settings-replay-index_all_replays = Indexer tous les replays
-ui-settings-replay-reindex_all_replays = Réindexer tous les replays
-ui-settings-replay-reindex_all_replays_hover = Réanalyser et réindexer chaque replay, y compris ceux déjà indexés. Utilisez cette option après une mise à jour ajoutant de nouvelles données d'index (par ex. cote personnelle, état de déconnexion) afin de les compléter sur les entrées existantes.
 ui-settings-replay-show_heals = Afficher les soins
 ui-settings-replay-current_path = Chemin actuel des replays
 
 ## ui.settings.session
-ui-settings-session-heading = Paramètres de session
-ui-settings-session-description = Préférences de session collaborative de replay
 ui-settings-session-display_name = Nom d'affichage
 ui-settings-session-suppress_ip_warning = Ne plus afficher l'avertissement d'adresse IP P2P
 ui-settings-session-ip_warning_tooltip = Les sessions collaboratives utilisent un réseau pair-à-pair. Les autres utilisateurs de la session peuvent voir votre adresse IP.
@@ -351,8 +299,6 @@ ui-settings-session-disable_auto_open = Désactiver l'ouverture automatique des 
 ui-settings-session-auto_open_tooltip = Lorsque activé, les fenêtres de session (replays, tableaux tactiques) ne s'ouvriront pas automatiquement. Vous pouvez toujours les ouvrir depuis la fenêtre contextuelle de session.
 
 ## ui.settings.twitch
-ui-settings-twitch-heading = Paramètres Twitch
-ui-settings-twitch-description = Se connecter à Twitch pour l'intégration du chat et le suivi des joueurs
 ui-settings-twitch-get_token = Obtenir un jeton de connexion
 ui-settings-twitch-get_token_tooltip = Nous utilisons la page de connexion de Chatterino car elle fournit un jeton avec les permissions nécessaires (essentiellement un jeton modérateur avec permissions de chat), et cela évite au développeur de WoWs Toolkit d'héberger sa propre page de connexion qui aurait le même résultat.
 ui-settings-twitch-paste_token_no_token = Coller le jeton (Aucun jeton défini)
@@ -367,29 +313,18 @@ ui-settings-twitch-signed_in_as = Connecté en tant que { $who }
 
 ## ui.replay
 ui-replay-copy_bug_report_info = Copier les informations du rapport de bug
-ui-replay-collapse_listing = Réduire la liste des replays
-ui-replay-expand_listing = Développer la liste des replays
 ui-replay-match_age = il y a { $age }
 ui-replay-listing_caption = Replays
-ui-replay-listing_reading = Lecture de { $done } sur { $total }...
-ui-replay-listing_scanning = Analyse de { $done } sur { $total }...
-ui-replay-listing_downloading = Téléchargement des données de jeu, { $done } fichiers sur { $total }...
-ui-replay-listing_loading_data = Chargement des données de jeu pour { $version } ({ $index } sur { $count })...
 ui-replay-loading_game_data_version = Chargement des données de jeu pour { $version }...
 ui-replay-spectator = Spectateur
 ui-replay-loading = Chargement...
 ui-replay-preview_loading = Construction de l'aperçu...
-ui-replay-preview_empty = Aucun mouvement à afficher
 ui-replay-preview_no_game_data = Aucune donnée de jeu pour la version client { $value }
-ui-replay-preview_unreadable = Ce replay n'a pas pu être lu
 ui-replay-preview_unreadable_because = Ce replay n'a pas pu être lu: { $value }
 ui-replay-preview_unwalkable = Impossible de parcourir la bataille de ce replay : { $value }
 ui-replay-preview_unknown_version = Ce replay indique une version client illisible : { $value }
 ui-replay-preview_no_map = Aucune donnée de carte pour { $value }
-ui-replay-preview_cancelled = L'aperçu a été remplacé
 ui-replay-preview_render_failed = L'aperçu n'a pas pu être affiché : { $value }
-ui-replay-no_selection = Cliquez sur un replay pour le voir, ou double-cliquez pour l'ouvrir dans un nouvel onglet
-ui-replay-workspace_closed = Cet espace de travail de replay a été fermé
 ui-replay-incomplete_results = Résultats de match incomplets
 ui-replay-incomplete_results_tooltip = Le replay ne contient pas encore les résultats de fin de match. Les données seront automatiquement rechargées lorsque le match se terminera et que les résultats seront ajoutés au replay.
 ui-replay-no_chat = Aucun message de chat n'a été envoyé dans ce replay
@@ -406,11 +341,16 @@ ui-replay-hide_my_stats = Masquer les stats de mes navires de test
 ui-replay-open_manually = Ouvrir un fichier replay manuellement...
 ui-replay-open_directory = Ouvrir un répertoire de replays...
 ui-replay-search_these_replays = Rechercher dans ces replays
-ui-replay-reading_directory = Listage des replays dans { $dir }
 ui-replay-import_constants = Importer un fichier constants.json...
 ui-replay-refresh_persisted_data = Actualiser les données de replay enregistrées...
-ui-replay-contributing = Contribution de { $done } replays sur { $total }
-ui-replay-contributed = { $sent } replays sur { $total } envoyés
+ui-replay-contributing = Contribution de { $done } sur { $total ->
+    [one] { $total } replay
+   *[other] { $total } replays
+}
+ui-replay-contributed = { $sent } sur { $total ->
+    [one] { $total } replay envoyé
+   *[other] { $total } replays envoyés
+}
 ui-replay-contribute_nothing_shared = Choisissez d'abord ce que vous partagez dans les Paramètres
 ui-replay-contribute_none_listed = Aucun replay listé à envoyer
 ui-replay-contribute_not_ready = Les replays pourront être envoyés une fois les données du jeu et les paramètres chargés
@@ -420,7 +360,10 @@ ui-replay-auto_exported = Bataille exportée vers { $file }
 ui-replay-opened_new_battle = Nouvelle bataille ouverte : { $battle }
 ui-replay-new_battle_listed = Nouvelle bataille : { $battle }
 ui-replay-results_arrived = Les résultats de la bataille { $battle } sont arrivés
-ui-replay-constants_written = Correspondances des résultats téléchargées pour { $count } version(s)
+ui-replay-constants_written = { $count ->
+    [one] Correspondance des résultats téléchargée pour { $count } version
+   *[other] Correspondances des résultats téléchargées pour { $count } versions
+}
 ui-replay-constants_import_title = Importer un constants.json
 ui-replay-constants_imported = La correspondance des résultats pour la version { $build } a été importée
 ui-replay-constants_import_failed = Cette correspondance n'a pas été importée : { $reason }
@@ -436,13 +379,16 @@ ui-replay-constants_fallback_published = Utilisation des constantes publiées po
 ui-replay-constants_fallback_embedded = Utilisation des constantes intégrées.
 ui-replay-copy_latest_log = Copier le dernier journal dans le presse-papiers
 ui-replay-load_alt_perspective = Charger la perspective de l'autre équipe...
-ui-replay-load_alt_perspective_tooltip = Fusionner l'enregistrement du même match par un autre joueur dans le replay actuel. Révèle les positions, les builds, les torpilles, l'artillerie et les consommables ennemis vus depuis l'autre perspective.
-ui-replay-load_alt_perspective_disabled_tooltip = Ouvrez ou sélectionnez d'abord un replay.
 ui-replay-load_alt_perspective_failed = Échec de la fusion du replay : { $error }
-ui-replay-load_alt_perspective_limit = Cette bataille est déjà lue à travers { $limit } autres enregistrements
-ui-replay-consumable_charges_remaining = { $remaining } restantes sur { $total } charges
+ui-replay-load_alt_perspective_limit = Cette bataille est déjà lue à travers { $limit ->
+    [one] { $limit } autre enregistrement
+   *[other] { $limit } autres enregistrements
+}
+ui-replay-consumable_charges_remaining = { $remaining } restante(s) sur { $total ->
+    [one] { $total } charge
+   *[other] { $total } charges
+}
 ui-replay-consumable_charges_unlimited = { $used } utilisées (charges illimitées)
-ui-replay-consumable_header_consumable = Consommable
 ui-replay-consumable_header_remaining = Restantes
 ui-replay-consumable_header_total = Total
 ui-replay-consumable_charges_infinite = ∞
@@ -478,10 +424,8 @@ ui-replay-check_game_data = Vérifier les données de jeu
 ui-replay-check_game_data_tooltip = Vérifier les données de jeu requises par les replays de ce répertoire
 ui-replay-close_side_panel = Fermer le panneau
 ui-replay-nda = NDA
-ui-replay-render = Rendu
 ui-replay-chat = Chat
 ui-replay-game_chat = Chat en jeu
-ui-replay-copy_all = Tout copier
 ui-replay-save_to_file = Enregistrer dans un fichier
 ui-replay-chat_copied = Chat copié
 ui-replay-copy_message = Copier le message
@@ -495,16 +439,16 @@ ui-replay-row_not_indexed = non indexé
 ui-replay-hover_survived = Survécu
 ui-replay-hover_sunk = Coulé
 ui-replay-hover_not_indexed = Non indexé
-ui-replay-row_kills = { $count } éliminations
+ui-replay-row_kills = { $count ->
+    [one] { $count } élimination
+   *[other] { $count } éliminations
+}
 ui-replay-row_survived = en vie
 ui-replay-row_sunk = coulé
 ui-replay-row_division = Division : { $members }
-ui-replay-export_chat_save = Chat : enregistrer dans un fichier
-ui-replay-export_chat_copy = Chat : copier
 ui-replay-export_results_json = Résultats : JSON
 ui-replay-export_results_cbor = Résultats : CBOR
 ui-replay-export_results_csv = Résultats : CSV
-ui-replay-timeline_filter = Filtrer
 ui-replay-timeline_filter_all = Tous
 ui-replay-timeline_filter_none = Aucun
 ui-replay-timeline_search_hint = Rechercher un navire ou un joueur
@@ -536,27 +480,38 @@ ui-replay-context-pin_column = Épingler la colonne
 ui-replay-context-unpin_column = Désépingler la colonne
 ui-replay-context-copied = Copié
 ui-replay-context-copy_path = Copier le chemin
-ui-replay-context-copy_replay = Copier le replay
-ui-replay-context-copy_replays = Copier { $count } replays
-ui-replay-context-copy_paths = Copier { $count } chemins
+ui-replay-context-copy_replays = { $count ->
+    [one] Copier le replay
+   *[other] Copier { $count } replays
+}
+ui-replay-context-copy_paths = { $count ->
+    [one] Copier le chemin
+   *[other] Copier { $count } chemins
+}
 ui-replay-context-show_in_explorer = Afficher dans l'explorateur de fichiers
 ui-replay-context-show_replay_controls = Afficher les contrôles de replay
 ui-replay-context-open_in_game = Ouvrir dans le jeu
 ui-replay-context-render_replay = Générer le rendu du replay
-ui-replay-context-set_session_stats_one = Définir comme stats de session (1 replay)
-ui-replay-context-set_session_stats_many = Définir comme stats de session ({ $count } replays)
-ui-replay-context-add_session_stats_one = Ajouter aux stats de session (1 replay)
-ui-replay-context-add_session_stats_many = Ajouter aux stats de session ({ $count } replays)
-ui-replay-context-render_to_video = Exporter en vidéo
-ui-replay-context-render_to_video_many = Exporter { $count } replays en vidéo
-ui-replay-context-render_to_clipboard = Exporter dans le presse-papiers
-ui-replay-context-render_to_clipboard_many = Exporter { $count } replays dans le presse-papiers
+ui-replay-context-set_session_stats = Définir comme stats de session ({ $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+})
+ui-replay-context-add_session_stats = Ajouter aux stats de session ({ $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+})
+ui-replay-context-render_to_video = { $count ->
+    [one] Exporter en vidéo
+   *[other] Exporter { $count } replays en vidéo
+}
+ui-replay-context-render_to_clipboard = { $count ->
+    [one] Exporter dans le presse-papiers
+   *[other] Exporter { $count } replays dans le presse-papiers
+}
 
 ## ui.replay.column
-ui-replay-column-actions = Actions
 ui-replay-column-player_name = Nom du joueur
 ui-replay-column-base_xp = XP de base
-ui-replay-column-raw_xp = XP brut
 ui-replay-column-ship_name = Nom du navire
 ui-replay-column-hits = Coups
 ui-replay-column-heals = Soins
@@ -565,7 +520,6 @@ ui-replay-column-heals_no_repair_tooltip = Ce navire ne dispose pas du consommab
 ui-replay-column-kills = Éliminations
 ui-replay-column-observed_damage = Dégâts observés
 ui-replay-column-actual_damage = Dégâts réels
-ui-replay-column-spotting_damage = Dégâts de repérage
 ui-replay-column-potential_damage = Dégâts potentiels
 ui-replay-column-time_lived = Temps de survie
 ui-replay-column-fires = Incendies
@@ -582,7 +536,6 @@ ui-replay-column-match_contribution = MC
 ui-rating-personal_rating = Cote personnelle
 ui-rating-match_contribution = Contribution au combat
 ui-rating-versus_average = par rapport à la moyenne
-ui-rating-average = Moyenne
 ui-rating-damage = Dégâts
 ui-rating-kills = Destructions
 ui-rating-wins = Victoire
@@ -604,12 +557,22 @@ ui-rating-detail-team_damage_share = { $share } % des dégâts de l'équipe aux 
 ui-rating-detail-tanking = { $potential } dégâts potentiels, { $class }x la moyenne de la classe, { $team }x une part égale de ceux de l'équipe
 ui-rating-detail-spotting = { $damage } dégâts sur repérage (moyenne de la classe { $baseline }), { $ships } PV de navires repérés (moyenne { $ships_baseline })
 ui-rating-detail-objectives = Points : { $capture } en capture, { $block } en blocage, { $reset } en réinitialisation, { $battle_end } tenus à la fin, { $hold } en maintien (comptés pour un quart)
-ui-rating-detail-anti_air_planes = { $strike } avions d'attaque, { $support } chasseurs et éclaireurs
+ui-rating-detail-anti_air_planes = { $strike ->
+    [one] { $strike } avion d'attaque
+   *[other] { $strike } avions d'attaque
+}, { $support ->
+    [one] { $support } chasseur ou éclaireur
+   *[other] { $support } chasseurs et éclaireurs
+}
 ui-rating-detail-anti_air_damage = { $damage } dégâts AA
-ui-rating-detail-torpedo_warnings = { $threatening } torpilles menaçantes repérées
-ui-rating-detail-torpedo_warnings_one = 1 torpille menaçante repérée
-ui-rating-detail-critical_bursts = { $count } rafales critiques : { $bursts }. Visibles uniquement pour les navires proches du joueur enregistré
-ui-rating-detail-critical_bursts_one = 1 rafale critique : { $bursts }. Visible uniquement pour les navires proches du joueur enregistré
+ui-rating-detail-torpedo_warnings = { $threatening ->
+    [one] { $threatening } torpille menaçante repérée
+   *[other] { $threatening } torpilles menaçantes repérées
+}
+ui-rating-detail-critical_bursts = { $count ->
+    [one] { $count } rafale critique
+   *[other] { $count } rafales critiques
+} : { $bursts }. Visibles uniquement pour les navires proches du joueur enregistré
 ui-rating-detail-critical_burst = { $share } % de { $ship } en { $seconds } s
 ui-rating-detail-critical_burst_at_once = { $share } % de { $ship } d'un coup
 
@@ -622,21 +585,10 @@ ui-rating-basis-dynamic = Dynamique
 ui-rating-basis-static_explained = Statique : mesuré par rapport à une constante fixe ou à une référence de classe
 ui-rating-basis-dynamic_explained = Dynamique : mesuré par rapport aux valeurs attendues de wows-numbers ou aux autres joueurs de cette bataille
 
-## ui.replay.filter
-ui-replay-filter-raw_xp = XP brut
-ui-replay-filter-entity_id = ID d'entité
-ui-replay-filter-observed_damage = Dégâts observés
-ui-replay-filter-heals = Soins
-ui-replay-filter-fires = Incendies
-ui-replay-filter-floods = Inondations
-ui-replay-filter-citadels = Citadelles
-ui-replay-filter-crits = Coups critiques sur modules
-
 ## ui.replay.group
 ui-replay-group-date = Date
 ui-replay-group-ship = Navire
 ui-replay-group-none = Aucun
-ui-replay-group-prefix = Groupe : { $label }
 
 ## ui.replay.player
 ui-replay-player-hidden_profile = Le joueur a un profil masqué
@@ -659,19 +611,23 @@ ui-replay-sections-modules_none = Aucun module
 ui-replay-sections-signals = Pavillons :
 ui-replay-sections-loadout = Configuration :
 ui-replay-sections-loadout_none = Aucune configuration
-ui-replay-sections-abilities = Capacités :
-ui-replay-sections-abilities_none = Aucune capacité
 ui-replay-sections-captain_skills = Compétences du commandant :
 ui-replay-sections-captain_skills_none = Aucune compétence de commandant
 ui-replay-sections-consumables = Consommables :
 ui-replay-sections-fire_chance = Chance d'incendie effective
 ui-replay-sections-fire_chance_expected = attendu
-ui-replay-sections-fire_chance_fires = { $fires } incendies
-ui-replay-sections-fire_chance_fires_one = 1 incendie
-ui-replay-sections-fire_chance_eligible_hits = { $hits } coups ayant pu en déclencher un
-ui-replay-sections-fire_chance_eligible_hits_one = 1 coup ayant pu en déclencher un
-ui-replay-sections-fire_chance_ships = sur { $ships } navires ciblés
-ui-replay-sections-fire_chance_ships_one = sur 1 navire ciblé
+ui-replay-sections-fire_chance_fires = { $fires ->
+    [one] { $fires } incendie
+   *[other] { $fires } incendies
+}
+ui-replay-sections-fire_chance_eligible_hits = { $hits ->
+    [one] { $hits } coup ayant pu en déclencher un
+   *[other] { $hits } coups ayant pu en déclencher un
+}
+ui-replay-sections-fire_chance_ships = sur { $ships ->
+    [one] { $ships } navire ciblé
+   *[other] { $ships } navires ciblés
+}
 ui-replay-sections-fire_chance_expected_fires = { $fires } incendies attendus
 ui-replay-sections-fire_chance_per_ship = Par navire ciblé
 ui-replay-sections-fire_chance_no_eligible_hits = aucun coup n'aurait pu déclencher un incendie
@@ -679,15 +635,23 @@ ui-replay-sections-fire_chance_formula = Formule de chance d'incendie de l'attaq
 ui-replay-sections-fire_chance_formula_base = burnProb de base
 ui-replay-sections-fire_chance_formula_clamped = borné
 ui-replay-sections-fire_chance_breakdown = Détail
-ui-replay-sections-fire_chance_shells_fired = obus HE tirés
-ui-replay-sections-fire_chance_shells_fired_one = obus HE tiré
-ui-replay-sections-fire_chance_he_hits = coups HE sur un navire
-ui-replay-sections-fire_chance_he_hits_one = coup HE sur un navire
-ui-replay-sections-fire_chance_no_target_ship = coups HE non attribuables à un navire ciblé
-ui-replay-sections-fire_chance_no_target_ship_one = coup HE non attribuable à un navire ciblé
+ui-replay-sections-fire_chance_shells_fired = { $count ->
+    [one] obus HE tiré
+   *[other] obus HE tirés
+}
+ui-replay-sections-fire_chance_he_hits = { $count ->
+    [one] coup HE sur un navire
+   *[other] coups HE sur un navire
+}
+ui-replay-sections-fire_chance_no_target_ship = { $count ->
+    [one] coup HE non attribuable à un navire ciblé
+   *[other] coups HE non attribuables à un navire ciblé
+}
 ui-replay-sections-fire_chance_eligible = auraient pu déclencher un incendie
-ui-replay-sections-fire_chance_ribbons = rubans SetFire
-ui-replay-sections-fire_chance_ribbons_one = ruban SetFire
+ui-replay-sections-fire_chance_ribbons = { $count ->
+    [one] ruban SetFire
+   *[other] rubans SetFire
+}
 ui-replay-sections-fire_chance_ribbons_credited = attribués à un obus
 ui-replay-sections-fire_chance_ribbons_uncredited = non attribués
 ui-replay-sections-fire_chance_unattributed_no_burn_state = aucun changement d'état d'incendie auquel le rattacher
@@ -720,19 +684,9 @@ ui-replay-debug-raw_metadata = Métadonnées brutes
 ui-replay-debug-raw_results = Résultats bruts
 ui-replay-debug-mapped_results = Résultats interprétés
 ui-replay-debug-player_metadata = Métadonnées du joueur
-ui-replay-debug-no_results_packet = Ce replay ne contient pas de paquet de résultats de bataille
-ui-replay-debug-raw_json_tooltip = Les résultats bruts de la bataille tels que sérialisés par WG.
-ui-replay-debug-mapped_json_tooltip = Résultats de bataille avec les tableaux positionnels résolus en champs nommés.
-ui-replay-debug-results_raw_json = Résultats de bataille : JSON brut
-ui-replay-debug-results_mapped_json = Résultats de bataille : JSON mappé
 ui-replay-debug-search = Rechercher
 ui-replay-debug-previous_match = Résultat précédent (Shift+Enter)
 ui-replay-debug-next_match = Résultat suivant (Enter)
-
-## ui.replay.results
-ui-replay-results-victory = Victoire
-ui-replay-results-defeat = Défaite
-ui-replay-results-draw = Match nul
 
 ## ui.replay.controls
 ui-replay-controls-window_title = Contrôles de replay
@@ -742,7 +696,7 @@ ui-replay-controls-unavailable = Contrôles non disponibles (commands.scheme.xml
 
 ## ui.collab
 ui-collab-session = Session
-ui-collab-starting = Démarrage de la session…
+ui-collab-starting = Démarrage de la session...
 ui-collab-session_active = Session active
 ui-collab-connected_to_session = Connecté à la session
 ui-collab-session_token = Jeton de session :
@@ -750,14 +704,11 @@ ui-collab-toggle_visibility = Basculer la visibilité du jeton
 ui-collab-copy_token = Copier le jeton
 ui-collab-token_copied = Jeton copié dans le presse-papiers
 ui-collab-copy_web_link = Copier le lien web
-ui-collab-copy_web_link_tooltip = Copier le lien pour le client web
 ui-collab-web_link_copied = Lien web copié dans le presse-papiers
 ui-collab-copy_localhost_link = Copier le lien localhost
-ui-collab-copy_localhost_tooltip = Copier le lien localhost (dev)
 ui-collab-localhost_copied = Lien localhost copié dans le presse-papiers
 ui-collab-connected_count = { $count } connecté(s)
 ui-collab-promote_cohost = Promouvoir en co-hôte
-ui-collab-promoted_cohost = { $name } promu(e) co-hôte
 ui-collab-permissions = Permissions
 ui-collab-lock_annotations = Verrouiller les annotations
 ui-collab-lock_settings = Verrouiller les paramètres
@@ -769,7 +720,6 @@ ui-collab-role_cohost = Co-hôte
 ui-collab-you = (vous)
 ui-collab-display_name = Nom d'affichage :
 ui-collab-display_name_hint = Votre nom...
-ui-collab-display_name_error = Veuillez entrer un nom d'affichage
 ui-collab-enter_display_name = Entrez d'abord un nom d'affichage
 ui-collab-host_session = Héberger une session
 ui-collab-start_session = Démarrer la session
@@ -784,8 +734,6 @@ ui-collab-waiting_for_frames = En attente de la bataille
 ui-collab-open = Ouvrir
 ui-collab-open_for_everyone = Ouvrir pour tout le monde
 ui-collab-tactics_board = Tableau tactique
-ui-collab-max_boards = Maximum { $count } tableaux tactiques ouverts
-ui-collab-waiting_for_data = En attente du chargement des données de jeu…
 
 # -- Texte des résultats de bataille --
 
@@ -816,8 +764,6 @@ finish_type-score_excess = Limite de score dépassée
 ## ui.stats
 ui-stats-overview = Aperçu
 ui-stats-sample_notice = Données d'exemple, pas des parties enregistrées
-ui-stats-limit = Limite
-ui-stats-division = Div :
 ui-stats-div_all = Tous
 ui-stats-div_solo = Solo
 ui-stats-div_div = Div
@@ -828,8 +774,10 @@ ui-stats-mode_label = Mode :
 ui-stats-clear = Effacer
 ui-stats-pr = PR :
 ui-stats-mc = MC :
-ui-stats-frags_count = { $count } éliminations
-ui-stats-best_frags = Meilleur : { $ship } ({ $count } éliminations)
+ui-stats-best_frags = Meilleur : { $ship } ({ $count ->
+    [one] { $count } élimination
+   *[other] { $count } éliminations
+})
 ui-stats-max_damage = Dégâts max : { $ship } ({ $damage })
 ui-stats-copy_markdown = Copier en Markdown
 ui-stats-copy_image = Copier comme image
@@ -837,16 +785,8 @@ ui-stats-copy_image_done = Graphique copié dans le presse-papiers
 ui-stats-copy_image_failed = Le graphique n'a pas pu être copié
 ui-stats-copy_csv = Copier en CSV
 ui-stats-remove_games_hint = Supprimer toutes les parties de { $ship } (Ctrl+Click pour passer la confirmation)
-ui-stats-no_stats = Aucune statistique de session disponible. Jouez d'abord quelques parties !
 ui-stats-settings = Paramètres
-ui-stats-chart_type = Type de graphique
-ui-stats-stat_label = Stat :
-ui-stats-chart_line = Ligne
-ui-stats-chart_bar = Barres
 ui-stats-options = Options
-ui-stats-combined = Combiné
-ui-stats-rolling_avg = Moy. glissante
-ui-stats-labels = Libellés
 ui-stats-ships = Navires
 ui-stats-filter_ships = Filtrer les navires du graphique
 ui-stats-all_ships = Tous
@@ -858,12 +798,10 @@ ui-stats-no_statistic_matches = Aucune statistique ne correspond à cette recher
 ui-stats-ship_selection_count = { $selected } sur { $total } sélectionnés
 ui-stats-all_ships_tooltip = Sélectionner tous les navires correspondants
 ui-stats-no_ships_tooltip = Effacer la sélection des navires correspondants
-ui-stats-copy_as_image = Copier comme image
 ui-stats-limit_to_recent = Limiter aux parties récentes
 ui-stats-limit_to_recent_tooltip = La limite s'applique par navire dans Navires et Graphiques, et à l'ensemble des parties dans Vue d'ensemble.
 ui-stats-division_label = Division :
 ui-stats-add_chart = Ajouter un graphique
-ui-stats-clear_confirm = Effacer toutes les parties ?
 ui-stats-clear_tooltip = Oublier toutes les parties enregistrées
 ui-stats-clear_failed = Non effacé : { $reason }
 ui-stats-clear_ship_confirm = Appuyez à nouveau pour oublier les parties de ce navire
@@ -876,23 +814,34 @@ ui-stats-column_battles = Batailles
 ui-stats-column_win_rate = Taux de victoire
 ui-stats-column_avg_damage = Dégâts moy.
 ui-stats-column_avg_frags = Destructions moy.
-ui-stats-frags = { $count } destructions
+ui-stats-frags = { $count ->
+    [one] { $count } destruction
+   *[other] { $count } destructions
+}
 ui-stats-statistic = Statistique
 ui-stats-open_directory_stats = Stats du répertoire
 ui-stats-open_directory_stats_tooltip = Ouvrir les stats de tous les replays de ce répertoire et de ses sous-répertoires
 ui-stats-directory_stats_unavailable = Les données de jeu sont encore en chargement
 ui-stats-directory_reading_task = Lecture des replays pour les stats du répertoire...
 ui-stats-directory_walking = Recherche des replays...
-ui-stats-directory_scanning = Vérification de { $done } replays sur { $total }...
-ui-stats-directory_reading = Lecture de { $done } replays sur { $total }...
+ui-stats-directory_scanning = Vérification de { $done } sur { $total ->
+    [one] { $total } replay...
+   *[other] { $total } replays...
+}
+ui-stats-directory_reading = Lecture de { $done } sur { $total ->
+    [one] { $total } replay...
+   *[other] { $total } replays...
+}
 ui-stats-directory_reload = Recharger
 ui-stats-directory_reload_tooltip = Relire les replays de ce répertoire
-ui-stats-directory_skipped = { $count } replays ignorés
+ui-stats-directory_skipped = { $count ->
+    [one] { $count } replay ignoré
+   *[other] { $count } replays ignorés
+}
 ui-stats-directory_skipped_detail =
     Illisibles : { $unreadable }
     Aucune donnée de jeu pour leur version : { $missing_build }
     Aucun résultat de bataille : { $no_results }
-ui-stats-directory_no_games = Aucun replay de ce répertoire ne contient de résultats de bataille
 ui-stats-chart = Graphique
 ui-stats-combine_ships = Combiner les navires
 ui-stats-running_average = Moyenne glissante
@@ -904,8 +853,10 @@ ui-stats-session_manual = Manuelle
 ui-stats-session_since_opened = Depuis l'ouverture de l'application
 ui-stats-session_manual_tooltip = La session contient les batailles que vous jouez et les replays que vous définissez ou ajoutez depuis la liste des replays. Elle est conservée entre les lancements.
 ui-stats-session_since_opened_tooltip = La session contient chaque bataille commencée à { $time } ou après, à l'ouverture de l'application. Votre session manuelle est conservée et revient lorsque vous passez en Manuelle.
-ui-stats-session_battles_one = 1 bataille
-ui-stats-session_battles_many = { $count } batailles
+ui-stats-session_battles = { $count ->
+    [one] { $count } bataille
+   *[other] { $count } batailles
+}
 ui-stats-session_chip_manual = Session : { $battles }
 ui-stats-session_chip_since = Session depuis { $time } : { $battles }
 ui-stats-session_empty_title = Aucune bataille dans cette session pour l'instant
@@ -936,7 +887,10 @@ ui-stats-leave_out_ship_hint = Exclure { $ship } des statistiques
 ui-stats-keep_all_games = Compter toutes les parties
 ui-stats-keep_all_games_tooltip = Compter à nouveau toutes les parties exclues manuellement
 ui-stats-left_out_only = Exclues uniquement
-ui-stats-match_count = { $shown } sur { $total } parties, { $left_out } exclues
+ui-stats-match_count = { $shown } sur { $total ->
+    [one] { $total } partie
+   *[other] { $total } parties
+}, { $left_out } exclue(s)
 ui-stats-no_matches = Aucune partie ne correspond aux filtres actuels
 ui-stats-search_matches = Rechercher par navire...
 ui-stats-ship_filter_tooltip = Choisir quels navires comptent dans les statistiques
@@ -945,7 +899,10 @@ ui-stats-leave_out_ships_tooltip = Exclure tous les navires correspondants des s
 ui-stats-dates = Dates
 ui-stats-all_dates = Toutes les dates
 ui-stats-clear_dates = Afficher toutes les dates
-ui-stats-games_left_out = { $count } parties exclues
+ui-stats-games_left_out = { $count ->
+    [one] { $count } partie exclue
+   *[other] { $count } parties exclues
+}
 ui-stats-reset_filters = Réinitialiser les filtres
 ui-stats-reset_filters_tooltip = Afficher toutes les parties : sans limite, période, division, mode, ni navires et parties exclus
 
@@ -959,12 +916,10 @@ ui-stats-table-average = Moyenne
 
 ## ui.player_tracker
 ui-player_tracker-clear_stats = Effacer les stats
-ui-player_tracker-player_filter = Filtre de joueurs
 ui-player_tracker-populate_from_replays = Remplir les données depuis les replays
 ui-player_tracker-find_matches = Trouver les matchs
 ui-player_tracker-open_wows_numbers = Ouvrir sur wows-numbers
 ui-player_tracker-open_shipbuilds = Ouvrir les builds sur shipbuilds
-ui-player_tracker-subtab_historical = Historique
 ui-player_tracker-subtab_players = Joueurs
 ui-player_tracker-filter_hint = Filtrer par joueur ou clan...
 ui-player_tracker-time_period = Période
@@ -979,55 +934,63 @@ ui-player_tracker-loading_clans = Chargement des clans...
 ui-player_tracker-loading_players = Chargement des joueurs...
 ui-player_tracker-index_failed = Impossible de lire l'index : { $reason }
 ui-player_tracker-no_players = Aucun joueur indexé pour cette période
-ui-player_tracker-notes_title = Notes : { $name }
 ui-player_tracker-note_not_saved = Non enregistré : { $reason }
 ui-player_tracker-subtab_current_match = Match actuel
-ui-player_tracker-your_team = Votre équipe ({ $count })
-ui-player_tracker-enemy_team = Équipe ennemie ({ $count })
-ui-player_tracker-no_live_match = Aucun match en cours. La liste des joueurs apparaît lorsque vous entrez en match.
-ui-player_tracker-encounters_hover = Vu { $total } fois au total, { $range } dans la période sélectionnée. Vu pour la dernière fois { $last }.
+ui-player_tracker-encounters_hover = Vu { $total ->
+    [one] { $total } fois
+   *[other] { $total } fois
+} au total, { $range } dans la période sélectionnée. Vu pour la dernière fois { $last }.
 ui-player_tracker-never_encountered = Jamais vu auparavant
 ui-player_tracker-copy_wg_id = Cliquez pour copier l'ID WG
 ui-player_tracker-copied_wg_id = ID WG { $id } copié
 ui-player_tracker-aliases_hover = Également connu sous : { $names }
 ui-player_tracker-notes_hint = Notes sur ce joueur
-ui-player_tracker-arena_count = { $count } matchs enregistrés
+ui-player_tracker-arena_count = { $count ->
+    [one] { $count } match enregistré
+   *[other] { $count } matchs enregistrés
+}
 ui-player_tracker-last_encountered_exact = Dernière rencontre { $timestamp }
 ui-player_tracker-subtab_clans = Clans
 ui-player_tracker-clan_no_data = Aucune rencontre de clan enregistrée pour l'instant.
 ui-player_tracker-find_clan_matches = Trouver les matchs mentionnant ce tag. L'index n'a pas de champ réservé aux clans, les noms de joueurs contenant le tag correspondent donc aussi.
 ui-player_tracker-clan_sightings_hover = { $range } d'entre elles se situent dans la période sélectionnée.
-ui-player_tracker-clan_member_matches = vu dans { $count } matchs
+ui-player_tracker-clan_member_matches = vu dans { $count ->
+    [one] { $count } match
+   *[other] { $count } matchs
+}
 ui-player_tracker-show_division_mates = Afficher les coéquipiers de division
 ui-player_tracker-show_division_mates_hover = Compter les matchs que vous avez joués en division. Désactivé par défaut, car vous y avez croisé ces joueurs parce que vous les aviez invités. Les autres matchs contre les mêmes joueurs sont toujours comptés.
 ui-player_tracker-seen_in_twitch_chat = Vu dans le chat Twitch
 ui-player_tracker-seen_in_twitch_chat_hover = Afficher uniquement les joueurs dont le nom correspondait à un identifiant du chat Twitch pendant un match avec vous.
-ui-player_tracker-twitch_seen_hover = Vu dans le chat Twitch sous { $logins } dans { $count } matchs avec vous
+ui-player_tracker-twitch_seen_hover = Vu dans le chat Twitch sous { $logins } dans { $count ->
+    [one] { $count } match
+   *[other] { $count } matchs
+} avec vous
 ui-player_tracker-win_rate_overall = Global
 ui-player_tracker-win_rate_ship = Navire
 ui-player_tracker-view_compact = Compact
 ui-player_tracker-view_detailed = Détaillé
 ui-player_tracker-ship_stats = Stats du navire
-ui-player_tracker-win_rate_mode_hover = Afficher les stats du compte ou celles de ce navire. La couleur de la ligne, le PR, le nombre de batailles et les dégâts moyens suivent ce choix.
 ui-player_tracker-stats_resolving = Lecture de la liste des joueurs du match...
 ui-player_tracker-stats_fetching = Récupération des stats des joueurs...
-ui-player_tracker-stats_rate_limited = Limite de requêtes atteinte, nouvelle tentative dans { $wait }
 ui-player_tracker-stats_unavailable = Stats indisponibles : { $reason }
-ui-player_tracker-roster_unavailable = Impossible de lire la liste des joueurs depuis le replay
 ui-player_tracker-stats_hidden = Le profil de ce joueur est privé
 ui-player_tracker-stats_no_data = Aucune stat pour ce joueur
-ui-player_tracker-stats_unplayed_ship = Aucune bataille enregistrée avec ce navire
 ui-player_tracker-pr_overall_hover = PR du compte sur tous les navires
 ui-player_tracker-pr_ship_hover = PR avec ce navire
-ui-player_tracker-avg_damage = Dégâts moyens
-ui-player_tracker-win_rate_hover_line = { $label } : { $rate } sur { $battles } batailles
-ui-player_tracker-win_rate_hover_line_damage = { $label } : { $rate } sur { $battles } batailles, { $damage } de dégâts moyens
+ui-player_tracker-win_rate_hover_line = { $label } : { $rate } sur { $count ->
+    [one] { $battles } bataille
+   *[other] { $battles } batailles
+}
+ui-player_tracker-win_rate_hover_line_damage = { $label } : { $rate } sur { $count ->
+    [one] { $battles } bataille
+   *[other] { $battles } batailles
+}, { $damage } de dégâts moyens
 ui-player_tracker-team_average_win_rate = WR moy. : { $rate }
-ui-player_tracker-team_players = { $count } joueurs
-ui-player_tracker-row_win_rate = WR { $rate }
-ui-player_tracker-row_personal_rating = PR { $value }
-ui-player_tracker-row_battles = { $count } batailles
-ui-player_tracker-row_seen = Vu x{ $total }
+ui-player_tracker-team_players = { $count ->
+    [one] { $count } joueur
+   *[other] { $count } joueurs
+}
 ui-player_tracker-debug_replay_picker = Débogage : traiter un replay comme le match actuel
 ui-player_tracker-debug_replay_picker_hover = Charge la liste des joueurs d'un replay terminé dans cet onglet afin de tester le chemin des stats en dehors d'une bataille.
 ui-player_tracker-debug_replay_none = Choisir un replay
@@ -1057,31 +1020,15 @@ ui-player_tracker-period-all_time = Depuis toujours
 
 # -- Gestionnaire de mods --
 
-
 ## ui.twitch
 ui-twitch-possible_name = Nom de stream possible : { $name }
 ui-twitch-seen_minutes = Vu : { $minutes } minutes après le début du match
 ui-twitch-click_to_copy = Cliquez pour copier
 ui-twitch-copied = { $name } copié
-## ui.mod_manager
-ui-mod_manager-category_filters = Filtres de catégorie
-ui-mod_manager-enabled = Activé
-ui-mod_manager-mod_home = Page d'accueil du mod
-ui-mod_manager-discord_thread = Fil d'approbation Discord
-ui-mod_manager-save_config = Sauvegarder la config des mods
-ui-mod_manager-load_config = Charger la config des mods
-ui-mod_manager-filter = Filtrer
-
-## ui.mod_manager.column
-ui-mod_manager-column-enabled = Activé
-ui-mod_manager-column-name = Nom
-ui-mod_manager-column-author = Auteur
-ui-mod_manager-column-category = Catégorie
 
 # -- Rendu de replay --
 
 ## ui.renderer
-ui-renderer-loading = Chargement des données du replay...
 ui-renderer-preparing_export = Préparation de l'export...
 ui-renderer-encoding = Encodage
 ui-renderer-muxing = Multiplexage
@@ -1093,7 +1040,7 @@ ui-renderer-advantage-score_projection = Projection du score
 ui-renderer-advantage-fleet_power = Puissance de la flotte
 ui-renderer-advantage-strategic_threat = Menace stratégique
 ui-renderer-advantage-total = Total
-ui-renderer-advantage-hp_incomplete = Données HP/navire incomplètes — seuls les facteurs de score sont affichés
+ui-renderer-advantage-hp_incomplete = Données HP/navire incomplètes. Seuls les facteurs de score sont affichés
 
 ## ui.renderer.context
 ui-renderer-context-show_trail = Afficher la trace
@@ -1109,39 +1056,30 @@ ui-renderer-context-enable_all = Tout activer
 ui-renderer-context-disable_all = Tout désactiver
 ui-renderer-context-disable_other_ranges = Désactiver toutes les autres portées
 ui-renderer-context-enable_all_ranges = Activer les portées de tous les navires
-ui-renderer-context-show_armor = Afficher le blindage en temps réel
 ui-renderer-context-realtime_armor = Afficher le blindage en temps réel
 
 ## ui.renderer.controls
 ui-renderer-controls-jump_to_start = Aller au début
 ui-renderer-controls-previous_event = Événement précédent (Shift+Left)
 ui-renderer-controls-back_10s = Reculer de 10s (Left)
-ui-renderer-controls-pause = Pause (Space)
-ui-renderer-controls-play = Lecture (Space)
 ui-renderer-controls-forward_10s = Avancer de 10s (Right)
 ui-renderer-controls-next_event = Événement suivant (Shift+Right)
 ui-renderer-controls-jump_to_end = Aller à la fin
-ui-renderer-controls-save_as_video = Enregistrer en vidéo
-ui-renderer-controls-copy_to_clipboard = Rendre la vidéo dans le presse-papiers
 ui-renderer-controls-speed = Vitesse de lecture
 
 ## ui.renderer.settings
 ui-renderer-settings-title = Paramètres d'affichage
 ui-renderer-settings-hp_bars = Barres de PV
-ui-renderer-settings-ship_settings = Paramètres des navires
 ui-renderer-settings-armament = Armement
 ui-renderer-settings-dead_ships = Navires coulés
 ui-renderer-settings-dead_ship_names = Noms des navires coulés
 ui-renderer-settings-player_names = Noms des joueurs
 ui-renderer-settings-ship_ranges = Portées des navires
-ui-renderer-settings-self_ship_ranges = Portées de son propre navire
 ui-renderer-settings-ship_names = Noms des navires
 ui-renderer-settings-camera_direction = Direction des tourelles
-ui-renderer-settings-trail_settings = Paramètres des traces
 ui-renderer-settings-heat_trail = Trace thermique
 ui-renderer-settings-speed_trails = Traces de vitesse
 ui-renderer-settings-dead_ship_trails = Traces des navires coulés
-ui-renderer-settings-map_settings = Paramètres de la carte
 ui-renderer-settings-buildings = Bâtiments
 ui-renderer-settings-capture_points = Points de capture
 ui-renderer-settings-consumables = Consommables
@@ -1149,7 +1087,6 @@ ui-renderer-settings-planes = Avions
 ui-renderer-settings-smoke = Fumigène
 ui-renderer-settings-torpedoes = Torpilles
 ui-renderer-settings-tracers = Traceurs
-ui-renderer-settings-hud_settings = Paramètres de l'ATH
 ui-renderer-settings-battle_result = Résultat de bataille
 ui-renderer-settings-buff_counters = Compteurs de buffs
 ui-renderer-settings-chat_label = Chat
@@ -1188,21 +1125,11 @@ ui-unpacker-filter_files = Filtrer les fichiers...
 ui-unpacker-search_in_files = Rechercher dans les fichiers
 ui-unpacker-search_hint = Rechercher dans les fichiers...
 ui-unpacker-path_filter_hint = Filtre de chemin (ex. *.xml)
-ui-unpacker-queue_all = Tout mettre en file
 ui-unpacker-queue_all_files = Mettre tous les fichiers en file
-ui-unpacker-empty_directory = Répertoire vide
-ui-unpacker-stop_search_tooltip = Arrêter la recherche
-ui-unpacker-no_matches = Aucun résultat trouvé.
 ui-unpacker-view_as_json = Voir en JSON
 ui-unpacker-extract_as_json = Extraire en JSON
 ui-unpacker-view_contents = Voir le contenu
 ui-unpacker-version = Version :
-ui-unpacker-game_params = GameParams
-ui-unpacker-base_as_json = Base en JSON
-ui-unpacker-as_json = En JSON
-ui-unpacker-as_cbor = En CBOR
-ui-unpacker-as_json_minimal = En JSON (Minimal / Transformé)
-ui-unpacker-as_cbor_minimal = En CBOR (Minimal / Transformé)
 ui-unpacker-decode_prototypes = Décoder les prototypes en JSON
 ui-unpacker-decode_prototypes_tooltip = Décoder les prototypes Assets.bin pris en charge (.visual, .model, .mfm) en JSON lors de l'extraction
 ui-unpacker-extraction_queue = File d'extraction
@@ -1211,16 +1138,16 @@ ui-unpacker-expand_folders = Développer l'arborescence
 ui-unpacker-clear_all = Tout effacer
 ui-unpacker-browse = Parcourir
 ui-unpacker-output_dir_hint = Répertoire de sortie...
-ui-unpacker-go_to_directory = Aller au répertoire
 ui-unpacker-remove_from_queue = Retirer de la file
 ui-unpacker-queue_folder = Mettre tout le dossier en file
 ui-unpacker-queue_file = Ajouter ce fichier à la file
 ui-unpacker-extraction_output = Extraire vers
 ui-unpacker-queue_empty = Cochez un fichier ou un dossier dans la liste pour l'ajouter à la file
-ui-unpacker-show_queue = File d'extraction
-ui-unpacker-double_click_open = Double-cliquez pour ouvrir
 ui-unpacker-packages = Paquets
-ui-unpacker-item_count = { $count } éléments
+ui-unpacker-item_count = { $count ->
+    [one] { $count } élément
+   *[other] { $count } éléments
+}
 ui-unpacker-search_title = Recherche : { $query }
 ui-unpacker-search_in = dans { $source }
 ui-unpacker-image_decode_failed = Impossible de décoder cette image : { $reason }
@@ -1238,11 +1165,19 @@ ui-unpacker-queued_count = { $count } en file
 ui-unpacker-counting_files = Comptage des fichiers...
 ui-unpacker-extracting = Extraction { $done } sur { $total }
 ui-unpacker-extract_failed = Échec de l'extraction : { $reason }
-ui-unpacker-extracted = { $count } fichiers extraits
-ui-unpacker-cancelled = Annulé après { $count } fichiers
-ui-unpacker-extract = Extraire
-ui-unpacker-extract_one = Extraire 1 élément
-ui-unpacker-extract_many = Extraire { $count } éléments
+ui-unpacker-extracted = { $count ->
+    [one] { $count } fichier extrait
+   *[other] { $count } fichiers extraits
+}
+ui-unpacker-cancelled = Annulé après { $count ->
+    [one] { $count } fichier
+   *[other] { $count } fichiers
+}
+ui-unpacker-extract = { $count ->
+    [0] Extraire
+    [one] Extraire { $count } élément
+   *[other] Extraire { $count } éléments
+}
 ui-unpacker-choose_directory = Choisissez d'abord un répertoire de destination
 ui-unpacker-dump_parameters = Exporter GameParams
 ui-unpacker-dump_parameters_tooltip = Exporter le GameParams.data de cette version
@@ -1258,19 +1193,12 @@ ui-unpacker-base_only = Paramètres de base uniquement
 ui-unpacker-column-name = Nom
 ui-unpacker-column-size = Taille
 ui-unpacker-column-type_col = Type
-ui-unpacker-column-path = Chemin
-ui-unpacker-column-file = Fichier
-ui-unpacker-column-offset = Décalage
-ui-unpacker-column-context = Contexte
 
 # -- Visualiseur de blindage --
 
 ## ui.armor
 ui-armor-load_settings = Chargez les données de jeu dans les Paramètres pour utiliser le visualiseur de blindage.
-ui-armor-gpu_unavailable = État de rendu GPU non disponible.
-ui-armor-loading_ship = Chargement des données du navire...
 ui-armor-load_failed = Échec du chargement des données du navire : { $error }
-ui-armor-ship_load_failed = Échec du chargement de { $ship } : { $reason }
 ui-armor-empty = Vide
 ui-armor-mirror_cameras = Miroir des caméras
 ui-armor-sync_options = Options de synchronisation
@@ -1284,33 +1212,26 @@ ui-armor-show_hidden_ships_tooltip = Lister aussi les navires que la liste omet,
 ui-armor-compare_split = Comparer dans un nouveau panneau
 ui-armor-open_in_new_tab = Ouvrir dans un nouvel onglet
 ui-armor-export_model = Exporter le modèle du navire
-ui-armor-armor_thickness = Épaisseur du blindage
 ui-armor-export_disclaimer = Ces modèles 3D et textures sont la propriété intellectuelle de Wargaming et toute utilisation de ces modèles doit être conforme aux lois de votre pays.
 ui-armor-export_button = Exporter
-ui-armor-armor_toggle = Blindage
-ui-armor-armor_tooltip = Basculer la visibilité des zones de blindage
 ui-armor-hull_toggle = Coque
-ui-armor-hull_tooltip = Basculer la visibilité des parties du modèle de coque
-ui-armor-splash_toggle = Splash
 ui-armor-splash_tooltip = Basculer la visibilité de la zone de splash
 ui-armor-show_hidden = Afficher les cachés
 ui-armor-show_hidden_tooltip = Basculer la visibilité des panneaux (possiblement) cachés
 ui-armor-gaps = Espaces
 ui-armor-gaps_tooltip = Mettre en évidence les bords de limite où les panneaux de blindage ne se connectent pas (espaces potentiels)
 ui-armor-display = Affichage
-ui-armor-display_tooltip = Paramètres d'affichage (Ctrl+S)
 ui-armor-marker_opacity = Opacité des marqueurs
-ui-armor-save_defaults = Sauvegarder par défaut
-ui-armor-export_tab = Exporter
 ui-armor-export_tooltip = Exporter le modèle du navire en fichier OBJ
 ui-armor-pen_check = Test de pénétration
-ui-armor-pen_check_tooltip = Configurer les obus pour la comparaison de pénétration
 ui-armor-trajectory = Trajectoire
-ui-armor-trajectory_on = Trajectoire [ON]
 ui-armor-trajectory_range = Distance
 ui-armor-trajectory_clear = Tout effacer
 ui-armor-arc_heading = Arc { $number }
-ui-armor-arc_summary = { $hits } impacts, { $armor } mm à { $range } km
+ui-armor-arc_summary = { $hits ->
+    [one] { $hits } impact
+   *[other] { $hits } impacts
+}, { $armor } mm à { $range } km
 ui-armor-arc_delete = Supprimer cet arc
 ui-armor-arc_isolate_plates = Isoler les plaques
 ui-armor-arc_isolate_plates_tooltip = Afficher uniquement les plaques de blindage traversées par cet arc
@@ -1329,7 +1250,6 @@ ui-armor-arc_plate_unknown = une plaque non répertoriée
 ui-armor-angle_good = moins de 30 deg
 ui-armor-angle_mid = 30 à 45 deg
 ui-armor-angle_bad = plus de 45 deg
-ui-armor-trajectory_tooltip = Cliquez sur le blindage pour simuler les trajectoires des obus (Ctrl+T)
 ui-armor-trajectory_ship = Navire :
 ui-armor-trajectory_select_ship = Sélectionner un navire
 ui-armor-trajectory_ship_tooltip = Choisir le navire qui fournit l'obus de trajectoire
@@ -1340,18 +1260,14 @@ ui-armor-trajectory_select_shell = Sélectionner un obus
 ui-armor-trajectory_shell_tooltip = Choisir l'obus utilisé pour les tirs de trajectoire
 ui-armor-continue_ricochet = Continuer après le ricochet
 ui-armor-splash_mode = Splash
-ui-armor-splash_on = Splash [ACTIVÉ]
 ui-armor-splash_no_data = Pas de données de splash pour ce navire
 ui-armor-splash_no_shells = Ajoutez un navire avec des obus HE/SAP à la liste de comparaison
 ui-armor-splash_tooltip_mode = Cliquez sur le blindage pour visualiser le volume de dégâts de splash HE
-ui-armor-loading_armor = Chargement du navire...
 ui-armor-select_ship = Sélectionnez un navire dans la liste
-ui-armor-pen_check_label = Test de pénétration
 ui-armor-all_btn = Tous
 ui-armor-none_btn = Aucun
 ui-armor-opaque = Opaque
 ui-armor-upgrade = Amélioration :
-ui-armor-camo = Camo :
 ui-armor-camo_none = D'origine (aucun)
 ui-armor-camo_group_universal = Camouflages universels
 ui-armor-camo_group_expendable = Camouflages consommables
@@ -1360,7 +1276,10 @@ ui-armor-show_armor_thickness = Afficher la légende d'épaisseur du blindage
 ui-armor-plate_edges = Bords des plaques
 ui-armor-waterline = Ligne de flottaison
 ui-armor-camera_rings = Anneaux de caméra
-ui-armor-realtime_readout = { $health } PV  -  { $hits } impacts
+ui-armor-realtime_readout = { $health } PV  -  { $hits ->
+    [one] { $hits } impact
+   *[other] { $hits } impacts
+}
 ui-armor-show_camera_rings = Afficher les anneaux de caméra
 ui-armor-camera_fov = FOV de la caméra
 ui-armor-camera_height = Hauteur de la caméra
@@ -1385,7 +1304,6 @@ ui-armor-tree_matches = Correspondances : { $count }
 ui-armor-tree_no_matches = Aucune correspondance
 ui-armor-no_matching_options = Aucune option ne correspond au filtre
 ui-armor-opacity = Opacité
-ui-armor-ship_hull = Coque du navire
 ui-armor-opaque_hull = Coque opaque
 ui-armor-lighting = Éclairage de la coque
 ui-armor-lighting_enabled = Activer l'éclairage
@@ -1401,20 +1319,16 @@ ui-armor-lighting_specular = Spéculaire
 ui-armor-lighting_shininess = Brillance
 ui-armor-lighting_key_color = Couleur principale
 ui-armor-lighting_ambient_color = Couleur ambiante
-ui-armor-pop_out = Détacher
 ui-armor-zero_mm_plates = Plaques 0 mm
 ui-armor-armor_opacity = Opacité du blindage
 ui-armor-ballistic_disclaimer = Les résultats balistiques sont basés sur de l'ingénierie inverse et des estimations du fonctionnement de la simulation
 ui-armor-roll = Roulis
-ui-armor-ctrl_click_solo = Ctrl+click pour isoler
 ui-armor-reset_plates = Réinitialiser les plaques
-ui-armor-visibility = Visibilité
 ui-armor-armor_options = Blindage
 ui-armor-no_ship_loaded = Aucun navire chargé
 ui-armor-lod = LOD :
 ui-armor-lod_highest = 0 (maximum)
 ui-armor-camouflage = Camouflage
-ui-armor-search_ships = Rechercher des navires...
 ui-armor-ships = Navires
 ui-armor-compare = Comparer
 ui-armor-compare_tooltip = Ouvrir un nouveau volet de comparaison, ou clic droit sur un navire pour le comparer
@@ -1438,14 +1352,12 @@ ui-armor-zone_toggle_tooltip = Affiche ou masque toutes les plaques de cette zon
 ui-armor-mode_solo_zone = zone seule
 ui-armor-mode_cast_trajectory = tirer une trajectoire
 ui-armor-loading_catalog = Chargement du catalogue des navires...
-ui-armor-catalog_failed = Échec du chargement du catalogue des navires : { $reason }
 ui-armor-legend_collapse = Réduire
 ui-armor-legend_hide = Masquer la légende
 ui-armor-armor_thickness_title = Épaisseur du blindage
 ui-armor-initializing = Initialisation de la vue 3D...
 ui-armor-init_failed = Échec de l'initialisation de la vue du blindage : { $reason }
 ui-armor-loading_named_ship = Chargement de { $ship }...
-ui-armor-rendering = Rendu...
 ui-armor-options = Options
 
 ## ui.armor.compass
@@ -1455,23 +1367,27 @@ ui-armor-compass-south = S
 ui-armor-compass-west = O
 
 ## ui.armor.realtime
-ui-armor-realtime-loading = Chargement du blindage du navire...
-ui-armor-realtime-waiting = En attente des données du navire...
 ui-armor-realtime-incoming_fire = Tir entrant
 ui-armor-realtime-attacker_filter = Filtre d'attaquant
 ui-armor-realtime-all_enemies = Tous les ennemis
 ui-armor-realtime-show_secondaries = Afficher l'armement secondaire
-ui-armor-realtime-auto_scroll = Défilement automatique
 ui-armor-realtime-seek_to_salvo = Aller à la salve
-ui-armor-realtime-deselect = Désélectionner
-ui-armor-realtime-select_all = Tout sélectionner
 ui-armor-realtime-no_data = Données d'obus plus disponibles
 ui-armor-realtime-sim_agrees = Simulation concorde
-ui-armor-realtime-sim_unchecked = { $count } obus n'ont pas pu être simulés
+ui-armor-realtime-sim_unchecked = { $count ->
+    [one] { $count } obus n'a pas pu être simulé
+   *[other] { $count } obus n'ont pas pu être simulés
+}
 ui-armor-realtime-sim_rng_zone = Zone aléatoire ({ $angle } deg dans { $from }-{ $to })
 ui-armor-realtime-sim_disagrees = Sim : { $sim } / Serveur : { $server }
 ui-armor-realtime-no_armor_hit = Aucune plaque de blindage touchée
-ui-armor-realtime-tracked = { $salvos } salves, { $shells } obus suivis
+ui-armor-realtime-tracked = { $salvos ->
+    [one] { $salvos } salve
+   *[other] { $salvos } salves
+}, { $shells ->
+    [one] { $shells } obus suivi
+   *[other] { $shells } obus suivis
+}
 ui-armor-realtime-nothing_landed = Rien n'a encore touché ce navire
 ui-armor-realtime-shells = { $count }x
 ui-armor-realtime-salvo_shell = { $caliber } mm { $shell }
@@ -1504,10 +1420,8 @@ advantage-moderate = Modéré
 advantage-weak = Faible
 
 ## ui.search
-ui-search-undo = Annuler la dernière modification de la requête
 ui-search-edit_value = Modifier la valeur
 ui-search-add_filter = Ajouter un filtre
-ui-search-redo = Rétablir la modification annulée
 ui-search-pill_select = Sélectionner
 ui-search-pill_deselect = Désélectionner
 ui-search-pill_group_all = Grouper avec et
@@ -1523,7 +1437,10 @@ ui-search-outcome_draw = Match nul
 ui-search-outcome_unknown = Inconnu
 ui-search-bool_true = vrai
 ui-search-bool_false = faux
-ui-search-match_count = { $count } match(s)
+ui-search-match_count = { $count ->
+    [one] { $count } match
+   *[other] { $count } matchs
+}
 ui-search-row_actions_hint = Actions du replay (ou clic droit sur la ligne)
 ui-search-looking_up_values = Recherche des valeurs...
 ui-search-type_a_query = Saisissez une requête et appuyez sur Entrée
@@ -1531,15 +1448,12 @@ ui-search-parse_failed = Requête invalide : { $reason }
 ui-search-searching = Recherche...
 ui-search-failed = La recherche a échoué : { $reason }
 ui-search-no_matches = Aucun résultat
-ui-search-game_mode_gap_hint_one = 1 match indexé n'a pas de mode de jeu enregistré. Utilisez Réindexer tous les replays dans les Paramètres pour le compléter.
-ui-search-game_mode_gap_hint = { $count } matchs indexés n'ont pas de mode de jeu enregistré. Utilisez Réindexer tous les replays dans les Paramètres pour les compléter.
+ui-search-game_mode_gap_hint = { $count ->
+    [one] { $count } match indexé n'a pas de mode de jeu enregistré. Utilisez Réindexer tous les replays dans les Paramètres pour le compléter.
+   *[other] { $count } matchs indexés n'ont pas de mode de jeu enregistré. Utilisez Réindexer tous les replays dans les Paramètres pour les compléter.
+}
 ui-search-open = Ouvrir
 ui-search-open_missing = Le fichier replay n'existe plus
-ui-search-opened_directory = { $dir } ouvert pour accueillir ce replay
-ui-search-open_no_directory = Impossible de déterminer à quel répertoire appartient ce replay
-ui-search-path_copied = Chemin du replay copié dans le presse-papiers
-ui-search-preview_map = Aperçu de la carte
-ui-search-preview_and_render = Survolez pour un aperçu, cliquez pour générer le rendu
 ui-search-free_text = contient "{ $text }"
 ui-search-quant_any = au moins un
 ui-search-quant_none = aucun
@@ -1573,23 +1487,6 @@ ui-search-suggest-scope_enemy = Ennemi :
 ui-search-suggest-scope_division = Division :
 ui-search-suggest-scope_anyone = Tout joueur :
 
-## ui.search.bar
-ui-search-bar-hint = Filtrer les replays
-ui-search-bar-and_word = et
-ui-search-bar-or_word = ou
-ui-search-bar-not_word = non
-ui-search-bar-group_and = Grouper avec ET
-ui-search-bar-group_or = Grouper avec OU
-ui-search-bar-negate = Inverser
-ui-search-bar-delete = Supprimer
-ui-search-bar-clear_selection = Effacer la sélection
-ui-search-bar-ungroup = Cliquez pour dissoudre ce groupe
-ui-search-bar-flip_connector = Cliquez pour basculer entre ET et OU
-ui-search-bar-context_preset = Préréglage
-ui-search-bar-context_match = Match
-ui-search-bar-context_roster = Joueurs
-ui-search-bar-no_suggestions = Aucune correspondance
-
 ## ui.search.field
 ui-search-field-outcome = Résultat
 ui-search-field-map = Carte
@@ -1604,7 +1501,6 @@ ui-search-field-stat_spotting = Repérage
 ui-search-field-stat_potential = Dégâts potentiels
 ui-search-field-stat_received = Dégâts reçus
 ui-search-field-stat_pr = PR
-ui-search-field-stat_mc = MC
 ui-search-field-rating = Cote
 ui-search-field-stat_survived = Survécu
 ui-search-field-stat_disconnected = Déconnecté
@@ -1690,7 +1586,6 @@ ui-search-value-game_mode_pinata_event = Événement Pinata
 ui-search-value-game_mode_respawns = Réapparitions
 ui-search-value-game_mode_respawns_sectors = Réapparitions par secteurs
 
-
 ## ui.search.column
 ui-search-column-date = Date
 ui-search-column-map = Carte
@@ -1710,8 +1605,17 @@ ui-settings-index-rebuild = Tout réindexer
 ui-settings-index-rebuild_hint = Relit chaque replay, pour corriger les lignes mal analysées auparavant. « Construire l'index » ne lit que ce qui manque.
 ui-settings-index-progress = { $done } sur { $total } lus, { $failed } illisibles
 ui-settings-index-progress_skipped = { $done } sur { $total } lus, { $skipped } déjà présents, { $failed } illisibles
-ui-settings-index-built = { $indexed } replays indexés, { $failed } illisibles
-ui-settings-index-built_with_skipped = { $indexed } replays indexés, { $skipped } déjà présents, { $failed } illisibles
+ui-settings-index-built = { $indexed ->
+    [one] { $indexed } replay indexé
+   *[other] { $indexed } replays indexés
+}, { $failed } illisible(s)
+ui-settings-index-built_with_skipped = { $indexed ->
+    [one] { $indexed } replay indexé
+   *[other] { $indexed } replays indexés
+}, { $skipped ->
+    [one] { $skipped } déjà présent
+   *[other] { $skipped } déjà présents
+}, { $failed } illisible(s)
 
 ## ui.settings
 ui-settings-loading = Chargement des paramètres...
@@ -1722,8 +1626,10 @@ ui-settings-not_set = (non défini)
 ui-settings-panel-mcp = Serveur MCP
 ui-settings-panel-open = Ouvrir les paramètres
 ui-settings-panel-search_placeholder = Rechercher dans les paramètres
-ui-settings-panel-count_one = 1 paramètre
-ui-settings-panel-count = { $count } paramètres
+ui-settings-panel-count = { $count ->
+    [one] { $count } paramètre
+   *[other] { $count } paramètres
+}
 ui-settings-panel-no_matches = Aucun paramètre ne correspond à la recherche
 ui-settings-panel-close = Fermer les paramètres
 ui-settings-panel-in_error = { $name } : un paramètre requiert votre attention
@@ -1774,13 +1680,28 @@ ui-app-status_cache_downloading = Téléchargement des données de jeu
 ui-app-status_cache_planning = Recherche des données de jeu publiées
 ui-app-drop_to_load = Déposer pour charger { $file }
 ui-app-drop_to_list = Déposer pour lister les replays de { $folder }
-ui-app-drop_to_list_replays = Déposer pour lister { $count } replays
-ui-app-drop_to_list_folders = Déposer pour lister les replays de { $count } dossiers
+ui-app-drop_to_list_replays = Déposer pour lister { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+}
+ui-app-drop_to_list_folders = Déposer pour lister les replays { $count ->
+    [one] du dossier
+   *[other] des { $count } dossiers
+}
 ui-app-drop_to_open_and_list = Déposer pour ouvrir { $file } et lister les replays de { $folders }
-ui-app-drop_to_list_replays_and_folders = Déposer pour lister { $count } replays et les replays de { $folders }
-ui-app-drop_folder_count = { $count } dossiers
+ui-app-drop_to_list_replays_and_folders = Déposer pour lister { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+} et les replays de { $folders }
+ui-app-drop_folder_count = { $count ->
+    [one] { $count } dossier
+   *[other] { $count } dossiers
+}
 ui-app-reading_replay = Lecture de { $replay }
-ui-app-reading_replays = Lecture de { $count } replays
+ui-app-reading_replays = Lecture de { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+}
 ui-app-status_constants_generating = Mise à jour des constantes du jeu pour { $version }
 ui-app-worker_constants = Le processus des constantes du jeu
 ui-app-worker_live_match = La surveillance des batailles
@@ -1790,7 +1711,10 @@ ui-app-worker_stalled = { $worker } ne répond pas
 ui-app-worker_stopped = { $worker } s'est arrêté
 ui-app-status_indexing = Indexation des replays
 ui-app-status_of = { $done } sur { $total }
-ui-app-status_tasks = Tâches en cours : { $count }
+ui-app-status_tasks = { $count ->
+    [one] { $count } tâche en cours
+   *[other] { $count } tâches en cours
+}
 ui-app-status_show_panel = Afficher le panneau : { $panel }
 ui-app-status_hide_panel = Masquer le panneau : { $panel }
 ui-app-panel_left = Gauche
@@ -1823,8 +1747,10 @@ ui-palette-armor_ship_row = { $name } -- { $class } de rang { $tier }, { $nation
 ui-palette-back_hint = Esc : retour
 ui-palette-ships_loading = Chargement de la liste des navires...
 ui-palette-ships_unavailable = Aucune liste de navires : { $reason }
-ui-palette-matches_found = { $count } résultat(s)
-ui-palette-nothing_indexed = Rien n'est encore indexé
+ui-palette-matches_found = { $count ->
+    [one] { $count } résultat
+   *[other] { $count } résultats
+}
 ui-palette-sample_stats = Débogage : afficher des données d'exemple dans Statistiques
 ui-palette-restore_stats = Débogage : afficher les données enregistrées dans Statistiques
 
@@ -1848,10 +1774,22 @@ ui-replay-renderer-export_copied = Vidéo copiée dans le presse-papiers
 ui-replay-renderer-export_not_written = Impossible de faire le rendu de la vidéo : { $reason }
 ui-replay-renderer-pop_out = Ouvrir dans une fenêtre séparée
 ui-replay-renderer-export_path_unusable = Impossible d'écrire à cet emplacement
-ui-replay-renderer-batch_started = Rendu de { $count } replay(s) dans { $dir }
-ui-replay-renderer-batch_finished = { $written } replay(s) rendu(s) ; { $failed } n'ont pas pu être rendus
-ui-replay-renderer-batch_all_written = { $written } replay(s) rendu(s)
-ui-replay-renderer-batch_copied = { $written } replay(s) rendu(s) et placé(s) dans le presse-papiers
+ui-replay-renderer-batch_started = Rendu de { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+} dans { $dir }
+ui-replay-renderer-batch_finished = { $written ->
+    [one] { $written } replay rendu
+   *[other] { $written } replays rendus
+} ; { $failed } n'ont pas pu être rendus
+ui-replay-renderer-batch_all_written = { $written ->
+    [one] { $written } replay rendu
+   *[other] { $written } replays rendus
+}
+ui-replay-renderer-batch_copied = { $written ->
+    [one] { $written } replay rendu et placé dans le presse-papiers
+   *[other] { $written } replays rendus et placés dans le presse-papiers
+}
 ui-replay-renderer-batch_not_copied = Rendu dans { $dir }, mais le presse-papiers les a refusés : { $reason }
 ui-replay-renderer-batch_progress = Rendu { $done } sur { $total } : { $replay }
 ui-replay-renderer-baking = Lecture du replay et parcours de la bataille...
@@ -1908,19 +1846,11 @@ ui-armor-pen-hover_a_plate = Survolez une plaque du navire pour la tester
 ui-armor-pen-awaiting_plate = survolez une plaque
 ui-armor-pen-clear_all = Tout effacer
 ui-armor-pen-remove = Retirer de la comparaison
-ui-armor-pen-title = Pénétration
-ui-armor-pen-title_tooltip = Vérifier l'effet des obus d'un navire sur une plaque
-ui-armor-pen-ship = Navire tireur
 ui-armor-pen-firing_ship_tooltip = Utiliser les obus de ce navire pour les tirs de trajectoire
 ui-armor-pen-use_for_trajectory = Utiliser pour la trajectoire
-ui-armor-pen-pick_ship = Choisissez le navire qui tire sur celui-ci
-ui-armor-pen-enter_thickness = Saisissez l'épaisseur de la plaque
 ui-armor-pen-no_shells = { $ship } n'a pas d'obus de batterie principale
-ui-armor-pen-plate = Plaque
-ui-armor-pen-mm = mm
 ui-armor-pen-ifhe = IFHE
 ui-armor-pen-ifhe_tooltip = Amorce à inertie pour obus HE augmente la pénétration des obus HE d'un quart
-ui-armor-pen-last_hovered = Dernière survolée : { $plate }
 ui-armor-pen-penetrates = pénètre
 ui-armor-pen-shatters = se fragmente
 ui-armor-pen-angle_dependent = dépend de l'angle
@@ -1955,14 +1885,15 @@ ui-armor-export-camo_reset = Rétablir par défaut
 ui-armor-export-loading_details = Chargement...
 ui-armor-export-size_estimate = Taille estimée du fichier : { $size }
 ui-armor-export-size_breakdown = Géométrie { $geometry } (exacte), textures { $textures } (estimées)
-ui-armor-export-size_incomplete = Impossible d'évaluer { $count } camouflage(s) ; la taille peut être incomplète
+ui-armor-export-size_incomplete = Impossible d'évaluer { $count ->
+    [one] { $count } camouflage
+   *[other] { $count } camouflages
+} ; la taille peut être incomplète
 ui-armor-export-exporting = Export de { $ship }...
-ui-armor-export-close_button = Fermer
 ui-armor-export-already_running = Un export est déjà en cours
 ui-armor-export-exported = { $ship } exporté
 ui-armor-export-exported_with_size = { $ship } exporté ({ $size })
 ui-armor-export-vehicle_not_found = Navire introuvable
-ui-armor-export-create_file_failed = Échec de la création du fichier : { $error }
 ui-armor-export-export_failed = Échec de l'export : { $error }
 
 ## ui.tactics
@@ -2010,8 +1941,17 @@ ui-tactics-scan_replays_tooltip = Lire les replays pour obtenir la disposition d
 ui-tactics-scan_needs_game_data = Chargez d'abord une version du jeu
 ui-tactics-scan_running = Lecture des replays...
 ui-tactics-scan_progress = Lecture des replays... { $read } / { $total }
-ui-tactics-scan_done = { $total } replays lus, { $added } nouvelles dispositions trouvées
-ui-tactics-session_boards_full = La session a déjà { $limit } tableaux ouverts, ce tableau reste donc sur sa carte
+ui-tactics-scan_done = { $total ->
+    [one] { $total } replay lu
+   *[other] { $total } replays lus
+}, { $added ->
+    [one] { $added } nouvelle disposition trouvée
+   *[other] { $added } nouvelles dispositions trouvées
+}
+ui-tactics-session_boards_full = La session a déjà { $limit ->
+    [one] { $limit } tableau ouvert
+   *[other] { $limit } tableaux ouverts
+}, ce tableau reste donc sur sa carte
 ui-tactics-placing = Placement de { $ship }
 ui-tactics-side_friendly = Allié
 ui-tactics-side_enemy = Ennemi
@@ -2075,14 +2015,15 @@ ui-launcher-cancel = Annuler
 ui-launcher-resume = Reprendre
 ui-launcher-paused = Téléchargement en pause ; les fichiers préparés sont conservés.
 ui-launcher-installed = Installé
-ui-launcher-installed_skipped = Installé ({ $count } partie(s) différentielle(s) ignorée(s) : pas encore prises en charge, téléchargées mais non appliquées)
+ui-launcher-installed_skipped = Installé ({ $count ->
+    [one] { $count } partie différentielle ignorée
+   *[other] { $count } parties différentielles ignorées
+} : pas encore prises en charge, téléchargées mais non appliquées)
 ui-launcher-download_failed = Échec du téléchargement : { $error }
 ui-launcher-update_in_place = Une mise à jour s'installe dans le dossier de l'installation elle-même. Choisissez { $path } pour la mettre à jour.
 ui-launcher-cancelled = Téléchargement annulé.
 ui-launcher-launch_failed = Échec du lancement : { $error }
 ui-launcher-use_for_toolkit = Utiliser pour le toolkit
-ui-launcher-not_set = non défini
-ui-launcher-browse = Parcourir...
 ui-launcher-install_heading = Installer un jeu
 ui-launcher-install_hint = Une nouvelle installation pèse plusieurs dizaines de Go.
 ui-launcher-install_title = Emplacement d'installation du jeu
@@ -2150,25 +2091,51 @@ ui-replay-damage_share-hold = Maintenez { $key } pour inverser.
 ui-replay-damage_share-release = Relâchez { $key } pour revenir.
 
 ## ui.reindex
-ui-reindex-context_one = Forcer la réindexation
-ui-reindex-context_many = Forcer la réindexation de { $count } replays
+ui-reindex-context = { $count ->
+    [one] Forcer la réindexation
+   *[other] Forcer la réindexation de { $count } replays
+}
 ui-reindex-palette_by_version = Forcer la réindexation des replays : par version
 ui-reindex-palette_all = Forcer la réindexation des replays : tous
 ui-reindex-versions_title = Forcer la réindexation des replays : par version
 ui-reindex-versions_placeholder = Filtrer les versions du jeu...
-ui-reindex-version_row = { $version } -- { $count } replay(s)
+ui-reindex-version_row = { $version } -- { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+}
 ui-reindex-no_versions = Aucun replay listé n'indique de version du jeu
 ui-reindex-confirm_title = Forcer la réindexation des replays
 ui-reindex-confirm_ok = Réindexer
-ui-reindex-confirm_count = { $count } replay(s) seront relus et leurs entrées d'index réécrites.
+ui-reindex-confirm_count = { $count ->
+    [one] { $count } replay sera relu et son entrée d'index réécrite.
+   *[other] { $count } replays seront relus et leurs entrées d'index réécrites.
+}
 ui-reindex-confirm_range = Joués du { $oldest } au { $newest }.
-ui-reindex-confirm_undated = { $count } replay(s) à lire n'ont pas de date de bataille lisible et ne sont pas dans cette période.
+ui-reindex-confirm_undated = { $count ->
+    [one] { $count } replay à lire n'a pas de date de bataille lisible et n'est pas dans cette période.
+   *[other] { $count } replays à lire n'ont pas de date de bataille lisible et ne sont pas dans cette période.
+}
 ui-reindex-confirm_downloads = Les données de jeu de ces versions sont d'abord téléchargées :
-ui-reindex-confirm_unobtainable = Aucune donnée de jeu n'est disponible pour ces versions, leurs { $count } replay(s) sont donc ignorés :
-ui-reindex-confirm_no_cache_dir = Aucun dossier de cache des données de jeu n'est défini, les données de jeu de ces versions ne peuvent donc pas être téléchargées et leurs { $count } replay(s) sont ignorés :
-ui-reindex-confirm_no_build = { $count } replay(s) n'indiquent aucun build du jeu et sont ignorés.
-ui-reindex-confirm_no_version = { $count } replay(s) n'indiquent aucune version du jeu lisible et sont ignorés.
-ui-reindex-build_row = { $version } (build { $build }) : { $count } replay(s)
+ui-reindex-confirm_unobtainable = Aucune donnée de jeu n'est disponible pour ces versions, { $count ->
+    [one] leur { $count } replay est donc ignoré :
+   *[other] leurs { $count } replays sont donc ignorés :
+}
+ui-reindex-confirm_no_cache_dir = Aucun dossier de cache des données de jeu n'est défini, les données de jeu de ces versions ne peuvent donc pas être téléchargées et { $count ->
+    [one] leur { $count } replay est ignoré :
+   *[other] leurs { $count } replays sont ignorés :
+}
+ui-reindex-confirm_no_build = { $count ->
+    [one] { $count } replay n'indique aucun build du jeu et est ignoré.
+   *[other] { $count } replays n'indiquent aucun build du jeu et sont ignorés.
+}
+ui-reindex-confirm_no_version = { $count ->
+    [one] { $count } replay n'indique aucune version du jeu lisible et est ignoré.
+   *[other] { $count } replays n'indiquent aucune version du jeu lisible et sont ignorés.
+}
+ui-reindex-build_row = { $version } (build { $build }) : { $count ->
+    [one] { $count } replay
+   *[other] { $count } replays
+}
 ui-reindex-nothing_listed = La liste ne contient aucun replay à réindexer.
 ui-reindex-nothing_readable = Aucun de ces replays ne peut être réindexé : aucune donnée de jeu n'est disponible ({ $count } ignorés).
 ui-reindex-no_game_data = Les replays ne peuvent pas être lus tant que le dossier du jeu n'est pas défini.
@@ -2176,7 +2143,10 @@ ui-reindex-busy_index = Une indexation est déjà en cours.
 ui-reindex-busy_cache = Une tâche de données de jeu est déjà en cours. Réessayez lorsqu'elle sera terminée.
 ui-reindex-planning = Vérification des données de jeu disponibles...
 ui-reindex-no_index = L'index des replays n'est pas ouvert, rien n'a été réindexé.
-ui-reindex-done = { $indexed } replay(s) réindexé(s) ; { $skipped } ignoré(s), { $failed } illisible(s)
+ui-reindex-done = { $indexed ->
+    [one] { $indexed } replay réindexé
+   *[other] { $indexed } replays réindexés
+} ; { $skipped } ignoré(s), { $failed } illisible(s)
 ui-reindex-stopped = Réindexation arrêtée : { $indexed } réindexé(s), { $skipped } ignoré(s), { $failed } illisible(s)
 ui-reindex-stopped_before_reading = Réindexation arrêtée avant la lecture du moindre replay.
 
@@ -2184,13 +2154,19 @@ ui-reindex-stopped_before_reading = Réindexation arrêtée avant la lecture du 
 ui-index_folder-tooltip = Indexer tous les replays de cette liste qui ne figurent pas encore dans l'index des replays
 ui-index_folder-confirm_title = Indexer les replays
 ui-index_folder-confirm_ok = Indexer
-ui-index_folder-confirm_count = { $count } replay(s) de cette liste ne figurent pas encore dans l'index des replays et seront lus puis ajoutés.
+ui-index_folder-confirm_count = { $count ->
+    [one] { $count } replay de cette liste ne figure pas encore dans l'index des replays et sera lu puis ajouté.
+   *[other] { $count } replays de cette liste ne figurent pas encore dans l'index des replays et seront lus puis ajoutés.
+}
 ui-index_folder-note_live = Les replays indexés sont ajoutés à l'index des replays utilisé par la Recherche et le Suivi des joueurs.
 ui-index_folder-note_folder = Les replays indexés sont ajoutés à l'index des replays sous la source propre à ce répertoire ({ $dir }). La Recherche et la liste des joueurs du Suivi des joueurs les incluent. La liste des clans du Suivi des joueurs ne lit que les replays du jeu.
 ui-index_folder-nothing_listed = Cette liste ne contient aucun replay à indexer.
 ui-index_folder-nothing_missing = Tous les replays de cette liste sont déjà indexés.
 ui-index_folder-unreadable_index = Impossible de lire l'index des replays.
-ui-index_folder-done = { $indexed } replay(s) indexé(s) ; { $skipped } ignoré(s), { $failed } illisible(s)
+ui-index_folder-done = { $indexed ->
+    [one] { $indexed } replay indexé
+   *[other] { $indexed } replays indexés
+} ; { $skipped } ignoré(s), { $failed } illisible(s)
 ui-index_folder-stopped = Indexation arrêtée : { $indexed } indexé(s), { $skipped } ignoré(s), { $failed } illisible(s)
 ui-index_folder-stopped_before_reading = L'indexation a été arrêtée avant la lecture du moindre replay.
 
@@ -2198,7 +2174,10 @@ ui-index_folder-stopped_before_reading = L'indexation a été arrêtée avant la
 ui-replay_folders-install = Jeu
 ui-replay_folders-watched = Surveillé : les replays nouveaux et modifiés apparaissent ici
 ui-replay_folders-unwatched = Non surveillé : utilisez Actualiser pour le relire
-ui-replay_folders-unseen = { $count } replay(s) nouveau(x) ou modifié(s) depuis votre dernière visite
+ui-replay_folders-unseen = { $count ->
+    [one] { $count } replay nouveau ou modifié depuis votre dernière visite
+   *[other] { $count } replays nouveaux ou modifiés depuis votre dernière visite
+}
 ui-replay_folders-missing = Ce répertoire n'existe plus : { $dir }
 ui-replay_folders-missing_hint = Il s'ouvrira ici à chaque démarrage jusqu'à ce que vous le désépingliez.
 ui-replay_folders-pin = Épingler
@@ -2219,7 +2198,10 @@ ui-replay_folders-source_failed = Les replays de ce répertoire ne peuvent pas �
 ui-replay_folders-restart_watch = Relancer la surveillance
 ui-replay_folders-watch_stopped = La surveillance de { $folder } s'est arrêtée : { $cause }.
 ui-replay_folders-watch_restarting = Relance dans { $seconds } s (tentative { $attempt } sur { $attempts }).
-ui-replay_folders-watch_gave_up = La relance a échoué { $attempts } fois et ne sera plus tentée.
+ui-replay_folders-watch_gave_up = La relance a échoué { $attempts ->
+    [one] { $attempts } fois
+   *[other] { $attempts } fois
+} et ne sera plus tentée.
 ui-replay_folders-watch_restart_hint = Cliquez sur le point rouge ou choisissez Relancer la surveillance dans le menu de l'onglet pour la relancer maintenant.
 ui-replay_folders-watch_resumed = La surveillance de { $folder } a repris.
 ui-replay_folders-watch_cause_backend = le système de fichiers a signalé une erreur : { $error }
@@ -2228,7 +2210,10 @@ ui-replay_folders-watch_cause_panicked = erreur interne : { $error }
 ui-replay_folders-watch_cause_exited = la surveillance s'est arrêtée de manière inattendue
 ui-replay_folders-dropped = Déposés
 ui-replay_folders-dropped_numbered = Déposés { $number }
-ui-replay_folders-dropped_count = { $count } replay(s) déposé(s)
+ui-replay_folders-dropped_count = { $count ->
+    [one] { $count } replay déposé
+   *[other] { $count } replays déposés
+}
 ui-replay_folders-dropped_no_source = Les replays déposés sont indexés avec leurs propres dossiers. Ouvrez un dossier pour le rechercher ou l'indexer.
 ui-replay_folders-unreadable_replay = Lecture impossible : { $error }
 
@@ -2393,14 +2378,22 @@ ui-armor-textures-title = Textures
 ui-armor-textures-hint = Le jeu lit un fichier du dossier res_mods du build à la place du fichier empaqueté au même chemin. Faites un clic droit sur une texture pour copier ce chemin.
 ui-armor-textures-under_pointer = Sous le pointeur : { $material }
 ui-armor-textures-reading = Lecture des textures...
-ui-armor-textures-summary = { $materials } matériaux, { $textures } textures
+ui-armor-textures-summary = { $materials ->
+    [one] { $materials } matériau
+   *[other] { $materials } matériaux
+}, { $textures ->
+    [one] { $textures } texture
+   *[other] { $textures } textures
+}
 ui-armor-textures-no_material = Aucun matériau
 ui-armor-textures-unresolved = Le chemin n'est pas dans assets.bin
 ui-armor-textures-absent = Absent des paquets installés
 ui-armor-textures-unreadable = Impossible de lire l'en-tête DDS
 ui-armor-textures-unknown_format = Format non reconnu
-ui-armor-textures-details_one = { $format }, { $size }, 1 fichier, { $bytes }
-ui-armor-textures-details = { $format }, { $size }, { $count } fichiers, { $bytes }
+ui-armor-textures-details = { $format }, { $size }, { $count ->
+    [one] { $count } fichier
+   *[other] { $count } fichiers
+}, { $bytes }
 ui-armor-textures-role_albedo = Albédo
 ui-armor-textures-role_normal = Normale
 ui-armor-textures-role_metal_gloss = Métal-brillance
@@ -2408,19 +2401,30 @@ ui-armor-textures-role_ambient_occlusion = Occlusion ambiante
 ui-armor-textures-role_detail = Détail
 ui-armor-textures-role_name_matched = Albédo, trouvé par nom de fichier
 ui-armor-textures-copy_path = Copier le chemin
-ui-armor-textures-copy_override = Copier le chemin res_mods
-ui-armor-textures-copy_overrides = Copier { $count } chemins res_mods
-ui-armor-textures-paths_copied = { $count } chemins copiés
+ui-armor-textures-copy_overrides = { $count ->
+    [one] Copier le chemin res_mods
+   *[other] Copier { $count } chemins res_mods
+}
+ui-armor-textures-paths_copied = { $count ->
+    [one] { $count } chemin copié
+   *[other] { $count } chemins copiés
+}
 ui-armor-textures-no_build = Les données du jeu ne sont pas chargées, le dossier de mods du build est donc inconnu.
 ui-armor-textures-show_in_unpacker = Afficher dans l'extracteur de ressources
 ui-armor-textures-show_textures = Afficher les textures
 ui-armor-textures-extract = Extraire les fichiers...
 ui-armor-textures-extract_title = Extraire les fichiers de texture vers
 ui-armor-textures-extracting = Extraction des fichiers de texture...
-ui-armor-textures-extracted = { $count } fichiers extraits vers { $folder }
+ui-armor-textures-extracted = { $count ->
+    [one] { $count } fichier extrait
+   *[other] { $count } fichiers extraits
+} vers { $folder }
 ui-armor-textures-extract_failed = Impossible d'extraire les fichiers de texture : { $reason }
 ui-armor-textures-replace_title = Remplacer les fichiers existants ?
-ui-armor-textures-replace_description = { $count } de ces fichiers sont déjà dans { $folder }. L'extraction les remplacera.
+ui-armor-textures-replace_description = { $count ->
+    [one] { $count } de ces fichiers est déjà dans { $folder }. L'extraction le remplacera.
+   *[other] { $count } de ces fichiers sont déjà dans { $folder }. L'extraction les remplacera.
+}
 ui-armor-textures-replace = Remplacer
 
 ## ui.settings.mcp

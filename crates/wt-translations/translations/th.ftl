@@ -15,20 +15,16 @@ dialog-machine_translation_warning = การแปลส่วนใหญ่�
 # -- ชื่อแท็บ --
 
 ## ui.tabs
-ui-tabs-launcher = ตัวเปิดเกม
 ui-tabs-unpacker = ตัวแกะไฟล์ทรัพยากร
 ui-tabs-settings = ตั้งค่า
 ui-tabs-replay_parser = ตัวตรวจสอบรีเพลย์
-ui-tabs-replay_directory = ไดเรกทอรีรีเพลย์
 ui-tabs-player_tracker = ติดตามผู้เล่น
-ui-tabs-mod_manager = จัดการม็อด
 ui-tabs-armor_viewer = ดูเกราะ
 ui-tabs-model_viewer = ดูโมเดล
 ui-tabs-stats = สถิติ
 ui-tabs-directory_stats = สถิติ { $dir }
 ui-tabs-close_directory_stats = ปิดสถิติไดเรกทอรี
 ui-tabs-search = ค้นหา
-ui-tabs-search_these_replays = ค้นหาในรีเพลย์เหล่านี้
 ui-tabs-search_these_replays_unavailable = รีเพลย์เหล่านี้ยังไม่ได้จัดทำดัชนี
 ui-tabs-zoom_in_panel = ซูมเข้า
 ui-tabs-zoom_out_panel = ซูมออก
@@ -53,6 +49,7 @@ ui-buttons-cancel = ยกเลิก
 ui-buttons-continue_ = ดำเนินการต่อ
 ui-buttons-install_update = ติดตั้งอัปเดต
 ui-buttons-view_release = ดูรุ่นที่เผยแพร่
+ui-buttons-clear = ล้าง
 ui-buttons-clear_settings = ล้างการตั้งค่า
 ui-buttons-more_options = ตัวเลือกเพิ่มเติม
 ui-buttons-create_issue = สร้าง Issue
@@ -63,10 +60,7 @@ ui-buttons-choose = เลือก...
 ui-buttons-reset = รีเซ็ต
 ui-buttons-select_all = เลือกทั้งหมด
 ui-buttons-download = ดาวน์โหลด
-ui-buttons-dismiss = ปิด
 ui-buttons-retry = ลองใหม่
-ui-buttons-check_all = เลือกทั้งหมด
-ui-buttons-uncheck_all = ยกเลิกเลือกทั้งหมด
 ui-buttons-refresh_persisted_data_confirm = รีเฟรช
 
 # -- รายการเมนู --
@@ -76,7 +70,6 @@ ui-menu-file = ไฟล์
 ui-menu-check_updates = ตรวจสอบอัปเดต
 ui-menu-about = เกี่ยวกับ
 ui-menu-quit = ออก
-ui-menu-licenses = สัญญาอนุญาต
 
 # -- ชื่อหน้าต่าง --
 
@@ -85,7 +78,6 @@ ui-windows-build_consent = ความยินยอมในการเก�
 ui-windows-replay_migration = เปลี่ยนไปแชร์รีเพลย์
 ui-windows-crash_detected = ตรวจพบแอปพลิเคชันขัดข้อง
 ui-windows-update_available = มีอัปเดตใหม่
-ui-windows-confirm = ยืนยัน
 ui-windows-network_warning = คำเตือนเครือข่าย
 ui-windows-download_game_data = ดาวน์โหลดข้อมูลเกม
 ui-windows-error = ข้อผิดพลาด
@@ -97,7 +89,6 @@ ui-windows-minimize = ย่อ
 ui-windows-maximize = ขยายใหญ่สุด
 ui-windows-restore = คืนขนาด
 ui-windows-close = ปิด
-ui-windows-licenses = สัญญาอนุญาต
 
 # -- ข้อความในกล่องโต้ตอบ --
 
@@ -115,7 +106,6 @@ ui-dialogs-software_encode_message = ไม่พบตัวเข้ารห�
 ui-dialogs-download_game_data_intro = รีเพลย์บางรายการต้องใช้ข้อมูลเกมที่ยังไม่ได้ติดตั้ง เลือกบิลด์ที่ต้องการดาวน์โหลด
 ui-dialogs-download_build_row = เวอร์ชัน { $version } (บิลด์ { $build })
 ui-dialogs-download_replays_needing = จำเป็นสำหรับรีเพลย์ { $count } รายการ
-ui-dialogs-download_availability_resolving = กำลังตรวจสอบที่เก็บข้อมูล
 ui-dialogs-download_availability_exact = เผยแพร่แล้ว
 ui-dialogs-download_availability_nearest = ไม่มีรายการที่ตรงพอดี ใกล้เคียงที่สุดคือ { $version } (บิลด์ { $build })
 ui-dialogs-download_availability_unpublished = ไม่เคยเผยแพร่
@@ -134,11 +124,8 @@ ui-labels-error_occurred = เกิดข้อผิดพลาด:
 ui-labels-made_by = สร้างโดย landaire
 ui-labels-credits = ขอบคุณ Trackpad, TTaro, lkolbly สำหรับการมีส่วนร่วม
 ui-labels-pr_credits = ข้อมูลและสูตรคำนวณ Personal rating (PR) จัดทำโดย WoWs Numbers
-ui-labels-powered_by = ขับเคลื่อนโดย{" "}
-ui-labels-and = {" "}และ{" "}
 ui-labels-suppress_warning = ไม่ต้องแสดงอีก
 ui-labels-more_info = ข้อมูลเพิ่มเติม
-ui-labels-loading_replays = กำลังโหลดรีเพลย์ { $count } รายการ...
 ui-labels-app_version = เวอร์ชัน { $version }
 ui-labels-project_license = WoWs Toolkit เผยแพร่ภายใต้สัญญาอนุญาต { $license }
 ui-labels-third_party_notices = ประกาศของบุคคลที่สาม
@@ -155,35 +142,21 @@ ui-messages-app_up_to_date = แอปพลิเคชันเป็นเว
 ui-messages-checking_app_updates = กำลังตรวจสอบอัปเดตแอป...
 ui-messages-update_starting = กำลังดาวน์โหลดอัปเดต...
 ui-messages-update_check_failed = ตรวจสอบอัปเดตไม่สำเร็จ
-ui-messages-constants_fetch_failed = ไม่สามารถดึงข้อมูลแมปปิ้งรีเพลย์ที่อัปเดตได้ จะลองใหม่ภายหลัง
 ui-messages-game_data_loaded = โหลดข้อมูลเกมสำเร็จ
-ui-messages-no_replays_detected = ไม่พบรีเพลย์ — ตั้งค่าไดเรกทอรี WoWs ถูกต้องหรือไม่?
-ui-messages-build_loaded = โหลดบิลด์ { $build } แล้ว
-ui-messages-downloading_game_data = กำลังดาวน์โหลดข้อมูลเกม...
-ui-messages-game_data_downloaded = ดาวน์โหลดข้อมูลเกมสำหรับบิลด์ { $build } แล้ว
+ui-messages-no_replays_detected = ไม่พบรีเพลย์ ตั้งค่าไดเรกทอรี WoWs ถูกต้องหรือไม่?
 ui-messages-game_data_builds_downloaded = ดาวน์โหลดข้อมูลเกมสำหรับ { $count } บิลด์แล้ว
 ui-messages-game_data_download_failed = ดาวน์โหลดข้อมูลเกมไม่สำเร็จ
-ui-messages-game_data_build_download_failed = ดาวน์โหลดข้อมูลเกมสำหรับบิลด์ { $build } ไม่สำเร็จ
-ui-messages-checking_game_data_updates = กำลังตรวจสอบอัปเดตข้อมูลเกม...
 ui-messages-game_data_up_to_date = ข้อมูลเกมเป็นเวอร์ชันล่าสุดแล้ว
 ui-messages-game_data_updates_available = มีข้อมูลใหม่สำหรับบิลด์ที่แคชไว้ { $count } รายการ
-ui-messages-validating_game_data = กำลังตรวจสอบความถูกต้องของแคชข้อมูลเกม...
 ui-messages-game_data_cache_valid = แคชข้อมูลเกมถูกต้องและตรงกับที่เก็บข้อมูลระยะไกล
 ui-messages-game_data_cache_invalid = บิลด์ที่แคชไว้ { $count } รายการล้าสมัยหรือเสียหาย
-ui-messages-replay_loaded = โหลดรีเพลย์สำเร็จ
 ui-messages-replay_load_failed = โหลดรีเพลย์ไม่สำเร็จ
 ui-messages-twitch_token_invalid = โทเค็น Twitch ไม่ถูกต้องหรือหมดอายุ กรุณาอัปเดตในการตั้งค่า
 ui-messages-wows_dir_invalid = ไดเรกทอรี World of Warships ไม่ถูกต้อง ตรวจสอบเส้นทางในการตั้งค่า
 ui-messages-wows_dir_not_set = ยังไม่ได้ตั้งค่าไดเรกทอรี World of Warships
-ui-messages-twitch_token_expired = โทเค็น Twitch ไม่ถูกต้องหรือหมดอายุ
-ui-messages-versioned_constants_rebuild_failed = ไม่สามารถดึงค่าคงที่เวอร์ชันระหว่างการสร้างใหม่ จะลองใหม่ภายหลัง
 ui-messages-constants_version_mismatch =
     เวอร์ชันไฟล์แมปปิ้งข้อมูลรีเพลย์ไม่ตรงกับเวอร์ชันเกม
     ผลลัพธ์หลังการรบอาจไม่ถูกต้อง กรุณารอให้ผู้ดูแลโปรเจกต์อัปเดตแมปปิ้งบนเซิร์ฟเวอร์
-ui-messages-constants_updated = อัปเดตไฟล์แมปปิ้งข้อมูลรีเพลย์สำเร็จ
-ui-messages-constants_imported = ติดตั้งแมปปิ้งข้อมูลรีเพลย์สำหรับบิลด์ { $build } แล้ว
-ui-messages-constants_imported_other_build = ติดตั้งแมปปิ้งข้อมูลรีเพลย์สำหรับบิลด์ { $build } แล้ว ซึ่งไม่ใช่บิลด์ที่โหลดอยู่ ({ $loaded })
-ui-messages-constants_import_failed = นำเข้าแมปปิ้งข้อมูลรีเพลย์ไม่สำเร็จ: { $error }
 ui-messages-session_started = เริ่มเซสชันแล้ว
 ui-messages-user_joined = { $name } เข้าร่วมแล้ว
 ui-messages-user_timeout = { $name } หมดเวลา
@@ -191,23 +164,12 @@ ui-messages-user_left = { $name } ออกไปแล้ว
 ui-messages-session_ended = เซสชันสิ้นสุดแล้ว
 ui-messages-session_error = ข้อผิดพลาดเซสชัน: { $msg }
 ui-messages-connected_to_session = เชื่อมต่อกับเซสชันแล้ว
-ui-messages-joined_session = เข้าร่วมเซสชัน: { $name }
-ui-messages-replay_spam_protection = ตัดการเชื่อมต่อ: โฮสต์เปิดรีเพลย์เร็วเกินไป
 ui-messages-host_opened_replay = โฮสต์เปิดรีเพลย์: { $name }
 ui-messages-host_closed_replay = โฮสต์ปิดรีเพลย์แล้ว
-ui-messages-session_error_generic = เซสชัน: { $msg }
 ui-messages-session_rejected = เซสชันถูกปฏิเสธ: { $reason }
-ui-messages-indexing_replays = กำลังจัดทำดัชนีรีเพลย์...
-ui-messages-indexing_replays_progress = กำลังจัดทำดัชนีรีเพลย์ ({ $done }/{ $total })
-ui-messages-replays_indexed = จัดทำดัชนีรีเพลย์แล้ว { $indexed } จาก { $total } รายการ
-ui-messages-replays_already_indexed = รีเพลย์ทั้ง { $total } รายการจัดทำดัชนีไว้แล้ว
-ui-messages-loading_row_summaries = กำลังโหลดรายละเอียดรีเพลย์...
-ui-messages-reading_replay_directory = กำลังอ่านไดเรกทอรีรีเพลย์...
-ui-messages-directory_replays_skipped = ข้ามรีเพลย์ที่อ่านไม่ได้ { $skipped } รายการ
 ui-messages-drop_not_a_replay = ไฟล์นี้ไม่ใช่ไฟล์รีเพลย์
 ui-messages-drop_not_replays = ไฟล์เหล่านั้นไม่ใช่ไฟล์รีเพลย์
 ui-messages-drop_skipped = ข้ามไฟล์ที่วาง { $count } รายการที่ไม่ใช่รีเพลย์หรือโฟลเดอร์
-ui-messages-directory_replays_not_indexed = แสดงรีเพลย์ { $count } รายการโดยไม่มีรายละเอียดการแข่งขัน
 ui-messages-log_copied = คัดลอก { $bytes } KB จาก { $file } ไปยังคลิปบอร์ดแล้ว
 ui-messages-log_copy_failed = อ่านไฟล์บันทึกไม่ได้: { $error }
 ui-messages-log_not_found = ไม่พบไฟล์บันทึกใน { $dir }
@@ -221,7 +183,6 @@ stat-frags = สังหาร
 stat-raw_xp = Raw XP
 stat-base_xp = Base XP
 stat-win_rate = อัตราชนะ
-stat-win_rate_pct = อัตราชนะ (%)
 stat-personal_rating = เรตติ้งส่วนบุคคล
 stat-match_contribution = การมีส่วนร่วมในการรบ
 stat-capture_points = คะแนนการยึดจุด
@@ -229,29 +190,19 @@ stat-planes_shot_down = เครื่องบินที่ยิงตก
 stat-anti_air_damage = ความเสียหายต่อต้านอากาศยาน
 stat-survival_rate = อัตราการรอดชีวิต
 stat-torpedoes_spotted = ตอร์ปิโดที่ตรวจพบ
-stat-avg_damage = ความเสียหายเฉลี่ย
-stat-avg_spotting_damage = ความเสียหายจากการตรวจจับเฉลี่ย
-stat-avg_frags = สังหารเฉลี่ย
-stat-avg_raw_xp = Raw XP เฉลี่ย
-stat-avg_base_xp = Base XP เฉลี่ย
 stat-avg_pr = PR เฉลี่ย
-stat-avg_mc = MC เฉลี่ย
 stat-avg_prefix = เฉลี่ย { $name }
 
 ## chart
-chart-game_number = เกม #
 chart-combined = รวม
 chart-combined_suffix = (รวม)
 chart-rolling_average_suffix = (ค่าเฉลี่ยเคลื่อนที่)
-chart-no_data = ไม่มีข้อมูลสำหรับเรือที่เลือก
-chart-win_rate_unavailable = อัตราชนะไม่สามารถแสดงในกราฟเส้นต่อเกมได้ (เปิดค่าเฉลี่ยเคลื่อนที่หรือใช้กราฟแท่ง)
 
 # -- กล่องยืนยัน --
 
 ## confirm
 confirm-open_in_game = การดำเนินการนี้จะเปิด World of Warships ดำเนินการต่อหรือไม่?
 confirm-clear_all_session_stats = การดำเนินการนี้จะล้างสถิติเซสชันทั้งหมด ดำเนินการต่อหรือไม่?
-confirm-clear_ship_session_stats = การดำเนินการนี้จะลบเกมทั้งหมดของเรือนี้ออกจากสถิติเซสชัน ดำเนินการต่อหรือไม่?
 confirm-set_as_session_stats = การดำเนินการนี้จะแทนที่สถิติเซสชันปัจจุบันของคุณ ดำเนินการต่อหรือไม่?
 
 # -- ข้อความผิดพลาด --
@@ -263,16 +214,10 @@ error-replay_dir_watch = เฝ้าดูไดเรกทอรีรีเ�
 # -- การตั้งค่า --
 
 ## ui.settings.app
-ui-settings-app-heading = การตั้งค่าแอปพลิเคชัน
-ui-settings-app-description = พฤติกรรมและรูปลักษณ์ทั่วไปของแอปพลิเคชัน
 ui-settings-app-check_for_updates = ตรวจสอบอัปเดตเมื่อเริ่มต้น
 ui-settings-app-enable_logging = เปิดใช้งานบันทึก (มีผลเมื่อรีสตาร์ท)
 ui-settings-app-enable_logging_tooltip = เขียนบันทึกดีบักลงไฟล์ในไดเรกทอรีข้อมูลแอปพลิเคชัน มีประโยชน์สำหรับการแก้ไขปัญหา
 ui-settings-app-data_sharing_mode = การแชร์ข้อมูล (การรบจัดอันดับและการรบสุ่ม)
-ui-settings-app-data_sharing_off = ไม่ส่งอะไรเลย
-ui-settings-app-data_sharing_build_data = ส่งข้อมูลบิลด์ไปยัง ShipBuilds.com
-ui-settings-app-data_sharing_replays = ส่งรีเพลย์ไปยัง ShipBuilds.com
-ui-settings-app-zoom_factor = ระดับการซูม (Ctrl + และ Ctrl - สามารถเปลี่ยนได้เช่นกัน)
 ui-settings-app-theme = ธีม
 ui-settings-app-theme_system = ตามระบบ
 ui-settings-app-theme_dark = มืด
@@ -283,14 +228,11 @@ ui-settings-app-code_integrity_automatic = อัตโนมัติ
 ui-settings-app-code_integrity_always = เสมอ
 ui-settings-app-code_integrity_never = ไม่ใช้
 ui-settings-app-language = ภาษา
-ui-settings-app-open_data_dir = เปิดโฟลเดอร์ข้อมูลแอป
 ui-settings-app-open_data_dir_tooltip = เปิดโฟลเดอร์ข้อมูลแอปพลิเคชัน (การตั้งค่า บันทึก ข้อมูลแคช) ในตัวจัดการไฟล์ของคุณ
 ui-settings-app-proxy_url = พร็อกซี HTTP
-ui-settings-app-proxy_url_hint = host:port หรือเว้นว่างเพื่อใช้การตั้งค่าพร็อกซีของระบบ (มีผลหลังรีสตาร์ท)
 ui-settings-app-proxy_url_hint_live = host:port หรือเว้นว่างเพื่อใช้การตั้งค่าพร็อกซีของระบบ
 
 ## ui.settings.wows
-ui-settings-wows-heading = การตั้งค่า World of Warships
 ui-settings-wows-description = เส้นทางไปยังการติดตั้ง World of Warships ของคุณ
 ui-settings-wows-directory_hint = ไดเรกทอรี World of Warships
 ui-settings-wows-browse = เรียกดู...
@@ -299,7 +241,6 @@ ui-settings-wows-browse = เรียกดู...
 ui-settings-wows-cache-heading = แคชข้อมูลเกม
 ui-settings-wows-cache-description = ข้อมูลเกมที่ดัมป์ไว้ เพื่อให้เปิดรีเพลย์จากบิลด์เก่าได้
 ui-settings-wows-cache-auto_dump = แคชข้อมูลเกมเพื่อรองรับรีเพลย์เก่า
-ui-settings-wows-cache-directory_label = ไดเรกทอรีแคช:
 ui-settings-wows-cache-browse = เรียกดู
 ui-settings-wows-cache-open_folder = เปิดโฟลเดอร์
 ui-settings-wows-cache-delete_old = ลบเวอร์ชันเก่า
@@ -310,40 +251,23 @@ ui-settings-wows-cache-actions_tooltip = ตรวจสอบอัปเดต
 ui-settings-wows-cache-update_all = อัปเดตทั้งหมด
 ui-settings-wows-cache-updates_available = มีข้อมูลใหม่สำหรับบิลด์ที่แคชไว้ { $count } รายการ
 ui-settings-wows-cache-validate = ตรวจสอบแคช
-ui-settings-wows-cache-validate_tooltip = ตรวจสอบบิลด์ที่แคชไว้ทุกรายการเทียบกับที่เก็บข้อมูลระยะไกล และยืนยันความสมบูรณ์ของไฟล์
 ui-settings-wows-cache-repair = ซ่อมแซม
 ui-settings-wows-cache-repair_needed = บิลด์ที่แคชไว้ { $count } รายการล้าสมัยหรือเสียหาย
 
-## ui.task
-ui-task-batch_render_progress = กำลังเรนเดอร์ { $current }/{ $total }: { $name }
-
 ## ui.settings.replay
-ui-settings-replay-heading = การตั้งค่ารีเพลย์
-ui-settings-replay-description = กำหนดค่าคอลัมน์ที่จะแสดงในตารางผลลัพธ์รีเพลย์
 ui-settings-replay-show_raw_xp = แสดง Raw XP
 ui-settings-replay-show_entity_id = แสดง Entity ID
 ui-settings-replay-show_observed_damage = แสดงความเสียหายที่สังเกต
 ui-settings-replay-enable_previews = แสดงตัวอย่างมินิแมปเมื่อชี้เมาส์
 ui-settings-replay-enable_previews_tooltip = เมื่อชี้เมาส์ที่รีเพลย์ ระบบจะอ่านและเล่นรีเพลย์เบื้องหลังเพื่อสร้างตัวอย่างมินิแมปแบบวนซ้ำ ปิดตัวเลือกนี้หากใช้ที่เก็บข้อมูลที่ช้า
-ui-settings-replay-show_fires = แสดงไฟ
-ui-settings-replay-show_floods = แสดงน้ำท่วม
-ui-settings-replay-show_citadels = แสดงห้องนิรภัย
-ui-settings-replay-show_crits = แสดงการโจมตีโมดูลวิกฤต
 ui-settings-replay-auto_export_data = ส่งออกข้อมูลอัตโนมัติ
-ui-settings-replay-format_json = JSON
-ui-settings-replay-format_csv = CSV
-ui-settings-replay-format_cbor = CBOR
 ui-settings-replay-export_path_hint = ไดเรกทอรีส่งออกข้อมูลอัตโนมัติ
 ui-settings-replay-export_path_missing = ไม่มีไดเรกทอรีนี้ จึงไม่สามารถส่งออกข้อมูลได้
 ui-settings-replay-index_all_replays = จัดทำดัชนีรีเพลย์ทั้งหมด
-ui-settings-replay-reindex_all_replays = จัดทำดัชนีรีเพลย์ทั้งหมดใหม่
-ui-settings-replay-reindex_all_replays_hover = แยกวิเคราะห์และจัดทำดัชนีรีเพลย์ทุกรายการใหม่ รวมถึงรายการที่จัดทำดัชนีไว้แล้ว ใช้หลังจากอัปเดตที่เพิ่มข้อมูลดัชนีใหม่ (เช่น Personal Rating หรือสถานะหลุดการเชื่อมต่อ) เพื่อเติมข้อมูลลงในรายการเดิม
 ui-settings-replay-show_heals = แสดงการซ่อมแซม
 ui-settings-replay-current_path = เส้นทางรีเพลย์ปัจจุบัน
 
 ## ui.settings.session
-ui-settings-session-heading = การตั้งค่าเซสชัน
-ui-settings-session-description = การตั้งค่าเซสชันรีเพลย์ร่วม
 ui-settings-session-display_name = ชื่อที่แสดง
 ui-settings-session-suppress_ip_warning = ไม่ต้องแสดงคำเตือนที่อยู่ IP แบบ P2P
 ui-settings-session-ip_warning_tooltip = เซสชันร่วมใช้เครือข่ายแบบ P2P ผู้ใช้อื่นในเซสชันอาจสามารถเห็นที่อยู่ IP ของคุณได้
@@ -351,8 +275,6 @@ ui-settings-session-disable_auto_open = ปิดการเปิดหน้�
 ui-settings-session-auto_open_tooltip = เมื่อเปิดใช้งาน หน้าต่างเซสชัน (รีเพลย์ กระดานยุทธวิธี) จะไม่เปิดอัตโนมัติ คุณยังสามารถเปิดได้จากป๊อปอัพเซสชัน
 
 ## ui.settings.twitch
-ui-settings-twitch-heading = การตั้งค่า Twitch
-ui-settings-twitch-description = เชื่อมต่อกับ Twitch สำหรับการรวมแชทและติดตามผู้เล่น
 ui-settings-twitch-get_token = รับโทเค็นเข้าสู่ระบบ
 ui-settings-twitch-get_token_tooltip = เราใช้หน้าเข้าสู่ระบบของ Chatterino เนื่องจากให้โทเค็นที่มีสิทธิ์ที่จำเป็น (โทเค็นผู้ดูแลพร้อมสิทธิ์แชท) และไม่จำเป็นต้องให้ผู้พัฒนา WoWs Toolkit โฮสต์หน้าเว็บเข้าสู่ระบบของตัวเองซึ่งจะให้ผลลัพธ์เดียวกัน
 ui-settings-twitch-paste_token_no_token = วางโทเค็น (ยังไม่มีโทเค็น)
@@ -367,29 +289,18 @@ ui-settings-twitch-signed_in_as = ลงชื่อเข้าใช้เป�
 
 ## ui.replay
 ui-replay-copy_bug_report_info = คัดลอกข้อมูลรายงานข้อบกพร่อง
-ui-replay-collapse_listing = ย่อรายการรีเพลย์
-ui-replay-expand_listing = ขยายรายการรีเพลย์
 ui-replay-match_age = { $age } ที่แล้ว
 ui-replay-listing_caption = รีเพลย์
-ui-replay-listing_reading = กำลังอ่าน { $done } จาก { $total }...
-ui-replay-listing_scanning = กำลังสแกน { $done } จาก { $total }...
-ui-replay-listing_downloading = กำลังดาวน์โหลดข้อมูลเกม { $done } จาก { $total } ไฟล์...
-ui-replay-listing_loading_data = กำลังโหลดข้อมูลเกมสำหรับ { $version } ({ $index } จาก { $count })...
 ui-replay-loading_game_data_version = กำลังโหลดข้อมูลเกมสำหรับ { $version }...
 ui-replay-spectator = ผู้ชม
 ui-replay-loading = กำลังโหลด...
 ui-replay-preview_loading = กำลังสร้างตัวอย่าง...
-ui-replay-preview_empty = ไม่มีการเคลื่อนไหวให้แสดง
 ui-replay-preview_no_game_data = ไม่มีข้อมูลเกมสำหรับไคลเอนต์เวอร์ชัน { $value }
-ui-replay-preview_unreadable = ไม่สามารถอ่านรีเพลย์นี้ได้
 ui-replay-preview_unreadable_because = ไม่สามารถอ่านรีเพลย์นี้ได้: { $value }
 ui-replay-preview_unwalkable = ไม่สามารถไล่ดูการรบของรีเพลย์นี้ได้: { $value }
 ui-replay-preview_unknown_version = รีเพลย์นี้ระบุไคลเอนต์เวอร์ชันที่อ่านไม่ได้: { $value }
 ui-replay-preview_no_map = ไม่มีข้อมูลแผนที่สำหรับ { $value }
-ui-replay-preview_cancelled = ตัวอย่างถูกแทนที่ด้วยรายการใหม่
 ui-replay-preview_render_failed = วาดตัวอย่างไม่ได้: { $value }
-ui-replay-no_selection = คลิกรีเพลย์เพื่อดู หรือดับเบิลคลิกเพื่อเปิดในแท็บใหม่
-ui-replay-workspace_closed = พื้นที่ทำงานรีเพลย์นี้ถูกปิดแล้ว
 ui-replay-incomplete_results = ผลการแข่งขันไม่สมบูรณ์
 ui-replay-incomplete_results_tooltip = รีเพลย์ยังไม่มีผลลัพธ์สิ้นสุดการแข่งขัน ข้อมูลจะถูกโหลดใหม่อัตโนมัติเมื่อการแข่งขันสิ้นสุดและเพิ่มผลลัพธ์ลงในรีเพลย์
 ui-replay-no_chat = ไม่มีข้อความแชทในรีเพลย์นี้
@@ -406,7 +317,6 @@ ui-replay-hide_my_stats = ซ่อนสถิติเรือทดสอบ
 ui-replay-open_manually = เปิดไฟล์รีเพลย์ด้วยตนเอง...
 ui-replay-open_directory = เปิดไดเรกทอรีรีเพลย์...
 ui-replay-search_these_replays = ค้นหาในรีเพลย์เหล่านี้
-ui-replay-reading_directory = กำลังแสดงรายการรีเพลย์ใน { $dir }
 ui-replay-import_constants = นำเข้าไฟล์ constants.json...
 ui-replay-refresh_persisted_data = รีเฟรชข้อมูลรีเพลย์ที่จัดเก็บไว้...
 ui-replay-contributing = กำลังส่งรีเพลย์ { $done } จาก { $total } รายการ
@@ -436,13 +346,10 @@ ui-replay-constants_fallback_published = ใช้ค่าคงที่ที
 ui-replay-constants_fallback_embedded = ใช้ค่าคงที่ในตัว
 ui-replay-copy_latest_log = คัดลอกบันทึกล่าสุดไปยังคลิปบอร์ด
 ui-replay-load_alt_perspective = โหลดมุมมองของทีมอีกฝ่าย...
-ui-replay-load_alt_perspective_tooltip = รวมไฟล์บันทึกของผู้เล่นคนอื่นจากการแข่งขันเดียวกันเข้ากับรีเพลย์ปัจจุบัน เผยให้เห็นตำแหน่ง บิลด์ ตอร์ปิโด การยิงปืนใหญ่ และอุปกรณ์สิ้นเปลืองของศัตรูจากมุมมองอีกฝ่าย
-ui-replay-load_alt_perspective_disabled_tooltip = เปิดหรือเลือกรีเพลย์ก่อน
 ui-replay-load_alt_perspective_failed = รวมรีเพลย์ไม่สำเร็จ: { $error }
 ui-replay-load_alt_perspective_limit = การรบนี้กำลังอ่านผ่านไฟล์บันทึกอื่น { $limit } ไฟล์อยู่แล้ว
 ui-replay-consumable_charges_remaining = เหลือ { $remaining } จากทั้งหมด { $total } ครั้ง
 ui-replay-consumable_charges_unlimited = ใช้ไป { $used } ครั้ง (ใช้ได้ไม่จำกัด)
-ui-replay-consumable_header_consumable = อุปกรณ์สิ้นเปลือง
 ui-replay-consumable_header_remaining = คงเหลือ
 ui-replay-consumable_header_total = ทั้งหมด
 ui-replay-consumable_charges_infinite = ∞
@@ -478,10 +385,8 @@ ui-replay-check_game_data = ตรวจสอบข้อมูลเกม
 ui-replay-check_game_data_tooltip = ตรวจสอบข้อมูลเกมที่รีเพลย์ในไดเรกทอรีนี้ต้องใช้
 ui-replay-close_side_panel = ปิดแผง
 ui-replay-nda = NDA
-ui-replay-render = เรนเดอร์
 ui-replay-chat = แชท
 ui-replay-game_chat = แชทในเกม
-ui-replay-copy_all = คัดลอกทั้งหมด
 ui-replay-save_to_file = บันทึกเป็นไฟล์
 ui-replay-chat_copied = คัดลอกแชทแล้ว
 ui-replay-copy_message = คัดลอกข้อความ
@@ -495,16 +400,13 @@ ui-replay-row_not_indexed = ยังไม่ได้จัดทำดัช�
 ui-replay-hover_survived = รอดชีวิต
 ui-replay-hover_sunk = จม
 ui-replay-hover_not_indexed = ยังไม่ได้จัดทำดัชนี
-ui-replay-row_kills = สังหาร { $count }
+ui-replay-row_kills = สังหาร { $count } ลำ
 ui-replay-row_survived = รอด
 ui-replay-row_sunk = จม
 ui-replay-row_division = ดิวิชัน: { $members }
-ui-replay-export_chat_save = แชท: บันทึกเป็นไฟล์
-ui-replay-export_chat_copy = แชท: คัดลอก
 ui-replay-export_results_json = ผลลัพธ์: JSON
 ui-replay-export_results_cbor = ผลลัพธ์: CBOR
 ui-replay-export_results_csv = ผลลัพธ์: CSV
-ui-replay-timeline_filter = กรอง
 ui-replay-timeline_filter_all = ทั้งหมด
 ui-replay-timeline_filter_none = ไม่มี
 ui-replay-timeline_search_hint = ค้นหาเรือหรือผู้เล่น
@@ -536,27 +438,32 @@ ui-replay-context-pin_column = ปักหมุดคอลัมน์
 ui-replay-context-unpin_column = เลิกปักหมุดคอลัมน์
 ui-replay-context-copied = คัดลอกแล้ว
 ui-replay-context-copy_path = คัดลอกเส้นทาง
-ui-replay-context-copy_replay = คัดลอกรีเพลย์
-ui-replay-context-copy_replays = คัดลอก { $count } รีเพลย์
-ui-replay-context-copy_paths = คัดลอก { $count } เส้นทาง
+ui-replay-context-copy_replays = { $count ->
+    [one] คัดลอกรีเพลย์
+   *[other] คัดลอกรีเพลย์ { $count } รายการ
+}
+ui-replay-context-copy_paths = { $count ->
+    [one] คัดลอกพาธ
+   *[other] คัดลอกพาธ { $count } รายการ
+}
 ui-replay-context-show_in_explorer = แสดงในตัวจัดการไฟล์
 ui-replay-context-show_replay_controls = แสดงตัวควบคุมรีเพลย์
 ui-replay-context-open_in_game = เปิดในเกม
 ui-replay-context-render_replay = เรนเดอร์รีเพลย์
-ui-replay-context-set_session_stats_one = ตั้งเป็นสถิติเซสชัน (1 รีเพลย์)
-ui-replay-context-set_session_stats_many = ตั้งเป็นสถิติเซสชัน ({ $count } รีเพลย์)
-ui-replay-context-add_session_stats_one = เพิ่มในสถิติเซสชัน (1 รีเพลย์)
-ui-replay-context-add_session_stats_many = เพิ่มในสถิติเซสชัน ({ $count } รีเพลย์)
-ui-replay-context-render_to_video = ส่งออกเป็นวิดีโอ
-ui-replay-context-render_to_video_many = ส่งออก { $count } รีเพลย์เป็นวิดีโอ
-ui-replay-context-render_to_clipboard = ส่งออกไปยังคลิปบอร์ด
-ui-replay-context-render_to_clipboard_many = ส่งออก { $count } รีเพลย์ไปยังคลิปบอร์ด
+ui-replay-context-set_session_stats = ตั้งเป็นสถิติเซสชัน (รีเพลย์ { $count } รายการ)
+ui-replay-context-add_session_stats = เพิ่มในสถิติเซสชัน (รีเพลย์ { $count } รายการ)
+ui-replay-context-render_to_video = { $count ->
+    [one] ส่งออกเป็นวิดีโอ
+   *[other] ส่งออกรีเพลย์ { $count } รายการเป็นวิดีโอ
+}
+ui-replay-context-render_to_clipboard = { $count ->
+    [one] ส่งออกไปยังคลิปบอร์ด
+   *[other] ส่งออกรีเพลย์ { $count } รายการไปยังคลิปบอร์ด
+}
 
 ## ui.replay.column
-ui-replay-column-actions = การดำเนินการ
 ui-replay-column-player_name = ชื่อผู้เล่น
 ui-replay-column-base_xp = Base XP
-ui-replay-column-raw_xp = Raw XP
 ui-replay-column-ship_name = ชื่อเรือ
 ui-replay-column-hits = โดน
 ui-replay-column-heals = ซ่อม
@@ -565,7 +472,6 @@ ui-replay-column-heals_no_repair_tooltip = เรือลำนี้ไม่�
 ui-replay-column-kills = สังหาร
 ui-replay-column-observed_damage = ความเสียหายที่สังเกต
 ui-replay-column-actual_damage = ความเสียหายจริง
-ui-replay-column-spotting_damage = ความเสียหายจากการตรวจจับ
 ui-replay-column-potential_damage = ความเสียหายที่อาจเกิดขึ้น
 ui-replay-column-time_lived = เวลาที่มีชีวิต
 ui-replay-column-fires = ไฟ
@@ -582,7 +488,6 @@ ui-replay-column-match_contribution = MC
 ui-rating-personal_rating = เรตติ้งส่วนบุคคล
 ui-rating-match_contribution = การมีส่วนร่วมในการรบ
 ui-rating-versus_average = เทียบค่าเฉลี่ย
-ui-rating-average = ค่าเฉลี่ย
 ui-rating-damage = ความเสียหาย
 ui-rating-kills = สังหาร
 ui-rating-wins = ชนะ
@@ -607,9 +512,7 @@ ui-rating-detail-objectives = คะแนน: ยึด { $capture }, ขัด
 ui-rating-detail-anti_air_planes = เครื่องบินโจมตี { $strike } ลำ, เครื่องบินขับไล่และลาดตระเวน { $support } ลำ
 ui-rating-detail-anti_air_damage = ความเสียหาย AA { $damage }
 ui-rating-detail-torpedo_warnings = ตรวจพบตอร์ปิโดที่เป็นภัย { $threatening } ลูก
-ui-rating-detail-torpedo_warnings_one = ตรวจพบตอร์ปิโดที่เป็นภัย 1 ลูก
 ui-rating-detail-critical_bursts = ความเสียหายรุนแรงต่อเนื่อง { $count } ครั้ง: { $bursts }. เห็นได้เฉพาะเรือที่อยู่ใกล้ผู้เล่นที่บันทึก
-ui-rating-detail-critical_bursts_one = ความเสียหายรุนแรงต่อเนื่อง 1 ครั้ง: { $bursts }. เห็นได้เฉพาะเรือที่อยู่ใกล้ผู้เล่นที่บันทึก
 ui-rating-detail-critical_burst = { $share }% ของ { $ship } ใน { $seconds } วินาที
 ui-rating-detail-critical_burst_at_once = { $share }% ของ { $ship } ในครั้งเดียว
 
@@ -622,21 +525,10 @@ ui-rating-basis-dynamic = ไดนามิก
 ui-rating-basis-static_explained = คงที่: วัดเทียบกับค่าคงที่หรือค่าฐานของประเภทเรือ
 ui-rating-basis-dynamic_explained = ไดนามิก: วัดเทียบกับค่าที่คาดไว้ของ wows-numbers หรือผู้เล่นคนอื่นในการรบนี้
 
-## ui.replay.filter
-ui-replay-filter-raw_xp = Raw XP
-ui-replay-filter-entity_id = ID เอนทิตี
-ui-replay-filter-observed_damage = ความเสียหายที่สังเกต
-ui-replay-filter-heals = ซ่อม
-ui-replay-filter-fires = ไฟ
-ui-replay-filter-floods = น้ำท่วม
-ui-replay-filter-citadels = ห้องนิรภัย
-ui-replay-filter-crits = การโจมตีโมดูลวิกฤต
-
 ## ui.replay.group
 ui-replay-group-date = วันที่
 ui-replay-group-ship = เรือ
 ui-replay-group-none = ไม่มี
-ui-replay-group-prefix = กลุ่ม: { $label }
 
 ## ui.replay.player
 ui-replay-player-hidden_profile = ผู้เล่นซ่อนโปรไฟล์
@@ -659,19 +551,14 @@ ui-replay-sections-modules_none = ไม่มีโมดูล
 ui-replay-sections-signals = ธงสัญญาณ:
 ui-replay-sections-loadout = ชุดอุปกรณ์:
 ui-replay-sections-loadout_none = ไม่มีชุดอุปกรณ์
-ui-replay-sections-abilities = ความสามารถ:
-ui-replay-sections-abilities_none = ไม่มีความสามารถ
 ui-replay-sections-captain_skills = ทักษะกัปตัน:
 ui-replay-sections-captain_skills_none = ไม่มีทักษะกัปตัน
 ui-replay-sections-consumables = อุปกรณ์สิ้นเปลือง:
 ui-replay-sections-fire_chance = โอกาสติดไฟที่แท้จริง
 ui-replay-sections-fire_chance_expected = คาดการณ์
 ui-replay-sections-fire_chance_fires = ไฟ { $fires } ครั้ง
-ui-replay-sections-fire_chance_fires_one = ไฟ 1 ครั้ง
 ui-replay-sections-fire_chance_eligible_hits = { $hits } นัดที่มีโอกาสจุดไฟ
-ui-replay-sections-fire_chance_eligible_hits_one = 1 นัดที่มีโอกาสจุดไฟ
 ui-replay-sections-fire_chance_ships = จากเรือเป้าหมาย { $ships } ลำ
-ui-replay-sections-fire_chance_ships_one = จากเรือเป้าหมาย 1 ลำ
 ui-replay-sections-fire_chance_expected_fires = คาดการณ์ไฟ { $fires } ครั้ง
 ui-replay-sections-fire_chance_per_ship = แยกตามเรือเป้าหมาย
 ui-replay-sections-fire_chance_no_eligible_hits = ไม่มีนัดที่มีโอกาสจุดไฟ
@@ -680,14 +567,10 @@ ui-replay-sections-fire_chance_formula_base = burnProb พื้นฐาน
 ui-replay-sections-fire_chance_formula_clamped = จำกัดค่าแล้ว
 ui-replay-sections-fire_chance_breakdown = รายละเอียด
 ui-replay-sections-fire_chance_shells_fired = กระสุน HE ที่ยิงออกไป
-ui-replay-sections-fire_chance_shells_fired_one = กระสุน HE ที่ยิงออกไป
 ui-replay-sections-fire_chance_he_hits = นัด HE ที่โดนเรือ
-ui-replay-sections-fire_chance_he_hits_one = นัด HE ที่โดนเรือ
 ui-replay-sections-fire_chance_no_target_ship = นัด HE ที่ระบุเรือเป้าหมายไม่ได้
-ui-replay-sections-fire_chance_no_target_ship_one = นัด HE ที่ระบุเรือเป้าหมายไม่ได้
 ui-replay-sections-fire_chance_eligible = มีโอกาสจุดไฟได้
 ui-replay-sections-fire_chance_ribbons = ริบบิ้น SetFire
-ui-replay-sections-fire_chance_ribbons_one = ริบบิ้น SetFire
 ui-replay-sections-fire_chance_ribbons_credited = นับให้กระสุนนัดหนึ่ง
 ui-replay-sections-fire_chance_ribbons_uncredited = ไม่ได้นับให้นัดใด
 ui-replay-sections-fire_chance_unattributed_no_burn_state = ไม่มีการเปลี่ยนสถานะการไหม้ให้จับคู่ด้วย
@@ -720,19 +603,9 @@ ui-replay-debug-raw_metadata = เมตาดาต้าดิบ
 ui-replay-debug-raw_results = ผลลัพธ์ดิบ
 ui-replay-debug-mapped_results = ผลลัพธ์ที่แมปแล้ว
 ui-replay-debug-player_metadata = เมทาดาทาผู้เล่น
-ui-replay-debug-no_results_packet = รีเพลย์นี้ไม่มีแพ็กเก็ตผลการรบ
-ui-replay-debug-raw_json_tooltip = ผลการรบดิบตามที่ WG ซีเรียลไลซ์
-ui-replay-debug-mapped_json_tooltip = ผลการรบที่แปลงอาร์เรย์ตำแหน่งเป็นฟิลด์ที่มีชื่อ
-ui-replay-debug-results_raw_json = ผลการรบ: JSON ดิบ
-ui-replay-debug-results_mapped_json = ผลการรบ: JSON ที่แมปแล้ว
 ui-replay-debug-search = ค้นหา
 ui-replay-debug-previous_match = รายการก่อนหน้า (Shift+Enter)
 ui-replay-debug-next_match = รายการถัดไป (Enter)
-
-## ui.replay.results
-ui-replay-results-victory = ชนะ
-ui-replay-results-defeat = แพ้
-ui-replay-results-draw = เสมอ
 
 ## ui.replay.controls
 ui-replay-controls-window_title = ตัวควบคุมรีเพลย์
@@ -742,7 +615,7 @@ ui-replay-controls-unavailable = ตัวควบคุมไม่พร้�
 
 ## ui.collab
 ui-collab-session = เซสชัน
-ui-collab-starting = กำลังเริ่มเซสชัน…
+ui-collab-starting = กำลังเริ่มเซสชัน...
 ui-collab-session_active = เซสชันใช้งานอยู่
 ui-collab-connected_to_session = เชื่อมต่อกับเซสชันแล้ว
 ui-collab-session_token = โทเค็นเซสชัน:
@@ -750,14 +623,11 @@ ui-collab-toggle_visibility = สลับการแสดงโทเค็�
 ui-collab-copy_token = คัดลอกโทเค็น
 ui-collab-token_copied = คัดลอกโทเค็นไปยังคลิปบอร์ดแล้ว
 ui-collab-copy_web_link = คัดลอกลิงก์เว็บ
-ui-collab-copy_web_link_tooltip = คัดลอกลิงก์สำหรับเว็บไคลเอนต์
 ui-collab-web_link_copied = คัดลอกลิงก์เว็บไปยังคลิปบอร์ดแล้ว
 ui-collab-copy_localhost_link = คัดลอกลิงก์ Localhost
-ui-collab-copy_localhost_tooltip = คัดลอกลิงก์ localhost (dev)
 ui-collab-localhost_copied = คัดลอกลิงก์ localhost ไปยังคลิปบอร์ดแล้ว
 ui-collab-connected_count = { $count } เชื่อมต่อแล้ว
 ui-collab-promote_cohost = เลื่อนเป็นผู้ร่วมโฮสต์
-ui-collab-promoted_cohost = เลื่อน { $name } เป็นผู้ร่วมโฮสต์แล้ว
 ui-collab-permissions = สิทธิ์
 ui-collab-lock_annotations = ล็อกคำอธิบายประกอบ
 ui-collab-lock_settings = ล็อกการตั้งค่า
@@ -769,7 +639,6 @@ ui-collab-role_cohost = ผู้ร่วมโฮสต์
 ui-collab-you = (คุณ)
 ui-collab-display_name = ชื่อที่แสดง:
 ui-collab-display_name_hint = ชื่อของคุณ...
-ui-collab-display_name_error = กรุณาใส่ชื่อที่แสดง
 ui-collab-enter_display_name = ใส่ชื่อที่แสดงก่อน
 ui-collab-host_session = โฮสต์เซสชัน
 ui-collab-start_session = เริ่มเซสชัน
@@ -784,8 +653,6 @@ ui-collab-waiting_for_frames = กำลังรอข้อมูลการ�
 ui-collab-open = เปิด
 ui-collab-open_for_everyone = เปิดให้ทุกคน
 ui-collab-tactics_board = กระดานยุทธวิธี
-ui-collab-max_boards = เปิดกระดานยุทธวิธีได้สูงสุด { $count } กระดาน
-ui-collab-waiting_for_data = กำลังรอข้อมูลเกมโหลด…
 
 # -- ข้อความผลการรบ --
 
@@ -816,8 +683,6 @@ finish_type-score_excess = เกินขีดจำกัดคะแนน
 ## ui.stats
 ui-stats-overview = ภาพรวม
 ui-stats-sample_notice = ข้อมูลตัวอย่าง ไม่ใช่เกมที่บันทึกไว้
-ui-stats-limit = จำกัด
-ui-stats-division = ดิวิชัน:
 ui-stats-div_all = ทั้งหมด
 ui-stats-div_solo = เดี่ยว
 ui-stats-div_div = ดิวิชัน
@@ -828,8 +693,7 @@ ui-stats-mode_label = โหมด:
 ui-stats-clear = ล้าง
 ui-stats-pr = PR:
 ui-stats-mc = MC:
-ui-stats-frags_count = { $count } สังหาร
-ui-stats-best_frags = ดีที่สุด: { $ship } ({ $count } สังหาร)
+ui-stats-best_frags = ดีที่สุด: { $ship } (สังหาร { $count } ลำ)
 ui-stats-max_damage = ความเสียหายสูงสุด: { $ship } ({ $damage })
 ui-stats-copy_markdown = คัดลอกเป็น Markdown
 ui-stats-copy_image = คัดลอกเป็นรูปภาพ
@@ -837,16 +701,8 @@ ui-stats-copy_image_done = คัดลอกแผนภูมิไปยั�
 ui-stats-copy_image_failed = คัดลอกแผนภูมิไม่ได้
 ui-stats-copy_csv = คัดลอกเป็น CSV
 ui-stats-remove_games_hint = ลบเกมทั้งหมดของ { $ship } (Ctrl+Click เพื่อข้ามการยืนยัน)
-ui-stats-no_stats = ไม่มีสถิติเซสชัน เล่นเกมก่อน!
 ui-stats-settings = ตั้งค่า
-ui-stats-chart_type = ประเภทกราฟ
-ui-stats-stat_label = สถิติ:
-ui-stats-chart_line = เส้น
-ui-stats-chart_bar = แท่ง
 ui-stats-options = ตัวเลือก
-ui-stats-combined = รวม
-ui-stats-rolling_avg = ค่าเฉลี่ยเคลื่อนที่
-ui-stats-labels = ป้ายกำกับ
 ui-stats-ships = เรือ
 ui-stats-filter_ships = กรองเรือในแผนภูมิ
 ui-stats-all_ships = ทั้งหมด
@@ -858,12 +714,10 @@ ui-stats-no_statistic_matches = ไม่มีสถิติที่ตรง
 ui-stats-ship_selection_count = เลือก { $selected } จาก { $total }
 ui-stats-all_ships_tooltip = เลือกเรือที่ตรงกันทั้งหมด
 ui-stats-no_ships_tooltip = ล้างการเลือกเรือที่ตรงกัน
-ui-stats-copy_as_image = คัดลอกเป็นรูปภาพ
 ui-stats-limit_to_recent = จำกัดเฉพาะเกมล่าสุด
 ui-stats-limit_to_recent_tooltip = ขีดจำกัดใช้ต่อเรือแต่ละลำในเรือและแผนภูมิ และใช้กับทุกเกมในภาพรวม
 ui-stats-division_label = กองเรือ:
 ui-stats-add_chart = เพิ่มแผนภูมิ
-ui-stats-clear_confirm = ล้างทุกเกม?
 ui-stats-clear_tooltip = ลบเกมที่บันทึกไว้ทั้งหมด
 ui-stats-clear_failed = ล้างไม่สำเร็จ: { $reason }
 ui-stats-clear_ship_confirm = กดอีกครั้งเพื่อลบเกมของเรือลำนี้
@@ -876,7 +730,7 @@ ui-stats-column_battles = การรบ
 ui-stats-column_win_rate = อัตราชนะ
 ui-stats-column_avg_damage = ความเสียหายเฉลี่ย
 ui-stats-column_avg_frags = สังหารเฉลี่ย
-ui-stats-frags = สังหาร { $count }
+ui-stats-frags = สังหาร { $count } ลำ
 ui-stats-statistic = สถิติ
 ui-stats-open_directory_stats = สถิติไดเรกทอรี
 ui-stats-open_directory_stats_tooltip = เปิดสถิติของรีเพลย์ทุกรายการในไดเรกทอรีนี้และไดเรกทอรีย่อย
@@ -892,7 +746,6 @@ ui-stats-directory_skipped_detail =
     อ่านไม่ได้: { $unreadable }
     ไม่มีข้อมูลเกมสำหรับบิลด์: { $missing_build }
     ไม่มีผลการรบ: { $no_results }
-ui-stats-directory_no_games = ไม่มีรีเพลย์ในไดเรกทอรีนี้ที่มีผลการรบ
 ui-stats-chart = แผนภูมิ
 ui-stats-combine_ships = รวมเรือ
 ui-stats-running_average = ค่าเฉลี่ยสะสม
@@ -904,8 +757,7 @@ ui-stats-session_manual = กำหนดเอง
 ui-stats-session_since_opened = ตั้งแต่เปิดแอป
 ui-stats-session_manual_tooltip = เซสชันประกอบด้วยการรบที่คุณเล่นและรีเพลย์ที่คุณตั้งหรือเพิ่มจากรายการรีเพลย์ และจะถูกเก็บไว้ระหว่างการเปิดแอปแต่ละครั้ง
 ui-stats-session_since_opened_tooltip = เซสชันประกอบด้วยการรบทุกครั้งที่เริ่มตั้งแต่ { $time } ซึ่งเป็นเวลาที่เปิดแอป เซสชันแบบกำหนดเองของคุณจะถูกเก็บไว้และกลับมาเมื่อคุณสลับเป็นกำหนดเอง
-ui-stats-session_battles_one = 1 การรบ
-ui-stats-session_battles_many = { $count } การรบ
+ui-stats-session_battles = { $count } การรบ
 ui-stats-session_chip_manual = เซสชัน: { $battles }
 ui-stats-session_chip_since = เซสชันตั้งแต่ { $time }: { $battles }
 ui-stats-session_empty_title = ยังไม่มีการรบในเซสชันนี้
@@ -959,12 +811,10 @@ ui-stats-table-average = เฉลี่ย
 
 ## ui.player_tracker
 ui-player_tracker-clear_stats = ล้างสถิติ
-ui-player_tracker-player_filter = กรองผู้เล่น
 ui-player_tracker-populate_from_replays = เติมข้อมูลจากรีเพลย์
 ui-player_tracker-find_matches = ค้นหาแมตช์
 ui-player_tracker-open_wows_numbers = เปิดใน wows-numbers
 ui-player_tracker-open_shipbuilds = เปิดบิลด์ใน shipbuilds
-ui-player_tracker-subtab_historical = ย้อนหลัง
 ui-player_tracker-subtab_players = ผู้เล่น
 ui-player_tracker-filter_hint = กรองตามผู้เล่นหรือแคลน...
 ui-player_tracker-time_period = ช่วงเวลา
@@ -979,12 +829,8 @@ ui-player_tracker-loading_clans = กำลังโหลดแคลน...
 ui-player_tracker-loading_players = กำลังโหลดผู้เล่น...
 ui-player_tracker-index_failed = อ่านดัชนีไม่ได้: { $reason }
 ui-player_tracker-no_players = ไม่มีผู้เล่นในดัชนีสำหรับช่วงเวลานี้
-ui-player_tracker-notes_title = บันทึก: { $name }
 ui-player_tracker-note_not_saved = ไม่ได้บันทึก: { $reason }
 ui-player_tracker-subtab_current_match = แมตช์ปัจจุบัน
-ui-player_tracker-your_team = ทีมของคุณ ({ $count })
-ui-player_tracker-enemy_team = ทีมศัตรู ({ $count })
-ui-player_tracker-no_live_match = ไม่มีแมตช์ที่กำลังดำเนินอยู่ รายชื่อผู้เล่นจะแสดงเมื่อคุณเข้าสู่แมตช์
 ui-player_tracker-encounters_hover = พบทั้งหมด { $total } ครั้ง, { $range } ครั้งในช่วงเวลาที่เลือก พบล่าสุด { $last }
 ui-player_tracker-never_encountered = ไม่เคยพบมาก่อน
 ui-player_tracker-copy_wg_id = คลิกเพื่อคัดลอก WG ID
@@ -1008,26 +854,17 @@ ui-player_tracker-win_rate_ship = เรือ
 ui-player_tracker-view_compact = กระชับ
 ui-player_tracker-view_detailed = ละเอียด
 ui-player_tracker-ship_stats = สถิติเรือ
-ui-player_tracker-win_rate_mode_hover = แสดงสถิติของบัญชีหรือสถิติของเรือลำนี้ สีของแถว PR จำนวนการรบ และความเสียหายเฉลี่ยจะเปลี่ยนตาม
 ui-player_tracker-stats_resolving = กำลังอ่านรายชื่อผู้เล่นในแมตช์...
 ui-player_tracker-stats_fetching = กำลังดึงสถิติผู้เล่น...
-ui-player_tracker-stats_rate_limited = ถูกจำกัดอัตราคำขอ ลองใหม่ใน { $wait }
 ui-player_tracker-stats_unavailable = สถิติไม่พร้อมใช้งาน: { $reason }
-ui-player_tracker-roster_unavailable = ไม่สามารถอ่านรายชื่อผู้เล่นในแมตช์จากรีเพลย์ได้
 ui-player_tracker-stats_hidden = โปรไฟล์ของผู้เล่นคนนี้เป็นส่วนตัว
 ui-player_tracker-stats_no_data = ไม่มีสถิติสำหรับผู้เล่นคนนี้
-ui-player_tracker-stats_unplayed_ship = ไม่มีบันทึกการรบด้วยเรือลำนี้
 ui-player_tracker-pr_overall_hover = PR ของบัญชีจากเรือทุกลำ
 ui-player_tracker-pr_ship_hover = PR ของเรือลำนี้
-ui-player_tracker-avg_damage = ความเสียหายเฉลี่ย
 ui-player_tracker-win_rate_hover_line = { $label }: { $rate } จาก { $battles } การรบ
 ui-player_tracker-win_rate_hover_line_damage = { $label }: { $rate } จาก { $battles } การรบ, ความเสียหายเฉลี่ย { $damage }
 ui-player_tracker-team_average_win_rate = WR เฉลี่ย: { $rate }
 ui-player_tracker-team_players = ผู้เล่น { $count } คน
-ui-player_tracker-row_win_rate = WR { $rate }
-ui-player_tracker-row_personal_rating = PR { $value }
-ui-player_tracker-row_battles = { $count } การรบ
-ui-player_tracker-row_seen = พบ x{ $total }
 ui-player_tracker-debug_replay_picker = ดีบัก: ใช้รีเพลย์แทนแมตช์ปัจจุบัน
 ui-player_tracker-debug_replay_picker_hover = โหลดรายชื่อผู้เล่นจากรีเพลย์ที่จบแล้วเข้าแท็บนี้ เพื่อทดสอบเส้นทางการดึงสถิตินอกการรบได้
 ui-player_tracker-debug_replay_none = เลือกรีเพลย์
@@ -1057,31 +894,15 @@ ui-player_tracker-period-all_time = ทั้งหมด
 
 # -- จัดการม็อด --
 
-
 ## ui.twitch
 ui-twitch-possible_name = ชื่อสตรีมที่เป็นไปได้: { $name }
 ui-twitch-seen_minutes = พบ: { $minutes } นาทีหลังเริ่มแมตช์
 ui-twitch-click_to_copy = คลิกเพื่อคัดลอก
 ui-twitch-copied = คัดลอก { $name } แล้ว
-## ui.mod_manager
-ui-mod_manager-category_filters = ตัวกรองหมวดหมู่
-ui-mod_manager-enabled = เปิดใช้งาน
-ui-mod_manager-mod_home = หน้าหลักม็อด
-ui-mod_manager-discord_thread = เธรดอนุมัติ Discord
-ui-mod_manager-save_config = บันทึกค่าม็อด
-ui-mod_manager-load_config = โหลดค่าม็อด
-ui-mod_manager-filter = กรอง
-
-## ui.mod_manager.column
-ui-mod_manager-column-enabled = เปิดใช้งาน
-ui-mod_manager-column-name = ชื่อ
-ui-mod_manager-column-author = ผู้เขียน
-ui-mod_manager-column-category = หมวดหมู่
 
 # -- ตัวเรนเดอร์รีเพลย์ --
 
 ## ui.renderer
-ui-renderer-loading = กำลังโหลดข้อมูลรีเพลย์...
 ui-renderer-preparing_export = กำลังเตรียมการส่งออก...
 ui-renderer-encoding = กำลังเข้ารหัส
 ui-renderer-muxing = กำลัง Mux
@@ -1093,7 +914,7 @@ ui-renderer-advantage-score_projection = การคาดการณ์คะ
 ui-renderer-advantage-fleet_power = กำลังกองเรือ
 ui-renderer-advantage-strategic_threat = ภัยคุกคามเชิงยุทธศาสตร์
 ui-renderer-advantage-total = รวม
-ui-renderer-advantage-hp_incomplete = ข้อมูล HP/เรือไม่สมบูรณ์ — แสดงเฉพาะปัจจัยคะแนน
+ui-renderer-advantage-hp_incomplete = ข้อมูล HP/เรือไม่สมบูรณ์ แสดงเฉพาะปัจจัยคะแนน
 
 ## ui.renderer.context
 ui-renderer-context-show_trail = แสดงเส้นทาง
@@ -1109,39 +930,30 @@ ui-renderer-context-enable_all = เปิดทั้งหมด
 ui-renderer-context-disable_all = ปิดทั้งหมด
 ui-renderer-context-disable_other_ranges = ปิดระยะอื่นทั้งหมด
 ui-renderer-context-enable_all_ranges = เปิดระยะของเรือทุกลำ
-ui-renderer-context-show_armor = แสดงเกราะแบบเรียลไทม์
 ui-renderer-context-realtime_armor = แสดงเกราะแบบเรียลไทม์
 
 ## ui.renderer.controls
 ui-renderer-controls-jump_to_start = ข้ามไปจุดเริ่มต้น
 ui-renderer-controls-previous_event = เหตุการณ์ก่อนหน้า (Shift+Left)
 ui-renderer-controls-back_10s = ย้อนกลับ 10 วินาที (Left)
-ui-renderer-controls-pause = หยุดชั่วคราว (Space)
-ui-renderer-controls-play = เล่น (Space)
 ui-renderer-controls-forward_10s = เดินหน้า 10 วินาที (Right)
 ui-renderer-controls-next_event = เหตุการณ์ถัดไป (Shift+Right)
 ui-renderer-controls-jump_to_end = ข้ามไปจุดสิ้นสุด
-ui-renderer-controls-save_as_video = บันทึกเป็นวิดีโอ
-ui-renderer-controls-copy_to_clipboard = เรนเดอร์วิดีโอไปยังคลิปบอร์ด
 ui-renderer-controls-speed = ความเร็วในการเล่น
 
 ## ui.renderer.settings
 ui-renderer-settings-title = การตั้งค่าการแสดงผล
 ui-renderer-settings-hp_bars = แถบ HP
-ui-renderer-settings-ship_settings = ตั้งค่าเรือ
 ui-renderer-settings-armament = อาวุธยุทโธปกรณ์
 ui-renderer-settings-dead_ships = เรือที่จม
 ui-renderer-settings-dead_ship_names = ชื่อเรือที่จม
 ui-renderer-settings-player_names = ชื่อผู้เล่น
 ui-renderer-settings-ship_ranges = ระยะเรือ
-ui-renderer-settings-self_ship_ranges = ระยะเรือตัวเอง
 ui-renderer-settings-ship_names = ชื่อเรือ
 ui-renderer-settings-camera_direction = ทิศทางป้อมปืน
-ui-renderer-settings-trail_settings = ตั้งค่าเส้นทาง
 ui-renderer-settings-heat_trail = เส้นทางความร้อน
 ui-renderer-settings-speed_trails = เส้นทางความเร็ว
 ui-renderer-settings-dead_ship_trails = เส้นทางเรือที่จม
-ui-renderer-settings-map_settings = ตั้งค่าแผนที่
 ui-renderer-settings-buildings = อาคาร
 ui-renderer-settings-capture_points = จุดยึด
 ui-renderer-settings-consumables = อุปกรณ์สิ้นเปลือง
@@ -1149,7 +961,6 @@ ui-renderer-settings-planes = เครื่องบิน
 ui-renderer-settings-smoke = ควัน
 ui-renderer-settings-torpedoes = ตอร์ปิโด
 ui-renderer-settings-tracers = กระสุนเรืองแสง
-ui-renderer-settings-hud_settings = ตั้งค่า HUD
 ui-renderer-settings-battle_result = ผลการรบ
 ui-renderer-settings-buff_counters = ตัวนับบัฟ
 ui-renderer-settings-chat_label = แชท
@@ -1188,21 +999,11 @@ ui-unpacker-filter_files = กรองไฟล์...
 ui-unpacker-search_in_files = ค้นหาในไฟล์
 ui-unpacker-search_hint = ค้นหาในไฟล์...
 ui-unpacker-path_filter_hint = กรองเส้นทาง (เช่น *.xml)
-ui-unpacker-queue_all = เข้าคิวทั้งหมด
 ui-unpacker-queue_all_files = เข้าคิวไฟล์ทั้งหมด
-ui-unpacker-empty_directory = ไดเรกทอรีว่าง
-ui-unpacker-stop_search_tooltip = หยุดค้นหา
-ui-unpacker-no_matches = ไม่พบผลลัพธ์
 ui-unpacker-view_as_json = ดูเป็น JSON
 ui-unpacker-extract_as_json = แยกเป็น JSON
 ui-unpacker-view_contents = ดูเนื้อหา
 ui-unpacker-version = เวอร์ชัน:
-ui-unpacker-game_params = GameParams
-ui-unpacker-base_as_json = ฐานเป็น JSON
-ui-unpacker-as_json = เป็น JSON
-ui-unpacker-as_cbor = เป็น CBOR
-ui-unpacker-as_json_minimal = เป็น JSON (ย่อ / แปลง)
-ui-unpacker-as_cbor_minimal = เป็น CBOR (ย่อ / แปลง)
 ui-unpacker-decode_prototypes = ถอดรหัสโปรโตไทป์เป็น JSON
 ui-unpacker-decode_prototypes_tooltip = ถอดรหัสโปรโตไทป์ Assets.bin ที่รองรับ (.visual, .model, .mfm) เป็น JSON เมื่อแยก
 ui-unpacker-extraction_queue = คิวการแยก
@@ -1211,14 +1012,11 @@ ui-unpacker-expand_folders = ขยายแผนผังโฟลเดอร
 ui-unpacker-clear_all = ล้างทั้งหมด
 ui-unpacker-browse = เรียกดู
 ui-unpacker-output_dir_hint = ไดเรกทอรีปลายทาง...
-ui-unpacker-go_to_directory = ไปยังไดเรกทอรี
 ui-unpacker-remove_from_queue = ลบออกจากคิว
 ui-unpacker-queue_folder = เข้าคิวทั้งโฟลเดอร์
 ui-unpacker-queue_file = เข้าคิวไฟล์นี้
 ui-unpacker-extraction_output = แตกไฟล์ไปยัง
 ui-unpacker-queue_empty = ทำเครื่องหมายไฟล์หรือโฟลเดอร์ในรายการเพื่อเข้าคิว
-ui-unpacker-show_queue = คิวการแตกไฟล์
-ui-unpacker-double_click_open = ดับเบิลคลิกเพื่อเปิด
 ui-unpacker-packages = แพ็กเกจ
 ui-unpacker-item_count = { $count } รายการ
 ui-unpacker-search_title = ค้นหา: { $query }
@@ -1240,9 +1038,10 @@ ui-unpacker-extracting = กำลังแตกไฟล์ { $done } จา�
 ui-unpacker-extract_failed = แตกไฟล์ไม่สำเร็จ: { $reason }
 ui-unpacker-extracted = แตกไฟล์แล้ว { $count } ไฟล์
 ui-unpacker-cancelled = ยกเลิกหลังจาก { $count } ไฟล์
-ui-unpacker-extract = แตกไฟล์
-ui-unpacker-extract_one = แตกไฟล์ 1 รายการ
-ui-unpacker-extract_many = แตกไฟล์ { $count } รายการ
+ui-unpacker-extract = { $count ->
+    [0] แตกไฟล์
+   *[other] แตกไฟล์ { $count } รายการ
+}
 ui-unpacker-choose_directory = เลือกไดเรกทอรีปลายทางก่อน
 ui-unpacker-dump_parameters = ส่งออก GameParams
 ui-unpacker-dump_parameters_tooltip = ส่งออก GameParams.data ของบิลด์นี้
@@ -1258,19 +1057,12 @@ ui-unpacker-base_only = เฉพาะพารามิเตอร์พื�
 ui-unpacker-column-name = ชื่อ
 ui-unpacker-column-size = ขนาด
 ui-unpacker-column-type_col = ประเภท
-ui-unpacker-column-path = เส้นทาง
-ui-unpacker-column-file = ไฟล์
-ui-unpacker-column-offset = ออฟเซ็ต
-ui-unpacker-column-context = บริบท
 
 # -- ดูเกราะ --
 
 ## ui.armor
 ui-armor-load_settings = โหลดข้อมูลเกมในการตั้งค่าเพื่อใช้ตัวดูเกราะ
-ui-armor-gpu_unavailable = สถานะการเรนเดอร์ GPU ไม่พร้อมใช้งาน
-ui-armor-loading_ship = กำลังโหลดข้อมูลเรือ...
 ui-armor-load_failed = โหลดข้อมูลเรือไม่สำเร็จ: { $error }
-ui-armor-ship_load_failed = โหลด { $ship } ไม่สำเร็จ: { $reason }
 ui-armor-empty = ว่าง
 ui-armor-mirror_cameras = กล้องสะท้อน
 ui-armor-sync_options = ตัวเลือกซิงค์
@@ -1284,29 +1076,19 @@ ui-armor-show_hidden_ships_tooltip = แสดงเรือที่ราย�
 ui-armor-compare_split = เปรียบเทียบในส่วนแยกใหม่
 ui-armor-open_in_new_tab = เปิดในแท็บใหม่
 ui-armor-export_model = ส่งออกโมเดลเรือ
-ui-armor-armor_thickness = ความหนาเกราะ
 ui-armor-export_disclaimer = โมเดล 3D และเท็กซ์เจอร์เหล่านี้เป็นทรัพย์สินทางปัญญาของ Wargaming และการใช้งานโมเดลเหล่านี้ควรเป็นไปตามกฎหมายท้องถิ่นของคุณ
 ui-armor-export_button = ส่งออก
-ui-armor-armor_toggle = เกราะ
-ui-armor-armor_tooltip = สลับการแสดงโซนเกราะ
 ui-armor-hull_toggle = ตัวเรือ
-ui-armor-hull_tooltip = สลับการแสดงชิ้นส่วนโมเดลตัวเรือ
-ui-armor-splash_toggle = สแปลช
 ui-armor-splash_tooltip = สลับการแสดงกล่องสแปลช
 ui-armor-show_hidden = แสดงที่ซ่อน
 ui-armor-show_hidden_tooltip = สลับการแสดงแผงที่ (อาจ) ซ่อนอยู่
 ui-armor-gaps = ช่องว่าง
 ui-armor-gaps_tooltip = เน้นขอบเขตที่แผ่นเกราะไม่เชื่อมต่อกัน (ช่องว่างที่อาจเกิดขึ้น)
 ui-armor-display = แสดงผล
-ui-armor-display_tooltip = การตั้งค่าการแสดงผล (Ctrl+S)
 ui-armor-marker_opacity = ความทึบของเครื่องหมาย
-ui-armor-save_defaults = บันทึกเป็นค่าเริ่มต้น
-ui-armor-export_tab = ส่งออก
 ui-armor-export_tooltip = ส่งออกโมเดลเรือเป็นไฟล์ OBJ
 ui-armor-pen_check = ตรวจสอบการเจาะ
-ui-armor-pen_check_tooltip = กำหนดค่ากระสุนสำหรับการเปรียบเทียบการเจาะทะลุ
 ui-armor-trajectory = วิถีกระสุน
-ui-armor-trajectory_on = วิถีกระสุน [เปิด]
 ui-armor-trajectory_range = ระยะ
 ui-armor-trajectory_clear = ล้างทั้งหมด
 ui-armor-arc_heading = วิถี { $number }
@@ -1329,7 +1111,6 @@ ui-armor-arc_plate_unknown = แผ่นเกราะที่ไม่มี
 ui-armor-angle_good = ต่ำกว่า 30 องศา
 ui-armor-angle_mid = 30 ถึง 45 องศา
 ui-armor-angle_bad = มากกว่า 45 องศา
-ui-armor-trajectory_tooltip = คลิกเกราะเพื่อจำลองวิถีกระสุน (Ctrl+T)
 ui-armor-trajectory_ship = เรือ:
 ui-armor-trajectory_select_ship = เลือกเรือ
 ui-armor-trajectory_ship_tooltip = เลือกเรือที่ให้กระสุนสำหรับวิถีกระสุน
@@ -1340,18 +1121,14 @@ ui-armor-trajectory_select_shell = เลือกกระสุน
 ui-armor-trajectory_shell_tooltip = เลือกกระสุนที่ใช้จำลองวิถีกระสุน
 ui-armor-continue_ricochet = ดำเนินการต่อหลังกระสุนสะท้อน
 ui-armor-splash_mode = สแปลช
-ui-armor-splash_on = สแปลช [เปิด]
 ui-armor-splash_no_data = ไม่มีข้อมูลสแปลชสำหรับเรือนี้
 ui-armor-splash_no_shells = เพิ่มเรือที่มีกระสุน HE/SAP ลงในรายการเปรียบเทียบ
 ui-armor-splash_tooltip_mode = คลิกเกราะเพื่อแสดงปริมาตรความเสียหายสแปลช HE
-ui-armor-loading_armor = กำลังโหลดเรือ...
 ui-armor-select_ship = เลือกเรือจากรายการ
-ui-armor-pen_check_label = ตรวจสอบการเจาะทะลุ
 ui-armor-all_btn = ทั้งหมด
 ui-armor-none_btn = ไม่มี
 ui-armor-opaque = ทึบแสง
 ui-armor-upgrade = อัปเกรด:
-ui-armor-camo = ลายพราง:
 ui-armor-camo_none = ค่ามาตรฐาน (ไม่มี)
 ui-armor-camo_group_universal = ลายพรางอเนกประสงค์
 ui-armor-camo_group_expendable = ลายพรางแบบใช้แล้วหมด
@@ -1385,7 +1162,6 @@ ui-armor-tree_matches = ตรงกัน: { $count }
 ui-armor-tree_no_matches = ไม่พบรายการที่ตรงกัน
 ui-armor-no_matching_options = ไม่มีตัวเลือกที่ตรงกับตัวกรอง
 ui-armor-opacity = ความทึบ
-ui-armor-ship_hull = ตัวเรือ
 ui-armor-opaque_hull = ตัวเรือทึบแสง
 ui-armor-lighting = แสงตัวเรือ
 ui-armor-lighting_enabled = เปิดใช้งานแสง
@@ -1401,20 +1177,16 @@ ui-armor-lighting_specular = แสงสะท้อนวาว
 ui-armor-lighting_shininess = ความมันวาว
 ui-armor-lighting_key_color = สีแสงหลัก
 ui-armor-lighting_ambient_color = สีแสง Ambient
-ui-armor-pop_out = แยกหน้าต่าง
 ui-armor-zero_mm_plates = แผ่นเกราะ 0 มม.
 ui-armor-armor_opacity = ความทึบเกราะ
 ui-armor-ballistic_disclaimer = ผลลัพธ์กระสุนวิถีอิงจากการวิศวกรรมย้อนกลับ/การประมาณการทำงานของระบบจำลอง
 ui-armor-roll = การโคลง
-ui-armor-ctrl_click_solo = Ctrl+click เพื่อแสดงเดี่ยว
 ui-armor-reset_plates = รีเซ็ตแผ่นเกราะ
-ui-armor-visibility = การมองเห็น
 ui-armor-armor_options = เกราะ
 ui-armor-no_ship_loaded = ยังไม่ได้โหลดเรือ
 ui-armor-lod = LOD:
 ui-armor-lod_highest = 0 (สูงสุด)
 ui-armor-camouflage = ลายพราง
-ui-armor-search_ships = ค้นหาเรือ...
 ui-armor-ships = เรือ
 ui-armor-compare = เปรียบเทียบ
 ui-armor-compare_tooltip = เปิดแผงเปรียบเทียบใหม่ หรือคลิกขวาที่เรือเพื่อเปรียบเทียบลำนั้น
@@ -1438,14 +1210,12 @@ ui-armor-zone_toggle_tooltip = แสดงหรือซ่อนแผ่น�
 ui-armor-mode_solo_zone = เฉพาะโซนนี้
 ui-armor-mode_cast_trajectory = ยิงวิถี
 ui-armor-loading_catalog = กำลังโหลดแคตตาล็อกเรือ...
-ui-armor-catalog_failed = โหลดแคตตาล็อกเรือไม่สำเร็จ: { $reason }
 ui-armor-legend_collapse = ย่อ
 ui-armor-legend_hide = ซ่อนคำอธิบาย
 ui-armor-armor_thickness_title = ความหนาเกราะ
 ui-armor-initializing = กำลังเริ่มต้นวิวพอร์ต 3D...
 ui-armor-init_failed = เริ่มต้นวิวพอร์ตเกราะไม่สำเร็จ: { $reason }
 ui-armor-loading_named_ship = กำลังโหลด { $ship }...
-ui-armor-rendering = กำลังเรนเดอร์...
 ui-armor-options = ตัวเลือก
 
 ## ui.armor.compass
@@ -1455,16 +1225,11 @@ ui-armor-compass-south = ใต้
 ui-armor-compass-west = ตก
 
 ## ui.armor.realtime
-ui-armor-realtime-loading = กำลังโหลดเกราะเรือ...
-ui-armor-realtime-waiting = กำลังรอข้อมูลเรือ...
 ui-armor-realtime-incoming_fire = การยิงเข้า
 ui-armor-realtime-attacker_filter = กรองผู้โจมตี
 ui-armor-realtime-all_enemies = ศัตรูทั้งหมด
 ui-armor-realtime-show_secondaries = แสดงอาวุธรอง
-ui-armor-realtime-auto_scroll = เลื่อนอัตโนมัติ
 ui-armor-realtime-seek_to_salvo = ไปยังชุดกระสุน
-ui-armor-realtime-deselect = ยกเลิกการเลือก
-ui-armor-realtime-select_all = เลือกทั้งหมด
 ui-armor-realtime-no_data = ข้อมูลกระสุนไม่พร้อมใช้งานแล้ว
 ui-armor-realtime-sim_agrees = ผลจำลองตรงกัน
 ui-armor-realtime-sim_unchecked = จำลองกระสุน { $count } นัดไม่ได้
@@ -1504,10 +1269,8 @@ advantage-moderate = ปานกลาง
 advantage-weak = อ่อน
 
 ## ui.search
-ui-search-undo = เลิกทำการเปลี่ยนแปลงล่าสุดของคำค้นหา
 ui-search-edit_value = แก้ไขค่า
 ui-search-add_filter = เพิ่มตัวกรอง
-ui-search-redo = ทำซ้ำการเปลี่ยนแปลงที่เลิกทำไป
 ui-search-pill_select = เลือก
 ui-search-pill_deselect = ยกเลิกการเลือก
 ui-search-pill_group_all = จัดกลุ่มด้วย และ
@@ -1531,15 +1294,9 @@ ui-search-parse_failed = แยกวิเคราะห์คำค้นห�
 ui-search-searching = กำลังค้นหา...
 ui-search-failed = การค้นหาล้มเหลว: { $reason }
 ui-search-no_matches = ไม่มีรายการที่ตรงกัน
-ui-search-game_mode_gap_hint_one = มี 1 แมตช์ในดัชนีที่ไม่ได้บันทึกโหมดเกมไว้ สั่งจัดทำดัชนีรีเพลย์ทั้งหมดใหม่ในการตั้งค่าเพื่อเติมข้อมูล
 ui-search-game_mode_gap_hint = มี { $count } แมตช์ในดัชนีที่ไม่ได้บันทึกโหมดเกมไว้ สั่งจัดทำดัชนีรีเพลย์ทั้งหมดใหม่ในการตั้งค่าเพื่อเติมข้อมูล
 ui-search-open = เปิด
 ui-search-open_missing = ไม่มีไฟล์รีเพลย์นี้แล้ว
-ui-search-opened_directory = เปิด { $dir } เพื่อแสดงรีเพลย์นี้แล้ว
-ui-search-open_no_directory = ไม่ทราบว่ารีเพลย์นี้อยู่ในไดเรกทอรีใด
-ui-search-path_copied = คัดลอกเส้นทางรีเพลย์ไปยังคลิปบอร์ดแล้ว
-ui-search-preview_map = ดูตัวอย่างแผนที่
-ui-search-preview_and_render = ชี้เมาส์เพื่อดูตัวอย่าง คลิกเพื่อเรนเดอร์
 ui-search-free_text = มีคำว่า "{ $text }"
 ui-search-quant_any = มี
 ui-search-quant_none = ไม่มี
@@ -1573,23 +1330,6 @@ ui-search-suggest-scope_enemy = ฝ่ายศัตรู
 ui-search-suggest-scope_division = ในดิวิชัน
 ui-search-suggest-scope_anyone = ผู้เล่นคนใดก็ได้
 
-## ui.search.bar
-ui-search-bar-hint = กรองรีเพลย์
-ui-search-bar-and_word = และ
-ui-search-bar-or_word = หรือ
-ui-search-bar-not_word = ไม่
-ui-search-bar-group_and = จัดกลุ่มแบบ AND
-ui-search-bar-group_or = จัดกลุ่มแบบ OR
-ui-search-bar-negate = กลับเงื่อนไข
-ui-search-bar-delete = ลบ
-ui-search-bar-clear_selection = ล้างการเลือก
-ui-search-bar-ungroup = คลิกเพื่อยุบกลุ่มนี้
-ui-search-bar-flip_connector = คลิกเพื่อสลับระหว่าง AND และ OR
-ui-search-bar-context_preset = พรีเซ็ต
-ui-search-bar-context_match = การแข่งขัน
-ui-search-bar-context_roster = รายชื่อผู้เล่น
-ui-search-bar-no_suggestions = ไม่มีรายการที่ตรงกัน
-
 ## ui.search.field
 ui-search-field-outcome = ผลการรบ
 ui-search-field-map = แผนที่
@@ -1604,7 +1344,6 @@ ui-search-field-stat_spotting = การตรวจจับ
 ui-search-field-stat_potential = ความเสียหายที่อาจเกิดขึ้น
 ui-search-field-stat_received = ความเสียหายที่ได้รับ
 ui-search-field-stat_pr = PR
-ui-search-field-stat_mc = MC
 ui-search-field-rating = เรตติ้ง
 ui-search-field-stat_survived = รอดชีวิต
 ui-search-field-stat_disconnected = หลุดการเชื่อมต่อ
@@ -1690,7 +1429,6 @@ ui-search-value-game_mode_pinata_event = อีเวนต์ Pinata
 ui-search-value-game_mode_respawns = เกิดใหม่ได้
 ui-search-value-game_mode_respawns_sectors = เกิดใหม่ตามเขต
 
-
 ## ui.search.column
 ui-search-column-date = วันที่
 ui-search-column-map = แผนที่
@@ -1722,7 +1460,6 @@ ui-settings-not_set = (ยังไม่ได้ตั้งค่า)
 ui-settings-panel-mcp = เซิร์ฟเวอร์ MCP
 ui-settings-panel-open = เปิดการตั้งค่า
 ui-settings-panel-search_placeholder = ค้นหาการตั้งค่า
-ui-settings-panel-count_one = การตั้งค่า 1 รายการ
 ui-settings-panel-count = การตั้งค่า { $count } รายการ
 ui-settings-panel-no_matches = ไม่มีการตั้งค่าที่ตรงกับการค้นหา
 ui-settings-panel-close = ปิดการตั้งค่า
@@ -1790,7 +1527,7 @@ ui-app-worker_stalled = { $worker } ไม่ตอบสนอง
 ui-app-worker_stopped = { $worker } หยุดทำงาน
 ui-app-status_indexing = กำลังจัดทำดัชนีรีเพลย์
 ui-app-status_of = { $done } จาก { $total }
-ui-app-status_tasks = งานที่กำลังทำงาน: { $count }
+ui-app-status_tasks = มีงานกำลังทำงาน { $count } งาน
 ui-app-status_show_panel = แสดงแผง: { $panel }
 ui-app-status_hide_panel = ซ่อนแผง: { $panel }
 ui-app-panel_left = ซ้าย
@@ -1824,7 +1561,6 @@ ui-palette-back_hint = Esc: ย้อนกลับ
 ui-palette-ships_loading = กำลังโหลดรายชื่อเรือ...
 ui-palette-ships_unavailable = ไม่มีรายชื่อเรือ: { $reason }
 ui-palette-matches_found = { $count } รายการที่ตรงกัน
-ui-palette-nothing_indexed = ยังไม่มีข้อมูลในดัชนี
 ui-palette-sample_stats = ดีบัก: แสดงข้อมูลตัวอย่างในสถิติ
 ui-palette-restore_stats = ดีบัก: แสดงข้อมูลที่บันทึกไว้ในสถิติ
 
@@ -1848,7 +1584,7 @@ ui-replay-renderer-export_copied = คัดลอกวิดีโอไปย
 ui-replay-renderer-export_not_written = ไม่สามารถเรนเดอร์วิดีโอได้: { $reason }
 ui-replay-renderer-pop_out = เปิดในหน้าต่างแยก
 ui-replay-renderer-export_path_unusable = ไม่สามารถเขียนไปยังตำแหน่งนี้ได้
-ui-replay-renderer-batch_started = กำลังเรนเดอร์ { $count } รีเพลย์ไปยัง { $dir }
+ui-replay-renderer-batch_started = กำลังเรนเดอร์รีเพลย์ { $count } รายการไปยัง { $dir }
 ui-replay-renderer-batch_finished = เรนเดอร์แล้ว { $written } รีเพลย์ เรนเดอร์ไม่ได้ { $failed } รีเพลย์
 ui-replay-renderer-batch_all_written = เรนเดอร์แล้ว { $written } รีเพลย์
 ui-replay-renderer-batch_copied = เรนเดอร์แล้ว { $written } รีเพลย์และวางไว้ในคลิปบอร์ด
@@ -1908,19 +1644,11 @@ ui-armor-pen-hover_a_plate = ชี้เมาส์ที่แผ่นเก
 ui-armor-pen-awaiting_plate = ชี้เมาส์ที่แผ่นเกราะ
 ui-armor-pen-clear_all = ล้างทั้งหมด
 ui-armor-pen-remove = ลบออกจากการเปรียบเทียบ
-ui-armor-pen-title = การเจาะทะลุ
-ui-armor-pen-title_tooltip = ตรวจสอบผลของกระสุนเรือต่อแผ่นเกราะ
-ui-armor-pen-ship = เรือที่ยิง
 ui-armor-pen-firing_ship_tooltip = ใช้กระสุนของเรือลำนี้ในการจำลองวิถีกระสุน
 ui-armor-pen-use_for_trajectory = ใช้สำหรับวิถีกระสุน
-ui-armor-pen-pick_ship = เลือกเรือที่ยิงใส่เรือลำนี้
-ui-armor-pen-enter_thickness = ใส่ความหนาแผ่นเกราะ
 ui-armor-pen-no_shells = { $ship } ไม่มีกระสุนปืนใหญ่หลัก
-ui-armor-pen-plate = แผ่นเกราะ
-ui-armor-pen-mm = มม.
 ui-armor-pen-ifhe = IFHE
 ui-armor-pen-ifhe_tooltip = Inertia Fuse for HE Shells เพิ่มการเจาะทะลุของกระสุน HE หนึ่งในสี่
-ui-armor-pen-last_hovered = ชี้ล่าสุด: { $plate }
 ui-armor-pen-penetrates = เจาะทะลุ
 ui-armor-pen-shatters = เจาะไม่เข้า
 ui-armor-pen-angle_dependent = ขึ้นกับมุม
@@ -1957,12 +1685,10 @@ ui-armor-export-size_estimate = ขนาดไฟล์โดยประมา
 ui-armor-export-size_breakdown = รูปทรง { $geometry } (แน่นอน), เท็กซ์เจอร์ { $textures } (ประมาณ)
 ui-armor-export-size_incomplete = คำนวณขนาดลายพราง { $count } รายการไม่ได้ ขนาดอาจไม่ครบถ้วน
 ui-armor-export-exporting = กำลังส่งออก { $ship }...
-ui-armor-export-close_button = ปิด
 ui-armor-export-already_running = การส่งออกกำลังทำงานอยู่แล้ว
 ui-armor-export-exported = ส่งออก { $ship } แล้ว
 ui-armor-export-exported_with_size = ส่งออก { $ship } แล้ว ({ $size })
 ui-armor-export-vehicle_not_found = ไม่พบยานพาหนะ
-ui-armor-export-create_file_failed = สร้างไฟล์ไม่สำเร็จ: { $error }
 ui-armor-export-export_failed = ส่งออกไม่สำเร็จ: { $error }
 
 ## ui.tactics
@@ -2081,8 +1807,6 @@ ui-launcher-update_in_place = การอัปเดตจะติดตั�
 ui-launcher-cancelled = ยกเลิกการดาวน์โหลดแล้ว
 ui-launcher-launch_failed = เปิดเกมไม่สำเร็จ: { $error }
 ui-launcher-use_for_toolkit = ใช้กับ toolkit
-ui-launcher-not_set = ยังไม่ได้ตั้งค่า
-ui-launcher-browse = เรียกดู...
 ui-launcher-install_heading = ติดตั้งเกม
 ui-launcher-install_hint = การติดตั้งใหม่มีขนาดหลายสิบ GB
 ui-launcher-install_title = ตำแหน่งที่จะติดตั้งเกม
@@ -2150,8 +1874,10 @@ ui-replay-damage_share-hold = กด { $key } ค้างไว้เพื่�
 ui-replay-damage_share-release = ปล่อย { $key } เพื่อกลับคืน
 
 ## ui.reindex
-ui-reindex-context_one = บังคับจัดทำดัชนีใหม่
-ui-reindex-context_many = บังคับจัดทำดัชนีรีเพลย์ { $count } รายการใหม่
+ui-reindex-context = { $count ->
+    [one] บังคับจัดทำดัชนีใหม่
+   *[other] บังคับจัดทำดัชนีรีเพลย์ { $count } รายการใหม่
+}
 ui-reindex-palette_by_version = บังคับจัดทำดัชนีรีเพลย์ใหม่: ตามเวอร์ชัน
 ui-reindex-palette_all = บังคับจัดทำดัชนีรีเพลย์ใหม่: ทั้งหมด
 ui-reindex-versions_title = บังคับจัดทำดัชนีรีเพลย์ใหม่: ตามเวอร์ชัน
@@ -2399,7 +2125,6 @@ ui-armor-textures-unresolved = ไม่พบพาธใน assets.bin
 ui-armor-textures-absent = ไม่อยู่ในแพ็กเกจที่ติดตั้ง
 ui-armor-textures-unreadable = ไม่สามารถอ่านส่วนหัว DDS ได้
 ui-armor-textures-unknown_format = ไม่รู้จักรูปแบบ
-ui-armor-textures-details_one = { $format }, { $size }, 1 ไฟล์, { $bytes }
 ui-armor-textures-details = { $format }, { $size }, { $count } ไฟล์, { $bytes }
 ui-armor-textures-role_albedo = Albedo
 ui-armor-textures-role_normal = Normal
@@ -2408,8 +2133,10 @@ ui-armor-textures-role_ambient_occlusion = Ambient occlusion
 ui-armor-textures-role_detail = Detail
 ui-armor-textures-role_name_matched = Albedo, พบจากชื่อไฟล์
 ui-armor-textures-copy_path = คัดลอกพาธ
-ui-armor-textures-copy_override = คัดลอกพาธ res_mods
-ui-armor-textures-copy_overrides = คัดลอกพาธ res_mods { $count } รายการ
+ui-armor-textures-copy_overrides = { $count ->
+    [one] คัดลอกพาธ res_mods
+   *[other] คัดลอกพาธ res_mods { $count } รายการ
+}
 ui-armor-textures-paths_copied = คัดลอกพาธ { $count } รายการแล้ว
 ui-armor-textures-no_build = ข้อมูลเกมยังไม่โหลด จึงไม่ทราบโฟลเดอร์ม็อดของบิลด์
 ui-armor-textures-show_in_unpacker = แสดงใน Resource Unpacker

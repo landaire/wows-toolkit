@@ -11,20 +11,16 @@ dialog-select_language = Vybrat jazyk
 dialog-machine_translation_warning = Většina překladů byla strojově vygenerována a může být nepřesná.
 
 ## ui.tabs
-ui-tabs-launcher = Spouštěč
 ui-tabs-unpacker = Rozbalovač zdrojů
 ui-tabs-settings = Nastavení
 ui-tabs-replay_parser = Inspektor záznamů
-ui-tabs-replay_directory = Adresář záznamů
 ui-tabs-player_tracker = Sledování hráčů
-ui-tabs-mod_manager = Správce módů
 ui-tabs-armor_viewer = Prohlížeč pancíře
 ui-tabs-model_viewer = Prohlížeč modelů
 ui-tabs-stats = Statistiky
 ui-tabs-directory_stats = Statistiky { $dir }
 ui-tabs-close_directory_stats = Zavřít statistiky adresáře
 ui-tabs-search = Hledání
-ui-tabs-search_these_replays = Prohledat tyto záznamy
 ui-tabs-search_these_replays_unavailable = Tyto záznamy zatím nebyly indexovány
 ui-tabs-zoom_in_panel = Přiblížit
 ui-tabs-zoom_out_panel = Oddálit
@@ -55,12 +51,10 @@ ui-buttons-github = GitHub
 ui-buttons-view_github = Zobrazit projekt na GitHub
 ui-buttons-choose = Vybrat...
 ui-buttons-reset = Obnovit
+ui-buttons-clear = Vymazat
 ui-buttons-select_all = Vybrat vše
 ui-buttons-download = Stáhnout
-ui-buttons-dismiss = Zavřít
 ui-buttons-retry = Zkusit znovu
-ui-buttons-check_all = Zaškrtnout vše
-ui-buttons-uncheck_all = Odškrtnout vše
 ui-buttons-refresh_persisted_data_confirm = Obnovit
 
 ## ui.menu
@@ -68,14 +62,12 @@ ui-menu-file = Soubor
 ui-menu-check_updates = Zkontrolovat aktualizace
 ui-menu-about = O aplikaci
 ui-menu-quit = Ukončit
-ui-menu-licenses = Licence
 
 ## ui.windows
 ui-windows-build_consent = Souhlas se sběrem buildů
 ui-windows-replay_migration = Přechod na sdílení záznamů
 ui-windows-crash_detected = Zjištěno zhroucení aplikace
 ui-windows-update_available = Dostupná aktualizace
-ui-windows-confirm = Potvrdit
 ui-windows-network_warning = Síťové upozornění
 ui-windows-download_game_data = Stáhnout herní data
 ui-windows-error = Chyba
@@ -87,7 +79,6 @@ ui-windows-minimize = Minimalizovat
 ui-windows-maximize = Maximalizovat
 ui-windows-restore = Obnovit
 ui-windows-close = Zavřít
-ui-windows-licenses = Licence
 
 ## ui.dialogs
 ui-dialogs-build_consent_message = Chcete odesílat informace o buildech hráčů z hodnocených a náhodných bitev vývojáři? Tento sběr dat pomáhá komunitě hromadně analyzovat buildy hráčů. Kdykoli se můžete odhlásit v nastavení.
@@ -102,8 +93,11 @@ ui-dialogs-p2p_warning = Spolupracující relace používají P2P síť. Ostatn�
 ui-dialogs-software_encode_message = Nebyl nalezen žádný podporovaný GPU kodér videa, proto bude tento export kódován softwarově. To je mnohem pomalejší a dlouhá bitva může trvat několik minut.
 ui-dialogs-download_game_data_intro = Některé záznamy potřebují herní data, která nejsou nainstalována. Vyberte buildy ke stažení.
 ui-dialogs-download_build_row = Verze { $version } (build { $build })
-ui-dialogs-download_replays_needing = potřebné pro { $count } záznamů
-ui-dialogs-download_availability_resolving = kontroluje se repozitář
+ui-dialogs-download_replays_needing = potřebné pro { $count ->
+    [one] { $count } záznam
+    [few] { $count } záznamy
+   *[other] { $count } záznamů
+}
 ui-dialogs-download_availability_exact = publikováno
 ui-dialogs-download_availability_nearest = žádná přesná shoda, nejbližší je { $version } (build { $build })
 ui-dialogs-download_availability_unpublished = nikdy nepublikováno
@@ -120,11 +114,8 @@ ui-labels-error_occurred = Došlo k chybě:
 ui-labels-made_by = Vytvořil landaire.
 ui-labels-credits = Díky Trackpad, TTaro, lkolbly za jejich příspěvky.
 ui-labels-pr_credits = Údaje a vzorec pro výpočet osobního hodnocení (PR) poskytuje WoWs Numbers.
-ui-labels-powered_by = Poháněno{" "}
-ui-labels-and = {" "}a{" "}
 ui-labels-suppress_warning = Příště nezobrazovat
 ui-labels-more_info = Více informací
-ui-labels-loading_replays = Načítání { $count } záznamů...
 ui-labels-app_version = Verze { $version }
 ui-labels-project_license = WoWs Toolkit je distribuován pod licencí { $license }.
 ui-labels-third_party_notices = Upozornění třetích stran
@@ -139,35 +130,33 @@ ui-messages-app_up_to_date = Aplikace je aktuální
 ui-messages-checking_app_updates = Kontrola aktualizací aplikace...
 ui-messages-update_starting = Stahování aktualizace...
 ui-messages-update_check_failed = Kontrola aktualizací selhala
-ui-messages-constants_fetch_failed = Nepodařilo se získat aktualizované mapování dat záznamů. Zkusíme to znovu později.
 ui-messages-game_data_loaded = Herní data úspěšně načtena
-ui-messages-no_replays_detected = Nebyly zjištěny žádné záznamy — je váš adresář WoWs správně nastaven?
-ui-messages-build_loaded = Načten build { $build }
-ui-messages-downloading_game_data = Stahování herních dat...
-ui-messages-game_data_downloaded = Stažena herní data pro build { $build }
-ui-messages-game_data_builds_downloaded = Stažena herní data pro buildy: { $count }
+ui-messages-no_replays_detected = Nebyly zjištěny žádné záznamy. Je váš adresář WoWs správně nastaven?
+ui-messages-game_data_builds_downloaded = Stažena herní data pro { $count ->
+    [one] { $count } build
+    [few] { $count } buildy
+   *[other] { $count } buildů
+}
 ui-messages-game_data_download_failed = Nepodařilo se stáhnout herní data
-ui-messages-game_data_build_download_failed = Nepodařilo se stáhnout herní data pro build { $build }
-ui-messages-checking_game_data_updates = Kontrola aktualizací herních dat...
 ui-messages-game_data_up_to_date = Herní data jsou aktuální
-ui-messages-game_data_updates_available = { $count } uložených buildů má k dispozici novější data
-ui-messages-validating_game_data = Ověřování mezipaměti herních dat...
+ui-messages-game_data_updates_available = { $count ->
+    [one] { $count } uložený build má k dispozici novější data
+    [few] { $count } uložené buildy mají k dispozici novější data
+   *[other] { $count } uložených buildů má k dispozici novější data
+}
 ui-messages-game_data_cache_valid = Mezipaměť herních dat je v pořádku a odpovídá vzdálenému repozitáři
-ui-messages-game_data_cache_invalid = { $count } uložených buildů je zastaralých nebo poškozených
-ui-messages-replay_loaded = Záznam úspěšně načten
+ui-messages-game_data_cache_invalid = { $count ->
+    [one] { $count } uložený build je zastaralý nebo poškozený
+    [few] { $count } uložené buildy jsou zastaralé nebo poškozené
+   *[other] { $count } uložených buildů je zastaralých nebo poškozených
+}
 ui-messages-replay_load_failed = Nepodařilo se načíst záznam
 ui-messages-twitch_token_invalid = Token Twitch je neplatný nebo vypršel. Aktualizujte ho v Nastavení.
 ui-messages-wows_dir_invalid = Adresář World of Warships není platný. Zkontrolujte cestu v Nastavení.
 ui-messages-wows_dir_not_set = Adresář World of Warships není nastaven
-ui-messages-twitch_token_expired = Token Twitch je neplatný nebo vypršel
-ui-messages-versioned_constants_rebuild_failed = Nepodařilo se získat verzované konstanty během přestavby. Zkusíme to znovu později.
 ui-messages-constants_version_mismatch =
     Verze souboru mapování dat záznamu neodpovídá verzi hry.
     Výsledky po bitvě nemusí být přesné. Vyčkejte prosím, než správci projektu aktualizují mapování na serveru.
-ui-messages-constants_updated = Soubor mapování dat záznamu byl úspěšně aktualizován
-ui-messages-constants_imported = Nainstalováno mapování dat záznamu pro build { $build }
-ui-messages-constants_imported_other_build = Nainstalováno mapování dat záznamu pro build { $build }, což není aktuálně načtený build ({ $loaded })
-ui-messages-constants_import_failed = Nepodařilo se importovat mapování dat záznamu: { $error }
 ui-messages-session_started = Relace zahájena
 ui-messages-user_joined = { $name } se připojil(a)
 ui-messages-user_timeout = { $name } — časový limit vypršel
@@ -175,23 +164,16 @@ ui-messages-user_left = { $name } odešel/odešla
 ui-messages-session_ended = Relace ukončena
 ui-messages-session_error = Chyba relace: { $msg }
 ui-messages-connected_to_session = Připojeno k relaci
-ui-messages-joined_session = Připojeno k relaci: { $name }
-ui-messages-replay_spam_protection = Odpojeno: hostitel otevírá záznamy příliš rychle
 ui-messages-host_opened_replay = Hostitel otevřel záznam: { $name }
 ui-messages-host_closed_replay = Hostitel zavřel záznam
-ui-messages-session_error_generic = Relace: { $msg }
 ui-messages-session_rejected = Relace odmítnuta: { $reason }
-ui-messages-indexing_replays = Indexování záznamů...
-ui-messages-indexing_replays_progress = Indexování záznamů ({ $done }/{ $total })
-ui-messages-replays_indexed = Indexováno { $indexed } z { $total } záznamů
-ui-messages-replays_already_indexed = Všech { $total } záznamů je již indexováno
-ui-messages-loading_row_summaries = Načítání podrobností záznamů...
-ui-messages-reading_replay_directory = Čtení adresáře záznamů...
-ui-messages-directory_replays_skipped = Přeskočeno { $skipped } záznamů, které nelze načíst
 ui-messages-drop_not_a_replay = Toto není soubor záznamu
 ui-messages-drop_not_replays = Toto nejsou soubory záznamů
-ui-messages-drop_skipped = Přeskočeno { $count } přetažených souborů, které nejsou záznamy ani složky
-ui-messages-directory_replays_not_indexed = Vypsáno { $count } záznamů bez podrobností o zápase
+ui-messages-drop_skipped = { $count ->
+    [one] Přeskočen { $count } přetažený soubor, který není záznamem ani složkou
+    [few] Přeskočeny { $count } přetažené soubory, které nejsou záznamy ani složkami
+   *[other] Přeskočeno { $count } přetažených souborů, které nejsou záznamy ani složkami
+}
 ui-messages-log_copied = Zkopírováno { $bytes } KB ze souboru { $file } do schránky
 ui-messages-log_copy_failed = Nepodařilo se přečíst soubor protokolu: { $error }
 ui-messages-log_not_found = V adresáři { $dir } nebyl nalezen žádný soubor protokolu
@@ -203,7 +185,6 @@ stat-frags = Zabití
 stat-raw_xp = Hrubé XP
 stat-base_xp = Základní XP
 stat-win_rate = Míra výher
-stat-win_rate_pct = Míra výher (%)
 stat-personal_rating = Osobní hodnocení
 stat-match_contribution = Přínos v bitvě
 stat-capture_points = Body za obsazení
@@ -211,27 +192,17 @@ stat-planes_shot_down = Sestřelená letadla
 stat-anti_air_damage = Protiletadlové poškození
 stat-survival_rate = Míra přežití
 stat-torpedoes_spotted = Odhalená torpéda
-stat-avg_damage = Prům. poškození
-stat-avg_spotting_damage = Prům. poškození z pozorování
-stat-avg_frags = Prům. zabití
-stat-avg_raw_xp = Prům. hrubé XP
-stat-avg_base_xp = Prům. základní XP
 stat-avg_pr = Prům. PR
-stat-avg_mc = Prům. MC
 stat-avg_prefix = Prům. { $name }
 
 ## chart
-chart-game_number = Hra č.
 chart-combined = Kombinované
 chart-combined_suffix = (Kombinované)
 chart-rolling_average_suffix = (Klouzavý průměr)
-chart-no_data = Pro vybrané lodě nejsou k dispozici žádná data
-chart-win_rate_unavailable = Míra výher není dostupná pro čárové grafy per hra (povolte Klouzavý průměr nebo použijte sloupcový graf)
 
 ## confirm
 confirm-open_in_game = Tím se spustí World of Warships. Pokračovat?
 confirm-clear_all_session_stats = Tím se vymažou všechny statistiky relace. Pokračovat?
-confirm-clear_ship_session_stats = Tím se odstraní všechny hry této lodi ze statistik relace. Pokračovat?
 confirm-set_as_session_stats = Tím se nahradí vaše aktuální statistiky relace. Pokračovat?
 
 ## error
@@ -239,21 +210,13 @@ error-file_watcher_creation = Nepodařilo se vytvořit sledování souborů: { $
 error-replay_dir_watch = Nepodařilo se sledovat adresář záznamů: { $error }
 
 ## ui.settings.app
-ui-settings-app-heading = Nastavení aplikace
-ui-settings-app-description = Obecné chování a vzhled aplikace
 ui-settings-app-check_for_updates = Kontrolovat aktualizace při spuštění
 ui-settings-app-enable_logging = Povolit logování (projeví se po restartu)
 ui-settings-app-enable_logging_tooltip = Zapisovat ladicí logy do souboru v adresáři dat aplikace. Užitečné při řešení problémů.
 ui-settings-app-data_sharing_mode = Sdílení dat (hodnocené a náhodné bitvy)
-ui-settings-app-data_sharing_off = Neodesílat nic
-ui-settings-app-data_sharing_build_data = Odesílat data buildů na ShipBuilds.com
-ui-settings-app-data_sharing_replays = Odesílat záznamy na ShipBuilds.com
-ui-settings-app-open_data_dir = Otevřít složku dat aplikace
 ui-settings-app-open_data_dir_tooltip = Otevře složku dat aplikace (nastavení, logy, data v mezipaměti) ve správci souborů.
 ui-settings-app-proxy_url = HTTP proxy
-ui-settings-app-proxy_url_hint = host:port, nebo ponechte prázdné pro použití systémového nastavení proxy (projeví se po restartu)
 ui-settings-app-proxy_url_hint_live = host:port, nebo ponechte prázdné pro použití systémového nastavení proxy
-ui-settings-app-zoom_factor = Faktor přiblížení (Ctrl + a Ctrl - jej také mění)
 ui-settings-app-theme = Motiv
 ui-settings-app-theme_system = Systémový
 ui-settings-app-theme_dark = Tmavý
@@ -266,7 +229,6 @@ ui-settings-app-code_integrity_never = Nikdy
 ui-settings-app-language = Jazyk
 
 ## ui.settings.wows
-ui-settings-wows-heading = Nastavení World of Warships
 ui-settings-wows-description = Cesta k instalaci World of Warships
 ui-settings-wows-directory_hint = Adresář World of Warships
 ui-settings-wows-browse = Procházet...
@@ -275,51 +237,45 @@ ui-settings-wows-browse = Procházet...
 ui-settings-wows-cache-heading = Mezipaměť herních dat
 ui-settings-wows-cache-description = Vyexportovaná herní data, aby šlo otevřít i záznamy ze starších buildů
 ui-settings-wows-cache-auto_dump = Ukládat herní data pro kompatibilitu starších záznamů
-ui-settings-wows-cache-directory_label = Adresář mezipaměti:
 ui-settings-wows-cache-browse = Procházet
 ui-settings-wows-cache-open_folder = Otevřít složku
 ui-settings-wows-cache-delete_old = Smazat starší verze
-ui-settings-wows-cache-stats = Mezipaměť herních dat: { $size } v { $count } verzích
+ui-settings-wows-cache-stats = Mezipaměť herních dat: { $size } v { $count ->
+    [one] { $count } verzi
+    [few] { $count } verzích
+   *[other] { $count } verzích
+}
 ui-settings-wows-cache-check_updates = Zkontrolovat aktualizace
 ui-settings-wows-cache-actions = Akce mezipaměti
 ui-settings-wows-cache-actions_tooltip = Zkontrolovat aktualizace nebo ověřit uložené buildy
 ui-settings-wows-cache-update_all = Aktualizovat vše
-ui-settings-wows-cache-updates_available = { $count } uložených buildů má k dispozici novější data
+ui-settings-wows-cache-updates_available = { $count ->
+    [one] { $count } uložený build má k dispozici novější data
+    [few] { $count } uložené buildy mají k dispozici novější data
+   *[other] { $count } uložených buildů má k dispozici novější data
+}
 ui-settings-wows-cache-validate = Ověřit mezipaměť
-ui-settings-wows-cache-validate_tooltip = Porovná každý uložený build se vzdáleným repozitářem a ověří integritu souborů
 ui-settings-wows-cache-repair = Opravit
-ui-settings-wows-cache-repair_needed = { $count } uložených buildů je zastaralých nebo poškozených
-
-## ui.task
-ui-task-batch_render_progress = Vykreslování { $current }/{ $total }: { $name }
+ui-settings-wows-cache-repair_needed = { $count ->
+    [one] { $count } uložený build je zastaralý nebo poškozený
+    [few] { $count } uložené buildy jsou zastaralé nebo poškozené
+   *[other] { $count } uložených buildů je zastaralých nebo poškozených
+}
 
 ## ui.settings.replay
-ui-settings-replay-heading = Nastavení záznamů
-ui-settings-replay-description = Nastavte, které sloupce se zobrazí v tabulce výsledků záznamů
 ui-settings-replay-show_raw_xp = Zobrazit hrubé XP
 ui-settings-replay-show_entity_id = Zobrazit ID entity
 ui-settings-replay-show_observed_damage = Zobrazit pozorované poškození
 ui-settings-replay-enable_previews = Zobrazit náhled minimapy při najetí
 ui-settings-replay-enable_previews_tooltip = Najetí na záznam jej na pozadí načte a přehraje, aby vznikl opakující se náhled minimapy. Na pomalých discích toto vypněte.
-ui-settings-replay-show_fires = Zobrazit požáry
-ui-settings-replay-show_floods = Zobrazit záplavy
-ui-settings-replay-show_citadels = Zobrazit citadely
-ui-settings-replay-show_crits = Zobrazit kritická zasažení modulů
 ui-settings-replay-auto_export_data = Automatický export dat
-ui-settings-replay-format_json = JSON
-ui-settings-replay-format_csv = CSV
-ui-settings-replay-format_cbor = CBOR
 ui-settings-replay-export_path_hint = Adresář automatického exportu dat
 ui-settings-replay-export_path_missing = Adresář neexistuje. Data do něj nelze exportovat.
 ui-settings-replay-index_all_replays = Indexovat všechny záznamy
-ui-settings-replay-reindex_all_replays = Znovu indexovat všechny záznamy
-ui-settings-replay-reindex_all_replays_hover = Znovu načte a naindexuje každý záznam včetně již indexovaných. Použijte po aktualizaci, která přidá nová indexovaná data (např. osobní hodnocení, stav odpojení), aby se doplnila i k existujícím položkám.
 ui-settings-replay-show_heals = Zobrazit léčení
 ui-settings-replay-current_path = Aktuální cesta k záznamům
 
 ## ui.settings.session
-ui-settings-session-heading = Nastavení relace
-ui-settings-session-description = Předvolby spolupracujících relací záznamů
 ui-settings-session-display_name = Zobrazované jméno
 ui-settings-session-suppress_ip_warning = Nezobrazovat upozornění na IP adresu P2P
 ui-settings-session-ip_warning_tooltip = Spolupracující relace používají P2P síť. Ostatní uživatelé v relaci mohou vidět vaši IP adresu.
@@ -327,8 +283,6 @@ ui-settings-session-disable_auto_open = Zakázat automatické otevírání oken 
 ui-settings-session-auto_open_tooltip = Když je povoleno, okna relace (záznamy, taktické tabule) se nebudou otevírat automaticky. Stále je můžete otevřít z nabídky relace.
 
 ## ui.settings.twitch
-ui-settings-twitch-heading = Nastavení Twitch
-ui-settings-twitch-description = Připojte se k Twitch pro integraci chatu a sledování hráčů
 ui-settings-twitch-get_token = Získat přihlašovací token
 ui-settings-twitch-get_token_tooltip = Používáme přihlašovací stránku Chatterino, protože poskytuje token s potřebnými oprávněními (v podstatě token moderátora s oprávněními chatu) a odstraňuje potřebu, aby vývojář WoWs Toolkit hostoval vlastní přihlašovací stránku, která by měla stejný výsledek.
 ui-settings-twitch-paste_token_no_token = Vložit token (žádný token nenastaven)
@@ -341,29 +295,18 @@ ui-settings-twitch-signed_in_as = Přihlášen jako { $who }
 
 ## ui.replay
 ui-replay-copy_bug_report_info = Kopírovat informace pro hlášení chyby
-ui-replay-collapse_listing = Sbalit seznam záznamů
-ui-replay-expand_listing = Rozbalit seznam záznamů
 ui-replay-match_age = před { $age }
 ui-replay-listing_caption = Záznamy
-ui-replay-listing_reading = Načítání { $done } z { $total }...
-ui-replay-listing_scanning = Prohledávání { $done } z { $total }...
-ui-replay-listing_downloading = Stahování herních dat, { $done } z { $total } souborů...
-ui-replay-listing_loading_data = Načítání herních dat pro { $version } ({ $index } z { $count })...
 ui-replay-loading_game_data_version = Načítání herních dat pro { $version }...
 ui-replay-spectator = Divák
 ui-replay-loading = Načítání...
 ui-replay-preview_loading = Vytváření náhledu...
-ui-replay-preview_empty = Žádný pohyb k zobrazení
 ui-replay-preview_no_game_data = Žádná herní data pro verzi klienta { $value }
-ui-replay-preview_unreadable = Tento záznam se nepodařilo načíst
 ui-replay-preview_unreadable_because = Tento záznam se nepodařilo načíst: { $value }
 ui-replay-preview_unwalkable = Bitvu z tohoto záznamu nelze zpracovat: { $value }
 ui-replay-preview_unknown_version = Tento záznam uvádí nečitelnou verzi klienta: { $value }
 ui-replay-preview_no_map = Žádná data mapy pro { $value }
-ui-replay-preview_cancelled = Náhled byl nahrazen novějším
 ui-replay-preview_render_failed = Náhled nelze vykreslit: { $value }
-ui-replay-no_selection = Klikněte na záznam pro zobrazení nebo dvojklikem otevřete v nové kartě
-ui-replay-workspace_closed = Tento pracovní prostor záznamu byl zavřen
 ui-replay-incomplete_results = Neúplné výsledky zápasu
 ui-replay-incomplete_results_tooltip = Záznam zatím nemá výsledky z konce zápasu. Data budou automaticky znovu načtena po skončení zápasu a přidání výsledků.
 ui-replay-no_chat = V tomto záznamu nebyly odeslány žádné chatové zprávy
@@ -380,11 +323,18 @@ ui-replay-hide_my_stats = Skrýt statistiky mých testovacích lodí
 ui-replay-open_manually = Ručně otevřít soubor záznamu...
 ui-replay-open_directory = Otevřít adresář záznamů...
 ui-replay-search_these_replays = Prohledat tyto záznamy
-ui-replay-reading_directory = Vypisování záznamů v { $dir }
 ui-replay-import_constants = Importovat soubor constants.json...
 ui-replay-refresh_persisted_data = Obnovit uložená data záznamů...
-ui-replay-contributing = Odesílání příspěvku: { $done } z { $total } záznamů
-ui-replay-contributed = Odesláno { $sent } z { $total } záznamů
+ui-replay-contributing = Odesílání příspěvku: { $done } z { $total ->
+    [one] { $total } záznamu
+    [few] { $total } záznamů
+   *[other] { $total } záznamů
+}
+ui-replay-contributed = Odesláno { $sent } z { $total ->
+    [one] { $total } záznamu
+    [few] { $total } záznamů
+   *[other] { $total } záznamů
+}
 ui-replay-contribute_nothing_shared = Nejprve v Nastavení zvolte, co chcete sdílet
 ui-replay-contribute_none_listed = Nejsou uvedeny žádné záznamy k odeslání
 ui-replay-contribute_not_ready = Záznamy lze odeslat, až se načtou herní data a nastavení
@@ -394,7 +344,11 @@ ui-replay-auto_exported = Bitva byla exportována do { $file }
 ui-replay-opened_new_battle = Otevřena nová bitva: { $battle }
 ui-replay-new_battle_listed = Nová bitva: { $battle }
 ui-replay-results_arrived = Výsledky bitvy { $battle } dorazily
-ui-replay-constants_written = Stažena mapování výsledků pro buildy: { $count }
+ui-replay-constants_written = { $count ->
+    [one] Mapování výsledků pro { $count } build bylo staženo
+    [few] Mapování výsledků pro { $count } buildy byla stažena
+   *[other] Mapování výsledků pro { $count } buildů byla stažena
+}
 ui-replay-constants_import_title = Importovat constants.json
 ui-replay-constants_imported = Mapování výsledků pro build { $build } bylo importováno
 ui-replay-constants_import_failed = Mapování nebylo importováno: { $reason }
@@ -410,13 +364,18 @@ ui-replay-constants_fallback_published = Používají se konstanty zveřejněné
 ui-replay-constants_fallback_embedded = Používají se vestavěné konstanty.
 ui-replay-copy_latest_log = Kopírovat poslední protokol do schránky
 ui-replay-load_alt_perspective = Načíst pohled druhého týmu...
-ui-replay-load_alt_perspective_tooltip = Sloučí nahrávku stejného zápasu od jiného hráče s aktuálním záznamem. Odhalí pozice, buildy, torpéda, dělostřelbu a spotřební materiál nepřátel z druhého pohledu.
-ui-replay-load_alt_perspective_disabled_tooltip = Nejprve otevřete nebo vyberte záznam.
 ui-replay-load_alt_perspective_failed = Nepodařilo se sloučit záznam: { $error }
-ui-replay-load_alt_perspective_limit = Tato bitva se již čte z { $limit } dalších záznamů
-ui-replay-consumable_charges_remaining = Zbývá { $remaining } z { $total } nabití
+ui-replay-load_alt_perspective_limit = Tato bitva se již čte z { $limit ->
+    [one] { $limit } dalšího záznamu
+    [few] { $limit } dalších záznamů
+   *[other] { $limit } dalších záznamů
+}
+ui-replay-consumable_charges_remaining = Zbývá { $remaining } z { $total ->
+    [one] { $total } nabití
+    [few] { $total } nabití
+   *[other] { $total } nabití
+}
 ui-replay-consumable_charges_unlimited = Použito { $used } (neomezený počet nabití)
-ui-replay-consumable_header_consumable = Spotřební materiál
 ui-replay-consumable_header_remaining = Zbývá
 ui-replay-consumable_header_total = Celkem
 ui-replay-consumable_charges_infinite = ∞
@@ -452,10 +411,8 @@ ui-replay-check_game_data = Zkontrolovat herní data
 ui-replay-check_game_data_tooltip = Zkontrolovat herní data potřebná pro záznamy v tomto adresáři
 ui-replay-close_side_panel = Zavřít panel
 ui-replay-nda = NDA
-ui-replay-render = Vykreslit
 ui-replay-chat = Chat
 ui-replay-game_chat = Herní chat
-ui-replay-copy_all = Kopírovat vše
 ui-replay-save_to_file = Uložit do souboru
 ui-replay-chat_copied = Chat zkopírován
 ui-replay-copy_message = Kopírovat zprávu
@@ -473,12 +430,9 @@ ui-replay-row_kills = { $count } zabití
 ui-replay-row_survived = naživu
 ui-replay-row_sunk = potopen
 ui-replay-row_division = Divize: { $members }
-ui-replay-export_chat_save = Chat: uložit do souboru
-ui-replay-export_chat_copy = Chat: kopírovat
 ui-replay-export_results_json = Výsledky: JSON
 ui-replay-export_results_cbor = Výsledky: CBOR
 ui-replay-export_results_csv = Výsledky: CSV
-ui-replay-timeline_filter = Filtr
 ui-replay-timeline_filter_all = Vše
 ui-replay-timeline_filter_none = Nic
 ui-replay-timeline_search_hint = Hledat loď nebo hráče
@@ -510,27 +464,44 @@ ui-replay-context-pin_column = Připnout sloupec
 ui-replay-context-unpin_column = Odepnout sloupec
 ui-replay-context-copied = Zkopírováno
 ui-replay-context-copy_path = Kopírovat cestu
-ui-replay-context-copy_replay = Kopírovat záznam
-ui-replay-context-copy_replays = Kopírovat { $count } záznamů
-ui-replay-context-copy_paths = Kopírovat cesty ({ $count })
+ui-replay-context-copy_replays = { $count ->
+    [one] Kopírovat záznam
+    [few] Kopírovat { $count } záznamy
+   *[other] Kopírovat { $count } záznamů
+}
+ui-replay-context-copy_paths = { $count ->
+    [one] Kopírovat cestu
+    [few] Kopírovat { $count } cesty
+   *[other] Kopírovat { $count } cest
+}
 ui-replay-context-show_in_explorer = Zobrazit v průzkumníku souborů
 ui-replay-context-show_replay_controls = Zobrazit ovládání záznamu
 ui-replay-context-open_in_game = Otevřít ve hře
 ui-replay-context-render_replay = Vykreslit záznam
-ui-replay-context-set_session_stats_one = Nastavit jako statistiky relace (1 záznam)
-ui-replay-context-set_session_stats_many = Nastavit jako statistiky relace ({ $count } záznamů)
-ui-replay-context-add_session_stats_one = Přidat ke statistikám relace (1 záznam)
-ui-replay-context-add_session_stats_many = Přidat ke statistikám relace ({ $count } záznamů)
-ui-replay-context-render_to_video = Exportovat jako video
-ui-replay-context-render_to_video_many = Exportovat { $count } záznamů jako video
-ui-replay-context-render_to_clipboard = Exportovat do schránky
-ui-replay-context-render_to_clipboard_many = Exportovat { $count } záznamů do schránky
+ui-replay-context-set_session_stats = Nastavit jako statistiky relace ({ $count ->
+    [one] { $count } záznam
+    [few] { $count } záznamy
+   *[other] { $count } záznamů
+})
+ui-replay-context-add_session_stats = Přidat ke statistikám relace ({ $count ->
+    [one] { $count } záznam
+    [few] { $count } záznamy
+   *[other] { $count } záznamů
+})
+ui-replay-context-render_to_video = { $count ->
+    [one] Exportovat jako video
+    [few] Exportovat { $count } záznamy jako video
+   *[other] Exportovat { $count } záznamů jako video
+}
+ui-replay-context-render_to_clipboard = { $count ->
+    [one] Exportovat do schránky
+    [few] Exportovat { $count } záznamy do schránky
+   *[other] Exportovat { $count } záznamů do schránky
+}
 
 ## ui.replay.column
-ui-replay-column-actions = Akce
 ui-replay-column-player_name = Jméno hráče
 ui-replay-column-base_xp = Základní XP
-ui-replay-column-raw_xp = Hrubé XP
 ui-replay-column-ship_name = Název lodi
 ui-replay-column-hits = Zásahy
 ui-replay-column-heals = Opravy
@@ -539,7 +510,6 @@ ui-replay-column-heals_no_repair_tooltip = Tato loď nemá opravný tým (Repair
 ui-replay-column-kills = Zabití
 ui-replay-column-observed_damage = Pozorované poškození
 ui-replay-column-actual_damage = Skutečné poškození
-ui-replay-column-spotting_damage = Poškození z pozorování
 ui-replay-column-potential_damage = Potenciální poškození
 ui-replay-column-time_lived = Doba přežití
 ui-replay-column-fires = Požáry
@@ -556,7 +526,6 @@ ui-replay-column-match_contribution = MC
 ui-rating-personal_rating = Osobní hodnocení
 ui-rating-match_contribution = Přínos v bitvě
 ui-rating-versus_average = vs průměr
-ui-rating-average = Průměr
 ui-rating-damage = Poškození
 ui-rating-kills = Zabití
 ui-rating-wins = Výhra
@@ -578,12 +547,26 @@ ui-rating-detail-team_damage_share = { $share }% poškození týmu nepřátelům
 ui-rating-detail-tanking = { $potential } potenciálního poškození, { $class }x průměr třídy, { $team }x rovnoměrný podíl týmu
 ui-rating-detail-spotting = { $damage } poškození z pozorování (průměr třídy { $baseline }), pozorováno { $ships } HP lodí (průměr { $ships_baseline })
 ui-rating-detail-objectives = Body: { $capture } obsazování, { $block } blokování, { $reset } resetování, { $battle_end } drženo na konci, { $hold } držení (počítáno čtvrtinou)
-ui-rating-detail-anti_air_planes = { $strike } útočných letadel, { $support } stíhaček a průzkumných letadel
+ui-rating-detail-anti_air_planes = { $strike ->
+    [one] { $strike } útočné letadlo
+    [few] { $strike } útočná letadla
+   *[other] { $strike } útočných letadel
+}, { $support ->
+    [one] { $support } stíhačka nebo průzkumné letadlo
+    [few] { $support } stíhačky a průzkumná letadla
+   *[other] { $support } stíhaček a průzkumných letadel
+}
 ui-rating-detail-anti_air_damage = { $damage } protiletadlového poškození
-ui-rating-detail-torpedo_warnings = Odhaleno { $threatening } hrozících torpéd
-ui-rating-detail-torpedo_warnings_one = Odhaleno 1 hrozící torpédo
-ui-rating-detail-critical_bursts = { $count } kritických zásahů: { $bursts }. Viditelné jen u lodí poblíž nahrávajícího hráče
-ui-rating-detail-critical_bursts_one = 1 kritický zásah: { $bursts }. Viditelné jen u lodí poblíž nahrávajícího hráče
+ui-rating-detail-torpedo_warnings = { $threatening ->
+    [one] Odhaleno { $threatening } hrozící torpédo
+    [few] Odhalena { $threatening } hrozící torpéda
+   *[other] Odhaleno { $threatening } hrozících torpéd
+}
+ui-rating-detail-critical_bursts = { $count ->
+    [one] { $count } kritický zásah
+    [few] { $count } kritické zásahy
+   *[other] { $count } kritických zásahů
+}: { $bursts }. Viditelné jen u lodí poblíž nahrávajícího hráče
 ui-rating-detail-critical_burst = { $share }% lodi { $ship } za { $seconds } s
 ui-rating-detail-critical_burst_at_once = { $share }% lodi { $ship } najednou
 
@@ -596,21 +579,10 @@ ui-rating-basis-dynamic = Dynamické
 ui-rating-basis-static_explained = Statické: měřeno vůči pevné konstantě nebo základu třídy
 ui-rating-basis-dynamic_explained = Dynamické: měřeno vůči očekávaným hodnotám wows-numbers nebo ostatním hráčům v této bitvě
 
-## ui.replay.filter
-ui-replay-filter-raw_xp = Hrubé XP
-ui-replay-filter-entity_id = ID entity
-ui-replay-filter-observed_damage = Pozorované poškození
-ui-replay-filter-heals = Opravy
-ui-replay-filter-fires = Požáry
-ui-replay-filter-floods = Záplavy
-ui-replay-filter-citadels = Citadely
-ui-replay-filter-crits = Kritická zasažení modulů
-
 ## ui.replay.group
 ui-replay-group-date = Datum
 ui-replay-group-ship = Loď
 ui-replay-group-none = Žádné
-ui-replay-group-prefix = Skupina: { $label }
 
 ## ui.replay.player
 ui-replay-player-hidden_profile = Hráč má skrytý profil
@@ -633,19 +605,26 @@ ui-replay-sections-modules_none = Žádné moduly
 ui-replay-sections-signals = Signální vlajky:
 ui-replay-sections-loadout = Výbava:
 ui-replay-sections-loadout_none = Žádná výbava
-ui-replay-sections-abilities = Schopnosti:
-ui-replay-sections-abilities_none = Žádné schopnosti
 ui-replay-sections-captain_skills = Dovednosti kapitána:
 ui-replay-sections-captain_skills_none = Žádné dovednosti kapitána
 ui-replay-sections-consumables = Spotřební materiál:
 ui-replay-sections-fire_chance = Efektivní šance na požár
 ui-replay-sections-fire_chance_expected = očekáváno
-ui-replay-sections-fire_chance_fires = { $fires } požárů
-ui-replay-sections-fire_chance_fires_one = 1 požár
-ui-replay-sections-fire_chance_eligible_hits = { $hits } zásahů, které jej mohly založit
-ui-replay-sections-fire_chance_eligible_hits_one = 1 zásah, který jej mohl založit
-ui-replay-sections-fire_chance_ships = na { $ships } cílových lodích
-ui-replay-sections-fire_chance_ships_one = na 1 cílové lodi
+ui-replay-sections-fire_chance_fires = { $fires ->
+    [one] { $fires } požár
+    [few] { $fires } požáry
+   *[other] { $fires } požárů
+}
+ui-replay-sections-fire_chance_eligible_hits = { $hits ->
+    [one] { $hits } zásah, který jej mohl založit
+    [few] { $hits } zásahy, které jej mohly založit
+   *[other] { $hits } zásahů, které jej mohly založit
+}
+ui-replay-sections-fire_chance_ships = na { $ships ->
+    [one] { $ships } cílové lodi
+    [few] { $ships } cílových lodích
+   *[other] { $ships } cílových lodích
+}
 ui-replay-sections-fire_chance_expected_fires = očekáváno { $fires } požárů
 ui-replay-sections-fire_chance_per_ship = Podle cílové lodi
 ui-replay-sections-fire_chance_no_eligible_hits = žádné zásahy, které mohly založit požár
@@ -653,15 +632,27 @@ ui-replay-sections-fire_chance_formula = Vzorec šance na požár u útočníka
 ui-replay-sections-fire_chance_formula_base = základní burnProb
 ui-replay-sections-fire_chance_formula_clamped = omezeno
 ui-replay-sections-fire_chance_breakdown = Rozpad
-ui-replay-sections-fire_chance_shells_fired = vystřelených granátů HE
-ui-replay-sections-fire_chance_shells_fired_one = vystřelený granát HE
-ui-replay-sections-fire_chance_he_hits = zásahů HE do lodi
-ui-replay-sections-fire_chance_he_hits_one = zásah HE do lodi
-ui-replay-sections-fire_chance_no_target_ship = zásahů HE nepřiřaditelných k cílové lodi
-ui-replay-sections-fire_chance_no_target_ship_one = zásah HE nepřiřaditelný k cílové lodi
+ui-replay-sections-fire_chance_shells_fired = { $count ->
+    [one] vystřelený granát HE
+    [few] vystřelené granáty HE
+   *[other] vystřelených granátů HE
+}
+ui-replay-sections-fire_chance_he_hits = { $count ->
+    [one] zásah HE do lodi
+    [few] zásahy HE do lodi
+   *[other] zásahů HE do lodi
+}
+ui-replay-sections-fire_chance_no_target_ship = { $count ->
+    [one] zásah HE nepřiřaditelný k cílové lodi
+    [few] zásahy HE nepřiřaditelné k cílové lodi
+   *[other] zásahů HE nepřiřaditelných k cílové lodi
+}
 ui-replay-sections-fire_chance_eligible = mohlo založit požár
-ui-replay-sections-fire_chance_ribbons = stuh SetFire
-ui-replay-sections-fire_chance_ribbons_one = stuha SetFire
+ui-replay-sections-fire_chance_ribbons = { $count ->
+    [one] stuha SetFire
+    [few] stuhy SetFire
+   *[other] stuh SetFire
+}
 ui-replay-sections-fire_chance_ribbons_credited = přiřazeno ke granátu
 ui-replay-sections-fire_chance_ribbons_uncredited = nepřiřazeno
 ui-replay-sections-fire_chance_unattributed_no_burn_state = žádná změna stavu hoření, ke které by to šlo přiřadit
@@ -694,19 +685,9 @@ ui-replay-debug-raw_metadata = Surová metadata
 ui-replay-debug-raw_results = Surové výsledky
 ui-replay-debug-mapped_results = Namapované výsledky
 ui-replay-debug-player_metadata = Metadata hráčů
-ui-replay-debug-no_results_packet = Tento záznam neobsahuje paket s výsledky bitvy
-ui-replay-debug-raw_json_tooltip = Surové výsledky bitvy serializované WG.
-ui-replay-debug-mapped_json_tooltip = Výsledky bitvy s pozičními poli přeloženými na pojmenovaná pole.
-ui-replay-debug-results_raw_json = Výsledky bitvy: surový JSON
-ui-replay-debug-results_mapped_json = Výsledky bitvy: mapovaný JSON
 ui-replay-debug-search = Hledat
 ui-replay-debug-previous_match = Předchozí shoda (Shift+Enter)
 ui-replay-debug-next_match = Další shoda (Enter)
-
-## ui.replay.results
-ui-replay-results-victory = Vítězství
-ui-replay-results-defeat = Porážka
-ui-replay-results-draw = Remíza
 
 ## ui.replay.controls
 ui-replay-controls-window_title = Ovládání záznamu
@@ -714,7 +695,7 @@ ui-replay-controls-unavailable = Ovládání není dostupné (commands.scheme.xm
 
 ## ui.collab
 ui-collab-session = Relace
-ui-collab-starting = Spouštění relace…
+ui-collab-starting = Spouštění relace...
 ui-collab-session_active = Relace aktivní
 ui-collab-connected_to_session = Připojeno k relaci
 ui-collab-session_token = Token relace:
@@ -722,14 +703,11 @@ ui-collab-toggle_visibility = Přepnout viditelnost tokenu
 ui-collab-copy_token = Kopírovat token
 ui-collab-token_copied = Token zkopírován do schránky
 ui-collab-copy_web_link = Kopírovat webový odkaz
-ui-collab-copy_web_link_tooltip = Kopírovat odkaz pro webového klienta
 ui-collab-web_link_copied = Webový odkaz zkopírován do schránky
 ui-collab-copy_localhost_link = Kopírovat odkaz localhost
-ui-collab-copy_localhost_tooltip = Kopírovat odkaz localhost (dev)
 ui-collab-localhost_copied = Odkaz localhost zkopírován do schránky
 ui-collab-connected_count = { $count } připojených
 ui-collab-promote_cohost = Povýšit na spolupořadatele
-ui-collab-promoted_cohost = { $name } povýšen na spolupořadatele
 ui-collab-permissions = Oprávnění
 ui-collab-lock_annotations = Zamknout anotace
 ui-collab-lock_settings = Zamknout nastavení
@@ -741,7 +719,6 @@ ui-collab-role_cohost = Spolupořadatel
 ui-collab-you = (vy)
 ui-collab-display_name = Zobrazované jméno:
 ui-collab-display_name_hint = Vaše jméno...
-ui-collab-display_name_error = Zadejte prosím zobrazované jméno
 ui-collab-enter_display_name = Nejprve zadejte zobrazované jméno
 ui-collab-host_session = Vytvořit relaci
 ui-collab-start_session = Zahájit relaci
@@ -756,8 +733,6 @@ ui-collab-waiting_for_frames = Čekání na data bitvy
 ui-collab-open = Otevřít
 ui-collab-open_for_everyone = Otevřít pro všechny
 ui-collab-tactics_board = Taktická tabule
-ui-collab-max_boards = Maximálně { $count } taktických tabulí otevřeno
-ui-collab-waiting_for_data = Čekání na načtení herních dat…
 
 ## battle
 battle-victory = VÍTĚZSTVÍ
@@ -782,8 +757,6 @@ finish_type-score_excess = Limit skóre překročen
 ## ui.stats
 ui-stats-overview = Přehled
 ui-stats-sample_notice = Ukázková data, nikoli zaznamenané hry
-ui-stats-limit = Limit
-ui-stats-division = Div:
 ui-stats-div_all = Všechny
 ui-stats-div_solo = Solo
 ui-stats-div_div = Div
@@ -794,7 +767,6 @@ ui-stats-mode_label = Režim:
 ui-stats-clear = Vymazat
 ui-stats-pr = PR:
 ui-stats-mc = MC:
-ui-stats-frags_count = { $count } zabití
 ui-stats-best_frags = Nejlepší: { $ship } ({ $count } zabití)
 ui-stats-max_damage = Max poškození: { $ship } ({ $damage })
 ui-stats-copy_markdown = Kopírovat jako Markdown
@@ -803,16 +775,8 @@ ui-stats-copy_image_done = Graf zkopírován do schránky
 ui-stats-copy_image_failed = Graf nelze zkopírovat
 ui-stats-copy_csv = Kopírovat jako CSV
 ui-stats-remove_games_hint = Odstranit všechny hry na { $ship } (Ctrl+klik pro přeskočení potvrzení)
-ui-stats-no_stats = Žádné statistiky relace nejsou k dispozici. Nejdřív si zahrajte!
 ui-stats-settings = Nastavení
-ui-stats-chart_type = Typ grafu
-ui-stats-stat_label = Statistika:
-ui-stats-chart_line = Čárový
-ui-stats-chart_bar = Sloupcový
 ui-stats-options = Možnosti
-ui-stats-combined = Kombinované
-ui-stats-rolling_avg = Klouzavý průměr
-ui-stats-labels = Popisky
 ui-stats-ships = Lodě
 ui-stats-filter_ships = Filtrovat lodě grafu
 ui-stats-all_ships = Všechny
@@ -824,12 +788,10 @@ ui-stats-no_statistic_matches = Hledání neodpovídá žádná statistika
 ui-stats-ship_selection_count = Vybráno { $selected } z { $total }
 ui-stats-all_ships_tooltip = Vybrat všechny odpovídající lodě
 ui-stats-no_ships_tooltip = Zrušit výběr odpovídajících lodí
-ui-stats-copy_as_image = Kopírovat jako obrázek
 ui-stats-limit_to_recent = Omezit na nedávné bitvy
 ui-stats-limit_to_recent_tooltip = V Lodích a Grafech platí limit pro každou loď zvlášť, v Přehledu pro všechny bitvy dohromady.
 ui-stats-division_label = Divize:
 ui-stats-add_chart = Přidat graf
-ui-stats-clear_confirm = Vymazat všechny bitvy?
 ui-stats-clear_tooltip = Zapomenout všechny zaznamenané bitvy
 ui-stats-clear_failed = Nevymazáno: { $reason }
 ui-stats-clear_ship_confirm = Stiskněte znovu pro zapomenutí bitev této lodi
@@ -849,16 +811,27 @@ ui-stats-open_directory_stats_tooltip = Otevřít statistiky všech záznamů v 
 ui-stats-directory_stats_unavailable = Herní data se stále načítají
 ui-stats-directory_reading_task = Čtení záznamů pro statistiky adresáře...
 ui-stats-directory_walking = Vyhledávání záznamů...
-ui-stats-directory_scanning = Kontrola { $done } z { $total } záznamů...
-ui-stats-directory_reading = Čtení { $done } z { $total } záznamů...
+ui-stats-directory_scanning = Kontrola { $done } z { $total ->
+    [one] { $total } záznamu...
+    [few] { $total } záznamů...
+   *[other] { $total } záznamů...
+}
+ui-stats-directory_reading = Čtení { $done } z { $total ->
+    [one] { $total } záznamu...
+    [few] { $total } záznamů...
+   *[other] { $total } záznamů...
+}
 ui-stats-directory_reload = Znovu načíst
 ui-stats-directory_reload_tooltip = Znovu přečíst záznamy v tomto adresáři
-ui-stats-directory_skipped = Přeskočeno záznamů: { $count }
+ui-stats-directory_skipped = { $count ->
+    [one] Přeskočen { $count } záznam
+    [few] Přeskočeny { $count } záznamy
+   *[other] Přeskočeno { $count } záznamů
+}
 ui-stats-directory_skipped_detail =
     Nečitelné: { $unreadable }
     Chybí herní data pro jejich build: { $missing_build }
     Bez výsledků bitvy: { $no_results }
-ui-stats-directory_no_games = Žádný záznam v tomto adresáři neobsahuje výsledky bitvy
 ui-stats-chart = Graf
 ui-stats-combine_ships = Sloučit lodě
 ui-stats-running_average = Klouzavý průměr
@@ -870,8 +843,11 @@ ui-stats-session_manual = Ručně
 ui-stats-session_since_opened = Od spuštění aplikace
 ui-stats-session_manual_tooltip = Relace obsahuje bitvy, které odehrajete, a záznamy, které nastavíte nebo přidáte ze seznamu záznamů. Uchovává se mezi spuštěními.
 ui-stats-session_since_opened_tooltip = Relace obsahuje každou bitvu, která začala v { $time } nebo později, kdy byla aplikace spuštěna. Vaše ruční relace je zachována a vrátí se, když přepnete na Ručně.
-ui-stats-session_battles_one = 1 bitva
-ui-stats-session_battles_many = Bitvy: { $count }
+ui-stats-session_battles = { $count ->
+    [one] { $count } bitva
+    [few] { $count } bitvy
+   *[other] { $count } bitev
+}
 ui-stats-session_chip_manual = Relace: { $battles }
 ui-stats-session_chip_since = Relace od { $time }: { $battles }
 ui-stats-session_empty_title = V této relaci zatím nejsou žádné bitvy
@@ -902,7 +878,11 @@ ui-stats-leave_out_ship_hint = Vynechat { $ship } ze statistik
 ui-stats-keep_all_games = Započítat všechny hry
 ui-stats-keep_all_games_tooltip = Znovu započítat všechny ručně vynechané hry
 ui-stats-left_out_only = Pouze vynechané
-ui-stats-match_count = { $shown } z { $total } her, vynecháno { $left_out }
+ui-stats-match_count = { $shown } z { $total ->
+    [one] { $total } hry
+    [few] { $total } her
+   *[other] { $total } her
+}, vynecháno { $left_out }
 ui-stats-no_matches = Aktuálním filtrům neodpovídají žádné hry
 ui-stats-search_matches = Hledat podle lodi...
 ui-stats-ship_filter_tooltip = Vyberte, které lodě se započítají do statistik
@@ -911,7 +891,11 @@ ui-stats-leave_out_ships_tooltip = Vynechat všechny odpovídající lodě ze st
 ui-stats-dates = Data
 ui-stats-all_dates = Všechna data
 ui-stats-clear_dates = Zobrazit všechna data
-ui-stats-games_left_out = Vynecháno her: { $count }
+ui-stats-games_left_out = { $count ->
+    [one] Vynechána { $count } hra
+    [few] Vynechány { $count } hry
+   *[other] Vynecháno { $count } her
+}
 ui-stats-reset_filters = Obnovit filtry
 ui-stats-reset_filters_tooltip = Zobrazit všechny hry: bez limitu, rozsahu dat, divize, režimu ani vynechaných lodí a her
 
@@ -923,12 +907,10 @@ ui-stats-table-average = Průměr
 
 ## ui.player_tracker
 ui-player_tracker-clear_stats = Vymazat statistiky
-ui-player_tracker-player_filter = Filtr hráčů
 ui-player_tracker-populate_from_replays = Naplnit daty ze záznamů
 ui-player_tracker-find_matches = Najít zápasy
 ui-player_tracker-open_wows_numbers = Otevřít na wows-numbers
 ui-player_tracker-open_shipbuilds = Otevřít buildy na shipbuilds
-ui-player_tracker-subtab_historical = Historické
 ui-player_tracker-subtab_players = Hráči
 ui-player_tracker-filter_hint = Filtrovat podle hráče nebo klanu...
 ui-player_tracker-time_period = Časové období
@@ -943,55 +925,70 @@ ui-player_tracker-loading_clans = Načítání klanů...
 ui-player_tracker-loading_players = Načítání hráčů...
 ui-player_tracker-index_failed = Index nelze přečíst: { $reason }
 ui-player_tracker-no_players = Pro toto období nejsou indexováni žádní hráči
-ui-player_tracker-notes_title = Poznámky: { $name }
 ui-player_tracker-note_not_saved = Neuloženo: { $reason }
 ui-player_tracker-subtab_current_match = Aktuální zápas
-ui-player_tracker-your_team = Váš tým ({ $count })
-ui-player_tracker-enemy_team = Nepřátelský tým ({ $count })
-ui-player_tracker-no_live_match = Neprobíhá žádný zápas. Soupiska se zobrazí, jakmile vstoupíte do zápasu.
-ui-player_tracker-encounters_hover = Spatřen celkem { $total }x, { $range } ve zvoleném časovém rozmezí. Naposledy { $last }.
+ui-player_tracker-encounters_hover = Spatřen celkem { $total ->
+    [one] { $total }krát
+    [few] { $total }krát
+   *[other] { $total }krát
+}, { $range } ve zvoleném časovém rozmezí. Naposledy { $last }.
 ui-player_tracker-never_encountered = Dosud nespatřen
 ui-player_tracker-copy_wg_id = Kliknutím zkopírujete WG ID
 ui-player_tracker-copied_wg_id = WG ID { $id } zkopírováno
 ui-player_tracker-aliases_hover = Také znám jako: { $names }
 ui-player_tracker-notes_hint = Poznámky k tomuto hráči
-ui-player_tracker-arena_count = { $count } zaznamenaných zápasů
+ui-player_tracker-arena_count = { $count ->
+    [one] { $count } zaznamenaný zápas
+    [few] { $count } zaznamenané zápasy
+   *[other] { $count } zaznamenaných zápasů
+}
 ui-player_tracker-last_encountered_exact = Naposledy potkán { $timestamp }
 ui-player_tracker-subtab_clans = Klany
 ui-player_tracker-clan_no_data = Zatím nejsou zaznamenána žádná setkání s klany.
 ui-player_tracker-find_clan_matches = Najít zápasy, ve kterých se objevuje tato značka. Index nemá pole jen pro klany, takže se shodují i jména hráčů obsahující tuto značku.
 ui-player_tracker-clan_sightings_hover = { $range } z nich spadá do zvoleného časového rozmezí.
-ui-player_tracker-clan_member_matches = spatřen v { $count } zápasech
+ui-player_tracker-clan_member_matches = spatřen { $count ->
+    [one] v { $count } zápase
+    [few] ve { $count } zápasech
+   *[other] v { $count } zápasech
+}
 ui-player_tracker-show_division_mates = Zobrazit spoluhráče z divize
 ui-player_tracker-show_division_mates_hover = Počítat zápasy, které jste odehráli v divizi. Ve výchozím stavu vypnuto, protože jste tam tyto hráče potkali jen proto, že jste je pozvali. Ostatní zápasy proti stejným hráčům se počítají vždy.
 ui-player_tracker-seen_in_twitch_chat = Viděn v chatu Twitch
 ui-player_tracker-seen_in_twitch_chat_hover = Zobrazit jen hráče, jejichž jméno odpovídalo přihlašovacímu jménu v chatu Twitch během zápasu s vámi.
-ui-player_tracker-twitch_seen_hover = Viděn v chatu Twitch jako { $logins } v { $count } zápasech s vámi
+ui-player_tracker-twitch_seen_hover = Viděn v chatu Twitch jako { $logins } { $count ->
+    [one] v { $count } zápase
+    [few] ve { $count } zápasech
+   *[other] v { $count } zápasech
+} s vámi
 ui-player_tracker-win_rate_overall = Celkově
 ui-player_tracker-win_rate_ship = Loď
 ui-player_tracker-view_compact = Kompaktní
 ui-player_tracker-view_detailed = Podrobné
 ui-player_tracker-ship_stats = Statistiky lodi
-ui-player_tracker-win_rate_mode_hover = Zobrazit statistiky účtu, nebo statistiky této lodi. Barva řádku, PR, počet bitev i průměrné poškození se tím řídí.
 ui-player_tracker-stats_resolving = Načítání soupisky zápasu...
 ui-player_tracker-stats_fetching = Získávání statistik hráčů...
-ui-player_tracker-stats_rate_limited = Omezení počtu dotazů, další pokus za { $wait }
 ui-player_tracker-stats_unavailable = Statistiky nedostupné: { $reason }
-ui-player_tracker-roster_unavailable = Ze záznamu se nepodařilo načíst soupisku zápasu
 ui-player_tracker-stats_hidden = Profil tohoto hráče je skrytý
 ui-player_tracker-stats_no_data = Pro tohoto hráče nejsou žádné statistiky
-ui-player_tracker-stats_unplayed_ship = V této lodi nejsou zaznamenány žádné bitvy
 ui-player_tracker-pr_overall_hover = PR účtu napříč všemi loděmi
 ui-player_tracker-pr_ship_hover = PR v této lodi
-ui-player_tracker-avg_damage = Průměrné poškození
-ui-player_tracker-win_rate_hover_line = { $label }: { $rate } za { $battles } bitev
-ui-player_tracker-win_rate_hover_line_damage = { $label }: { $rate } za { $battles } bitev, průměrné poškození { $damage }
+ui-player_tracker-win_rate_hover_line = { $label }: { $rate } za { $count ->
+    [one] { $battles } bitvu
+    [few] { $battles } bitvy
+   *[other] { $battles } bitev
+}
+ui-player_tracker-win_rate_hover_line_damage = { $label }: { $rate } za { $count ->
+    [one] { $battles } bitvu
+    [few] { $battles } bitvy
+   *[other] { $battles } bitev
+}, průměrné poškození { $damage }
 ui-player_tracker-team_average_win_rate = Prům. WR: { $rate }
-ui-player_tracker-team_players = Hráčů: { $count }
-ui-player_tracker-row_win_rate = WR { $rate }
-ui-player_tracker-row_personal_rating = PR { $value }
-ui-player_tracker-row_battles = { $count } bitev
-ui-player_tracker-row_seen = Spatřen { $total }x
+ui-player_tracker-team_players = { $count ->
+    [one] { $count } hráč
+    [few] { $count } hráči
+   *[other] { $count } hráčů
+}
 ui-player_tracker-debug_replay_picker = Ladění: považovat záznam za aktuální zápas
 ui-player_tracker-debug_replay_picker_hover = Načte soupisku dokončeného záznamu do této karty, aby šlo vyzkoušet načítání statistik mimo bitvu.
 ui-player_tracker-debug_replay_none = Vyberte záznam
@@ -1019,29 +1016,13 @@ ui-player_tracker-period-past_week = Poslední týden
 ui-player_tracker-period-past_month = Poslední měsíc
 ui-player_tracker-period-all_time = Za celou dobu
 
-
 ## ui.twitch
 ui-twitch-possible_name = Možné jméno na streamu: { $name }
 ui-twitch-seen_minutes = Spatřen: { $minutes } minut po zahájení zápasu
 ui-twitch-click_to_copy = Kliknutím zkopírujete
 ui-twitch-copied = Zkopírováno { $name }
-## ui.mod_manager
-ui-mod_manager-category_filters = Filtry kategorií
-ui-mod_manager-enabled = Povoleno
-ui-mod_manager-mod_home = Domovská stránka módu
-ui-mod_manager-discord_thread = Vlákno schválení na Discord
-ui-mod_manager-save_config = Uložit konfiguraci módů
-ui-mod_manager-load_config = Načíst konfiguraci módů
-ui-mod_manager-filter = Filtr
-
-## ui.mod_manager.column
-ui-mod_manager-column-enabled = Povoleno
-ui-mod_manager-column-name = Název
-ui-mod_manager-column-author = Autor
-ui-mod_manager-column-category = Kategorie
 
 ## ui.renderer
-ui-renderer-loading = Načítání dat záznamu...
 ui-renderer-preparing_export = Příprava exportu...
 ui-renderer-encoding = Kódování
 ui-renderer-muxing = Multiplexování
@@ -1053,7 +1034,7 @@ ui-renderer-advantage-score_projection = Projekce skóre
 ui-renderer-advantage-fleet_power = Síla flotily
 ui-renderer-advantage-strategic_threat = Strategická hrozba
 ui-renderer-advantage-total = Celkem
-ui-renderer-advantage-hp_incomplete = Data HP/lodí neúplná — zobrazeny pouze faktory skóre
+ui-renderer-advantage-hp_incomplete = Data HP/lodí neúplná. Zobrazeny pouze faktory skóre
 
 ## ui.renderer.context
 ui-renderer-context-show_trail = Zobrazit stopu
@@ -1069,39 +1050,30 @@ ui-renderer-context-enable_all = Povolit vše
 ui-renderer-context-disable_all = Zakázat vše
 ui-renderer-context-disable_other_ranges = Zakázat všechny ostatní dostoely
 ui-renderer-context-enable_all_ranges = Povolit dostoely všech lodí
-ui-renderer-context-show_armor = Zobrazit pancíř v reálném čase
 ui-renderer-context-realtime_armor = Zobrazit pancíř v reálném čase
 
 ## ui.renderer.controls
 ui-renderer-controls-jump_to_start = Přeskočit na začátek
 ui-renderer-controls-previous_event = Předchozí událost (Shift+Left)
 ui-renderer-controls-back_10s = Zpět 10s (Left)
-ui-renderer-controls-pause = Pauza (Space)
-ui-renderer-controls-play = Přehrát (Space)
 ui-renderer-controls-forward_10s = Vpřed 10s (Right)
 ui-renderer-controls-next_event = Další událost (Shift+Right)
 ui-renderer-controls-jump_to_end = Přeskočit na konec
-ui-renderer-controls-save_as_video = Uložit jako video
-ui-renderer-controls-copy_to_clipboard = Vykreslit video do schránky
 ui-renderer-controls-speed = Rychlost přehrávání
 
 ## ui.renderer.settings
 ui-renderer-settings-title = Nastavení zobrazení
 ui-renderer-settings-hp_bars = Ukazatele HP
-ui-renderer-settings-ship_settings = Nastavení lodí
 ui-renderer-settings-armament = Výzbroj
 ui-renderer-settings-dead_ships = Zničené lodě
 ui-renderer-settings-dead_ship_names = Názvy zničených lodí
 ui-renderer-settings-player_names = Jména hráčů
 ui-renderer-settings-ship_ranges = Dostřely lodí
-ui-renderer-settings-self_ship_ranges = Vlastní dostoely lodi
 ui-renderer-settings-ship_names = Názvy lodí
 ui-renderer-settings-camera_direction = Směr věží
-ui-renderer-settings-trail_settings = Nastavení stop
 ui-renderer-settings-heat_trail = Tepelná stopa
 ui-renderer-settings-speed_trails = Stopy rychlosti
 ui-renderer-settings-dead_ship_trails = Stopy zničených lodí
-ui-renderer-settings-map_settings = Nastavení mapy
 ui-renderer-settings-buildings = Budovy
 ui-renderer-settings-capture_points = Body obsazení
 ui-renderer-settings-consumables = Spotřební materiál
@@ -1109,7 +1081,6 @@ ui-renderer-settings-planes = Letadla
 ui-renderer-settings-smoke = Kouř
 ui-renderer-settings-torpedoes = Torpéda
 ui-renderer-settings-tracers = Světelné stopy
-ui-renderer-settings-hud_settings = Nastavení HUD
 ui-renderer-settings-battle_result = Výsledek bitvy
 ui-renderer-settings-buff_counters = Počítadla posílení
 ui-renderer-settings-chat_label = Chat
@@ -1146,21 +1117,11 @@ ui-unpacker-filter_files = Filtrovat soubory...
 ui-unpacker-search_in_files = Hledat v souborech
 ui-unpacker-search_hint = Hledat v souborech...
 ui-unpacker-path_filter_hint = Filtr cesty (např. *.xml)
-ui-unpacker-queue_all = Zařadit vše
 ui-unpacker-queue_all_files = Zařadit všechny soubory
-ui-unpacker-empty_directory = Prázdný adresář
-ui-unpacker-stop_search_tooltip = Zastavit hledání
-ui-unpacker-no_matches = Nebyly nalezeny žádné shody.
 ui-unpacker-view_as_json = Zobrazit jako JSON
 ui-unpacker-extract_as_json = Extrahovat jako JSON
 ui-unpacker-view_contents = Zobrazit obsah
 ui-unpacker-version = Verze:
-ui-unpacker-game_params = GameParams
-ui-unpacker-base_as_json = Základ jako JSON
-ui-unpacker-as_json = Jako JSON
-ui-unpacker-as_cbor = Jako CBOR
-ui-unpacker-as_json_minimal = Jako JSON (minimální / transformovaný)
-ui-unpacker-as_cbor_minimal = Jako CBOR (minimální / transformovaný)
 ui-unpacker-decode_prototypes = Dekódovat prototypy jako JSON
 ui-unpacker-decode_prototypes_tooltip = Dekódovat podporované prototypy Assets.bin (.visual, .model, .mfm) do JSON při extrakci
 ui-unpacker-extraction_queue = Fronta extrakce
@@ -1169,16 +1130,17 @@ ui-unpacker-expand_folders = Rozbalit strom složek
 ui-unpacker-clear_all = Vymazat vše
 ui-unpacker-browse = Procházet
 ui-unpacker-output_dir_hint = Výstupní adresář...
-ui-unpacker-go_to_directory = Přejít do adresáře
 ui-unpacker-remove_from_queue = Odebrat z fronty
 ui-unpacker-queue_folder = Zařadit celou složku
 ui-unpacker-queue_file = Přidat soubor do fronty
 ui-unpacker-extraction_output = Extrahovat do
 ui-unpacker-queue_empty = Zaškrtnutím souboru nebo složky ve výpisu ji přidáte do fronty
-ui-unpacker-show_queue = Fronta extrakce
-ui-unpacker-double_click_open = Dvojklikem otevřít
 ui-unpacker-packages = Balíčky
-ui-unpacker-item_count = Položek: { $count }
+ui-unpacker-item_count = { $count ->
+    [one] { $count } položka
+    [few] { $count } položky
+   *[other] { $count } položek
+}
 ui-unpacker-search_title = Hledání: { $query }
 ui-unpacker-search_in = v { $source }
 ui-unpacker-image_decode_failed = Obrázek nelze dekódovat: { $reason }
@@ -1196,11 +1158,22 @@ ui-unpacker-queued_count = Ve frontě: { $count }
 ui-unpacker-counting_files = Počítání souborů...
 ui-unpacker-extracting = Extrahování { $done } z { $total }
 ui-unpacker-extract_failed = Extrakce selhala: { $reason }
-ui-unpacker-extracted = Extrahováno souborů: { $count }
-ui-unpacker-cancelled = Zrušeno po { $count } souborech
-ui-unpacker-extract = Extrahovat
-ui-unpacker-extract_one = Extrahovat 1 položku
-ui-unpacker-extract_many = Extrahovat položky ({ $count })
+ui-unpacker-extracted = { $count ->
+    [one] Extrahován { $count } soubor
+    [few] Extrahovány { $count } soubory
+   *[other] Extrahováno { $count } souborů
+}
+ui-unpacker-cancelled = Zrušeno po { $count ->
+    [one] { $count } souboru
+    [few] { $count } souborech
+   *[other] { $count } souborech
+}
+ui-unpacker-extract = { $count ->
+    [0] Extrahovat
+    [one] Extrahovat { $count } položku
+    [few] Extrahovat { $count } položky
+   *[other] Extrahovat { $count } položek
+}
 ui-unpacker-choose_directory = Nejprve vyberte adresář pro extrakci
 ui-unpacker-dump_parameters = Exportovat GameParams
 ui-unpacker-dump_parameters_tooltip = Exportovat GameParams.data tohoto buildu
@@ -1216,17 +1189,10 @@ ui-unpacker-base_only = Pouze základní parametry
 ui-unpacker-column-name = Název
 ui-unpacker-column-size = Velikost
 ui-unpacker-column-type_col = Typ
-ui-unpacker-column-path = Cesta
-ui-unpacker-column-file = Soubor
-ui-unpacker-column-offset = Posun
-ui-unpacker-column-context = Kontext
 
 ## ui.armor
 ui-armor-load_settings = Načtěte herní data v Nastavení pro použití Prohlížeče pancíře.
-ui-armor-gpu_unavailable = Stav GPU vykreslování není dostupný.
-ui-armor-loading_ship = Načítání dat lodi...
 ui-armor-load_failed = Nepodařilo se načíst data lodi: { $error }
-ui-armor-ship_load_failed = Nepodařilo se načíst { $ship }: { $reason }
 ui-armor-empty = Prázdné
 ui-armor-mirror_cameras = Zrcadlové kamery
 ui-armor-sync_options = Synchronizovat možnosti
@@ -1240,33 +1206,27 @@ ui-armor-show_hidden_ships_tooltip = Uvést i lodě, které seznam vynechává, 
 ui-armor-compare_split = Porovnat v novém panelu
 ui-armor-open_in_new_tab = Otevřít v nové kartě
 ui-armor-export_model = Exportovat model lodi
-ui-armor-armor_thickness = Tloušťka pancíře
 ui-armor-export_disclaimer = Tyto 3D modely a textury jsou duševním vlastnictvím Wargaming a jakékoli použití těchto modelů by mělo být v souladu s místními zákony.
 ui-armor-export_button = Exportovat
-ui-armor-armor_toggle = Pancíř
-ui-armor-armor_tooltip = Přepnout viditelnost pancířových zón
 ui-armor-hull_toggle = Trup
-ui-armor-hull_tooltip = Přepnout viditelnost částí modelu trupu
-ui-armor-splash_toggle = Rozstřik
 ui-armor-splash_tooltip = Přepnout viditelnost zóny rozstřiku
 ui-armor-show_hidden = Zobrazit skryté
 ui-armor-show_hidden_tooltip = Přepnout viditelnost (pravděpodobně) skrytých panelů
 ui-armor-gaps = Mezery
 ui-armor-gaps_tooltip = Zvýraznit hraniční hrany, kde se pancířové panely nespojují (potenciální mezery)
 ui-armor-display = Zobrazení
-ui-armor-display_tooltip = Nastavení zobrazení (Ctrl+S)
 ui-armor-marker_opacity = Průhlednost značek
-ui-armor-save_defaults = Uložit jako výchozí
-ui-armor-export_tab = Export
 ui-armor-export_tooltip = Exportovat model lodi do souboru OBJ
 ui-armor-pen_check = Kontrola průniku
-ui-armor-pen_check_tooltip = Nastavit střely pro porovnání průniku
 ui-armor-trajectory = Trajektorie
-ui-armor-trajectory_on = Trajektorie [ZAP]
 ui-armor-trajectory_range = Vzdálenost
 ui-armor-trajectory_clear = Vymazat vše
 ui-armor-arc_heading = Dráha { $number }
-ui-armor-arc_summary = Zásahů: { $hits }, { $armor } mm na { $range } km
+ui-armor-arc_summary = { $hits ->
+    [one] { $hits } zásah
+    [few] { $hits } zásahy
+   *[other] { $hits } zásahů
+}, { $armor } mm na { $range } km
 ui-armor-arc_delete = Smazat tuto dráhu
 ui-armor-arc_isolate_plates = Izolovat pláty
 ui-armor-arc_isolate_plates_tooltip = Zobrazit pouze pancéřové pláty, které tato dráha protnula
@@ -1285,7 +1245,6 @@ ui-armor-arc_plate_unknown = nezaznamenaném plátu
 ui-armor-angle_good = pod 30 deg
 ui-armor-angle_mid = 30 až 45 deg
 ui-armor-angle_bad = nad 45 deg
-ui-armor-trajectory_tooltip = Klikněte na pancíř pro simulaci trajektorie střel (Ctrl+T)
 ui-armor-trajectory_ship = Loď:
 ui-armor-trajectory_select_ship = Vybrat loď
 ui-armor-trajectory_ship_tooltip = Vyberte loď, jejíž střela se použije pro trajektorii
@@ -1296,18 +1255,14 @@ ui-armor-trajectory_select_shell = Vybrat střelu
 ui-armor-trajectory_shell_tooltip = Vyberte střelu použitou pro simulaci trajektorie
 ui-armor-continue_ricochet = Pokračovat po odrazu
 ui-armor-splash_mode = Rozstřik
-ui-armor-splash_on = Rozstřik [ZAP]
 ui-armor-splash_no_data = Žádná data o rozstřiku pro tuto loď
 ui-armor-splash_no_shells = Přidejte loď se střelami HE/SAP do seznamu porovnání
 ui-armor-splash_tooltip_mode = Klikněte na pancíř pro vizualizaci objemu poškození rozstřiku HE
-ui-armor-loading_armor = Načítání lodi...
 ui-armor-select_ship = Vyberte loď ze seznamu
-ui-armor-pen_check_label = Kontrola průniku
 ui-armor-all_btn = Vše
 ui-armor-none_btn = Nic
 ui-armor-opaque = Neprůhledný
 ui-armor-upgrade = Vylepšení:
-ui-armor-camo = Kamufláž:
 ui-armor-camo_none = Základní (žádná)
 ui-armor-camo_group_universal = Univerzální kamufláže
 ui-armor-camo_group_expendable = Spotřební kamufláže
@@ -1316,7 +1271,11 @@ ui-armor-show_armor_thickness = Zobrazit legendu tloušťky pancíře
 ui-armor-plate_edges = Hrany panelů
 ui-armor-waterline = Vodní čára
 ui-armor-camera_rings = Kruhy kamery
-ui-armor-realtime_readout = { $health } HP  -  zásahů: { $hits }
+ui-armor-realtime_readout = { $health } HP  -  { $hits ->
+    [one] { $hits } zásah
+    [few] { $hits } zásahy
+   *[other] { $hits } zásahů
+}
 ui-armor-show_camera_rings = Zobrazit kruhy kamery
 ui-armor-camera_fov = Zorné pole kamery
 ui-armor-camera_height = Výška kamery
@@ -1341,7 +1300,6 @@ ui-armor-tree_matches = Shody: { $count }
 ui-armor-tree_no_matches = Žádné shody
 ui-armor-no_matching_options = Filtru neodpovídají žádné možnosti
 ui-armor-opacity = Průhlednost
-ui-armor-ship_hull = Trup lodi
 ui-armor-opaque_hull = Neprůhledný trup
 ui-armor-lighting = Osvětlení trupu
 ui-armor-lighting_enabled = Povolit osvětlení
@@ -1357,20 +1315,16 @@ ui-armor-lighting_specular = Odlesk
 ui-armor-lighting_shininess = Lesklost
 ui-armor-lighting_key_color = Barva hlavního světla
 ui-armor-lighting_ambient_color = Ambientní barva
-ui-armor-pop_out = Oddělit
 ui-armor-zero_mm_plates = Panely 0 mm
 ui-armor-armor_opacity = Průhlednost pancíře
 ui-armor-ballistic_disclaimer = Balistické výsledky jsou založeny na reverzním inženýrství/odhadech fungování simulace
 ui-armor-roll = Náklon
-ui-armor-ctrl_click_solo = Ctrl+klik pro izolaci
 ui-armor-reset_plates = Obnovit panely
-ui-armor-visibility = Viditelnost
 ui-armor-armor_options = Pancíř
 ui-armor-no_ship_loaded = Není načtena žádná loď
 ui-armor-lod = LOD:
 ui-armor-lod_highest = 0 (nejvyšší)
 ui-armor-camouflage = Kamufláž
-ui-armor-search_ships = Hledat lodě...
 ui-armor-ships = Lodě
 ui-armor-compare = Porovnat
 ui-armor-compare_tooltip = Otevřít nový panel pro porovnání, nebo klikněte pravým tlačítkem na loď pro její porovnání
@@ -1394,14 +1348,12 @@ ui-armor-zone_toggle_tooltip = Zobrazí nebo skryje všechny pláty v této zón
 ui-armor-mode_solo_zone = pouze zóna
 ui-armor-mode_cast_trajectory = vystřelit dráhu
 ui-armor-loading_catalog = Načítání katalogu lodí...
-ui-armor-catalog_failed = Nepodařilo se načíst katalog lodí: { $reason }
 ui-armor-legend_collapse = Sbalit
 ui-armor-legend_hide = Skrýt legendu
 ui-armor-armor_thickness_title = Tloušťka pancíře
 ui-armor-initializing = Inicializace 3D zobrazení...
 ui-armor-init_failed = Inicializace zobrazení pancíře selhala: { $reason }
 ui-armor-loading_named_ship = Načítání { $ship }...
-ui-armor-rendering = Vykreslování...
 ui-armor-options = Možnosti
 
 ## ui.armor.compass
@@ -1411,23 +1363,30 @@ ui-armor-compass-south = J
 ui-armor-compass-west = Z
 
 ## ui.armor.realtime
-ui-armor-realtime-loading = Načítání pancíře lodi...
-ui-armor-realtime-waiting = Čekání na data lodi...
 ui-armor-realtime-incoming_fire = Příchozí palba
 ui-armor-realtime-attacker_filter = Filtr útočníků
 ui-armor-realtime-all_enemies = Všichni nepřátelé
 ui-armor-realtime-show_secondaries = Zobrazit sekundární výzbroj
-ui-armor-realtime-auto_scroll = Automatické posouvání
 ui-armor-realtime-seek_to_salvo = Přejít na salvu
-ui-armor-realtime-deselect = Zrušit výběr
-ui-armor-realtime-select_all = Vybrat vše
 ui-armor-realtime-no_data = Data o střelách již nejsou dostupná
 ui-armor-realtime-sim_agrees = Simulace souhlasí
-ui-armor-realtime-sim_unchecked = Střely, které nelze simulovat: { $count }
+ui-armor-realtime-sim_unchecked = { $count ->
+    [one] { $count } střelu nelze simulovat
+    [few] { $count } střely nelze simulovat
+   *[other] { $count } střel nelze simulovat
+}
 ui-armor-realtime-sim_rng_zone = Náhodná zóna ({ $angle } deg v rozsahu { $from }-{ $to })
 ui-armor-realtime-sim_disagrees = Simulace: { $sim } / Server: { $server }
 ui-armor-realtime-no_armor_hit = Žádné zásahy pancíře
-ui-armor-realtime-tracked = Sledováno salv: { $salvos }, střel: { $shells }
+ui-armor-realtime-tracked = Sledováno { $salvos ->
+    [one] { $salvos } salva
+    [few] { $salvos } salvy
+   *[other] { $salvos } salv
+}, { $shells ->
+    [one] { $shells } střela
+    [few] { $shells } střely
+   *[other] { $shells } střel
+}
 ui-armor-realtime-nothing_landed = Na tuto loď zatím nic nedopadlo
 ui-armor-realtime-shells = { $count }x
 ui-armor-realtime-salvo_shell = { $caliber } mm { $shell }
@@ -1458,10 +1417,8 @@ advantage-moderate = Střední
 advantage-weak = Slabá
 
 ## ui.search
-ui-search-undo = Vrátit poslední změnu dotazu
 ui-search-edit_value = Upravit hodnotu
 ui-search-add_filter = Přidat filtr
-ui-search-redo = Znovu provést vrácenou změnu
 ui-search-pill_select = Vybrat
 ui-search-pill_deselect = Zrušit výběr
 ui-search-pill_group_all = Seskupit pomocí a
@@ -1477,7 +1434,11 @@ ui-search-outcome_draw = Remíza
 ui-search-outcome_unknown = Neznámý
 ui-search-bool_true = ano
 ui-search-bool_false = ne
-ui-search-match_count = { $count } zápasů
+ui-search-match_count = { $count ->
+    [one] { $count } zápas
+    [few] { $count } zápasy
+   *[other] { $count } zápasů
+}
 ui-search-row_actions_hint = Akce záznamu (nebo klikněte pravým tlačítkem na řádek)
 ui-search-looking_up_values = Vyhledávání hodnot...
 ui-search-type_a_query = Zadejte dotaz a stiskněte Enter
@@ -1485,15 +1446,13 @@ ui-search-parse_failed = Dotaz nelze zpracovat: { $reason }
 ui-search-searching = Hledání...
 ui-search-failed = Hledání selhalo: { $reason }
 ui-search-no_matches = Žádné shody
-ui-search-game_mode_gap_hint_one = U 1 indexovaného zápasu není zaznamenán herní režim. Doplníte jej volbou Znovu indexovat všechny záznamy v Nastavení.
-ui-search-game_mode_gap_hint = U { $count } indexovaných zápasů není zaznamenán herní režim. Doplníte je volbou Znovu indexovat všechny záznamy v Nastavení.
+ui-search-game_mode_gap_hint = { $count ->
+    [one] U { $count } indexovaného zápasu není zaznamenán herní režim. Doplníte jej volbou Znovu indexovat všechny záznamy v Nastavení.
+    [few] U { $count } indexovaných zápasů není zaznamenán herní režim. Doplníte je volbou Znovu indexovat všechny záznamy v Nastavení.
+   *[other] U { $count } indexovaných zápasů není zaznamenán herní režim. Doplníte je volbou Znovu indexovat všechny záznamy v Nastavení.
+}
 ui-search-open = Otevřít
 ui-search-open_missing = Soubor záznamu už neexistuje
-ui-search-opened_directory = Otevřen adresář { $dir }, ve kterém je tento záznam
-ui-search-open_no_directory = Nelze určit, do kterého adresáře tento záznam patří
-ui-search-path_copied = Cesta k záznamu zkopírována do schránky
-ui-search-preview_map = Náhled mapy
-ui-search-preview_and_render = Najetím zobrazíte náhled, kliknutím vykreslíte
 ui-search-free_text = obsahuje "{ $text }"
 ui-search-quant_any = kdokoli
 ui-search-quant_none = nikdo
@@ -1527,23 +1486,6 @@ ui-search-suggest-scope_enemy = U nepřítele
 ui-search-suggest-scope_division = V mé divizi
 ui-search-suggest-scope_anyone = U kohokoli
 
-## ui.search.bar
-ui-search-bar-hint = Filtrovat záznamy
-ui-search-bar-and_word = a
-ui-search-bar-or_word = nebo
-ui-search-bar-not_word = ne
-ui-search-bar-group_and = Seskupit A
-ui-search-bar-group_or = Seskupit NEBO
-ui-search-bar-negate = Negovat
-ui-search-bar-delete = Smazat
-ui-search-bar-clear_selection = Zrušit výběr
-ui-search-bar-ungroup = Kliknutím tuto skupinu zrušíte
-ui-search-bar-flip_connector = Kliknutím přepnete mezi A a NEBO
-ui-search-bar-context_preset = Předvolba
-ui-search-bar-context_match = Zápas
-ui-search-bar-context_roster = Soupiska
-ui-search-bar-no_suggestions = Nic neodpovídá
-
 ## ui.search.field
 ui-search-field-outcome = Výsledek
 ui-search-field-map = Mapa
@@ -1558,7 +1500,6 @@ ui-search-field-stat_spotting = Pozorování
 ui-search-field-stat_potential = Potenciální poškození
 ui-search-field-stat_received = Obdržené poškození
 ui-search-field-stat_pr = PR
-ui-search-field-stat_mc = MC
 ui-search-field-rating = Hodnocení
 ui-search-field-stat_survived = Přežil
 ui-search-field-stat_disconnected = Odpojen
@@ -1644,7 +1585,6 @@ ui-search-value-game_mode_pinata_event = Piňata (událost)
 ui-search-value-game_mode_respawns = Oživování
 ui-search-value-game_mode_respawns_sectors = Oživování v sektorech
 
-
 ## ui.search.column
 ui-search-column-date = Datum
 ui-search-column-map = Mapa
@@ -1664,8 +1604,20 @@ ui-settings-index-rebuild = Znovu indexovat vše
 ui-settings-index-rebuild_hint = Znovu přečte každý záznam kvůli řádkům, které starší zpracování načetlo chybně. Vytvořit index čte jen to, co chybí.
 ui-settings-index-progress = Přečteno { $done } z { $total }, { $failed } nelze přečíst
 ui-settings-index-progress_skipped = Přečteno { $done } z { $total }, { $skipped } již v indexu, { $failed } nelze přečíst
-ui-settings-index-built = Indexováno { $indexed } záznamů, { $failed } nelze přečíst
-ui-settings-index-built_with_skipped = Indexováno { $indexed } záznamů, { $skipped } již v indexu, { $failed } nelze přečíst
+ui-settings-index-built = { $indexed ->
+    [one] Indexován { $indexed } záznam
+    [few] Indexovány { $indexed } záznamy
+   *[other] Indexováno { $indexed } záznamů
+}, { $failed } nelze přečíst
+ui-settings-index-built_with_skipped = { $indexed ->
+    [one] Indexován { $indexed } záznam
+    [few] Indexovány { $indexed } záznamy
+   *[other] Indexováno { $indexed } záznamů
+}, { $skipped ->
+    [one] { $skipped } již byl v indexu
+    [few] { $skipped } již byly v indexu
+   *[other] { $skipped } již bylo v indexu
+}, { $failed } nelze přečíst
 
 ## ui.settings
 ui-settings-loading = Načítání nastavení...
@@ -1676,7 +1628,6 @@ ui-settings-not_set = (nenastaveno)
 ui-settings-panel-mcp = Server MCP
 ui-settings-panel-open = Otevřít nastavení
 ui-settings-panel-search_placeholder = Hledat v nastavení
-ui-settings-panel-count_one = 1 nastavení
 ui-settings-panel-count = { $count } nastavení
 ui-settings-panel-no_matches = Hledání neodpovídá žádné nastavení
 ui-settings-panel-close = Zavřít nastavení
@@ -1728,13 +1679,33 @@ ui-app-status_cache_downloading = Stahování herních dat
 ui-app-status_cache_planning = Zjišťování, jaká herní data jsou publikována
 ui-app-drop_to_load = Pusťte pro načtení { $file }
 ui-app-drop_to_list = Pusťte pro zobrazení záznamů ve složce { $folder }
-ui-app-drop_to_list_replays = Pusťte pro zobrazení { $count } záznamů
-ui-app-drop_to_list_folders = Pusťte pro zobrazení záznamů ve složkách ({ $count })
+ui-app-drop_to_list_replays = Pusťte pro zobrazení { $count ->
+    [one] { $count } záznamu
+    [few] { $count } záznamů
+   *[other] { $count } záznamů
+}
+ui-app-drop_to_list_folders = Pusťte pro zobrazení záznamů { $count ->
+    [one] v { $count } složce
+    [few] ve { $count } složkách
+   *[other] v { $count } složkách
+}
 ui-app-drop_to_open_and_list = Pusťte pro otevření { $file } a zobrazení záznamů v { $folders }
-ui-app-drop_to_list_replays_and_folders = Pusťte pro zobrazení { $count } záznamů a záznamů v { $folders }
-ui-app-drop_folder_count = { $count } složkách
+ui-app-drop_to_list_replays_and_folders = Pusťte pro zobrazení { $count ->
+    [one] { $count } záznamu
+    [few] { $count } záznamů
+   *[other] { $count } záznamů
+} a záznamů { $folders }
+ui-app-drop_folder_count = { $count ->
+    [one] v { $count } složce
+    [few] ve { $count } složkách
+   *[other] v { $count } složkách
+}
 ui-app-reading_replay = Načítání { $replay }
-ui-app-reading_replays = Načítání { $count } záznamů
+ui-app-reading_replays = Načítání { $count ->
+    [one] { $count } záznamu
+    [few] { $count } záznamů
+   *[other] { $count } záznamů
+}
 ui-app-status_constants_generating = Aktualizace herních konstant pro { $version }
 ui-app-worker_constants = Proces herních konstant
 ui-app-worker_live_match = Sledování bitvy
@@ -1744,7 +1715,11 @@ ui-app-worker_stalled = { $worker }: neodpovídá
 ui-app-worker_stopped = { $worker }: zastaveno
 ui-app-status_indexing = Indexování záznamů
 ui-app-status_of = { $done } z { $total }
-ui-app-status_tasks = Běžící úlohy: { $count }
+ui-app-status_tasks = { $count ->
+    [one] Běží { $count } úloha
+    [few] Běží { $count } úlohy
+   *[other] Běží { $count } úloh
+}
 ui-app-status_show_panel = Zobrazit panel: { $panel }
 ui-app-status_hide_panel = Skrýt panel: { $panel }
 ui-app-panel_left = Vlevo
@@ -1777,8 +1752,11 @@ ui-palette-armor_ship_row = { $name } -- úroveň { $tier }, { $class }, { $nati
 ui-palette-back_hint = Esc: zpět
 ui-palette-ships_loading = Načítání seznamu lodí...
 ui-palette-ships_unavailable = Seznam lodí není k dispozici: { $reason }
-ui-palette-matches_found = Shody: { $count }
-ui-palette-nothing_indexed = Zatím není nic indexováno
+ui-palette-matches_found = { $count ->
+    [one] { $count } shoda
+    [few] { $count } shody
+   *[other] { $count } shod
+}
 ui-palette-sample_stats = Ladění: zobrazit ukázková data ve Statistikách
 ui-palette-restore_stats = Ladění: zobrazit zaznamenaná data ve Statistikách
 
@@ -1802,10 +1780,26 @@ ui-replay-renderer-export_copied = Video zkopírováno do schránky
 ui-replay-renderer-export_not_written = Video se nepodařilo vykreslit: { $reason }
 ui-replay-renderer-pop_out = Otevřít v samostatném okně
 ui-replay-renderer-export_path_unusable = Do tohoto umístění nelze zapisovat
-ui-replay-renderer-batch_started = Vykreslování záznamů ({ $count }) do { $dir }
-ui-replay-renderer-batch_finished = Vykresleno záznamů: { $written }; nepodařilo se vykreslit: { $failed }
-ui-replay-renderer-batch_all_written = Vykresleno záznamů: { $written }
-ui-replay-renderer-batch_copied = Vykresleno záznamů: { $written }, vloženo do schránky
+ui-replay-renderer-batch_started = Vykreslování { $count ->
+    [one] { $count } záznamu
+    [few] { $count } záznamů
+   *[other] { $count } záznamů
+} do { $dir }
+ui-replay-renderer-batch_finished = { $written ->
+    [one] Vykreslen { $written } záznam
+    [few] Vykresleny { $written } záznamy
+   *[other] Vykresleno { $written } záznamů
+}; { $failed } se nepodařilo vykreslit
+ui-replay-renderer-batch_all_written = { $written ->
+    [one] Vykreslen { $written } záznam
+    [few] Vykresleny { $written } záznamy
+   *[other] Vykresleno { $written } záznamů
+}
+ui-replay-renderer-batch_copied = { $written ->
+    [one] Vykreslen { $written } záznam a vložen do schránky
+    [few] Vykresleny { $written } záznamy a vloženy do schránky
+   *[other] Vykresleno { $written } záznamů a vloženo do schránky
+}
 ui-replay-renderer-batch_not_copied = Vykresleno do { $dir }, ale schránka je odmítla: { $reason }
 ui-replay-renderer-batch_progress = Vykreslování { $done } z { $total }: { $replay }
 ui-replay-renderer-baking = Čtení záznamu a procházení bitvy...
@@ -1862,19 +1856,11 @@ ui-armor-pen-hover_a_plate = Najeďte na plát lodi pro jeho kontrolu
 ui-armor-pen-awaiting_plate = najeďte na plát
 ui-armor-pen-clear_all = Vymazat vše
 ui-armor-pen-remove = Odebrat z porovnání
-ui-armor-pen-title = Průnik
-ui-armor-pen-title_tooltip = Zkontrolovat, co střely lodi udělají s plátem
-ui-armor-pen-ship = Střílející loď
 ui-armor-pen-firing_ship_tooltip = Použít střely této lodi pro simulaci trajektorie
 ui-armor-pen-use_for_trajectory = Použít pro trajektorii
-ui-armor-pen-pick_ship = Vyberte loď, která na tuto loď střílí
-ui-armor-pen-enter_thickness = Zadejte tloušťku plátu
 ui-armor-pen-no_shells = { $ship } nemá granáty hlavní baterie
-ui-armor-pen-plate = Plát
-ui-armor-pen-mm = mm
 ui-armor-pen-ifhe = IFHE
 ui-armor-pen-ifhe_tooltip = Setrvačná roznětka HE granátů zvyšuje průnik HE o čtvrtinu
-ui-armor-pen-last_hovered = Naposledy pod kurzorem: { $plate }
 ui-armor-pen-penetrates = prostřelí
 ui-armor-pen-shatters = roztříští se
 ui-armor-pen-angle_dependent = závisí na úhlu
@@ -1909,14 +1895,16 @@ ui-armor-export-camo_reset = Obnovit výchozí
 ui-armor-export-loading_details = Načítání...
 ui-armor-export-size_estimate = Odhadovaná velikost souboru: { $size }
 ui-armor-export-size_breakdown = Geometrie { $geometry } (přesně), textury { $textures } (odhad)
-ui-armor-export-size_incomplete = Nelze určit velikost kamufláží ({ $count }); velikost může být neúplná
+ui-armor-export-size_incomplete = Nelze určit velikost { $count ->
+    [one] { $count } kamufláže
+    [few] { $count } kamufláží
+   *[other] { $count } kamufláží
+}; velikost může být neúplná
 ui-armor-export-exporting = Exportování { $ship }...
-ui-armor-export-close_button = Zavřít
 ui-armor-export-already_running = Export již probíhá
 ui-armor-export-exported = Exportováno: { $ship }
 ui-armor-export-exported_with_size = Exportováno: { $ship } ({ $size })
 ui-armor-export-vehicle_not_found = Plavidlo nebylo nalezeno
-ui-armor-export-create_file_failed = Nepodařilo se vytvořit soubor: { $error }
 ui-armor-export-export_failed = Export selhal: { $error }
 
 ## ui.armor.outcome
@@ -1979,8 +1967,20 @@ ui-tactics-scan_replays_tooltip = Přečíst záznamy a získat rozložení bod�
 ui-tactics-scan_needs_game_data = Nejprve načtěte build hry
 ui-tactics-scan_running = Čtení záznamů...
 ui-tactics-scan_progress = Čtení záznamů... { $read } / { $total }
-ui-tactics-scan_done = Přečteno záznamů: { $total }, nalezeno nových rozložení: { $added }
-ui-tactics-session_boards_full = Relace už má otevřené { $limit } tabule, proto tato tabule zůstává na své mapě
+ui-tactics-scan_done = { $total ->
+    [one] Přečten { $total } záznam
+    [few] Přečteny { $total } záznamy
+   *[other] Přečteno { $total } záznamů
+} a { $added ->
+    [one] nalezeno { $added } nové rozložení
+    [few] nalezena { $added } nová rozložení
+   *[other] nalezeno { $added } nových rozložení
+}
+ui-tactics-session_boards_full = Relace už má otevřen{ $limit ->
+    [one] ou { $limit } tabuli
+    [few] é { $limit } tabule
+   *[other] o { $limit } tabulí
+}, proto tato tabule zůstává na své mapě
 ui-tactics-placing = Umísťování: { $ship }
 ui-tactics-side_friendly = Spojenecká
 ui-tactics-side_enemy = Nepřátelská
@@ -2029,14 +2029,16 @@ ui-launcher-cancel = Zrušit
 ui-launcher-resume = Pokračovat
 ui-launcher-paused = Stahování pozastaveno; připravené soubory zůstávají zachovány.
 ui-launcher-installed = Nainstalováno
-ui-launcher-installed_skipped = Nainstalováno (přeskočené rozdílové části: { $count }; zatím nepodporováno, staženo, ale nepoužito)
+ui-launcher-installed_skipped = Nainstalováno ({ $count ->
+    [one] { $count } rozdílová část přeskočena
+    [few] { $count } rozdílové části přeskočeny
+   *[other] { $count } rozdílových částí přeskočeno
+}: zatím nepodporováno, staženo, ale nepoužito)
 ui-launcher-download_failed = Stahování selhalo: { $error }
 ui-launcher-update_in_place = Aktualizace se instaluje do složky dané instalace. Pro aktualizaci zvolte { $path }.
 ui-launcher-cancelled = Stahování zrušeno.
 ui-launcher-launch_failed = Spuštění selhalo: { $error }
 ui-launcher-use_for_toolkit = Použít pro toolkit
-ui-launcher-not_set = nenastaveno
-ui-launcher-browse = Procházet...
 ui-launcher-install_heading = Nainstalovat hru
 ui-launcher-install_hint = Nová instalace má desítky GB.
 ui-launcher-install_title = Kam nainstalovat hru
@@ -2104,25 +2106,60 @@ ui-replay-damage_share-hold = Podržte { $key } pro obrácení.
 ui-replay-damage_share-release = Uvolněte { $key } pro návrat.
 
 ## ui.reindex
-ui-reindex-context_one = Vynutit nové indexování
-ui-reindex-context_many = Vynutit nové indexování { $count } záznamů
+ui-reindex-context = { $count ->
+    [one] Vynutit nové indexování
+    [few] Vynutit nové indexování { $count } záznamů
+   *[other] Vynutit nové indexování { $count } záznamů
+}
 ui-reindex-palette_by_version = Vynutit nové indexování záznamů: podle verze
 ui-reindex-palette_all = Vynutit nové indexování záznamů: všechny
 ui-reindex-versions_title = Vynutit nové indexování záznamů: podle verze
 ui-reindex-versions_placeholder = Filtrovat verze hry...
-ui-reindex-version_row = { $version } -- { $count } záznam(ů)
+ui-reindex-version_row = { $version } -- { $count ->
+    [one] { $count } záznam
+    [few] { $count } záznamy
+   *[other] { $count } záznamů
+}
 ui-reindex-no_versions = Žádný uvedený záznam neobsahuje verzi hry
 ui-reindex-confirm_title = Vynutit nové indexování záznamů
 ui-reindex-confirm_ok = Znovu indexovat
-ui-reindex-confirm_count = { $count } záznam(ů) bude znovu načteno a jejich položky indexu přepsány.
+ui-reindex-confirm_count = { $count ->
+    [one] { $count } záznam bude znovu načten a jeho položka indexu přepsána.
+    [few] { $count } záznamy budou znovu načteny a jejich položky indexu přepsány.
+   *[other] { $count } záznamů bude znovu načteno a jejich položky indexu přepsány.
+}
 ui-reindex-confirm_range = Hráno od { $oldest } do { $newest }.
-ui-reindex-confirm_undated = { $count } záznam(ů) k načtení nemá čitelné datum bitvy a nespadá do tohoto rozsahu.
+ui-reindex-confirm_undated = { $count ->
+    [one] { $count } záznam k načtení nemá čitelné datum bitvy a nespadá do tohoto rozsahu.
+    [few] { $count } záznamy k načtení nemají čitelné datum bitvy a nespadají do tohoto rozsahu.
+   *[other] { $count } záznamů k načtení nemá čitelné datum bitvy a nespadá do tohoto rozsahu.
+}
 ui-reindex-confirm_downloads = Nejprve se stáhnou herní data pro tyto verze:
-ui-reindex-confirm_unobtainable = Pro tyto verze nelze získat herní data, proto se jejich { $count } záznam(ů) přeskočí:
-ui-reindex-confirm_no_cache_dir = Není nastaven adresář mezipaměti herních dat, proto nelze stáhnout herní data pro tyto verze a jejich { $count } záznam(ů) se přeskočí:
-ui-reindex-confirm_no_build = { $count } záznam(ů) neuvádí build hry a bude přeskočeno.
-ui-reindex-confirm_no_version = { $count } záznam(ů) neuvádí čitelnou verzi hry a bude přeskočeno.
-ui-reindex-build_row = { $version } (build { $build }): { $count } záznam(ů)
+ui-reindex-confirm_unobtainable = Pro tyto verze nelze získat herní data, proto se { $count ->
+    [one] jejich { $count } záznam přeskočí:
+    [few] jejich { $count } záznamy přeskočí:
+   *[other] jejich { $count } záznamů přeskočí:
+}
+ui-reindex-confirm_no_cache_dir = Není nastaven adresář mezipaměti herních dat, proto nelze stáhnout herní data pro tyto verze a { $count ->
+    [one] jejich { $count } záznam se přeskočí:
+    [few] jejich { $count } záznamy se přeskočí:
+   *[other] jejich { $count } záznamů se přeskočí:
+}
+ui-reindex-confirm_no_build = { $count ->
+    [one] { $count } záznam neuvádí build hry a bude přeskočen.
+    [few] { $count } záznamy neuvádějí build hry a budou přeskočeny.
+   *[other] { $count } záznamů neuvádí build hry a bude přeskočeno.
+}
+ui-reindex-confirm_no_version = { $count ->
+    [one] { $count } záznam neuvádí čitelnou verzi hry a bude přeskočen.
+    [few] { $count } záznamy neuvádějí čitelnou verzi hry a budou přeskočeny.
+   *[other] { $count } záznamů neuvádí čitelnou verzi hry a bude přeskočeno.
+}
+ui-reindex-build_row = { $version } (build { $build }): { $count ->
+    [one] { $count } záznam
+    [few] { $count } záznamy
+   *[other] { $count } záznamů
+}
 ui-reindex-nothing_listed = Seznam neobsahuje žádné záznamy k novému indexování.
 ui-reindex-nothing_readable = Žádný z těchto záznamů nelze znovu indexovat: nejsou pro ně k dispozici herní data ({ $count } přeskočeno).
 ui-reindex-no_game_data = Záznamy nelze číst, dokud není nastaven adresář hry.
@@ -2130,7 +2167,11 @@ ui-reindex-busy_index = Indexování již probíhá.
 ui-reindex-busy_cache = Úloha herních dat již probíhá. Zkuste to znovu po jejím dokončení.
 ui-reindex-planning = Zjišťování dostupných herních dat...
 ui-reindex-no_index = Index záznamů není otevřen, nic nebylo znovu indexováno.
-ui-reindex-done = Znovu indexováno { $indexed } záznam(ů); { $skipped } přeskočeno, { $failed } nelze přečíst
+ui-reindex-done = { $indexed ->
+    [one] Znovu indexován { $indexed } záznam
+    [few] Znovu indexovány { $indexed } záznamy
+   *[other] Znovu indexováno { $indexed } záznamů
+}; { $skipped } přeskočeno, { $failed } nelze přečíst
 ui-reindex-stopped = Nové indexování zastaveno: { $indexed } znovu indexováno, { $skipped } přeskočeno, { $failed } nelze přečíst
 ui-reindex-stopped_before_reading = Nové indexování bylo zastaveno dříve, než byl přečten jakýkoli záznam.
 
@@ -2138,13 +2179,21 @@ ui-reindex-stopped_before_reading = Nové indexování bylo zastaveno dříve, n
 ui-index_folder-tooltip = Indexovat všechny záznamy v tomto seznamu, které index záznamů ještě neobsahuje
 ui-index_folder-confirm_title = Indexovat záznamy
 ui-index_folder-confirm_ok = Indexovat
-ui-index_folder-confirm_count = { $count } záznamů v tomto seznamu ještě není v indexu záznamů; budou načteny a přidány do něj.
+ui-index_folder-confirm_count = { $count ->
+    [one] { $count } záznam v tomto seznamu ještě není v indexu záznamů; bude načten a přidán do něj.
+    [few] { $count } záznamy v tomto seznamu ještě nejsou v indexu záznamů; budou načteny a přidány do něj.
+   *[other] { $count } záznamů v tomto seznamu ještě není v indexu záznamů; budou načteny a přidány do něj.
+}
 ui-index_folder-note_live = Indexované záznamy se přidají do indexu záznamů, ze kterého čte Hledání a Sledování hráčů.
 ui-index_folder-note_folder = Indexované záznamy se přidají do indexu záznamů pod vlastním zdrojem tohoto adresáře ({ $dir }). Hledání a seznam hráčů ve Sledování hráčů je zahrnují. Seznam klanů ve Sledování hráčů čte pouze vlastní záznamy hry.
 ui-index_folder-nothing_listed = Tento seznam neobsahuje žádné záznamy k indexování.
 ui-index_folder-nothing_missing = Všechny záznamy v tomto seznamu jsou již indexovány.
 ui-index_folder-unreadable_index = Index záznamů nelze načíst.
-ui-index_folder-done = Indexováno záznamů: { $indexed }; přeskočeno { $skipped }, nelze načíst { $failed }
+ui-index_folder-done = { $indexed ->
+    [one] Indexován { $indexed } záznam
+    [few] Indexovány { $indexed } záznamy
+   *[other] Indexováno { $indexed } záznamů
+}; přeskočeno { $skipped }, nelze načíst { $failed }
 ui-index_folder-stopped = Indexování zastaveno: indexováno { $indexed }, přeskočeno { $skipped }, nelze načíst { $failed }
 ui-index_folder-stopped_before_reading = Indexování bylo zastaveno dříve, než byl načten jakýkoli záznam.
 
@@ -2152,7 +2201,11 @@ ui-index_folder-stopped_before_reading = Indexování bylo zastaveno dříve, ne
 ui-replay_folders-install = Hra
 ui-replay_folders-watched = Sledováno: nové a změněné záznamy se zobrazí zde
 ui-replay_folders-unwatched = Nesledováno: pro opětovné načtení použijte Obnovit
-ui-replay_folders-unseen = { $count } nových nebo změněných záznamů od vaší poslední návštěvy
+ui-replay_folders-unseen = { $count ->
+    [one] { $count } nový nebo změněný záznam od vaší poslední návštěvy
+    [few] { $count } nové nebo změněné záznamy od vaší poslední návštěvy
+   *[other] { $count } nových nebo změněných záznamů od vaší poslední návštěvy
+}
 ui-replay_folders-missing = Tento adresář už neexistuje: { $dir }
 ui-replay_folders-missing_hint = Otevře se zde při každém spuštění, dokud ho neodepnete.
 ui-replay_folders-pin = Připnout
@@ -2173,7 +2226,11 @@ ui-replay_folders-source_failed = Záznamy z tohoto adresáře nelze indexovat: 
 ui-replay_folders-restart_watch = Znovu spustit sledování
 ui-replay_folders-watch_stopped = Sledování { $folder } se zastavilo: { $cause }.
 ui-replay_folders-watch_restarting = Znovu se spustí za { $seconds } s (pokus { $attempt } z { $attempts }).
-ui-replay_folders-watch_gave_up = Opětovné spuštění selhalo { $attempts }krát a už se nezkouší.
+ui-replay_folders-watch_gave_up = Opětovné spuštění selhalo { $attempts ->
+    [one] { $attempts }krát
+    [few] { $attempts }krát
+   *[other] { $attempts }krát
+} a už se nezkouší.
 ui-replay_folders-watch_restart_hint = Klikněte na červenou tečku nebo v nabídce karty zvolte Znovu spustit sledování, abyste ho spustili hned.
 ui-replay_folders-watch_resumed = Sledování { $folder } pokračuje.
 ui-replay_folders-watch_cause_backend = souborový systém nahlásil chybu: { $error }
@@ -2182,7 +2239,11 @@ ui-replay_folders-watch_cause_panicked = vnitřní chyba: { $error }
 ui-replay_folders-watch_cause_exited = sledování neočekávaně skončilo
 ui-replay_folders-dropped = Přetažené
 ui-replay_folders-dropped_numbered = Přetažené { $number }
-ui-replay_folders-dropped_count = Přetažené záznamy: { $count }
+ui-replay_folders-dropped_count = { $count ->
+    [one] { $count } přetažený záznam
+    [few] { $count } přetažené záznamy
+   *[other] { $count } přetažených záznamů
+}
 ui-replay_folders-dropped_no_source = Přetažené záznamy se indexují s vlastními adresáři. Pro hledání nebo indexování otevřete adresář.
 ui-replay_folders-unreadable_replay = Nelze přečíst: { $error }
 
@@ -2347,14 +2408,25 @@ ui-armor-textures-title = Textury
 ui-armor-textures-hint = Hra místo zabaleného souboru načte soubor se stejnou cestou ve složce res_mods daného buildu. Kliknutím pravým tlačítkem na texturu tuto cestu zkopírujete.
 ui-armor-textures-under_pointer = Pod kurzorem: { $material }
 ui-armor-textures-reading = Načítání textur...
-ui-armor-textures-summary = Materiály: { $materials }, textury: { $textures }
+ui-armor-textures-summary = { $materials ->
+    [one] { $materials } materiál
+    [few] { $materials } materiály
+   *[other] { $materials } materiálů
+}, { $textures ->
+    [one] { $textures } textura
+    [few] { $textures } textury
+   *[other] { $textures } textur
+}
 ui-armor-textures-no_material = Žádný materiál
 ui-armor-textures-unresolved = Cesta není v assets.bin
 ui-armor-textures-absent = Není v nainstalovaných balíčcích
 ui-armor-textures-unreadable = Hlavičku DDS nelze přečíst
 ui-armor-textures-unknown_format = Nerozpoznaný formát
-ui-armor-textures-details_one = { $format }, { $size }, 1 soubor, { $bytes }
-ui-armor-textures-details = { $format }, { $size }, souborů: { $count }, { $bytes }
+ui-armor-textures-details = { $format }, { $size }, { $count ->
+    [one] { $count } soubor
+    [few] { $count } soubory
+   *[other] { $count } souborů
+}, { $bytes }
 ui-armor-textures-role_albedo = Albedo
 ui-armor-textures-role_normal = Normála
 ui-armor-textures-role_metal_gloss = Kov-lesk
@@ -2362,19 +2434,34 @@ ui-armor-textures-role_ambient_occlusion = Ambientní okluze
 ui-armor-textures-role_detail = Detail
 ui-armor-textures-role_name_matched = Albedo, nalezeno podle názvu souboru
 ui-armor-textures-copy_path = Kopírovat cestu
-ui-armor-textures-copy_override = Kopírovat cestu res_mods
-ui-armor-textures-copy_overrides = Kopírovat cesty res_mods ({ $count })
-ui-armor-textures-paths_copied = Zkopírováno cest: { $count }
+ui-armor-textures-copy_overrides = { $count ->
+    [one] Kopírovat cestu res_mods
+    [few] Kopírovat { $count } cesty res_mods
+   *[other] Kopírovat { $count } cest res_mods
+}
+ui-armor-textures-paths_copied = { $count ->
+    [one] Zkopírována { $count } cesta
+    [few] Zkopírovány { $count } cesty
+   *[other] Zkopírováno { $count } cest
+}
 ui-armor-textures-no_build = Herní data nejsou načtena, takže složka modů buildu není známa.
 ui-armor-textures-show_in_unpacker = Zobrazit v rozbalovači zdrojů
 ui-armor-textures-show_textures = Zobrazit textury
 ui-armor-textures-extract = Extrahovat soubory...
 ui-armor-textures-extract_title = Extrahovat soubory textur do
 ui-armor-textures-extracting = Extrahování souborů textur...
-ui-armor-textures-extracted = Extrahováno souborů: { $count } do { $folder }
+ui-armor-textures-extracted = { $count ->
+    [one] Extrahován { $count } soubor
+    [few] Extrahovány { $count } soubory
+   *[other] Extrahováno { $count } souborů
+} do { $folder }
 ui-armor-textures-extract_failed = Soubory textur nelze extrahovat: { $reason }
 ui-armor-textures-replace_title = Nahradit existující soubory?
-ui-armor-textures-replace_description = { $count } z těchto souborů již je v { $folder }. Extrahování je nahradí.
+ui-armor-textures-replace_description = { $count ->
+    [one] { $count } z těchto souborů již je v { $folder }. Extrahování jej nahradí.
+    [few] { $count } z těchto souborů již jsou v { $folder }. Extrahování je nahradí.
+   *[other] { $count } z těchto souborů již je v { $folder }. Extrahování je nahradí.
+}
 ui-armor-textures-replace = Nahradit
 
 ## ui.settings.mcp

@@ -473,12 +473,7 @@ fn details(files: &TextureFiles) -> String {
     let size = files.largest().map(|size| size.to_string()).unwrap_or_default();
     let bytes = byte_size(files.files.iter().map(|file| file.bytes).sum());
 
-    match files.files.len() {
-        1 => t!("ui-armor-textures-details_one", format = format, size = size, bytes = bytes).into_owned(),
-        count => {
-            t!("ui-armor-textures-details", format = format, size = size, count = count, bytes = bytes).into_owned()
-        }
-    }
+    t!("ui-armor-textures-details", format = format, size = size, count = files.files.len(), bytes = bytes).into_owned()
 }
 
 /// What a texture property is for, in the reader's words where the property is a common one.
@@ -619,10 +614,7 @@ fn copy_item(shell: Shell, test_id: &'static str, paths: Vec<String>) -> AnyView
 
 /// Copies where each of `files` goes to replace the packaged one.
 fn override_item(shell: Shell, services: Services, files: Vec<String>) -> AnyView {
-    let label = match files.len() {
-        1 => t!("ui-armor-textures-copy_override").into_owned(),
-        count => t!("ui-armor-textures-copy_overrides", count = count).into_owned(),
-    };
+    let label = t!("ui-armor-textures-copy_overrides", count = files.len()).into_owned();
     let copy = move |()| match override_paths(services, &files) {
         Ok(paths) => copy_paths(shell, &paths),
         Err(reason) => {

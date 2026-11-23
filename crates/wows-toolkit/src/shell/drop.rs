@@ -291,7 +291,7 @@ mod tests {
 
         let three = intent(vec![replay("a"), replay("b"), replay("c")], Vec::new(), 2);
         assert_eq!(three.said(), "Drop to list 3 replays");
-        assert_eq!(three.refusal().as_deref(), Some("Skipped 2 dropped file(s) that are not replays or folders"));
+        assert_eq!(three.refusal().as_deref(), Some("Skipped 2 dropped files that are not replays or folders"));
 
         assert_eq!(intent(Vec::new(), vec![folder("battles")], 0).said(), "Drop to list the replays in battles");
         assert_eq!(

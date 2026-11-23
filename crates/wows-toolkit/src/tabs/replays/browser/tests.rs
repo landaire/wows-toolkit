@@ -1262,7 +1262,7 @@ fn a_lone_rows_menu_renders_it_to_video_or_the_clipboard() {
 
     for key in ["ui-replay-context-render_to_video", "ui-replay-context-render_to_clipboard"] {
         let target = row(&window, &paths[0]);
-        pick(&mut window, target, &t!(key));
+        pick(&mut window, target, &t!(key, count = 1));
     }
 
     assert_eq!(
@@ -1287,10 +1287,10 @@ fn a_groups_menu_renders_and_records_session_stats_for_its_replays() {
     for key in [
         "ui-replay-context-render_to_video",
         "ui-replay-context-render_to_clipboard",
-        "ui-replay-context-add_session_stats_one",
+        "ui-replay-context-add_session_stats",
     ] {
         let header = window.by_class("wt-row__group-label").expect("the replays are grouped by date");
-        pick(&mut window, header, &t!(key));
+        pick(&mut window, header, &t!(key, count = 1));
     }
 
     assert_eq!(

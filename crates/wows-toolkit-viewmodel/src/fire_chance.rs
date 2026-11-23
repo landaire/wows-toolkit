@@ -2,9 +2,6 @@
 //!
 //! The analysis itself is `wows_replay_insights::fire_chance`; this is the
 //! wording put around it.
-//!
-//! The translation layer carries no plural machinery, so every count that can
-//! be one takes a separate key, the way the session-stats labels do.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -17,19 +14,13 @@ use wows_replay_insights::fire_chance::analysis::UnattributedFireReason;
 use wt_translations::keys;
 use wt_translations::t;
 
-/// "N fires", singular at one.
+/// "N fires".
 pub fn fires_text(fires: u32) -> Cow<'static, str> {
-    if fires == 1 {
-        return t!("ui-replay-sections-fire_chance_fires_one");
-    }
     t!("ui-replay-sections-fire_chance_fires", fires = fires)
 }
 
-/// "N eligible hits", singular at one.
+/// "N eligible hits".
 pub fn eligible_hits_text(hits: u32) -> Cow<'static, str> {
-    if hits == 1 {
-        return t!("ui-replay-sections-fire_chance_eligible_hits_one");
-    }
     t!("ui-replay-sections-fire_chance_eligible_hits", hits = hits)
 }
 
@@ -44,13 +35,9 @@ pub fn counts_text(fires: u32, hits: u32) -> String {
     format!("{} / {}", fires_text(fires), eligible_hits_text(hits))
 }
 
-/// "across N target ships", singular at one.
+/// "across N target ships".
 pub fn ships_text(fire_chance: &EffectiveFireChance) -> Cow<'static, str> {
-    let ships = fire_chance.ships_with_trials();
-    if ships == 1 {
-        return t!("ui-replay-sections-fire_chance_ships_one");
-    }
-    t!("ui-replay-sections-fire_chance_ships", ships = ships)
+    t!("ui-replay-sections-fire_chance_ships", ships = fire_chance.ships_with_trials())
 }
 
 /// The expected-fires note beside the observed count, when there is one.
@@ -94,12 +81,13 @@ pub fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireCha
     ships
 }
 
-/// The unit a count in the breakdown's left column carries, singular at one.
+/// The unit a count in the breakdown's left column carries, in the count's
+/// grammatical number.
 ///
 /// The count is printed apart from the label so a column of them lines up,
 /// which is why these keys are bare nouns.
-pub fn count_label(count: u32, plural: &'static str, singular: &'static str) -> Cow<'static, str> {
-    t!(if count == 1 { singular } else { plural })
+pub fn count_label(count: u32, key: &'static str) -> Cow<'static, str> {
+    t!(key, count = count)
 }
 
 /// "N HE hits not attributable to a target ship", or `None` when every HE hit
@@ -116,11 +104,7 @@ pub fn no_target_ship_line(fire_chance: &EffectiveFireChance) -> Option<String> 
     if hits == 0 {
         return None;
     }
-    let label = count_label(
-        hits,
-        "ui-replay-sections-fire_chance_no_target_ship",
-        "ui-replay-sections-fire_chance_no_target_ship_one",
-    );
+    let label = count_label(hits, "ui-replay-sections-fire_chance_no_target_ship");
     Some(format!("{hits} {label}"))
 }
 
@@ -343,11 +327,7 @@ pub fn fire_chance_tally_rows(tally: &FireChanceTally<'_>, heads: &[TallyRow]) -
     rows.push(TallyRow::new(
         0,
         tally.he_hits_on_a_ship,
-        count_label(
-            tally.he_hits_on_a_ship,
-            "ui-replay-sections-fire_chance_he_hits",
-            "ui-replay-sections-fire_chance_he_hits_one",
-        ),
+        count_label(tally.he_hits_on_a_ship, "ui-replay-sections-fire_chance_he_hits"),
     ));
     rows.push(TallyRow::new(1, tally.eligible_hits, t!("ui-replay-sections-fire_chance_eligible")));
 
@@ -369,11 +349,7 @@ pub fn fire_chance_battle_tally_rows(fire_chance: &EffectiveFireChance) -> Vec<T
     let fired = TallyRow::new(
         0,
         fire_chance.he_shells_fired,
-        count_label(
-            fire_chance.he_shells_fired,
-            "ui-replay-sections-fire_chance_shells_fired",
-            "ui-replay-sections-fire_chance_shells_fired_one",
-        ),
+        count_label(fire_chance.he_shells_fired, "ui-replay-sections-fire_chance_shells_fired"),
     );
     fire_chance_tally_rows(&fire_chance.into(), std::slice::from_ref(&fired))
 }
@@ -397,11 +373,7 @@ pub fn fire_chance_ribbon_rows(fire_chance: &EffectiveFireChance) -> Vec<TallyRo
         TallyRow::new(
             0,
             fire_chance.set_fire_ribbons,
-            count_label(
-                fire_chance.set_fire_ribbons,
-                "ui-replay-sections-fire_chance_ribbons",
-                "ui-replay-sections-fire_chance_ribbons_one",
-            ),
+            count_label(fire_chance.set_fire_ribbons, "ui-replay-sections-fire_chance_ribbons"),
         ),
         TallyRow::new(1, fire_chance.fires, t!("ui-replay-sections-fire_chance_ribbons_credited")),
     ];
@@ -847,18 +819,14 @@ mod breakdown_tests {
             UnattributedFireReason::NoNearbyHitCouldStartAFire,
             UnattributedFireReason::NoHitInWindow,
         ];
-        const LABELS: [&str; 13] = [
+        const LABELS: [&str; 9] = [
             "ui-replay-sections-fire_chance_breakdown",
             "ui-replay-sections-fire_chance_shells_fired",
-            "ui-replay-sections-fire_chance_shells_fired_one",
             "ui-replay-sections-fire_chance_he_hits",
-            "ui-replay-sections-fire_chance_he_hits_one",
             "ui-replay-sections-fire_chance_no_target_ship",
-            "ui-replay-sections-fire_chance_no_target_ship_one",
             "ui-replay-sections-fire_chance_eligible",
             "ui-replay-sections-fire_chance_not_applicable",
             "ui-replay-sections-fire_chance_ribbons",
-            "ui-replay-sections-fire_chance_ribbons_one",
             "ui-replay-sections-fire_chance_ribbons_credited",
             "ui-replay-sections-fire_chance_ribbons_uncredited",
         ];
@@ -867,7 +835,7 @@ mod breakdown_tests {
         keys.extend(UNATTRIBUTED.iter().map(|r| keys::unattributed_fire_reason_key(*r)));
         keys.extend(LABELS);
         for key in keys {
-            assert_ne!(t!(key), key, "{key} resolves to nothing");
+            assert_ne!(t!(key, count = 2), key, "{key} resolves to nothing");
         }
     }
 
@@ -992,8 +960,7 @@ mod tests {
     use super::eligible_hits_text;
     use super::fires_text;
 
-    /// A count of one reads in the singular, because the catalog has no
-    /// plural machinery to do it.
+    /// A count of one reads in the singular.
     #[test]
     fn a_count_of_one_reads_in_the_singular() {
         assert_eq!(fires_text(1), "1 fire");

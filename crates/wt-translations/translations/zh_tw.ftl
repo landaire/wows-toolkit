@@ -15,20 +15,16 @@ dialog-machine_translation_warning = 大部分翻譯為機器生成，可能不�
 # -- 分頁標題 --
 
 ## ui.tabs
-ui-tabs-launcher = 啟動器
 ui-tabs-unpacker = 資源解包器
 ui-tabs-settings = 設定
 ui-tabs-replay_parser = 戰鬥回放檢視器
-ui-tabs-replay_directory = 回放目錄
 ui-tabs-player_tracker = 玩家追蹤
-ui-tabs-mod_manager = 模組管理器
 ui-tabs-armor_viewer = 裝甲檢視器
 ui-tabs-model_viewer = 模型檢視器
 ui-tabs-stats = 統計
 ui-tabs-directory_stats = { $dir } 統計
 ui-tabs-close_directory_stats = 關閉目錄統計
 ui-tabs-search = 搜尋
-ui-tabs-search_these_replays = 搜尋這些回放
 ui-tabs-search_these_replays_unavailable = 這些回放尚未建立索引
 ui-tabs-zoom_in_panel = 放大
 ui-tabs-zoom_out_panel = 縮小
@@ -61,12 +57,10 @@ ui-buttons-github = GitHub
 ui-buttons-view_github = 在 GitHub 上查看專案
 ui-buttons-choose = 選擇...
 ui-buttons-reset = 重置
+ui-buttons-clear = 清除
 ui-buttons-select_all = 全選
 ui-buttons-download = 下載
-ui-buttons-dismiss = 關閉
 ui-buttons-retry = 重試
-ui-buttons-check_all = 全部勾選
-ui-buttons-uncheck_all = 全部取消勾選
 ui-buttons-refresh_persisted_data_confirm = 重新整理
 
 # -- 選單項目 --
@@ -76,7 +70,6 @@ ui-menu-file = 檔案
 ui-menu-check_updates = 檢查更新
 ui-menu-about = 關於
 ui-menu-quit = 結束
-ui-menu-licenses = 授權條款
 
 # -- 視窗標題 --
 
@@ -85,7 +78,6 @@ ui-windows-build_consent = 配裝收集同意
 ui-windows-replay_migration = 改為分享回放
 ui-windows-crash_detected = 偵測到應用程式當機
 ui-windows-update_available = 有可用更新
-ui-windows-confirm = 確認
 ui-windows-network_warning = 網路警告
 ui-windows-download_game_data = 下載遊戲資料
 ui-windows-error = 錯誤
@@ -97,7 +89,6 @@ ui-windows-minimize = 最小化
 ui-windows-maximize = 最大化
 ui-windows-restore = 還原
 ui-windows-close = 關閉
-ui-windows-licenses = 授權條款
 
 # -- 對話框 / 訊息文字 --
 
@@ -115,7 +106,6 @@ ui-dialogs-software_encode_message = 未找到受支援的 GPU 影片編碼器�
 ui-dialogs-download_game_data_intro = 部分回放需要尚未安裝的遊戲資料。請選擇要下載的組建。
 ui-dialogs-download_build_row = 版本 { $version }（組建 { $build }）
 ui-dialogs-download_replays_needing = { $count } 個回放需要
-ui-dialogs-download_availability_resolving = 正在檢查儲存庫
 ui-dialogs-download_availability_exact = 已發布
 ui-dialogs-download_availability_nearest = 沒有完全相符，最接近的是 { $version }（組建 { $build }）
 ui-dialogs-download_availability_unpublished = 從未發布
@@ -134,11 +124,8 @@ ui-labels-error_occurred = 發生了一個錯誤：
 ui-labels-made_by = 由 landaire 開發。
 ui-labels-credits = 感謝 Trackpad、TTaro、lkolbly 的貢獻。
 ui-labels-pr_credits = 個人評分 (PR) 的計算資料和公式由 WoWs Numbers 提供。
-ui-labels-powered_by = 採用{" "}
-ui-labels-and = {" "}和{" "}
 ui-labels-suppress_warning = 不再顯示
 ui-labels-more_info = 更多資訊
-ui-labels-loading_replays = 正在載入 { $count } 個戰鬥回放...
 ui-labels-app_version = 版本 { $version }
 ui-labels-project_license = WoWs Toolkit 依據 { $license } 授權條款散布。
 ui-labels-third_party_notices = 第三方聲明
@@ -155,35 +142,21 @@ ui-messages-app_up_to_date = 應用程式已是最新版本
 ui-messages-checking_app_updates = 正在檢查應用程式更新...
 ui-messages-update_starting = 正在下載更新...
 ui-messages-update_check_failed = 無法檢查應用程式更新
-ui-messages-constants_fetch_failed = 無法獲取更新的回放資料對應。稍後將重試。
 ui-messages-game_data_loaded = 成功載入遊戲資料
-ui-messages-no_replays_detected = 未偵測到戰鬥回放 — 您的 WoWs 目錄是否正確設定？
-ui-messages-build_loaded = 已載入配裝 { $build }
-ui-messages-downloading_game_data = 正在下載遊戲資料...
-ui-messages-game_data_downloaded = 已下載組建 { $build } 的遊戲資料
+ui-messages-no_replays_detected = 未偵測到戰鬥回放。您的 WoWs 目錄是否正確設定？
 ui-messages-game_data_builds_downloaded = 已下載 { $count } 個組建的遊戲資料
 ui-messages-game_data_download_failed = 無法下載遊戲資料
-ui-messages-game_data_build_download_failed = 無法下載組建 { $build } 的遊戲資料
-ui-messages-checking_game_data_updates = 正在檢查遊戲資料更新...
 ui-messages-game_data_up_to_date = 遊戲資料已是最新
 ui-messages-game_data_updates_available = { $count } 個快取組建有更新的資料可用
-ui-messages-validating_game_data = 正在驗證遊戲資料快取...
 ui-messages-game_data_cache_valid = 遊戲資料快取有效，且與遠端儲存庫相符
 ui-messages-game_data_cache_invalid = { $count } 個快取組建已過期或損毀
-ui-messages-replay_loaded = 成功載入戰鬥回放
 ui-messages-replay_load_failed = 載入回放失敗
 ui-messages-twitch_token_invalid = Twitch 權杖無效或已過期。請在設定中更新。
 ui-messages-wows_dir_invalid = World of Warships 目錄無效。請在設定中檢查路徑。
 ui-messages-wows_dir_not_set = 尚未設定 World of Warships 目錄
-ui-messages-twitch_token_expired = Twitch 權杖無效或已過期
-ui-messages-versioned_constants_rebuild_failed = 重建期間無法獲取版本化常數。稍後將重試。
 ui-messages-constants_version_mismatch =
     回放資料對應檔案版本與遊戲版本不符。
     戰後結果可能不準確。請耐心等待專案維護者更新伺服器上的對應。
-ui-messages-constants_updated = 回放資料對應檔案已成功更新
-ui-messages-constants_imported = 已安裝組建 { $build } 的回放資料對應
-ui-messages-constants_imported_other_build = 已安裝組建 { $build } 的回放資料對應，但它不是當前載入的組建（{ $loaded }）
-ui-messages-constants_import_failed = 無法匯入回放資料對應：{ $error }
 ui-messages-session_started = 工作階段已開始
 ui-messages-user_joined = { $name } 已加入
 ui-messages-user_timeout = { $name } 已逾時
@@ -191,23 +164,12 @@ ui-messages-user_left = { $name } 已離開
 ui-messages-session_ended = 工作階段已結束
 ui-messages-session_error = 工作階段錯誤：{ $msg }
 ui-messages-connected_to_session = 已連線至工作階段
-ui-messages-joined_session = 已加入工作階段：{ $name }
-ui-messages-replay_spam_protection = 已斷線：主持人開啟回放過快
 ui-messages-host_opened_replay = 主持人已開啟回放：{ $name }
 ui-messages-host_closed_replay = 主持人已關閉一個回放
-ui-messages-session_error_generic = 工作階段：{ $msg }
 ui-messages-session_rejected = 工作階段被拒絕：{ $reason }
-ui-messages-indexing_replays = 正在建立回放索引...
-ui-messages-indexing_replays_progress = 正在建立回放索引（{ $done }/{ $total }）
-ui-messages-replays_indexed = 已為 { $total } 個回放中的 { $indexed } 個建立索引
-ui-messages-replays_already_indexed = 全部 { $total } 個回放皆已建立索引
-ui-messages-loading_row_summaries = 正在載入回放詳細資料...
-ui-messages-reading_replay_directory = 正在讀取回放目錄...
-ui-messages-directory_replays_skipped = 已略過 { $skipped } 個無法讀取的回放
 ui-messages-drop_not_a_replay = 這不是回放檔案
 ui-messages-drop_not_replays = 這些不是回放檔案
 ui-messages-drop_skipped = 已略過 { $count } 個不是回放或資料夾的拖放檔案
-ui-messages-directory_replays_not_indexed = 已列出 { $count } 個回放，但沒有比賽詳細資料
 ui-messages-log_copied = 已將 { $file } 中的 { $bytes } KB 複製到剪貼簿
 ui-messages-log_copy_failed = 無法讀取日誌檔案：{ $error }
 ui-messages-log_not_found = 在 { $dir } 中未找到日誌檔案
@@ -221,7 +183,6 @@ stat-frags = 擊沉
 stat-raw_xp = 原始 XP
 stat-base_xp = 基礎 XP
 stat-win_rate = 勝率
-stat-win_rate_pct = 勝率 (%)
 stat-personal_rating = 個人評分
 stat-match_contribution = 戰鬥貢獻
 stat-capture_points = 佔領點數
@@ -229,29 +190,19 @@ stat-planes_shot_down = 擊落飛機
 stat-anti_air_damage = 防空傷害
 stat-survival_rate = 存活率
 stat-torpedoes_spotted = 發現魚雷
-stat-avg_damage = 平均傷害
-stat-avg_spotting_damage = 平均偵察傷害
-stat-avg_frags = 平均擊沉
-stat-avg_raw_xp = 平均原始 XP
-stat-avg_base_xp = 平均基礎 XP
 stat-avg_pr = 平均 PR
-stat-avg_mc = 平均 MC
 stat-avg_prefix = 平均 { $name }
 
 ## chart
-chart-game_number = 場次 #
 chart-combined = 合計
 chart-combined_suffix = (合計)
 chart-rolling_average_suffix = (移動平均)
-chart-no_data = 所選艦船無可用資料
-chart-win_rate_unavailable = 勝率不適用於每場折線圖（請啟用移動平均或使用長條圖）
 
 # -- 確認對話框 --
 
 ## confirm
 confirm-open_in_game = 這將啟動 World of Warships。是否繼續？
 confirm-clear_all_session_stats = 這將清除所有工作階段統計。是否繼續？
-confirm-clear_ship_session_stats = 這將從工作階段統計中移除此艦船的所有場次。是否繼續？
 confirm-set_as_session_stats = 這將取代您目前的工作階段統計。是否繼續？
 
 # -- 錯誤訊息 --
@@ -263,16 +214,10 @@ error-replay_dir_watch = 無法監視回放目錄：{ $error }
 # -- 設定 --
 
 ## ui.settings.app
-ui-settings-app-heading = 應用程式設定
-ui-settings-app-description = 一般應用程式行為和外觀
 ui-settings-app-check_for_updates = 啟動時檢查更新
 ui-settings-app-enable_logging = 啟用日誌記錄（重新啟動後生效）
 ui-settings-app-enable_logging_tooltip = 將偵錯日誌寫入應用程式資料目錄中的檔案。對疑難排解很有用。
 ui-settings-app-data_sharing_mode = 資料分享（排位戰與隨機戰）
-ui-settings-app-data_sharing_off = 不傳送任何資料
-ui-settings-app-data_sharing_build_data = 將配裝資料傳送至 ShipBuilds.com
-ui-settings-app-data_sharing_replays = 將回放傳送至 ShipBuilds.com
-ui-settings-app-zoom_factor = 縮放比例（Ctrl + 和 Ctrl - 也可更改此設定）
 ui-settings-app-theme = 佈景主題
 ui-settings-app-theme_system = 系統
 ui-settings-app-theme_dark = 深色
@@ -283,14 +228,11 @@ ui-settings-app-code_integrity_automatic = 自動
 ui-settings-app-code_integrity_always = 永遠
 ui-settings-app-code_integrity_never = 永不
 ui-settings-app-language = 語言
-ui-settings-app-open_data_dir = 開啟應用程式資料資料夾
 ui-settings-app-open_data_dir_tooltip = 在檔案管理器中開啟應用程式資料資料夾（設定、日誌、快取資料）。
 ui-settings-app-proxy_url = HTTP 代理
-ui-settings-app-proxy_url_hint = host:port，留空則使用系統代理設定（重啟後生效）
 ui-settings-app-proxy_url_hint_live = host:port，留空則使用系統代理設定
 
 ## ui.settings.wows
-ui-settings-wows-heading = World of Warships 設定
 ui-settings-wows-description = World of Warships 安裝路徑
 ui-settings-wows-directory_hint = World of Warships 目錄
 ui-settings-wows-browse = 瀏覽...
@@ -299,7 +241,6 @@ ui-settings-wows-browse = 瀏覽...
 ui-settings-wows-cache-heading = 遊戲資料快取
 ui-settings-wows-cache-description = 已轉儲的遊戲資料，使舊組建的回放仍可開啟
 ui-settings-wows-cache-auto_dump = 快取遊戲資料以相容舊回放
-ui-settings-wows-cache-directory_label = 快取目錄：
 ui-settings-wows-cache-browse = 瀏覽
 ui-settings-wows-cache-open_folder = 開啟資料夾
 ui-settings-wows-cache-delete_old = 刪除舊版本
@@ -310,40 +251,23 @@ ui-settings-wows-cache-actions_tooltip = 檢查更新或校驗已快取的組建
 ui-settings-wows-cache-update_all = 全部更新
 ui-settings-wows-cache-updates_available = { $count } 個快取組建有更新的資料可用
 ui-settings-wows-cache-validate = 驗證快取
-ui-settings-wows-cache-validate_tooltip = 比對遠端儲存庫檢查每個快取組建，並驗證檔案完整性
 ui-settings-wows-cache-repair = 修復
 ui-settings-wows-cache-repair_needed = { $count } 個快取組建已過期或損毀
 
-## ui.task
-ui-task-batch_render_progress = 正在渲染 { $current }/{ $total }：{ $name }
-
 ## ui.settings.replay
-ui-settings-replay-heading = 回放設定
-ui-settings-replay-description = 設定回放結果表格中顯示的欄位
 ui-settings-replay-show_raw_xp = 顯示原始 XP
 ui-settings-replay-show_entity_id = 顯示實體 ID
 ui-settings-replay-show_observed_damage = 顯示觀測傷害
 ui-settings-replay-enable_previews = 滑鼠停留時顯示小地圖預覽
 ui-settings-replay-enable_previews_tooltip = 將滑鼠停留在回放上時，會在背景讀取並重播該回放，以建立循環播放的小地圖預覽。若儲存裝置速度較慢，請關閉此功能。
-ui-settings-replay-show_fires = 顯示火災
-ui-settings-replay-show_floods = 顯示進水
-ui-settings-replay-show_citadels = 顯示核心區命中
-ui-settings-replay-show_crits = 顯示模組關鍵命中
 ui-settings-replay-auto_export_data = 自動匯出資料
-ui-settings-replay-format_json = JSON
-ui-settings-replay-format_csv = CSV
-ui-settings-replay-format_cbor = CBOR
 ui-settings-replay-export_path_hint = 資料自動匯出目錄
 ui-settings-replay-export_path_missing = 該目錄不存在，無法匯出資料。
 ui-settings-replay-index_all_replays = 為所有回放建立索引
-ui-settings-replay-reindex_all_replays = 重新為所有回放建立索引
-ui-settings-replay-reindex_all_replays_hover = 重新解析並重新索引每個回放，包括已建立索引的回放。當更新新增了索引資料（例如個人評分、斷線狀態）時，可用此功能將資料回填至既有項目。
 ui-settings-replay-show_heals = 顯示維修
 ui-settings-replay-current_path = 當前回放路徑
 
 ## ui.settings.session
-ui-settings-session-heading = 工作階段設定
-ui-settings-session-description = 協作回放工作階段偏好設定
 ui-settings-session-display_name = 顯示名稱
 ui-settings-session-suppress_ip_warning = 不顯示 P2P IP 位址警告
 ui-settings-session-ip_warning_tooltip = 協作工作階段使用 P2P 網路。工作階段中的其他使用者可能能夠看到您的 IP 位址。
@@ -351,8 +275,6 @@ ui-settings-session-disable_auto_open = 停用自動開啟工作階段視窗
 ui-settings-session-auto_open_tooltip = 啟用後，工作階段視窗（回放、戰術板）不會自動開啟。您仍然可以從工作階段彈出視窗中開啟它們。
 
 ## ui.settings.twitch
-ui-settings-twitch-heading = Twitch 設定
-ui-settings-twitch-description = 連接 Twitch 以進行聊天整合和玩家追蹤
 ui-settings-twitch-get_token = 取得登入權杖
 ui-settings-twitch-get_token_tooltip = 我們使用 Chatterino 的登入頁面，因為它提供具有必要權限的權杖（基本上是具有聊天權限的管理員權杖），並且不需要 WoWs Toolkit 開發者架設自己的登入頁面網站以達到相同的效果。
 ui-settings-twitch-paste_token_no_token = 貼上權杖（未設定權杖）
@@ -367,29 +289,18 @@ ui-settings-twitch-signed_in_as = 已登入為 { $who }
 
 ## ui.replay
 ui-replay-copy_bug_report_info = 複製錯誤回報資訊
-ui-replay-collapse_listing = 收合回放清單
-ui-replay-expand_listing = 展開回放清單
 ui-replay-match_age = { $age }前
 ui-replay-listing_caption = 回放
-ui-replay-listing_reading = 正在讀取 { $done } / { $total }...
-ui-replay-listing_scanning = 正在掃描 { $done } / { $total }...
-ui-replay-listing_downloading = 正在下載遊戲資料，{ $done } / { $total } 個檔案...
-ui-replay-listing_loading_data = 正在載入 { $version } 的遊戲資料（{ $index } / { $count }）...
 ui-replay-loading_game_data_version = 正在載入 { $version } 的遊戲資料...
 ui-replay-spectator = 觀戰者
 ui-replay-loading = 載入中...
 ui-replay-preview_loading = 正在建立預覽...
-ui-replay-preview_empty = 沒有可顯示的移動
 ui-replay-preview_no_game_data = 沒有用戶端版本 { $value } 的遊戲資料
-ui-replay-preview_unreadable = 無法讀取此回放
 ui-replay-preview_unreadable_because = 無法讀取此回放: { $value }
 ui-replay-preview_unwalkable = 無法重播此回放的戰鬥：{ $value }
 ui-replay-preview_unknown_version = 此回放回報了無法讀取的用戶端版本：{ $value }
 ui-replay-preview_no_map = 沒有 { $value } 的地圖資料
-ui-replay-preview_cancelled = 預覽已被新的預覽取代
 ui-replay-preview_render_failed = 無法繪製預覽：{ $value }
-ui-replay-no_selection = 點擊回放以檢視，或雙擊在新分頁中開啟
-ui-replay-workspace_closed = 此回放工作區已關閉
 ui-replay-incomplete_results = 不完整的比賽結果
 ui-replay-incomplete_results_tooltip = 回放尚無比賽結束結果。比賽結束並將結果加入回放後，資料將自動重新載入。
 ui-replay-no_chat = 此回放中沒有發送聊天訊息
@@ -406,10 +317,9 @@ ui-replay-hide_my_stats = 隱藏我的測試艦統計
 ui-replay-open_manually = 手動開啟回放檔案...
 ui-replay-open_directory = 開啟回放目錄...
 ui-replay-search_these_replays = 搜尋這些回放
-ui-replay-reading_directory = 正在列出 { $dir } 中的回放
 ui-replay-import_constants = 匯入 constants.json 檔案...
 ui-replay-refresh_persisted_data = 重新整理已儲存的回放資料...
-ui-replay-contributing = 正在提交回放 { $done } / { $total }
+ui-replay-contributing = 正在提交第 { $done } 個回放，共 { $total } 個
 ui-replay-contributed = 已提交 { $sent } / { $total } 個回放
 ui-replay-contribute_nothing_shared = 請先在設定中選擇要共享的內容
 ui-replay-contribute_none_listed = 沒有可提交的回放
@@ -436,13 +346,10 @@ ui-replay-constants_fallback_published = 使用為組建 { $build } 發布的常
 ui-replay-constants_fallback_embedded = 使用內建常數。
 ui-replay-copy_latest_log = 將最新日誌複製到剪貼簿
 ui-replay-load_alt_perspective = 載入另一隊的視角...
-ui-replay-load_alt_perspective_tooltip = 將其他玩家錄製的同一場比賽合併至目前的回放。可顯示另一視角中的敵方位置、配裝、魚雷、砲擊與消耗品。
-ui-replay-load_alt_perspective_disabled_tooltip = 請先開啟或聚焦一個回放。
 ui-replay-load_alt_perspective_failed = 合併回放失敗：{ $error }
 ui-replay-load_alt_perspective_limit = 這場戰鬥已在透過 { $limit } 個其他錄影讀取
 ui-replay-consumable_charges_remaining = 剩餘 { $remaining } 次，共 { $total } 次
 ui-replay-consumable_charges_unlimited = 已使用 { $used } 次（次數無限）
-ui-replay-consumable_header_consumable = 消耗品
 ui-replay-consumable_header_remaining = 剩餘
 ui-replay-consumable_header_total = 總數
 ui-replay-consumable_charges_infinite = ∞
@@ -478,10 +385,8 @@ ui-replay-check_game_data = 檢查遊戲資料
 ui-replay-check_game_data_tooltip = 檢查此目錄中的回放所需的遊戲資料
 ui-replay-close_side_panel = 關閉面板
 ui-replay-nda = NDA
-ui-replay-render = 渲染
 ui-replay-chat = 聊天
 ui-replay-game_chat = 遊戲聊天
-ui-replay-copy_all = 全部複製
 ui-replay-save_to_file = 儲存至檔案
 ui-replay-chat_copied = 聊天已複製
 ui-replay-copy_message = 複製訊息
@@ -499,12 +404,9 @@ ui-replay-row_kills = { $count } 擊沉
 ui-replay-row_survived = 存活
 ui-replay-row_sunk = 已沉沒
 ui-replay-row_division = 分隊：{ $members }
-ui-replay-export_chat_save = 聊天：儲存至檔案
-ui-replay-export_chat_copy = 聊天：複製
 ui-replay-export_results_json = 結果：JSON
 ui-replay-export_results_cbor = 結果：CBOR
 ui-replay-export_results_csv = 結果：CSV
-ui-replay-timeline_filter = 篩選
 ui-replay-timeline_filter_all = 全部
 ui-replay-timeline_filter_none = 無
 ui-replay-timeline_search_hint = 搜尋艦船或玩家
@@ -536,27 +438,32 @@ ui-replay-context-pin_column = 固定欄
 ui-replay-context-unpin_column = 取消固定欄
 ui-replay-context-copied = 已複製
 ui-replay-context-copy_path = 複製路徑
-ui-replay-context-copy_replay = 複製回放
-ui-replay-context-copy_replays = 複製 { $count } 個回放
-ui-replay-context-copy_paths = 複製 { $count } 個路徑
+ui-replay-context-copy_replays = { $count ->
+    [one] 複製回放
+   *[other] 複製 { $count } 個回放
+}
+ui-replay-context-copy_paths = { $count ->
+    [one] 複製路徑
+   *[other] 複製 { $count } 個路徑
+}
 ui-replay-context-show_in_explorer = 在檔案總管中顯示
 ui-replay-context-show_replay_controls = 顯示回放控制項
 ui-replay-context-open_in_game = 在遊戲中開啟
 ui-replay-context-render_replay = 渲染回放
-ui-replay-context-set_session_stats_one = 設為工作階段統計（1 個回放）
-ui-replay-context-set_session_stats_many = 設為工作階段統計（{ $count } 個回放）
-ui-replay-context-add_session_stats_one = 加入工作階段統計（1 個回放）
-ui-replay-context-add_session_stats_many = 加入工作階段統計（{ $count } 個回放）
-ui-replay-context-render_to_video = 匯出為影片
-ui-replay-context-render_to_video_many = 匯出{ $count }個回放為影片
-ui-replay-context-render_to_clipboard = 匯出到剪貼簿
-ui-replay-context-render_to_clipboard_many = 匯出{ $count }個回放到剪貼簿
+ui-replay-context-set_session_stats = 設為工作階段統計（{ $count } 個回放）
+ui-replay-context-add_session_stats = 加入工作階段統計（{ $count } 個回放）
+ui-replay-context-render_to_video = { $count ->
+    [one] 匯出為影片
+   *[other] 將 { $count } 個回放匯出為影片
+}
+ui-replay-context-render_to_clipboard = { $count ->
+    [one] 匯出到剪貼簿
+   *[other] 將 { $count } 個回放匯出到剪貼簿
+}
 
 ## ui.replay.column
-ui-replay-column-actions = 操作
 ui-replay-column-player_name = 玩家名稱
 ui-replay-column-base_xp = 基礎 XP
-ui-replay-column-raw_xp = 原始 XP
 ui-replay-column-ship_name = 艦船名稱
 ui-replay-column-hits = 命中
 ui-replay-column-heals = 維修
@@ -565,7 +472,6 @@ ui-replay-column-heals_no_repair_tooltip = 此艦船沒有維修小組消耗品�
 ui-replay-column-kills = 擊沉
 ui-replay-column-observed_damage = 觀測傷害
 ui-replay-column-actual_damage = 實際傷害
-ui-replay-column-spotting_damage = 偵察傷害
 ui-replay-column-potential_damage = 潛在傷害
 ui-replay-column-time_lived = 存活時間
 ui-replay-column-fires = 火災
@@ -582,7 +488,6 @@ ui-replay-column-match_contribution = MC
 ui-rating-personal_rating = 個人評分
 ui-rating-match_contribution = 戰鬥貢獻
 ui-rating-versus_average = 相較平均
-ui-rating-average = 平均
 ui-rating-damage = 傷害
 ui-rating-kills = 擊沉
 ui-rating-wins = 勝利
@@ -607,9 +512,7 @@ ui-rating-detail-objectives = 得分：佔領 { $capture }、阻止佔領 { $blo
 ui-rating-detail-anti_air_planes = { $strike } 架攻擊機，{ $support } 架戰鬥機與偵察機
 ui-rating-detail-anti_air_damage = { $damage } 防空傷害
 ui-rating-detail-torpedo_warnings = 發現 { $threatening } 枚具威脅的魚雷
-ui-rating-detail-torpedo_warnings_one = 發現 1 枚具威脅的魚雷
 ui-rating-detail-critical_bursts = { $count } 次關鍵爆發：{ $bursts }。僅能看到錄影玩家附近的艦船
-ui-rating-detail-critical_bursts_one = 1 次關鍵爆發：{ $bursts }。僅能看到錄影玩家附近的艦船
 ui-rating-detail-critical_burst = { $seconds } 秒內造成 { $ship } 的 { $share }%
 ui-rating-detail-critical_burst_at_once = 一次造成 { $ship } 的 { $share }%
 
@@ -622,21 +525,10 @@ ui-rating-basis-dynamic = 動態
 ui-rating-basis-static_explained = 靜態：與固定常數或艦種基準比較
 ui-rating-basis-dynamic_explained = 動態：與 wows-numbers 期望值或本場戰鬥中的其他玩家比較
 
-## ui.replay.filter
-ui-replay-filter-raw_xp = 原始 XP
-ui-replay-filter-entity_id = 實體 ID
-ui-replay-filter-observed_damage = 觀測傷害
-ui-replay-filter-heals = 維修
-ui-replay-filter-fires = 火災
-ui-replay-filter-floods = 進水
-ui-replay-filter-citadels = 核心區命中
-ui-replay-filter-crits = 模組關鍵命中
-
 ## ui.replay.group
 ui-replay-group-date = 日期
 ui-replay-group-ship = 艦船
 ui-replay-group-none = 無
-ui-replay-group-prefix = 分組：{ $label }
 
 ## ui.replay.player
 ui-replay-player-hidden_profile = 該玩家的個人檔案已隱藏
@@ -659,19 +551,14 @@ ui-replay-sections-modules_none = 無模組
 ui-replay-sections-signals = 信號旗：
 ui-replay-sections-loadout = 配置：
 ui-replay-sections-loadout_none = 無配置
-ui-replay-sections-abilities = 消耗品：
-ui-replay-sections-abilities_none = 無消耗品
 ui-replay-sections-captain_skills = 艦長技能：
 ui-replay-sections-captain_skills_none = 無艦長技能
 ui-replay-sections-consumables = 消耗品：
 ui-replay-sections-fire_chance = 有效縱火機率
 ui-replay-sections-fire_chance_expected = 預期
 ui-replay-sections-fire_chance_fires = { $fires } 次縱火
-ui-replay-sections-fire_chance_fires_one = 1 次縱火
 ui-replay-sections-fire_chance_eligible_hits = { $hits } 次可能引發火災的命中
-ui-replay-sections-fire_chance_eligible_hits_one = 1 次可能引發火災的命中
 ui-replay-sections-fire_chance_ships = 橫跨 { $ships } 艘目標艦船
-ui-replay-sections-fire_chance_ships_one = 橫跨 1 艘目標艦船
 ui-replay-sections-fire_chance_expected_fires = 預期 { $fires } 次縱火
 ui-replay-sections-fire_chance_per_ship = 各目標艦船
 ui-replay-sections-fire_chance_no_eligible_hits = 沒有可能引發火災的命中
@@ -680,14 +567,10 @@ ui-replay-sections-fire_chance_formula_base = 基礎 burnProb
 ui-replay-sections-fire_chance_formula_clamped = 已限制範圍
 ui-replay-sections-fire_chance_breakdown = 明細
 ui-replay-sections-fire_chance_shells_fired = 已發射的 HE 砲彈
-ui-replay-sections-fire_chance_shells_fired_one = 已發射 1 發 HE 砲彈
 ui-replay-sections-fire_chance_he_hits = 命中艦船的 HE 砲彈
-ui-replay-sections-fire_chance_he_hits_one = 命中艦船的 HE 砲彈 1 發
 ui-replay-sections-fire_chance_no_target_ship = 無法歸屬至目標艦船的 HE 命中
-ui-replay-sections-fire_chance_no_target_ship_one = 無法歸屬至目標艦船的 HE 命中 1 次
 ui-replay-sections-fire_chance_eligible = 可能引發火災
 ui-replay-sections-fire_chance_ribbons = 縱火勳帶
-ui-replay-sections-fire_chance_ribbons_one = 縱火勳帶 1 個
 ui-replay-sections-fire_chance_ribbons_credited = 已歸屬至某發砲彈
 ui-replay-sections-fire_chance_ribbons_uncredited = 未歸屬
 ui-replay-sections-fire_chance_unattributed_no_burn_state = 沒有可供比對的燃燒狀態變化
@@ -720,19 +603,9 @@ ui-replay-debug-raw_metadata = 原始中繼資料
 ui-replay-debug-raw_results = 原始結果
 ui-replay-debug-mapped_results = 對應結果
 ui-replay-debug-player_metadata = 玩家中繼資料
-ui-replay-debug-no_results_packet = 此回放沒有戰鬥結果資料包
-ui-replay-debug-raw_json_tooltip = 由 WG 序列化的原始戰鬥結果。
-ui-replay-debug-mapped_json_tooltip = 將位置陣列解析為具名欄位的戰鬥結果。
-ui-replay-debug-results_raw_json = 戰鬥結果：原始 JSON
-ui-replay-debug-results_mapped_json = 戰鬥結果：已對應 JSON
 ui-replay-debug-search = 搜尋
 ui-replay-debug-previous_match = 上一個符合項 (Shift+Enter)
 ui-replay-debug-next_match = 下一個符合項 (Enter)
-
-## ui.replay.results
-ui-replay-results-victory = 勝利
-ui-replay-results-defeat = 失敗
-ui-replay-results-draw = 平手
 
 ## ui.replay.controls
 ui-replay-controls-window_title = 回放控制項
@@ -742,7 +615,7 @@ ui-replay-controls-unavailable = 控制項不可用（在遊戲檔案中找不�
 
 ## ui.collab
 ui-collab-session = 工作階段
-ui-collab-starting = 正在啟動工作階段…
+ui-collab-starting = 正在啟動工作階段...
 ui-collab-session_active = 工作階段進行中
 ui-collab-connected_to_session = 已連線至工作階段
 ui-collab-session_token = 工作階段權杖：
@@ -750,14 +623,11 @@ ui-collab-toggle_visibility = 切換權杖可見性
 ui-collab-copy_token = 複製權杖
 ui-collab-token_copied = 權杖已複製到剪貼簿
 ui-collab-copy_web_link = 複製網頁連結
-ui-collab-copy_web_link_tooltip = 複製網頁用戶端的連結
 ui-collab-web_link_copied = 網頁連結已複製到剪貼簿
 ui-collab-copy_localhost_link = 複製 localhost 連結
-ui-collab-copy_localhost_tooltip = 複製 localhost 連結（開發用）
 ui-collab-localhost_copied = localhost 連結已複製到剪貼簿
 ui-collab-connected_count = { $count } 人已連線
 ui-collab-promote_cohost = 升級為共同主持人
-ui-collab-promoted_cohost = 已將 { $name } 升級為共同主持人
 ui-collab-permissions = 權限
 ui-collab-lock_annotations = 鎖定標註
 ui-collab-lock_settings = 鎖定設定
@@ -769,7 +639,6 @@ ui-collab-role_cohost = 共同主持人
 ui-collab-you = （你）
 ui-collab-display_name = 顯示名稱：
 ui-collab-display_name_hint = 您的名稱...
-ui-collab-display_name_error = 請輸入顯示名稱
 ui-collab-enter_display_name = 請先輸入顯示名稱
 ui-collab-host_session = 主持工作階段
 ui-collab-start_session = 開始工作階段
@@ -784,8 +653,6 @@ ui-collab-waiting_for_frames = 正在等待戰鬥資料
 ui-collab-open = 開啟
 ui-collab-open_for_everyone = 為所有人開啟
 ui-collab-tactics_board = 戰術板
-ui-collab-max_boards = 最多開啟 { $count } 個戰術板
-ui-collab-waiting_for_data = 正在等待遊戲資料載入…
 
 # -- 戰鬥結果文字 --
 
@@ -816,8 +683,6 @@ finish_type-score_excess = 超過分數上限
 ## ui.stats
 ui-stats-overview = 概覽
 ui-stats-sample_notice = 範例資料，並非記錄的戰鬥
-ui-stats-limit = 限制
-ui-stats-division = 分隊：
 ui-stats-div_all = 全部
 ui-stats-div_solo = 單人
 ui-stats-div_div = 分隊
@@ -828,7 +693,6 @@ ui-stats-mode_label = 模式：
 ui-stats-clear = 清除
 ui-stats-pr = PR：
 ui-stats-mc = MC：
-ui-stats-frags_count = { $count } 擊沉
 ui-stats-best_frags = 最佳：{ $ship }（{ $count } 擊沉）
 ui-stats-max_damage = 最大傷害：{ $ship }（{ $damage }）
 ui-stats-copy_markdown = 複製為 Markdown
@@ -837,16 +701,8 @@ ui-stats-copy_image_done = 圖表已複製到剪貼簿
 ui-stats-copy_image_failed = 無法複製圖表
 ui-stats-copy_csv = 複製為 CSV
 ui-stats-remove_games_hint = 移除 { $ship } 的所有場次（Ctrl+Click 跳過確認）
-ui-stats-no_stats = 沒有可用的工作階段統計。請先進行一些場次！
 ui-stats-settings = 設定
-ui-stats-chart_type = 圖表類型
-ui-stats-stat_label = 統計：
-ui-stats-chart_line = 折線圖
-ui-stats-chart_bar = 長條圖
 ui-stats-options = 選項
-ui-stats-combined = 合計
-ui-stats-rolling_avg = 移動平均
-ui-stats-labels = 標籤
 ui-stats-ships = 艦船
 ui-stats-filter_ships = 篩選圖表艦船
 ui-stats-all_ships = 全部
@@ -858,12 +714,10 @@ ui-stats-no_statistic_matches = 沒有符合搜尋條件的統計項目
 ui-stats-ship_selection_count = 已選擇 { $selected } / { $total }
 ui-stats-all_ships_tooltip = 選擇所有匹配的艦船
 ui-stats-no_ships_tooltip = 清除匹配艦船的選擇
-ui-stats-copy_as_image = 複製為圖片
 ui-stats-limit_to_recent = 僅限最近的比賽
 ui-stats-limit_to_recent_tooltip = 在「艦船」和「圖表」中按每艘艦船分別限制，在「概覽」中對所有比賽統一限制。
 ui-stats-division_label = 分隊：
 ui-stats-add_chart = 新增圖表
-ui-stats-clear_confirm = 清除所有比賽？
 ui-stats-clear_tooltip = 刪除所有已記錄的比賽
 ui-stats-clear_failed = 未清除：{ $reason }
 ui-stats-clear_ship_confirm = 再次按下以刪除此艦船的比賽
@@ -892,7 +746,6 @@ ui-stats-directory_skipped_detail =
     無法讀取：{ $unreadable }
     沒有對應組建的遊戲資料：{ $missing_build }
     沒有戰鬥結果：{ $no_results }
-ui-stats-directory_no_games = 此目錄中沒有包含戰鬥結果的回放
 ui-stats-chart = 圖表
 ui-stats-combine_ships = 合併艦船
 ui-stats-running_average = 累計平均
@@ -904,8 +757,7 @@ ui-stats-session_manual = 手動
 ui-stats-session_since_opened = 自應用程式啟動以來
 ui-stats-session_manual_tooltip = 工作階段包含您進行的戰鬥，以及您從回放清單中設定或加入的回放。它會在多次執行之間保留。
 ui-stats-session_since_opened_tooltip = 工作階段包含在 { $time }（應用程式啟動時）或之後開始的所有戰鬥。您的手動工作階段會被保留，切換到手動時即可恢復。
-ui-stats-session_battles_one = 1 場戰鬥
-ui-stats-session_battles_many = { $count } 場戰鬥
+ui-stats-session_battles = { $count } 場戰鬥
 ui-stats-session_chip_manual = 工作階段：{ $battles }
 ui-stats-session_chip_since = 自 { $time } 起的工作階段：{ $battles }
 ui-stats-session_empty_title = 此工作階段中尚無戰鬥
@@ -959,12 +811,10 @@ ui-stats-table-average = 平均
 
 ## ui.player_tracker
 ui-player_tracker-clear_stats = 清除統計
-ui-player_tracker-player_filter = 玩家篩選器
 ui-player_tracker-populate_from_replays = 從回放填充資料
 ui-player_tracker-find_matches = 尋找比賽
 ui-player_tracker-open_wows_numbers = 在 wows-numbers 上開啟
 ui-player_tracker-open_shipbuilds = 在 shipbuilds 上開啟配裝
-ui-player_tracker-subtab_historical = 歷史比賽
 ui-player_tracker-subtab_players = 玩家
 ui-player_tracker-filter_hint = 按玩家或公會篩選...
 ui-player_tracker-time_period = 時間範圍
@@ -979,12 +829,8 @@ ui-player_tracker-loading_clans = 正在載入公會...
 ui-player_tracker-loading_players = 正在載入玩家...
 ui-player_tracker-index_failed = 無法讀取索引：{ $reason }
 ui-player_tracker-no_players = 此時間範圍內沒有已索引的玩家
-ui-player_tracker-notes_title = 備註：{ $name }
 ui-player_tracker-note_not_saved = 未儲存：{ $reason }
 ui-player_tracker-subtab_current_match = 當前比賽
-ui-player_tracker-your_team = 我方隊伍（{ $count }）
-ui-player_tracker-enemy_team = 敵方隊伍（{ $count }）
-ui-player_tracker-no_live_match = 目前沒有進行中的比賽。進入比賽後即會顯示名單。
 ui-player_tracker-encounters_hover = 總共遭遇 { $total } 次，所選時間範圍內 { $range } 次。上次遭遇於 { $last }。
 ui-player_tracker-never_encountered = 先前未曾遭遇
 ui-player_tracker-copy_wg_id = 點擊以複製 WG ID
@@ -1008,26 +854,17 @@ ui-player_tracker-win_rate_ship = 艦船
 ui-player_tracker-view_compact = 精簡
 ui-player_tracker-view_detailed = 詳細
 ui-player_tracker-ship_stats = 艦船統計
-ui-player_tracker-win_rate_mode_hover = 顯示帳號統計或此艦船的統計。該列的顏色、PR、戰鬥場次與平均傷害都會隨之變更。
 ui-player_tracker-stats_resolving = 正在讀取比賽名單...
 ui-player_tracker-stats_fetching = 正在取得玩家統計...
-ui-player_tracker-stats_rate_limited = 已達速率限制，{ $wait } 後重試
 ui-player_tracker-stats_unavailable = 統計不可用：{ $reason }
-ui-player_tracker-roster_unavailable = 無法從回放中讀取比賽名單
 ui-player_tracker-stats_hidden = 此玩家的個人檔案已隱藏
 ui-player_tracker-stats_no_data = 此玩家沒有統計資料
-ui-player_tracker-stats_unplayed_ship = 沒有此艦船的戰鬥記錄
 ui-player_tracker-pr_overall_hover = 所有艦船的帳號 PR
 ui-player_tracker-pr_ship_hover = 此艦船的 PR
-ui-player_tracker-avg_damage = 平均傷害
 ui-player_tracker-win_rate_hover_line = { $label }：{ $rate }，共 { $battles } 場戰鬥
 ui-player_tracker-win_rate_hover_line_damage = { $label }：{ $rate }，共 { $battles } 場戰鬥，平均傷害 { $damage }
 ui-player_tracker-team_average_win_rate = 平均勝率：{ $rate }
 ui-player_tracker-team_players = { $count } 名玩家
-ui-player_tracker-row_win_rate = 勝率 { $rate }
-ui-player_tracker-row_personal_rating = PR { $value }
-ui-player_tracker-row_battles = { $count } 場戰鬥
-ui-player_tracker-row_seen = 遭遇 x{ $total }
 ui-player_tracker-debug_replay_picker = 偵錯：將某個回放視為當前比賽
 ui-player_tracker-debug_replay_picker_hover = 將已結束回放的名單載入此分頁，以便在戰鬥之外測試統計流程。
 ui-player_tracker-debug_replay_none = 選擇回放
@@ -1057,31 +894,15 @@ ui-player_tracker-period-all_time = 所有時間
 
 # -- 模組管理器 --
 
-
 ## ui.twitch
 ui-twitch-possible_name = 可能的直播名稱：{ $name }
 ui-twitch-seen_minutes = 在比賽開始 { $minutes } 分鐘後看到
 ui-twitch-click_to_copy = 點擊以複製
 ui-twitch-copied = 已複製 { $name }
-## ui.mod_manager
-ui-mod_manager-category_filters = 類別篩選器
-ui-mod_manager-enabled = 已啟用
-ui-mod_manager-mod_home = 模組首頁
-ui-mod_manager-discord_thread = Discord 審核討論串
-ui-mod_manager-save_config = 儲存模組設定
-ui-mod_manager-load_config = 載入模組設定
-ui-mod_manager-filter = 篩選
-
-## ui.mod_manager.column
-ui-mod_manager-column-enabled = 已啟用
-ui-mod_manager-column-name = 名稱
-ui-mod_manager-column-author = 作者
-ui-mod_manager-column-category = 類別
 
 # -- 回放渲染器 --
 
 ## ui.renderer
-ui-renderer-loading = 正在載入回放資料...
 ui-renderer-preparing_export = 正在準備匯出...
 ui-renderer-encoding = 編碼中
 ui-renderer-muxing = 混流中
@@ -1093,7 +914,7 @@ ui-renderer-advantage-score_projection = 分數預測
 ui-renderer-advantage-fleet_power = 艦隊戰力
 ui-renderer-advantage-strategic_threat = 戰略威脅
 ui-renderer-advantage-total = 總計
-ui-renderer-advantage-hp_incomplete = HP/艦船資料不完整 — 僅顯示分數因素
+ui-renderer-advantage-hp_incomplete = HP/艦船資料不完整。僅顯示分數因素
 
 ## ui.renderer.context
 ui-renderer-context-show_trail = 顯示航跡
@@ -1109,39 +930,30 @@ ui-renderer-context-enable_all = 全部啟用
 ui-renderer-context-disable_all = 全部停用
 ui-renderer-context-disable_other_ranges = 停用所有其他射程
 ui-renderer-context-enable_all_ranges = 啟用所有艦船的射程
-ui-renderer-context-show_armor = 顯示即時裝甲
 ui-renderer-context-realtime_armor = 顯示即時裝甲
 
 ## ui.renderer.controls
 ui-renderer-controls-jump_to_start = 跳至開始
 ui-renderer-controls-previous_event = 上一個事件 (Shift+Left)
 ui-renderer-controls-back_10s = 後退 10 秒 (Left)
-ui-renderer-controls-pause = 暫停 (Space)
-ui-renderer-controls-play = 播放 (Space)
 ui-renderer-controls-forward_10s = 前進 10 秒 (Right)
 ui-renderer-controls-next_event = 下一個事件 (Shift+Right)
 ui-renderer-controls-jump_to_end = 跳至結束
-ui-renderer-controls-save_as_video = 儲存為影片
-ui-renderer-controls-copy_to_clipboard = 渲染影片至剪貼簿
 ui-renderer-controls-speed = 播放速度
 
 ## ui.renderer.settings
 ui-renderer-settings-title = 顯示設定
 ui-renderer-settings-hp_bars = 血條
-ui-renderer-settings-ship_settings = 艦船設定
 ui-renderer-settings-armament = 武裝
 ui-renderer-settings-dead_ships = 被摧毀的艦船
 ui-renderer-settings-dead_ship_names = 被摧毀的艦船名稱
 ui-renderer-settings-player_names = 玩家名稱
 ui-renderer-settings-ship_ranges = 艦船射程
-ui-renderer-settings-self_ship_ranges = 己方艦船射程
 ui-renderer-settings-ship_names = 艦船名稱
 ui-renderer-settings-camera_direction = 砲塔方向
-ui-renderer-settings-trail_settings = 航跡設定
 ui-renderer-settings-heat_trail = 熱力航跡
 ui-renderer-settings-speed_trails = 速度航跡
 ui-renderer-settings-dead_ship_trails = 被摧毀艦船的航跡
-ui-renderer-settings-map_settings = 地圖設定
 ui-renderer-settings-buildings = 建築物
 ui-renderer-settings-capture_points = 佔領點
 ui-renderer-settings-consumables = 消耗品
@@ -1149,7 +961,6 @@ ui-renderer-settings-planes = 飛機
 ui-renderer-settings-smoke = 煙幕
 ui-renderer-settings-torpedoes = 魚雷
 ui-renderer-settings-tracers = 曳光彈
-ui-renderer-settings-hud_settings = HUD 設定
 ui-renderer-settings-battle_result = 戰鬥結果
 ui-renderer-settings-buff_counters = 增益計數器
 ui-renderer-settings-chat_label = 聊天
@@ -1188,21 +999,11 @@ ui-unpacker-filter_files = 篩選檔案...
 ui-unpacker-search_in_files = 在檔案中搜尋
 ui-unpacker-search_hint = 在檔案中搜尋...
 ui-unpacker-path_filter_hint = 路徑篩選器（例如 *.xml）
-ui-unpacker-queue_all = 全部排入佇列
 ui-unpacker-queue_all_files = 所有檔案排入佇列
-ui-unpacker-empty_directory = 空目錄
-ui-unpacker-stop_search_tooltip = 停止搜尋
-ui-unpacker-no_matches = 未找到相符結果。
 ui-unpacker-view_as_json = 以 JSON 檢視
 ui-unpacker-extract_as_json = 以 JSON 匯出
 ui-unpacker-view_contents = 檢視內容
 ui-unpacker-version = 版本：
-ui-unpacker-game_params = GameParams
-ui-unpacker-base_as_json = 基礎以 JSON 格式
-ui-unpacker-as_json = 以 JSON 格式
-ui-unpacker-as_cbor = 以 CBOR 格式
-ui-unpacker-as_json_minimal = 以 JSON 格式（精簡 / 轉換）
-ui-unpacker-as_cbor_minimal = 以 CBOR 格式（精簡 / 轉換）
 ui-unpacker-decode_prototypes = 將原型解碼為 JSON
 ui-unpacker-decode_prototypes_tooltip = 在匯出時將支援的 Assets.bin 原型（.visual、.model、.mfm）解碼為 JSON
 ui-unpacker-extraction_queue = 匯出佇列
@@ -1211,14 +1012,11 @@ ui-unpacker-expand_folders = 展開資料夾樹
 ui-unpacker-clear_all = 全部清除
 ui-unpacker-browse = 瀏覽
 ui-unpacker-output_dir_hint = 輸出目錄...
-ui-unpacker-go_to_directory = 前往目錄
 ui-unpacker-remove_from_queue = 從佇列中移除
 ui-unpacker-queue_folder = 將整個資料夾排入佇列
 ui-unpacker-queue_file = 將此檔案加入佇列
 ui-unpacker-extraction_output = 提取到
 ui-unpacker-queue_empty = 在列表中勾選檔案或資料夾以加入佇列
-ui-unpacker-show_queue = 提取佇列
-ui-unpacker-double_click_open = 雙擊開啟
 ui-unpacker-packages = 資源包
 ui-unpacker-item_count = { $count } 項
 ui-unpacker-search_title = 搜尋：{ $query }
@@ -1240,9 +1038,10 @@ ui-unpacker-extracting = 正在提取 { $done } / { $total }
 ui-unpacker-extract_failed = 提取失敗：{ $reason }
 ui-unpacker-extracted = 已提取 { $count } 個檔案
 ui-unpacker-cancelled = 已在提取 { $count } 個檔案後取消
-ui-unpacker-extract = 提取
-ui-unpacker-extract_one = 提取 1 項
-ui-unpacker-extract_many = 提取 { $count } 項
+ui-unpacker-extract = { $count ->
+    [0] 提取
+   *[other] 提取 { $count } 項
+}
 ui-unpacker-choose_directory = 請先選擇提取目標目錄
 ui-unpacker-dump_parameters = 匯出 GameParams
 ui-unpacker-dump_parameters_tooltip = 匯出此組建的 GameParams.data
@@ -1258,19 +1057,12 @@ ui-unpacker-base_only = 僅基礎參數
 ui-unpacker-column-name = 名稱
 ui-unpacker-column-size = 大小
 ui-unpacker-column-type_col = 類型
-ui-unpacker-column-path = 路徑
-ui-unpacker-column-file = 檔案
-ui-unpacker-column-offset = 偏移
-ui-unpacker-column-context = 上下文
 
 # -- 裝甲檢視器 --
 
 ## ui.armor
 ui-armor-load_settings = 請在設定中載入遊戲資料以使用裝甲檢視器。
-ui-armor-gpu_unavailable = GPU 渲染狀態不可用。
-ui-armor-loading_ship = 正在載入艦船資料...
 ui-armor-load_failed = 載入艦船資料失敗：{ $error }
-ui-armor-ship_load_failed = 載入 { $ship } 失敗：{ $reason }
 ui-armor-empty = 空
 ui-armor-mirror_cameras = 鏡像攝影機
 ui-armor-sync_options = 同步選項
@@ -1284,29 +1076,19 @@ ui-armor-show_hidden_ships_tooltip = 同時列出清單略去的艦船，例如�
 ui-armor-compare_split = 在新分割中比較
 ui-armor-open_in_new_tab = 在新分頁中開啟
 ui-armor-export_model = 匯出艦船模型
-ui-armor-armor_thickness = 裝甲厚度
 ui-armor-export_disclaimer = 這些 3D 模型和貼圖是 Wargaming 的智慧財產，任何使用這些模型的行為都應遵守您當地的法律。
 ui-armor-export_button = 匯出
-ui-armor-armor_toggle = 裝甲
-ui-armor-armor_tooltip = 切換裝甲區域可見性
 ui-armor-hull_toggle = 船體
-ui-armor-hull_tooltip = 切換船體模型部件可見性
-ui-armor-splash_toggle = 爆風
 ui-armor-splash_tooltip = 切換爆風區域可見性
 ui-armor-show_hidden = 顯示隱藏
 ui-armor-show_hidden_tooltip = 切換（可能）隱藏的面板可見性
 ui-armor-gaps = 間隙
 ui-armor-gaps_tooltip = 醒目標示裝甲板未連接的邊界邊緣（可能的間隙）
 ui-armor-display = 顯示
-ui-armor-display_tooltip = 顯示設定 (Ctrl+S)
 ui-armor-marker_opacity = 標記不透明度
-ui-armor-save_defaults = 儲存為預設值
-ui-armor-export_tab = 匯出
 ui-armor-export_tooltip = 將艦船模型匯出為 OBJ 檔案
 ui-armor-pen_check = 貫穿檢查
-ui-armor-pen_check_tooltip = 設定用於貫穿比較的砲彈
 ui-armor-trajectory = 彈道
-ui-armor-trajectory_on = 彈道 [ON]
 ui-armor-trajectory_range = 距離
 ui-armor-trajectory_clear = 全部清除
 ui-armor-arc_heading = 彈道 { $number }
@@ -1329,7 +1111,6 @@ ui-armor-arc_plate_unknown = 未記錄的裝甲板
 ui-armor-angle_good = 小於 30 度
 ui-armor-angle_mid = 30 至 45 度
 ui-armor-angle_bad = 大於 45 度
-ui-armor-trajectory_tooltip = 點擊裝甲以模擬砲彈彈道 (Ctrl+T)
 ui-armor-trajectory_ship = 艦船：
 ui-armor-trajectory_select_ship = 選擇艦船
 ui-armor-trajectory_ship_tooltip = 選擇提供彈道砲彈的艦船
@@ -1340,18 +1121,14 @@ ui-armor-trajectory_select_shell = 選擇砲彈
 ui-armor-trajectory_shell_tooltip = 選擇用於彈道投射的砲彈
 ui-armor-continue_ricochet = 跳彈後繼續
 ui-armor-splash_mode = 爆風
-ui-armor-splash_on = 爆風 [ON]
 ui-armor-splash_no_data = 此艦船沒有爆風資料
 ui-armor-splash_no_shells = 請將擁有 HE/SAP 砲彈的艦船加入比較列表
 ui-armor-splash_tooltip_mode = 點擊裝甲以視覺化 HE 爆風傷害範圍
-ui-armor-loading_armor = 正在載入艦船...
 ui-armor-select_ship = 從列表中選擇艦船
-ui-armor-pen_check_label = 貫穿檢查
 ui-armor-all_btn = 全部
 ui-armor-none_btn = 無
 ui-armor-opaque = 不透明
 ui-armor-upgrade = 升級：
-ui-armor-camo = 迷彩：
 ui-armor-camo_none = 原始（無）
 ui-armor-camo_group_universal = 通用迷彩
 ui-armor-camo_group_expendable = 消耗型迷彩
@@ -1385,7 +1162,6 @@ ui-armor-tree_matches = 符合：{ $count }
 ui-armor-tree_no_matches = 無符合項目
 ui-armor-no_matching_options = 沒有符合篩選的選項
 ui-armor-opacity = 不透明度
-ui-armor-ship_hull = 艦船船體
 ui-armor-opaque_hull = 不透明船體
 ui-armor-lighting = 船體光照
 ui-armor-lighting_enabled = 啟用光照
@@ -1401,20 +1177,16 @@ ui-armor-lighting_specular = 鏡面反射
 ui-armor-lighting_shininess = 光澤度
 ui-armor-lighting_key_color = 主光顏色
 ui-armor-lighting_ambient_color = 環境光顏色
-ui-armor-pop_out = 彈出視窗
 ui-armor-zero_mm_plates = 0 mm 裝甲板
 ui-armor-armor_opacity = 裝甲不透明度
 ui-armor-ballistic_disclaimer = 彈道結果基於對模擬運作方式的逆向工程/估算
 ui-armor-roll = 橫搖
-ui-armor-ctrl_click_solo = Ctrl+點擊以單獨顯示
 ui-armor-reset_plates = 重置裝甲板
-ui-armor-visibility = 可見性
 ui-armor-armor_options = 裝甲
 ui-armor-no_ship_loaded = 未載入艦船
 ui-armor-lod = LOD：
 ui-armor-lod_highest = 0（最高）
 ui-armor-camouflage = 迷彩
-ui-armor-search_ships = 搜尋艦船...
 ui-armor-ships = 艦船
 ui-armor-compare = 比較
 ui-armor-compare_tooltip = 開啟新的比較面板，或右鍵點擊艦船以比較該艦船
@@ -1438,14 +1210,12 @@ ui-armor-zone_toggle_tooltip = 顯示或隱藏此區域的所有裝甲板。按�
 ui-armor-mode_solo_zone = 僅此區域
 ui-armor-mode_cast_trajectory = 投射彈道
 ui-armor-loading_catalog = 正在載入艦船目錄...
-ui-armor-catalog_failed = 載入艦船目錄失敗：{ $reason }
 ui-armor-legend_collapse = 收合
 ui-armor-legend_hide = 隱藏圖例
 ui-armor-armor_thickness_title = 裝甲厚度
 ui-armor-initializing = 正在初始化 3D 檢視...
 ui-armor-init_failed = 裝甲檢視初始化失敗：{ $reason }
 ui-armor-loading_named_ship = 正在載入 { $ship }...
-ui-armor-rendering = 渲染中...
 ui-armor-options = 選項
 
 ## ui.armor.compass
@@ -1455,16 +1225,11 @@ ui-armor-compass-south = 南
 ui-armor-compass-west = 西
 
 ## ui.armor.realtime
-ui-armor-realtime-loading = 正在載入艦船裝甲...
-ui-armor-realtime-waiting = 正在等待艦船資料...
 ui-armor-realtime-incoming_fire = 受到攻擊
 ui-armor-realtime-attacker_filter = 攻擊者篩選器
 ui-armor-realtime-all_enemies = 所有敵人
 ui-armor-realtime-show_secondaries = 顯示副砲武裝
-ui-armor-realtime-auto_scroll = 自動捲動
 ui-armor-realtime-seek_to_salvo = 跳至齊射
-ui-armor-realtime-deselect = 取消選擇
-ui-armor-realtime-select_all = 全部選擇
 ui-armor-realtime-no_data = 砲彈資料已不可用
 ui-armor-realtime-sim_agrees = 模擬結果一致
 ui-armor-realtime-sim_unchecked = { $count } 發砲彈無法模擬
@@ -1504,10 +1269,8 @@ advantage-moderate = 中等
 advantage-weak = 微弱
 
 ## ui.search
-ui-search-undo = 復原對查詢的上一次更改
 ui-search-edit_value = 編輯值
 ui-search-add_filter = 新增篩選
-ui-search-redo = 重做已復原的更改
 ui-search-pill_select = 選擇
 ui-search-pill_deselect = 取消選擇
 ui-search-pill_group_all = 以「且」分組
@@ -1531,15 +1294,9 @@ ui-search-parse_failed = 無法解析該查詢：{ $reason }
 ui-search-searching = 正在搜尋...
 ui-search-failed = 搜尋失敗：{ $reason }
 ui-search-no_matches = 沒有匹配結果
-ui-search-game_mode_gap_hint_one = 有 1 場已建立索引的比賽沒有記錄遊戲模式。請在設定中重新為所有回放建立索引以補上。
 ui-search-game_mode_gap_hint = 有 { $count } 場已建立索引的比賽沒有記錄遊戲模式。請在設定中重新為所有回放建立索引以補上。
 ui-search-open = 開啟
 ui-search-open_missing = 回放檔案已不存在
-ui-search-opened_directory = 已開啟 { $dir } 以顯示此回放
-ui-search-open_no_directory = 無法判斷此回放屬於哪個目錄
-ui-search-path_copied = 回放路徑已複製到剪貼簿
-ui-search-preview_map = 預覽地圖
-ui-search-preview_and_render = 停留以預覽，點擊以渲染
 ui-search-free_text = 包含「{ $text }」
 ui-search-quant_any = 任一
 ui-search-quant_none = 沒有
@@ -1573,23 +1330,6 @@ ui-search-suggest-scope_enemy = 敵方
 ui-search-suggest-scope_division = 分隊
 ui-search-suggest-scope_anyone = 任何玩家
 
-## ui.search.bar
-ui-search-bar-hint = 篩選回放
-ui-search-bar-and_word = 且
-ui-search-bar-or_word = 或
-ui-search-bar-not_word = 非
-ui-search-bar-group_and = 分組為 AND
-ui-search-bar-group_or = 分組為 OR
-ui-search-bar-negate = 否定
-ui-search-bar-delete = 刪除
-ui-search-bar-clear_selection = 清除選取
-ui-search-bar-ungroup = 點擊以解散此群組
-ui-search-bar-flip_connector = 點擊以切換 AND 與 OR
-ui-search-bar-context_preset = 預設
-ui-search-bar-context_match = 比賽
-ui-search-bar-context_roster = 名單
-ui-search-bar-no_suggestions = 沒有相符項目
-
 ## ui.search.field
 ui-search-field-outcome = 結果
 ui-search-field-map = 地圖
@@ -1604,7 +1344,6 @@ ui-search-field-stat_spotting = 偵察傷害
 ui-search-field-stat_potential = 潛在傷害
 ui-search-field-stat_received = 受到的傷害
 ui-search-field-stat_pr = PR
-ui-search-field-stat_mc = MC
 ui-search-field-rating = 評分
 ui-search-field-stat_survived = 存活
 ui-search-field-stat_disconnected = 斷線
@@ -1690,7 +1429,6 @@ ui-search-value-game_mode_pinata_event = 皮納塔活動
 ui-search-value-game_mode_respawns = 重生
 ui-search-value-game_mode_respawns_sectors = 重生區域
 
-
 ## ui.search.column
 ui-search-column-date = 日期
 ui-search-column-map = 地圖
@@ -1722,7 +1460,6 @@ ui-settings-not_set = （未設定）
 ui-settings-panel-mcp = MCP 伺服器
 ui-settings-panel-open = 開啟設定
 ui-settings-panel-search_placeholder = 搜尋設定
-ui-settings-panel-count_one = 1 項設定
 ui-settings-panel-count = { $count } 項設定
 ui-settings-panel-no_matches = 沒有符合搜尋的設定
 ui-settings-panel-close = 關閉設定
@@ -1790,7 +1527,7 @@ ui-app-worker_stalled = { $worker }沒有回應
 ui-app-worker_stopped = { $worker }已停止
 ui-app-status_indexing = 正在為回放建立索引
 ui-app-status_of = { $done } / { $total }
-ui-app-status_tasks = 執行中的工作：{ $count }
+ui-app-status_tasks = { $count } 個工作執行中
 ui-app-status_show_panel = 顯示面板：{ $panel }
 ui-app-status_hide_panel = 隱藏面板：{ $panel }
 ui-app-panel_left = 左側
@@ -1824,7 +1561,6 @@ ui-palette-back_hint = Esc：返回
 ui-palette-ships_loading = 正在載入艦船列表...
 ui-palette-ships_unavailable = 沒有艦船列表：{ $reason }
 ui-palette-matches_found = { $count } 個匹配結果
-ui-palette-nothing_indexed = 尚未建立任何索引
 ui-palette-sample_stats = 偵錯：在統計中顯示範例資料
 ui-palette-restore_stats = 偵錯：在統計中顯示記錄的資料
 
@@ -1908,19 +1644,11 @@ ui-armor-pen-hover_a_plate = 將滑鼠懸停在艦船的裝甲板上進行檢查
 ui-armor-pen-awaiting_plate = 請懸停裝甲板
 ui-armor-pen-clear_all = 全部清除
 ui-armor-pen-remove = 從比較中移除
-ui-armor-pen-title = 貫穿力
-ui-armor-pen-title_tooltip = 檢視艦船砲彈對裝甲板的效果
-ui-armor-pen-ship = 射擊艦船
 ui-armor-pen-firing_ship_tooltip = 使用此艦船的砲彈進行彈道投射
 ui-armor-pen-use_for_trajectory = 用於彈道
-ui-armor-pen-pick_ship = 選擇向此艦船射擊的艦船
-ui-armor-pen-enter_thickness = 輸入裝甲板厚度
 ui-armor-pen-no_shells = { $ship } 沒有主砲砲彈
-ui-armor-pen-plate = 裝甲板
-ui-armor-pen-mm = mm
 ui-armor-pen-ifhe = IFHE
 ui-armor-pen-ifhe_tooltip = HE 彈的慣性引信使 HE 彈貫穿力提高四分之一
-ui-armor-pen-last_hovered = 上次懸停：{ $plate }
 ui-armor-pen-penetrates = 擊穿
 ui-armor-pen-shatters = 未擊穿
 ui-armor-pen-angle_dependent = 取決於角度
@@ -1957,12 +1685,10 @@ ui-armor-export-size_estimate = 預計檔案大小：{ $size }
 ui-armor-export-size_breakdown = 幾何體 { $geometry }（精確），紋理 { $textures }（估算）
 ui-armor-export-size_incomplete = 無法估算 { $count } 個迷彩的大小，總大小可能不完整
 ui-armor-export-exporting = 正在匯出 { $ship }...
-ui-armor-export-close_button = 關閉
 ui-armor-export-already_running = 已有匯出任務在執行
 ui-armor-export-exported = 已匯出 { $ship }
 ui-armor-export-exported_with_size = 已匯出 { $ship }（{ $size }）
 ui-armor-export-vehicle_not_found = 未找到艦船
-ui-armor-export-create_file_failed = 建立檔案失敗：{ $error }
 ui-armor-export-export_failed = 匯出失敗：{ $error }
 
 ## ui.tactics
@@ -2081,8 +1807,6 @@ ui-launcher-update_in_place = 更新會安裝到該安裝本身的資料夾中�
 ui-launcher-cancelled = 下載已取消。
 ui-launcher-launch_failed = 啟動失敗：{ $error }
 ui-launcher-use_for_toolkit = 供 Toolkit 使用
-ui-launcher-not_set = 未設定
-ui-launcher-browse = 瀏覽...
 ui-launcher-install_heading = 安裝遊戲
 ui-launcher-install_hint = 全新安裝需要數十 GB。
 ui-launcher-install_title = 遊戲的安裝位置
@@ -2150,8 +1874,10 @@ ui-replay-damage_share-hold = 按住{ $key }以反轉。
 ui-replay-damage_share-release = 放開{ $key }以還原。
 
 ## ui.reindex
-ui-reindex-context_one = 強制重建索引
-ui-reindex-context_many = 強制為 { $count } 個回放重建索引
+ui-reindex-context = { $count ->
+    [one] 強制重建索引
+   *[other] 強制為 { $count } 個回放重建索引
+}
 ui-reindex-palette_by_version = 強制重建回放索引：依版本
 ui-reindex-palette_all = 強制重建回放索引：全部
 ui-reindex-versions_title = 強制重建回放索引：依版本
@@ -2399,7 +2125,6 @@ ui-armor-textures-unresolved = 此路徑不在 assets.bin 中
 ui-armor-textures-absent = 不在已安裝的封裝中
 ui-armor-textures-unreadable = 無法讀取 DDS 標頭
 ui-armor-textures-unknown_format = 無法辨識的格式
-ui-armor-textures-details_one = { $format }，{ $size }，1 個檔案，{ $bytes }
 ui-armor-textures-details = { $format }，{ $size }，{ $count } 個檔案，{ $bytes }
 ui-armor-textures-role_albedo = 反照率
 ui-armor-textures-role_normal = 法線
@@ -2408,8 +2133,10 @@ ui-armor-textures-role_ambient_occlusion = 環境光遮蔽
 ui-armor-textures-role_detail = 細節
 ui-armor-textures-role_name_matched = 反照率（依檔名找到）
 ui-armor-textures-copy_path = 複製路徑
-ui-armor-textures-copy_override = 複製 res_mods 路徑
-ui-armor-textures-copy_overrides = 複製 { $count } 個 res_mods 路徑
+ui-armor-textures-copy_overrides = { $count ->
+    [one] 複製 res_mods 路徑
+   *[other] 複製 { $count } 個 res_mods 路徑
+}
 ui-armor-textures-paths_copied = 已複製 { $count } 個路徑
 ui-armor-textures-no_build = 遊戲資料尚未載入，因此無法得知此組建的模組資料夾。
 ui-armor-textures-show_in_unpacker = 在資源解包器中顯示

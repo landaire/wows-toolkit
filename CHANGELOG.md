@@ -81,6 +81,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Re-indexing replays fills in the chart statistics of saved session battles recorded before those statistics were kept
 - *(toolkit)* Faintly mark a replay's row in the listing while its tab title in the Replay Inspector is hovered, and date the match in the replay header, with how long ago it was on hover
 - *(toolkit)* Keep translations in [Fluent](https://projectfluent.org) files. A `translations/<language>.ftl` file next to the app overrides the messages it names
+- *(toolkit)* Word counted text, such as a number of replays or builds, with each language's plural forms
 
 ### Bug Fixes
 

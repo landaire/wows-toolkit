@@ -79,7 +79,7 @@ fn a_finished_read_reports_what_it_skipped_and_offers_a_reload() {
 
     assert!(window.by_test_id("directory-stats-status").is_none(), "the read has finished");
     assert!(window.by_test_id("directory-stats-progress").is_none());
-    assert_eq!(text_of(&mut window, "directory-stats-skipped").as_deref(), Some("1 replays skipped"));
+    assert_eq!(text_of(&mut window, "directory-stats-skipped").as_deref(), Some("1 replay skipped"));
     let reload = window.by_test_id("directory-stats-reload").expect("a finished read offers a reload");
 
     // A replay added since is picked up by the reload.

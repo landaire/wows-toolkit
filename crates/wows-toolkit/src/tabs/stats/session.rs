@@ -25,11 +25,7 @@ pub fn opened_label(opened: AppOpened) -> String {
 
 /// "5 battles".
 pub fn battles_label(count: usize) -> String {
-    if count == 1 {
-        t!("ui-stats-session_battles_one").into_owned()
-    } else {
-        t!("ui-stats-session_battles_many", count = count).into_owned()
-    }
+    t!("ui-stats-session_battles", count = count).into_owned()
 }
 
 /// The session's state in one line: its scope and how many battles it holds.

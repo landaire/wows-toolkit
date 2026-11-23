@@ -358,20 +358,23 @@ pub fn win_rate_hover(stats: Option<&PlayerStatsOut>, locale: Option<&str>) -> O
             let (rate, battles) = (rate?, battles?);
             let label = wt_translations::t!(mode.label_key()).into_owned();
             let rate = format!("{rate:.1}%");
-            let battles = crate::formatting::separate_number(battles, locale);
+            // `count` picks the plural form; `battles` is the same figure with digit grouping.
+            let shown = crate::formatting::separate_number(battles, locale);
             let line = match damage {
                 Some(damage) => wt_translations::t!(
                     "ui-player_tracker-win_rate_hover_line_damage",
                     label = label,
                     rate = rate,
-                    battles = battles,
+                    count = battles,
+                    battles = shown,
                     damage = crate::formatting::separate_number(damage, locale)
                 ),
                 None => wt_translations::t!(
                     "ui-player_tracker-win_rate_hover_line",
                     label = label,
                     rate = rate,
-                    battles = battles
+                    count = battles,
+                    battles = shown
                 ),
             };
             Some(line.into_owned())

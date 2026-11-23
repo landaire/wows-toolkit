@@ -1688,7 +1688,7 @@ fn the_textures_section_lists_each_material_with_its_textures() {
     armor.install(textured_scene(), &[OptionSection::Textures]);
 
     let summary = armor.window.texts_by_class("wt-armor-textures__dim").concat();
-    assert!(summary.contains("1 materials, 1 textures"), "the summary counts what was read: {summary:?}");
+    assert!(summary.contains("1 material, 1 texture"), "the summary counts what was read: {summary:?}");
     assert!(!armor.shown("armor-textures-texture-0-0"), "materials start closed");
 
     armor.click("armor-textures-expand-0");

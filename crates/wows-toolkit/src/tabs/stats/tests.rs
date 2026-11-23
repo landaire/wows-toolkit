@@ -728,7 +728,7 @@ fn the_session_scope_narrows_every_stats_view_to_the_session_and_back() {
     );
     assert_eq!(
         text_of(&window, "wt-stats__session-count"),
-        t!("ui-stats-session_chip_since", time = "14:32", battles = t!("ui-stats-session_battles_many", count = 2))
+        t!("ui-stats-session_chip_since", time = "14:32", battles = t!("ui-stats-session_battles", count = 2))
     );
     let (record, ships, chart) = every_view(&mut window);
     assert_eq!(record, "1W/1L (50.0%)", "the overview counts the two battles since the app opened");

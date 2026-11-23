@@ -585,14 +585,14 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                                 variant = ButtonVariant::Ghost,
                                 size = ButtonSize::IconXs,
                                 disabled = !exists,
-                                a11y:label = t!("ui-replay-context-render_to_clipboard").into_owned(),
+                                a11y:label = t!("ui-replay-context-render_to_clipboard", count = 1).into_owned(),
                                 attr:data-testid = format!("search-row-render-clipboard-{position}"),
                                 on:click = move |_| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone()))
                             ) {
                                 AppIcon(glyph = Glyph::Copy)
                             }
                         }
-                        TooltipContent {{t!("ui-replay-context-render_to_clipboard").into_owned()}}
+                        TooltipContent {{t!("ui-replay-context-render_to_clipboard", count = 1).into_owned()}}
                     }
                     Tooltip {
                         TooltipTrigger {
@@ -725,14 +725,14 @@ fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: im
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone())))
         ) {
-            {t!("ui-replay-context-render_to_clipboard").into_owned()}
+            {t!("ui-replay-context-render_to_clipboard", count = 1).into_owned()}
         }
         MenuSeparator()
         MenuItem(
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| copy_replay_files(shell.toasts(), std::slice::from_ref(&file)))
         ) {
-            {t!("ui-replay-context-copy_replay").into_owned()}
+            {t!("ui-replay-context-copy_replays", count = 1).into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| shell.copy_text(copied.clone()))) {
             {t!("ui-replay-context-copy_path").into_owned()}

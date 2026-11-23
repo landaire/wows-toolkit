@@ -118,15 +118,8 @@ pub fn cell_hover(hit: &MatchHit, column: SortColumn) -> Option<String> {
 }
 
 /// The hint a game-mode query shows over an index with `missing` matches that carry no mode.
-/// Singular at exactly one.
 pub fn game_mode_gap_hint(missing: i64) -> String {
-    if missing == 1 {
-        "1 indexed match has no recorded game mode and cannot match this query. Re-index to fill it in.".to_string()
-    } else {
-        format!(
-            "{missing} indexed matches have no recorded game mode and cannot match this query. Re-index to fill them in."
-        )
-    }
+    t!("ui-search-game_mode_gap_hint", count = missing).into_owned()
 }
 
 /// The names a player or ship field ranks as its value is typed.

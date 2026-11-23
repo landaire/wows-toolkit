@@ -782,10 +782,7 @@ fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey
 fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<PathBuf>) -> impl IntoView {
     let count = paths.len();
     let (copied, listed, reindexed) = (paths.clone(), paths.clone(), paths.clone());
-    let one = count == 1;
-    let label = move |single: &str, many: &str| {
-        if one { t!(single).into_owned() } else { t!(many, count = count).into_owned() }
-    };
+    let label = move |key: &str| t!(key, count = count).into_owned();
     let send = {
         let events = events.clone();
         move |event: ReplayBrowserEvent| {
@@ -799,7 +796,7 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
             let (events, paths) = (events.clone(), paths.clone());
             confirm(
                 shell,
-                t!("ui-replay-context-set_session_stats_one").into_owned(),
+                t!("ui-replay-context-set_session_stats", count = count).into_owned(),
                 t!("confirm-set_as_session_stats").into_owned(),
                 move || events.send(ReplayBrowserEvent::SessionStats { paths: paths.clone(), replace: true }),
             );
@@ -810,28 +807,28 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
 
     view! {
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToVideo(paths.clone()))) {
-            {label("ui-replay-context-render_to_video", "ui-replay-context-render_to_video_many")}
+            {label("ui-replay-context-render_to_video")}
         }
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToClipboard(paths.clone()))) {
-            {label("ui-replay-context-render_to_clipboard", "ui-replay-context-render_to_clipboard_many")}
+            {label("ui-replay-context-render_to_clipboard")}
         }
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
-            {t!("ui-replay-context-copy_replays", count = count).into_owned()}
+            {label("ui-replay-context-copy_replays")}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
-            {t!("ui-replay-context-copy_paths", count = count).into_owned()}
+            {label("ui-replay-context-copy_paths")}
         }
         MenuItem(disabled = session_off, on_select = set_session) {
-            {label("ui-replay-context-set_session_stats_one", "ui-replay-context-set_session_stats_many")}
+            {label("ui-replay-context-set_session_stats")}
         }
         MenuItem(disabled = session_off, on_select = send(ReplayBrowserEvent::SessionStats { paths, replace: false })) {
-            {label("ui-replay-context-add_session_stats_one", "ui-replay-context-add_session_stats_many")}
+            {label("ui-replay-context-add_session_stats")}
         }
         {unavailable.map(session_unavailable_line)}
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| events.force_reindex(listing, &reindexed, Confirm::Always))) {
-            {force_reindex_label(count)}
+            {label("ui-reindex-context")}
         }
     }
 }
@@ -868,30 +865,21 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
             MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
                 {t!("ui-replay-context-copy_paths", count = many).into_owned()}
             }
-            {item(t!("ui-replay-context-render_to_video_many", count = many).into_owned(), ReplayBrowserEvent::RenderManyToVideo(batch.clone()))}
-            {item(t!("ui-replay-context-render_to_clipboard_many", count = many).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(batch.clone()))}
+            {item(t!("ui-replay-context-render_to_video", count = many).into_owned(), ReplayBrowserEvent::RenderManyToVideo(batch.clone()))}
+            {item(t!("ui-replay-context-render_to_clipboard", count = many).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(batch.clone()))}
             MenuSeparator()
         }
     });
     // A batch is rendered from the items above; a lone row renders itself.
     let single_items = batch.is_empty().then(|| {
         view! {
-            {item(t!("ui-replay-context-render_to_video").into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
-            {item(t!("ui-replay-context-render_to_clipboard").into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
+            {item(t!("ui-replay-context-render_to_video", count = 1).into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
+            {item(t!("ui-replay-context-render_to_clipboard", count = 1).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
         }
     });
 
-    let (set_label, add_label) = if count == 1 {
-        (
-            t!("ui-replay-context-set_session_stats_one").into_owned(),
-            t!("ui-replay-context-add_session_stats_one").into_owned(),
-        )
-    } else {
-        (
-            t!("ui-replay-context-set_session_stats_many", count = count).into_owned(),
-            t!("ui-replay-context-add_session_stats_many", count = count).into_owned(),
-        )
-    };
+    let set_label = t!("ui-replay-context-set_session_stats", count = count).into_owned();
+    let add_label = t!("ui-replay-context-add_session_stats", count = count).into_owned();
     let set_session = {
         let events = events.clone();
         let paths = session.clone();
@@ -900,7 +888,7 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
             let paths = paths.clone();
             confirm(
                 shell,
-                t!("ui-replay-context-set_session_stats_one").into_owned(),
+                t!("ui-replay-context-set_session_stats", count = count).into_owned(),
                 t!("confirm-set_as_session_stats").into_owned(),
                 move || events.send(ReplayBrowserEvent::SessionStats { paths: paths.clone(), replace: true }),
             );
@@ -958,10 +946,10 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         MenuItem(disabled = session_off, on_select = set_session) {{set_label}}
         MenuItem(disabled = session_off, on_select = UnsyncCallback::new(move |()| events.send(ReplayBrowserEvent::SessionStats { paths: added.clone(), replace: false }))) {{add_label}}
         {unavailable.map(session_unavailable_line)}
-        MenuItem(on_select = reindex) {{force_reindex_label(count)}}
+        MenuItem(on_select = reindex) {{t!("ui-reindex-context", count = count).into_owned()}}
         MenuSeparator()
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), std::slice::from_ref(&copied)))) {
-            {t!("ui-replay-context-copy_replay").into_owned()}
+            {t!("ui-replay-context-copy_replays", count = 1).into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
             {t!("ui-replay-context-copy_path").into_owned()}
@@ -972,14 +960,6 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         {controls.map(IntoView::into_view)}
         {in_game.map(IntoView::into_view)}
     })
-}
-
-fn force_reindex_label(count: usize) -> String {
-    if count == 1 {
-        t!("ui-reindex-context_one").into_owned()
-    } else {
-        t!("ui-reindex-context_many", count = count).into_owned()
-    }
 }
 
 /// Why Set and Add are not offered: they change the saved session, which a session since the app

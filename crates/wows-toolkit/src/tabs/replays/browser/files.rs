@@ -28,12 +28,7 @@ pub fn copy_replay_files(toasts: Toasts, paths: &[PathBuf]) {
     let outcome = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set().file_list(paths));
     match outcome {
         Ok(()) => {
-            let message = if paths.len() == 1 {
-                t!("ui-replay-context-copy_replay").into_owned()
-            } else {
-                t!("ui-replay-context-copy_replays", count = paths.len()).into_owned()
-            };
-            toasts.ok(message);
+            toasts.ok(t!("ui-replay-context-copy_replays", count = paths.len()).into_owned());
         }
         Err(err) => {
             tracing::warn!("the replay files could not be copied: {err}");
