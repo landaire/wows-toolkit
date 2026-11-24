@@ -69,6 +69,7 @@ use zgui::vocab::Role;
 use crate::services::Services;
 use crate::windows::WindowSurfaceProps;
 use crate::windows::renderer::session::RendererSession;
+use crate::windows::renderer::session::Status;
 use crate::windows::renderer::view::ReplayRendererProps;
 use crate::windows::renderer::watched::WatchedPlaybackProps;
 
@@ -764,8 +765,7 @@ fn a_seek_into_a_closed_session_does_nothing() {
     assert!(session.track_untracked().is_none());
 }
 
-/// A viewport moved into a window of its own, as `pop_out` leaves it: its state lives under the
-/// main window's services, not under this window.
+/// A viewport moved into a window of its own, using the main window's services.
 #[component]
 fn PoppedViewport(services: Services, session: RendererSession) -> impl IntoView {
     zgui::reactive::provide_local_context(services);
@@ -780,9 +780,8 @@ fn PoppedViewport(services: Services, session: RendererSession) -> impl IntoView
     }
 }
 
-/// The app's exit disposes the main window, under which a popped-out viewport's state lives,
-/// before the viewport's own window. Until that window closes, it takes input and lays out
-/// without reading the state that is gone.
+/// Closing the main window stops a popped-out session immediately, but keeps signals for its
+/// queued view updates until that window also closes.
 #[test]
 fn a_popped_out_viewport_outlives_its_session() {
     zgui::reactive::install().expect("the reactive runtime installs");
@@ -798,7 +797,11 @@ fn a_popped_out_viewport_outlives_its_session() {
     window.advance(Duration::from_millis(50));
     focus_viewport(&mut window);
 
+    session.status.set(Status::Ready(Arc::new(track(half_second_frames(20)))));
     main.unmount();
+    assert!(!session.is_open(), "the main window closed playback immediately");
+    assert!(session.track_untracked().is_none());
+    assert!(session.status.try_with_untracked(|_| ()).is_some(), "the popped-out view retains its signals");
     pointer_over_viewport(&mut window);
     let viewport = find(&window, "replay-renderer-viewport");
     window.click(viewport).expect("the map takes a click");
@@ -812,6 +815,8 @@ fn a_popped_out_viewport_outlives_its_session() {
     window.advance(Duration::from_millis(200));
 
     assert!(!session.is_open());
+    drop(window);
+    assert!(session.status.try_with_untracked(|_| ()).is_none(), "the last view released session state");
 }
 
 /// Baking the battle again through more recordings keeps the battle on screen where playback is

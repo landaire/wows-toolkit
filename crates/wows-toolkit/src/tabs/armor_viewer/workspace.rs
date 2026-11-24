@@ -52,12 +52,10 @@ use wows_toolkit_viewmodel::settings::keys;
 use wowsunpack::export::model_catalog::ModelPath;
 use wowsunpack::game_types::GameParamId;
 use wt_translations::t;
-use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
-use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::GetValue;
@@ -76,6 +74,7 @@ use crate::services::Services;
 use crate::tabs::armor_viewer::library::ArmorBundle;
 use crate::tabs::armor_viewer::library::ArmorLibrary;
 use crate::tabs::armor_viewer::library::FeedSource;
+use crate::tabs::armor_viewer::library::PlaybackSeek;
 use crate::tabs::armor_viewer::options::TextureFocus;
 use crate::tabs::armor_viewer::panels::incoming::IncomingFire;
 use crate::tabs::armor_viewer::panels::legend::LegendState;
@@ -258,7 +257,7 @@ pub struct ArmorWorkspace {
     /// Where the playback feeding the viewer has reached.
     pub playback_at: RwSignal<Option<GameClock>, LocalStorage>,
     /// Moves that playback.
-    seek: StoredValue<Option<UnsyncCallback<GameClock>>, LocalStorage>,
+    seek: StoredValue<Option<PlaybackSeek>, LocalStorage>,
     pub pen: RwSignal<PenetrationState, LocalStorage>,
     pub legend: RwSignal<LegendState, LocalStorage>,
     /// Whether the ships list is open, which the status bar toggles.
@@ -398,7 +397,8 @@ impl ArmorWorkspace {
             viewport.apply_armor_defaults(defaults.as_ref());
         }
         viewport.set_hardpoint_targets(self.hardpoints.get_untracked().as_ref().clone());
-        viewport.set_pane_menu(super::options::pane_menu(self, viewport));
+        // Menu callbacks must survive the control that opened the pane.
+        owner.with(|| viewport.set_pane_menu(super::options::pane_menu(self, viewport)));
         viewport.on_change(move |change| self.on_viewport_change(viewport, change));
 
         Pane { id, viewport, owner }
@@ -853,7 +853,7 @@ impl ArmorWorkspace {
     /// Asks the playback feeding the viewer to move to `clock`.
     pub fn seek_to(self, clock: GameClock) {
         if let Some(seek) = self.seek.get_value() {
-            seek.run(clock);
+            seek(clock);
         }
     }
 
@@ -1059,7 +1059,7 @@ impl ArmorWorkspace {
 
     /// Shows a ship with the hits it had taken, for the replay viewport `source`, which the viewer
     /// follows from then on. The hits are held until the load that will show them lands.
-    pub fn show_with_hits(self, source: FeedSource, shown: ShowArmor, seek: Option<UnsyncCallback<GameClock>>) {
+    pub fn show_with_hits(self, source: FeedSource, shown: ShowArmor, seek: Option<PlaybackSeek>) {
         let ShowArmor { target, hits, health, incoming } = shown;
         self.following.set_value(Some(Following { source, pane: self.active.get_untracked() }));
         self.seek.set_value(seek);

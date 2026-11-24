@@ -85,6 +85,8 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(toolkit)* Prevent crashes when opening an armor viewport menu after its pane's opening menu closes, or seeking replay playback from the armor viewer
+- *(toolkit)* Keep renderer state valid until its view closes, including pending UI updates and popped-out windows
 - *(toolkit)* Show each ship's average base XP in the Stats overview
 - *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team
 - *(toolkit)* Apply replay renderer player and ship name switches when a baked frame is drawn

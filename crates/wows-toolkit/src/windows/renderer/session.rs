@@ -2,6 +2,7 @@
 //! the work behind each of them.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Weak;
@@ -106,13 +107,11 @@ use wt_collab_client::protocol::CursorScope;
 use wt_collab_client::types::PlacedShipRanges;
 use wt_translations::t;
 use zgui::prelude::WindowHandle;
-use zgui::reactive::Callable;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::Owner;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
-use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
@@ -121,7 +120,9 @@ use zgui::reactive::prelude::UpdateValue;
 use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::reactive::prelude::WithValue;
+use zgui::reactive::provide_local_context;
 use zgui::task::Task;
+use zgui::task::provide_task_set;
 use zgui::task::spawn_local;
 use zgui::view::IntervalHandle;
 use zgui::view::Timers;
@@ -203,6 +204,8 @@ pub enum ArmorRequest {
     Renamed(ShowArmor),
 }
 
+type ArmorListener = Rc<dyn Fn(ArmorRequest)>;
+
 /// The consumable icon under the pointer, and where its reading is anchored.
 pub struct HoveredConsumable {
     pub hover: ConsumableHover,
@@ -241,11 +244,37 @@ pub struct RendererSession {
     run: StoredValue<Run, LocalStorage>,
 }
 
+/// Keeps session signals valid until a mounted viewport has disposed its consumers.
+#[must_use]
+pub(super) struct RendererViewLease {
+    session: RendererSession,
+}
+
+impl Drop for RendererViewLease {
+    fn drop(&mut self) {
+        let owner = self
+            .session
+            .run
+            .try_update_value(|run| {
+                run.views.0 -= 1;
+                (run.closing && run.views.0 == 0).then(|| run.owner.clone())
+            })
+            .flatten();
+        if let Some(owner) = owner {
+            owner.cleanup();
+        }
+    }
+}
+
+struct ViewCount(usize);
+
 /// The parts of a session the view does not read.
 struct Run {
     request: RenderRequest,
     title: String,
     owner: Owner,
+    closing: bool,
+    views: ViewCount,
     timers: Option<Timers>,
     services: Services,
     game_data: Option<GameDataCache>,
@@ -297,6 +326,7 @@ struct Run {
     #[cfg(test)]
     frames_asked: u64,
     tasks: Vec<Task>,
+    names_effect: Option<RenderEffect<NameDisplay>>,
     replay_id: ReplayId,
     /// Whether the session has been told this playback is open.
     shared: bool,
@@ -309,7 +339,7 @@ struct Run {
     /// The versions of the session's display settings this viewport has taken up.
     display_seen: DisplayVersions,
     armor: Option<ArmorFollow>,
-    on_armor: Option<UnsyncCallback<ArmorRequest>>,
+    on_armor: Option<ArmorListener>,
     /// Where a renderer's window was last, read as the session opens so a pop-out opens there.
     remembered: Option<wows_toolkit_config::WindowSettings>,
     /// The window the viewport was moved into, once it has one to itself.
@@ -320,9 +350,7 @@ impl RendererSession {
     /// Opens a viewport on `request` and starts baking it. Called from a component's body inside
     /// the main window.
     pub fn open(request: RenderRequest, collab: CollabLink) -> Self {
-        let services = Services::current();
-        let owner = Owner::new();
-        let session = owner.with(|| Self::new_in(owner.clone(), services, request, collab));
+        let session = Self::new(request, collab);
         session.start_bake();
         session.start_event_scan();
         session.follow_collab();
@@ -331,7 +359,30 @@ impl RendererSession {
         session
     }
 
-    fn new_in(owner: Owner, services: Services, request: RenderRequest, collab: CollabLink) -> Self {
+    fn new(request: RenderRequest, collab: CollabLink) -> Self {
+        let services = Services::current();
+        let timers = Timers::current();
+        let app_messages = Toasts::current();
+        // A popped-out view can outlive the tab that requested the session.
+        let owner = Owner::default();
+        let session = owner.with(|| {
+            provide_local_context(services);
+            provide_task_set();
+            Self::new_in(owner.clone(), services, request, collab, timers, app_messages)
+        });
+        on_cleanup_local(move || session.close());
+
+        session
+    }
+
+    fn new_in(
+        owner: Owner,
+        services: Services,
+        request: RenderRequest,
+        collab: CollabLink,
+        timers: Option<Timers>,
+        app_messages: Option<Toasts>,
+    ) -> Self {
         let title = request.title();
         Self {
             status: RwSignal::new_local(Status::Baking),
@@ -355,7 +406,9 @@ impl RendererSession {
             run: StoredValue::new_local(Run {
                 title,
                 owner,
-                timers: Timers::current(),
+                closing: false,
+                views: ViewCount(0),
+                timers,
                 services,
                 game_data: services.game_data.cache_untracked(),
                 sink: FrameSink::new(),
@@ -371,7 +424,7 @@ impl RendererSession {
                 pending_export: None,
                 regions: Vec::new(),
                 messages: None,
-                app_messages: Toasts::current(),
+                app_messages,
                 bake_generation: Generation::default(),
                 bake_cancel: Arc::new(AtomicBool::new(false)),
                 event_generation: Generation::default(),
@@ -382,6 +435,7 @@ impl RendererSession {
                 #[cfg(test)]
                 frames_asked: 0,
                 tasks: Vec::new(),
+                names_effect: None,
                 replay_id: ReplayId::fresh(),
                 shared: false,
                 share_generation: Generation::default(),
@@ -400,10 +454,8 @@ impl RendererSession {
     /// A session already holding `track`, with no bake behind it and no renderer to draw through.
     #[cfg(test)]
     pub fn ready_for_test(track: Track) -> Self {
-        let services = Services::current();
-        let owner = Owner::new();
         let request = RenderRequest { path: PathBuf::from("test.wowsreplay"), alts: Vec::new() };
-        let session = owner.with(|| Self::new_in(owner.clone(), services, request, CollabLink::default()));
+        let session = Self::new(request, CollabLink::default());
         session.map_origin.set(track.map_origin);
         session.status.set(Status::Ready(Arc::new(track)));
         session
@@ -422,31 +474,59 @@ impl RendererSession {
         self.start_event_scan();
     }
 
-    /// Stops everything this session started and disposes of its state. An export in flight runs
-    /// to the end.
+    /// Stops playback and work immediately. Signals remain valid until every viewport unmounts.
+    /// An export in flight runs to the end.
     pub fn close(self) {
-        let owner = self.run.try_update_value(|run| {
-            run.bake_cancel.store(true, Ordering::Relaxed);
-            run.ticker = None;
-            run.collab_ticker = None;
-            for task in run.tasks.drain(..) {
-                task.cancel();
-            }
-            let replay_id = run.replay_id;
-            let shared = run.shared;
-            (run.owner.clone(), shared.then_some(replay_id))
-        });
-        let Some((owner, shared)) = owner else { return };
+        let closed = self
+            .run
+            .try_update_value(|run| {
+                if run.closing {
+                    return None;
+                }
+
+                run.closing = true;
+                run.bake_cancel.store(true, Ordering::Relaxed);
+                run.ticker = None;
+                run.collab_ticker = None;
+                run.names_effect = None;
+                for task in run.tasks.drain(..) {
+                    task.cancel();
+                }
+
+                run.renderers.clear();
+                run.motion = None;
+                run.pending_export = None;
+                run.redraw_wanted = false;
+                run.regions.clear();
+                run.armor = None;
+                run.on_armor = None;
+                run.game_data = None;
+                run.messages = None;
+                run.sink.clear();
+                let shared = std::mem::take(&mut run.shared).then_some(run.replay_id);
+                let owner = (run.views.0 == 0).then(|| run.owner.clone());
+
+                Some((owner, shared))
+            })
+            .flatten();
+        let Some((owner, shared)) = closed else { return };
         if let Some(replay_id) = shared {
             self.collab.with_untracked(|link| link.close_replay(replay_id));
         }
-        owner.cleanup();
+        if let Some(owner) = owner {
+            owner.cleanup();
+        }
     }
 
-    /// Whether the session's state is still there to read. The reader's input returns early when
-    /// it is not: a popped-out viewport's window outlives the main window owning its state at exit.
+    pub(super) fn lease_view(self) -> RendererViewLease {
+        self.run.update_value(|run| run.views.0 += 1);
+
+        RendererViewLease { session: self }
+    }
+
+    /// Whether the session still accepts input and work, including while its views unmount.
     pub fn is_open(self) -> bool {
-        self.run.try_with_value(|_| ()).is_some()
+        self.run.try_with_value(|run| !run.closing) == Some(true)
     }
 
     pub fn title(self) -> String {
@@ -458,9 +538,9 @@ impl RendererSession {
         self.run.with_value(|run| run.sink.clone())
     }
 
-    /// Who hears this viewport's asks for an armor viewer.
-    pub fn set_armor_listener(self, listener: UnsyncCallback<ArmorRequest>) {
-        self.run.update_value(|run| run.on_armor = Some(listener));
+    /// Retains the listener independently of the caller's reactive owner.
+    pub fn set_armor_listener(self, listener: Rc<dyn Fn(ArmorRequest)>) {
+        self.with_run(|run| run.on_armor = Some(listener));
     }
 
     /// The baked battle, once the bake has landed. Reactive.
@@ -474,6 +554,10 @@ impl RendererSession {
     /// The baked battle. `None` until the bake lands, and once the session has closed, since a
     /// listener such as the armor viewer's seek can outlive it.
     pub fn track_untracked(self) -> Option<Arc<Track>> {
+        if !self.is_open() {
+            return None;
+        }
+
         self.status
             .try_with_untracked(|status| match status {
                 Status::Ready(track) => Some(Arc::clone(track)),
@@ -484,7 +568,7 @@ impl RendererSession {
 
     /// Whether the transport can act: the track is here.
     pub fn is_ready(self) -> bool {
-        self.status.with(|status| matches!(status, Status::Ready(_)))
+        self.is_open() && self.status.with(|status| matches!(status, Status::Ready(_)))
     }
 
     /// Bakes this battle again through another set of recordings, for a viewport opened before
@@ -504,23 +588,27 @@ impl RendererSession {
 
     /// `None` once the session has closed.
     fn with_run<U>(self, change: impl FnOnce(&mut Run) -> U) -> Option<U> {
-        self.run.try_update_value(change)
+        self.run.try_update_value(|run| (!run.closing).then(|| change(run))).flatten()
+    }
+
+    fn with_run_value<U>(self, read: impl FnOnce(&Run) -> U) -> Option<U> {
+        self.run.try_with_value(|run| (!run.closing).then(|| read(run))).flatten()
     }
 
     /// The game data the session was opened with. `None` once it has closed, or when no build was
     /// loaded.
     pub fn game_data(self) -> Option<GameDataCache> {
-        self.run.try_with_value(|run| run.game_data.clone()).flatten()
+        self.with_run_value(|run| run.game_data.clone()).flatten()
     }
 
     /// The process's services, for work started from a listener. `None` once the session closed.
     pub fn services(self) -> Option<Services> {
-        self.run.try_with_value(|run| run.services)
+        self.with_run_value(|run| run.services)
     }
 
     /// Runs `work` on the UI thread until it finishes or the session closes.
     pub fn spawn(self, work: impl Future<Output = ()> + 'static) {
-        self.run.update_value(|run| {
+        self.with_run(|run| {
             run.tasks.retain(|task| !task.is_finished());
             let task = run.owner.with(|| spawn_local(work));
             run.tasks.push(task);
@@ -564,7 +652,7 @@ impl RendererSession {
             let first = shown.is_none();
             let defaults = async move { if first { Some(load_saved_defaults(services).await) } else { None } };
             let (baked, saved) = futures::join!(baking, defaults);
-            let current = self.run.try_with_value(|run| run.bake_generation == generation);
+            let current = self.with_run_value(|run| run.bake_generation == generation);
             if current != Some(true) {
                 return;
             }
@@ -572,7 +660,7 @@ impl RendererSession {
                 Ok(baked) => baked,
                 // A battle already on screen stays: only the recordings asked for since failed.
                 Err(err) if shown.is_some() => {
-                    let messages = self.run.try_with_value(|run| run.messages).flatten();
+                    let messages = self.with_run_value(|run| run.messages).flatten();
                     if let Some(messages) = messages {
                         messages.failed(format!("{}: {err}", t!("ui-replay-renderer-failed")));
                     }
@@ -635,7 +723,7 @@ impl RendererSession {
         self.spawn(async move {
             let read =
                 long_job(move || wows_toolkit_replay_data::minimap_preview::extract_events(&path, &game_data)).await;
-            if self.run.try_with_value(|run| run.event_generation == generation) != Some(true) {
+            if self.with_run_value(|run| run.event_generation == generation) != Some(true) {
                 return;
             }
             let mut events = match read {
@@ -682,7 +770,7 @@ impl RendererSession {
     /// Writes what this viewport shows back as what a viewport opens with. Resolves to whether it
     /// was written.
     pub async fn save_defaults(self) -> bool {
-        let Some(services) = self.run.try_with_value(|run| run.services) else { return false };
+        let Some(services) = self.with_run_value(|run| run.services) else { return false };
         let Some(pool) = services.settings.pool() else { return false };
         let read_pool = pool.clone();
         let stored = services
@@ -719,6 +807,10 @@ impl RendererSession {
 
     /// Changes what is drawn and redraws the frame on screen, so a toggle shows while paused.
     pub fn set_layers(self, apply: impl FnOnce(&mut Layers)) {
+        if !self.is_open() {
+            return;
+        }
+
         let Some(mut layers) = self.layers.try_get_untracked() else { return };
         apply(&mut layers);
         self.follow_layout(&mut layers.options);
@@ -803,7 +895,7 @@ impl RendererSession {
                 // no room for them or empty gutters with nothing in them.
                 Err(reason) => {
                     tracing::warn!("replay renderer: the canvas for {wanted:?} could not be built: {reason}");
-                    let Some(layout) = self.run.try_with_value(|run| run.layout) else { return };
+                    let Some(layout) = self.with_run_value(|run| run.layout) else { return };
                     let mut layers = self.layers.get_untracked();
                     layers.options = fit_to_canvas(&layers.options, layout).into_owned();
                     self.store_layers(layers);
@@ -909,6 +1001,10 @@ impl RendererSession {
     /// Changes playback, telling its readers only when `change` says something changed: a
     /// control bound to it writes its value back as it is built.
     fn change_playback(self, change: impl FnOnce(&mut Playback) -> bool) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+
         self.playback
             .try_maybe_update(|playback| {
                 let changed = change(playback);
@@ -919,6 +1015,10 @@ impl RendererSession {
 
     /// [`Self::change_playback`] for the map's view.
     fn change_map(self, change: impl FnOnce(&mut MapView) -> bool) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+
         self.map
             .try_maybe_update(|map| {
                 let changed = change(map);
@@ -961,7 +1061,7 @@ impl RendererSession {
     }
 
     fn start_ticker(self) {
-        self.run.update_value(|run| {
+        self.with_run(|run| {
             run.ticker = run
                 .timers
                 .as_ref()
@@ -1028,6 +1128,10 @@ impl RendererSession {
     /// Draws again when the frame on screen no longer suits the element, paused or not: a resize
     /// reshapes a zoomed view, and changes how many pixels a sharp frame needs.
     pub fn place(self, bounds: ElementBounds) {
+        if !self.is_open() {
+            return;
+        }
+
         let Some(frame) = self.frame_size.try_get_untracked() else { return };
         let placement = frame.map(|frame| Placement { bounds, frame });
         let suited = |map: &MapView| (map.shaped_view(), map.render_scale());
@@ -1043,6 +1147,10 @@ impl RendererSession {
 
     /// The wheel turns a ship being placed, and otherwise zooms about whatever is under the pointer.
     pub fn wheel(self, position: WindowPoint, delta_y: f32) {
+        if !self.is_open() {
+            return;
+        }
+
         let turned = self
             .annotator
             .try_maybe_update(|annotator| {
@@ -1150,6 +1258,10 @@ impl RendererSession {
 
     /// A click on the map. `add` adds to what is picked; `count` is how many clicks this ends.
     pub fn click(self, position: WindowPoint, add: bool, count: usize) {
+        if !self.is_open() {
+            return;
+        }
+
         let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let link = self.collab.get_untracked();
         let map = self.map.get_untracked();
@@ -1163,6 +1275,10 @@ impl RendererSession {
 
     /// The pointer left the map.
     pub fn pointer_left(self) {
+        if !self.is_open() {
+            return;
+        }
+
         let Some(link) = self.collab.try_get_untracked() else { return };
         self.run.update_value(|run| run.cursor.report(&link, None));
         if self.hovered.with_untracked(Option::is_some) {
@@ -1173,6 +1289,10 @@ impl RendererSession {
     /// A secondary press on the map: puts down the tool in hand and drops what was half-drawn,
     /// or with no tool opens the per-ship menu on whatever was pressed.
     pub fn secondary_press(self, position: WindowPoint) {
+        if !self.is_open() {
+            return;
+        }
+
         if self.annotator.with_untracked(Annotator::has_tool) {
             self.take_up(Tool::None);
             return;
@@ -1212,6 +1332,10 @@ impl RendererSession {
 
     /// Drops a ping where the pointer is, shown here and to everyone in the session.
     pub fn ping(self, position: WindowPoint) {
+        if !self.is_open() {
+            return;
+        }
+
         let Some(origin) = self.map_origin.try_get_untracked() else { return };
         let Some((x, y)) = self.map.with_untracked(|map| map.map_point(position, origin)) else { return };
         self.collab.with_untracked(|link| link.send_ping([x, y]));
@@ -1265,6 +1389,10 @@ impl RendererSession {
     /// Changes the annotations through the tool state and the session, and redraws. `None` once
     /// the session has closed.
     pub fn annotate<T>(self, apply: impl FnOnce(&mut Annotator, &CollabLink) -> T) -> Option<T> {
+        if !self.is_open() {
+            return None;
+        }
+
         let link = self.collab.try_get_untracked()?;
         let out = self.annotator.try_update(|annotator| apply(annotator, &link))?;
         self.draw();
@@ -1280,6 +1408,10 @@ impl RendererSession {
     /// Hands this viewport a session to talk to, or takes one away. What was drawn before stays
     /// on the map.
     pub fn set_collab(self, link: CollabLink) {
+        if !self.is_open() {
+            return;
+        }
+
         let old = self.collab.get_untracked();
         let carried = old.annotations_held();
         let closed = self
@@ -1307,12 +1439,16 @@ impl RendererSession {
     /// ripple move without anything here touching them, and the session's display settings change
     /// under it.
     fn follow_collab(self) {
+        if !self.is_open() {
+            return;
+        }
+
         let link = self.collab.get_untracked();
         if link.is_active() {
             link.hold_display(&self.layers.with_untracked(Layers::collab_display));
             self.follow_session_display();
         }
-        self.run.update_value(|run| {
+        self.with_run(|run| {
             if !link.is_active() && !link.has_pings() {
                 run.collab_ticker = None;
                 return;
@@ -1350,7 +1486,7 @@ impl RendererSession {
     /// each entity is.
     fn follow_session_display(self) {
         let link = self.collab.get_untracked();
-        let Some(seen) = self.run.try_with_value(|run| run.display_seen) else { return };
+        let Some(seen) = self.with_run_value(|run| run.display_seen) else { return };
         let versions = link.display_versions();
         if versions == seen {
             return;
@@ -1395,13 +1531,13 @@ impl RendererSession {
     /// drawn, so they start over, and an open armor viewer is shown the new names once the bake
     /// lands.
     fn follow_names(self) {
-        let Some((owner, settings)) = self.run.try_with_value(|run| (run.owner.clone(), run.services.settings)) else {
+        let Some((owner, settings)) = self.with_run_value(|run| (run.owner.clone(), run.services.settings)) else {
             return;
         };
-        owner.with(|| {
-            let effect = RenderEffect::new(move |previous: Option<NameDisplay>| {
+        let effect = owner.with(|| {
+            RenderEffect::new(move |previous: Option<NameDisplay>| {
                 let names = settings.name_display();
-                if previous.is_some_and(|previous| previous != names) {
+                if self.is_open() && previous.is_some_and(|previous| previous != names) {
                     self.menu.set(None);
                     self.hovered.set(None);
                     self.choices.set(ShipChoices::new());
@@ -1412,9 +1548,9 @@ impl RendererSession {
                     self.start_event_scan();
                 }
                 names
-            });
-            on_cleanup_local(move || drop(effect));
+            })
         });
+        self.with_run(|run| run.names_effect = Some(effect));
     }
 
     /// Tells the session this playback is open. The map art travels with it, since a peer may not
@@ -1439,12 +1575,12 @@ impl RendererSession {
         else {
             return;
         };
-        let Some(generation) = self.run.try_with_value(|run| run.share_generation) else { return };
+        let Some(generation) = self.with_run_value(|run| run.share_generation) else { return };
         self.spawn(async move {
             let (shared, silhouette) =
                 long_job(move || (shared_replay(replay_id, title, &track, &game_data), track_silhouette(&track))).await;
             // The link this was prepared for has been replaced.
-            if self.run.try_with_value(|run| run.share_generation) != Some(generation) {
+            if self.with_run_value(|run| run.share_generation) != Some(generation) {
                 return;
             }
             if let Some(shared) = shared {
@@ -1469,7 +1605,7 @@ impl RendererSession {
 
     /// This playback as the window a pointer is over, by the id the session is told it under.
     pub fn cursor_scope(self) -> Option<CursorScope> {
-        self.run.try_with_value(|run| run.replay_id.cursor_scope())
+        self.with_run_value(|run| run.replay_id.cursor_scope())
     }
 
     /// Reads the roster icon under the pointer.
@@ -1502,7 +1638,7 @@ impl RendererSession {
     pub fn show_armor(self, entity_id: EntityId) {
         let Some((shown, listener)) = self.follow_armor_of(entity_id) else { return };
         if let Some(listener) = listener {
-            listener.run(ArmorRequest::Show(shown));
+            listener(ArmorRequest::Show(shown));
         }
         self.menu.set(None);
     }
@@ -1511,12 +1647,12 @@ impl RendererSession {
     fn show_renamed_armor(self) {
         let Some(entity_id) = self.with_run(|run| run.armor_renamed.take()).flatten() else { return };
         let Some((shown, Some(listener))) = self.follow_armor_of(entity_id) else { return };
-        listener.run(ArmorRequest::Renamed(shown));
+        listener(ArmorRequest::Renamed(shown));
     }
 
     /// Follows `entity_id` with the armor viewer from where playback is, and says what to show and
     /// who to tell. `None` when the ship has no armor to show.
-    fn follow_armor_of(self, entity_id: EntityId) -> Option<(ShowArmor, Option<UnsyncCallback<ArmorRequest>>)> {
+    fn follow_armor_of(self, entity_id: EntityId) -> Option<(ShowArmor, Option<ArmorListener>)> {
         let track = self.track_untracked()?;
         let at = self.playback.with_untracked(Playback::at);
         let clock = GameClock(track.seconds_at(at));
@@ -1527,7 +1663,7 @@ impl RendererSession {
             .with_untracked(|events| ArmorFollow::start(entity_id, commands, events.shots(), clock, &game_data))?;
         let listener = self.with_run(|run| {
             run.armor = Some(follow);
-            run.on_armor
+            run.on_armor.as_ref().map(Rc::clone)
         });
 
         Some((shown, listener.flatten()))
@@ -1539,10 +1675,10 @@ impl RendererSession {
         let clock = GameClock(track.seconds_at(self.playback.with_untracked(Playback::at)));
         let followed = self.with_run(|run| {
             let followed = run.armor.as_mut()?.follow(clock)?;
-            Some((followed, run.on_armor?))
+            Some((followed, Rc::clone(run.on_armor.as_ref()?)))
         });
         if let Some((followed, listener)) = followed.flatten() {
-            listener.run(ArmorRequest::Followed(followed));
+            listener(ArmorRequest::Followed(followed));
         }
     }
 
@@ -1569,7 +1705,7 @@ impl RendererSession {
 
     fn draw_shared(self) {
         let Some(track) = self.track_untracked() else { return };
-        let Some(game_data) = self.run.try_with_value(|run| run.game_data.clone()).flatten() else { return };
+        let Some(game_data) = self.with_run_value(|run| run.game_data.clone()).flatten() else { return };
         let Some(DrawStart { renderer, generation, draw, layout }) = self
             .with_run(|run| {
                 let Some(renderer) = run.renderers.pop() else {
@@ -1690,7 +1826,7 @@ impl RendererSession {
     /// Puts the moment at `clock` in front of the session, where this end is the one the rest
     /// watches, with what the ships placed on the map draw their range circles from.
     fn broadcast(self, track: &Track, motion: &FrameMotion, clock: GameClock, placed: PlacedShipRanges) {
-        let Some((shared, replay_id)) = self.run.try_with_value(|run| (run.shared, run.replay_id)) else { return };
+        let Some((shared, replay_id)) = self.with_run_value(|run| (run.shared, run.replay_id)) else { return };
         if !shared {
             return;
         }
@@ -1705,7 +1841,7 @@ impl RendererSession {
     /// may be after the draw that read them.
     fn report_placed_ranges(self) {
         let link = self.collab.get_untracked();
-        self.run.try_update_value(|run| {
+        self.with_run(|run| {
             if run.shared {
                 run.placed.report(&link, run.replay_id);
             }
@@ -1715,6 +1851,10 @@ impl RendererSession {
     /// The transport's keyboard, saying on `toasts` the speed a step reaches and where an event
     /// jump lands. Returns whether the key was taken.
     pub fn key(self, key: &Key, unmodified: &Key, modifiers: Modifiers, toasts: Option<Toasts>) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+
         let ready = self.status.try_with_untracked(|status| matches!(status, Status::Ready(_)));
         if ready != Some(true) {
             return false;
@@ -1770,6 +1910,10 @@ impl RendererSession {
     /// Asks where to write, then encodes the baked track there, or to a temporary file handed to
     /// the clipboard.
     pub fn start_export(self, target: ExportTarget) {
+        if !self.is_open() {
+            return;
+        }
+
         if self.export.try_with_untracked(|export| export.progress.is_some()) != Some(false) {
             return;
         }
@@ -1779,7 +1923,7 @@ impl RendererSession {
         }
         let settings = self.export.with_untracked(|export| export.settings);
         let link = self.collab.get_untracked();
-        let Some((game_data, layout)) = self.run.try_with_value(|run| (run.game_data.clone(), run.layout)) else {
+        let Some((game_data, layout)) = self.with_run_value(|run| (run.game_data.clone(), run.layout)) else {
             return;
         };
         let drawn_on = match game_data {
@@ -1823,7 +1967,7 @@ impl RendererSession {
         else {
             return;
         };
-        let Some((services, app_messages)) = self.run.try_with_value(|run| (run.services, run.app_messages)) else {
+        let Some((services, app_messages)) = self.with_run_value(|run| (run.services, run.app_messages)) else {
             return;
         };
         let total = frames.len() as u64;
@@ -1911,7 +2055,7 @@ impl RendererSession {
                 export.failure = outcome.as_ref().err().cloned();
             });
             // The window that asked, or the main window once the viewport has closed.
-            let messages = self.run.try_with_value(|run| run.messages).flatten().or(app_messages);
+            let messages = self.with_run_value(|run| run.messages).flatten().or(app_messages);
             if let Some(messages) = messages {
                 match outcome {
                     Ok(ExportDone::Saved(path)) => {
@@ -1938,11 +2082,11 @@ impl RendererSession {
 
     /// Where a renderer's window was last, once that has been read.
     pub fn remembered_window(self) -> Option<wows_toolkit_config::WindowSettings> {
-        self.run.try_with_value(|run| run.remembered).flatten()
+        self.with_run_value(|run| run.remembered).flatten()
     }
 
     fn read_remembered_window(self) {
-        let Some(services) = self.run.try_with_value(|run| run.services) else { return };
+        let Some(services) = self.with_run_value(|run| run.services) else { return };
         let Some(pool) = services.settings.pool() else { return };
         let read = services.on_tokio(async move { wows_toolkit_config::load_all_window_settings(&pool).await });
         self.spawn(async move {
@@ -1965,14 +2109,14 @@ impl RendererSession {
 
     /// Brings forward the window the viewport has to itself, if it has one.
     pub fn raise(self) {
-        if let Some(window) = self.run.try_with_value(|run| run.window.clone()).flatten() {
+        if let Some(window) = self.with_run_value(|run| run.window.clone()).flatten() {
             window.focus();
         }
     }
 
     /// The replay this viewport plays. `None` once it has closed.
     pub fn path(self) -> Option<PathBuf> {
-        self.run.try_with_value(|run| run.request.path.clone())
+        self.with_run_value(|run| run.request.path.clone())
     }
 }
 

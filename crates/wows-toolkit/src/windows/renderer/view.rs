@@ -162,6 +162,7 @@ pub const SHORTCUTS_MODE: ModeHint =
 /// A replay played back on its minimap, with its transport.
 #[component]
 pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
+    let lease = session.lease_view();
     install_stylesheet(SHEET, CSS);
     let map = NodeRef::new();
     let root = NodeRef::new();
@@ -202,7 +203,7 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
         Status::Ready(_) => AnyView::new(view! { MapArea(session = session, map = map, root = root) }),
     };
 
-    view! {
+    let viewport = view! {
         column(
             class = "wt-renderer",
             node_ref = root,
@@ -225,7 +226,10 @@ pub fn ReplayRenderer(session: RendererSession) -> impl IntoView {
             ShipMenuView(session = session)
             ExportNotice(session = session)
         }
-    }
+    };
+    on_cleanup_local(move || drop(lease));
+
+    viewport
 }
 
 /// Records where the map element sits, in the window's CSS pixels, and how dense its pixels are.

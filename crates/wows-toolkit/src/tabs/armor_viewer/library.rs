@@ -5,6 +5,7 @@
 //!
 //! Also carries what a replay viewport asks of the viewer, since the tab may not be built yet.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use wows_replays::types::GameClock;
@@ -23,7 +24,6 @@ use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
-use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
@@ -74,10 +74,13 @@ pub enum ModelsState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FeedSource(u64);
 
+/// Seeks replay playback independently of the reactive scope that requested the viewer.
+pub type PlaybackSeek = Rc<dyn Fn(GameClock)>;
+
 /// What a replay viewport asked of the Armor Viewer, waiting for the tab to take it.
 pub enum ViewerFeed {
-    /// Opens the ship with what it had taken. `seek` moves the playback behind it.
-    Show { source: FeedSource, shown: Box<ShowArmor>, seek: Option<UnsyncCallback<GameClock>> },
+    /// Opens the ship with what it had taken. The owned `seek` outlives the caller's reactive owner.
+    Show { source: FeedSource, shown: Box<ShowArmor>, seek: Option<PlaybackSeek> },
     /// Playback moved, and with it the clock and health, and perhaps the hits.
     Followed { source: FeedSource, followed: ArmorFollowed },
     /// The battle was baked again with its players named differently.

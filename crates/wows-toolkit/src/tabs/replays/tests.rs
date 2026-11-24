@@ -1,7 +1,10 @@
 use std::cell::Cell;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use landaire_ui::Appearance;
@@ -14,20 +17,44 @@ use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
 use wows_core::pseudonym;
+use wows_minimap_renderer::draw_command::ConsumableAvailability;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::RosterRow;
+use wows_minimap_renderer::draw_command::RosterSide;
+use wows_replay_insights::timeline::HealthSnapshot;
+use wows_replay_insights::timeline::ShipShotTimeline;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wows_toolkit_config::index::query;
+use wows_toolkit_replay_data::load::GameDataCache;
+use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
+use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
+use wows_toolkit_replay_data::replay_render::track::FrameIndex;
+use wows_toolkit_replay_data::replay_render::track::Track;
 use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_services::collab::CollabState;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
+use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::ParamData;
+use wowsunpack::game_params::types::Species;
+use wowsunpack::game_params::types::Vehicle;
+use wowsunpack::game_types::GameParamId;
+use wowsunpack::recognized::Recognized;
+use wowsunpack::vfs::MemoryFS;
+use wowsunpack::vfs::VfsPath;
 use wt_collab_client::OpenReplay;
 use wt_translations::t;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
-use zgui::reactive::Callable;
+use zgui::reactive::Owner;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::WithUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
@@ -50,9 +77,12 @@ use crate::interaction_tests::settle_in_real_time;
 use crate::shell::ReplayRequest;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
+use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::replays::browser::FolderId;
 use crate::tabs::replays::panel::expanded::SHARE_MODE;
 use crate::windows::renderer::session::RenderRequest;
+use crate::windows::renderer::session::RendererSession;
+use crate::windows::renderer::session::Status;
 use crate::windows::renderer::view::SHORTCUTS_MODE;
 
 const WINDOW: WindowSize = WindowSize { width: 1200.0, height: 800.0 };
@@ -247,22 +277,138 @@ fn a_closed_viewport_ends_and_a_popped_out_one_moves() {
     moving.close();
 }
 
-/// The armor viewer keeps the seek of the viewport that showed it after that viewport's tab closes;
-/// a seek then finds the session's state gone and does nothing.
+/// Both the listener retained by the viewport and the seek retained by the viewer outlive the
+/// menus that supplied them. Closing the viewport still makes the viewer's seek harmless.
 #[test]
-fn a_seek_into_a_closed_viewport_does_nothing() {
+fn armor_playback_outlives_the_menus_that_opened_it() {
     let (mut window, workspace) = open();
-    let path = PathBuf::from("closed.wowsreplay");
-    workspace.render(RenderRequest { path: path.clone(), alts: Vec::new() });
+    let path = PathBuf::from("armor.wowsreplay");
+    let menu = workspace.under_tab(Owner::new);
+    menu.with(|| workspace.render(RenderRequest { path: path.clone(), alts: Vec::new() }));
+    menu.cleanup();
     window.advance(Duration::from_millis(32));
-    let session = workspace.session_for_test(&path).expect("the viewport has a session");
-    let seek = crate::tabs::replays::workspace::seek_callback(session);
+    let session = workspace.session_for_test(&path).expect("the viewport survived its opening menu");
+    let entity = EntityId::from(7u32);
+    seed_armor_playback(session, entity);
+
+    let ship_menu = workspace.under_tab(Owner::new);
+    ship_menu.with(|| session.show_armor(entity));
+    ship_menu.cleanup();
+    let shell = workspace.shell;
+    assert_eq!(shell.selected_untracked(), Some(TabKey::App(AppTab::ArmorViewer)));
+    let mut feeds = shell.armor.take_feed().into_iter();
+    let ViewerFeed::Show { shown, seek, source } = feeds.next().expect("the viewer was asked to show armor") else {
+        panic!("the first request opens the ship");
+    };
+    assert!(feeds.next().is_none(), "only the selected ship was sent");
+    assert_eq!(shown.target.param_index, "PRSC610");
+    assert_eq!(shown.health, Some(100.0));
+    let seek = seek.expect("the incoming-fire log can seek playback");
+
+    seek(GameClock(12.0));
+    assert_eq!(session.playback.with_untracked(|playback| playback.at()), FrameIndex::new(1));
+    let mut feeds = shell.armor.take_feed().into_iter();
+    let ViewerFeed::Followed { source: following, followed } =
+        feeds.next().expect("the viewer followed the playback seek")
+    else {
+        panic!("moving playback updates the followed ship");
+    };
+    assert!(feeds.next().is_none());
+    assert_eq!(following, source, "the same viewer feed follows playback");
+    assert_eq!(followed.at, GameClock(12.0));
+    assert_eq!(followed.health, Some(60.0));
 
     workspace.remove(&Docked::Renderer(path));
+    assert!(!session.is_open(), "closing stops playback before its view unmounts");
+    assert_eq!(session.playback.with_untracked(|playback| playback.at()), FrameIndex::new(1));
+    seek(GameClock(30.0));
+    assert_eq!(session.playback.with_untracked(|playback| playback.at()), FrameIndex::new(1));
     window.advance(Duration::from_millis(32));
     assert!(!session.is_open());
+    assert!(session.status.try_with_untracked(|_| ()).is_none(), "the dock released the closed viewport's state");
+    seek(GameClock(30.0));
+    assert!(shell.armor.take_feed().is_empty(), "a closed playback sends no further armor updates");
+}
 
-    seek.run(wows_replays::types::GameClock(12.0));
+fn seed_armor_playback(session: RendererSession, entity: EntityId) {
+    let vehicle = Vehicle::builder()
+        .level(10)
+        .group("cruiser".to_owned())
+        .maybe_abilities(None)
+        .upgrades(Vec::new())
+        .maybe_config_data(None)
+        .maybe_model_path(None)
+        .maybe_armor(None)
+        .maybe_hit_locations(None)
+        .permoflages(Vec::new())
+        .camera_trajectories(Vec::new())
+        .maybe_ttx_components(None)
+        .innate_skills(Vec::new())
+        .build();
+    let param_id = GameParamId::from(1u32);
+    let param = Param::builder()
+        .id(param_id)
+        .index("PRSC610".to_owned())
+        .name("PRSC610_Moskva".to_owned())
+        .species(Recognized::Known(Species::Cruiser))
+        .nation("Russia".to_owned())
+        .data(ParamData::Vehicle(vehicle))
+        .build();
+    let provider = GameMetadataProvider::from_params_no_specs(vec![param]).expect("the ship provider builds");
+    let vfs: VfsPath = MemoryFS::new().into();
+    session
+        .hold_game_data_for_test(GameDataCache::holding_for_test(Arc::new(LoadedGameData::for_test(provider, vfs, 1))));
+
+    let roster = DrawCommand::TeamRoster {
+        side: RosterSide::Friendly,
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 400,
+        rows: vec![RosterRow {
+            entity_id: entity,
+            team_id: 0,
+            player_name: "Player".to_owned(),
+            clan_tag: None,
+            clan_color: None,
+            ship_name: "Moskva".to_owned(),
+            ship_param_id: Some(param_id),
+            class_icon_key: None,
+            species: Some(Species::Cruiser),
+            hp: None,
+            heal_availability: ConsumableAvailability::Unavailable,
+            is_dead: false,
+            is_self: true,
+            is_spotted: false,
+            is_disconnected: false,
+            kills: 0,
+            damage_dealt: 0.0,
+            seconds_since_damage: None,
+            consumables: Vec::new(),
+        }],
+    };
+    session.status.set(Status::Ready(Arc::new(Track {
+        frames: vec![vec![roster]; 3],
+        clocks: vec![GameClock(0.0), GameClock(12.0), GameClock(30.0)],
+        battle_start: GameClock(0.0),
+        battle_end: None,
+        replay_end: GameClock(30.0),
+        space_size: 1400.0,
+        version: Version::base(99, 0, 0),
+        space: String::new(),
+        video_stem: String::new(),
+        trails: Default::default(),
+        map_origin: (0.0, 0.0),
+    })));
+    let timeline = ShipShotTimeline {
+        hits: Vec::new(),
+        health_history: BTreeMap::from([
+            (GameClock(0.0), HealthSnapshot { health: 100.0, max_health: 100.0 }),
+            (GameClock(12.0), HealthSnapshot { health: 60.0, max_health: 100.0 }),
+        ]),
+        hull: None,
+    };
+    session.events.set(BattleEvents::from_read(Vec::new(), None, HashMap::from([(entity, timeline)])));
 }
 
 /// A second ask for the same battle's playback brings the open viewport forward.

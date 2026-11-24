@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use landaire_ui::DockRegion;
@@ -41,6 +42,7 @@ use crate::services::Services;
 use crate::shell::Shell;
 use crate::shell::tabs::ModeHint;
 use crate::tabs::armor_viewer::library::FeedSource;
+use crate::tabs::armor_viewer::library::PlaybackSeek;
 use crate::tabs::armor_viewer::library::ViewerFeed;
 use crate::tabs::replays::browser::BrowserControl;
 use crate::tabs::replays::constants::ResultMappings;
@@ -482,9 +484,7 @@ impl ReplayWorkspace {
         let session = self.under_tab(|| RendererSession::open(request, link));
         let shell = self.shell;
         let source = shell.armor.new_source();
-        session.set_armor_listener(UnsyncCallback::new(move |asked: ArmorRequest| {
-            view_armor(shell, session, source, asked)
-        }));
+        session.set_armor_listener(Rc::new(move |asked: ArmorRequest| view_armor(shell, session, source, asked)));
         self.renderers.update(|renderers| {
             renderers.insert(path.clone(), session);
         });
@@ -665,8 +665,8 @@ fn show_armor(shell: Shell, session: RendererSession, source: FeedSource, shown:
 
 /// Seeks `session`'s playback to a clock. The viewer outlives the replay tab, and a closed
 /// session's state is gone, so a seek after the tab closes does nothing.
-pub(crate) fn seek_callback(session: RendererSession) -> UnsyncCallback<wows_replays::types::GameClock> {
-    UnsyncCallback::new(move |clock: wows_replays::types::GameClock| {
+pub(crate) fn seek_callback(session: RendererSession) -> PlaybackSeek {
+    Rc::new(move |clock: wows_replays::types::GameClock| {
         if session.is_open() {
             session.go_to_clock(clock);
         }

@@ -77,6 +77,7 @@ use wowsunpack::game_types::Vec3;
 use wowsunpack::models::geometry::SplashBox;
 use wowsunpack::vfs::MemoryFS;
 use wowsunpack::vfs::VfsPath;
+use zgui::reactive::Owner;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::Update;
@@ -335,6 +336,45 @@ fn landed_at(seconds: f32) -> PreExtractedHit {
 fn followed(hits: &[f32], health: f32) -> ArmorFollowed {
     let at = GameClock(*hits.last().expect("playback has reached a hit"));
     ArmorFollowed { hits: Some(hits.iter().copied().map(landed_at).collect()), health: Some(health), at }
+}
+
+/// Pane menu actions belong to the pane, not to the temporary control that opened it.
+#[test]
+fn a_pane_menu_outlives_the_scope_that_opened_the_pane() {
+    let mut armor = ArmorWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    armor.install(two_zone_scene(), &[]);
+    let workspace = armor.workspace;
+    let first = workspace.active_id();
+    let owner = Owner::new();
+    owner.with(|| workspace.compare(None));
+    owner.cleanup();
+    let compared = workspace.active_id();
+    assert_ne!(compared, first);
+    armor.close_tab(first);
+    assert_eq!(workspace.active_id(), compared);
+    workspace.options_open.set(false);
+    armor.settle();
+
+    let items = armor.menu_of("armor-viewport");
+    assert!(items.iter().any(|label| label == "Pen Check"), "{items:?}");
+    assert!(items.iter().any(|label| label == "Export Ship Model"), "{items:?}");
+    let pen_check = armor.window.by_role_and_label(Role::MenuItem, "Pen Check").expect("the pane offers Pen Check");
+    armor.window.click(pen_check).expect("the quick action can be selected");
+    armor.settle();
+    assert!(workspace.options_open.get_untracked(), "the quick action opens the rail");
+    assert_eq!(workspace.options_tab.get_untracked(), OptionsTab::Analysis);
+    assert!(armor.shown("armor-pen-search"), "the quick action opens the pen check controls");
+
+    armor.click("armor-viewport");
+    armor.window.press_character('s', Modifiers::PRIMARY);
+    armor.settle();
+    assert!(!workspace.options_open.get_untracked(), "the pane shortcut closes the rail");
+    assert!(!armor.shown("armor-options-panel"));
+
+    armor.window.press_character('s', Modifiers::PRIMARY);
+    armor.settle();
+    assert!(workspace.options_open.get_untracked(), "the pane shortcut reopens the rail");
+    assert!(armor.shown("armor-options-panel"));
 }
 
 /// The ships list and the options rail each have a toggle on the status bar, which puts the panel
