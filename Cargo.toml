@@ -56,13 +56,13 @@ name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (versions synced by scripts/bump-versions.sh)
-wows-core = { version = "0.15.0", path = "crates/wows-core", default-features = false }
-wowsunpack = { version = "0.47.1", path = "crates/wowsunpack", default-features = false }
-wows_replays = { version = "0.48.0", path = "crates/wows-replays", default-features = false }
-wows_minimap_renderer = { version = "0.41.0", path = "crates/minimap-renderer", default-features = false }
-wows-battle-world = { version = "0.15.0", path = "crates/wows-battle-world", default-features = false }
-wows-data-mgr = { version = "0.23.0", path = "crates/wows-data-mgr", default-features = false }
-wows-replay-insights = { version = "0.15.0", path = "crates/wows-replay-insights", default-features = false }
+wows-core = { version = "0.16.0", path = "crates/wows-core", default-features = false }
+wowsunpack = { version = "0.48.0", path = "crates/wowsunpack", default-features = false }
+wows_replays = { version = "0.49.0", path = "crates/wows-replays", default-features = false }
+wows_minimap_renderer = { version = "0.42.0", path = "crates/minimap-renderer", default-features = false }
+wows-battle-world = { version = "0.16.0", path = "crates/wows-battle-world", default-features = false }
+wows-data-mgr = { version = "0.24.0", path = "crates/wows-data-mgr", default-features = false }
+wows-replay-insights = { version = "0.16.0", path = "crates/wows-replay-insights", default-features = false }
 replayshark = { path = "crates/replayshark" }
 wows-query = { path = "crates/wows-query" }
 wows-mcp = { path = "crates/wows-mcp" }
@@ -70,7 +70,7 @@ wows-ship-stats = { path = "crates/wows-ship-stats" }
 wt-collab-client = { path = "crates/wt-collab-client" }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
-wt-translations = { version = "0.17.1", path = "crates/wt-translations" }
+wt-translations = { version = "0.18.0", path = "crates/wt-translations" }
 wows-toolkit-config = { path = "crates/wows-toolkit-config" }
 wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
 wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
