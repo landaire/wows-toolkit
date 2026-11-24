@@ -50,6 +50,7 @@ use crate::activity_feed;
 use crate::assets::GameFonts;
 use crate::draw_command::ActivityFeedEntry;
 use crate::draw_command::ActivityFeedKind;
+use crate::draw_command::BatteryFraction;
 use crate::draw_command::BuildingIconType;
 use crate::draw_command::BuildingRelation;
 use crate::draw_command::ChatEntry;
@@ -85,6 +86,20 @@ const KILL_FEED_DURATION: f32 = 10.0;
 /// Gaps larger than this between consecutive samples imply a spotting break /
 /// AOI exit, so we snap (hold nearest) instead of interpolating across them.
 const MAX_SAMPLE_GAP: f32 = 2.0;
+
+fn submarine_depth_meters(waterline: f32, state: Option<BuoyancyState>) -> Meters {
+    let measured = waterline.abs();
+    if measured.is_finite() && measured > 0.0 {
+        return Meters::new(measured);
+    }
+    let depth = match state {
+        Some(BuoyancyState::Periscope) => 6.0,
+        Some(BuoyancyState::SemiDeepWater) => 30.0,
+        Some(BuoyancyState::DeepWater | BuoyancyState::DeepWaterInvul) => 60.0,
+        _ => 0.0,
+    };
+    Meters::new(depth)
+}
 
 /// Interpolate one sorted (clock, value) track at `clock`. Lerps the bracketing
 /// pair when within `MAX_SAMPLE_GAP`; returns `None` outside the track's range,
@@ -401,6 +416,8 @@ pub struct MinimapRenderer<'a> {
     /// abilities: (entity_id, Consumable) -> radius. Fallback for when the
     /// default-ability-slot variant lookup is unavailable (e.g. old replays).
     ship_ability_radii: HashMap<(EntityId, Recognized<Consumable>), Meters>,
+    /// Modifier-adjusted dive capacity by submarine, in seconds.
+    submarine_battery_capacity: HashMap<EntityId, f32>,
     /// Per-player clan tag: entity_id -> clan tag string
     player_clan_tags: HashMap<EntityId, String>,
     /// Per-player clan color: entity_id -> RGB color (None = use team color)
@@ -484,6 +501,7 @@ impl<'a> MinimapRenderer<'a> {
             ship_ability_icons: HashMap::new(),
             ship_ability_variants: HashMap::new(),
             ship_ability_radii: HashMap::new(),
+            submarine_battery_capacity: HashMap::new(),
             player_clan_tags: HashMap::new(),
             player_clan_colors: HashMap::new(),
             resolved_entities: HashSet::new(),
@@ -777,7 +795,7 @@ impl<'a> MinimapRenderer<'a> {
         if let Some(name) = self.ship_ability_icons.get(&(entity_id, consumable.clone())) {
             return Some(name.clone());
         }
-        consumable.into_known().and_then(consumable_to_base_icon_key)
+        consumable.into_known().and_then(consumable_to_base_icon_key).map(str::to_owned)
     }
 
     /// Look up detection radius for a consumable on a specific ship from GameParams.
@@ -795,10 +813,16 @@ impl<'a> MinimapRenderer<'a> {
         {
             return Some(radius);
         }
-        // Fallback: radius resolved from the ship's equipped abilities
-        // (update_ship_abilities), which is available even when the slot variant
-        // lookup above is not (e.g. old replays).
-        self.ship_ability_radii.get(&(entity_id, consumable)).copied()
+        // The equipped-ability scan is available even when the slot variant
+        // lookup is not, including old replays.
+        if let Some(radius) = self.ship_ability_radii.get(&(entity_id, consumable.clone())).copied() {
+            return Some(radius);
+        }
+        // Some old replays do not expose the equipped slot. The base ability
+        // still provides a correct ring instead of omitting the active effect.
+        let key = consumable.into_known().and_then(consumable_to_base_icon_key)?;
+        let param = GameParamProvider::game_param_by_name(self.game_params, key)?;
+        param.ability()?.categories().values().find_map(|category| category.detection_radius())
     }
 
     /// Resolve a radar/hydro consumable's detection radius via the ship's range
@@ -880,16 +904,54 @@ impl<'a> MinimapRenderer<'a> {
         Some(armament.color())
     }
 
-    /// Get the depth suffix for a submarine (e.g. " (Scope)", " (30m)").
-    fn get_depth_suffix(&self, entity_id: &EntityId, controller: &BattleView<'_>) -> Option<&'static str> {
-        let props = controller.vehicle_props(*entity_id)?;
-        match props.buoyancy_current_state().known()? {
-            BuoyancyState::Periscope => Some(" (Scope)"),
-            BuoyancyState::SemiDeepWater => Some(" (30m)"),
-            BuoyancyState::DeepWater => Some(" (60m)"),
-            BuoyancyState::DeepWaterInvul => Some(" (60m*)"),
-            _ => None,
-        }
+    fn submarine_depth(&self, entity_id: EntityId, controller: &BattleView<'_>) -> Option<Meters> {
+        let props = controller.vehicle_props(entity_id)?;
+        Some(submarine_depth_meters(
+            props.buoyancy_current_waterline(),
+            props.buoyancy_current_state().known().copied(),
+        ))
+    }
+
+    fn submarine_battery_fraction(
+        &mut self,
+        entity_id: EntityId,
+        controller: &BattleView<'_>,
+    ) -> Option<BatteryFraction> {
+        let charge = controller.vehicle_props(entity_id)?.state().battery()?.energy().value();
+        let capacity = match self.submarine_battery_capacity.get(&entity_id).copied() {
+            Some(capacity) => capacity,
+            None => {
+                let capacity = self.submarine_configured_capacity(entity_id, controller)?;
+                self.submarine_battery_capacity.insert(entity_id, capacity);
+                capacity
+            }
+        };
+        BatteryFraction::from_charge(charge, capacity)
+    }
+
+    fn submarine_configured_capacity(&self, entity_id: EntityId, controller: &BattleView<'_>) -> Option<f32> {
+        let props = controller.vehicle_props(entity_id)?;
+        let ship_id = self.ship_param_ids.get(&entity_id).copied().or_else(|| props.ship_config().ship_params_id())?;
+        let ship_param = GameParamProvider::game_param_by_id(self.game_params, ship_id)?;
+        let species = *ship_param.species()?.known()?;
+        let hull_id = props.ship_config().hull()?;
+        let hull_param = GameParamProvider::game_param_by_id(self.game_params, hull_id)?;
+        let base_capacity = ship_param.vehicle()?.ttx_components()?.hull(hull_param.name())?.battery_capacity?;
+        let cfg = props.ship_config();
+        let crew = props.crew_modifiers_compact_params();
+        let build = ResolvedBuild::from_ids(
+            ship_id,
+            cfg.units(),
+            cfg.modernization(),
+            crew.params_id(),
+            crew.learned_skills().for_species(&species),
+            cfg.exteriors(),
+            cfg.abilities(),
+            species,
+            self.version,
+            self.game_params,
+        )?;
+        Some(base_capacity * build.modifiers.coefficient("batteryCapacityCoeff"))
     }
 
     /// Record a position in the trail history for an entity.
@@ -1637,16 +1699,8 @@ impl<'a> MinimapRenderer<'a> {
             let species = self.player_species.get(entity_id).cloned();
             let player_name =
                 if self.options.show_player_names { self.player_names.get(entity_id).cloned() } else { None };
-            let ship_name = if self.options.show_ship_names {
-                let base = self.ship_display_names.get(entity_id).cloned();
-                // Append depth suffix for submarines
-                match (base, self.get_depth_suffix(entity_id, controller)) {
-                    (Some(name), Some(suffix)) => Some(format!("{}{}", name, suffix)),
-                    (base, _) => base,
-                }
-            } else {
-                None
-            };
+            let ship_name =
+                if self.options.show_ship_names { self.ship_display_names.get(entity_id).cloned() } else { None };
 
             let name_color =
                 if self.options.show_armament { self.get_armament_color(entity_id, controller) } else { None };
@@ -1661,6 +1715,7 @@ impl<'a> MinimapRenderer<'a> {
             let health_fraction = controller
                 .vehicle_props(*entity_id)
                 .and_then(|p| p.max_health().map(|max| (p.health() / max).clamp(0.0, 1.0)));
+            let has_hp_bar = self.options.show_hp_bars && health_fraction.is_some();
 
             // Compute yaw: prefer minimap heading (more accurate for icon rotation)
             let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians().value());
@@ -1701,9 +1756,7 @@ impl<'a> MinimapRenderer<'a> {
                         is_disconnected,
                         name_color,
                     });
-                    if self.options.show_hp_bars
-                        && let Some(frac) = health_fraction
-                    {
+                    if has_hp_bar && let Some(frac) = health_fraction {
                         let fill_color = hp_bar_color(frac);
                         commands.push(DrawCommand::HealthBar {
                             entity_id: *entity_id,
@@ -1712,6 +1765,19 @@ impl<'a> MinimapRenderer<'a> {
                             fill_color,
                             background_color: HP_BAR_BG_COLOR,
                             background_alpha: HP_BAR_BG_ALPHA,
+                        });
+                    }
+                    if self.options.show_submarine_status
+                        && species.as_deref() == Some("Submarine")
+                        && let Some(depth) = self.submarine_depth(*entity_id, controller)
+                    {
+                        let battery = self.submarine_battery_fraction(*entity_id, controller);
+                        commands.push(DrawCommand::SubmarineStatus {
+                            entity_id: *entity_id,
+                            pos: px,
+                            battery,
+                            depth,
+                            has_hp_bar,
                         });
                     }
                 }
@@ -1836,7 +1902,7 @@ impl<'a> MinimapRenderer<'a> {
         }
 
         // 8. Active consumables
-        if self.options.show_consumables {
+        if self.options.show_consumables || self.options.show_submarine_surveillance {
             let all_consumables = controller.active_consumables();
             for (entity_id, consumables) in &all_consumables {
                 // Skip dead ships
@@ -1869,35 +1935,55 @@ impl<'a> MinimapRenderer<'a> {
                 for active in consumables {
                     let still_active = clock.seconds() < active.activated_at.seconds() + active.duration;
                     let past_start = clock.seconds() >= active.activated_at.seconds();
-                    if still_active && past_start {
-                        // Collect icon key
-                        if let Some(icon_key) = self.consumable_icon_key(*entity_id, active.consumable.clone()) {
-                            icon_keys.push(icon_key);
-                        }
+                    if !still_active || !past_start {
+                        continue;
+                    }
 
-                        // Emit radius for detection consumables (radar, hydro, hydrophone)
-                        // Skip fighter consumables — their patrol radius is drawn at the plane position, not the ship
-                        if matches!(
-                            active.consumable.known(),
-                            Some(Consumable::CallFighters | Consumable::CatapultFighter)
-                        ) {
-                            // no detection radius for fighters
-                        } else if let Some(radius) =
-                            self.get_consumable_radius(*entity_id, active.consumable.clone()).or_else(|| {
-                                self.consumable_radius_from_ranges(controller, *entity_id, active.consumable.clone())
-                            })
-                        {
-                            let space_size = map_info.space_size as f32;
-                            let px_radius = (radius.value() / 30.0 / space_size * MINIMAP_SIZE as f32) as i32;
-                            let color = consumable_radius_color(&active.consumable, is_friendly);
-                            commands.push(DrawCommand::ConsumableRadius {
-                                entity_id: *entity_id,
-                                pos,
-                                radius_px: px_radius,
-                                color,
-                                alpha: 0.15,
-                            });
-                        }
+                    if self.options.show_consumables
+                        && let Some(icon_key) = self.consumable_icon_key(*entity_id, active.consumable.clone())
+                    {
+                        icon_keys.push(icon_key);
+                    }
+
+                    let is_surveillance = matches!(active.consumable.known(), Some(Consumable::SubmarineSurveillance));
+                    let show_radius = if is_surveillance {
+                        self.options.show_submarine_surveillance
+                    } else {
+                        self.options.show_consumables
+                    };
+                    let is_fighter = matches!(
+                        active.consumable.known(),
+                        Some(Consumable::CallFighters | Consumable::CatapultFighter)
+                    );
+                    if !show_radius || is_fighter {
+                        continue;
+                    }
+                    let Some(radius) =
+                        self.get_consumable_radius(*entity_id, active.consumable.clone()).or_else(|| {
+                            self.consumable_radius_from_ranges(controller, *entity_id, active.consumable.clone())
+                        })
+                    else {
+                        continue;
+                    };
+                    let space_size = map_info.space_size as f32;
+                    let px_radius = (radius.value() / 30.0 / space_size * MINIMAP_SIZE as f32) as i32;
+                    let color = consumable_radius_color(&active.consumable, is_friendly);
+                    if is_surveillance {
+                        commands.push(DrawCommand::SubmarineSurveillanceRadius {
+                            entity_id: *entity_id,
+                            pos,
+                            radius_px: px_radius,
+                            color,
+                            alpha: 0.15,
+                        });
+                    } else {
+                        commands.push(DrawCommand::ConsumableRadius {
+                            entity_id: *entity_id,
+                            pos,
+                            radius_px: px_radius,
+                            color,
+                            alpha: 0.15,
+                        });
                     }
                 }
 
@@ -3027,8 +3113,8 @@ fn species_to_building_icon_type(species: &Species) -> Option<BuildingIconType> 
 ///
 /// Used as fallback when per-ship ability data is not available.
 /// Returns None for consumables that don't have a meaningful icon display.
-fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
-    let key = match c {
+fn consumable_to_base_icon_key(c: Consumable) -> Option<&'static str> {
+    Some(match c {
         Consumable::DamageControl => "PCY001_CrashCrew",
         Consumable::RepairParty => "PCY002_RegenCrew",
         Consumable::DefensiveAntiAircraft => "PCY003_AirDefenseDisp",
@@ -3046,8 +3132,7 @@ fn consumable_to_base_icon_key(c: Consumable) -> Option<String> {
         Consumable::EnhancedRudders => "PCY046_FastDeepRudders",
         Consumable::SubmarineSurveillance => "PCY048_SubmarineLocator",
         _ => return None,
-    };
-    Some(key.to_string())
+    })
 }
 
 #[cfg(test)]
@@ -3055,8 +3140,10 @@ mod test {
     use super::SampledPos;
     use super::interpolate_track;
     use super::resolve_salvo_flight;
+    use super::submarine_depth_meters;
     use super::tracer_flight_duration;
     use wows_battle_world::EntityTrack;
+    use wows_replays::analyzer::decoder::BuoyancyState;
     use wows_replays::types::GameClock;
     use wows_replays::types::NormalizedPos;
     use wows_replays::types::WorldPos;
@@ -3079,6 +3166,13 @@ mod test {
         assert_eq!(tracer_flight_duration(3000.0, 1000.0, 0.0), 3.0);
         // Neither available: fixed fallback so the tracer is still drawn.
         assert_eq!(tracer_flight_duration(3000.0, 0.0, 0.0), 3.0);
+    }
+
+    #[test]
+    fn submarine_depth_uses_the_measured_waterline_in_meters() {
+        assert_eq!(submarine_depth_meters(-17.6, Some(BuoyancyState::Periscope)).value(), 17.6);
+        assert_eq!(submarine_depth_meters(0.0, Some(BuoyancyState::DeepWater)).value(), 60.0);
+        assert_eq!(submarine_depth_meters(0.0, Some(BuoyancyState::Surface)).value(), 0.0);
     }
 
     fn world_only(samples: &[(f32, f32)]) -> EntityTrack {

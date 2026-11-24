@@ -779,6 +779,47 @@ pub fn draw_command_to_shapes(
             }
         }
 
+        DrawCommand::SubmarineStatus { pos, battery, depth, has_hp_bar, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            if let Some(fraction) = battery {
+                let bar_w = transform.scale_distance(20.0);
+                let bar_h = transform.scale_distance(3.0);
+                let bar_y = center.y + transform.scale_distance(if *has_hp_bar { 15.0 } else { 10.0 });
+                let bar_x = center.x - bar_w / 2.0;
+                let bg_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(bar_w, bar_h));
+                shapes.push(Shape::rect_filled(bg_rect, CornerRadius::ZERO, Color32::from_rgb(18, 32, 42)));
+                let fill_w = fraction.value() * bar_w;
+                if fill_w > 0.0 {
+                    let fill_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(fill_w, bar_h));
+                    shapes.push(Shape::rect_filled(fill_rect, CornerRadius::ZERO, Color32::from_rgb(80, 210, 255)));
+                }
+
+                let sx = transform.scale_distance(1.0);
+                let bolt_x = bar_x - 5.0 * sx;
+                let bolt_y = bar_y - sx;
+                shapes.push(Shape::line(
+                    vec![
+                        Pos2::new(bolt_x, bolt_y),
+                        Pos2::new(bolt_x + 3.0 * sx, bolt_y),
+                        Pos2::new(bolt_x + sx, bolt_y + 3.0 * sx),
+                        Pos2::new(bolt_x + 4.0 * sx, bolt_y + 3.0 * sx),
+                        Pos2::new(bolt_x, bolt_y + 7.0 * sx),
+                    ],
+                    Stroke::new(transform.scale_stroke(1.2), Color32::from_rgb(255, 220, 70)),
+                ));
+            }
+
+            let text = format!("{:.0} m", depth.value());
+            let font = egui::FontId::proportional(transform.scale_distance(9.0));
+            let color = Color32::from_rgb(190, 235, 255);
+            let galley = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(text, font, color));
+            shapes.push(Shape::galley(
+                Pos2::new(center.x + transform.scale_distance(13.0), center.y + transform.scale_distance(5.0)),
+                galley,
+                Color32::TRANSPARENT,
+            ));
+        }
+
         DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name, .. } => {
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
@@ -1381,7 +1422,8 @@ pub fn draw_command_to_shapes(
             shapes.push(Shape::convex_polygon(corners.to_vec(), fill, Stroke::NONE));
         }
 
-        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
+        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. }
+        | DrawCommand::SubmarineSurveillanceRadius { pos, radius_px, color, alpha, .. } => {
             let center = transform.minimap_to_screen(pos);
             let r = transform.scale_distance(*radius_px as f32);
             let fill_color = color_from_rgba(*color, *alpha);
@@ -1401,7 +1443,7 @@ pub fn draw_command_to_shapes(
         DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
             if let Some(consumable_icons) = textures.consumable_icons {
                 let center = transform.minimap_to_screen(pos);
-                let base_offset = if *has_hp_bar { 26.0 } else { 23.0 };
+                let base_offset = if *has_hp_bar { 32.0 } else { 29.0 };
                 let icon_y = center.y + transform.scale_distance(base_offset);
                 let icon_sz = transform.scale_distance(16.0);
                 let gap = transform.scale_distance(1.0);
@@ -2599,6 +2641,8 @@ mod camera_direction_tests {
     use wows_minimap_renderer::CANVAS_HEIGHT;
     use wows_minimap_renderer::MINIMAP_SIZE;
     use wows_minimap_renderer::MinimapPos;
+    use wows_minimap_renderer::draw_command::BatteryFraction;
+    use wows_minimap_renderer::draw_command::Meters;
     use wows_replays::types::EntityId;
     use wt_translations::DefaultTextResolver;
 
@@ -2660,5 +2704,96 @@ mod camera_direction_tests {
         let drawn_icon = transform.scale_distance(ICON_SIZE);
         assert!((tip - center - Vec2::new(drawn_icon, 0.0)).length() < 1e-3, "tip {tip:?}, center {center:?}");
         assert!(((left.to_vec2() + right.to_vec2()) / 2.0 - center.to_vec2()).length() < 1e-3, "{left:?} {right:?}");
+    }
+
+    #[test]
+    fn submarine_status_and_surveillance_draw_in_the_interactive_backend() {
+        let transform = MapTransform {
+            origin: Pos2::ZERO,
+            window_scale: 1.0,
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+            hud_height: HUD_HEIGHT as f32,
+            canvas_height: CANVAS_HEIGHT as f32,
+            canvas_width: MINIMAP_SIZE as f32,
+            hud_width: MINIMAP_SIZE as f32,
+            map_x_offset: 0.0,
+        };
+        let ship_icons = HashMap::new();
+        let plane_icons = HashMap::new();
+        let textures = DrawCommandTextures {
+            ship_icons: &ship_icons,
+            ship_icon_outlines: None,
+            plane_icons: &plane_icons,
+            building_icons: None,
+            consumable_icons: None,
+            ribbon_icons: None,
+            subribbon_icons: None,
+            death_cause_icons: None,
+            powerup_icons: None,
+            silhouette_texture: None,
+        };
+        let entity_id = EntityId::from(7u32);
+        let pos = MinimapPos { x: 300.0, y: 400.0 };
+        let status = DrawCommand::SubmarineStatus {
+            entity_id,
+            pos,
+            battery: BatteryFraction::from_charge(50.0, 100.0),
+            depth: Meters::new(30.0),
+            has_hp_bar: true,
+        };
+        let surveillance = DrawCommand::SubmarineSurveillanceRadius {
+            entity_id,
+            pos,
+            radius_px: 80,
+            color: [80, 210, 255],
+            alpha: 0.15,
+        };
+        let ctx = egui::Context::default();
+        let mut status_shapes = Vec::new();
+        let mut surveillance_shapes = Vec::new();
+        let _ = ctx.run_ui(egui::RawInput::default(), |_ui| {
+            status_shapes = draw_command_to_shapes(
+                &status,
+                &transform,
+                &textures,
+                &ctx,
+                &DrawCommandLabelOptions::default(),
+                None,
+                &DefaultTextResolver,
+                None,
+                None,
+            );
+            surveillance_shapes = draw_command_to_shapes(
+                &surveillance,
+                &transform,
+                &textures,
+                &ctx,
+                &DrawCommandLabelOptions::default(),
+                None,
+                &DefaultTextResolver,
+                None,
+                None,
+            );
+        });
+
+        assert!(
+            status_shapes
+                .iter()
+                .any(|shape| matches!(shape, Shape::Rect(rect) if rect.fill == Color32::from_rgb(80, 210, 255))),
+            "the dive-capacity fill is painted"
+        );
+        assert!(
+            status_shapes.iter().any(
+                |shape| matches!(shape, Shape::Path(path) if path.stroke.color == egui::epaint::ColorMode::Solid(Color32::from_rgb(255, 220, 70)))
+            ),
+            "the electric bolt is painted"
+        );
+        assert!(status_shapes.iter().any(|shape| matches!(shape, Shape::Text(_))), "the meter depth is painted");
+        assert_eq!(
+            surveillance_shapes.iter().filter(|shape| matches!(shape, Shape::Circle(_))).count(),
+            2,
+            "the surveillance range has a fill and outline"
+        );
     }
 }

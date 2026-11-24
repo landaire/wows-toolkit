@@ -27,6 +27,8 @@ pub struct RenderOptions {
     pub show_weather: bool,
     pub show_camera_direction: bool,
     pub show_consumables: bool,
+    pub show_submarine_surveillance: bool,
+    pub show_submarine_status: bool,
     pub show_armament: bool,
     pub show_trails: bool,
     pub show_dead_trails: bool,
@@ -66,6 +68,8 @@ impl Default for RenderOptions {
             show_weather: true,
             show_camera_direction: true,
             show_consumables: true,
+            show_submarine_surveillance: true,
+            show_submarine_status: true,
             show_armament: false,
             show_trails: false,
             show_dead_trails: true,
@@ -153,6 +157,8 @@ pub struct RendererConfig {
     pub show_kill_feed: bool,
     pub show_chat: bool,
     pub show_consumables: bool,
+    pub show_submarine_surveillance: bool,
+    pub show_submarine_status: bool,
     // New features (default false)
     pub show_armament: bool,
     pub show_trails: bool,
@@ -194,6 +200,8 @@ impl Default for RendererConfig {
             show_kill_feed: true,
             show_chat: true,
             show_consumables: true,
+            show_submarine_surveillance: true,
+            show_submarine_status: true,
             show_armament: true,
             show_trails: false,
             show_dead_trails: true,
@@ -256,6 +264,8 @@ impl RendererConfig {
             show_kill_feed: self.show_kill_feed,
             show_chat: self.show_chat,
             show_consumables: self.show_consumables,
+            show_submarine_surveillance: self.show_submarine_surveillance,
+            show_submarine_status: self.show_submarine_status,
             show_armament: self.show_armament,
             show_trails: self.show_trails,
             show_dead_trails: self.show_dead_trails,
@@ -326,6 +336,12 @@ show_chat = true
 
 # Show active consumable icons below ships
 show_consumables = true
+
+# Show active submarine surveillance ranges
+show_submarine_surveillance = true
+
+# Show submarine dive capacity and depth
+show_submarine_status = true
 
 # Show selected armament/ammo type below ship icons (e.g. AP, HE, SAP, Torp)
 show_armament = true
@@ -461,6 +477,8 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
         DrawCommand::Building { .. } => opts.show_buildings,
         DrawCommand::CameraDirection { .. } => opts.show_camera_direction,
         DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
+        DrawCommand::SubmarineSurveillanceRadius { .. } => opts.show_submarine_surveillance,
+        DrawCommand::SubmarineStatus { .. } => opts.show_submarine_status,
         DrawCommand::PatrolRadius { .. } => opts.show_planes,
         DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
         DrawCommand::PositionTrail { .. } => opts.show_trails || opts.show_speed_trails,

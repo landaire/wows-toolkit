@@ -10,6 +10,7 @@ use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::PlaneId;
 use wows_replays::types::TimeRemaining;
+pub use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_types::AdvantageLevel;
 use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::FinishType;
@@ -407,6 +408,24 @@ pub struct DamageBreakdownEntry {
 /// A high-level draw command emitted by the renderer.
 ///
 /// The renderer reads game state and produces a sequence of these commands.
+/// The fraction of a submarine's dive capacity that remains.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct BatteryFraction(f32);
+
+impl BatteryFraction {
+    pub fn from_charge(current: f32, capacity: f32) -> Option<Self> {
+        if !current.is_finite() || current < 0.0 || !capacity.is_finite() || capacity <= 0.0 {
+            return None;
+        }
+        Some(Self((current / capacity).clamp(0.0, 1.0)))
+    }
+
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
 /// A `RenderTarget` implementation consumes them to produce visual output,
 /// whether that's a software-rendered image or GPU draw calls.
 ///
@@ -721,6 +740,16 @@ pub enum DrawCommand {
     /// Something a reader drew on the map, rather than something the battle
     /// did. One command per shape; a drawn arrow is its shaft and its head.
     Annotation { shape: AnnotationShape, color: [u8; 4], width: f32 },
+    /// The active submarine surveillance range.
+    SubmarineSurveillanceRadius { entity_id: EntityId, pos: MinimapPos, radius_px: i32, color: [u8; 3], alpha: f32 },
+    /// Dive capacity and depth drawn beside a submarine.
+    SubmarineStatus {
+        entity_id: EntityId,
+        pos: MinimapPos,
+        battery: Option<BatteryFraction>,
+        depth: Meters,
+        has_hp_bar: bool,
+    },
 }
 
 /// What a drawn annotation is, in minimap space.
@@ -1193,5 +1222,18 @@ mod camera_direction_wedge_tests {
             assert!((distance(tip, stern(heading)) - ICON / 2.0).abs() < 1e-3, "heading {heading}: tip at {tip:?}");
             assert!((distance(tip, bow(heading)) - 1.5 * ICON).abs() < 1e-3, "heading {heading}: behind the stern");
         }
+    }
+}
+
+#[cfg(test)]
+mod battery_fraction_tests {
+    use super::BatteryFraction;
+
+    #[test]
+    fn the_fraction_is_bounded_by_empty_and_full() {
+        assert_eq!(BatteryFraction::from_charge(-10.0, 100.0), None);
+        assert_eq!(BatteryFraction::from_charge(50.0, 100.0).map(BatteryFraction::value), Some(0.5));
+        assert_eq!(BatteryFraction::from_charge(120.0, 100.0).map(BatteryFraction::value), Some(1.0));
+        assert_eq!(BatteryFraction::from_charge(50.0, 0.0), None);
     }
 }

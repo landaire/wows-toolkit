@@ -144,6 +144,7 @@ pub fn dispatch<G: ResourceLoader>(
         DecodedPacketPayload::PropertyUpdate(update) => {
             zones::handle_property_update(update, clock, world);
             combat::handle_ribbon_property_update(update, world, clock);
+            vehicles::handle_vehicle_nested_property(update, world);
         }
         DecodedPacketPayload::BattleEnd { winning_team, finish_type } => {
             match_state::handle_battle_end(winning_team, finish_type, clock, world);

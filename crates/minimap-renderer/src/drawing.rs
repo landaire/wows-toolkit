@@ -513,6 +513,59 @@ fn draw_health_bar(
     }
 }
 
+fn draw_submarine_status(
+    pm: &mut Surface,
+    x: f32,
+    y: f32,
+    battery: Option<f32>,
+    depth_meters: f32,
+    has_hp_bar: bool,
+    fonts: &GameFonts,
+    scale: f32,
+) {
+    if let Some(fraction) = battery {
+        let bar_w = 20.0 * scale;
+        let bar_h = 3.0 * scale;
+        let bar_x = x - bar_w / 2.0;
+        let bar_y = y + if has_hp_bar { 15.0 * scale } else { 10.0 * scale };
+        draw_filled_rect(pm, bar_x, bar_y, bar_w, bar_h, [18, 32, 42], 0.9);
+        let fill_w = (fraction.clamp(0.0, 1.0) * bar_w).round();
+        if fill_w > 0.0 {
+            draw_filled_rect(pm, bar_x, bar_y, fill_w, bar_h, [80, 210, 255], 1.0);
+        }
+
+        let bolt_x = bar_x - 5.0 * scale;
+        let bolt_y = bar_y - 1.0 * scale;
+        let color = [255, 220, 70];
+        let width = (1.2 * scale).max(1.0);
+        draw_line(pm, bolt_x, bolt_y, bolt_x + 3.0 * scale, bolt_y, color, 1.0, width);
+        draw_line(pm, bolt_x + 3.0 * scale, bolt_y, bolt_x + 1.0 * scale, bolt_y + 3.0 * scale, color, 1.0, width);
+        draw_line(
+            pm,
+            bolt_x + 1.0 * scale,
+            bolt_y + 3.0 * scale,
+            bolt_x + 4.0 * scale,
+            bolt_y + 3.0 * scale,
+            color,
+            1.0,
+            width,
+        );
+        draw_line(pm, bolt_x + 4.0 * scale, bolt_y + 3.0 * scale, bolt_x, bolt_y + 7.0 * scale, color, 1.0, width);
+    }
+
+    let text = format!("{depth_meters:.0} m");
+    let (font, text_scale) = fonts.font_and_scale(&text, 9.0 * scale);
+    draw_text_shadow(
+        pm,
+        [190, 235, 255],
+        (x + 13.0 * scale).round() as i32,
+        (y + 5.0 * scale).round() as i32,
+        text_scale,
+        font,
+        &text,
+    );
+}
+
 /// Draw a ship icon rotated by yaw, with optional team-color tinting.
 ///
 /// Uses tiny-skia's bilinear-filtered transform compositing for smooth rotation
@@ -2468,9 +2521,11 @@ fn is_map_command(cmd: &DrawCommand) -> bool {
             | DrawCommand::WeatherZone { .. }
             | DrawCommand::Ship { .. }
             | DrawCommand::HealthBar { .. }
+            | DrawCommand::SubmarineStatus { .. }
             | DrawCommand::DeadShip { .. }
             | DrawCommand::Plane { .. }
             | DrawCommand::ConsumableRadius { .. }
+            | DrawCommand::SubmarineSurveillanceRadius { .. }
             | DrawCommand::PatrolRadius { .. }
             | DrawCommand::ConsumableIcons { .. }
             | DrawCommand::PositionTrail { .. }
@@ -2700,6 +2755,18 @@ impl RenderTarget for ImageTarget {
                     grow,
                 );
             }
+            DrawCommand::SubmarineStatus { pos, battery, depth, has_hp_bar, .. } => {
+                draw_submarine_status(
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    battery.map(|fraction| fraction.value()),
+                    depth.value(),
+                    *has_hp_bar,
+                    &self.fonts,
+                    grow,
+                );
+            }
             DrawCommand::DeadShip { pos, yaw, species, color, is_self, .. } => {
                 let x = view.x(pos.x);
                 let y = view.y(pos.y);
@@ -2740,7 +2807,8 @@ impl RenderTarget for ImageTarget {
                     grow,
                 );
             }
-            DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
+            DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. }
+            | DrawCommand::SubmarineSurveillanceRadius { pos, radius_px, color, alpha, .. } => {
                 let x = view.x(pos.x);
                 let y = view.y(pos.y);
                 let radius = view.length(*radius_px as f32);
@@ -2758,7 +2826,7 @@ impl RenderTarget for ImageTarget {
             DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
                 let x = view.x(pos.x).round() as i32;
                 let y = view.y(pos.y).round() as i32;
-                let below = if *has_hp_bar { 28.0 } else { 26.0 };
+                let below = if *has_hp_bar { 37.0 } else { 35.0 };
                 let base_y = y + (below * grow).round() as i32;
                 let icon_size = (28.0 * grow).round().max(1.0) as i32;
                 let gap = (1.0 * grow).round().max(1.0) as i32;
@@ -3452,8 +3520,10 @@ impl RenderTarget for ImageTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draw_command::BatteryFraction;
     use crate::map_data::MinimapPos;
     use crate::viewport::MapViewport;
+    use wowsunpack::game_params::types::Meters;
 
     /// A target with no game files behind it: no map art, no icons, and
     /// whatever font the machine has. `None` where it has none.
@@ -3723,6 +3793,27 @@ mod tests {
         assert_eq!(pixel(&doubled, 399, 399 + 2 * top), red, "the far corner lands on the doubled pixel");
         assert_eq!(pixel(&doubled, 400, 399 + 2 * top), map);
         assert_eq!(pixel(&doubled, 400, 4), pixel(&plain, 200, 2), "the HUD strip is doubled with the map");
+    }
+    #[test]
+    fn submarine_status_draws_battery_bolt_and_depth() {
+        let Some(mut target) = target() else { return };
+        target.begin_frame();
+        target.draw(&DrawCommand::SubmarineStatus {
+            entity_id: EntityId::from(7u32),
+            pos: MinimapPos { x: 100.0, y: 100.0 },
+            battery: BatteryFraction::from_charge(50.0, 100.0),
+            depth: Meters::new(30.0),
+            has_hp_bar: true,
+        });
+        target.end_frame();
+
+        let frame = target.frame();
+        let top = HUD_HEIGHT;
+        assert_eq!(pixel(&frame, 95, 115 + top), [80, 210, 255], "the battery fill is below the HP bar");
+        let bolt = pixel(&frame, 85, 114 + top);
+        assert!(bolt[0] > bolt[2], "the electric bolt is yellow: {bolt:?}");
+        let depth_drawn = (113..145).any(|x| (105 + top..120 + top).any(|y| pixel(&frame, x, y) != [30, 40, 60]));
+        assert!(depth_drawn, "the meter depth is drawn beside the submarine");
     }
 }
 

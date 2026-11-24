@@ -13,6 +13,7 @@ use wowsunpack::data::ship_config::parse_ship_config_value;
 use wowsunpack::game_params::types::CAPTAIN_SKILL_REWORK_VERSION;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::Seconds;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::rpc::typedefs::ArgValue;
 
@@ -439,8 +440,41 @@ pub struct VehicleState {
     /// TODO
     buffs: Option<()>,
     vehicle_visual_state: u8,
-    /// TODO
-    battery: Option<()>,
+    battery: Option<BatteryState>,
+}
+
+impl VehicleState {
+    fn from_arg(value: &ArgValue<'_>) -> Option<Self> {
+        let fields = value.fixed_dict_ref()?;
+        let battery = fields.get("battery").and_then(BatteryState::from_arg);
+        let vehicle_visual_state =
+            fields.get("vehicleVisualState").and_then(ArgValue::as_u32).unwrap_or_default() as u8;
+        Some(Self { buffs: None, vehicle_visual_state, battery })
+    }
+
+    pub fn battery(&self) -> Option<&BatteryState> {
+        self.battery.as_ref()
+    }
+}
+
+#[derive(Debug, Serialize, Clone, Copy)]
+pub struct BatteryState {
+    energy: Seconds,
+}
+
+impl BatteryState {
+    fn from_arg(value: &ArgValue<'_>) -> Option<Self> {
+        let fields = value.nullable_fixed_dict_ref()?.as_ref()?;
+        Self::new(Seconds::new(fields.get("energy")?.as_f32()?))
+    }
+
+    fn new(energy: Seconds) -> Option<Self> {
+        (energy.value().is_finite() && energy.value() >= 0.0).then_some(Self { energy })
+    }
+
+    pub fn energy(&self) -> Seconds {
+        self.energy
+    }
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -1052,6 +1086,10 @@ impl VehicleProps {
         <Self as UpdateFromReplayArgs>::update_by_name(self, name, value, version, constants);
     }
 
+    pub fn set_battery_energy(&mut self, energy: Seconds) {
+        self.state.battery = BatteryState::new(energy);
+    }
+
     /// Apply a batch of named property updates (mirrors `UpdateFromReplayArgs::update_from_args`).
     pub fn update_from_args(
         &mut self,
@@ -1177,7 +1215,10 @@ impl VehicleProps {
                 }
             }
             "engineDir" => apply_prop_value!(self.engine_dir, value, i8),
-            // TODO: state
+            "state" => match VehicleState::from_arg(value) {
+                Some(state) => self.state = state,
+                None => skip_property(name, value),
+            },
             "teamId" => apply_prop_value!(self.team_id, value, i8),
             "buoyancyCurrentState" => match value.as_i32() {
                 Some(id) => {
@@ -1503,6 +1544,19 @@ mod tests {
                 ModelEffect { id: ClientActionId(-1), name: "glow".to_owned(), node: String::new() },
             ]
         );
+    }
+
+    #[test]
+    fn vehicle_state_decodes_submarine_battery_energy() {
+        let version = Version::from_client_exe("15,10,0,13533378");
+        let constants = GameConstants::defaults();
+        let mut props = VehicleProps::default();
+        let battery = ArgValue::NullableFixedDict(Some(HashMap::from([("energy", ArgValue::Float32(95.5))])));
+        let state =
+            ArgValue::FixedDict(HashMap::from([("battery", battery), ("vehicleVisualState", ArgValue::Uint8(2))]));
+        props.update_by_name("state", &state, version, &constants);
+
+        assert_eq!(props.state().battery().map(|battery| battery.energy().value()), Some(95.5));
     }
 
     /// A property whose value has a type its def does not give it is skipped, leaving what was

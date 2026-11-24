@@ -65,6 +65,7 @@ use wows_toolkit_services::collab::CollabLink;
 use wows_toolkit_services::collab::ReplayId;
 use wows_toolkit_services::collab::push_ping_aged;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::AdvantageLevel;
 use wt_collab_client::AnnotationSyncState;
@@ -2122,6 +2123,28 @@ fn a_roster_icon_reads_what_the_frame_drew() {
 
     assert!(reading(32.0, 15.0).is_none(), "between two icons is neither");
     assert!(reading(400.0, 400.0).is_none(), "and the map is not a roster");
+}
+
+#[test]
+fn submarine_layers_have_independent_display_switches() {
+    let entity_id = EntityId::from(7u32);
+    let pos = MinimapPos { x: 100.0, y: 100.0 };
+    let surveillance =
+        DrawCommand::SubmarineSurveillanceRadius { entity_id, pos, radius_px: 30, color: [80, 210, 255], alpha: 0.15 };
+    let status =
+        DrawCommand::SubmarineStatus { entity_id, pos, battery: None, depth: Meters::new(30.0), has_hp_bar: true };
+    let consumable = DrawCommand::ConsumableRadius { entity_id, pos, radius_px: 20, color: [0, 255, 0], alpha: 0.15 };
+    let mut options = playback_options();
+    let mut dead = true;
+
+    (toggle("renderer-opt-submarine-surveillance").write)(&mut options, &mut dead, false);
+    assert!(!should_draw_command(&surveillance, &options, dead));
+    assert!(should_draw_command(&status, &options, dead));
+    assert!(should_draw_command(&consumable, &options, dead));
+
+    (toggle("renderer-opt-submarine-status").write)(&mut options, &mut dead, false);
+    assert!(!should_draw_command(&status, &options, dead));
+    assert!(should_draw_command(&consumable, &options, dead));
 }
 
 /// The rosters and the stats panel compete for the same gutters, so turning

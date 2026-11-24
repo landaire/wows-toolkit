@@ -19,55 +19,39 @@ pub use wowsunpack::game_types::EntityId;
 
 /// ALPN protocol identifier for the collab session.
 ///
-/// Bump this whenever the wire format changes (new/removed/reordered enum
-/// variants, changed struct fields, etc.).  Mismatched clients will fail
-/// cleanly at the QUIC handshake instead of hitting rkyv deserialization
-/// errors.
-pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/4";
+/// Bump this whenever the wire format changes. Mismatched clients fail at the
+/// QUIC handshake instead of reaching rkyv deserialization.
+pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/5";
 
-/// ALPN of peers that predate [`PeerMessage::PlacedShipRanges`].
-///
-/// Still accepted and offered: it differs from [`COLLAB_ALPN`] only in that variant, which
-/// [`PeerMessage::for_version`] keeps from such a peer.
+/// Retired ALPNs kept for protocol fixtures. They are not offered because this
+/// wire layout cannot project render options or frames to those schemas.
 pub const COLLAB_ALPN_SCOPED: &[u8] = b"/wows-toolkit-collab/3";
-
-/// ALPN of peers that predate [`PeerMessage::ScopedCursorPosition`].
-///
-/// Still accepted and offered: it differs from [`COLLAB_ALPN_SCOPED`] only in that variant,
-/// which [`PeerMessage::for_version`] rewrites for such a peer.
 pub const COLLAB_ALPN_UNSCOPED: &[u8] = b"/wows-toolkit-collab/2";
 
 /// Which protocol revision a connection negotiated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireVersion {
-    /// [`COLLAB_ALPN_UNSCOPED`]: cursors carry no window.
+    /// Retired unscoped cursor protocol.
     Unscoped,
-    /// [`COLLAB_ALPN_SCOPED`]: no placed ship ranges.
+    /// Retired scoped cursor protocol.
     Scoped,
     /// [`COLLAB_ALPN`].
     PlacedRanges,
 }
 
 impl WireVersion {
-    /// The ALPNs an endpoint accepts, newest first.
+    /// The only ALPN this wire layout accepts.
     pub fn alpns() -> Vec<Vec<u8>> {
-        vec![COLLAB_ALPN.to_vec(), COLLAB_ALPN_SCOPED.to_vec(), COLLAB_ALPN_UNSCOPED.to_vec()]
+        vec![COLLAB_ALPN.to_vec()]
     }
 
-    /// What a connection offers beyond [`COLLAB_ALPN`], so it still reaches an older host.
     pub fn connect_options() -> iroh::endpoint::ConnectOptions {
         iroh::endpoint::ConnectOptions::new()
-            .with_additional_alpns(vec![COLLAB_ALPN_SCOPED.to_vec(), COLLAB_ALPN_UNSCOPED.to_vec()])
     }
 
     /// The revision `connection` negotiated, or `None` for an ALPN this build does not speak.
     pub fn of(connection: &iroh::endpoint::Connection) -> Option<Self> {
-        match connection.alpn() {
-            alpn if alpn == COLLAB_ALPN => Some(Self::PlacedRanges),
-            alpn if alpn == COLLAB_ALPN_SCOPED => Some(Self::Scoped),
-            alpn if alpn == COLLAB_ALPN_UNSCOPED => Some(Self::Unscoped),
-            _ => None,
-        }
+        (connection.alpn() == COLLAB_ALPN).then_some(Self::PlacedRanges)
     }
 }
 
@@ -548,6 +532,8 @@ pub enum DisplayOptionField {
     ShowSelfTorpedo,
     ShowSelfRadar,
     ShowSelfHydro,
+    ShowSubmarineSurveillance,
+    ShowSubmarineStatus,
 }
 
 // ─── Serializable render options ────────────────────────────────────────────
@@ -589,6 +575,8 @@ pub struct CollabRenderOptions {
     pub show_self_torpedo_range: bool,
     pub show_self_radar_range: bool,
     pub show_self_hydro_range: bool,
+    pub show_submarine_surveillance: bool,
+    pub show_submarine_status: bool,
 }
 
 impl CollabRenderOptions {
@@ -627,6 +615,8 @@ impl CollabRenderOptions {
             show_self_torpedo_range: saved.show_self_torpedo_range,
             show_self_radar_range: saved.show_self_radar_range,
             show_self_hydro_range: saved.show_self_hydro_range,
+            show_submarine_surveillance: saved.show_submarine_surveillance,
+            show_submarine_status: saved.show_submarine_status,
         }
     }
 
@@ -666,6 +656,8 @@ impl CollabRenderOptions {
             show_self_torpedo_range: false,
             show_self_radar_range: false,
             show_self_hydro_range: false,
+            show_submarine_surveillance: options.show_submarine_surveillance,
+            show_submarine_status: options.show_submarine_status,
         }
     }
 
@@ -697,6 +689,8 @@ impl CollabRenderOptions {
         options.show_chat = self.show_chat;
         options.show_advantage = self.show_advantage;
         options.show_score_timer = self.show_score_timer;
+        options.show_submarine_surveillance = self.show_submarine_surveillance;
+        options.show_submarine_status = self.show_submarine_status;
         *show_dead_ships = self.show_dead_ships;
     }
 
@@ -742,6 +736,8 @@ impl CollabRenderOptions {
         cmp!(show_self_torpedo_range, ShowSelfTorpedo);
         cmp!(show_self_radar_range, ShowSelfRadar);
         cmp!(show_self_hydro_range, ShowSelfHydro);
+        cmp!(show_submarine_surveillance, ShowSubmarineSurveillance);
+        cmp!(show_submarine_status, ShowSubmarineStatus);
         out
     }
 
@@ -780,6 +776,8 @@ impl CollabRenderOptions {
             DisplayOptionField::ShowSelfTorpedo => self.show_self_torpedo_range = value,
             DisplayOptionField::ShowSelfRadar => self.show_self_radar_range = value,
             DisplayOptionField::ShowSelfHydro => self.show_self_hydro_range = value,
+            DisplayOptionField::ShowSubmarineSurveillance => self.show_submarine_surveillance = value,
+            DisplayOptionField::ShowSubmarineStatus => self.show_submarine_status = value,
         }
     }
 }

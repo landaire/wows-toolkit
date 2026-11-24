@@ -53,6 +53,10 @@ pub struct SavedRenderOptions {
     #[serde(default = "yes")]
     pub show_consumables: bool,
     #[serde(default = "yes")]
+    pub show_submarine_surveillance: bool,
+    #[serde(default = "yes")]
+    pub show_submarine_status: bool,
+    #[serde(default = "yes")]
     pub show_dead_ships: bool,
     #[serde(default)]
     pub show_dead_ship_names: bool,
@@ -123,6 +127,8 @@ impl Default for SavedRenderOptions {
             show_buildings: true,
             show_camera_direction: true,
             show_consumables: true,
+            show_submarine_surveillance: true,
+            show_submarine_status: true,
             show_dead_ships: true,
             show_dead_ship_names: false,
             show_armament: true,
@@ -228,6 +234,8 @@ impl SavedRenderOptions {
         options.show_weather = self.show_buildings;
         options.show_camera_direction = self.show_camera_direction;
         options.show_consumables = self.show_consumables;
+        options.show_submarine_surveillance = self.show_submarine_surveillance;
+        options.show_submarine_status = self.show_submarine_status;
         options.show_armament = self.show_armament;
         options.show_trails = self.show_trails;
         options.show_dead_trails = self.show_dead_trails;
@@ -261,6 +269,8 @@ impl SavedRenderOptions {
         self.show_buildings = options.show_buildings;
         self.show_camera_direction = options.show_camera_direction;
         self.show_consumables = options.show_consumables;
+        self.show_submarine_surveillance = options.show_submarine_surveillance;
+        self.show_submarine_status = options.show_submarine_status;
         self.show_armament = options.show_armament;
         self.show_trails = options.show_trails;
         self.show_dead_trails = options.show_dead_trails;
@@ -383,6 +393,8 @@ mod tests {
             show_buildings: false,
             show_camera_direction: false,
             show_consumables: false,
+            show_submarine_surveillance: false,
+            show_submarine_status: false,
             show_dead_ships: false,
             show_dead_ship_names: true,
             show_armament: false,
@@ -508,5 +520,7 @@ mod tests {
         assert!(!saved.show_hp_bars);
         assert!(!saved.show_camera_direction, "the old name for the camera arc is still read");
         assert_eq!(saved.show_ship_names, SavedRenderOptions::default().show_ship_names);
+        assert!(saved.show_submarine_surveillance);
+        assert!(saved.show_submarine_status);
     }
 }

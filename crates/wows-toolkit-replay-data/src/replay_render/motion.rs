@@ -183,6 +183,8 @@ impl FrameMotion {
                 }),
                 DrawCommand::HealthBar { entity_id, .. }
                 | DrawCommand::ConsumableRadius { entity_id, .. }
+                | DrawCommand::SubmarineSurveillanceRadius { entity_id, .. }
+                | DrawCommand::SubmarineStatus { entity_id, .. }
                 | DrawCommand::ConsumableIcons { entity_id, .. }
                 | DrawCommand::ShipConfigCircle { entity_id, .. } => {
                     ships.get(entity_id).map(|ship| Shift { turn: 0.0, ..*ship })
@@ -524,6 +526,8 @@ fn shift_by(command: &mut DrawCommand, shift: Shift, fraction: f32) {
         }
         DrawCommand::HealthBar { pos, .. }
         | DrawCommand::ConsumableRadius { pos, .. }
+        | DrawCommand::SubmarineSurveillanceRadius { pos, .. }
+        | DrawCommand::SubmarineStatus { pos, .. }
         | DrawCommand::ConsumableIcons { pos, .. }
         | DrawCommand::ShipConfigCircle { pos, .. }
         | DrawCommand::Plane { pos, .. }

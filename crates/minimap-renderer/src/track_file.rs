@@ -28,7 +28,7 @@ pub struct TrackFileVersion(u32);
 
 impl TrackFileVersion {
     /// The layout this build reads and writes.
-    pub const CURRENT: Self = Self(1);
+    pub const CURRENT: Self = Self(2);
 
     pub const fn new(raw: u32) -> Self {
         Self(raw)
@@ -226,12 +226,12 @@ mod tests {
     #[test]
     fn another_version_is_refused() {
         let mut bytes = sample().encode().expect("encodes");
-        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&3u32.to_le_bytes());
 
         let Err(TrackFileError::UnsupportedVersion { found, supported }) = TrackFile::decode(&bytes) else {
-            panic!("a version 2 file is refused");
+            panic!("a version 3 file is refused");
         };
-        assert_eq!(found, TrackFileVersion::new(2));
+        assert_eq!(found, TrackFileVersion::new(3));
         assert_eq!(supported, TrackFileVersion::CURRENT);
     }
 

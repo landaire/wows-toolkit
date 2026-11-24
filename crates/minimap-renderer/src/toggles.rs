@@ -58,6 +58,18 @@ pub const TOGGLES: &[Toggle] = &[
         write: |o, _, v| o.show_consumables = v,
     },
     Toggle {
+        id: "renderer-opt-submarine-surveillance",
+        label_key: "ui-renderer-settings-submarine_surveillance",
+        read: |o, _| o.show_submarine_surveillance,
+        write: |o, _, v| o.show_submarine_surveillance = v,
+    },
+    Toggle {
+        id: "renderer-opt-submarine-status",
+        label_key: "ui-renderer-settings-submarine_status",
+        read: |o, _| o.show_submarine_status,
+        write: |o, _, v| o.show_submarine_status = v,
+    },
+    Toggle {
         id: "renderer-opt-capture-points",
         label_key: "ui-renderer-settings-capture_points",
         read: |o, _| o.show_capture_points,

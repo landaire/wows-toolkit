@@ -2,10 +2,14 @@
 
 use bevy_ecs::world::World;
 use wows_replays::game_constants::GameConstants;
+use wows_replays::nested_property_path::PropertyNestLevel;
+use wows_replays::nested_property_path::UpdateAction;
+use wows_replays::packet2::PropertyUpdatePacket;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::types::Seconds;
 use wowsunpack::game_types::WeaponType;
 use wowsunpack::recognized::Recognized;
 use wowsunpack::rpc::typedefs::ArgValue;
@@ -83,6 +87,30 @@ pub fn handle_vehicle_property(
                 });
             }
         }
+    }
+}
+
+/// Apply the battery charge carried by a nested `state.battery.energy` update.
+pub fn handle_vehicle_nested_property(update: &PropertyUpdatePacket<'_>, world: &mut World) {
+    let [PropertyNestLevel::DictKey("battery")] = update.update_cmd.levels.as_slice() else {
+        return;
+    };
+    let UpdateAction::SetKey { key: "energy", value } = &update.update_cmd.action else {
+        return;
+    };
+    if update.property != "state" {
+        return;
+    }
+    let Some(energy) = value.as_f32().filter(|energy| energy.is_finite() && *energy >= 0.0) else {
+        return;
+    };
+    let Some(ecs_entity) = world.resource::<EntityIndex>().get(update.entity_id) else {
+        return;
+    };
+    if let Ok(mut entity) = world.get_entity_mut(ecs_entity)
+        && let Some(mut state) = entity.get_mut::<VehicleState>()
+    {
+        state.0.set_battery_energy(Seconds::new(energy));
     }
 }
 
@@ -222,6 +250,28 @@ mod burn_state_tests {
         let version = Version::default();
         let constants = GameConstants::defaults();
         handle_vehicle_property(id, "burningFlags", &ArgValue::Uint16(flags), world, version, &constants, clock);
+    }
+
+    #[test]
+    fn nested_battery_energy_updates_vehicle_state() {
+        use wows_replays::nested_property_path::PropertyNesting;
+
+        let id = EntityId::from(9u32);
+        let mut world = test_world_with_vehicle(id);
+        let update = PropertyUpdatePacket {
+            entity_id: id,
+            property: "state",
+            update_cmd: PropertyNesting {
+                levels: vec![PropertyNestLevel::DictKey("battery")],
+                action: UpdateAction::SetKey { key: "energy", value: ArgValue::Float32(83.5) },
+            },
+        };
+
+        handle_vehicle_nested_property(&update, &mut world);
+
+        let ecs_entity = world.resource::<EntityIndex>().get(id).unwrap();
+        let state = world.entity(ecs_entity).get::<VehicleState>().unwrap();
+        assert_eq!(state.0.state().battery().map(|battery| battery.energy().value()), Some(83.5));
     }
 
     /// Only burn bits (0-3) produce entries. A flood starting must not read as

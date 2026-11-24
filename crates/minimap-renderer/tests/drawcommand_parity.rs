@@ -326,6 +326,20 @@ fn normalize(cmd: &DrawCommand) -> String {
             let row_ids: Vec<_> = rows.iter().map(|r| r.entity_id).collect();
             format!("TeamRoster side={side:?} x={x} y={y} w={width} h={height} eids={row_ids:?}")
         }
+        DrawCommand::SubmarineSurveillanceRadius { entity_id, pos, radius_px, color, alpha } => {
+            format!(
+                "SubmarineSurveillanceRadius eid={entity_id:?} pos={} r={radius_px} color={color:?} a={alpha:.3}",
+                fmt_pos(*pos)
+            )
+        }
+        DrawCommand::SubmarineStatus { entity_id, pos, battery, depth, has_hp_bar } => {
+            format!(
+                "SubmarineStatus eid={entity_id:?} pos={} battery={:?} depth={:.1} hp={has_hp_bar}",
+                fmt_pos(*pos),
+                battery.map(|fraction| fraction.value()),
+                depth.value()
+            )
+        }
         // Drawn by a reader, not by the battle, so a replay played back through
         // this driver never produces one. Described anyway, because the match is
         // exhaustive and a new command must not go unnoticed.
