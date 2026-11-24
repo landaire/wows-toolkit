@@ -450,6 +450,7 @@ ui-replay-context-show_in_explorer = แสดงในตัวจัดกา�
 ui-replay-context-show_replay_controls = แสดงตัวควบคุมรีเพลย์
 ui-replay-context-open_in_game = เปิดในเกม
 ui-replay-context-render_replay = เรนเดอร์รีเพลย์
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = ตั้งเป็นสถิติเซสชัน (รีเพลย์ { $count } รายการ)
 ui-replay-context-add_session_stats = เพิ่มในสถิติเซสชัน (รีเพลย์ { $count } รายการ)
 ui-replay-context-render_to_video = { $count ->

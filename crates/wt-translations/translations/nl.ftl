@@ -492,6 +492,7 @@ ui-replay-context-show_in_explorer = Weergeven in Verkenner
 ui-replay-context-show_replay_controls = Replaybediening weergeven
 ui-replay-context-open_in_game = Openen in spel
 ui-replay-context-render_replay = Replay renderen
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = { $count ->
     [one] Instellen als sessiestatistieken ({ $count } replay)
    *[other] Instellen als sessiestatistieken ({ $count } replays)

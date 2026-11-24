@@ -444,6 +444,7 @@ ui-replay-context-show_in_explorer = 파일 탐색기에서 보기
 ui-replay-context-show_replay_controls = 리플레이 컨트롤 표시
 ui-replay-context-open_in_game = 게임에서 열기
 ui-replay-context-render_replay = 리플레이 렌더링
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = 세션 통계로 설정 ({ $count }개 리플레이)
 ui-replay-context-add_session_stats = 세션 통계에 추가 ({ $count }개 리플레이)
 ui-replay-context-render_to_video = 리플레이 { $count }개를 동영상으로 렌더링

@@ -444,6 +444,7 @@ ui-replay-context-show_in_explorer = 在文件资源管理器中显示
 ui-replay-context-show_replay_controls = 显示回放控制
 ui-replay-context-open_in_game = 在游戏中打开
 ui-replay-context-render_replay = 渲染回放
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = 设为会话统计（{ $count } 个回放）
 ui-replay-context-add_session_stats = 添加到会话统计（{ $count } 个回放）
 ui-replay-context-render_to_video = 将 { $count } 个回放导出为视频

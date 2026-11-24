@@ -492,6 +492,7 @@ ui-replay-context-show_in_explorer = Afficher dans l'explorateur de fichiers
 ui-replay-context-show_replay_controls = Afficher les contrôles de replay
 ui-replay-context-open_in_game = Ouvrir dans le jeu
 ui-replay-context-render_replay = Générer le rendu du replay
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = Définir comme stats de session ({ $count ->
     [one] { $count } replay
    *[other] { $count } replays

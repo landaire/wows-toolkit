@@ -488,6 +488,7 @@ ui-replay-context-show_in_explorer = Pokaż w eksploratorze plików
 ui-replay-context-show_replay_controls = Pokaż sterowanie powtórką
 ui-replay-context-open_in_game = Otwórz w grze
 ui-replay-context-render_replay = Renderuj powtórkę
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = Ustaw jako statystyki sesji ({ $count ->
     [one] { $count } powtórka
     [few] { $count } powtórki

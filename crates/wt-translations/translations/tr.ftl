@@ -424,6 +424,7 @@ ui-replay-context-show_in_explorer = Dosya Gezgininde Göster
 ui-replay-context-show_replay_controls = Tekrar Kontrollerini Göster
 ui-replay-context-open_in_game = Oyunda Aç
 ui-replay-context-render_replay = Tekrarı Oluştur
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = Oturum İstatistikleri Olarak Ayarla ({ $count } tekrar)
 ui-replay-context-add_session_stats = Oturum İstatistiklerine Ekle ({ $count } tekrar)
 ui-replay-context-render_to_video = { $count ->

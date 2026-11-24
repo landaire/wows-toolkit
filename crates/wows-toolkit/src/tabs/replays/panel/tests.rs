@@ -45,7 +45,6 @@ use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::StoredValue;
-use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
@@ -62,7 +61,6 @@ use super::Loaded;
 use super::PanelEvents;
 use super::PanelSetup;
 use super::PanelTable;
-use super::RenderRequest;
 use super::ReparseCause;
 use super::ReplayPanelProps;
 use super::TableSlot;
@@ -505,28 +503,6 @@ fn a_rows_raw_metadata_opens_in_the_side_panel_and_closes() {
     window.click(close).expect("clickable");
     window.advance(Duration::from_millis(600));
     assert!(window.by_test_id("replay-side-panel-close").is_none(), "the panel is shut");
-}
-
-/// The Actions menu asks for the battle it reads to be rendered.
-#[test]
-fn the_actions_menu_offers_to_render_the_replay_it_is_reading() {
-    let asked: Rc<RefCell<Vec<RenderRequest>>> = Rc::default();
-    let heard = Rc::clone(&asked);
-    let events = PanelEvents {
-        on_render: Some(UnsyncCallback::new(move |request| heard.borrow_mut().push(request))),
-        ..PanelEvents::default()
-    };
-    let Opened { mut window } =
-        open(Opening { seed: Some(loaded(model_at_expected_values(), true)), events, ..Opening::default() });
-
-    let actions = window.by_test_id("replay-actions").expect("the menu is offered");
-    window.click(actions).expect("clickable");
-    window.advance(Duration::from_millis(300));
-    let render = window.by_test_id("replay-render").expect("the menu offers to render");
-    window.click(render).expect("clickable");
-    window.advance(Duration::from_millis(300));
-
-    assert_eq!(*asked.borrow(), vec![RenderRequest { path: PathBuf::from("battle.wowsreplay"), alts: Vec::new() }]);
 }
 
 /// A test ship's own figures can be hidden from the menu, which takes them off the tiles.

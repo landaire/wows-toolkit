@@ -478,6 +478,7 @@ ui-replay-context-show_in_explorer = Zobrazit v průzkumníku souborů
 ui-replay-context-show_replay_controls = Zobrazit ovládání záznamu
 ui-replay-context-open_in_game = Otevřít ve hře
 ui-replay-context-render_replay = Vykreslit záznam
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = Nastavit jako statistiky relace ({ $count ->
     [one] { $count } záznam
     [few] { $count } záznamy

@@ -450,6 +450,7 @@ ui-replay-context-show_in_explorer = 在檔案總管中顯示
 ui-replay-context-show_replay_controls = 顯示回放控制項
 ui-replay-context-open_in_game = 在遊戲中開啟
 ui-replay-context-render_replay = 渲染回放
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = 設為工作階段統計（{ $count } 個回放）
 ui-replay-context-add_session_stats = 加入工作階段統計（{ $count } 個回放）
 ui-replay-context-render_to_video = { $count ->

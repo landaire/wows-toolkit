@@ -444,6 +444,7 @@ ui-replay-context-show_in_explorer = エクスプローラーで表示
 ui-replay-context-show_replay_controls = リプレイコントロールを表示
 ui-replay-context-open_in_game = ゲームで開く
 ui-replay-context-render_replay = リプレイをレンダリング
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = セッション統計として設定 ({ $count } リプレイ)
 ui-replay-context-add_session_stats = セッション統計に追加 ({ $count } リプレイ)
 ui-replay-context-render_to_video = { $count ->

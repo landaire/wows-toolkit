@@ -1240,10 +1240,11 @@ fn self_is_test_ship(rows: &[PlayerRow]) -> bool {
     rows.iter().any(|row| row.is_self && row.is_test_ship)
 }
 
-/// The outcome on the left; the status, the Actions menu and the chat toggle on the right.
+/// The outcome on the left; the status, render button, Actions menu and chat toggle on the right.
 #[component]
 fn HeaderRow(header: HeaderCx) -> impl IntoView {
-    let HeaderCx { loaded, side, parsing, export_status, .. } = header.clone();
+    let HeaderCx { loaded, side, parsing, export_status, path, alts, events, .. } = header.clone();
+    let on_render = events.with_value(|events| events.on_render);
     let has_results = move || loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.raw_results.is_some()));
     let has_chat = move || loaded.with(|loaded| loaded.as_ref().is_some_and(|loaded| loaded.chat.is_some()));
     let outcome = move || loaded.with(|loaded| loaded.as_ref().and_then(|loaded| loaded.battle_result));
@@ -1273,6 +1274,14 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                     LoadingLine(label = t!("ui-replay-loading").into_owned())
                 }
                 {move || export_status.get().map(|status| AnyView::new(view! { text(class = "wt-rp-status", attr:data-testid = "replay-export-status") {{status}} }))}
+                {on_render.map(|on_render| AnyView::new(view! {
+                    Button(
+                        variant = ButtonVariant::Outline,
+                        size = ButtonSize::Sm,
+                        attr:data-testid = "replay-render",
+                        on:click = move |_| on_render.run(RenderRequest { path: path.get_value(), alts: alts.get_untracked() })
+                    ) {{t!("ui-replay-render").into_owned()}}
+                }))}
                 ActionsMenu(header = header.clone())
                 Tooltip(open = Binding::controlled(tip_open, move |on: bool| tip_wanted.set(on))) {
                     TooltipTrigger {
@@ -1514,9 +1523,8 @@ fn export_match(
 /// Everything that is not flipped back and forth, in sections.
 #[component]
 fn ActionsMenu(header: HeaderCx) -> impl IntoView {
-    let HeaderCx { loaded, side, debug, export_status, alts, path, events, add_alt, export, .. } = header;
+    let HeaderCx { loaded, side, debug, export_status, alts, add_alt, export, .. } = header;
     let export = StoredValue::new_local(export);
-    let on_render = events.with_value(|events| events.on_render);
     let is_test_ship = move || {
         loaded.with(|loaded| {
             loaded.as_ref().is_some_and(|loaded| loaded.model.with(|model| self_is_test_ship(&model.rows)))
@@ -1599,12 +1607,6 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
             }
             DropdownMenuContent {
                 MenuLabel(class = "wt-rp-menu-heading") {{t!("ui-replay-section_match").into_owned()}}
-                {on_render.map(|on_render| AnyView::new(view! {
-                    MenuItem(
-                        attr:data-testid = "replay-render",
-                        on_select = UnsyncCallback::new(move |()| on_render.run(RenderRequest { path: path.get_value(), alts: alts.get_untracked() }))
-                    ) {{t!("ui-replay-context-render_replay").into_owned()}}
-                }))}
                 MenuItem(attr:data-testid = "replay-load-alt", on_select = load_alt) {{alt_label}}
                 MenuItem(attr:data-testid = "replay-timeline-open", disabled = no_timeline, on_select = open_timeline) {
                     {t!("ui-replay-timeline").into_owned()}

@@ -500,6 +500,7 @@ ui-replay-context-show_in_explorer = Показати у провіднику
 ui-replay-context-show_replay_controls = Показати керування реплеєм
 ui-replay-context-open_in_game = Відкрити у грі
 ui-replay-context-render_replay = Рендерити реплей
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = Задати як статистику сесії ({ $count ->
     [one] { $count } реплей
     [few] { $count } реплеї

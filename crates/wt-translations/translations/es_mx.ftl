@@ -466,6 +466,7 @@ ui-replay-context-show_in_explorer = Mostrar en el explorador de archivos
 ui-replay-context-show_replay_controls = Mostrar controles de repetición
 ui-replay-context-open_in_game = Abrir en el juego
 ui-replay-context-render_replay = Renderizar repetición
+ui-replay-render = { ui-replay-context-render_replay }
 ui-replay-context-set_session_stats = { $count ->
     [one] Establecer como estadísticas de sesión ({ $count } repetición)
    *[other] Establecer como estadísticas de sesión ({ $count } repeticiones)

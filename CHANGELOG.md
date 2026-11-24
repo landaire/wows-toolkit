@@ -90,6 +90,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Prevent stale damage bars at the replay player table's right edge while scrolling
 - *(renderer)* Keep ship icons sharp when zooming by drawing their SVG source at the displayed resolution
 - *(renderer)* Draw dead ship markers beneath living ships and their labels and status bars
+- *(toolkit)* Open the replay renderer directly from a Render button beside Actions in the Replay Inspector
 - *(toolkit)* Show each ship's average base XP in the Stats overview
 - *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team
 - *(toolkit)* Apply replay renderer player and ship name switches when a baked frame is drawn
