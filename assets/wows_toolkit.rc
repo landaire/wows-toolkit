@@ -24,11 +24,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "landaire"
             VALUE "FileDescription", "WoWs Toolkit"
-            VALUE "FileVersion", "1.1.0-beta6"
+            VALUE "FileVersion", "1.1.0"
             VALUE "InternalName", "wows_toolkit.exe"
             VALUE "OriginalFilename", "wows_toolkit.exe"
             VALUE "ProductName", "WoWs Toolkit"
-            VALUE "ProductVersion", "1.1.0-beta6"
+            VALUE "ProductVersion", "1.1.0"
         END
     END
     BLOCK "VarFileInfo"

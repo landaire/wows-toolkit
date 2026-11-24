@@ -12997,7 +12997,7 @@ dependencies = [
 
 [[package]]
 name = "wows-toolkit"
-version = "1.1.0-beta6"
+version = "1.1.0"
 dependencies = [
  "arboard",
  "ciborium",
@@ -13423,7 +13423,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-client"
-version = "1.1.0-beta6"
+version = "1.1.0"
 dependencies = [
  "data-encoding",
  "iroh",
@@ -13441,7 +13441,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-egui"
-version = "1.1.0-beta6"
+version = "1.1.0"
 dependencies = [
  "egui",
  "egui-phosphor",
@@ -13454,7 +13454,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-protocol"
-version = "1.1.0-beta6"
+version = "1.1.0"
 dependencies = [
  "data-encoding",
  "egui",
@@ -13470,7 +13470,7 @@ dependencies = [
 
 [[package]]
 name = "wt-replay-demo"
-version = "1.1.0-beta6"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "egui",
@@ -13502,7 +13502,7 @@ dependencies = [
 
 [[package]]
 name = "wt-web"
-version = "1.1.0-beta6"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "egui",
