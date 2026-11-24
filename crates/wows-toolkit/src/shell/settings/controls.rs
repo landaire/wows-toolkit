@@ -357,6 +357,27 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 replay.show_heals = on;
             },
         ),
+        Setting::ShowDamageDealtBar => replay_switch(
+            shell,
+            setting,
+            "show-damage-dealt-bar",
+            |replay| replay.show_damage_dealt_bar,
+            |replay, on| replay.show_damage_dealt_bar = on,
+        ),
+        Setting::ShowDamageReceivedBar => replay_switch(
+            shell,
+            setting,
+            "show-damage-received-bar",
+            |replay| replay.show_damage_received_bar,
+            |replay, on| replay.show_damage_received_bar = on,
+        ),
+        Setting::ShowNationFlags => replay_switch(
+            shell,
+            setting,
+            "show-nation-flags",
+            |replay| replay.show_nation_flags,
+            |replay, on| replay.show_nation_flags = on,
+        ),
         Setting::ReplayPreviews => replay_switch(
             shell,
             setting,

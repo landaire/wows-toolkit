@@ -19,6 +19,8 @@ use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Rect;
 use zgui::geom::Size;
+use zgui::platform::ClipboardFormat;
+use zgui::platform::ClipboardKind;
 use zgui::platform::CursorStyle;
 use zgui::platform::DecorationSource;
 use zgui::platform::PlatformCx;
@@ -656,6 +658,17 @@ impl HeadlessWindow {
     /// The cursor the window last asked the platform to show, or `None` before it asked for one.
     pub fn cursor(&self) -> Option<CursorStyle> {
         self.surface().and_then(|surface| surface.last_cursor())
+    }
+
+    /// Text held by the standard clipboard, when it holds text.
+    pub fn clipboard_text(&self) -> Option<String> {
+        self.harness
+            .platform()
+            .clipboard()
+            .read_blocking(ClipboardKind::Standard, ClipboardFormat::Text)
+            .ok()?
+            .as_text()
+            .map(str::to_owned)
     }
 
     /// Resizes the window to `size`, as a window manager would, and runs the frames that asks for.

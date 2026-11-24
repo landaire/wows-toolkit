@@ -47,6 +47,7 @@ use zgui::reactive::provide_local_context;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
+use zgui_image::ImageBytes;
 
 use super::*;
 use crate::services::saved_for_test;
@@ -60,6 +61,8 @@ thread_local! {
     pub(super) static EXPANDED: Cell<Option<RwSignal<HashSet<RowId>, LocalStorage>>> = const { Cell::new(None) };
     /// The selected rows of the table built last on this thread.
     pub(super) static SELECTION: Cell<Option<RwSignal<Selection<RowId>, LocalStorage>>> = const { Cell::new(None) };
+    /// The game art of the table built last on this thread.
+    pub(super) static ART: Cell<Option<GameArt>> = const { Cell::new(None) };
     /// The services of the table built last on this thread.
     static SERVICES: Cell<Option<Services>> = const { Cell::new(None) };
     /// The model of the table built last on this thread.
@@ -225,16 +228,18 @@ fn cell_on_line_of(window: &HeadlessWindow, element: Element, column: ReplayColu
 }
 
 /// The damage-mix bar in `column` on player `id`'s line.
-fn damage_bar(window: &HeadlessWindow, id: i64, column: ReplayColumn) -> Rect<DevicePx, Device> {
+fn damage_bar_element(window: &HeadlessWindow, id: i64, column: ReplayColumn) -> Option<Element> {
     let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
     let cell = cell_on_line_of(window, name, column);
     let cell = window.bounds(cell).expect("the damage cell has a box");
-    let bar = window
+    window
         .all_by_class("wt-pt-mix")
         .into_iter()
         .find(|bar| window.bounds(*bar).is_some_and(|bar| cell.contains(bar.origin)))
-        .expect("the damage cell has a mix bar");
+}
 
+fn damage_bar(window: &HeadlessWindow, id: i64, column: ReplayColumn) -> Rect<DevicePx, Device> {
+    let bar = damage_bar_element(window, id, column).expect("the damage cell has a mix bar");
     window.bounds(bar).expect("the damage bar has a box")
 }
 
@@ -249,6 +254,43 @@ fn damage_bars_scale_to_the_largest_figure_on_the_players_team() {
 
         assert!((smaller - expected).abs() < 1.0, "{column:?}: {smaller} is scaled against {greatest}");
     }
+}
+
+#[test]
+fn replay_settings_toggle_each_damage_bar_and_the_nation_flags() {
+    let mut model = split_damage(sample_model());
+    model.rows[0].ship_nation = Some("usa".to_owned());
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, true);
+    let art = ART.with(Cell::take).expect("the table exposed its art");
+    art.insert_for_test(
+        crate::game_art::ArtKey::NationFlag("usa".to_owned()),
+        crate::game_art::Art::Raster(ImageBytes::new(vec![0])),
+    );
+    let services = SERVICES.with(Cell::take).expect("the harness ran");
+    services.settings.adopt_unsaved(crate::shell::settings::tests::test_settings());
+    window.advance(Duration::from_millis(100));
+
+    assert!(damage_bar_element(&window, 1, ReplayColumn::ActualDamage).is_some());
+    assert!(damage_bar_element(&window, 1, ReplayColumn::ReceivedDamage).is_some());
+    assert!(window.by_class("wt-pt-flag").is_some());
+
+    services.settings.edit(wows_toolkit_viewmodel::settings::keys::REPLAY_SETTINGS, |settings| {
+        settings.replay.show_damage_dealt_bar = false;
+        settings.replay.clone()
+    });
+    window.advance(Duration::from_millis(100));
+    assert!(damage_bar_element(&window, 1, ReplayColumn::ActualDamage).is_none());
+    assert!(damage_bar_element(&window, 1, ReplayColumn::ReceivedDamage).is_some());
+    assert!(window.by_class("wt-pt-flag").is_some());
+
+    services.settings.edit(wows_toolkit_viewmodel::settings::keys::REPLAY_SETTINGS, |settings| {
+        settings.replay.show_damage_received_bar = false;
+        settings.replay.show_nation_flags = false;
+        settings.replay.clone()
+    });
+    window.advance(Duration::from_millis(100));
+    assert!(damage_bar_element(&window, 1, ReplayColumn::ReceivedDamage).is_none());
+    assert!(window.by_class("wt-pt-flag").is_none());
 }
 
 /// An old battle's class icons come from the build it was read through, before the newest build
@@ -362,8 +404,7 @@ fn the_sort_opens_as_saved_and_a_press_saves_it_for_every_table() {
     assert_eq!(shared, Some(SortOrder::Asc(SortColumn::Kills)), "a table opened next starts from it");
 }
 
-/// The Kills cell on player `id`'s line. Its figure keeps a double click to itself, so tests open
-/// a row with [`double_click_beside_text`] on it.
+/// The Kills cell on player `id`'s line.
 pub(crate) fn kills_cell(window: &HeadlessWindow, id: i64) -> Element {
     let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
     let line = window.bounds(name).expect("the name has a box");
@@ -380,8 +421,7 @@ pub(crate) fn kills_cell(window: &HeadlessWindow, id: i64) -> Element {
         .expect("the player's line has a Kills cell")
 }
 
-/// Double-clicks `cell` at its far end, beside its text, where a double click opens or closes the
-/// row.
+/// Double-clicks `cell` at its far end, beside its text.
 pub(crate) fn double_click_beside_text(window: &mut HeadlessWindow, cell: Element) {
     let bounds = window.bounds(cell).expect("the cell has a box");
     let at = Point::<DevicePx, Device>::new(
@@ -403,11 +443,11 @@ fn text_in(window: &HeadlessWindow, cell: Element) -> Element {
 }
 
 #[test]
-fn a_double_click_opens_a_rows_detail_and_its_disclosure_closes_it() {
+fn a_double_click_on_a_rows_text_opens_its_detail_and_the_disclosure_closes_it() {
     let (mut window, expanded) = open_table(Drawing::Recorded, Scheme::Dark);
-    let cell = kills_cell(&window, 2);
+    let figure = text_in(&window, kills_cell(&window, 2));
 
-    double_click_beside_text(&mut window, cell);
+    window.double_click(figure).expect("the figure takes a double click");
     window.advance(Duration::from_millis(400));
     assert!(window.by_test_id("detail-2-name").is_some(), "the row's detail is open");
 
@@ -419,19 +459,58 @@ fn a_double_click_opens_a_rows_detail_and_its_disclosure_closes_it() {
 }
 
 #[test]
-fn a_double_click_on_the_players_name_leaves_the_row_closed() {
+fn a_double_click_on_the_players_name_opens_the_row() {
     let (mut window, expanded) = open_table(Drawing::Recorded, Scheme::Dark);
     let name = window.by_test_id("player-name-text-2").expect("the second player's name is drawn");
 
     window.double_click(name).expect("the name takes a double click");
     window.advance(Duration::from_millis(400));
-    assert!(expanded.with_untracked(HashSet::is_empty), "no row opens");
+    assert_eq!(expanded.get_untracked(), HashSet::from([sample_row(2)]));
 }
 
-/// A double click on a figure or a chip, or anywhere in an open detail, leaves the row as it is.
-/// A press on a chip or in the detail leaves the selection as it is.
 #[test]
-fn double_clicks_on_figures_chips_and_the_detail_leave_the_row_as_it_is() {
+fn player_table_text_can_be_selected_and_copied() {
+    let (mut window, _) = open_table(Drawing::Recorded, Scheme::Dark);
+
+    let name = window.by_test_id("player-name-text-1").expect("the player's name is drawn");
+    window.double_click(name).expect("the name takes a double click");
+    window.press_character('c', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(window.clipboard_text().as_deref(), Some("You"));
+
+    let clan = window.by_test_id("player-clan-1").expect("the player's clan is drawn");
+    window.double_click(clan).expect("the clan takes a double click");
+    window.press_character('c', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(window.clipboard_text().as_deref(), Some("WTK"));
+
+    let species_text = window.texts_by_class("wt-pt-species").into_iter().next().expect("a class name is drawn");
+    let species = window.by_class("wt-pt-species").expect("a class name is drawn");
+    window.double_click(species).expect("the class name takes a double click");
+    window.press_character('c', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(window.clipboard_text().as_deref(), Some(species_text.as_str()));
+
+    let team_text = window.texts_by_class("wt-pt-team__name").into_iter().next().expect("a team name is drawn");
+    let team = window.by_class("wt-pt-team__name").expect("a team name is drawn");
+    window.double_click(team).expect("the team name takes a double click");
+    window.press_character('c', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(window.clipboard_text().as_deref(), Some(team_text.as_str()));
+
+    let damage_text = window.texts_by_class("wt-pt-team__damage").into_iter().next().expect("a team's damage is drawn");
+    let damage = window.by_class("wt-pt-team__damage").expect("a team's damage is drawn");
+    window.click(damage).expect("the team damage takes a click");
+    window.press_character('a', Modifiers::PRIMARY);
+    window.press_character('c', Modifiers::PRIMARY);
+    window.advance(Duration::from_millis(100));
+    assert_eq!(window.clipboard_text().as_deref(), Some(damage_text.as_str()));
+}
+
+/// A double click on a control, or anywhere in an open detail, leaves the row as it is.
+/// A press on a control or in the detail leaves the selection as it is.
+#[test]
+fn double_clicks_on_controls_and_the_detail_leave_the_row_as_it_is() {
     let mut model = split_damage(sample_model());
     let row = model.rows.iter_mut().find(|row| row.db_id.raw() == 2).expect("the sample has player 2");
     row.twitch_candidates = vec![SniperCandidate { login: "harvey635".to_owned(), minutes: vec![3] }];
@@ -444,13 +523,8 @@ fn double_clicks_on_figures_chips_and_the_detail_leave_the_row_as_it_is() {
     assert!(expanded.with_untracked(HashSet::is_empty), "a double click on a chip leaves the row closed");
     assert!(selected_rows(selection).is_empty(), "a press on a chip selects nothing");
 
-    let figure = text_in(&window, kills_cell(&window, 2));
-    window.double_click(figure).expect("the figure takes a double click");
-    window.advance(Duration::from_millis(400));
-    assert!(expanded.with_untracked(HashSet::is_empty), "a double click on a figure leaves the row closed");
-
-    let opened = kills_cell(&window, 2);
-    double_click_beside_text(&mut window, opened);
+    let opened = text_in(&window, kills_cell(&window, 2));
+    window.double_click(opened).expect("the figure takes a double click");
     window.advance(Duration::from_millis(400));
     window.click(kills_cell(&window, 1)).expect("the row takes a click");
     window.advance(Duration::from_millis(400));

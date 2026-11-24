@@ -252,6 +252,9 @@ struct TableCx {
     rows: Memo<Vec<TableRow>>,
     shown: Memo<Vec<ReplayColumn>>,
     columns: RwSignal<Columns, LocalStorage>,
+    show_damage_dealt_bar: Memo<bool>,
+    show_damage_received_bar: Memo<bool>,
+    show_nation_flags: Memo<bool>,
     debug: Signal<bool, LocalStorage>,
     clipboard: StoredValue<Option<Clipboards>, LocalStorage>,
     toasts: Option<Toasts>,
@@ -277,6 +280,14 @@ impl TableCx {
     fn drawn_columns(self) -> Vec<ReplayColumn> {
         let shown = self.shown.get_untracked();
         self.columns.with_untracked(|columns| columns.arrangement.shown(&shown).iter().collect())
+    }
+
+    fn shows_damage_bar(self, col: ReplayColumn) -> bool {
+        match col {
+            ReplayColumn::ActualDamage => self.show_damage_dealt_bar.get(),
+            ReplayColumn::ReceivedDamage => self.show_damage_received_bar.get(),
+            _ => false,
+        }
     }
 
     /// Puts `text` on the clipboard and says so with `said`.
@@ -406,7 +417,16 @@ pub fn PlayerTable(
         }
     });
 
+    let show_damage_dealt_bar =
+        Memo::new(move |_| services.settings.read(|settings| settings.replay.show_damage_dealt_bar).unwrap_or(true));
+    let show_damage_received_bar =
+        Memo::new(move |_| services.settings.read(|settings| settings.replay.show_damage_received_bar).unwrap_or(true));
+    let show_nation_flags =
+        Memo::new(move |_| services.settings.read(|settings| settings.replay.show_nation_flags).unwrap_or(true));
+
     let art = GameArt::new();
+    #[cfg(test)]
+    tests::ART.with(|slot| slot.set(Some(art)));
     let wanting = RenderEffect::new(move |_| {
         let newest = match services.game_data.state() {
             GameDataState::Ready(data) => Some(data),
@@ -428,6 +448,9 @@ pub fn PlayerTable(
         rows,
         shown,
         columns,
+        show_damage_dealt_bar,
+        show_damage_received_bar,
+        show_nation_flags,
         debug,
         clipboard: StoredValue::new_local(try_use_clipboard()),
         toasts: Toasts::current(),

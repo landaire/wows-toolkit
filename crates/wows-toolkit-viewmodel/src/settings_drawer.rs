@@ -88,6 +88,9 @@ pub enum Setting {
     ShowObservedDamage,
     ShowEntityId,
     ShowHeals,
+    ShowDamageDealtBar,
+    ShowDamageReceivedBar,
+    ShowNationFlags,
     ReplayPreviews,
     AutoExport,
     DisplayName,
@@ -108,7 +111,7 @@ pub enum Setting {
 
 impl Setting {
     /// Every setting, in the order the drawer lists them.
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 43] = [
         Self::Language,
         Self::DataSharing,
         Self::CodeIntegrity,
@@ -134,6 +137,9 @@ impl Setting {
         Self::ShowObservedDamage,
         Self::ShowEntityId,
         Self::ShowHeals,
+        Self::ShowDamageDealtBar,
+        Self::ShowDamageReceivedBar,
+        Self::ShowNationFlags,
         Self::ReplayPreviews,
         Self::AutoExport,
         Self::DisplayName,
@@ -175,6 +181,9 @@ impl Setting {
             | Self::ShowObservedDamage
             | Self::ShowEntityId
             | Self::ShowHeals
+            | Self::ShowDamageDealtBar
+            | Self::ShowDamageReceivedBar
+            | Self::ShowNationFlags
             | Self::ReplayPreviews
             | Self::AutoExport => SettingsSection::Replays,
             Self::DisplayName | Self::SuppressIpWarning | Self::DisableAutoOpen => SettingsSection::Collaboration,
@@ -211,6 +220,9 @@ impl Setting {
             Self::ShowObservedDamage => t!("ui-settings-replay-show_observed_damage"),
             Self::ShowEntityId => t!("ui-settings-replay-show_entity_id"),
             Self::ShowHeals => t!("ui-settings-replay-show_heals"),
+            Self::ShowDamageDealtBar => t!("ui-settings-replay-show_damage_dealt_bar"),
+            Self::ShowDamageReceivedBar => t!("ui-settings-replay-show_damage_received_bar"),
+            Self::ShowNationFlags => t!("ui-settings-replay-show_nation_flags"),
             Self::ReplayPreviews => t!("ui-settings-replay-enable_previews"),
             Self::AutoExport => t!("ui-settings-replay-auto_export_data"),
             Self::DisplayName => t!("ui-settings-session-display_name"),
@@ -257,6 +269,9 @@ impl Setting {
             Self::ShowObservedDamage => t!("ui-settings-panel-show_observed_damage_description"),
             Self::ShowEntityId => t!("ui-settings-panel-show_entity_id_description"),
             Self::ShowHeals => t!("ui-settings-panel-show_heals_description"),
+            Self::ShowDamageDealtBar => t!("ui-settings-panel-show_damage_dealt_bar_description"),
+            Self::ShowDamageReceivedBar => t!("ui-settings-panel-show_damage_received_bar_description"),
+            Self::ShowNationFlags => t!("ui-settings-panel-show_nation_flags_description"),
             Self::ReplayPreviews => t!("ui-settings-replay-enable_previews_tooltip"),
             Self::AutoExport => t!("ui-settings-panel-auto_export_description"),
             Self::DisplayName => t!("ui-settings-panel-display_name_description"),

@@ -225,6 +225,15 @@ fn the_search_filters_every_section_and_counts_what_it_kept() {
 
     click(&mut window, "settings-search-clear");
     assert!(window.by_test_id("settings-count").is_none(), "the clear button empties the search");
+    window.type_text("replay player table");
+    settle(&mut window);
+    assert_eq!(label(&mut window, "settings-count").as_deref(), Some("3 settings"));
+    for kept in [Setting::ShowDamageDealtBar, Setting::ShowDamageReceivedBar, Setting::ShowNationFlags] {
+        assert!(window.by_test_id(&row_test_id(kept)).is_some(), "{kept:?} is kept");
+    }
+
+    click(&mut window, "settings-search-clear");
+    assert!(window.by_test_id("settings-count").is_none(), "the clear button empties the search");
     // A title, in another case than it is written in.
     window.type_text("RAW XP");
     settle(&mut window);

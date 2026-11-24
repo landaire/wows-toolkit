@@ -89,6 +89,10 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team
 - *(toolkit)* Apply replay renderer player and ship name switches when a baked frame is drawn
 - *(toolkit)* Keep replay playback, seeking and zoom controls available while a video renders
+- *(toolkit)* Open or close replay player details when a row's text or figures are double-clicked
+- *(toolkit)* Make replay player names, clan tags and table values selectable and copyable
+- *(toolkit)* Add separate replay player table switches for the damage dealt bar, damage received bar and nation flags
+- *(toolkit)* Preserve nation flag proportions in replay player rows
 
 - *(toolkit)* Translate the strings that every language other than English was missing, such as the replay folder tabs, the rating breakdown and the texture export, and translate a few strings that were left in English
 - *(toolkit)* Show messages at the bottom right of the main window, above the status bar, so they no longer cover the Play button and the tab strip
@@ -112,7 +116,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Read the Player Tracker tables again when a battle is recorded while the tab is open, and run a search again when a battle that lands in a watched folder is indexed. A battle recorded during an indexing pass is read once the pass ends
 - *(toolkit)* Keep the player table's scroll position, selection and keyboard row when a column filter or the language changes
 - *(toolkit)* Keep the player table's other rows and their open tooltips when a rating table, Twitch lookup or stat hide changes one row
-- *(toolkit)* Leave a player table row open or closed on a double click on its figures, chips or detail, and selected as it was on a press on a chip or in the detail
+- *(toolkit)* Leave a player table row open or closed on a double click on its chips or detail, and selected as it was on a press on a chip or in the detail
 - *(toolkit)* Read open replays again after a language change, so their ship names, classes, bot names, builds, achievements and ribbons are in the new language
 - *(toolkit)* Draw a replay's icons and tab flag from the build it was read through, and from the newest build only what that build lacks, so old replays keep retired module and skill icons
 - *(toolkit)* Keep the replay listing scrolled where it was, with its keyboard cursor and shift anchor, when a battle lands, the folder is read again or game data loads

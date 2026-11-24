@@ -66,6 +66,15 @@ pub struct ReplaySettings {
     pub show_heals: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_received_damage: bool,
+    /// Whether the player table draws the damage-type bar under damage dealt.
+    #[serde(default = "default_bool::<true>")]
+    pub show_damage_dealt_bar: bool,
+    /// Whether the player table draws the damage-type bar under damage received.
+    #[serde(default = "default_bool::<true>")]
+    pub show_damage_received_bar: bool,
+    /// Whether the player table draws a nation's flag beside each ship.
+    #[serde(default = "default_bool::<true>")]
+    pub show_nation_flags: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_distance_traveled: bool,
     #[serde(default = "default_bool::<false>")]
@@ -104,6 +113,9 @@ impl Default for ReplaySettings {
             show_raw_xp: false,
             show_heals: true,
             show_received_damage: true,
+            show_damage_dealt_bar: true,
+            show_damage_received_bar: true,
+            show_nation_flags: true,
             show_distance_traveled: true,
             auto_export_data: false,
             auto_export_path: String::new(),
@@ -226,6 +238,19 @@ mod tests {
         let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
         assert!(!parsed.anonymize_player_names);
         assert!(!ReplaySettings::default().anonymize_player_names);
+    }
+
+    #[test]
+    fn player_table_elements_default_on_and_survive_missing_fields() {
+        let legacy = r#"{"show_entity_id":false,"show_observed_damage":false}"#;
+        let parsed: ReplaySettings = serde_json::from_str(legacy).expect("legacy settings should parse");
+
+        assert!(parsed.show_damage_dealt_bar);
+        assert!(parsed.show_damage_received_bar);
+        assert!(parsed.show_nation_flags);
+        assert!(ReplaySettings::default().show_damage_dealt_bar);
+        assert!(ReplaySettings::default().show_damage_received_bar);
+        assert!(ReplaySettings::default().show_nation_flags);
     }
 
     #[test]

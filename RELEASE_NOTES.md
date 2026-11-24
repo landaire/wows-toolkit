@@ -10,6 +10,8 @@ per-commit history lives in `CHANGELOG.md`.
 - Damage dealt and received bars in the player table are scaled against the highest damage on that player's team.
 - The replay renderer's player and ship name switches hide those labels in the viewer and exported videos.
 - You can keep playing, seeking and zooming a replay while its video renders.
+- Double-clicking a replay player row opens or closes its details, including over text and figures. Player names, clan tags and other table values can be selected and copied.
+- Replay settings can hide the damage dealt bar, damage received bar and nation flags separately. Nation flags keep their proper proportions.
 
 ## 1.1.0
 

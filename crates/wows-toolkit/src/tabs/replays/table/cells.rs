@@ -28,6 +28,7 @@ use wows_toolkit_replay_data::team_totals::TeamScale;
 use wows_toolkit_replay_data::team_totals::TeamSide;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wt_translations::t;
+use zgui::elements::Focus;
 use zgui::prelude::AnyView;
 use zgui::reactive::StoredValue;
 use zgui::reactive::UnsyncCallback;
@@ -149,9 +150,15 @@ pub(super) fn class_mark(row: &PlayerRow, cx: TableCx) -> AnyView {
                 a11y:label = text.clone()
             )
         }),
-        None => AnyView::new(
-            (!text.is_empty()).then(|| view! { text(class = "wt-pt-species wt-pt-text") {{text.clone()}} }),
-        ),
+        None => AnyView::new((!text.is_empty()).then(|| {
+            view! {
+                field(
+                    class = "wt-pt-species wt-pt-text",
+                    tabindex = Focus::Programmatic,
+                    state:read_only
+                ) {{text.clone()}}
+            }
+        })),
     })
 }
 
@@ -165,13 +172,23 @@ pub(super) fn team_heading(team: TeamHeading) -> AnyView {
     let total = team.damage.side(team.side).map(|total| {
         let text = separate_number(total);
         let hover = format!("{}{text}", t!("ui-replay-team_damage"));
-        with_hover(AnyView::new(view! { text(class = "wt-pt-text") {{text}} }), Some(hover))
+        with_hover(
+            AnyView::new(view! {
+                field(
+                    class = "wt-pt-text wt-pt-team__damage",
+                    attr:data-testid = format!("team-damage-{mark}"),
+                    tabindex = Focus::Programmatic,
+                    state:read_only
+                ) {{text}}
+            }),
+            Some(hover),
+        )
     });
 
     AnyView::new(view! {
         box(class = "wt-pt-team", attr:data-testid = format!("team-heading-{mark}")) {
             box(class = "wt-pt-stripe", attr:data-team = mark) {}
-            text(class = "wt-pt-team__name") {{label}}
+            field(class = "wt-pt-team__name", tabindex = Focus::Programmatic, state:read_only) {{label}}
             {total}
         }
     })
@@ -186,8 +203,7 @@ fn note_cell(cx: TableCx, row: RowId, col: ReplayColumn) -> impl Fn(&mut EventCx
     }
 }
 
-/// Keeps a double click on a cell's text, figure or icon from opening or closing the row, which a
-/// double click beside them does.
+/// Keeps a double click on a control from opening or closing the row.
 fn keep_double(ev: &mut EventCx<'_, events::DoubleClick>) {
     ev.stop_propagation();
 }
@@ -219,8 +235,8 @@ pub(super) fn with_hover(content: AnyView, hover: Option<String>) -> AnyView {
     })
 }
 
-/// The text of a cell: selectable, cut off with an ellipsis, and a rating band's chip for a
-/// personal rating.
+/// The read-only text of a cell: selectable and copyable, cut off with an ellipsis, and a rating
+/// band's chip for a personal rating.
 fn cell_text(cell: &CellValue) -> AnyView {
     let chip = match cell.color {
         Some(ColorRole::PrTier(category)) => {
@@ -232,11 +248,12 @@ fn cell_text(cell: &CellValue) -> AnyView {
     let text = cell.text.clone();
 
     AnyView::new(view! {
-        text(
+        field(
             class = "wt-pt-text",
             attr:data-chip = chipped,
             style:background-color = chip,
-            on:double_click = keep_double
+            tabindex = Focus::Programmatic,
+            state:read_only
         ) {{text}}
     })
 }
@@ -276,15 +293,14 @@ fn figure_cell(
     let text = cell_text(cell);
     let flag = (col == ReplayColumn::ShipName).then(|| row.row.ship_nation.clone()).flatten().map(|nation| {
         AnyView::new(move || {
-            art::flag(cx.art, &nation).map(|src| {
-                view! { image(class = "wt-pt-flag", src = src, a11y:hidden = true, on:double_click = keep_double) }
-            })
+            if !cx.show_nation_flags.get() {
+                return None;
+            }
+            art::flag(cx.art, &nation).map(|src| view! { image(class = "wt-pt-flag", src = src, a11y:hidden = true) })
         })
     });
     let content = match (damage_bar, flag) {
-        (Some(bar), _) => {
-            AnyView::new(view! { box(class = "wt-pt-figure", on:double_click = keep_double) { {text} {bar} } })
-        }
+        (Some(bar), _) => AnyView::new(view! { box(class = "wt-pt-figure") { {text} {bar} } }),
         (None, Some(flag)) => AnyView::new(view! { {flag} {text} }),
         (None, None) => text,
     };
@@ -315,7 +331,9 @@ fn damage_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
     };
 
     let cell = cell_value(&row.row, col, row.debug);
-    let bar = damage_mix::stacked_bar(&mix, row.scale(col).unwrap_or(TeamScale::FULL));
+    let scale = row.scale(col).unwrap_or(TeamScale::FULL);
+    let bar_mix = mix.clone();
+    let bar = AnyView::new(move || cx.shows_damage_bar(col).then(|| damage_mix::stacked_bar(&bar_mix, scale)));
     let content = figure_cell(col, row, cx, &cell, Some(bar));
     let shown = StoredValue::new_local((mix, lines.to_vec(), row.share(col).map(|share| share.text())));
     let explained = move || {
@@ -393,11 +411,7 @@ fn skills_cell(row: &TableRow, cx: TableCx) -> AnyView {
     }
     let markers: Vec<AnyView> = markers
         .into_iter()
-        .map(|glyph| {
-            AnyView::new(
-                view! { box(on:double_click = keep_double) { AppIcon(glyph = glyph, class = "wt-pt-marker") } },
-            )
-        })
+        .map(|glyph| AnyView::new(view! { AppIcon(glyph = glyph, class = "wt-pt-marker") }))
         .collect();
     let text = cell_text(&cell);
     let note = note_cell(cx, row.id, ReplayColumn::Skills);
@@ -458,7 +472,6 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
         })
     });
 
-    // A double click on the player's text leaves the row as it is.
     let species = class_mark(&player, cx);
     let species_name = player.ship_species_text.clone();
     let species = if species_name.is_empty() {
@@ -466,18 +479,27 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     } else {
         AnyView::new(view! {
             Tooltip {
-                TooltipTrigger { box(on:double_click = keep_double) {{species}} }
+                TooltipTrigger {{species}}
                 TooltipContent {{species_name.clone()}}
             }
         })
     };
-    let division = player
-        .division_label
-        .clone()
-        .map(|division| AnyView::new(view! { text(class = "wt-pt-text", on:double_click = keep_double) {{division}} }));
+    let division = player.division_label.clone().map(|division| {
+        AnyView::new(view! {
+            field(class = "wt-pt-text", tabindex = Focus::Programmatic, state:read_only) {{division}}
+        })
+    });
     let clan = player.clan_tag.clone().map(|clan| {
         let ink = clan_ink(&player, cx);
-        AnyView::new(view! { text(class = "wt-pt-text", on:double_click = keep_double, {..ink}) {{clan}} })
+        AnyView::new(view! {
+            field(
+                class = "wt-pt-text",
+                attr:data-testid = format!("player-clan-{}", db_id.raw()),
+                tabindex = Focus::Programmatic,
+                state:read_only,
+                {..ink}
+            ) {{clan}}
+        })
     });
     let name_color = player.is_abuser.then(|| player_color(PlayerColorKind::Abuser).to_owned());
     let name = player.display_name.clone();
@@ -485,7 +507,7 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
         let tip = t!("ui-replay-player-hidden_profile").into_owned();
         AnyView::new(view! {
             Tooltip {
-                TooltipTrigger { box(on:double_click = keep_double) { AppIcon(glyph = Glyph::EyeOff) } }
+                TooltipTrigger { AppIcon(glyph = Glyph::EyeOff) }
                 TooltipContent {{tip.clone()}}
             }
         })
@@ -507,11 +529,12 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
                 {species}
                 {division}
                 {clan}
-                text(
+                field(
                     class = "wt-pt-text",
                     style:color = name_color,
                     attr:data-testid = format!("player-name-text-{}", db_id.raw()),
-                    on:double_click = keep_double
+                    tabindex = Focus::Programmatic,
+                    state:read_only
                 ) {{name}}
                 box(class = "wt-pt-fill") {}
                 {hidden}

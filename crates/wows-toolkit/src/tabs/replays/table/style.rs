@@ -113,7 +113,7 @@ pub const CSS: &str = css!(
     .wt-pt-caret[data-open] { transform: rotate(90deg); }
     .wt-pt-species { font-size: 0.75rem; flex: none; }
     .wt-pt-class { flex: none; width: 16px; height: 16px; }
-    .wt-pt-flag { flex: none; width: 20.125px; height: 14px; }
+    .wt-pt-flag { flex: none; width: 23px; height: 16px; object-fit: contain; }
     .wt-pt-clan { color: var(--wt-clan-light); }
     @media (prefers-color-scheme: dark) {
         .wt-pt-clan { color: var(--wt-clan-dark); }
