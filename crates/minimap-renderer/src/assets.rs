@@ -19,6 +19,7 @@ use wowsunpack::vfs::VfsPath;
 
 use crate::ICON_SIZE;
 use crate::MINIMAP_SIZE;
+use crate::drawing::ShipIcon;
 use crate::map_data;
 
 /// Read a file from the VFS, returning its bytes or None if not found/empty.
@@ -159,16 +160,11 @@ pub fn load_map_info(map_name: &str, vfs: &VfsPath) -> Option<map_data::MapInfo>
     Some(map_data::MapInfo { space_size })
 }
 
-/// Load and rasterize ship SVG icons from game files.
-/// Returns a map from species name to RGBA image.
+/// Load parsed ship SVG icons and their small raster representations.
 ///
-/// Loads 5 variants per species:
-/// - `"{Species}"` — base icon (visible ally/enemy)
-/// - `"{Species}_self"` — player's own ship
-/// - `"{Species}_dead"` — destroyed ship
-/// - `"{Species}_invisible"` — not currently detected
-/// - `"{Species}_last_visible"` — last known position (minimap-only)
-pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<String, RgbaImage> {
+/// Keys include the species name and the optional `_self`, `_dead`,
+/// `_dead_self`, `_invisible`, or `_last_visible` suffix.
+pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<String, ShipIcon> {
     let species = [
         Species::Destroyer,
         Species::Cruiser,
@@ -178,9 +174,9 @@ pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<Stri
         Species::Auxiliary,
     ];
     let mut icons = HashMap::new();
-    let load_svg = |asset: GuiAsset<'_>, key: String, icons: &mut HashMap<String, RgbaImage>| {
+    let load_svg = |asset: GuiAsset<'_>, key: String, icons: &mut HashMap<String, ShipIcon>| {
         if let Some(buf) = asset.read(vfs, version)
-            && let Some(img) = rasterize_svg(&buf, ICON_SIZE)
+            && let Some(img) = ShipIcon::from_svg(&buf)
         {
             icons.insert(key, img);
             return true;
@@ -563,8 +559,12 @@ pub fn rasterize_svg(svg_data: &[u8], size: u32) -> Option<RgbaImage> {
     let opt = resvg::usvg::Options::default();
     let tree = resvg::usvg::Tree::from_data(svg_data, &opt).ok()?;
 
+    rasterize_svg_tree(&tree, size).map(|(image, _)| image)
+}
+
+/// The raster and source-to-icon transform share the same padding and crop.
+pub(crate) fn rasterize_svg_tree(tree: &resvg::usvg::Tree, size: u32) -> Option<(RgbaImage, tiny_skia::Transform)> {
     // Render at a larger internal size for accurate bounding-box detection.
-    // Use pre_scale so the offset is in output-pixel space (not scaled).
     let internal_size = size * 4;
     let tree_size = tree.size();
     let sx = internal_size as f32 / tree_size.width();
@@ -577,7 +577,7 @@ pub fn rasterize_svg(svg_data: &[u8], size: u32) -> Option<RgbaImage> {
     let offset_y = (internal_size as f32 - tree_size.height() * scale) / 2.0;
     let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(offset_x, offset_y);
 
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    resvg::render(tree, transform, &mut pixmap.as_mut());
 
     // Find bounding box of non-transparent pixels
     let w = pixmap.width();
@@ -601,7 +601,8 @@ pub fn rasterize_svg(svg_data: &[u8], size: u32) -> Option<RgbaImage> {
 
     if max_x < min_x || max_y < min_y {
         // Fully transparent — return empty icon at target size
-        return RgbaImage::from_raw(size, size, vec![0u8; (size * size * 4) as usize]);
+        let image = RgbaImage::from_raw(size, size, vec![0u8; (size * size * 4) as usize])?;
+        return Some((image, transform.post_scale(0.25, 0.25)));
     }
 
     // Crop to bounding box with 1px margin
@@ -646,7 +647,12 @@ pub fn rasterize_svg(svg_data: &[u8], size: u32) -> Option<RgbaImage> {
     let oy = (size.saturating_sub(final_h)) / 2;
     image::imageops::overlay(&mut output, &resized, ox as i64, oy as i64);
 
-    Some(output)
+    let normalized = transform
+        .post_translate(-(crop_x as f32), -(crop_y as f32))
+        .post_scale(final_w as f32 / crop_w as f32, final_h as f32 / crop_h as f32)
+        .post_translate(ox as f32, oy as f32);
+
+    Some((output, normalized))
 }
 
 // ── Game Fonts ─────────────────────────────────────────────────────────────

@@ -1675,6 +1675,41 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
+        // Dead markers stay above direction wedges and below live ships and their labels.
+        for (entity_id, dead) in dead_ships {
+            if clock >= dead.clock {
+                let px = if let Some(world_pos) = dead.position {
+                    map_info.world_to_minimap(world_pos, MINIMAP_SIZE)
+                } else if let Some(mm_pos) = &dead.minimap_position {
+                    map_info.normalized_to_minimap(mm_pos, MINIMAP_SIZE)
+                } else {
+                    continue;
+                };
+                let species = self.player_species.get(entity_id).cloned();
+                // Use last known heading from minimap positions
+                let yaw = minimap_positions
+                    .get(entity_id)
+                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians().value())
+                    .or_else(|| ship_positions.get(entity_id).map(|t| t.yaw.value()))
+                    .unwrap_or(0.0);
+                let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
+                let player_name =
+                    if self.options.show_player_names { self.player_names.get(entity_id).cloned() } else { None };
+                let ship_name =
+                    if self.options.show_ship_names { self.ship_display_names.get(entity_id).cloned() } else { None };
+                commands.push(DrawCommand::DeadShip {
+                    entity_id: *entity_id,
+                    pos: px,
+                    yaw,
+                    species,
+                    color: None,
+                    is_self: relation.is_self(),
+                    player_name,
+                    ship_name,
+                });
+            }
+        }
+
         for entity_id in &all_ship_ids {
             // Render any entity that we know is a ship (from arena state, vehicle
             // entity, or previously resolved species) OR that has a minimap position
@@ -1687,7 +1722,7 @@ impl<'a> MinimapRenderer<'a> {
                 continue;
             }
 
-            // Skip dead ships (they get an X marker below)
+            // Dead ships are emitted in the marker layer.
             if let Some(dead) = dead_ships.get(entity_id)
                 && clock >= dead.clock
             {
@@ -1803,41 +1838,6 @@ impl<'a> MinimapRenderer<'a> {
                     is_detected_teammate: false,
                     is_disconnected,
                     name_color: None,
-                });
-            }
-        }
-
-        // 7. Dead ship markers
-        for (entity_id, dead) in dead_ships {
-            if clock >= dead.clock {
-                let px = if let Some(world_pos) = dead.position {
-                    map_info.world_to_minimap(world_pos, MINIMAP_SIZE)
-                } else if let Some(mm_pos) = &dead.minimap_position {
-                    map_info.normalized_to_minimap(mm_pos, MINIMAP_SIZE)
-                } else {
-                    continue;
-                };
-                let species = self.player_species.get(entity_id).cloned();
-                // Use last known heading from minimap positions
-                let yaw = minimap_positions
-                    .get(entity_id)
-                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians().value())
-                    .or_else(|| ship_positions.get(entity_id).map(|t| t.yaw.value()))
-                    .unwrap_or(0.0);
-                let relation = self.player_relations.get(entity_id).copied().unwrap_or(Relation::new(2));
-                let player_name =
-                    if self.options.show_player_names { self.player_names.get(entity_id).cloned() } else { None };
-                let ship_name =
-                    if self.options.show_ship_names { self.ship_display_names.get(entity_id).cloned() } else { None };
-                commands.push(DrawCommand::DeadShip {
-                    entity_id: *entity_id,
-                    pos: px,
-                    yaw,
-                    species,
-                    color: None,
-                    is_self: relation.is_self(),
-                    player_name,
-                    ship_name,
                 });
             }
         }
@@ -3285,5 +3285,198 @@ mod availability_tests {
     #[test]
     fn active_wins_even_if_reloading_flag_set() {
         assert_eq!(availability_from(false, true, true, true), ConsumableAvailability::Active);
+    }
+}
+
+#[cfg(test)]
+mod ship_layer_tests {
+    use std::collections::HashMap;
+
+    use wows_battle_world::BattleWorld;
+    use wows_replays::ReplayMeta;
+    use wows_replays::analyzer::Analyzer;
+    use wows_replays::packet2::EntityCreatePacket;
+    use wows_replays::packet2::EntityMethodPacket;
+    use wows_replays::packet2::Packet;
+    use wows_replays::packet2::PacketType;
+    use wows_replays::packet2::PacketTypeId;
+    use wows_replays::packet2::Rot3;
+    use wows_replays::packet2::Vec3;
+    use wows_replays::types::AccountId;
+    use wows_replays::types::EntityId;
+    use wows_replays::types::GameClock;
+    use wows_replays::types::Relation;
+    use wowsunpack::data::Version;
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::rpc::typedefs::ArgValue;
+
+    use super::MinimapRenderer;
+    use crate::DrawCommand;
+    use crate::RenderOptions;
+    use crate::map_data::MapInfo;
+
+    fn replay_meta() -> ReplayMeta {
+        ReplayMeta {
+            matchGroup: None,
+            gameMode: 0,
+            gameType: None,
+            clientVersionFromExe: "0, 15, 5, 12668706".to_string(),
+            scenarioUiCategoryId: None,
+            mapDisplayName: String::new(),
+            mapId: 0,
+            clientVersionFromXml: String::new(),
+            weatherParams: None,
+            duration: 0,
+            gameLogic: None,
+            name: String::new(),
+            scenario: String::new(),
+            playerID: AccountId::from(1u32),
+            vehicles: Vec::new(),
+            playersPerTeam: 1,
+            dateTime: String::new(),
+            mapName: String::new(),
+            playerName: "live".to_string(),
+            scenarioConfigId: 0,
+            teamsCount: 2,
+            logic: None,
+            playerVehicle: String::new(),
+            battleDuration: None,
+        }
+    }
+
+    fn process(world: &mut BattleWorld<'_, '_, GameMetadataProvider>, payload: PacketType<'_, '_>) {
+        let packet_type = match &payload {
+            PacketType::EntityCreate(_) => PacketTypeId::EntityCreate,
+            PacketType::EntityMethod(_) => PacketTypeId::EntityMethod,
+            _ => unreachable!("the fixture uses entity creation and method packets"),
+        };
+        world.process(&Packet { packet_size: 0, packet_type, clock: GameClock(2.0), payload, raw: &[], leftover: &[] });
+    }
+
+    #[test]
+    fn dead_markers_precede_overlapping_live_ship_overlays() {
+        let meta = replay_meta();
+        // These packets contain all properties used by this rendering case.
+        let metadata = GameMetadataProvider::from_params_no_specs(Vec::new()).expect("empty game metadata");
+        let live_id = EntityId::from(2u32);
+
+        for dead_id in [EntityId::from(1u32), EntityId::from(3u32)] {
+            for reverse in [false, true] {
+                for relation in [Relation::new(0), Relation::new(1), Relation::new(2)] {
+                    let mut world = BattleWorld::new(&meta, &metadata, None);
+                    let ids = if reverse { [dead_id, live_id] } else { [live_id, dead_id] };
+                    for entity_id in ids {
+                        process(
+                            &mut world,
+                            PacketType::EntityCreate(EntityCreatePacket {
+                                entity_id,
+                                spec_idx: 0,
+                                entity_type: "Vehicle",
+                                space_id: 0,
+                                vehicle_id: None,
+                                position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                                rotation: Rot3 { yaw: 0.0, pitch: 0.0, roll: 0.0 },
+                                state_length: 0,
+                                props: HashMap::from([
+                                    ("health", ArgValue::Float32(500.0)),
+                                    ("maxHealth", ArgValue::Float32(1000.0)),
+                                    ("buoyancyCurrentWaterline", ArgValue::Float32(-10.0)),
+                                ]),
+                            }),
+                        );
+                    }
+
+                    // Equal packed coordinates make the visible live icon and the wreck overlap.
+                    let updates = ids
+                        .iter()
+                        .map(|entity_id| {
+                            ArgValue::FixedDict(HashMap::from([
+                                ("vehicleID", ArgValue::Uint32(entity_id.raw())),
+                                ("packedData", ArgValue::Uint32(1024 | (1024 << 11))),
+                            ]))
+                        })
+                        .collect();
+                    process(
+                        &mut world,
+                        PacketType::EntityMethod(EntityMethodPacket {
+                            entity_id: live_id,
+                            method: "updateMinimapVisionInfo",
+                            args: vec![ArgValue::Array(updates), ArgValue::Array(Vec::new())],
+                        }),
+                    );
+                    process(
+                        &mut world,
+                        PacketType::EntityMethod(EntityMethodPacket {
+                            entity_id: live_id,
+                            method: "receiveVehicleDeath",
+                            args: vec![
+                                ArgValue::Int32(dead_id.raw() as i32),
+                                ArgValue::Int32(live_id.raw() as i32),
+                                ArgValue::Uint32(0),
+                            ],
+                        }),
+                    );
+
+                    let options = RenderOptions {
+                        show_player_names: true,
+                        show_ship_names: true,
+                        show_hp_bars: true,
+                        show_submarine_status: true,
+                        ..RenderOptions::default()
+                    };
+                    let mut renderer = MinimapRenderer::new(
+                        Some(MapInfo { space_size: 5000 }),
+                        &metadata,
+                        Version::from_client_exe(&meta.clientVersionFromExe),
+                        options,
+                    );
+                    renderer.player_relations.insert(live_id, relation);
+                    renderer.player_relations.insert(dead_id, relation);
+                    renderer.player_species.insert(live_id, "Submarine".to_string());
+                    renderer.player_names.insert(live_id, "live player".to_string());
+                    renderer.ship_display_names.insert(live_id, "live ship".to_string());
+
+                    // Packet-clock exports and continuous-clock playback share these commands.
+                    for render_clock in [None, Some(GameClock(2.0))] {
+                        renderer.render_clock = render_clock;
+                        let commands = renderer.draw_frame(&world.view());
+                        let dead_index = commands
+                            .iter()
+                            .position(|command| matches!(command, DrawCommand::DeadShip { entity_id, .. } if *entity_id == dead_id))
+                            .expect("the wreck remains visible");
+                        let live_index = commands
+                            .iter()
+                            .position(|command| matches!(command, DrawCommand::Ship { entity_id, .. } if *entity_id == live_id))
+                            .expect("the live ship remains visible");
+                        assert!(dead_index < live_index, "dead marker must precede the live icon and labels");
+
+                        let DrawCommand::Ship { pos: live_pos, player_name, ship_name, is_self, .. } =
+                            &commands[live_index]
+                        else {
+                            unreachable!("the live ship command was selected");
+                        };
+                        let DrawCommand::DeadShip { pos: dead_pos, .. } = &commands[dead_index] else {
+                            unreachable!("the dead ship command was selected");
+                        };
+                        assert!((live_pos.x - dead_pos.x).abs() < 1.0);
+                        assert!((live_pos.y - dead_pos.y).abs() < 1.0);
+                        assert_eq!(player_name.as_deref(), Some("live player"));
+                        assert_eq!(ship_name.as_deref(), Some("live ship"));
+                        assert_eq!(*is_self, relation.is_self());
+
+                        let health_index = commands
+                            .iter()
+                            .position(|command| matches!(command, DrawCommand::HealthBar { entity_id, .. } if *entity_id == live_id))
+                            .expect("the live health bar is present");
+                        let status_index = commands
+                            .iter()
+                            .position(|command| matches!(command, DrawCommand::SubmarineStatus { entity_id, .. } if *entity_id == live_id))
+                            .expect("the live submarine status is present");
+                        assert!(dead_index < health_index);
+                        assert!(dead_index < status_index);
+                    }
+                }
+            }
+        }
     }
 }

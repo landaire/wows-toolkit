@@ -566,12 +566,9 @@ fn draw_submarine_status(
     );
 }
 
-/// Draw a ship icon rotated by yaw, with optional team-color tinting.
-///
-/// Uses tiny-skia's bilinear-filtered transform compositing for smooth rotation
-/// and sub-pixel placement.
+/// Draw a small HUD raster with yaw and optional team-color tinting.
 #[allow(clippy::too_many_arguments)]
-fn draw_ship_icon(
+fn draw_raster_ship_icon(
     pm: &mut Surface,
     icon: &RgbaImage,
     x: f32,
@@ -626,55 +623,6 @@ fn draw_ship_icon(
     let paint = PixmapPaint { opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
 
     pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform);
-}
-
-/// Build a padded outline image for a ship icon: the icon's silhouette dilated
-/// by `thickness` pixels, colored gold, on a canvas large enough to hold the
-/// extension beyond the original icon bounds. The original icon area itself is
-/// left transparent so it composites cleanly under the real icon.
-fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alpha: u8) -> RgbaImage {
-    let t = thickness;
-    let iw = icon.width();
-    let ih = icon.height();
-    let ow = iw + 2 * t;
-    let oh = ih + 2 * t;
-    let mut out = RgbaImage::from_pixel(ow, oh, image::Rgba([0, 0, 0, 0]));
-
-    let alpha_at = |x: i32, y: i32| -> u8 {
-        let ix = x - t as i32;
-        let iy = y - t as i32;
-        if ix < 0 || iy < 0 || ix >= iw as i32 || iy >= ih as i32 {
-            0
-        } else {
-            icon.get_pixel(ix as u32, iy as u32).0[3]
-        }
-    };
-
-    let t_i = t as i32;
-    let t_sq = t_i * t_i;
-    for y in 0..oh as i32 {
-        for x in 0..ow as i32 {
-            if alpha_at(x, y) > 128 {
-                continue;
-            }
-            let mut hit = false;
-            'scan: for dy in -t_i..=t_i {
-                for dx in -t_i..=t_i {
-                    if dx * dx + dy * dy > t_sq {
-                        continue;
-                    }
-                    if alpha_at(x + dx, y + dy) > 128 {
-                        hit = true;
-                        break 'scan;
-                    }
-                }
-            }
-            if hit {
-                out.put_pixel(x as u32, y as u32, image::Rgba([color[0], color[1], color[2], alpha]));
-            }
-        }
-    }
-    out
 }
 
 /// Draw a plane/consumable icon (pre-colored RGBA, no rotation).
@@ -1012,7 +960,7 @@ fn draw_kill_feed(
         if has_killer_icon {
             x += gap;
             let icon = &ship_icons[entry.killer_species.as_ref().unwrap()];
-            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.killer_color, !entry.killer_is_friendly);
+            draw_kill_feed_icon(pm, icon.raster(), x, icon_y, icon_size, entry.killer_color, !entry.killer_is_friendly);
             x += icon_size + gap;
         } else if killer_ship_w > 0 {
             x += gap;
@@ -1040,7 +988,7 @@ fn draw_kill_feed(
         if has_victim_icon {
             x += gap;
             let icon = &ship_icons[entry.victim_species.as_ref().unwrap()];
-            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.victim_color, !entry.victim_is_friendly);
+            draw_kill_feed_icon(pm, icon.raster(), x, icon_y, icon_size, entry.victim_color, !entry.victim_is_friendly);
             x += icon_size + gap;
         } else if victim_ship_w > 0 {
             x += gap;
@@ -1221,7 +1169,9 @@ struct FeedAssets<'a> {
 impl<'a> FeedAssets<'a> {
     fn icon(&self, icon: &FeedIcon<'_>) -> Option<&'a RgbaImage> {
         match icon {
-            FeedIcon::KillShip { species, .. } | FeedIcon::ChatShip { species, .. } => self.ship_icons.get(*species),
+            FeedIcon::KillShip { species, .. } | FeedIcon::ChatShip { species, .. } => {
+                self.ship_icons.get(*species).map(ShipIcon::raster)
+            }
             FeedIcon::DeathCause(kill) => self.death_cause_icons.get(death_cause_icon_key(kill.cause.as_ref())),
         }
     }
@@ -1534,7 +1484,7 @@ fn draw_chat_overlay(
                     let icon_y = cur_y + (line_height - icon_size) / 2;
                     draw_kill_feed_icon(
                         pm,
-                        icon,
+                        icon.raster(),
                         sx,
                         icon_y,
                         icon_size,
@@ -1996,10 +1946,9 @@ fn draw_team_roster(
         let ship_row_y = row_top + name_scale.y + 4.0;
         let ship_text_x = if let Some(ref class_key) = row.class_icon_key {
             if let Some(class_icon) = ship_icons.get(class_key) {
-                // Pre-resize then route through the icon helper so the rotation
-                // path matches the in-map ship glyphs.
+                // HUD rows keep their fixed-size raster layout.
                 let resized = image::imageops::resize(
-                    class_icon,
+                    class_icon.raster(),
                     class_icon_size.round() as u32,
                     class_icon_size.round() as u32,
                     image::imageops::FilterType::Lanczos3,
@@ -2008,7 +1957,7 @@ fn draw_team_roster(
                 let opacity = if row.is_dead { 0.55 } else { 1.0 };
                 let cx = inner_x + class_icon_size * 0.5;
                 let cy = ship_row_y + ship_scale.y * 0.5;
-                draw_ship_icon(pm, &resized, cx, cy, icon_yaw, tint, opacity, 1.0);
+                draw_raster_ship_icon(pm, &resized, cx, cy, icon_yaw, tint, opacity, 1.0);
                 inner_x + class_icon_size + class_icon_padding
             } else {
                 inner_x
@@ -2187,8 +2136,237 @@ impl SidePanelLayout {
     }
 }
 
-/// Pre-rasterized ship icon (RGBA, white/alpha mask to be tinted at draw time).
-pub type ShipIcon = RgbaImage;
+/// A parsed ship graphic normalized to [`crate::ICON_SIZE`] canvas pixels.
+///
+/// Map drawing retains the vector source. Small HUD and serialized icon
+/// consumers use the separately retained raster.
+#[derive(Clone)]
+pub struct ShipIcon {
+    source: Arc<ShipIconSource>,
+}
+
+struct ShipIconSource {
+    tree: resvg::usvg::Tree,
+    normalized: Transform,
+    raster: RgbaImage,
+}
+
+impl ShipIcon {
+    pub fn from_svg(data: &[u8]) -> Option<Self> {
+        let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?;
+        let (raster, normalized) = crate::assets::rasterize_svg_tree(&tree, crate::ICON_SIZE)?;
+
+        Some(Self { source: Arc::new(ShipIconSource { tree, normalized, raster }) })
+    }
+
+    /// The fixed-size raster for HUD layout and raster asset serialization.
+    pub fn raster(&self) -> &RgbaImage {
+        &self.source.raster
+    }
+
+    /// Consume an icon for a raster-only asset bundle.
+    pub fn into_raster(self) -> RgbaImage {
+        match Arc::try_unwrap(self.source) {
+            Ok(source) => source.raster,
+            Err(source) => source.raster.clone(),
+        }
+    }
+}
+
+/// One reusable icon-sized work area, independent of the number of ships and zoom changes.
+#[derive(Default)]
+struct ShipIconRasterizer {
+    pixels: Option<Pixmap>,
+    outline: Option<Pixmap>,
+    horizontal_distances: Vec<u32>,
+    nearest_rows: Vec<usize>,
+    row_boundaries: Vec<f32>,
+}
+
+impl Clone for ShipIconRasterizer {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl ShipIconRasterizer {
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        &mut self,
+        surface: &mut Surface,
+        icon: &ShipIcon,
+        x: f32,
+        y: f32,
+        yaw: f32,
+        color: Option<[u8; 3]>,
+        opacity: f32,
+        zoom: f32,
+        detected: bool,
+        disconnected: bool,
+    ) {
+        let physical = surface.scale().factor();
+        let factor = zoom * physical;
+        let icon_size = crate::ICON_SIZE as f32;
+        let radius = SHIP_ICON_OUTLINE_THICKNESS as f32 * factor;
+        let side = ((icon_size * std::f32::consts::SQRT_2 * factor + 2.0 * radius).ceil() as u32) + 2;
+        let left = (x * physical - side as f32 / 2.0).floor() as i32;
+        let top = (y * physical - side as f32 / 2.0).floor() as i32;
+        if left >= surface.pixels().width() as i32
+            || top >= surface.pixels().height() as i32
+            || left + side as i32 <= 0
+            || top + side as i32 <= 0
+        {
+            return;
+        }
+
+        if self.pixels.as_ref().is_none_or(|pixels| pixels.width() != side) {
+            self.pixels = Pixmap::new(side, side);
+            self.outline = None;
+        }
+        let Some(pixels) = self.pixels.as_mut() else { return };
+        pixels.data_mut().fill(0);
+        let center_x = x * physical - left as f32;
+        let center_y = y * physical - top as f32;
+        let angle = (std::f32::consts::FRAC_PI_2 - yaw).to_degrees();
+        let transform = icon
+            .source
+            .normalized
+            .post_scale(factor, factor)
+            .post_translate(center_x - icon_size * factor / 2.0, center_y - icon_size * factor / 2.0)
+            .post_rotate_at(angle, center_x, center_y);
+        resvg::render(&icon.source.tree, transform, &mut pixels.as_mut());
+
+        let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
+        if detected || disconnected {
+            if self.outline.is_none() {
+                self.outline = Pixmap::new(side, side);
+            }
+            if let Some(outline) = self.outline.as_mut() {
+                make_ship_icon_outline(
+                    pixels,
+                    outline,
+                    &mut self.horizontal_distances,
+                    &mut self.nearest_rows,
+                    &mut self.row_boundaries,
+                    radius,
+                );
+                if detected {
+                    color_ship_icon_outline(outline, [255, 215, 0]);
+                    surface.pixels_mut().draw_pixmap(left, top, outline.as_ref(), &paint, Transform::identity(), None);
+                }
+                if disconnected {
+                    // The disconnect outline uses the gold source's luminance, as HUD tinting does.
+                    color_ship_icon_outline(outline, [202, 47, 47]);
+                    surface.pixels_mut().draw_pixmap(left, top, outline.as_ref(), &paint, Transform::identity(), None);
+                }
+            }
+        }
+        if let Some(color) = color {
+            for pixel in pixels.data_mut().as_chunks_mut::<4>().0 {
+                let luminance = pixel[0] as f32 * 0.299 + pixel[1] as f32 * 0.587 + pixel[2] as f32 * 0.114;
+                for (channel, tint) in pixel[..3].iter_mut().zip(color) {
+                    *channel = (tint as f32 * luminance / 255.0) as u8;
+                }
+            }
+        }
+        let paint = PixmapPaint { opacity, ..paint };
+        surface.pixels_mut().draw_pixmap(left, top, pixels.as_ref(), &paint, Transform::identity(), None);
+    }
+}
+
+/// Dilate the current-resolution silhouette, including the space outside the icon square.
+fn make_ship_icon_outline(
+    source: &Pixmap,
+    outline: &mut Pixmap,
+    distances: &mut Vec<u32>,
+    nearest_rows: &mut Vec<usize>,
+    boundaries: &mut Vec<f32>,
+    radius: f32,
+) {
+    let width = source.width() as usize;
+    let height = source.height() as usize;
+    let reach = radius.ceil() as usize;
+    distances.resize(width * height, 0);
+    nearest_rows.resize(height, 0);
+    boundaries.resize(height + 1, 0.0);
+    outline.data_mut().fill(0);
+
+    for (source_row, row) in source.data().chunks_exact(width * 4).zip(distances.chunks_exact_mut(width)) {
+        let mut distance = reach as u32 + 1;
+        for (pixel, at) in source_row.as_chunks::<4>().0.iter().zip(row.iter_mut()) {
+            distance = if pixel[3] > 128 { 0 } else { (distance + 1).min(reach as u32 + 1) };
+            *at = distance;
+        }
+        distance = reach as u32 + 1;
+        for at in row.iter_mut().rev() {
+            distance = (*at).min(distance + 1);
+            *at = distance;
+        }
+    }
+
+    // The lower envelope of squared-distance parabolas gives a circular
+    // dilation in linear time, independent of the halo's physical radius.
+    let radius_squared = radius * radius;
+    let coverage_radius = radius + 1.0;
+    let coverage_radius_squared = coverage_radius * coverage_radius;
+    for x in 0..width {
+        let squared_distance = |row: usize| {
+            let dx = distances[row * width + x] as f32;
+            dx * dx
+        };
+        let mut last = 0;
+        nearest_rows[0] = 0;
+        boundaries[0] = f32::NEG_INFINITY;
+        boundaries[1] = f32::INFINITY;
+        for row in 1..height {
+            let intersection = |previous: usize| {
+                let row = row as f32;
+                let previous = previous as f32;
+                (squared_distance(row as usize) + row * row - squared_distance(previous as usize) - previous * previous)
+                    / (2.0 * (row - previous))
+            };
+            let mut boundary = intersection(nearest_rows[last]);
+            while boundary <= boundaries[last] {
+                last -= 1;
+                boundary = intersection(nearest_rows[last]);
+            }
+            last += 1;
+            nearest_rows[last] = row;
+            boundaries[last] = boundary;
+            boundaries[last + 1] = f32::INFINITY;
+        }
+
+        let mut nearest = 0;
+        for row in 0..height {
+            while boundaries[nearest + 1] < row as f32 {
+                nearest += 1;
+            }
+            let dy = row.abs_diff(nearest_rows[nearest]) as f32;
+            let index = (row * width + x) * 4 + 3;
+            if source.data()[index] <= 128 {
+                let distance_squared = squared_distance(nearest_rows[nearest]) + dy * dy;
+                let coverage = if distance_squared <= radius_squared {
+                    1.0
+                } else if distance_squared < coverage_radius_squared {
+                    // Integrate the subpixel extension beyond the source pixel's edge.
+                    coverage_radius - distance_squared.sqrt()
+                } else {
+                    0.0
+                };
+                outline.data_mut()[index] = (230.0 * coverage).round() as u8;
+            }
+        }
+    }
+}
+
+fn color_ship_icon_outline(outline: &mut Pixmap, color: [u8; 3]) {
+    for pixel in outline.data_mut().as_chunks_mut::<4>().0 {
+        let alpha = u32::from(pixel[3]);
+        for (channel, color) in pixel[..3].iter_mut().zip(color) {
+            *channel = (u32::from(color) * alpha / 255) as u8;
+        }
+    }
+}
 
 /// Software renderer that draws to a tiny-skia `Pixmap` for anti-aliased output.
 ///
@@ -2232,10 +2410,7 @@ pub struct ImageTarget {
     layout: SidePanelLayout,
     fonts: GameFonts,
     ship_icons: HashMap<String, ShipIcon>,
-    /// Pre-computed gold outline halos for ship icons. Same keys as `ship_icons`;
-    /// each image is `ship_icons[key]` padded by [`SHIP_ICON_OUTLINE_THICKNESS`]
-    /// pixels with a dilated silhouette painted gold.
-    ship_icon_outlines: HashMap<String, RgbaImage>,
+    ship_icon_rasterizer: ShipIconRasterizer,
     plane_icons: HashMap<String, RgbaImage>,
     building_icons: HashMap<String, RgbaImage>,
     consumable_icons: HashMap<String, RgbaImage>,
@@ -2335,11 +2510,6 @@ impl ImageTarget {
         let viewport = MapViewport::default();
         let map_base = build_map_base(&map, viewport, RenderScale::ONE, &fonts);
 
-        let ship_icon_outlines = ship_icons
-            .iter()
-            .map(|(k, icon)| (k.clone(), make_ship_icon_outline(icon, SHIP_ICON_OUTLINE_THICKNESS, [255, 215, 0], 230)))
-            .collect();
-
         Self {
             canvas: Surface::new(canvas_width, CANVAS_HEIGHT, RenderScale::ONE).unwrap(),
             map_layer: map_base.clone(),
@@ -2353,7 +2523,7 @@ impl ImageTarget {
             layout,
             fonts,
             ship_icons,
-            ship_icon_outlines,
+            ship_icon_rasterizer: ShipIconRasterizer::default(),
             plane_icons,
             building_icons,
             consumable_icons,
@@ -2718,20 +2888,22 @@ impl RenderTarget for ImageTarget {
                     vec![fallback_key.to_string()]
                 };
 
-                let Some((icon_key, icon)) =
-                    lookup_keys.iter().find_map(|k| self.ship_icons.get(k).map(|i| (k.as_str(), i)))
-                else {
+                let Some(icon) = lookup_keys.iter().find_map(|key| self.ship_icons.get(key)) else {
                     return;
                 };
 
-                if *is_detected_teammate && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
-                    draw_ship_icon(&mut self.map_layer, outline, x, y, *yaw, None, 1.0, grow);
-                }
-                if *is_disconnected && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
-                    draw_ship_icon(&mut self.map_layer, outline, x, y, *yaw, Some([255, 60, 60]), 1.0, grow);
-                }
-
-                draw_ship_icon(&mut self.map_layer, icon, x, y, *yaw, color.map(|c| c), *opacity, grow);
+                self.ship_icon_rasterizer.draw(
+                    &mut self.map_layer,
+                    icon,
+                    x,
+                    y,
+                    *yaw,
+                    *color,
+                    *opacity,
+                    grow,
+                    *is_detected_teammate,
+                    *is_disconnected,
+                );
                 draw_ship_labels(
                     &mut self.map_layer,
                     x,
@@ -2786,7 +2958,7 @@ impl RenderTarget for ImageTarget {
                     return;
                 };
 
-                draw_ship_icon(&mut self.map_layer, icon, x, y, *yaw, color.map(|c| c), 1.0, grow);
+                self.ship_icon_rasterizer.draw(&mut self.map_layer, icon, x, y, *yaw, *color, 1.0, grow, false, false);
             }
             DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
                 let x = view.x(pos.x);
@@ -3525,6 +3697,126 @@ mod tests {
     use crate::viewport::MapViewport;
     use wowsunpack::game_params::types::Meters;
 
+    /// Fine diagonals and curves are sampled from the SVG at the displayed
+    /// resolution, not enlarged from the HUD raster.
+    #[test]
+    fn zoomed_ship_detail_matches_the_physical_svg_reference() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path fill="#b0b0b0" d="M0 18L9 0L18 18Z"/>
+            <path fill="white" d="M4 14Q9 2 14 14Q9 9 4 14Z"/>
+            <path fill="none" stroke="#444" stroke-width=".23" d="M4 12L13 7"/>
+        </svg>"##;
+        let icon = ShipIcon::from_svg(svg).expect("a ship SVG");
+        let tree = resvg::usvg::Tree::from_data(svg, &resvg::usvg::Options::default()).expect("the SVG reference");
+        let mut rasterizer = ShipIconRasterizer::default();
+
+        for (zoom, physical) in [(4.0, 1.5), (6.0, 2.0), (10.0, 3.0)] {
+            let scale = RenderScale::new(physical).expect("a physical scale");
+            let mut drawn = Surface::new(400, 400, scale).expect("a surface");
+            let mut enlarged = Surface::new(400, 400, scale).expect("a raster comparison");
+            let mut reference = Pixmap::new(drawn.pixels().width(), drawn.pixels().height()).expect("a reference");
+            let (x, y, yaw) = (200.25, 200.75, 0.37);
+            rasterizer.draw(&mut drawn, &icon, x, y, yaw, None, 1.0, zoom, false, false);
+            draw_raster_ship_icon(&mut enlarged, icon.raster(), x, y, yaw, None, 1.0, zoom);
+
+            let factor = zoom * physical;
+            let (center_x, center_y) = (x * physical, y * physical);
+            let transform = Transform::from_scale(factor, factor)
+                .post_translate(center_x - 9.0 * factor, center_y - 9.0 * factor)
+                .post_rotate_at((std::f32::consts::FRAC_PI_2 - yaw).to_degrees(), center_x, center_y);
+            resvg::render(&tree, transform, &mut reference.as_mut());
+            let error = |pixels: &Pixmap| -> u64 {
+                pixels
+                    .data()
+                    .iter()
+                    .zip(reference.data())
+                    .map(|(actual, expected)| u64::from(actual.abs_diff(*expected)))
+                    .sum()
+            };
+            let covered = reference.data().as_chunks::<4>().0.iter().filter(|pixel| pixel[3] > 0).count() as u64;
+            let vector_error = error(drawn.pixels());
+            let raster_error = error(enlarged.pixels());
+            assert!(vector_error * 2 < covered, "SVG sampling error {vector_error} at zoom {zoom}, scale {physical}");
+            assert!(vector_error * 8 < raster_error, "the HUD raster loses detail at zoom {zoom}, scale {physical}");
+        }
+    }
+
+    #[test]
+    fn a_ship_halo_keeps_its_extent_tint_and_opacity_at_physical_scale() {
+        let icon = ShipIcon::from_svg(
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path fill="white" d="M0 0H18V18H0Z"/></svg>"#,
+        ).expect("a square SVG");
+        let scale = RenderScale::new(1.5).expect("a physical scale");
+        let mut surface = Surface::new(128, 128, scale).expect("a surface");
+        ShipIconRasterizer::default().draw(
+            &mut surface,
+            &icon,
+            64.0,
+            64.0,
+            std::f32::consts::FRAC_PI_2,
+            Some([80, 160, 240]),
+            0.5,
+            2.0,
+            true,
+            false,
+        );
+
+        let pixel = |x: usize, y: usize| {
+            let offset = (y * surface.pixels().width() as usize + x) * 4;
+            &surface.pixels().data()[offset..offset + 4]
+        };
+        assert_eq!(pixel(63, 96), &[230, 193, 0, 230], "the halo reaches six physical pixels outside the icon");
+        assert_eq!(pixel(62, 96), &[0, 0, 0, 0], "the halo stops at its scaled radius");
+        for (actual, expected) in pixel(96, 96).iter().zip([40u8, 80, 120, 128]) {
+            assert!(actual.abs_diff(expected) <= 1, "the icon keeps team tint and half opacity");
+        }
+    }
+
+    #[test]
+    fn a_ship_outline_remains_visible_at_the_minimum_render_scale() {
+        let icon = ShipIcon::from_svg(
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path fill="white" d="M0 0H18V18H0Z"/></svg>"#,
+        ).expect("a square SVG");
+        let Some(mut target) = target_with_ship_icons(HashMap::from([("Cruiser".to_owned(), icon)])) else {
+            return;
+        };
+        target.set_render_scale(RenderScale::MIN);
+        let ship = |detected, disconnected| DrawCommand::Ship {
+            entity_id: EntityId::from(7u32),
+            pos: MinimapPos { x: 130.0, y: 130.0 },
+            yaw: std::f32::consts::FRAC_PI_2,
+            species: Some("Cruiser".to_owned()),
+            color: Some([0, 0, 255]),
+            visibility: ShipVisibility::Visible,
+            opacity: 1.0,
+            is_self: false,
+            player_name: None,
+            ship_name: None,
+            is_detected_teammate: detected,
+            is_disconnected: disconnected,
+            name_color: None,
+        };
+        target.begin_frame();
+        target.draw(&ship(false, false));
+        target.end_frame();
+        let plain = target.frame();
+
+        for (detected, disconnected) in [(true, false), (false, true)] {
+            target.begin_frame();
+            target.draw(&ship(detected, disconnected));
+            target.end_frame();
+            let outlined = target.frame();
+            let visibly_outlined = (27..38).any(|x| {
+                (27 + HUD_HEIGHT / 4..38 + HUD_HEIGHT / 4).any(|y| {
+                    let without = plain.get_pixel(x, y).0;
+                    let with = outlined.get_pixel(x, y).0;
+                    with[0] > without[0].saturating_add(20)
+                })
+            });
+            assert!(visibly_outlined, "the half-pixel outline is visible at minimum scale");
+        }
+    }
+
     /// A target with no game files behind it: no map art, no icons, and
     /// whatever font the machine has. `None` where it has none.
     fn target() -> Option<ImageTarget> {
@@ -3717,7 +4009,9 @@ mod tests {
     /// the icon's bow.
     #[test]
     fn a_ship_icon_covers_its_camera_direction() {
-        let icon = image::RgbaImage::from_pixel(crate::ICON_SIZE, crate::ICON_SIZE, image::Rgba([255, 255, 255, 255]));
+        let icon = ShipIcon::from_svg(
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path fill="white" d="M0 0H18V18H0Z"/></svg>"#,
+        ).expect("a square SVG");
         let Some(mut target) = target_with_ship_icons(HashMap::from([("Cruiser".to_string(), icon)])) else {
             return;
         };

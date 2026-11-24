@@ -309,7 +309,10 @@ fn export(args: &Args) -> Result<(), ExportError> {
 
     let used = UsedIcons::of(&frames);
     let icons = TrackIcons {
-        ships: icon_list(assets::load_ship_icons(vfs, version), |_| true),
+        ships: icon_list(
+            assets::load_ship_icons(vfs, version).into_iter().map(|(key, icon)| (key, icon.into_raster())).collect(),
+            |_| true,
+        ),
         planes: icon_list(assets::load_plane_icons(vfs, version), |key| used.planes.contains(key)),
         buildings: icon_list(assets::load_building_icons(vfs, version), |_| true),
         consumables: icon_list(assets::load_consumable_icons(vfs, version), |key| used.consumables.contains(key)),
