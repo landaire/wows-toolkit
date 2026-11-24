@@ -143,25 +143,25 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 fluent-bundle = "0.16"
 unic-langid = "0.9"
 sys-locale = "0.3"
-# landaire-contrib/zgui, branch `main`.
-zgui = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-ui = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-ui-icons = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-ui-primitives = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-ui-tokens = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-image = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-css = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-platform-headless = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-render-wgpu = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-render-vector-vello = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
-zgui-testkit-scene = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+# The fork's scrollbar-gutter fix, backported onto the current toolkit base.
+zgui = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-ui = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-ui-icons = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-ui-primitives = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-ui-tokens = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-image = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-css = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-platform-headless = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-render-wgpu = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-render-vector-vello = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
+zgui-testkit-scene = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
 # The accessibility tree zgui publishes, read back as a screen reader reads it.
 accesskit_consumer = "0.38"
 
 [patch.crates-io]
 # zgui's copy of fontique, which keeps resolved font families across queries
 # and caches the system font collection between launches.
-fontique = { git = "https://github.com/landaire-contrib/zgui", branch = "main" }
+fontique = { git = "https://github.com/landaire-contrib/zgui", rev = "43996299f8dda1c54012f4a1d61ceb649fc49814" }
 # pickled = { path = "../pickled" }
 # egui = { git = "https://github.com/emilk/egui", branch = "main" }
 # eframe = { git = "https://github.com/emilk/egui", branch = "main" }

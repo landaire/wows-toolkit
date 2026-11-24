@@ -38,10 +38,13 @@ use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
+use zgui::geom::Css;
+use zgui::geom::CssPx;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::geom::Rect;
+use zgui::geom::Size;
 use zgui::reactive::Signal;
 use zgui::reactive::provide_local_context;
 use zgui::vocab::Modifiers;
@@ -79,6 +82,7 @@ fn Harness(
     with_detail: bool,
     #[prop(optional)] saved_sort: Option<SortOrder>,
     #[prop(optional)] height: Option<f32>,
+    #[prop(default = MotionPreference::Full)] motion: MotionPreference,
     /// The build the battle was read through.
     #[prop(optional)]
     battle_build: Option<Arc<LoadedGameData>>,
@@ -101,7 +105,7 @@ fn Harness(
         theme: RwSignal::new_local(theme),
         theme_preview: RwSignal::new_local(None),
         zoom: RwSignal::new_local(ZoomFactor::DEFAULT),
-        motion: RwSignal::new_local(MotionPreference::Full),
+        motion: RwSignal::new_local(motion),
     });
     let debug = Signal::stored_local(false);
     // Built inside the theme root, under its context.
@@ -1067,6 +1071,111 @@ fn a_withheld_match_contribution_says_why_it_is_missing() {
         let hover = plain_hover(&mut window, ReplayColumn::MatchContribution);
         assert_eq!(hover, [reason.explanation()], "{reason:?}");
     }
+}
+
+/// Incremental scrolling must leave the damage bars and scrollbar gutters as a full repaint does.
+#[test]
+#[ignore = "needs a graphics device"]
+fn scrolling_damage_bars_matches_a_full_repaint() {
+    // The arrangement cache is thread-local and has no reset operation.
+    std::thread::spawn(|| {
+        let shown = [ReplayColumn::Name, ReplayColumn::ActualDamage, ReplayColumn::ReceivedDamage];
+        let mut columns = arrangement::Columns::new();
+        for column in shown {
+            columns.widths[column as usize] = Some(landaire_ui::ColumnWidth(200.0));
+        }
+        arrangement::remember(&columns);
+
+        let mut model = split_damage(sample_model());
+        model.columns = shown.to_vec();
+        for (index, row) in model.rows.iter_mut().enumerate() {
+            let amount = 100_000;
+            let ap = if index % 2 == 0 { 80_000 } else { 20_000 };
+            let bands = vec![
+                DamageLine { kind: DamageKind::Ap, label: "AP", amount: ap },
+                DamageLine { kind: DamageKind::Fire, label: "Fire", amount: amount - ap },
+            ];
+            row.actual_damage = Some(amount);
+            row.received_damage = Some(amount);
+            row.actual_damage_by_type = Some(bands.clone());
+            row.received_damage_by_type = Some(bands);
+        }
+        let watched = model.rows[2].db_id.raw();
+        let model = Rc::new(model);
+        let options = HeadlessOptions {
+            drawing: Drawing::Device,
+            desktop: Some(Appearance::Dark),
+            ..HeadlessOptions::new(WindowSize { width: 500.0, height: 260.0 })
+        };
+        let mut window = HeadlessWindow::open(options, move || {
+            view! {
+                Harness(
+                    scheme = Scheme::Dark,
+                    model = Rc::clone(&model),
+                    with_detail = false,
+                    saved_sort = SortOrder::default(),
+                    height = 220.0,
+                    motion = MotionPreference::Reduced,
+                )
+            }
+        })
+        .expect("the table opens on the graphics device");
+        window.advance(Duration::from_millis(600));
+
+        let port = window.by_class("lui-grid__port").expect("the table has a scrollport");
+        let port_bounds = window.bounds(port).expect("the scrollport has a box");
+        let name = window.by_test_id(&format!("player-name-{watched}")).expect("the watched player is drawn");
+        let received = cell_on_line_of(&window, name, ReplayColumn::ReceivedDamage);
+        let received_bounds = window.bounds(received).expect("the last column has a box");
+        let right = port_bounds.origin.x.0 + port_bounds.size.width.0;
+        assert!(received_bounds.origin.x.0 > port_bounds.origin.x.0 + 390.0, "received damage is the last column");
+        assert!(received_bounds.origin.x.0 < right, "received damage is partly visible");
+        assert!(
+            received_bounds.origin.x.0 + received_bounds.size.width.0 > right,
+            "received damage crosses the right gutter"
+        );
+        assert!(damage_bar(&window, watched, ReplayColumn::ReceivedDamage).size.width.0 > 100.0);
+        window.pixels().expect("the initial frame is fully painted");
+
+        let steps: [Size<CssPx, Css>; 4] = [
+            Size::new(CssPx(0.0), CssPx(15.0)),
+            Size::new(CssPx(0.0), CssPx(-15.0)),
+            Size::new(CssPx(25.0), CssPx(0.0)),
+            Size::new(CssPx(-25.0), CssPx(0.0)),
+        ];
+        for delta in steps {
+            let before = window.bounds(received).expect("the last column has a box");
+            window.trackpad_scroll(port, &[delta]).expect("the table accepts instant trackpad scrolling");
+            let after = window.bounds(received).expect("the last column has a box");
+            assert!(
+                (after.origin.x.0 - before.origin.x.0 + delta.width.0).abs() < 1.0,
+                "the horizontal scroll moved by {delta:?}"
+            );
+            assert!(
+                (after.origin.y.0 - before.origin.y.0 + delta.height.0).abs() < 1.0,
+                "the vertical scroll moved by {delta:?}"
+            );
+
+            let painted = window.painted_pixels().expect("the incremental frame is available");
+            let repainted = window.pixels().expect("the same scroll position can be fully repainted");
+            assert_eq!(window.bounds(received), Some(after), "the full repaint does not advance scrolling");
+            assert_eq!(painted.size(), repainted.size());
+            let size = painted.size();
+            let mut differences = 0usize;
+            let mut first = None;
+            for y in 0..size.height {
+                for x in 0..size.width {
+                    if painted.rgba(x, y) != repainted.rgba(x, y) {
+                        differences += 1;
+                        first.get_or_insert(Point::<i32, Device>::new(x, y));
+                    }
+                }
+            }
+            assert_eq!(differences, 0, "scroll {delta:?} left stale pixels; first difference at {first:?}");
+        }
+    })
+    .join()
+    .expect("the isolated graphics regression completes");
 }
 
 /// Writes the table in both appearances, with one row open, and the row part way open as its

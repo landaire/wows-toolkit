@@ -612,10 +612,17 @@ impl HeadlessWindow {
         self.deliver(SurfaceEvent::Key { state: KeyState::Released, event, modifiers, timestamp: Timestamp::ORIGIN });
     }
 
-    /// The window's composed pixels, read back off the graphics device.
+    /// Repaints the whole window and reads its composed pixels off the graphics device.
     pub fn pixels(&mut self) -> Result<Pixels, HeadlessError> {
         self.redraw_whole();
+        self.painted_pixels()
+    }
 
+    /// Reads the currently composed pixels without requesting a redraw.
+    ///
+    /// Use this to check incremental painting. [`Self::pixels`] repaints the whole window and
+    /// therefore cannot expose stale pixels left by an incremental frame.
+    pub fn painted_pixels(&self) -> Result<Pixels, HeadlessError> {
         let renderer = self.window().renderer().as_any().and_then(|any| any.downcast_ref::<WgpuRenderer>());
         let Some(renderer) = renderer else {
             return Err(HeadlessError::NotDrawnOnDevice);
