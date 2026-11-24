@@ -175,8 +175,9 @@ jobs:
         shell: pwsh
         run: |
           $slug = "${{ steps.buck.outputs.slug }}"
-          Copy-Item -Recurse "crates/wt-translations/translations" "translations" -Force
-          Compress-Archive -Path "dist/wows_toolkit.exe","dist/wows_toolkit.pdb","LICENSE","THIRD_PARTY_NOTICES.txt","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
+          # The catalogs are compiled into the app. A translations folder beside it overrides them,
+          # and the updater replaces only the executable, so shipping one would pin these strings.
+          Compress-Archive -Path "dist/wows_toolkit.exe","dist/wows_toolkit.pdb","LICENSE","THIRD_PARTY_NOTICES.txt","README.md" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
@@ -256,7 +257,6 @@ jobs:
 
           mkdir -p build-dir/files/bin
           cp dist/wows_toolkit dist/wgc-relay.exe dist/wgc-placeholder.exe build-dir/files/bin/
-          cp -r crates/wt-translations/translations build-dir/files/bin/translations
 
           mkdir -p build-dir/files/share/applications
           cp assets/wows-toolkit.desktop "build-dir/files/share/applications/${APP_ID}.desktop"
@@ -358,7 +358,6 @@ jobs:
           cp dist/wows_toolkit "$APP/Contents/MacOS/wows_toolkit"
           chmod +x "$APP/Contents/MacOS/wows_toolkit"
           cp wows_toolkit.icns "$APP/Contents/Resources/"
-          cp -r crates/wt-translations/translations "$APP/Contents/MacOS/translations"
           # Inside the bundle so the notices stay with the app after it is
           # dragged out of the disk image.
           cp LICENSE THIRD_PARTY_NOTICES.txt "$APP/Contents/Resources/"
