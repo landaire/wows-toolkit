@@ -513,6 +513,15 @@ fn the_overview_rates_the_session_only_with_a_table() {
     assert!(window.by_test_id("stats-overview-summary").is_none(), "no games, no summary");
 }
 
+#[test]
+fn the_overview_shows_each_ships_average_base_xp() {
+    let Opened { mut window, .. } = open(Panel::Overview, Drawing::Recorded, Appearance::Dark, None);
+    let heading = t!("stat-avg_prefix", name = t!("stat-base_xp")).into_owned();
+
+    assert!(window.by_role_and_label(zgui::vocab::Role::ColumnHeader, &heading).is_some());
+    assert!(window.by_label("1,159").is_some(), "the Yamato's three battles average 1,159 base XP");
+}
+
 /// The band a cell carries, read off the element `test_id` names.
 fn band_of(window: &HeadlessWindow, test_id: &str) -> Option<&'static str> {
     let cell = window.by_test_id(test_id).expect("the cell is drawn");

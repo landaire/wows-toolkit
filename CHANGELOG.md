@@ -85,6 +85,11 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
+- *(toolkit)* Show each ship's average base XP in the Stats overview
+- *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team
+- *(toolkit)* Apply replay renderer player and ship name switches when a baked frame is drawn
+- *(toolkit)* Keep replay playback, seeking and zoom controls available while a video renders
+
 - *(toolkit)* Translate the strings that every language other than English was missing, such as the replay folder tabs, the rating breakdown and the texture export, and translate a few strings that were left in English
 - *(toolkit)* Show messages at the bottom right of the main window, above the status bar, so they no longer cover the Play button and the tab strip
 - *(toolkit)* Keep the Play button's size and place while the game starts and runs, and show the keyring note under it rather than beside it

@@ -4,6 +4,7 @@ use wows_toolkit_replay_data::damage_mix::DamageKind;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
 use wows_toolkit_replay_data::damage_mix::DamageMix;
 use wows_toolkit_replay_data::model::separate_number;
+use wows_toolkit_replay_data::team_totals::TeamScale;
 use zgui::prelude::AnyView;
 use zgui::view;
 
@@ -14,8 +15,9 @@ pub fn color(kind: DamageKind) -> String {
     format!("var(--wt-damage-{})", damage_kind_name(kind))
 }
 
-/// The segments across the whole width, each as wide as its kind's part of the damage.
-pub fn stacked_bar(mix: &DamageMix) -> AnyView {
+/// The segments, each as wide as its kind's part of the damage, scaled against the greatest
+/// damage figure on the player's team.
+pub fn stacked_bar(mix: &DamageMix, scale: TeamScale) -> AnyView {
     let segments: Vec<AnyView> = mix
         .proportions()
         .enumerate()
@@ -32,7 +34,8 @@ pub fn stacked_bar(mix: &DamageMix) -> AnyView {
         })
         .collect();
 
-    AnyView::new(view! { box(class = "wt-pt-mix") {{segments}} })
+    let width = format!("{}%", scale.fraction * 100.0);
+    AnyView::new(view! { box(class = "wt-pt-mix", style:width = width) {{segments}} })
 }
 
 /// Every line with its colour key, amount and share of the total, for a tooltip.

@@ -41,6 +41,7 @@ use wowsunpack::game_params::types::Species;
 use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
+use zgui::geom::Rect;
 use zgui::reactive::Signal;
 use zgui::reactive::provide_local_context;
 use zgui::vocab::Modifiers;
@@ -221,6 +222,33 @@ fn cell_on_line_of(window: &HeadlessWindow, element: Element, column: ReplayColu
                 .is_some_and(|cell| cell.origin.y.0 <= middle && middle < cell.origin.y.0 + cell.size.height.0)
         })
         .expect("the line has the cell")
+}
+
+/// The damage-mix bar in `column` on player `id`'s line.
+fn damage_bar(window: &HeadlessWindow, id: i64, column: ReplayColumn) -> Rect<DevicePx, Device> {
+    let name = window.by_test_id(&format!("player-name-{id}")).expect("the player's name is drawn");
+    let cell = cell_on_line_of(window, name, column);
+    let cell = window.bounds(cell).expect("the damage cell has a box");
+    let bar = window
+        .all_by_class("wt-pt-mix")
+        .into_iter()
+        .find(|bar| window.bounds(*bar).is_some_and(|bar| cell.contains(bar.origin)))
+        .expect("the damage cell has a mix bar");
+
+    window.bounds(bar).expect("the damage bar has a box")
+}
+
+#[test]
+fn damage_bars_scale_to_the_largest_figure_on_the_players_team() {
+    let (window, _) = open_table(Drawing::Recorded, Scheme::Dark);
+
+    for column in [ReplayColumn::ActualDamage, ReplayColumn::ReceivedDamage] {
+        let greatest = damage_bar(&window, 2, column).size.width.0;
+        let smaller = damage_bar(&window, 4, column).size.width.0;
+        let expected = greatest * 61_200.0 / 112_300.0;
+
+        assert!((smaller - expected).abs() < 1.0, "{column:?}: {smaller} is scaled against {greatest}");
+    }
 }
 
 /// An old battle's class icons come from the build it was read through, before the newest build

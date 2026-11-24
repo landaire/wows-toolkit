@@ -24,6 +24,7 @@ use wows_toolkit_replay_data::damage_mix::DamageMix;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::SkillWarning;
 use wows_toolkit_replay_data::model::separate_number;
+use wows_toolkit_replay_data::team_totals::TeamScale;
 use wows_toolkit_replay_data::team_totals::TeamSide;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wt_translations::t;
@@ -258,7 +259,13 @@ fn number_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
 
 /// The cell box: its colour, the share bar under it, its text and, for a damage figure, the
 /// band of damage types under the text.
-fn figure_cell(col: ReplayColumn, row: &TableRow, cx: TableCx, cell: &CellValue, mix: Option<&DamageMix>) -> AnyView {
+fn figure_cell(
+    col: ReplayColumn,
+    row: &TableRow,
+    cx: TableCx,
+    cell: &CellValue,
+    damage_bar: Option<AnyView>,
+) -> AnyView {
     let ink = cell.color.map(role_color);
     // A ship name keeps the font's own figures.
     let figures = (col != ReplayColumn::ShipName).then(String::new);
@@ -274,9 +281,8 @@ fn figure_cell(col: ReplayColumn, row: &TableRow, cx: TableCx, cell: &CellValue,
             })
         })
     });
-    let content = match (mix, flag) {
-        (Some(mix), _) => {
-            let bar = damage_mix::stacked_bar(mix);
+    let content = match (damage_bar, flag) {
+        (Some(bar), _) => {
             AnyView::new(view! { box(class = "wt-pt-figure", on:double_click = keep_double) { {text} {bar} } })
         }
         (None, Some(flag)) => AnyView::new(view! { {flag} {text} }),
@@ -309,7 +315,8 @@ fn damage_cell(col: ReplayColumn, row: &TableRow, cx: TableCx) -> AnyView {
     };
 
     let cell = cell_value(&row.row, col, row.debug);
-    let content = figure_cell(col, row, cx, &cell, Some(&mix));
+    let bar = damage_mix::stacked_bar(&mix, row.scale(col).unwrap_or(TeamScale::FULL));
+    let content = figure_cell(col, row, cx, &cell, Some(bar));
     let shown = StoredValue::new_local((mix, lines.to_vec(), row.share(col).map(|share| share.text())));
     let explained = move || {
         shown.with_value(|(mix, lines, share)| {

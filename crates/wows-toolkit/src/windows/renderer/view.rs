@@ -420,8 +420,10 @@ fn PlayButton(session: RendererSession, refused: Signal<bool, LocalStorage>) -> 
 /// The scrubber, and the row of controls under it.
 #[component]
 fn Transport(session: RendererSession) -> impl IntoView {
-    let ready = move || session.is_ready() && session.export.with(|export| export.progress.is_none());
+    let ready = move || session.is_ready();
     let refused = Signal::derive_local(move || !ready());
+    let export_refused =
+        Signal::derive_local(move || !ready() || session.export.with(|export| export.progress.is_some()));
     let press = move |act: fn(RendererSession)| UnsyncCallback::new(move |()| act(session));
     let toasts = Toasts::current();
     let jump = move |act: fn(RendererSession, Option<Toasts>)| UnsyncCallback::new(move |()| act(session, toasts));
@@ -534,11 +536,11 @@ fn Transport(session: RendererSession) -> impl IntoView {
                     }
                 }
                 box(class = "wt-renderer__rule")
-                // Withdrawn while a session runs: an export stops playback, and the rest of the
-                // session watches this end's.
+                // Withdrawn while a session runs: the rest of the session watches this end's
+                // playback, and only one export can run at a time.
                 Show(when = move || !session.collab.with(CollabLink::is_active)) {
                     TransportButton(glyph = Glyph::Download, label_key = "ui-replay-renderer-export_video",
-                        test_id = "replay-renderer-export", disabled = refused,
+                        test_id = "replay-renderer-export", disabled = export_refused,
                         on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::File)))
                 }
                 ToolsPopover(session = session)
@@ -553,7 +555,7 @@ fn Transport(session: RendererSession) -> impl IntoView {
                 }
                 Show(when = move || !session.collab.with(CollabLink::is_active)) {
                     TransportButton(glyph = Glyph::Clipboard, label_key = "ui-replay-renderer-export_clipboard",
-                        test_id = "replay-renderer-clipboard", disabled = refused,
+                        test_id = "replay-renderer-clipboard", disabled = export_refused,
                         on_press = UnsyncCallback::new(move |()| export_asking_first(session, ExportTarget::Clipboard)))
                 }
             }

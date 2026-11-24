@@ -834,6 +834,34 @@ fn a_display_toggle_changes_what_is_drawn_without_rebaking() {
     assert_eq!(drawn.map(|drawn| drawn.len()), Some(0), "the torpedo is no longer drawn");
     assert_eq!(track.len(), baked, "the track is untouched; only what is drawn of it moved");
 }
+/// Player and ship names are fields of ship commands rather than separate commands, so their
+/// switches clear those fields without another bake.
+#[test]
+fn the_name_toggles_hide_names_without_rebaking() {
+    let mut track = track(vec![0.0, 30.0]);
+    let mut ship = drawn_ship(1, "player", 10.0, true);
+    let DrawCommand::Ship { ship_name, .. } = &mut ship else { unreachable!() };
+    *ship_name = Some("ship".to_owned());
+    track.frames[0] = vec![ship];
+    let mut options = RenderOptions { show_player_names: true, show_ship_names: true, ..playback_options_hidden() };
+    let mut show_dead_ships = true;
+    let names = |options: &RenderOptions, show_dead_ships: bool| {
+        let drawn = drawn_at(&track, FrameIndex::FIRST, options, show_dead_ships, &ShipChoices::new(), Vec::new())
+            .expect("the first frame draws");
+        let DrawCommand::Ship { player_name, ship_name, .. } = &drawn[0] else {
+            panic!("the ship is drawn");
+        };
+        (player_name.clone(), ship_name.clone())
+    };
+
+    assert_eq!(names(&options, show_dead_ships), (Some("player".to_owned()), Some("ship".to_owned())));
+
+    (toggle("renderer-opt-player-names").write)(&mut options, &mut show_dead_ships, false);
+    assert_eq!(names(&options, show_dead_ships), (None, Some("ship".to_owned())));
+
+    (toggle("renderer-opt-ship-names").write)(&mut options, &mut show_dead_ships, false);
+    assert_eq!(names(&options, show_dead_ships), (None, None));
+}
 
 /// Dead ships are gated beside the options rather than in them, so the
 /// toggle has to reach its own flag.

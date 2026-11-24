@@ -4,6 +4,13 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.1.1
+
+- The Stats overview shows each ship's average base XP.
+- Damage dealt and received bars in the player table are scaled against the highest damage on that player's team.
+- The replay renderer's player and ship name switches hide those labels in the viewer and exported videos.
+- You can keep playing, seeking and zooming a replay while its video renders.
+
 ## 1.1.0
 
 - The new interface from the 1.1 betas is now the only interface. The old one is removed.

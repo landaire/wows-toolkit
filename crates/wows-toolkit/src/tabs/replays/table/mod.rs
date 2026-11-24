@@ -37,6 +37,7 @@ use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
 use wows_toolkit_replay_data::sort::sort_rows;
 use wows_toolkit_replay_data::team_totals::TeamDamage;
+use wows_toolkit_replay_data::team_totals::TeamScale;
 use wows_toolkit_replay_data::team_totals::TeamShare;
 use wows_toolkit_replay_data::team_totals::TeamSide;
 use wows_toolkit_replay_data::team_totals::TeamTotals;
@@ -122,6 +123,8 @@ struct TableRow {
     row: Arc<PlayerRow>,
     /// Indexed by `ReplayColumn as usize`.
     shares: Arc<[Option<TeamShare>]>,
+    /// Indexed by `ReplayColumn as usize`.
+    scales: Arc<[Option<TeamScale>]>,
     side: TeamSide,
     /// The heading over the row's team, while the order keeps each team's rows together.
     team: Option<TeamHeading>,
@@ -135,6 +138,7 @@ impl PartialEq for TableRow {
         self.id == other.id
             && Arc::ptr_eq(&self.row, &other.row)
             && self.shares == other.shares
+            && self.scales == other.scales
             && self.side == other.side
             && self.team == other.team
             && self.debug == other.debug
@@ -151,6 +155,10 @@ impl Borrow<PlayerRow> for TableRow {
 impl TableRow {
     fn share(&self, col: ReplayColumn) -> Option<TeamShare> {
         self.shares[col as usize]
+    }
+
+    fn scale(&self, col: ReplayColumn) -> Option<TeamScale> {
+        self.scales[col as usize]
     }
 }
 
@@ -558,6 +566,7 @@ fn table_rows(
         .map(|(position, row)| TableRow {
             id: RowId(position),
             shares: ReplayColumn::ALL.iter().map(|col| totals.share(row, *col, debug)).collect(),
+            scales: ReplayColumn::ALL.iter().map(|col| totals.scale(row, *col, debug)).collect(),
             side: TeamSide::of(row, self_team),
             team: None,
             debug,

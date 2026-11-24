@@ -669,10 +669,10 @@ fn a_resize_while_paused_draws_the_frame_again() {
     assert_eq!(session.frames_asked(), asked, "a window left alone asks for nothing more");
 }
 
-/// An export says how far it has got over the video, and the transport refuses while it runs:
-/// the export holds the renderer the transport draws through.
+/// An export reports its progress over the video while playback and navigation remain available.
+/// Only starting a second export is refused.
 #[test]
-fn an_export_reports_its_progress_over_the_video() {
+fn an_export_reports_progress_without_locking_playback() {
     let (mut window, session) = open_viewport(track(vec![0.0, 30.0]));
     assert!(window.by_test_id("replay-renderer-export-overlay").is_none(), "nothing is being exported");
     assert!(!is_disabled(&mut window, "replay-renderer-play"));
@@ -692,11 +692,14 @@ fn an_export_reports_its_progress_over_the_video() {
     });
     window.advance(Duration::from_millis(16));
     assert!(window.by_test_id("replay-renderer-export-overlay").is_some(), "the bar is over the video");
-    for control in
-        ["replay-renderer-play", "replay-renderer-export", "replay-renderer-clipboard", "replay-renderer-jump-to-end"]
-    {
-        assert!(is_disabled(&mut window, control), "{control} refuses while the export runs");
+    for control in ["replay-renderer-export", "replay-renderer-clipboard"] {
+        assert!(is_disabled(&mut window, control), "{control} refuses a second export");
     }
+    for control in ["replay-renderer-play", "replay-renderer-jump-to-end"] {
+        assert!(!is_disabled(&mut window, control), "{control} remains available while the export runs");
+    }
+    click(&mut window, "replay-renderer-jump-to-end");
+    assert_eq!(at(session), 1, "the viewer moves while the export runs");
 
     session.export.update(|export| {
         export.progress = None;

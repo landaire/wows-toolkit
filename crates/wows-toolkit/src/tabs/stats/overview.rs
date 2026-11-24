@@ -536,6 +536,13 @@ fn ship_table(computed: Memo<Computed>) -> AnyView {
         })
         .text(move |ship| optional_number(ship.info.avg_damage(), locale))
         .sizing(number_width),
+        GridColumn::new(
+            "avg_base_xp",
+            t!("stat-avg_prefix", name = t!("stat-base_xp")).into_owned(),
+            move |ship: &OverviewShip| optional_number(ship.info.avg_win_adjusted_xp(), locale),
+        )
+        .text(move |ship| optional_number(ship.info.avg_win_adjusted_xp(), locale))
+        .sizing(number_width),
         GridColumn::new("avg_frags", t!("ui-stats-column_avg_frags").into_owned(), |ship: &OverviewShip| {
             optional_decimal(ship.info.avg_frags())
         })

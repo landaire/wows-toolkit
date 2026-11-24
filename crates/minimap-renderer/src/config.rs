@@ -490,11 +490,32 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
 /// Beside [`should_draw_command`] for the same reason: every app that
 /// rasterises a command stream hides the same things.
 pub fn hide_command_parts(cmd: &mut DrawCommand, opts: &RenderOptions) {
-    if !opts.show_score_timer
-        && let DrawCommand::ScoreBar { team0_timer, team1_timer, .. } = cmd
-    {
-        *team0_timer = None;
-        *team1_timer = None;
+    match cmd {
+        DrawCommand::Ship { player_name, ship_name, .. } | DrawCommand::Plane { player_name, ship_name, .. } => {
+            hide_names(player_name, ship_name, opts);
+        }
+        DrawCommand::DeadShip { player_name, ship_name, .. } => {
+            if opts.show_dead_ship_names {
+                hide_names(player_name, ship_name, opts);
+            } else {
+                *player_name = None;
+                *ship_name = None;
+            }
+        }
+        DrawCommand::ScoreBar { team0_timer, team1_timer, .. } if !opts.show_score_timer => {
+            *team0_timer = None;
+            *team1_timer = None;
+        }
+        _ => {}
+    }
+}
+
+fn hide_names(player_name: &mut Option<String>, ship_name: &mut Option<String>, opts: &RenderOptions) {
+    if !opts.show_player_names {
+        *player_name = None;
+    }
+    if !opts.show_ship_names {
+        *ship_name = None;
     }
 }
 

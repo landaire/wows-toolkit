@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -253,6 +254,8 @@ struct Run {
     /// drawn off the UI thread or an export runs, so frames of a playing battle are drawn side by
     /// side when one takes longer than a frame interval.
     renderers: Vec<SharedPreviewRenderer>,
+    /// The number of renderers in the pool when none are drawing.
+    renderer_capacity: usize,
     /// Moved on whenever `renderers` is replaced, so a frame drawn on the old canvas, and the old
     /// renderer it brings back, are dropped.
     renderer_generation: Generation,
@@ -364,6 +367,7 @@ impl RendererSession {
                 draw_generation: Generation::default(),
                 shown_draw: Generation::default(),
                 redraw_wanted: false,
+                renderer_capacity: 0,
                 pending_export: None,
                 regions: Vec::new(),
                 messages: None,
@@ -581,6 +585,7 @@ impl RendererSession {
             };
             let track = Arc::new(track);
             self.run.update_value(|run| {
+                run.renderer_capacity = renderers.len();
                 run.renderers = renderers;
                 run.renderer_generation.next();
                 run.layout = SidePanelLayout::None;
@@ -788,6 +793,7 @@ impl RendererSession {
                     self.run.update_value(|run| {
                         run.layout = layout;
                         // A draw or an export in flight on an old renderer drops it as it finishes.
+                        run.renderer_capacity = renderers.len();
                         run.renderers = renderers;
                         run.renderer_generation.next();
                     });
@@ -1728,12 +1734,7 @@ impl RendererSession {
                 return true;
             }
         }
-        let exporting = self.export.with_untracked(|export| export.progress.is_some());
         match key {
-            // The transport refuses while an export holds the renderer, as its buttons do.
-            Key::Named(
-                NamedKey::Space | NamedKey::ArrowUp | NamedKey::ArrowDown | NamedKey::ArrowLeft | NamedKey::ArrowRight,
-            ) if exporting => return false,
             Key::Named(NamedKey::Space) => self.toggle_playing(),
             Key::Named(NamedKey::ArrowUp) => self.step_speed(1, toasts),
             Key::Named(NamedKey::ArrowDown) => self.step_speed(-1, toasts),
@@ -1799,20 +1800,27 @@ impl RendererSession {
         let Some(frames) = ExportFrames::new(track, settings.include_pre_battle, settings.timing, layers) else {
             return;
         };
-        // Held for the whole encode, which is why the transport refuses while one runs.
-        let Some((renderer, generation)) = self
+        // One renderer is held for the encode. A one-renderer pool keeps its renderer and exports
+        // through a copy so the viewport can continue to draw.
+        let Some((renderer, generation, borrowed)) = self
             .with_run(|run| {
-                let renderer = run.renderers.pop();
-                if renderer.is_none() {
+                let Some(renderer) = run.renderers.pop() else {
                     // Every renderer is drawing; the export starts as the first draw hands one back.
                     run.pending_export = Some(target);
-                    run.ticker = None;
-                }
-                renderer.map(|renderer| (renderer, run.renderer_generation))
+                    return None;
+                };
+                let borrowed = run.renderer_capacity > 1;
+                let renderer = if borrowed {
+                    renderer
+                } else {
+                    let copy = renderer.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+                    run.renderers.push(renderer);
+                    Arc::new(Mutex::new(copy))
+                };
+                Some((renderer, run.renderer_generation, borrowed))
             })
             .flatten()
         else {
-            self.playback.update(Playback::stop);
             return;
         };
         let Some((services, app_messages)) = self.run.try_with_value(|run| (run.services, run.app_messages)) else {
@@ -1820,8 +1828,6 @@ impl RendererSession {
         };
         let total = frames.len() as u64;
 
-        self.run.update_value(|run| run.ticker = None);
-        self.playback.update(Playback::stop);
         self.export.update(|export| {
             export.failure = None;
             export.progress = Some(ExportProgress { done: 0, total, stage: ExportStage::Encoding });
@@ -1842,7 +1848,9 @@ impl RendererSession {
                     match asked {
                         Ok(chosen) => chosen,
                         Err(err) => {
-                            self.give_back(generation, renderer);
+                            if borrowed {
+                                self.give_back(generation, renderer);
+                            }
                             self.export.try_update(|export| {
                                 export.progress = None;
                                 export.failure = Some(err.to_string());
@@ -1856,7 +1864,9 @@ impl RendererSession {
                 ExportTarget::Clipboard => temporary_output(&suggested),
             };
             let Some(output) = output else {
-                self.give_back(generation, renderer);
+                if borrowed {
+                    self.give_back(generation, renderer);
+                }
                 self.export.try_update(|export| export.progress = None);
                 self.after_renderer_returned();
                 return;
@@ -1886,7 +1896,9 @@ impl RendererSession {
             let ((renderer, outcome), ()) = futures::join!(encode, follow);
             drop(job);
 
-            self.give_back(generation, renderer);
+            if borrowed {
+                self.give_back(generation, renderer);
+            }
             let outcome = match outcome {
                 Ok(()) if target == ExportTarget::Clipboard => {
                     copy_file_to_clipboard(output).map(|()| ExportDone::Copied)
