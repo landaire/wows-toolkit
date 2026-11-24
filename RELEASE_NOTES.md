@@ -17,7 +17,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### New interface
 
-![Replay inspector](https://landaire.github.io/wows-toolkit/img/shots/replay-dark.webp)
+![Replay inspector](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/replay-dark.webp)
 
 - Panels dock, split and move by dragging their tabs.
 - The interface has light and dark themes and zoom shortcuts. You can select and copy text.
@@ -31,7 +31,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### Launcher on Linux
 
-![Launcher](https://landaire.github.io/wows-toolkit/img/shots/launcher-dark.webp)
+![Launcher](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/launcher-dark.webp)
 
 - The launcher is opt-in. Turn on Enable game launcher in settings to get a Play button and saved accounts. Wargaming does not support this way of playing.
 - Sign in to your Wargaming account, update or install the game, and start it. You choose the destination folder before an update starts.
@@ -45,7 +45,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### Replay inspector and listing
 
-![Replay listing with a hover preview](https://landaire.github.io/wows-toolkit/img/shots/listing-dark.webp)
+![Replay listing with a hover preview](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/listing-dark.webp)
 
 - Replay folders open as tabs in the listing. Drop a folder to open it, or drop several replays to list them in a tab of their own. Subfolders are listed, indexed and watched too.
 - Listing rows show a map thumbnail, the result, PR and MC. The listing's options choose what else each row shows: division, Twitch, damage, kills and battle time.
@@ -77,7 +77,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### Replay renderer
 
-![Replay renderer](https://landaire.github.io/wows-toolkit/img/shots/renderer-dark.webp)
+![Replay renderer](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/renderer-dark.webp)
 
 - Playback runs at 30 frames a second at every speed. Ships, shells, torpedoes, planes and smoke move smoothly between recorded frames, and seeking lands on the exact time.
 - The battle clock counts down once per game second.
@@ -94,7 +94,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### Armor and Model Viewer
 
-![Armor viewer](https://landaire.github.io/wows-toolkit/img/shots/armor-dark.webp)
+![Armor viewer](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/armor-dark.webp)
 
 - The options panel is grouped into Ship, Layers, Analysis and Display tabs. Its search covers every tab.
 - Shift+click the hull to cast a shell. The trajectory editor lists each plate the shell struck with its thickness, impact angle, zone and what the shell did there.
@@ -105,7 +105,7 @@ per-commit history lives in `CHANGELOG.md`.
 - Ctrl+Z, Ctrl+Shift+Z and Ctrl+S work anywhere in the viewer.
 - The viewer starts with the water off and the grid on.
 
-![Model viewer](https://landaire.github.io/wows-toolkit/img/shots/model-dark.webp)
+![Model viewer](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/model-dark.webp)
 
 - The Model Viewer opens any model in the game, including armored buildings under Fortifications and their gun mounts.
 - Hover a model to see the name of the part under the pointer.
@@ -114,7 +114,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### Player Tracker
 
-![Current Match](https://landaire.github.io/wows-toolkit/img/shots/tracker-dark.webp)
+![Current Match](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/tracker-dark.webp)
 
 - Current Match, Players and Clans are panels you can place side by side. The layout and your filters are saved.
 - Current Match shows team averages for win rate and PR, colored by the band each value falls in. Ship class icons keep their proportions.
@@ -124,7 +124,7 @@ per-commit history lives in `CHANGELOG.md`.
 
 ### Stats
 
-![Session stats](https://landaire.github.io/wows-toolkit/img/shots/stats-dark.webp)
+![Session stats](https://raw.githubusercontent.com/landaire/wows-toolkit/v1.1.0/site/img/shots/stats-dark.webp)
 
 - Session stats can hold your saved session or every battle since the app opened. Choose from the listing's options or the Stats tab.
 - Battles you play are added to session stats as the game writes them.
