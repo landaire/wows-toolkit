@@ -11,6 +11,9 @@
 //! [`POLL_INTERVAL`] costs a `stat` per tick. [`LivePoll`] runs it on a thread
 //! the watchdog supervises; every function here blocks.
 
+use std::fs::Metadata;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,6 +30,8 @@ use std::time::SystemTime;
 
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::channel::mpsc::UnboundedSender;
+use jiff::Timestamp;
+use wows_replay_insights::battle_report::try_replay_timestamp;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::analyzer::arena_scan::scan_arena_state;
@@ -87,9 +92,55 @@ impl LiveSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RosterSource {
     /// A battle in progress, whose stream may not hold the roster yet.
-    InProgress(LiveSource),
+    InProgress(LiveRosterSource),
     /// A finished replay, read once. Debug tooling drives the live path from one.
     Finished(PathBuf),
+}
+
+impl RosterSource {
+    fn in_progress(files: LiveSource) -> Self {
+        let stream_generation = std::fs::metadata(&files.stream).ok().and_then(|meta| StreamGeneration::of(&meta));
+
+        Self::InProgress(LiveRosterSource { files, stream_generation })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveRosterSource {
+    files: LiveSource,
+    stream_generation: Option<StreamGeneration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StreamGeneration {
+    created: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+impl StreamGeneration {
+    fn of(meta: &Metadata) -> Option<Self> {
+        let created = meta.created().ok();
+        #[cfg(not(unix))]
+        let created = Some(created?);
+
+        Some(Self {
+            created,
+            #[cfg(unix)]
+            device: meta.dev(),
+            #[cfg(unix)]
+            inode: meta.ino(),
+        })
+    }
+}
+
+/// A battle and the stream generation observed with its arena header.
+#[derive(Debug)]
+pub struct LiveBattle {
+    pub battle: LiveMatch,
+    pub roster: RosterSource,
 }
 
 /// What one poll found.
@@ -201,7 +252,7 @@ impl LivePoll {
     pub fn start(
         watchdog: &Watchdog,
         replay_dir: &Path,
-    ) -> Result<(Self, UnboundedReceiver<Option<LiveMatch>>), WatchdogError> {
+    ) -> Result<(Self, UnboundedReceiver<Option<LiveBattle>>), WatchdogError> {
         Self::start_folder(watchdog, ReplayFolder::from_dir(replay_dir.to_path_buf()))
     }
 
@@ -211,7 +262,7 @@ impl LivePoll {
     pub fn start_folder(
         watchdog: &Watchdog,
         folder: ReplayFolder,
-    ) -> Result<(Self, UnboundedReceiver<Option<LiveMatch>>), WatchdogError> {
+    ) -> Result<(Self, UnboundedReceiver<Option<LiveBattle>>), WatchdogError> {
         // A poll is a `stat` every two seconds; half a minute without one is a directory that
         // does not answer, such as a network share that has gone away.
         const STALL_AFTER: Duration = Duration::from_secs(30);
@@ -220,7 +271,6 @@ impl LivePoll {
         let shared = Arc::new(PollShared {
             #[cfg(any(test, feature = "test-support"))]
             replay_dir: folder.path().to_path_buf(),
-            source: Mutex::new(LiveSource::in_dir(folder.path())),
             watch: Mutex::new(LiveWatch::new(folder)),
             changes,
             closed: Mutex::new(false),
@@ -230,12 +280,6 @@ impl LivePoll {
         let registration = watchdog.register(spec, Arc::new(PollSupervisor { shared: Arc::clone(&shared) }))?;
 
         Ok((Self { registration: Some(registration), shared }, received))
-    }
-
-    /// Where the last poll found the battle in progress, or would have: the pair a roster scan
-    /// reads. Set before the poll's change is sent.
-    pub fn live_source(&self) -> LiveSource {
-        lock(&self.shared.source).clone()
     }
 }
 
@@ -272,9 +316,7 @@ struct PollShared {
     /// Kept here rather than on the thread, so a restarted thread does not report the battle
     /// again.
     watch: Mutex<LiveWatch>,
-    /// The watch's last source, apart from it so a reader does not wait out a poll's reads.
-    source: Mutex<LiveSource>,
-    changes: UnboundedSender<Option<LiveMatch>>,
+    changes: UnboundedSender<Option<LiveBattle>>,
     /// Set when the [`LivePoll`] is dropped.
     closed: Mutex<bool>,
     closing: Condvar,
@@ -282,7 +324,10 @@ struct PollShared {
 
 /// The stamp of the battle in progress, or `None` when there is none.
 pub fn poll(source: &LiveSource) -> Option<ArenaInfoStamp> {
-    let metadata = std::fs::metadata(&source.arena_info).ok()?;
+    file_stamp(&std::fs::metadata(&source.arena_info).ok()?)
+}
+
+fn file_stamp(metadata: &Metadata) -> Option<ArenaInfoStamp> {
     if !metadata.is_file() {
         return None;
     }
@@ -302,49 +347,66 @@ pub fn read(source: &LiveSource) -> Result<LiveMatch, LiveMatchError> {
     LiveMatch::from_meta(&replay.meta).ok_or(LiveMatchError::NoTimestamp)
 }
 
-/// Reads the arena roster off `source`.
-///
-/// `None` for a battle in progress means "not yet": the stream is short, still being written, or
-/// the packet carrying the roster has not been flushed. Retried by the caller.
-pub fn scan_arena(source: &RosterSource, loaded: &LoadedGameData, game_data: &GameDataCache) -> Option<ArenaState> {
-    let replay = match source {
-        // Both halves are re-read per attempt, so an attempt that raced the game mid-write is
-        // corrected by the next one.
-        RosterSource::InProgress(live) => {
+fn read_scan_replay(source: &RosterSource, expected_stream: &mut Option<StreamGeneration>) -> Option<ReplayFile> {
+    match source {
+        RosterSource::InProgress(LiveRosterSource { files: live, .. }) => {
+            let arena_stamp = poll(live)?;
+            let stream = std::fs::metadata(&live.stream).ok()?;
+            let generation = StreamGeneration::of(&stream);
+            if expected_stream.is_some() && *expected_stream != generation {
+                return None;
+            }
+            *expected_stream = generation;
+            let stream_stamp = file_stamp(&stream)?;
             let meta = std::fs::read(&live.arena_info).ok()?;
             let packets = std::fs::read(&live.stream).ok()?;
-            ReplayFile::from_decrypted_parts(meta, packets).ok()?
+
+            // The game can replace both files while the old roster is being read.
+            let after = std::fs::metadata(&live.stream).ok()?;
+            if poll(live)? != arena_stamp
+                || file_stamp(&after)? != stream_stamp
+                || StreamGeneration::of(&after) != generation
+            {
+                return None;
+            }
+
+            ReplayFile::from_decrypted_parts(meta, packets).ok()
         }
-        RosterSource::Finished(path) => ReplayFile::from_file(path).ok()?,
-    };
-
-    let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
-    // Constants are versioned by build; without one the parser's built-in layout applies.
-    let constants = match version.build_number() {
-        Some(build) => decode_constants(loaded, build, version, game_data),
-        None => loaded.base_constants().clone(),
-    };
-
-    scan_arena_state(loaded.provider().entity_specs(), version, &replay, &constants)
+        RosterSource::Finished(path) => ReplayFile::from_file(path).ok(),
+    }
 }
 
-/// [`scan_arena`] retried every [`SCAN_RETRY_INTERVAL`] until the roster is read or
-/// [`SCAN_RETRY_BUDGET`] runs out. A finished replay is read once, since it will not change.
-/// `None` when the roster is not read, or when `cancelled` is set, which is checked between
-/// attempts.
+/// Reads the roster for `started_at`, retrying while its stream is being written. Stops if the
+/// file describes a different match, the retry budget runs out, or the caller cancels.
 pub fn scan_arena_retrying(
     source: &RosterSource,
     loaded: &LoadedGameData,
     game_data: &GameDataCache,
     cancelled: &AtomicBool,
+    started_at: Timestamp,
 ) -> Option<ArenaState> {
     let deadline = Instant::now() + SCAN_RETRY_BUDGET;
+    let mut expected_stream = match source {
+        RosterSource::InProgress(live) => live.stream_generation,
+        RosterSource::Finished(_) => None,
+    };
     loop {
         if cancelled.load(Ordering::Relaxed) {
             return None;
         }
-        if let Some(state) = scan_arena(source, loaded, game_data) {
-            return Some(state);
+        if let Some(replay) = read_scan_replay(source, &mut expected_stream) {
+            if try_replay_timestamp(&replay.meta) != Some(started_at) {
+                return None;
+            }
+
+            let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+            let constants = match version.build_number() {
+                Some(build) => decode_constants(loaded, build, version, game_data),
+                None => loaded.base_constants().clone(),
+            };
+            if let Some(state) = scan_arena_state(loaded.provider().entity_specs(), version, &replay, &constants) {
+                return Some(state);
+            }
         }
         if matches!(source, RosterSource::Finished(_)) || Instant::now() >= deadline {
             return None;
@@ -362,13 +424,16 @@ fn poll_live(shared: &PollShared, heartbeat: &Heartbeat) {
 
         #[cfg(any(test, feature = "test-support"))]
         crate::simulated_panic::stop_live_poll_if_asked(&shared.replay_dir);
-        let (observed, source) = {
+        let observed = {
             let mut watch = lock(&shared.watch);
-            let observed = watch.step();
-            (observed, watch.source.clone())
+            match watch.step() {
+                Observed::Unchanged => None,
+                Observed::Changed(live) => Some(
+                    live.map(|battle| LiveBattle { battle, roster: RosterSource::in_progress(watch.source.clone()) }),
+                ),
+            }
         };
-        *lock(&shared.source) = source;
-        if let Observed::Changed(live) = observed {
+        if let Some(live) = observed {
             // The receiver goes with its owner, which closes the poll as it goes.
             let _ = shared.changes.unbounded_send(live);
         }
@@ -463,6 +528,30 @@ mod tests {
         assert!(source.stream.ends_with(LIVE_STREAM_FILE));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_roster_scan_rejects_a_replaced_live_stream() {
+        let dir = temp_dir("replacement-stream");
+        let files = LiveSource::in_dir(&dir);
+        std::fs::write(&files.arena_info, ARENA_INFO).expect("the arena info is writable");
+        std::fs::write(&files.stream, b"original packets").expect("the first stream is writable");
+        let source = RosterSource::in_progress(files.clone());
+        let RosterSource::InProgress(live) = &source else { panic!("a live match has a live source") };
+        let mut expected = live.stream_generation;
+        let first = read_scan_replay(&source, &mut expected).expect("the original stream is readable");
+        assert_eq!(first.packet_data(), b"original packets");
+
+        let replacement = dir.join("next-stream");
+        std::fs::write(&replacement, b"successor packets").expect("the successor stream is writable");
+        std::fs::rename(replacement, files.stream).expect("the successor replaces the temporary stream");
+        assert!(
+            read_scan_replay(&source, &mut expected).is_none(),
+            "the file for the next match is rejected even while the old arena header is present"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The first step reports even an idle directory, a battle is reported
     /// once, and a file that never parses is reported as no battle after the
     /// retries rather than on every step.
@@ -510,7 +599,7 @@ mod tests {
             }
         }
         let live = block_on(changes.next()).expect("the restarted poll reports");
-        assert_eq!(live.map(|live| live.players.len()), Some(2), "the battle is reported");
+        assert_eq!(live.map(|live| live.battle.players.len()), Some(2), "the battle is reported");
 
         drop(poll);
         assert!(block_on(changes.next()).is_none(), "the thread ends with its poll");
@@ -558,8 +647,10 @@ mod scan_tests {
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
         let loaded = game_data.get_or_load_build(build).expect("the build's game data loads");
 
-        let source = RosterSource::InProgress(LiveSource::in_dir(&dir));
-        let state = scan_arena(&source, &loaded, &game_data).expect("the roster scans");
+        let source = RosterSource::in_progress(LiveSource::in_dir(&dir));
+        let started_at = try_replay_timestamp(&replay.meta).expect("the replay has a timestamp");
+        let state = scan_arena_retrying(&source, &loaded, &game_data, &AtomicBool::new(false), started_at)
+            .expect("the roster scans");
         let humans = state.players.iter().filter(|player| !player.is_bot()).count();
         println!("arena {:?}: {} players, {humans} of them human", state.arena_id, state.players.len());
 

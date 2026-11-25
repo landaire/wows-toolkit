@@ -697,7 +697,7 @@ fn adopt_install(files: &[(&str, &[u8])]) -> tempfile::TempDir {
 /// Runs frames in real time until the shell's live watch reports a battle.
 fn wait_for_battle(window: &mut HeadlessWindow) -> LiveMatch {
     for _ in 0..10 {
-        if let Some(live) = shell().live.live_match.get_untracked() {
+        if let Some(live) = shell().live.current_match().and_then(|current| current.live_match.get_untracked()) {
             return live;
         }
         settle_in_real_time(window);
@@ -715,6 +715,7 @@ fn the_live_watch_runs_without_the_tab_and_looks_up_stats_once_shown() {
     let _install = adopt_install(&[(ARENA_INFO_FILE, ARENA_INFO.as_bytes())]);
 
     let live = wait_for_battle(&mut window);
+    let current = shell().live.current_match().expect("the current match is retained");
     let names: Vec<&str> = live.players.iter().map(|player| player.name.as_str()).collect();
     assert_eq!(names, ["Harvey635", "Stranger99"], "the battle's roster is read");
     assert!(window.by_test_id("player-tracker-tab").is_none(), "the tab was never built");
@@ -723,7 +724,7 @@ fn the_live_watch_runs_without_the_tab_and_looks_up_stats_once_shown() {
     shell().live.seed_scan(shell().services(), ArenaState { arena_id: arena, players: Vec::new() });
     settle_in_real_time(&mut window);
     assert!(take_stats_lookups().is_empty(), "no lookup while the section has never been shown");
-    assert!(matches!(shell().live.stats.get_untracked(), StatsState::Held), "the lookup is held");
+    assert!(matches!(current.stats.get_untracked(), StatsState::Held), "the lookup is held");
 
     let tab = window.by_test_id("player-tracker").expect("the strip has a Player Tracker tab");
     window.click(tab).expect("the tab can be pressed");
@@ -734,7 +735,148 @@ fn the_live_watch_runs_without_the_tab_and_looks_up_stats_once_shown() {
     tracker.show_current_match();
     settle_in_real_time(&mut tracker.window);
     assert_eq!(take_stats_lookups(), [arena], "showing the section sends the held lookup once");
-    assert!(matches!(tracker.model.live.stats.get_untracked(), StatsState::Ready(_)), "and its answer is shown");
+    assert!(matches!(current.stats.get_untracked(), StatsState::Ready(_)), "and its answer is shown");
+}
+
+#[test]
+fn session_matches_survive_returning_to_port_and_can_be_reopened() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    let install = adopt_install(&[(ARENA_INFO_FILE, ARENA_INFO.as_bytes())]);
+    let first = wait_for_battle(&mut tracker.window);
+    tracker.show_current_match();
+    let has_rating = |tracker: &TrackerWindow| tracker.has(OVERALL_PR) || tracker.has(SHIP_PR);
+    tracker.model.live.seed_scan(shell().services(), ArenaState { arena_id: ArenaId::new(84001), players: Vec::new() });
+    settle_in_real_time(&mut tracker.window);
+    tracker.seed_harvey_stats();
+    tracker.model.live.seed_chat(vec![("harvey_635".to_owned(), first.started_at)]);
+    tracker.settle();
+    take_stats_lookups();
+
+    let arena_info = install.path().join("wows/replays").join(ARENA_INFO_FILE);
+    std::fs::remove_file(&arena_info).expect("the game removes the temporary arena info");
+    for _ in 0..10 {
+        settle_in_real_time(&mut tracker.window);
+        if !tracker.model.live.in_battle.get_untracked() {
+            break;
+        }
+    }
+    assert!(!tracker.model.live.in_battle.get_untracked(), "the launcher no longer considers the user in battle");
+    assert!(has_rating(&tracker), "returning to port retains fetched statistics");
+    assert!(tracker.has("tracker-twitch-ally-0"), "returning to port retains the chat observation");
+    assert!(tracker.window.by_label("[WTK] Harvey635").is_some(), "returning to port retains identities");
+    assert!(!tracker.has("tracker-debug-replay"), "session history needs no debug mode");
+
+    let second_info = ARENA_INFO.replace("00:52:26", "01:12:26").replace("Harvey635", "NextCaptain");
+    std::fs::write(&arena_info, &second_info).expect("the next match writes its arena info");
+    for _ in 0..10 {
+        settle_in_real_time(&mut tracker.window);
+        if tracker.model.live.current_match().is_some_and(|current| {
+            current
+                .live_match
+                .with_untracked(|live| live.as_ref().is_some_and(|live| live.started_at != first.started_at))
+        }) {
+            break;
+        }
+    }
+    let second = tracker
+        .model
+        .live
+        .current_match()
+        .expect("the next match is retained")
+        .live_match
+        .get_untracked()
+        .expect("the next match has a roster");
+    assert_ne!(second.started_at, first.started_at, "the poll detects the next match");
+    assert!(tracker.window.by_label("NextCaptain").is_some(), "the next match opens automatically");
+    assert!(!has_rating(&tracker), "the next match does not inherit the previous match's figures");
+
+    tracker.press("tracker-session-match-trigger");
+    tracker.press(&format!("tracker-session-match-{}", first.started_at.as_second()));
+    assert!(tracker.window.by_label("[WTK] Harvey635").is_some(), "the cached roster keeps its identity");
+    assert!(has_rating(&tracker), "the cached roster keeps its statistics");
+    assert!(tracker.has("tracker-twitch-ally-0"), "the cached roster keeps its chat observation");
+    assert!(take_stats_lookups().is_empty(), "opening a cached answer does not request statistics again");
+
+    std::fs::write(&arena_info, &second_info).expect("the game rewrites the same match's metadata");
+    for _ in 0..6 {
+        settle_in_real_time(&mut tracker.window);
+    }
+    assert_eq!(tracker.model.live.matches.with_untracked(Vec::len), 2, "a rewrite does not duplicate a match");
+    assert!(tracker.window.by_label("[WTK] Harvey635").is_some(), "a rewrite does not replace the selected history");
+
+    tracker.press("tracker-session-match-trigger");
+    tracker.press(&format!("tracker-session-match-{}", second.started_at.as_second()));
+    assert!(tracker.window.by_label("NextCaptain").is_some(), "the latest match can be reopened");
+    tracker.press("tracker-session-match-trigger");
+    tracker.press(&format!("tracker-session-match-{}", first.started_at.as_second()));
+
+    let third_info = ARENA_INFO.replace("00:52:26", "01:32:26").replace("Harvey635", "ThirdCaptain");
+    std::fs::write(&arena_info, third_info).expect("another match writes its arena info");
+    for _ in 0..10 {
+        settle_in_real_time(&mut tracker.window);
+        if tracker.window.by_label("ThirdCaptain").is_some() {
+            break;
+        }
+    }
+    assert!(tracker.window.by_label("ThirdCaptain").is_some(), "a new match replaces the historical selection");
+    assert_eq!(tracker.model.live.matches.with_untracked(Vec::len), 3, "all three session matches remain cached");
+}
+
+#[test]
+fn selecting_a_cached_match_sends_only_its_held_lookup() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    take_stats_lookups();
+    let first = tracker.seed_battle();
+    let first_arena = ArenaId::new(85001);
+    tracker.model.live.seed_scan(shell().services(), ArenaState { arena_id: first_arena, players: Vec::new() });
+
+    let mut second = first.clone();
+    second.started_at = first.started_at.checked_add(Duration::from_secs(1200)).expect("a valid timestamp");
+    let second_started_at = second.started_at;
+    tracker.model.live.seed(second);
+    let second_arena = ArenaId::new(85002);
+    tracker.model.live.seed_scan(shell().services(), ArenaState { arena_id: second_arena, players: Vec::new() });
+    tracker.settle();
+    assert!(take_stats_lookups().is_empty(), "neither lookup is sent while Current Match is hidden");
+
+    tracker.model.live.select_match(shell().services(), first.started_at);
+    tracker.show_current_match();
+    settle_in_real_time(&mut tracker.window);
+    assert_eq!(take_stats_lookups(), [first_arena], "opening history sends that match's held lookup only");
+
+    tracker.press("tracker-session-match-trigger");
+    tracker.press(&format!("tracker-session-match-{}", second_started_at.as_second()));
+    settle_in_real_time(&mut tracker.window);
+    assert_eq!(take_stats_lookups(), [second_arena], "returning to the latest sends its held lookup");
+
+    tracker.press("tracker-session-match-trigger");
+    tracker.press(&format!("tracker-session-match-{}", first.started_at.as_second()));
+    settle_in_real_time(&mut tracker.window);
+    assert!(take_stats_lookups().is_empty(), "reopening an answered match reuses its statistics");
+}
+
+#[test]
+fn two_views_of_one_arena_share_the_in_flight_lookup() {
+    let mut tracker = TrackerWindow::open(HeadlessOptions::new(REVIEW_SIZE));
+    take_stats_lookups();
+    let mut replay = tracker.seed_battle();
+    tracker.show_current_match();
+
+    let live = tracker.model.live;
+    let original = live.current_match().expect("the real match is cached");
+    let arena_id = ArenaId::new(86001);
+    let scan = || ArenaState { arena_id, players: Vec::new() };
+    live.seed_scan(shell().services(), scan());
+
+    replay.started_at = replay.started_at.checked_add(Duration::from_secs(1)).expect("a valid timestamp");
+    live.seed(replay);
+    let second = live.current_match().expect("the second view has a model");
+    live.seed_scan(shell().services(), scan());
+    settle_in_real_time(&mut tracker.window);
+
+    assert_eq!(take_stats_lookups(), [arena_id], "the same arena spends one request");
+    assert!(matches!(original.stats.get_untracked(), StatsState::Ready(_)));
+    assert!(matches!(second.stats.get_untracked(), StatsState::Ready(_)));
 }
 
 /// In debug mode the Current Match section offers the replays in the watched directory, and the
@@ -758,15 +900,23 @@ fn the_debug_replay_picker_shows_in_debug_mode_and_seeds_the_battle() {
     // The directory is listed off the UI thread.
     settle_in_real_time(&mut tracker.window);
     assert!(tracker.has("tracker-debug-replay"), "debug mode shows the picker");
-    assert!(shell().live.live_match.get_untracked().is_none(), "no battle is under way");
+    assert!(shell().live.current_match().is_none(), "no battle is under way");
 
     tracker.press("tracker-debug-replay-trigger");
     tracker.press("tracker-debug-replay-0");
     settle_in_real_time(&mut tracker.window);
-    let live = shell().live.live_match.get_untracked().expect("the chosen replay is taken as the battle");
+    let live = shell()
+        .live
+        .selected_match()
+        .expect("the debug preview is selected")
+        .live_match
+        .get_untracked()
+        .expect("the chosen replay is taken as the battle");
     assert_eq!(live.started_at, expected.started_at);
     assert_eq!(live.players.len(), expected.players.len());
     assert!(tracker.has("tracker-roster-ally-0"), "its roster is listed");
+    assert!(!tracker.has("tracker-session-match-trigger"), "a debug replay does not enter the session history");
+    assert!(!shell().live.in_battle.get_untracked(), "a debug replay does not count as a battle in progress");
 
     shell().debug_mode.set(false);
     tracker.settle();

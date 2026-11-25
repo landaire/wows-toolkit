@@ -1,6 +1,4 @@
-//! The Current Match section: the battle in progress, two teams side by side, each player with
-//! their figures in the scopes the reader chose, whether they have been met before, and the
-//! possible-stream-sniper chip.
+//! The selected session match: its two teams, statistics, previous encounters, and Twitch sightings.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,6 +39,8 @@ use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::game_params::types::GameParamProvider;
 use wt_translations::t;
 use zgui::component;
 use zgui::reactive::RenderEffect;
@@ -88,6 +88,7 @@ use crate::icons::AppIconProps;
 use crate::services::Services;
 use crate::shell::Shell;
 use crate::tabs::player_tracker::live::LiveModel;
+use crate::tabs::player_tracker::live::MatchModel;
 use crate::tabs::player_tracker::model::TrackerModel;
 use crate::tabs::player_tracker::tables::HoverTextProps;
 use crate::tabs::player_tracker::tables::severity;
@@ -162,36 +163,123 @@ pub fn CurrentMatchSection(model: TrackerModel) -> impl IntoView {
     let status = move || {
         locale.track();
         if live.source.with(Option::is_none) {
-            return Some((t!("ui-player_tracker-live_no_directory").into_owned(), false));
+            return (t!("ui-player_tracker-live_no_directory").into_owned(), false);
         }
         if !live.checked.get() {
-            return Some((t!("ui-player_tracker-live_checking").into_owned(), true));
+            return (t!("ui-player_tracker-live_checking").into_owned(), true);
         }
-        live.live_match.with(Option::is_none).then(|| (t!("ui-player_tracker-live_none").into_owned(), false))
+        (t!("ui-player_tracker-live_none").into_owned(), false)
     };
 
     let body = move || {
-        if let Some((text, waiting)) = status() {
-            if waiting {
-                return AnyView::new(view! { Loading(label = text, attr:data-testid = "tracker-live-status") });
-            }
-            return AnyView::new(view! {
-                row(class = "wt-tracker-status", attr:data-testid = "tracker-live-status") {
-                    text {{text}}
-                }
-            });
+        if let Some(selected) = live.selected_match() {
+            return AnyView::new(view! { Roster(model = model, shell = shell, live = selected) });
         }
-        AnyView::new(view! { Roster(model = model, shell = shell) })
+        let (text, waiting) = status();
+        if waiting {
+            return AnyView::new(view! { Loading(label = text, attr:data-testid = "tracker-live-status") });
+        }
+
+        AnyView::new(view! {
+            row(class = "wt-tracker-status", attr:data-testid = "tracker-live-status") {
+                text {{text}}
+            }
+        })
     };
 
     view! {
         column(class = "wt-tracker-section", attr:data-testid = "tracker-current-match") {
+            Show(when = move || live.matches.with(|matches| !matches.is_empty())) {
+                SessionMatchPicker(live = live)
+            }
             Show(when = move || shell.debug_mode.get()) {
                 DebugReplayPicker(live = live)
             }
             ModeBar(model = model)
             box(class = "wt-tracker-fill") {
                 {body}
+            }
+        }
+    }
+}
+
+#[component]
+fn SessionMatchPicker(live: LiveModel) -> impl IntoView {
+    let services = Services::current();
+    let locale = services.locale;
+    let choices = move || {
+        locale.track();
+        live.matches.with(|matches| {
+            matches
+                .iter()
+                .rev()
+                .enumerate()
+                .filter_map(|(index, entry)| {
+                    let (timestamp, own_ship) = entry.live_match.with(|entry| {
+                        let entry = entry.as_ref()?;
+                        let own_ship = entry.players.iter().find(|player| player.relation.is_self());
+
+                        Some((entry.started_at, own_ship.map(|player| player.ship_id)))
+                    })?;
+                    let time = history::exact_timestamp_text(timestamp);
+                    let ship = own_ship.and_then(|ship_id| {
+                        entry.metadata.with(|data| {
+                            let provider = data.as_ref()?.provider().as_ref();
+                            let ship = GameParamProvider::game_param_by_id(provider, ship_id)?;
+
+                            provider.localized_name_from_param(&ship)
+                        })
+                    });
+                    let label = match ship {
+                        Some(ship) => t!("ui-player_tracker-session_match_ship", time = time, ship = ship).into_owned(),
+                        None => time,
+                    };
+                    let label = if index == 0 {
+                        t!("ui-player_tracker-session_match_latest", match_label = label).into_owned()
+                    } else {
+                        label
+                    };
+
+                    Some((timestamp, label))
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    let value = Signal::derive_local(move || {
+        live.selection.with(|selected| selected.map(|selected| selected.to_string()).unwrap_or_default())
+    });
+    let choose = move |value: String| {
+        let Ok(timestamp) = value.parse::<Timestamp>() else { return };
+        live.select_match(services, timestamp);
+    };
+
+    view! {
+        row(class = "wt-tracker-modes", attr:data-testid = "tracker-session-matches") {
+            Select(value = Binding::controlled(value, choose)) {
+                SelectTrigger(
+                    size = SelectTriggerSize::Sm,
+                    label = t!("ui-player_tracker-session_matches").into_owned(),
+                    attr:data-testid = "tracker-session-match-trigger"
+                ) {
+                    SelectValue(placeholder = t!("ui-player_tracker-session_match_none").into_owned())
+                }
+                SelectContent {
+                    for entry in move || choices(), key = |entry: &(Timestamp, String)| entry.clone() {
+                        SelectItem(
+                            value = entry.0.to_string(),
+                            text = entry.1.clone(),
+                            attr:data-testid = format!("tracker-session-match-{}", entry.0.as_second())
+                        ) {
+                            {entry.1.clone()}
+                        }
+                    }
+                }
+            }
+            text(class = "wt-tracker-small wt-tracker-dim") {
+                {move || {
+                    locale.track();
+                    t!("ui-player_tracker-session_matches_hint").into_owned()
+                }}
             }
         }
     }
@@ -206,6 +294,11 @@ fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
     let choices = RwSignal::new_local(Vec::<DebugReplayChoice>::new());
     let chosen = RwSignal::new_local(None::<PathBuf>);
     let listing = StoredValue::new_local(None::<Task>);
+    let selection = RenderEffect::new(move |_| {
+        if live.selection.get().is_some() {
+            chosen.set(None);
+        }
+    });
 
     let list = RenderEffect::new(move |_| {
         if let Some(previous) = listing.get_value() {
@@ -233,6 +326,7 @@ fn DebugReplayPicker(live: LiveModel) -> impl IntoView {
             task.cancel();
         }
         drop(list);
+        drop(selection);
     });
 
     // The choice is kept by path, so a list read again keeps it chosen wherever it moved to.
@@ -332,20 +426,20 @@ fn ModeBar(model: TrackerModel) -> impl IntoView {
 
 /// The two teams, with the lookup's progress or failure above them.
 #[component]
-fn Roster(model: TrackerModel, shell: Shell) -> impl IntoView {
+fn Roster(model: TrackerModel, shell: Shell, live: MatchModel) -> impl IntoView {
     let locale = Services::current().locale;
-    let live = model.live;
 
     let note = move || {
         locale.track();
-        let resolved = live.roster().is_some_and(|roster| roster.ships_resolved);
         live.stats.with(|stats| match stats {
             // A failure is reported even while the ships are unresolved: a build that did not load
             // is why they are unresolved.
             StatsState::Failed(reason) => {
                 Some((t!("ui-player_tracker-stats_unavailable", reason = reason).into_owned(), false))
             }
-            _ if !resolved => Some((t!("ui-player_tracker-live_loading_build").into_owned(), true)),
+            StatsState::Scanning if live.metadata.with(Option::is_none) => {
+                Some((t!("ui-player_tracker-live_loading_build").into_owned(), true))
+            }
             StatsState::Scanning => Some((t!("ui-player_tracker-stats_resolving").into_owned(), true)),
             StatsState::Held | StatsState::Fetching => {
                 Some((t!("ui-player_tracker-stats_fetching").into_owned(), true))

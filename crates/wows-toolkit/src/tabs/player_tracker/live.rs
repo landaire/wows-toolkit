@@ -1,12 +1,8 @@
-//! The battle in progress: the poll of the replays directory, the roster scan, the stats lookup
-//! and the Twitch chat observations around the battle.
+//! The matches observed during this app session, their roster scans, statistics and Twitch data.
 //!
-//! The shell owns the model and starts the poll with the app, so battles are detected and their
-//! rosters read whether or not the Player Tracker tab has been opened. The stats lookup still
-//! waits until the Current Match section is shown.
-//!
-//! Every write a task makes is keyed on the battle's start time, so a task that outlives its
-//! battle is dropped rather than landing on the next one.
+//! The shell watches the replays directory whether or not Player Tracker is open. Each match
+//! owns its asynchronous work and retained results. Only the selected match may start a stats
+//! lookup while Current Match is shown.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -22,9 +18,9 @@ use jiff::Timestamp;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::types::AccountId;
-#[cfg(test)]
 use wows_replays::types::ArenaId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_replay_data::live_match::LiveBattle;
 use wows_toolkit_replay_data::live_match::LivePoll;
 use wows_toolkit_replay_data::live_match::RosterSource;
 use wows_toolkit_replay_data::live_match::scan_arena_retrying;
@@ -109,81 +105,240 @@ pub struct LiveSourceConfig {
     pub game_data: GameDataCache,
 }
 
-/// The tasks belonging to the battle in progress, cancelled with it.
+/// A match's work, retained independently of the displayed match.
 #[derive(Default)]
 struct BattleTasks {
     build_load: Option<Task>,
     scan: Option<Task>,
-    lookup: Option<Task>,
     chat: Option<Task>,
 }
 
 impl BattleTasks {
     fn cancel(&mut self) {
-        for task in
-            [self.build_load.take(), self.scan.take(), self.lookup.take(), self.chat.take()].into_iter().flatten()
-        {
+        for task in [self.build_load.take(), self.scan.take(), self.chat.take()].into_iter().flatten() {
             task.cancel();
         }
     }
 }
 
-/// The battle in progress and everything learned about it.
+#[derive(Clone, Copy)]
+struct BuildIcons {
+    images: RwSignal<HashMap<ClassIconKey, ImageBytes>, LocalStorage>,
+    asked: StoredValue<HashSet<ClassIconKey>>,
+}
+
+impl BuildIcons {
+    fn new() -> Self {
+        Self { images: RwSignal::new_local(HashMap::new()), asked: StoredValue::new(HashSet::new()) }
+    }
+}
+
+type StatsWaiters = StoredValue<HashMap<ArenaId, Vec<RwSignal<StatsState, LocalStorage>>>, LocalStorage>;
+
+/// The live watch and the matches observed during this app session.
 #[derive(Clone, Copy)]
 pub struct LiveModel {
-    /// `None` until the replays directory and its game data are known.
     pub source: RwSignal<Option<LiveSourceConfig>, LocalStorage>,
-    /// Whether the poll has reported at all yet, so "no battle" is not said before the first look.
     pub checked: RwSignal<bool, LocalStorage>,
-    pub live_match: RwSignal<Option<LiveMatch>, LocalStorage>,
-    /// Ship data for the battle's build, once it has loaded.
-    pub metadata: RwSignal<Option<Arc<LoadedGameData>>, LocalStorage>,
-    /// The roster's class icons drawn from that build.
-    pub class_icons: RwSignal<HashMap<ClassIconKey, ImageBytes>, LocalStorage>,
-    class_icons_asked: StoredValue<HashSet<ClassIconKey>>,
-    metadata_build: StoredValue<Option<u32>>,
-    /// The shell's scope, which the model's work is spawned into so it ends with the shell.
+    /// Whether the poll currently reports a battle, independently of retained matches.
+    pub in_battle: RwSignal<bool, LocalStorage>,
+    pub matches: RwSignal<Vec<MatchModel>, LocalStorage>,
+    /// A real match's start time, or `None` while a debug preview is selected.
+    pub selection: RwSignal<Option<Timestamp>, LocalStorage>,
+    preview: RwSignal<Option<MatchModel>, LocalStorage>,
     owner: StoredValue<Owner, LocalStorage>,
-    /// Account ids, realms and clans the packet scan recovered.
-    pub identities: RwSignal<Option<LiveIdentities>, LocalStorage>,
-    pub stats: RwSignal<StatsState, LocalStorage>,
-    /// Which of the battle's players the index has met before, keyed by lower-cased name.
-    pub met_before: RwSignal<HashMap<String, AccountId>, LocalStorage>,
-    chat: StoredValue<Vec<(String, Timestamp)>>,
-    /// The chip's candidates per roster name; a name that is absent has no chip.
-    pub twitch: RwSignal<HashMap<String, Vec<SniperCandidate>>, LocalStorage>,
     budget: StoredValue<StatsBudget>,
-    gate: StoredValue<StatsLookupGate<HeldLookup>, LocalStorage>,
+    pending_stats: StatsWaiters,
+    build_icons: StoredValue<HashMap<u32, BuildIcons>, LocalStorage>,
+    shown: StoredValue<bool>,
     watch: StoredValue<Option<Task>, LocalStorage>,
-    tasks: StoredValue<BattleTasks, LocalStorage>,
-    /// Set by [`Self::seed_over`], after which the watch stays off so no poll replaces the seed.
+    preview_read: StoredValue<Option<Task>, LocalStorage>,
     #[cfg(test)]
     seeded: StoredValue<bool>,
 }
 
 impl LiveModel {
-    /// Called from the shell's component body.
     pub fn new() -> Self {
         Self {
             source: RwSignal::new_local(None),
             checked: RwSignal::new_local(false),
-            live_match: RwSignal::new_local(None),
-            metadata: RwSignal::new_local(None),
-            class_icons: RwSignal::new_local(HashMap::new()),
-            class_icons_asked: StoredValue::new(HashSet::new()),
-            metadata_build: StoredValue::new(None),
+            in_battle: RwSignal::new_local(false),
+            matches: RwSignal::new_local(Vec::new()),
+            selection: RwSignal::new_local(None),
+            preview: RwSignal::new_local(None),
             owner: StoredValue::new_local(Owner::current().expect("the live model is made inside a component")),
+            budget: StoredValue::new(StatsBudget::default()),
+            pending_stats: StoredValue::new_local(HashMap::new()),
+            build_icons: StoredValue::new_local(HashMap::new()),
+            shown: StoredValue::new(false),
+            watch: StoredValue::new_local(None),
+            preview_read: StoredValue::new_local(None),
+            #[cfg(test)]
+            seeded: StoredValue::new(false),
+        }
+    }
+
+    pub fn selected_match(self) -> Option<MatchModel> {
+        self.preview.get().or_else(|| {
+            let selected = self.selection.get()?;
+            self.matches.with(|matches| matches.iter().copied().find(|model| model.started_at() == Some(selected)))
+        })
+    }
+
+    /// The latest real match observed, even after its arena info disappears.
+    pub fn current_match(self) -> Option<MatchModel> {
+        self.matches.with_untracked(|matches| matches.last().copied())
+    }
+
+    pub fn select_match(self, services: Services, started_at: Timestamp) {
+        let selected = self
+            .matches
+            .with_untracked(|matches| matches.iter().copied().find(|model| model.started_at() == Some(started_at)));
+        let Some(selected) = selected else { return };
+        self.hide_selected();
+        self.clear_preview();
+        self.selection.set(Some(started_at));
+        selected.set_shown(services, self.shown.get_value());
+    }
+
+    pub fn set_shown(self, services: Services, shown: bool) {
+        self.shown.set_value(shown);
+        if let Some(selected) = self.selected_untracked() {
+            selected.set_shown(services, shown);
+        }
+    }
+
+    fn selected_untracked(self) -> Option<MatchModel> {
+        self.preview.get_untracked().or_else(|| {
+            let selected = self.selection.get_untracked()?;
+            self.matches
+                .with_untracked(|matches| matches.iter().copied().find(|model| model.started_at() == Some(selected)))
+        })
+    }
+
+    fn hide_selected(self) {
+        if let Some(selected) = self.selected_untracked() {
+            selected.gate.update_value(|gate| {
+                gate.set_shown(false);
+            });
+        }
+    }
+
+    fn clear_preview(self) {
+        if let Some(task) = self.preview_read.get_value() {
+            task.cancel();
+        }
+        self.preview_read.set_value(None);
+        if let Some(preview) = self.preview.get_untracked() {
+            let owner = preview.owner.get_value();
+            self.preview.set(None);
+            preview.tasks.update_value(BattleTasks::cancel);
+            owner.cleanup();
+        }
+    }
+
+    fn stop_live_scans(self) {
+        if let Some(model) = self.current_match() {
+            model.stop_live_scan();
+        }
+    }
+
+    /// Returns only newly observed matches; repeated polls must not reset cached state.
+    fn cache_match(self, live: LiveMatch, in_progress: bool) -> Option<MatchModel> {
+        let started_at = live.started_at;
+        if self.matches.with_untracked(|matches| matches.iter().any(|model| model.started_at() == Some(started_at))) {
+            return None;
+        }
+        self.stop_live_scans();
+        self.hide_selected();
+        self.clear_preview();
+        let model = self.make_match(live, in_progress);
+        self.matches.update(|matches| matches.push(model));
+        self.selection.set(Some(started_at));
+        Some(model)
+    }
+
+    fn make_match(self, live: LiveMatch, in_progress: bool) -> MatchModel {
+        let icons = live.build.and_then(|build| self.build_icons.with_value(|icons| icons.get(&build).copied()));
+        let icons = icons.unwrap_or_else(|| {
+            let icons = self.owner.with_value(|owner| owner.with(BuildIcons::new));
+            if let Some(build) = live.build {
+                self.build_icons.update_value(|builds| {
+                    builds.insert(build, icons);
+                });
+            }
+            icons
+        });
+        let owner = self.owner.with_value(Owner::child);
+        owner.with(|| MatchModel::new(self, live, in_progress, icons))
+    }
+
+    fn spawn(self, work: impl Future<Output = ()> + 'static) -> Task {
+        self.owner.with_value(|owner| owner.with(|| spawn_local(work)))
+    }
+}
+
+/// One match and everything learned about it.
+#[derive(Clone, Copy)]
+pub struct MatchModel {
+    pub live_match: RwSignal<Option<LiveMatch>, LocalStorage>,
+    pub metadata: RwSignal<Option<Arc<LoadedGameData>>, LocalStorage>,
+    pub class_icons: RwSignal<HashMap<ClassIconKey, ImageBytes>, LocalStorage>,
+    class_icons_asked: StoredValue<HashSet<ClassIconKey>>,
+    session_owner: StoredValue<Owner, LocalStorage>,
+    owner: StoredValue<Owner, LocalStorage>,
+    pub identities: RwSignal<Option<LiveIdentities>, LocalStorage>,
+    pub stats: RwSignal<StatsState, LocalStorage>,
+    pub met_before: RwSignal<HashMap<String, AccountId>, LocalStorage>,
+    chat: StoredValue<Vec<(String, Timestamp)>>,
+    pub twitch: RwSignal<HashMap<String, Vec<SniperCandidate>>, LocalStorage>,
+    budget: StoredValue<StatsBudget>,
+    pending_stats: StatsWaiters,
+    gate: StoredValue<StatsLookupGate<HeldLookup>, LocalStorage>,
+    tasks: StoredValue<BattleTasks, LocalStorage>,
+    live_scan: StoredValue<Option<Arc<AtomicBool>>>,
+}
+
+impl MatchModel {
+    fn new(session: LiveModel, live: LiveMatch, in_progress: bool, icons: BuildIcons) -> Self {
+        let mut gate = StatsLookupGate::default();
+        gate.set_shown(session.shown.get_value());
+        Self {
+            live_match: RwSignal::new_local(Some(live)),
+            metadata: RwSignal::new_local(None),
+            class_icons: icons.images,
+            class_icons_asked: icons.asked,
+            session_owner: session.owner,
+            owner: StoredValue::new_local(Owner::current().expect("a match is made inside its owner")),
             identities: RwSignal::new_local(None),
             stats: RwSignal::new_local(StatsState::Idle),
             met_before: RwSignal::new_local(HashMap::new()),
             chat: StoredValue::new(Vec::new()),
             twitch: RwSignal::new_local(HashMap::new()),
-            budget: StoredValue::new(StatsBudget::default()),
-            gate: StoredValue::new_local(StatsLookupGate::default()),
-            watch: StoredValue::new_local(None),
+            budget: session.budget,
+            pending_stats: session.pending_stats,
+            gate: StoredValue::new_local(gate),
             tasks: StoredValue::new_local(BattleTasks::default()),
-            #[cfg(test)]
-            seeded: StoredValue::new(false),
+            live_scan: StoredValue::new(in_progress.then(|| Arc::new(AtomicBool::new(false)))),
+        }
+    }
+
+    fn stop_live_scan(self) {
+        let stopped = self.live_scan.with_value(|cancelled| {
+            let Some(cancelled) = cancelled else { return false };
+            cancelled.store(true, Ordering::Relaxed);
+            true
+        });
+        if !stopped {
+            return;
+        }
+        self.tasks.update_value(|tasks| {
+            if let Some(task) = tasks.scan.take() {
+                task.cancel();
+            }
+        });
+        if self.stats.with_untracked(|stats| matches!(stats, StatsState::Scanning)) {
+            self.stats.set(StatsState::Failed(StatsError::NoRoster.to_string()));
         }
     }
 
@@ -219,7 +374,7 @@ impl LiveModel {
         }
         self.class_icons_asked.update_value(|asked| asked.extend(fresh.iter().copied()));
 
-        let build = data.build();
+        let icons = self.class_icons;
         let work = async move {
             let drawn: Vec<(ClassIconKey, Vec<u8>)> = blocking(move || {
                 fresh
@@ -234,13 +389,9 @@ impl LiveModel {
                     .collect()
             })
             .await;
-            if self.metadata.with_untracked(|data| data.as_ref().map(|data| data.build())) != Some(build) {
-                return;
-            }
-            self.class_icons
-                .update(|icons| icons.extend(drawn.into_iter().map(|(key, png)| (key, ImageBytes::new(png)))));
+            icons.update(|icons| icons.extend(drawn.into_iter().map(|(key, png)| (key, ImageBytes::new(png)))));
         };
-        self.spawn(work);
+        self.session_owner.with_value(|owner| owner.with(|| spawn_local(work)));
     }
 
     /// Spawns `work` into the shell's task set. Battle work is started from inside the watch task,
@@ -248,12 +399,13 @@ impl LiveModel {
     fn spawn(self, work: impl Future<Output = ()> + 'static) -> Task {
         self.owner.with_value(|owner| owner.with(|| spawn_local(work)))
     }
+}
 
+impl LiveModel {
     /// Watches the replays folder of the install the settings name, for as long as the calling
     /// scope lasts, restarting the watch whenever the directory or its game data changes.
     pub fn follow_install(self, services: Services) {
-        // The directory alone, so an edit to any other setting does not restart the watch and
-        // drop the battle in progress.
+        // Settings unrelated to the install do not restart its watch.
         let wows_dir = Memo::new(move |_| {
             services.settings.read(|settings| settings.wows_dir.clone()).filter(|dir| !dir.is_empty())
         });
@@ -276,10 +428,9 @@ impl LiveModel {
         if let Some(previous) = self.watch.get_value() {
             previous.cancel();
         }
-        self.tasks.update_value(BattleTasks::cancel);
+        self.stop_live_scans();
         self.checked.set(false);
-        self.live_match.set(None);
-        self.clear_battle();
+        self.in_battle.set(false);
         self.source.set(config.clone());
         let Some(config) = config else {
             self.watch.set_value(None);
@@ -291,12 +442,12 @@ impl LiveModel {
             return;
         };
 
-        let task = spawn_local(async move {
+        let task = self.spawn(async move {
             // Resolving the folder reads the install's files.
             let install_dir = config.install_dir.clone();
             let folder = blocking(move || ReplayFolder::from_app_install(&install_dir)).await;
             // Held by the task, so cancelling it ends the poll.
-            let (poll, mut changes) = match LivePoll::start_folder(&watchdog, folder) {
+            let (_poll, mut changes) = match LivePoll::start_folder(&watchdog, folder) {
                 Ok(started) => started,
                 Err(err) => {
                     tracing::error!(%err, "live match: the poll did not start");
@@ -304,33 +455,22 @@ impl LiveModel {
                 }
             };
             while let Some(live) = changes.next().await {
-                let roster = RosterSource::InProgress(poll.live_source());
-                self.adopt(services, &config, live, roster);
+                self.adopt(services, &config, live);
             }
         });
         self.watch.set_value(Some(task));
     }
 
-    /// Drops everything that belonged to the previous battle.
-    fn clear_battle(self) {
-        self.tasks.update_value(BattleTasks::cancel);
-        self.met_before.set(HashMap::new());
-        self.chat.set_value(Vec::new());
-        self.twitch.set(HashMap::new());
-        self.identities.set(None);
-        self.stats.set(StatsState::Idle);
-        self.gate.update_value(StatsLookupGate::clear);
-    }
-
-    /// Takes the finished replay at `replay` as the battle in progress, so the roster scan and the
-    /// stats lookup can be exercised outside a battle. A debug tool: the next battle the poll
-    /// reports replaces it.
+    /// Opens a debug preview without adding it to the observed session matches.
     pub fn adopt_finished_replay(self, services: Services, replay: PathBuf) {
         let Some(config) = self.source.get_untracked() else {
             tracing::warn!("live match: no replays directory is known, so no replay is taken as the battle");
             return;
         };
-        self.spawn(async move {
+        if let Some(previous) = self.preview_read.get_value() {
+            previous.cancel();
+        }
+        let task = self.spawn(async move {
             let read = replay.clone();
             let meta = blocking(move || ReplayFile::meta_from_file(&read)).await;
             let live = match meta {
@@ -344,35 +484,77 @@ impl LiveModel {
                 tracing::warn!(path = %replay.display(), "live match: the replay's header carries no date");
                 return;
             };
-            self.adopt(services, &config, Some(live), RosterSource::Finished(replay));
+            self.preview_read.set_value(None);
+            self.hide_selected();
+            self.clear_preview();
+            let preview = self.make_match(live, false);
+            self.selection.set(None);
+            self.preview.set(Some(preview));
+            self.checked.set(true);
+            preview.start(services, &config, RosterSource::Finished(replay));
         });
+        self.preview_read.set_value(Some(task));
     }
 
-    /// Adopts what a poll found, or a replay taken as the battle, and loads the roster's build
-    /// when the loaded data does not already cover it. `roster` is where the scan reads it from.
-    fn adopt(self, services: Services, config: &LiveSourceConfig, live: Option<LiveMatch>, roster: RosterSource) {
+    /// Records a poll result without clearing retained matches when the game returns to port.
+    fn adopt(self, services: Services, config: &LiveSourceConfig, live: Option<LiveBattle>) {
         self.checked.set(true);
-        let started_at = live.as_ref().map(|live| live.started_at);
-        let build = live.as_ref().and_then(|live| live.build);
-        let names: Vec<String> =
-            live.iter().flat_map(|live| live.players.iter().map(|player| player.name.clone())).collect();
-        self.live_match.set(live);
-        self.clear_battle();
+        let was_in_battle = self.in_battle.get_untracked();
+        self.in_battle.set(live.is_some());
+        let Some(LiveBattle { battle: live, roster }) = live else {
+            self.stop_live_scans();
+            return;
+        };
+        if let Some(current) = self.current_match().filter(|current| current.started_at() == Some(live.started_at)) {
+            if !was_in_battle {
+                current.resume_scan(services, config, roster);
+            }
+            return;
+        }
+        let Some(model) = self.cache_match(live, true) else { return };
+        model.start(services, config, roster);
+    }
+}
 
-        let Some(started_at) = started_at else { return };
+impl MatchModel {
+    fn start(self, services: Services, config: &LiveSourceConfig, roster: RosterSource) {
+        let started_at = self.started_at().expect("a cached match has its header");
+        let names = self.live_match.with_untracked(|live| {
+            live.as_ref()
+                .expect("a cached match has its header")
+                .players
+                .iter()
+                .map(|player| player.name.clone())
+                .collect()
+        });
         self.look_up_met_before(services, started_at, names);
         self.watch_chat(services, started_at);
+        self.load_and_scan(services, config, roster, started_at);
+    }
 
-        let Some(build) = build else { return };
-        if self.metadata_build.get_value() == Some(build) && self.metadata.with_untracked(Option::is_some) {
+    fn resume_scan(self, services: Services, config: &LiveSourceConfig, roster: RosterSource) {
+        if self.identities.with_untracked(Option::is_some) {
+            return;
+        }
+        let started_at = self.started_at().expect("a cached match has its header");
+        self.tasks.update_value(|tasks| {
+            if let Some(previous) = tasks.build_load.take() {
+                previous.cancel();
+            }
+        });
+        self.live_scan.set_value(Some(Arc::new(AtomicBool::new(false))));
+        self.load_and_scan(services, config, roster, started_at);
+    }
+
+    fn load_and_scan(self, services: Services, config: &LiveSourceConfig, roster: RosterSource, started_at: Timestamp) {
+        if self.metadata.with_untracked(Option::is_some) {
             self.start_scan(services, config, roster, started_at);
             return;
         }
 
-        self.metadata_build.set_value(Some(build));
-        self.metadata.set(None);
-        self.class_icons_asked.set_value(HashSet::new());
-        self.class_icons.set(HashMap::new());
+        let build = self.live_match.with_untracked(|live| live.as_ref().and_then(|live| live.build));
+
+        let Some(build) = build else { return };
         self.stats.set(StatsState::Scanning);
         let game_data = config.game_data.clone();
         let config = config.clone();
@@ -390,7 +572,6 @@ impl LiveModel {
                 // have nothing to resolve against, which is a failure rather than a wait.
                 Err(err) => {
                     tracing::warn!("live match: build {build} did not load: {err}");
-                    self.metadata_build.set_value(None);
                     self.stats.set(StatsState::Failed(format!("this battle's game data did not load: {err}")));
                 }
             }
@@ -504,13 +685,24 @@ impl LiveModel {
     /// offers the stats lookup.
     fn start_scan(self, services: Services, config: &LiveSourceConfig, source: RosterSource, started_at: Timestamp) {
         let Some(metadata) = self.metadata.get_untracked() else { return };
+        if self
+            .live_scan
+            .with_value(|cancelled| cancelled.as_ref().is_some_and(|cancelled| cancelled.load(Ordering::Relaxed)))
+        {
+            self.stats.set(StatsState::Failed(StatsError::NoRoster.to_string()));
+            return;
+        }
         self.stats.set(StatsState::Scanning);
         let game_data = config.game_data.clone();
+        // A finished replay needs only a task-local cancellation flag.
+        let cancel = self.live_scan.with_value(|cancelled| {
+            cancelled.as_ref().map(|cancelled| ScanCancel(Arc::clone(cancelled))).unwrap_or_default()
+        });
         let task = self.spawn(async move {
             // Dropped with this task, which stops the retries between attempts.
-            let cancel = ScanCancel::default();
             let cancelled = Arc::clone(&cancel.0);
-            let state = long_job(move || scan_arena_retrying(&source, &metadata, &game_data, &cancelled)).await;
+            let state =
+                long_job(move || scan_arena_retrying(&source, &metadata, &game_data, &cancelled, started_at)).await;
             drop(cancel);
             if self.started_at() != Some(started_at) {
                 return;
@@ -545,7 +737,7 @@ impl LiveModel {
     }
 
     /// Records whether the Current Match section is on screen, sending a held lookup once it is.
-    pub fn set_shown(self, services: Services, shown: bool) {
+    fn set_shown(self, services: Services, shown: bool) {
         let mut send = None;
         self.gate.update_value(|gate| send = gate.set_shown(shown));
         if let Some(lookup) = send {
@@ -559,49 +751,72 @@ impl LiveModel {
             return;
         }
         let arena_id = state.arena_id;
+        if let Some(answered) = self.budget.with_value(|budget| budget.answered_state(arena_id)) {
+            self.stats.set(answered);
+            return;
+        }
+        let pending = self.pending_stats;
+        let joined =
+            pending.try_update_value(|requests| requests.get_mut(&arena_id).map(|waiters| waiters.push(self.stats)));
+        if joined.flatten().is_some() {
+            self.stats.set(StatsState::Fetching);
+            return;
+        }
+
         let mut begun = Ok(());
         self.budget.update_value(|budget| begun = budget.begin(arena_id, Instant::now()));
         if let Err(refused) = begun {
             self.stats.set(refused);
             return;
         }
+        pending.update_value(|requests| {
+            requests.insert(arena_id, vec![self.stats]);
+        });
         self.stats.set(StatsState::Fetching);
 
         // The proxy as the settings hold it; `http::client` decides what an unset one means.
         let proxy_url = services.settings.read_untracked(|settings| settings.proxy_url.clone()).unwrap_or_default();
-        let task = self.spawn(async move {
+        let budget = self.budget;
+        let work = async move {
             let mut retries_left = match_stats::TIMEOUT_RETRIES;
             let shown = loop {
                 let fetched = request_stats(services, state.clone(), proxy_url.clone()).await;
-                if self.started_at() != Some(started_at) {
-                    return;
-                }
                 match fetched {
                     // The service may have counted the request that timed out, so the retry is
                     // cleared against the budget like the first.
                     Ok(Err(err)) if err.timed_out() && retries_left > 0 => {
                         retries_left -= 1;
                         let mut begun = Ok(());
-                        self.budget.update_value(|budget| begun = budget.begin(arena_id, Instant::now()));
+                        budget.update_value(|budget| begun = budget.begin(arena_id, Instant::now()));
                         if let Err(refused) = begun {
                             break refused;
                         }
                     }
                     Ok(fetched) => {
                         let mut shown = StatsState::Idle;
-                        self.budget.update_value(|budget| shown = budget.finish(arena_id, fetched, Instant::now()));
+                        budget.update_value(|budget| shown = budget.finish(arena_id, fetched, Instant::now()));
                         break shown;
                     }
                     Err(err) => break StatsState::Failed(err.to_string()),
                 }
             };
-            self.stats.set(shown);
-        });
-        self.tasks.update_value(|tasks| tasks.lookup = Some(task));
+            let waiters = pending.try_update_value(|requests| requests.remove(&arena_id)).flatten();
+            if let Some(waiters) = waiters
+                && let Some((last, others)) = waiters.split_last()
+            {
+                for waiter in others {
+                    let _ = waiter.try_set(shown.clone());
+                }
+                let _ = last.try_set(shown);
+            }
+        };
+        self.session_owner.with_value(|owner| owner.with(|| spawn_local(work)));
     }
+}
 
+#[cfg(test)]
+impl LiveModel {
     /// Seeds a battle as a poll would have found it.
-    #[cfg(test)]
     pub fn seed(self, live: LiveMatch) {
         // A source with no install behind it: the roster is seeded rather than polled.
         self.source.set(Some(LiveSourceConfig {
@@ -609,28 +824,26 @@ impl LiveModel {
             game_data: GameDataCache::without_install(),
         }));
         self.checked.set(true);
-        self.live_match.set(Some(live));
+        self.in_battle.set(true);
+        self.cache_match(live, false);
     }
 
-    /// Seeds a battle with its build loaded from `game_data`, so its ships are named. The watch
-    /// and the battle's tasks are stopped first and the watch stays off, so a late poll or scan
-    /// cannot adopt over the seed.
-    #[cfg(test)]
+    /// Seeds a battle with its build loaded, and stops the watch from replacing it.
     pub fn seed_over(self, live: LiveMatch, game_data: GameDataCache) {
         self.seeded.set_value(true);
         if let Some(previous) = self.watch.get_value() {
             previous.cancel();
         }
         self.watch.set_value(None);
-        self.tasks.update_value(BattleTasks::cancel);
+        self.stop_live_scans();
 
         let build = live.build.expect("the battle names its build");
         let data = game_data.get_or_load_build(build).expect("the battle's build loads");
-        self.metadata_build.set_value(Some(build));
-        self.metadata.set(Some(data));
+        self.seed(live);
+        let model = self.current_match().expect("the seeded battle is cached");
+        model.tasks.update_value(BattleTasks::cancel);
+        model.metadata.set(Some(data));
         self.source.set(Some(LiveSourceConfig { install_dir: std::env::temp_dir(), game_data }));
-        self.checked.set(true);
-        self.live_match.set(Some(live));
     }
 
     /// Seeds what a scan and a lookup would have produced.
@@ -640,25 +853,29 @@ impl LiveModel {
         identities: LiveIdentities,
         players: Vec<wows_toolkit_viewmodel::match_stats::PlayerStatsOut>,
     ) {
-        self.identities.set(Some(identities));
-        self.recompute_twitch();
-        self.stats.set(StatsState::ready(players));
+        let model = self.current_match().expect("a battle is seeded");
+        model.identities.set(Some(identities));
+        model.recompute_twitch();
+        model.stats.set(StatsState::ready(players));
     }
 
     #[cfg(test)]
     pub fn seed_chat(self, observations: Vec<(String, Timestamp)>) {
-        self.chat.set_value(observations);
-        self.recompute_twitch();
+        let model = self.current_match().expect("a battle is seeded");
+        model.chat.set_value(observations);
+        model.recompute_twitch();
     }
 
     /// Offers the battle in progress the lookup a roster scan of `state` would have offered. The
     /// battle's own tasks are stopped first, so its scan cannot offer over the seed.
     #[cfg(test)]
     pub fn seed_scan(self, services: Services, state: ArenaState) {
-        let started_at = self.started_at().expect("a battle is in progress");
-        self.tasks.update_value(BattleTasks::cancel);
-        self.identities.set(Some(LiveIdentities::from_player_states(&state.players)));
-        self.offer_lookup(services, HeldLookup { started_at, state });
+        let model = self.current_match().expect("a battle is seeded");
+        let started_at = model.started_at().expect("a cached battle has its header");
+        model.tasks.update_value(BattleTasks::cancel);
+        model.identities.set(Some(LiveIdentities::from_player_states(&state.players)));
+        model.recompute_twitch();
+        model.offer_lookup(services, HeldLookup { started_at, state });
     }
 }
 

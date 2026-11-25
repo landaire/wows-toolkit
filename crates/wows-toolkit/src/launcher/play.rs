@@ -170,7 +170,7 @@ pub fn PlayControl(shell: Shell, model: LauncherModel) -> impl IntoView {
 fn SplitButton(shell: Shell, model: LauncherModel) -> impl IntoView {
     let state = Memo::new(move |_| {
         let wows_dir = model.wows_dir();
-        let in_battle = shell.live.live_match.with(Option::is_some);
+        let in_battle = shell.live.in_battle.get();
         model.with(|state| PlayState::of(state, wows_dir.as_deref(), in_battle))
     });
     let window = try_use_window().map(|window| window.size());

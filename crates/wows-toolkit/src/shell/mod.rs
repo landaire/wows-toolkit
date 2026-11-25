@@ -317,7 +317,7 @@ pub struct Shell {
     pub collab: CollabHost,
     /// The Armor Viewer's ship data, which the palette lists from any tab.
     pub armor: ArmorLibrary,
-    /// The battle in progress, watched from startup whether or not the Player Tracker is open.
+    /// Session matches, watched from startup whether or not the Player Tracker is open.
     pub live: LiveModel,
     /// The game launcher, whichever tab is open. Its surfaces show only once the user opts in.
     #[cfg(target_os = "linux")]
