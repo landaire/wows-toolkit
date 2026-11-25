@@ -4,6 +4,27 @@ Player-facing highlights for each release. New entries are generated from `Relea
 commit trailers via `cliff-release.toml`; see that file for the convention. The full,
 per-commit history lives in `CHANGELOG.md`.
 
+## 1.1.2
+
+### Replay Inspector
+
+- Open the replay renderer from the **Render** button beside **Actions**. A play icon marks the button, and key replay actions have icons in the replay list and Search menus.
+- Show or hide any player table column from Replay Settings or a column's right-click menu. Reset visibility without changing the column layout.
+- Hover a player's connection indicator to see when they disconnected. The tooltip also shows the reconnect time and duration when available.
+- Fixed damage bars that could linger at the right edge of the player table while scrolling.
+
+### Replay renderer and Armor Viewer
+
+- The renderer can show submarine battery and depth. Submarine Surveillance has its own display switch.
+- Ship icons stay sharp when you zoom in. Dead ship markers are drawn behind living ships and their labels.
+- Display switches for dead ship labels, armament, the score, and activity in the stats panel take effect even while playback is paused.
+- Fixed crashes involving armor viewport menus, seeking replay playback from the armor viewer, and renderer updates after a view closes.
+
+### Player Tracker and Stats
+
+- **Current Match** stays visible when you return to port. Use the match picker to revisit battles from this app session.
+- Stats chart points line up with their game numbers. Both axes show more ticks and gridlines when the labels have room.
+
 ## 1.1.1
 
 - The Stats overview shows each ship's average base XP.
