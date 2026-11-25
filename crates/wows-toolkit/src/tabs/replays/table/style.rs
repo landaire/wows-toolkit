@@ -147,6 +147,14 @@ pub const CSS: &str = css!(
     @media (prefers-color-scheme: dark) {
         .wt-pt-offline-ink { color: var(--wt-offline-dark); }
     }
+    .wt-pt-connection-grid {
+        display: grid;
+        grid-template-columns: auto auto auto;
+        gap: 2px 12px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+    .wt-pt-connection-grid [data-heading] { font-weight: 700; }
     .wt-pt-actions {
         position: absolute;
         right: 0;

@@ -1,6 +1,7 @@
 //! The player table's cells.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use landaire_ui::Appearance;
 use landaire_ui::Palette;
@@ -9,6 +10,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use landaire_ui::text_on;
+use wows_replay_insights::battle_report::ConnectionDrop;
 use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::TimeOffline;
 use wows_toolkit_icons::Glyph;
@@ -546,12 +548,69 @@ fn name_cell(row: &TableRow, cx: TableCx) -> AnyView {
     })
 }
 
-/// What a connection history says.
-fn connection_hover_text(note: &ConnectionNote) -> String {
-    match note {
-        ConnectionNote::NeverConnected => t!("ui-replay-player-never_connected").into_owned(),
-        ConnectionNote::Interrupted { events, .. } => format!("Player {}", events.join(", ")),
+enum ConnectionHistory {
+    NeverConnected(String),
+    Rows(Vec<[String; 3]>),
+}
+
+impl ConnectionHistory {
+    fn from_note(note: &ConnectionNote) -> Self {
+        let ConnectionNote::Interrupted { events, .. } = note else {
+            return Self::NeverConnected(t!("ui-replay-player-never_connected").into_owned());
+        };
+
+        let headings = [
+            t!("ui-replay-player-disconnected_at").into_owned(),
+            t!("ui-replay-player-reconnected_at").into_owned(),
+            t!("ui-replay-player-disconnect_duration").into_owned(),
+        ];
+        let unknown = t!("ui-replay-player-reconnect_unknown");
+        let rows = std::iter::once(headings).chain(ConnectionDrop::from_events(events).map(|drop| {
+            [
+                connection_clock(drop.disconnected_at),
+                drop.reconnected_at.map_or_else(|| unknown.to_string(), connection_clock),
+                drop.duration().map_or_else(|| "-".to_owned(), connection_clock),
+            ]
+        }));
+
+        Self::Rows(rows.collect())
     }
+
+    fn content(&self) -> AnyView {
+        let rows = match self {
+            Self::NeverConnected(message) => return AnyView::new(view! { text {{message.clone()}} }),
+            Self::Rows(rows) => rows,
+        };
+        let cells: Vec<AnyView> = rows
+            .iter()
+            .enumerate()
+            .flat_map(|(index, row)| {
+                row.iter().cloned().map(move |value| {
+                    AnyView::new(view! {
+                        text(attr:data-heading = {(index == 0).then(String::new)}) {{value}}
+                    })
+                })
+            })
+            .collect();
+
+        AnyView::new(view! {
+            box(class = "wt-pt-connection-grid", attr:data-testid = "player-disconnect-history") {
+                {cells}
+            }
+        })
+    }
+
+    fn copy_text(&self) -> String {
+        match self {
+            Self::NeverConnected(message) => message.clone(),
+            Self::Rows(rows) => rows.iter().map(|row| row.join("\t")).collect::<Vec<_>>().join("\n"),
+        }
+    }
+}
+
+fn connection_clock(time: Duration) -> String {
+    let secs = time.as_secs();
+    format!("{}:{:02}", secs / 60, secs % 60)
 }
 
 /// How long the player was offline while alive, when the replay says.
@@ -614,8 +673,7 @@ fn blend(under: Rgb, over: Rgb, share: f32) -> Rgb {
 /// The plug and, when known, how long the player was offline, on a ground that reddens with that
 /// time. A click copies what its tooltip says.
 fn connection_chip(note: &ConnectionNote, cx: TableCx) -> AnyView {
-    let hover = connection_hover_text(note);
-    let copied = hover.clone();
+    let history = StoredValue::new(ConnectionHistory::from_note(note));
     let time = time_offline(note);
     let depth = time.map(offline_depth);
     let ink = depth.map_or_else(Attrs::new, |depth| offline_ink(depth, cx));
@@ -623,7 +681,7 @@ fn connection_chip(note: &ConnectionNote, cx: TableCx) -> AnyView {
     let offline = time.map(|time| AnyView::new(view! { text {{offline_label(time)}} }));
     let copy = move |ev: &mut EventCx<'_, events::Click>| {
         ev.stop_propagation();
-        cx.copy(copied.clone(), t!("ui-replay-context-copied").into_owned());
+        cx.copy(history.with_value(ConnectionHistory::copy_text), t!("ui-replay-context-copied").into_owned());
     };
 
     AnyView::new(view! {
@@ -642,7 +700,7 @@ fn connection_chip(note: &ConnectionNote, cx: TableCx) -> AnyView {
                     {offline}
                 }
             }
-            TooltipContent {{hover.clone()}}
+            TooltipContent {{history.with_value(ConnectionHistory::content)}}
         }
     })
 }

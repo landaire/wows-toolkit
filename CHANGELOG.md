@@ -62,6 +62,7 @@ All notable changes to this project will be documented in this file.
 - *(renderer)* Add speed trail, dead ship trail and score timer toggles
 - *(renderer)* Name exported videos by battle start, player, map and ship so they sort chronologically
 - *(toolkit)* Flag players seen in the monitored Twitch chat around a battle in the replay panel
+- *(toolkit)* List disconnect times, reconnect times, and durations in columns on a replay player's connection tooltip
 - *(renderer)* Draw the camera direction as a translucent wedge that tapers from the ship icon's center to a point one icon length out, beneath every ship icon
 - *(toolkit)* Generate a build's game constants from the installed client when GitHub has none for it, with the status bar and a notice saying when it runs and how it went
 - *(toolkit)* Add an "Anonymize player names" listing option that shows generated names and clan tags everywhere the app displays players, while exports keep the real ones

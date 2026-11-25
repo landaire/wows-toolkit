@@ -159,22 +159,66 @@ pub struct NormalizedPlayer {
 }
 
 /// A connection history worth showing beside a name.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ConnectionNote {
     /// In the roster but never in the battle. Only said of a player who
     /// never spawned a ship: a client that does not broadcast usable
     /// connection state reports everyone as not-connected and never updates
     /// it, and a player who spawned was plainly connected.
     NeverConnected,
-    /// Dropped at least once while still alive. Each entry is one event
-    /// after the opening connect, as "connected @ M:SS" or
-    /// "disconnected @ M:SS".
+    /// Dropped at least once while still alive.
     Interrupted {
-        events: Vec<String>,
+        events: Vec<ConnectionEvent>,
         /// `None` when a drop was never recovered and the replay says
         /// neither when the player died nor when the battle ended.
         time_offline: Option<TimeOffline>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionEvent {
+    pub at: Duration,
+    pub kind: ConnectionChangeKind,
+}
+
+impl serde::Serialize for ConnectionEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // The normalized CLI report lists events as strings.
+        let action = match self.kind {
+            ConnectionChangeKind::Connected => "connected",
+            ConnectionChangeKind::Disconnected => "disconnected",
+        };
+        let seconds = self.at.as_secs();
+
+        serializer.collect_str(&format_args!("{action} @ {}:{:02}", seconds / 60, seconds % 60))
+    }
+}
+
+/// One interval between losing and regaining the connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionDrop {
+    pub disconnected_at: Duration,
+    pub reconnected_at: Option<Duration>,
+}
+
+impl ConnectionDrop {
+    pub fn duration(&self) -> Option<Duration> {
+        self.reconnected_at?.checked_sub(self.disconnected_at)
+    }
+
+    pub fn from_events(events: &[ConnectionEvent]) -> impl Iterator<Item = Self> + '_ {
+        let mut events = events.iter();
+        std::iter::from_fn(move || {
+            let disconnected_at = events.find(|event| event.kind == ConnectionChangeKind::Disconnected)?.at;
+            let reconnected_at =
+                events.find(|event| event.kind == ConnectionChangeKind::Connected).map(|event| event.at);
+
+            Some(Self { disconnected_at, reconnected_at })
+        })
+    }
 }
 
 /// How long a player was disconnected while alive.
@@ -1092,18 +1136,10 @@ fn connection_note(player: &Player, until: Option<Duration>) -> Option<Connectio
         return None;
     }
 
-    // The opening connect is every player's, so it says nothing.
     let events = changes
         .iter()
         .skip(1)
-        .map(|change| {
-            let secs = change.at_game_duration().as_secs();
-            let timestamp = format!("{}:{:02}", secs / 60, secs % 60);
-            match change.event_kind() {
-                ConnectionChangeKind::Connected => format!("connected @ {timestamp}"),
-                ConnectionChangeKind::Disconnected => format!("disconnected @ {timestamp}"),
-            }
-        })
+        .map(|change| ConnectionEvent { at: change.at_game_duration(), kind: change.event_kind() })
         .collect();
     let time_offline = TimeOffline::of(&changes, until);
     Some(ConnectionNote::Interrupted { events, time_offline })
@@ -1398,6 +1434,38 @@ mod tests {
 
     fn change(at_secs: u64, kind: ConnectionChangeKind, dead: bool) -> ConnectionChangeInfo {
         ConnectionChangeInfo::new(Duration::from_secs(at_secs), kind, dead)
+    }
+
+    #[test]
+    fn connection_history_pairs_each_drop_with_its_recovery() {
+        let event = |secs, kind| ConnectionEvent { at: Duration::from_secs(secs), kind };
+        let events = vec![
+            event(62, ConnectionChangeKind::Disconnected),
+            event(70, ConnectionChangeKind::Disconnected),
+            event(125, ConnectionChangeKind::Connected),
+            event(148, ConnectionChangeKind::Disconnected),
+        ];
+
+        assert_eq!(
+            ConnectionDrop::from_events(&events).collect::<Vec<_>>(),
+            [
+                ConnectionDrop {
+                    disconnected_at: Duration::from_secs(62),
+                    reconnected_at: Some(Duration::from_secs(125)),
+                },
+                ConnectionDrop { disconnected_at: Duration::from_secs(148), reconnected_at: None },
+            ],
+        );
+        let note = ConnectionNote::Interrupted { events, time_offline: None };
+        assert_eq!(
+            serde_json::to_value(note).expect("the note serializes"),
+            json!({
+                "Interrupted": {
+                    "events": ["disconnected @ 1:02", "disconnected @ 1:10", "connected @ 2:05", "disconnected @ 2:28"],
+                    "time_offline": null,
+                }
+            })
+        );
     }
 
     #[test]

@@ -13,6 +13,8 @@ use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
+use wows_replay_insights::battle_report::ConnectionEvent;
+use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::match_contribution::FactorScore;
 use wows_replay_insights::match_contribution::MatchContributionComponents;
 use wows_replay_insights::match_contribution::MatchContributionFactor;
@@ -25,6 +27,7 @@ use wows_replay_insights::match_contribution::TankingRatios;
 use wows_replay_insights::match_contribution::TeamDamageShare;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replay_insights::personal_rating::rate_single_battle;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::types::AccountId;
 use wows_toolkit_replay_data::damage_mix::DamageKind;
 use wows_toolkit_replay_data::damage_mix::DamageLine;
@@ -933,6 +936,45 @@ fn a_disconnect_chip_deepens_from_thirty_to_ninety_seconds() {
     assert_eq!(cells::offline_depth(offline(120)), 1.0);
     assert_eq!(cells::offline_label(offline(72)), "1m 12s");
     assert_eq!(cells::offline_label(offline(45)), "45s");
+}
+
+#[test]
+fn repeated_disconnects_show_aligned_reconnect_and_duration_columns() {
+    let mut model = sample_model();
+    let event = |secs, kind| ConnectionEvent { at: Duration::from_secs(secs), kind };
+    let disconnected = ConnectionChangeKind::Disconnected;
+    let connected = ConnectionChangeKind::Connected;
+    model.rows[0].connection = Some(ConnectionNote::Interrupted {
+        events: vec![
+            event(62, disconnected),
+            event(125, connected),
+            event(312, disconnected),
+            event(341, connected),
+            event(487, disconnected),
+        ],
+        time_offline: None,
+    });
+    let (mut window, _) = open_table_over(Drawing::Recorded, Scheme::Dark, model, false);
+    let chip = window.by_test_id("player-disconnect").expect("the disconnect chip is shown");
+    window.hover(chip).expect("the chip takes the pointer");
+    window.advance(Duration::from_secs(1));
+
+    let mut position = |label| {
+        let element = window.by_label(label).unwrap_or_else(|| panic!("{label} is in the tooltip"));
+        window.bounds(element).expect("the tooltip cell is drawn").origin
+    };
+    let first = ["1:02", "2:05", "1:03"].map(&mut position);
+    let second = ["5:12", "5:41", "0:29"].map(&mut position);
+    let last = ["8:07", "Not recorded"].map(&mut position);
+    let header = ["Disconnect", "Reconnect", "Duration"].map(position);
+    assert!(first[0].x.0 < first[1].x.0 && first[1].x.0 < first[2].x.0, "three side-by-side columns");
+    for column in 0..3 {
+        assert_eq!(first[column].x, header[column].x, "each value is under its heading");
+        assert_eq!(first[column].x, second[column].x, "the next drop keeps the same columns");
+        assert!(second[column].y.0 > first[column].y.0, "each disconnect gets a new line");
+    }
+    assert_eq!(last[0].x, first[0].x);
+    assert_eq!(last[1].x, first[1].x);
 }
 
 /// A match contribution with every part filled in, adding up to `mc`.

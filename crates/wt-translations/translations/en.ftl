@@ -775,6 +775,10 @@ ui-replay-group-none = None
 ## ui.replay.player
 ui-replay-player-hidden_profile = Player has a hidden profile
 ui-replay-player-never_connected = Player never connected to match
+ui-replay-player-disconnected_at = Disconnect
+ui-replay-player-reconnected_at = Reconnect
+ui-replay-player-disconnect_duration = Duration
+ui-replay-player-reconnect_unknown = Not recorded
 
 ## ui.replay.build
 ui-replay-build-open_shiptool = Open Build in ShipTool
