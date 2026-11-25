@@ -94,6 +94,7 @@ All notable changes to this project will be documented in this file.
 - *(renderer)* Keep ship icons sharp when zooming by drawing their SVG source at the displayed resolution
 - *(renderer)* Draw dead ship markers beneath living ships and their labels and status bars
 - *(toolkit)* Open the replay renderer directly from a Render button beside Actions in the Replay Inspector
+- *(toolkit)* Add a play icon to Render in the Replay Inspector and mark key replay actions in menus.
 - *(toolkit)* Show each ship's average base XP in the Stats overview
 - *(toolkit)* Align Stats chart points with their game numbers. Show more ticks and gridlines on both axes when the labels have room.
 - *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team

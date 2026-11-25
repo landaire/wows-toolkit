@@ -589,7 +589,7 @@ fn ResultsTable(search: Search, layout: RwSignal<ColumnLayout, LocalStorage>) ->
                                 attr:data-testid = format!("search-row-render-clipboard-{position}"),
                                 on:click = move |_| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone()))
                             ) {
-                                AppIcon(glyph = Glyph::Copy)
+                                AppIcon(glyph = Glyph::Clipboard)
                             }
                         }
                         TooltipContent {{t!("ui-replay-context-render_to_clipboard", count = 1).into_owned()}}
@@ -712,32 +712,36 @@ fn row_menu_items(shell: Shell, path: std::path::PathBuf, exists: bool, open: im
             MenuLabel {{t!("ui-search-open_missing").into_owned()}}
             MenuSeparator()
         }
-        MenuItem(disabled = !exists, on_select = UnsyncCallback::new(move |()| open())) {
+        MenuItem(inset = true, disabled = !exists, on_select = UnsyncCallback::new(move |()| open())) {
             {t!("ui-search-open").into_owned()}
         }
         MenuItem(
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderReplay(rendered.clone())))
         ) {
+            AppIcon(glyph = Glyph::Play) {}
             {t!("ui-replay-context-render_replay").into_owned()}
         }
         MenuItem(
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| shell.request_replay(ReplayRequest::RenderToClipboard(clipped.clone())))
         ) {
+            AppIcon(glyph = Glyph::Clipboard) {}
             {t!("ui-replay-context-render_to_clipboard", count = 1).into_owned()}
         }
         MenuSeparator()
         MenuItem(
+            inset = true,
             disabled = !exists,
             on_select = UnsyncCallback::new(move |()| copy_replay_files(shell.toasts(), std::slice::from_ref(&file)))
         ) {
             {t!("ui-replay-context-copy_replays", count = 1).into_owned()}
         }
-        MenuItem(on_select = UnsyncCallback::new(move |()| shell.copy_text(copied.clone()))) {
+        MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| shell.copy_text(copied.clone()))) {
             {t!("ui-replay-context-copy_path").into_owned()}
         }
         MenuItem(disabled = !exists, on_select = UnsyncCallback::new(move |()| reveal_in_file_manager(&path))) {
+            AppIcon(glyph = Glyph::FolderOpen) {}
             {t!("ui-replay-context-show_in_explorer").into_owned()}
         }
     }

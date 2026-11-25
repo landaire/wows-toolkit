@@ -571,7 +571,7 @@ pub type TableSlot = Rc<dyn Fn(PanelTable) -> AnyView>;
 /// What the panel tells its owner.
 #[derive(Clone, Default)]
 pub struct PanelEvents {
-    /// The Actions menu's "Render replay". The item is left out without it.
+    /// The header's Render button. The button is left out without it.
     pub on_render: Option<UnsyncCallback<RenderRequest>>,
     pub on_constants_mismatched: Option<UnsyncCallback<ConstantsMismatched>>,
     /// A read landed, which [`PanelControl::read_game`] then answers with.
@@ -1280,7 +1280,10 @@ fn HeaderRow(header: HeaderCx) -> impl IntoView {
                         size = ButtonSize::Sm,
                         attr:data-testid = "replay-render",
                         on:click = move |_| on_render.run(RenderRequest { path: path.get_value(), alts: alts.get_untracked() })
-                    ) {{t!("ui-replay-render").into_owned()}}
+                    ) {
+                        AppIcon(glyph = wows_toolkit_icons::Glyph::Play) {}
+                        {t!("ui-replay-render").into_owned()}
+                    }
                 }))}
                 ActionsMenu(header = header.clone())
                 Tooltip(open = Binding::controlled(tip_open, move |on: bool| tip_wanted.set(on))) {
@@ -1607,8 +1610,12 @@ fn ActionsMenu(header: HeaderCx) -> impl IntoView {
             }
             DropdownMenuContent {
                 MenuLabel(class = "wt-rp-menu-heading") {{t!("ui-replay-section_match").into_owned()}}
-                MenuItem(attr:data-testid = "replay-load-alt", on_select = load_alt) {{alt_label}}
+                MenuItem(attr:data-testid = "replay-load-alt", on_select = load_alt) {
+                    AppIcon(glyph = wows_toolkit_icons::Glyph::FolderOpen) {}
+                    {alt_label}
+                }
                 MenuItem(attr:data-testid = "replay-timeline-open", disabled = no_timeline, on_select = open_timeline) {
+                    AppIcon(glyph = wows_toolkit_icons::Glyph::Clock) {}
                     {t!("ui-replay-timeline").into_owned()}
                 }
                 Show(when = is_test_ship) {

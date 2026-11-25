@@ -767,10 +767,11 @@ fn row_menu(shell: Shell, listing: Listing, events: BrowserEvents, key: &NodeKey
             Some(MenuItems::new(move || {
                 let (listed, revealed) = (listed.clone(), revealed.clone());
                 view! {
-                    MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
+                    MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
                         {t!("ui-replay-context-copy_path").into_owned()}
                     }
                     MenuItem(on_select = UnsyncCallback::new(move |()| wows_toolkit_services::child_process::reveal_in_file_manager(&revealed))) {
+                        AppIcon(glyph = Glyph::FolderOpen) {}
                         {t!("ui-replay-context-show_in_explorer").into_owned()}
                     }
                 }
@@ -807,9 +808,11 @@ fn group_menu(shell: Shell, listing: Listing, events: BrowserEvents, paths: Vec<
 
     view! {
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToVideo(paths.clone()))) {
+            AppIcon(glyph = Glyph::Download) {}
             {label("ui-replay-context-render_to_video")}
         }
         MenuItem(on_select = send(ReplayBrowserEvent::RenderManyToClipboard(paths.clone()))) {
+            AppIcon(glyph = Glyph::Clipboard) {}
             {label("ui-replay-context-render_to_clipboard")}
         }
         MenuSeparator()
@@ -848,10 +851,13 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
 
     let item = {
         let events = events.clone();
-        move |label: String, event: ReplayBrowserEvent| {
+        move |glyph: Option<Glyph>, label: String, event: ReplayBrowserEvent| {
             let events = events.clone();
             view! {
-                MenuItem(on_select = UnsyncCallback::new(move |()| events.send(event.clone()))) {{label}}
+                MenuItem(inset = glyph.is_none(), on_select = UnsyncCallback::new(move |()| events.send(event.clone()))) {
+                    {glyph.map(|glyph| view! { AppIcon(glyph = glyph) }.into_view())}
+                    {label}
+                }
             }
         }
     };
@@ -859,22 +865,22 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         let many = batch.len();
         let (copied, listed) = (batch.clone(), batch.clone());
         view! {
-            MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
+            MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), &copied))) {
                 {t!("ui-replay-context-copy_replays", count = many).into_owned()}
             }
-            MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
+            MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, &listed))) {
                 {t!("ui-replay-context-copy_paths", count = many).into_owned()}
             }
-            {item(t!("ui-replay-context-render_to_video", count = many).into_owned(), ReplayBrowserEvent::RenderManyToVideo(batch.clone()))}
-            {item(t!("ui-replay-context-render_to_clipboard", count = many).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(batch.clone()))}
+            {item(Some(Glyph::Download), t!("ui-replay-context-render_to_video", count = many).into_owned(), ReplayBrowserEvent::RenderManyToVideo(batch.clone()))}
+            {item(Some(Glyph::Clipboard), t!("ui-replay-context-render_to_clipboard", count = many).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(batch.clone()))}
             MenuSeparator()
         }
     });
     // A batch is rendered from the items above; a lone row renders itself.
     let single_items = batch.is_empty().then(|| {
         view! {
-            {item(t!("ui-replay-context-render_to_video", count = 1).into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
-            {item(t!("ui-replay-context-render_to_clipboard", count = 1).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
+            {item(Some(Glyph::Download), t!("ui-replay-context-render_to_video", count = 1).into_owned(), ReplayBrowserEvent::RenderManyToVideo(vec![path.to_path_buf()]))}
+            {item(Some(Glyph::Clipboard), t!("ui-replay-context-render_to_clipboard", count = 1).into_owned(), ReplayBrowserEvent::RenderManyToClipboard(vec![path.to_path_buf()]))}
         }
     });
 
@@ -903,7 +909,7 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
     let controls = cache.map(|cache| {
         let toasts = shell.toasts();
         view! {
-            MenuItem(on_select = UnsyncCallback::new(move |()| {
+            MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| {
                 let Some(newest) = cache.newest_loaded() else { return };
                 match wows_toolkit_viewmodel::controls::read_scheme(newest.vfs()) {
                     Some(groups) => controls::open(shell, groups),
@@ -919,7 +925,7 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
     let in_game = wows_dir.map(|dir| {
         let replay = path.clone();
         view! {
-            MenuItem(on_select = UnsyncCallback::new(move |()| {
+            MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| {
                 let (dir, replay) = (PathBuf::from(&dir), replay.clone());
                 confirm(
                     shell,
@@ -938,9 +944,9 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
 
     AnyView::new(view! {
         {batch_items.map(IntoView::into_view)}
-        {item(t!("ui-collab-open").into_owned(), ReplayBrowserEvent::Open(path.clone()))}
-        {item(t!("ui-replay-context-open_in_new_tab").into_owned(), ReplayBrowserEvent::OpenInNewTab(path.clone()))}
-        {item(t!("ui-replay-context-render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
+        {item(None, t!("ui-collab-open").into_owned(), ReplayBrowserEvent::Open(path.clone()))}
+        {item(Some(Glyph::AppWindow), t!("ui-replay-context-open_in_new_tab").into_owned(), ReplayBrowserEvent::OpenInNewTab(path.clone()))}
+        {item(Some(Glyph::Play), t!("ui-replay-context-render_replay").into_owned(), ReplayBrowserEvent::RenderReplay(path.clone()))}
         {single_items.map(IntoView::into_view)}
         MenuSeparator()
         MenuItem(disabled = session_off, on_select = set_session) {{set_label}}
@@ -948,13 +954,14 @@ fn leaf_menu(shell: Shell, listing: Listing, events: BrowserEvents, path: &Path)
         {unavailable.map(session_unavailable_line)}
         MenuItem(on_select = reindex) {{t!("ui-reindex-context", count = count).into_owned()}}
         MenuSeparator()
-        MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), std::slice::from_ref(&copied)))) {
+        MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| files::copy_replay_files(shell.toasts(), std::slice::from_ref(&copied)))) {
             {t!("ui-replay-context-copy_replays", count = 1).into_owned()}
         }
-        MenuItem(on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
+        MenuItem(inset = true, on_select = UnsyncCallback::new(move |()| files::copy_paths(shell, std::slice::from_ref(&listed)))) {
             {t!("ui-replay-context-copy_path").into_owned()}
         }
         MenuItem(on_select = UnsyncCallback::new(move |()| wows_toolkit_services::child_process::reveal_in_file_manager(&revealed))) {
+            AppIcon(glyph = Glyph::FolderOpen) {}
             {t!("ui-replay-context-show_in_explorer").into_owned()}
         }
         {controls.map(IntoView::into_view)}
