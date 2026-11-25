@@ -105,6 +105,11 @@ impl FrameSink {
     pub fn frame_size(&self) -> Option<FrameSize> {
         self.0.latest().frame.as_ref().map(FrameSize::of)
     }
+
+    #[cfg(test)]
+    pub(crate) fn latest_frame(&self) -> Option<BgraFrame> {
+        self.0.latest().frame.clone()
+    }
 }
 
 impl Default for FrameSink {

@@ -468,6 +468,47 @@ impl RendererSession {
         self.with_run(|run| run.game_data = Some(game_data));
     }
 
+    /// Starts a fixture track on a canvas built from the replay's own assets.
+    #[cfg(test)]
+    pub(super) fn hold_canvas_for_test(self, path: PathBuf, game_data: GameDataCache, canvas: Canvas) {
+        self.with_run(|run| {
+            run.request.path = path;
+            run.game_data = Some(game_data);
+            run.layout = canvas.layout;
+            run.renderer_capacity = canvas.renderers.len();
+            run.renderers = canvas.renderers;
+        });
+        self.map_origin.set(canvas.map_origin);
+    }
+
+    #[cfg(test)]
+    pub(super) fn draws_settled_for_test(self) -> bool {
+        self.run.with_value(|run| {
+            run.building.is_none() && !run.redraw_wanted && run.renderers.len() == run.renderer_capacity
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn shown_draw_for_test(self) -> u64 {
+        self.run.with_value(|run| run.shown_draw.0)
+    }
+
+    #[cfg(test)]
+    pub(super) fn draw_status_for_test(self) -> String {
+        self.run.with_value(|run| {
+            format!(
+                "asked={}, started={}, shown={}, available={}/{}, queued={}, building={:?}",
+                run.frames_asked,
+                run.draw_generation.0,
+                run.shown_draw.0,
+                run.renderers.len(),
+                run.renderer_capacity,
+                run.redraw_wanted,
+                run.building,
+            )
+        })
+    }
+
     /// Reads the battle's events, as an opened session does.
     #[cfg(test)]
     pub fn scan_events_for_test(self) {
@@ -1747,21 +1788,29 @@ impl RendererSession {
         self.broadcast(&track, &motion, clock, placed);
 
         let (view, scale) = self.map.with_untracked(|map| (map.shaped_view(), map.render_scale()));
-        let drawing = Arc::clone(&renderer);
-        self.spawn(async move {
-            // A playing viewport keeps several draws running, which would hold zgui's few shared
-            // threads.
-            let drawn = long_job(move || {
-                let mut drawing = drawing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ui = zgui::task::ui();
+
+        // Start raster work without waiting for another UI frame, and wake the UI when it lands.
+        drop(long_job(move || {
+            let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut drawing = renderer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let mut bgra = Vec::new();
                 let drawn = drawing.render_regions_bgra(view, scale, &shown, &mut bgra);
                 let (width, height) = drawn.pixels;
                 let size = FrameSize { width: drawn.canvas.0, height: drawn.canvas.1 };
+
                 RasterOutput { frame: BgraFrame::from_bgra(width, height, bgra), size, regions: drawn.regions }
-            })
-            .await;
-            self.finish_draw(generation, draw, renderer, drawn);
-        });
+            }));
+            ui.post(move || {
+                if !self.is_open() {
+                    return;
+                }
+                match drawn {
+                    Ok(drawn) => self.finish_draw(generation, draw, renderer, drawn),
+                    Err(panic) => std::panic::resume_unwind(panic),
+                }
+            });
+        }));
     }
 
     fn finish_draw(

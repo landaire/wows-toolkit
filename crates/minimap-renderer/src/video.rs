@@ -187,9 +187,17 @@ impl VideoEncoder {
     /// The commands one frame draws from the battle state as it stands.
     fn frame_commands(&self, controller: &BattleView<'_>, renderer: &mut MinimapRenderer) -> Vec<DrawCommand> {
         let mut commands = renderer.draw_frame(controller);
-        if !self.show_dead_ships {
-            commands.retain(|command| !matches!(command, DrawCommand::DeadShip { .. }));
-        }
+        commands.retain_mut(|command| {
+            if !matches!(command, DrawCommand::DeadShip { .. }) {
+                return true;
+            }
+
+            if self.show_dead_ships {
+                crate::config::hide_command_parts(command, &renderer.options);
+            }
+
+            self.show_dead_ships
+        });
 
         commands
     }

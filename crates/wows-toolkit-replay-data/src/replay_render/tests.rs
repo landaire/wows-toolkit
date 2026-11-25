@@ -2206,6 +2206,10 @@ fn the_options_drawn_fit_the_canvas_there_is() {
         crate::minimap_preview::layout_for(&fit_to_canvas(&plain, SidePanelLayout::TeamRosters)),
         SidePanelLayout::TeamRosters
     );
+
+    let requested_stats = RenderOptions { show_team_rosters: false, ..stats };
+    let on_rosters = fit_to_canvas(&requested_stats, SidePanelLayout::TeamRosters);
+    assert!(!on_rosters.show_stats_panel, "only the available panel should be selected");
 }
 
 /// A playback bake carries the rosters and the stats panel, or their switches

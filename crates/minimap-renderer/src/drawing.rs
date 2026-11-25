@@ -2939,7 +2939,7 @@ impl RenderTarget for ImageTarget {
                     grow,
                 );
             }
-            DrawCommand::DeadShip { pos, yaw, species, color, is_self, .. } => {
+            DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name, .. } => {
                 let x = view.x(pos.x);
                 let y = view.y(pos.y);
 
@@ -2959,6 +2959,16 @@ impl RenderTarget for ImageTarget {
                 };
 
                 self.ship_icon_rasterizer.draw(&mut self.map_layer, icon, x, y, *yaw, *color, 1.0, grow, false, false);
+                draw_ship_labels(
+                    &mut self.map_layer,
+                    x,
+                    y,
+                    player_name.as_deref(),
+                    ship_name.as_deref(),
+                    None,
+                    &self.fonts,
+                    grow,
+                );
             }
             DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
                 let x = view.x(pos.x);

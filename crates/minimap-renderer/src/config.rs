@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use wows_core::pseudonym::NameDisplay;
 
+use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::ShipConfigVisibility;
 use crate::error::TimingError;
@@ -460,9 +461,9 @@ video_length = 60
 pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships: bool) -> bool {
     match cmd {
         DrawCommand::ShotTracer { .. } => opts.show_tracers,
-        DrawCommand::ShotTracerTip { .. } => opts.show_tracers,
+        DrawCommand::ShotTracerTip { .. } => opts.show_tracers && opts.show_armament,
         DrawCommand::SecondaryShotTracer { .. } => opts.show_tracers,
-        DrawCommand::SecondaryShotTracerTip { .. } => opts.show_tracers,
+        DrawCommand::SecondaryShotTracerTip { .. } => opts.show_tracers && opts.show_armament,
         DrawCommand::Torpedo { .. } => opts.show_torpedoes,
         DrawCommand::Smoke { .. } => opts.show_smoke,
         DrawCommand::Ship { .. } => true, // ships always drawn; name visibility handled below
@@ -487,7 +488,7 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
         DrawCommand::TeamBuffs { .. } => opts.show_buffs,
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
         DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.stats_panel_visible(),
-        DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
+        DrawCommand::TeamAdvantage { .. } => opts.show_score && opts.show_advantage,
         DrawCommand::WeatherZone { .. } => opts.show_weather,
         // The rosters take the gutter when both are on, as the canvas does.
         DrawCommand::StatsPanel { .. }
@@ -509,9 +510,13 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
 /// rasterises a command stream hides the same things.
 pub fn hide_command_parts(cmd: &mut DrawCommand, opts: &RenderOptions) {
     match cmd {
-        DrawCommand::Ship { player_name, ship_name, .. } | DrawCommand::Plane { player_name, ship_name, .. } => {
+        DrawCommand::Ship { player_name, ship_name, name_color, .. } => {
             hide_names(player_name, ship_name, opts);
+            if !opts.show_armament {
+                *name_color = None;
+            }
         }
+        DrawCommand::Plane { player_name, ship_name, .. } => hide_names(player_name, ship_name, opts),
         DrawCommand::DeadShip { player_name, ship_name, .. } => {
             if opts.show_dead_ship_names {
                 hide_names(player_name, ship_name, opts);
@@ -520,9 +525,23 @@ pub fn hide_command_parts(cmd: &mut DrawCommand, opts: &RenderOptions) {
                 *ship_name = None;
             }
         }
-        DrawCommand::ScoreBar { team0_timer, team1_timer, .. } if !opts.show_score_timer => {
-            *team0_timer = None;
-            *team1_timer = None;
+        DrawCommand::ScoreBar { team0_timer, team1_timer, advantage, .. } => {
+            if !opts.show_score_timer {
+                *team0_timer = None;
+                *team1_timer = None;
+            }
+            if !opts.show_advantage {
+                *advantage = None;
+            }
+        }
+        DrawCommand::SubmarineStatus { has_hp_bar, .. } | DrawCommand::ConsumableIcons { has_hp_bar, .. } => {
+            *has_hp_bar &= opts.show_hp_bars;
+        }
+        DrawCommand::StatsActivityFeed { entries, .. } if !(opts.show_kill_feed && opts.show_chat) => {
+            entries.retain(|entry| match &entry.kind {
+                ActivityFeedKind::Kill(_) => opts.show_kill_feed,
+                ActivityFeedKind::Chat(_) => opts.show_chat,
+            });
         }
         _ => {}
     }

@@ -135,7 +135,10 @@ pub fn fit_to_canvas(options: &RenderOptions, layout: SidePanelLayout) -> Cow<'_
             fitted.show_team_rosters = false;
             fitted.show_stats_panel = true;
         }
-        SidePanelLayout::TeamRosters => fitted.show_team_rosters = true,
+        SidePanelLayout::TeamRosters => {
+            fitted.show_team_rosters = true;
+            fitted.show_stats_panel = false;
+        }
     }
     Cow::Owned(fitted)
 }

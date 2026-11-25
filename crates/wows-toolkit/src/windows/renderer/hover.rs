@@ -65,6 +65,10 @@ pub fn HoverReadings(session: RendererSession) -> impl IntoView {
 #[component]
 fn AdvantageStrip(session: RendererSession) -> impl IntoView {
     let lines = move || {
+        if !session.layers.with(|layers| layers.options.show_score && layers.options.show_advantage) {
+            return None;
+        }
+
         let track = session.track()?;
         let at = session.playback.with(Playback::at);
         advantage_hover(track.commands(at)?)

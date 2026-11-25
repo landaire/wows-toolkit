@@ -844,7 +844,15 @@ fn walk(
     if cancel.load(Ordering::Relaxed) {
         return Err(PreviewError::Cancelled);
     }
-    Ok(sink.finish())
+
+    let mut frames = sink.finish();
+    let options = paint_options();
+    for command in frames.iter_mut().flatten() {
+        if matches!(command, DrawCommand::DeadShip { .. }) {
+            wows_minimap_renderer::config::hide_command_parts(command, &options);
+        }
+    }
+    Ok(frames)
 }
 
 /// Rasterises `frames` one at a time through the paint preset, handing each

@@ -97,6 +97,7 @@ All notable changes to this project will be documented in this file.
 - *(toolkit)* Show each ship's average base XP in the Stats overview
 - *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team
 - *(toolkit)* Apply replay renderer player and ship name switches when a baked frame is drawn
+- *(toolkit)* Apply replay renderer switches to dead ship labels, armament, the score display, and activity in the stats panel even while playback is paused
 - *(toolkit)* Keep replay playback, seeking and zoom controls available while a video renders
 - *(toolkit)* Open or close replay player details when a row's text or figures are double-clicked
 - *(toolkit)* Make replay player names, clan tags and table values selectable and copyable

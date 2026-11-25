@@ -15,6 +15,7 @@ use wows_minimap_renderer::ExportSpeed;
 use wows_minimap_renderer::ExportTiming;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::ShipVisibility;
+use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::VideoLength;
 use wows_minimap_renderer::advantage::AdvantageBreakdown;
 use wows_minimap_renderer::draw_command::ConsumableLines;
@@ -27,6 +28,7 @@ use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_replay_data::replay_render::export::ExportTarget;
+use wows_toolkit_replay_data::replay_render::export::encoder_status;
 use wows_toolkit_replay_data::replay_render::hover::ConsumableHover;
 use wows_toolkit_replay_data::replay_render::playback::Playback;
 use wows_toolkit_replay_data::replay_render::timeline::BattleEvents;
@@ -50,6 +52,9 @@ use crate::windows::renderer::session::HoveredConsumable;
 use crate::windows::renderer::session::RendererSession;
 use crate::windows::renderer::session::Status;
 use crate::windows::renderer::view::ReplayRendererProps;
+
+#[path = "display_tests.rs"]
+mod display_tests;
 
 /// A track of empty frames drawn at `clocks`, with the battle starting at `battle_start` and the
 /// replay ending at the last frame.
@@ -89,12 +94,20 @@ fn events(at: &[f32]) -> BattleEvents {
 
 /// A renderer over `track` in a headless window, and its session.
 fn open(track: Track) -> (HeadlessWindow, RendererSession) {
+    open_with_setup(track, |_| {})
+}
+
+fn open_with_setup(
+    track: Track,
+    mut setup: impl FnMut(RendererSession) + 'static,
+) -> (HeadlessWindow, RendererSession) {
     let handle = Rc::new(Cell::new(None));
     let built = Rc::clone(&handle);
     let mut track = Some(track);
     let window = HeadlessWindow::open(HeadlessOptions::new(WindowSize { width: 1200.0, height: 800.0 }), move || {
         Services::provide(None);
         let session = RendererSession::ready_for_test(track.take().expect("the window is built once"));
+        setup(session);
         built.set(Some(session));
         // A host the size of the window, as a tab or a window of its own gives the renderer.
         view! {
@@ -155,39 +168,18 @@ fn elapsed(session: RendererSession) -> f32 {
     session.playback.with_untracked(|playback| playback.elapsed(&track))
 }
 
-/// The gear opens, and the switches inside it reach what the viewport draws.
-#[test]
-fn the_gear_opens_and_its_switches_reach_the_frame() {
-    let (mut window, session) = open(track(&[0.0, 30.0], 0.0));
-    assert!(!shown(&window, "renderer-opt-team-rosters"), "nothing is open yet");
-
-    click(&mut window, "replay-renderer-settings-toggle");
-    for switch in ["renderer-opt-hp-bars", "renderer-opt-trails", "renderer-opt-team-rosters"] {
-        assert!(shown(&window, switch), "{switch} is in the open gear");
-    }
-
-    let was = session.layers.with_untracked(|layers| layers.options.show_hp_bars);
-    click(&mut window, "renderer-opt-hp-bars");
-    assert_eq!(
-        session.layers.with_untracked(|layers| layers.options.show_hp_bars),
-        !was,
-        "the switch reaches what is drawn"
-    );
-}
-
-/// The gear offers the stats panel. Like the rosters it is a wider canvas, so with no game data to
-/// build that canvas from the switch is refused rather than drawing an empty gutter.
+/// Without game data neither panel's canvas can be built.
 #[test]
 fn the_gear_offers_the_stats_panel_and_refuses_it_without_a_canvas() {
     let (mut window, session) = open(track(&[0.0, 30.0], 0.0));
     click(&mut window, "replay-renderer-settings-toggle");
-    // The panel switches sit at the bottom of the scrolled gear; the focus brings them into view.
-    tab_to(&mut window, "renderer-opt-stats-panel");
-
-    click(&mut window, "renderer-opt-stats-panel");
-    let panels =
-        session.layers.with_untracked(|layers| (layers.options.show_stats_panel, layers.options.show_team_rosters));
-    assert_eq!(panels, (false, false), "no canvas can be built for it without game data");
+    for id in ["renderer-opt-team-rosters", "renderer-opt-stats-panel"] {
+        tab_to(&mut window, id);
+        click(&mut window, id);
+        let panels =
+            session.layers.with_untracked(|layers| (layers.options.show_stats_panel, layers.options.show_team_rosters));
+        assert_eq!(panels, (false, false), "{id}: no canvas can be built without game data");
+    }
 }
 
 /// The export settings under the switches reach what the next export is encoded with.
@@ -202,12 +194,31 @@ fn the_export_settings_reach_the_next_export() {
     tab_to(&mut window, "replay-renderer-prefer-cpu");
     click(&mut window, "replay-renderer-prefer-cpu");
     assert!(session.export.with_untracked(|export| export.settings.prefer_cpu));
+    click(&mut window, "replay-renderer-prefer-cpu");
+    assert!(!session.export.with_untracked(|export| export.settings.prefer_cpu));
 
     tab_to(&mut window, "replay-renderer-include-pre-battle");
     click(&mut window, "replay-renderer-include-pre-battle");
     assert!(session.export.with_untracked(|export| export.settings.include_pre_battle));
+    click(&mut window, "replay-renderer-include-pre-battle");
+    assert!(!session.export.with_untracked(|export| export.settings.include_pre_battle));
 
     assert!(shown(&window, "replay-renderer-codec-auto"), "the encoder's own pick is always offered");
+    let supported: Vec<_> = encoder_status().supported_codecs().collect();
+    for codec in VideoCodec::ALL {
+        let id = format!("replay-renderer-codec-{}", codec as usize);
+        assert_eq!(shown(&window, &id), supported.contains(&codec), "{codec:?}: only supported codecs are offered");
+    }
+    if let Some(codec) = supported.first().copied() {
+        let id = format!("replay-renderer-codec-{}", codec as usize);
+        tab_to(&mut window, &id);
+        click(&mut window, &id);
+        assert_eq!(session.export.with_untracked(|export| export.settings.codec), Some(codec));
+
+        tab_to(&mut window, "replay-renderer-codec-auto");
+        click(&mut window, "replay-renderer-codec-auto");
+        assert_eq!(session.export.with_untracked(|export| export.settings.codec), None);
+    }
     assert!(shown(&window, "replay-renderer-save-defaults"));
 }
 
