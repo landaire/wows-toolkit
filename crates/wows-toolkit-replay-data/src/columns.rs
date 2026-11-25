@@ -58,17 +58,30 @@ impl ReplayColumn {
         ReplayColumn::TimeLived,
     ];
 
-    /// The `ReplaySettings` flag that gates this column's visibility, for the
-    /// five user-toggleable columns. `None` for always-on columns. Mirrors
-    /// `update_visible_columns`'s `optional_columns` table.
-    fn settings_gate(self) -> Option<fn(&ReplaySettings) -> bool> {
+    pub fn is_visible(self, settings: &ReplaySettings) -> bool {
         match self {
-            ReplayColumn::RawXp => Some(|s| s.show_raw_xp),
-            ReplayColumn::ObservedDamage => Some(|s| s.show_observed_damage),
-            ReplayColumn::Heals => Some(|s| s.show_heals),
-            ReplayColumn::ReceivedDamage => Some(|s| s.show_received_damage),
-            ReplayColumn::DistanceTraveled => Some(|s| s.show_distance_traveled),
-            _ => None,
+            Self::RawXp => settings.show_raw_xp,
+            Self::ObservedDamage => settings.show_observed_damage,
+            Self::Heals => settings.show_heals,
+            Self::ReceivedDamage => settings.show_received_damage,
+            Self::DistanceTraveled => settings.show_distance_traveled,
+            _ => !settings.hidden_columns.contains(self.storage_key()),
+        }
+    }
+
+    pub fn set_visible(self, settings: &mut ReplaySettings, visible: bool) {
+        match self {
+            Self::RawXp => settings.show_raw_xp = visible,
+            Self::ObservedDamage => settings.show_observed_damage = visible,
+            Self::Heals => settings.show_heals = visible,
+            Self::ReceivedDamage => settings.show_received_damage = visible,
+            Self::DistanceTraveled => settings.show_distance_traveled = visible,
+            _ if visible => {
+                settings.hidden_columns.remove(self.storage_key());
+            }
+            _ => {
+                settings.hidden_columns.insert(self.storage_key().to_owned());
+            }
         }
     }
 
@@ -129,6 +142,15 @@ impl ReplayColumn {
         t!(self.label_key()).into_owned()
     }
 
+    /// The unabbreviated column name used by the visibility controls.
+    pub fn visibility_label(self) -> String {
+        match self {
+            Self::PersonalRating => t!("ui-rating-personal_rating").into_owned(),
+            Self::MatchContribution => t!("ui-rating-match_contribution").into_owned(),
+            _ => self.label(),
+        }
+    }
+
     /// What a press on the column's header sorts by. `None` for the columns
     /// with plain headers: Skills and Time Lived.
     pub const fn sort_column(self) -> Option<SortColumn> {
@@ -153,12 +175,19 @@ impl ReplayColumn {
     }
 }
 
-/// The column set for a fresh replay load, given the persisted display
-/// settings: always-on columns unconditionally, the five optional columns
-/// only when their `ReplaySettings` flag is set, in declaration order.
-/// Mirrors `UiReport::update_visible_columns`.
+/// The columns a replay opens with, in declaration order before applying its layout.
 pub fn default_columns(settings: &ReplaySettings) -> Vec<ReplayColumn> {
-    ReplayColumn::ALL.into_iter().filter(|col| col.settings_gate().is_none_or(|gate| gate(settings))).collect()
+    ReplayColumn::ALL.into_iter().filter(|col| col.is_visible(settings)).collect()
+}
+
+/// Restores visibility without modifying any other replay settings.
+pub fn reset_column_visibility(settings: &mut ReplaySettings) {
+    let defaults = ReplaySettings::default();
+
+    settings.hidden_columns.clear();
+    for column in ReplayColumn::ALL {
+        column.set_visible(settings, column.is_visible(&defaults));
+    }
 }
 
 /// Which part of the table a column sits in.
@@ -238,17 +267,30 @@ impl ColumnArrangement {
 
     /// Moves `col` to `placement`, counted among the columns in `shown`.
     pub fn place(&mut self, col: ReplayColumn, placement: Placement, shown: &[ReplayColumn]) {
+        let current = self.list(placement.section).iter().filter(|other| shown.contains(other)).nth(placement.index);
+        if current == Some(&col) {
+            return;
+        }
+
         self.remove(col);
         let list = self.list_mut(placement.section);
-        let shown_at: Vec<usize> =
-            list.iter().enumerate().filter(|(_, other)| shown.contains(other)).map(|(position, _)| position).collect();
+        // Inserting after the last shown column leaves any trailing hidden columns in place.
+        let mut next = 0;
+        let mut at = 0;
+        for (position, other) in list.iter().enumerate() {
+            if !shown.contains(other) {
+                continue;
+            }
 
-        // Past the last shown column it goes directly after that one, ahead
-        // of any hidden ones behind it; with none shown, first.
-        let at = match shown_at.get(placement.index) {
-            Some(position) => *position,
-            None => shown_at.last().map_or(0, |last| last + 1),
-        };
+            if next == placement.index {
+                at = position;
+                break;
+            }
+
+            next += 1;
+            at = position + 1;
+        }
+
         list.insert(at, col);
     }
 
@@ -705,6 +747,29 @@ mod tests {
         let heals_ix = columns.iter().position(|c| *c == ReplayColumn::Heals).unwrap();
         let distance_ix = columns.iter().position(|c| *c == ReplayColumn::DistanceTraveled).unwrap();
         assert!(heals_ix < distance_ix);
+    }
+
+    #[test]
+    fn column_visibility_reads_and_writes_legacy_fields() {
+        let legacy = r#"{"show_entity_id":false,"show_raw_xp":true,"show_observed_damage":true,
+                         "show_heals":false,"show_received_damage":false,"show_distance_traveled":false}"#;
+        let mut settings: ReplaySettings = serde_json::from_str(legacy).expect("legacy preferences read");
+        assert!(settings.hidden_columns.is_empty());
+        assert!(ReplayColumn::RawXp.is_visible(&settings));
+        assert!(ReplayColumn::ObservedDamage.is_visible(&settings));
+        assert!(!ReplayColumn::Heals.is_visible(&settings));
+        assert!(!ReplayColumn::ReceivedDamage.is_visible(&settings));
+        assert!(!ReplayColumn::DistanceTraveled.is_visible(&settings));
+
+        ReplayColumn::Name.set_visible(&mut settings, false);
+        ReplayColumn::ShipName.set_visible(&mut settings, false);
+        ReplayColumn::ObservedDamage.set_visible(&mut settings, false);
+        ReplayColumn::DistanceTraveled.set_visible(&mut settings, true);
+        let saved = serde_json::to_value(&settings).expect("visibility preferences serialize");
+
+        assert_eq!(saved["hidden_columns"], serde_json::json!(["name", "ship_name"]));
+        assert_eq!(saved["show_observed_damage"], false);
+        assert_eq!(saved["show_distance_traveled"], true);
     }
 
     #[test]

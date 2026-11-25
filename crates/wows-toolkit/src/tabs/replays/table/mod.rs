@@ -32,6 +32,7 @@ use landaire_ui::Toasts;
 use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::StoredArrangement;
 use wows_toolkit_replay_data::columns::cell_value;
+use wows_toolkit_replay_data::columns::reset_column_visibility;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wows_toolkit_replay_data::model::ReplayReportModel;
@@ -78,16 +79,20 @@ use zgui::view::IntoView;
 use zgui::view::events;
 use zgui::view::install_stylesheet;
 use zgui::vocab::PointerButton;
+use zgui_ui::ButtonProps;
+use zgui_ui::ButtonSize;
+use zgui_ui::ButtonVariant;
 
 use crate::game_art::GameArt;
 use crate::services::GameDataState;
 use crate::services::Services;
 use crate::shell::Appearance;
-use crate::tabs::replays::table::arrangement::COLUMN_ARRANGEMENT_KEY;
-use crate::tabs::replays::table::arrangement::COLUMN_WIDTHS_KEY;
 use crate::tabs::replays::table::arrangement::Columns;
 use crate::tabs::replays::table::arrangement::column_id;
 use crate::theme::palette_choice;
+
+pub(super) use crate::tabs::replays::table::arrangement::COLUMN_ARRANGEMENT_KEY;
+pub(super) use crate::tabs::replays::table::arrangement::COLUMN_WIDTHS_KEY;
 
 /// Builds one column's part of an expanded row; `None` for a column with nothing to show.
 pub type PlayerDetail = Rc<dyn Fn(PlayerDetailCx) -> Option<AnyView>>;
@@ -538,6 +543,8 @@ pub fn PlayerTable(
         t!("ui-tabs-replay_parser").into_owned()
     });
     let row_menu: RowMenu<RowId> = Rc::new(move |row: RowId| menu::row_menu(row, cx));
+    let settings = services.settings;
+    let header_menu = menu::column_menu(shown, settings);
     let row_mark: RowMark<TableRow> = Rc::new(|row: &TableRow| Some(cells::row_mark(&row.row, row.side)));
 
     let noted = cx.noted;
@@ -546,9 +553,24 @@ pub fn PlayerTable(
             noted.press();
         }
     };
+    let empty_notice = move || {
+        shown.with(Vec::is_empty).then(|| AnyView::new(view! {
+            row(style = "position: absolute; inset: 0; z-index: 3; padding: 8px; gap: 8px; flex-wrap: wrap; align-items: center; align-content: start; background-color: var(--lui-color-panel)") {
+                text {{locale.text("ui-replay-column-none_visible")}}
+                Button(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Sm,
+                    attr:data-testid = "replay-empty-reset-columns",
+                    on:click = move |_| settings.edit_replay(reset_column_visibility)
+                ) {
+                    {locale.text("ui-replay-column-reset_visibility")}
+                }
+            }
+        }))
+    };
 
     view! {
-        box(class = "wt-pt", on:pointer_down = on_press) {
+        box(class = "wt-pt", style:position = "relative", on:pointer_down = on_press) {
             Grid(
                 rows = Signal::derive_local(move || rows.get()),
                 columns = grid_columns,
@@ -561,13 +583,15 @@ pub fn PlayerTable(
                 selection = selection,
                 expanded = expanded,
                 row_menu = row_menu,
+                header_menu = header_menu,
                 row_mark = row_mark,
                 strings = strings,
                 row_menu_handle = cx.menus,
                 label = label,
                 class = "wt-pt-grid",
                 attr:data-testid = "player-table"
-            )
+            ) {}
+            {empty_notice}
         }
     }
 }

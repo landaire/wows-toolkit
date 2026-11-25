@@ -279,6 +279,7 @@ ui-settings-wows-cache-repair_needed = { $count ->
 }
 
 ## ui.settings.replay
+ui-settings-replay-column_visibility_description = Choose which player columns appear in the replay results table. You can also right-click any column heading.
 ui-settings-replay-show_raw_xp = Show Raw XP
 ui-settings-replay-show_entity_id = Show Entity ID
 ui-settings-replay-show_observed_damage = Show Observed Damage
@@ -688,6 +689,9 @@ ui-replay-context-render_to_clipboard = { $count ->
 }
 
 ## ui.replay.column
+ui-replay-column-visibility = Visible Columns
+ui-replay-column-reset_visibility = Reset to Default Columns
+ui-replay-column-none_visible = No player columns are visible.
 ui-replay-column-player_name = Player Name
 ui-replay-column-base_xp = Base XP
 ui-replay-column-ship_name = Ship Name

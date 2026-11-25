@@ -1,5 +1,4 @@
-//! A row's actions: the menu a right-click on the row opens, which the dots at the end of the
-//! player's name open too.
+//! Actions available from the player table's row and header context menus.
 
 use std::sync::Arc;
 
@@ -9,21 +8,25 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use wows_replays::types::AccountId;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::cell_value;
 use wows_toolkit_replay_data::columns::markdown_table;
 use wows_toolkit_replay_data::columns::name_color_kind;
+use wows_toolkit_replay_data::columns::reset_column_visibility;
 use wows_toolkit_replay_data::columns::row_text;
 use wows_toolkit_replay_data::columns::table_text;
 use wows_toolkit_replay_data::model::PlayerRow;
 use wt_translations::t;
 use zgui::prelude::AnyView;
 use zgui::reactive::Callable;
+use zgui::reactive::Memo;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::prelude::Get;
 use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
+use zgui::reactive::prelude::With;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::view;
 use zgui::view::EventCx;
@@ -32,6 +35,7 @@ use zgui::view::events;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
+use zgui_ui::MenuCheckboxItemProps;
 use zgui_ui::MenuItemProps;
 use zgui_ui::MenuLabelProps;
 use zgui_ui::MenuSeparatorProps;
@@ -41,11 +45,50 @@ use zgui_ui_primitives::Binding;
 
 use crate::desktop;
 use crate::icons::AppIconProps;
+use crate::services::Settings;
 use crate::tabs::replays::table::RowId;
 use crate::tabs::replays::table::TableCx;
 use crate::tabs::replays::table::cells::clan_ink;
 use crate::tabs::replays::table::cells::class_mark;
 use crate::tabs::replays::table::cells::player_color;
+
+pub(super) fn column_menu(shown: Memo<Vec<ReplayColumn>>, settings: Settings) -> MenuItems {
+    MenuItems::new(move || {
+        let disabled = Signal::derive_local(move || settings.read(|_| ()).is_none());
+        let columns = ReplayColumn::ALL
+            .into_iter()
+            .map(|column| {
+                let checked = Signal::derive_local(move || shown.with(|shown| shown.contains(&column)));
+                AnyView::new(view! {
+                    MenuCheckboxItem(
+                        checked = Binding::controlled(checked, move |visible| {
+                            settings.edit_replay(|replay| column.set_visible(replay, visible));
+                        }),
+                        close_on_select = false,
+                        disabled = disabled,
+                        attr:data-testid = format!("replay-header-column-{}", column.storage_key())
+                    ) {
+                        {column.visibility_label()}
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        view! {
+            MenuLabel {{t!("ui-replay-column-visibility").into_owned()}}
+            {columns}
+            MenuSeparator()
+            MenuItem(
+                close_on_select = false,
+                disabled = disabled,
+                on_select = UnsyncCallback::new(move |()| settings.edit_replay(reset_column_visibility)),
+                attr:data-testid = "replay-header-reset-columns"
+            ) {
+                {t!("ui-replay-column-reset_visibility").into_owned()}
+            }
+        }
+    })
+}
 
 /// What builds the menu of the row `id`. Nothing when the row is no longer in the table.
 pub(super) fn row_menu(id: RowId, cx: TableCx) -> Option<MenuItems> {

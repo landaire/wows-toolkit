@@ -206,11 +206,11 @@ fn the_search_filters_every_section_and_counts_what_it_kept() {
     assert_eq!(window.a11y(search).map(|state| state.focused), Some(true), "the search is ready for typing");
     assert!(window.by_test_id("settings-count").is_none(), "nothing is counted before a search");
 
-    // Only in the descriptions of the four column switches.
+    // Shared by the column visibility and entity ID descriptions.
     window.type_text("results table");
     settle(&mut window);
-    assert_eq!(label(&mut window, "settings-count").as_deref(), Some("4 settings"));
-    for kept in [Setting::ShowRawXp, Setting::ShowObservedDamage, Setting::ShowEntityId, Setting::ShowHeals] {
+    assert_eq!(label(&mut window, "settings-count").as_deref(), Some("2 settings"));
+    for kept in [Setting::ReplayColumns, Setting::ShowEntityId] {
         assert!(window.by_test_id(&row_test_id(kept)).is_some(), "{kept:?} is kept");
     }
     assert!(window.by_test_id(&row_test_id(Setting::Language)).is_none(), "the rest are not");
@@ -238,7 +238,8 @@ fn the_search_filters_every_section_and_counts_what_it_kept() {
     window.type_text("RAW XP");
     settle(&mut window);
     assert_eq!(label(&mut window, "settings-count").as_deref(), Some("1 setting"));
-    assert!(window.by_test_id(&row_test_id(Setting::ShowRawXp)).is_some());
+    assert!(window.by_test_id(&row_test_id(Setting::ReplayColumns)).is_some());
+    assert!(window.by_test_id("settings-replay-column-raw_xp").is_some());
 
     window.type_text("zzz");
     settle(&mut window);

@@ -3,12 +3,15 @@
 //! A control writes through `Services::settings`, which changes the snapshot every view reads and
 //! saves the persisted row, so a change takes effect at once and holds across restarts. There is no apply step to forget.
 
+use landaire_ui::MarkedTextProps;
 use landaire_ui::TABULAR_CLASS;
 use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::columns::reset_column_visibility;
 use wows_toolkit_replay_data::replay_index::IndexMode;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -16,6 +19,7 @@ use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::ZoomFactor;
 use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::settings_drawer::EXPORT_FORMATS;
+use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wt_translations::t;
 use zgui::component;
 use zgui::css;
@@ -48,7 +52,10 @@ use zgui::vocab::NamedKey;
 use zgui_ui::ButtonProps;
 use zgui_ui::ButtonSize;
 use zgui_ui::ButtonVariant;
+use zgui_ui::CheckboxProps;
+use zgui_ui::Checked;
 use zgui_ui::InputProps;
+use zgui_ui::LabelProps;
 use zgui_ui::SelectContentProps;
 use zgui_ui::SelectItemProps;
 use zgui_ui::SelectProps;
@@ -73,6 +80,7 @@ use crate::shell::settings::zoom_anchor::ZoomAnchor;
 use crate::shell::twitch::TwitchPaste;
 use crate::shell::twitch::TwitchStatus;
 use crate::shell::update;
+use crate::text_marks::marks;
 use crate::theme::palette_choice;
 
 const SHEET: &str = "wt-settings-controls";
@@ -90,6 +98,18 @@ const CSS: &str = css!(
         flex-direction: column;
         gap: 8px;
     }
+    .wt-settings__replay-columns {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 12px;
+    }
+    .wt-settings__replay-column {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+    }
+    .wt-settings__replay-column .zui-checkbox { flex: none; }
     .wt-settings__choices {
         display: flex;
         flex-direction: row;
@@ -227,7 +247,7 @@ const TWITCH_TOKEN_URL: &str = "https://chatterino.com/client_login";
 /// The control a setting is changed with, beside or under its name. Nothing for a setting that is
 /// only reported on.
 #[component]
-pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
+pub fn SettingControl(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalStorage>) -> impl IntoView {
     install_stylesheet(SHEET, CSS);
 
     let control = match setting {
@@ -325,37 +345,13 @@ pub fn SettingControl(shell: Shell, setting: Setting) -> impl IntoView {
                 text(class = "wt-settings__line wt-settings__selectable", attr:data-testid = "settings-current-replay-path") {{shown}}
             })
         }
-        Setting::ShowRawXp => replay_switch(
-            shell,
-            setting,
-            "show-raw-xp",
-            |replay| replay.show_raw_xp,
-            |replay, on| {
-                replay.show_raw_xp = on;
-            },
-        ),
-        Setting::ShowObservedDamage => replay_switch(
-            shell,
-            setting,
-            "show-observed-damage",
-            |replay| replay.show_observed_damage,
-            |replay, on| replay.show_observed_damage = on,
-        ),
+        Setting::ReplayColumns => replay_columns(shell, query),
         Setting::ShowEntityId => replay_switch(
             shell,
             setting,
             "show-entity-id",
             |replay| replay.show_entity_id,
             |replay, on| replay.show_entity_id = on,
-        ),
-        Setting::ShowHeals => replay_switch(
-            shell,
-            setting,
-            "show-heals",
-            |replay| replay.show_heals,
-            |replay, on| {
-                replay.show_heals = on;
-            },
         ),
         Setting::ShowDamageDealtBar => replay_switch(
             shell,
@@ -594,7 +590,7 @@ fn replay_switch(
 
     AnyView::new(view! {
         Switch(
-            checked = Binding::controlled(on, move |on: bool| edit_replay(shell, |replay| write(replay, on))),
+            checked = Binding::controlled(on, move |on: bool| settings.edit_replay(|replay| write(replay, on))),
             size = SwitchSize::Sm,
             attr:data-testid = test_id,
             a11y:label = setting.title().into_owned()
@@ -625,12 +621,60 @@ fn armor_switch(
     })
 }
 
-/// Rewrites the replay settings, which are stored as one row.
-fn edit_replay(shell: Shell, apply: impl FnOnce(&mut ReplaySettings)) {
-    shell.services().settings.edit(keys::REPLAY_SETTINGS, |settings| {
-        apply(&mut settings.replay);
-        settings.replay.clone()
+fn replay_columns(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> AnyView {
+    let settings = shell.services().settings;
+    let columns = ReplayColumn::ALL
+        .into_iter()
+        .map(|column| AnyView::new(view! { ReplayColumnCheckbox(shell = shell, column = column, query = query) }))
+        .collect::<Vec<_>>();
+
+    AnyView::new(view! {
+        column(class = "wt-settings__control-stack") {
+            box(class = "wt-settings__replay-columns") {
+                {columns}
+            }
+            row(class = "wt-settings__control-row") {
+                Button(
+                    variant = ButtonVariant::Outline,
+                    size = ButtonSize::Sm,
+                    attr:data-testid = "settings-replay-reset-columns",
+                    on:click = move |_| settings.edit_replay(reset_column_visibility)
+                ) {
+                    {t!("ui-replay-column-reset_visibility").into_owned()}
+                }
+            }
+        }
+    })
+}
+
+#[component]
+fn ReplayColumnCheckbox(shell: Shell, column: ReplayColumn, query: Signal<FilterQuery, LocalStorage>) -> impl IntoView {
+    let settings = shell.services().settings;
+    let checked = Signal::derive_local(move || {
+        Checked::from(settings.read(|settings| column.is_visible(&settings.replay)) == Some(true))
     });
+    let control = NodeRef::new();
+    let name = NodeRef::new();
+    let label = column.visibility_label();
+
+    view! {
+        row(class = "wt-settings__replay-column") {
+            Checkbox(
+                checked = Binding::controlled(checked, move |checked: Checked| {
+                    settings.edit_replay(|replay| column.set_visible(replay, checked == Checked::Yes));
+                }),
+                node_ref = control,
+                labelled_by = name,
+                attr:data-testid = format!("settings-replay-column-{}", column.storage_key())
+            )
+            Label(node_ref = name, control = control) {
+                {move || {
+                    let ranges = query.with(|query| marks(query, &label));
+                    view! { MarkedText(text = label.clone(), ranges = ranges) }
+                }}
+            }
+        }
+    }
 }
 
 /// The language the interface reads in.
@@ -1219,7 +1263,7 @@ fn AutoExport(shell: Shell) -> impl IntoView {
         spawn_detached(async move {
             let Some(directory) = shell.chosen_path(asked).await else { return };
             let directory = directory.to_string_lossy().into_owned();
-            edit_replay(shell, |replay| replay.auto_export_path = directory);
+            settings.edit_replay(|replay| replay.auto_export_path = directory);
         });
     };
 
@@ -1227,7 +1271,7 @@ fn AutoExport(shell: Shell) -> impl IntoView {
         column(class = "wt-settings__control-stack") {
             row(class = "wt-settings__control-row") {
                 Switch(
-                    checked = Binding::controlled(enabled, move |on: bool| edit_replay(shell, |replay| replay.auto_export_data = on)),
+                    checked = Binding::controlled(enabled, move |on: bool| settings.edit_replay(|replay| replay.auto_export_data = on)),
                     size = SwitchSize::Sm,
                     attr:data-testid = "auto-export-data",
                     a11y:label = Setting::AutoExport.title().into_owned()
@@ -1242,7 +1286,7 @@ fn AutoExport(shell: Shell) -> impl IntoView {
                             attr:data-testid = format!("auto-export-format-{}", format.as_str()),
                             attr:data-selected = move || (chosen() == Some(format)).then(String::new),
                             a11y:selected = move || chosen() == Some(format),
-                            on:click = move |_| edit_replay(shell, |replay| replay.auto_export_format = format)
+                            on:click = move |_| settings.edit_replay(|replay| replay.auto_export_format = format)
                         ) {
                             {format.as_str().to_owned()}
                         }

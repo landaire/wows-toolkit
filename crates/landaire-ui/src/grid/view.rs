@@ -41,6 +41,7 @@ use zgui_ui::virtualize::MeasuredRows;
 use zgui_ui::virtualize::MeasuredVirtualize;
 use zgui_ui::virtualize::Virtualize;
 
+use crate::context_menu::MenuItems;
 use crate::grid::body;
 use crate::grid::column::ColumnId;
 use crate::grid::column::GridColumn;
@@ -135,6 +136,9 @@ pub fn Grid<T, K, F>(
     /// The items of the menu a row opens, for that row.
     #[prop(optional)]
     row_menu: Option<RowMenu<K>>,
+    /// Items appended to the pin and width actions in every column header's menu.
+    #[prop(optional)]
+    header_menu: Option<MenuItems>,
     /// Opens the row menu from outside the grid and tells which row's menu is open.
     #[prop(optional)]
     row_menu_handle: Option<RowMenuHandle<K>>,
@@ -272,6 +276,7 @@ where
         on_row_click,
         on_row_hover,
         row_menu,
+        header_menu,
         menu_target: RwSignal::new_local(None),
         menu_claimed: Cell::new(false),
         menu_place: Cell::new(None),

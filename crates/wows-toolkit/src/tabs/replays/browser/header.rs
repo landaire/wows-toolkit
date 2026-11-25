@@ -8,8 +8,8 @@ use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use wows_toolkit_config::ListingRowElement;
 use wows_toolkit_config::ReplayGrouping;
-use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::paths::shown_path;
 use wows_toolkit_viewmodel::settings::keys;
 use wt_translations::t;
@@ -116,50 +116,6 @@ const CSS: &str = css!(
 
 /// The grouping choices, in order.
 const GROUPINGS: [ReplayGrouping; 3] = [ReplayGrouping::Date, ReplayGrouping::Ship, ReplayGrouping::None];
-
-/// One optional column the options show or hide: those with a column in the replay table that
-/// the reader may toggle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ColumnFilter {
-    RawXp,
-    ObservedDamage,
-    Heals,
-}
-
-impl ColumnFilter {
-    fn label(self) -> String {
-        match self {
-            Self::RawXp => t!("stat-raw_xp"),
-            Self::ObservedDamage => t!("ui-replay-column-observed_damage"),
-            Self::Heals => t!("ui-replay-column-heals"),
-        }
-        .into_owned()
-    }
-
-    fn test_id(self) -> &'static str {
-        match self {
-            Self::RawXp => "replay-listing-filter-raw-xp",
-            Self::ObservedDamage => "replay-listing-filter-observed-damage",
-            Self::Heals => "replay-listing-filter-heals",
-        }
-    }
-
-    fn shown(self, settings: &ReplaySettings) -> bool {
-        match self {
-            Self::RawXp => settings.show_raw_xp,
-            Self::ObservedDamage => settings.show_observed_damage,
-            Self::Heals => settings.show_heals,
-        }
-    }
-
-    fn set(self, settings: &mut ReplaySettings, shown: bool) {
-        match self {
-            Self::RawXp => settings.show_raw_xp = shown,
-            Self::ObservedDamage => settings.show_observed_damage = shown,
-            Self::Heals => settings.show_heals = shown,
-        }
-    }
-}
 
 #[component]
 pub fn ListingHeader(control: BrowserControl, events: BrowserEvents) -> impl IntoView {
@@ -465,9 +421,9 @@ fn ListingOptions(control: BrowserControl, events: BrowserEvents) -> impl IntoVi
                         }
                         Separator()
                         text(class = "wt-listing-options__title") {{locale.text("ui-replay-column_filters")}}
-                        ColumnFilterCheck(filter = ColumnFilter::RawXp)
-                        ColumnFilterCheck(filter = ColumnFilter::ObservedDamage)
-                        ColumnFilterCheck(filter = ColumnFilter::Heals)
+                        ColumnFilterCheck(column = ReplayColumn::RawXp, test_id = "replay-listing-filter-raw-xp")
+                        ColumnFilterCheck(column = ReplayColumn::ObservedDamage, test_id = "replay-listing-filter-observed-damage")
+                        ColumnFilterCheck(column = ReplayColumn::Heals, test_id = "replay-listing-filter-heals")
                         Separator()
                         text(class = "wt-listing-options__title") {{locale.text("ui-replay-row_elements")}}
                         box(class = "wt-listing-options__checks") {
@@ -518,20 +474,16 @@ fn FolderPathLine(path: PathBuf) -> impl IntoView {
 
 /// One column filter's checkbox, writing the replay settings as it changes.
 #[component]
-fn ColumnFilterCheck(filter: ColumnFilter) -> impl IntoView {
+fn ColumnFilterCheck(column: ReplayColumn, test_id: &'static str) -> impl IntoView {
     let services = Services::current();
     let checked = Signal::derive_local(move || {
         // Unchecked until the settings are read; the column follows them once they are.
-        let shown = services.settings.read(|settings| filter.shown(&settings.replay)).unwrap_or(false);
-        if shown { Checked::Yes } else { Checked::No }
+        Checked::from(services.settings.read(|settings| column.is_visible(&settings.replay)) == Some(true))
     });
     let set = move |checked: Checked| {
-        services.settings.edit(keys::REPLAY_SETTINGS, |settings| {
-            filter.set(&mut settings.replay, checked == Checked::Yes);
-            settings.replay.clone()
-        });
+        services.settings.edit_replay(|replay| column.set_visible(replay, checked == Checked::Yes));
     };
-    let label = filter.label();
+    let label = column.visibility_label();
     let control = NodeRef::new();
     let name = NodeRef::new();
 
@@ -541,7 +493,7 @@ fn ColumnFilterCheck(filter: ColumnFilter) -> impl IntoView {
                 checked = Binding::controlled(checked, set),
                 node_ref = control,
                 labelled_by = name,
-                attr:data-testid = filter.test_id()
+                attr:data-testid = test_id
             )
             Label(node_ref = name, control = control) {{label}}
         }

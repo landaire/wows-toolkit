@@ -10,10 +10,12 @@ use sqlx::sqlite::SqlitePool;
 use tokio::runtime::Runtime;
 use tokio_util::task::TaskTracker;
 use wows_core::pseudonym::NameDisplay;
+use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_services::settings::StartupSettings;
 use wows_toolkit_services::settings_writer::PendingWrite;
 use wows_toolkit_services::settings_writer::SettingsWriter;
+use wows_toolkit_viewmodel::settings::keys;
 use zgui::reactive::LocalStorage;
 use zgui::reactive::RwSignal;
 use zgui::reactive::StoredValue;
@@ -148,6 +150,14 @@ impl Settings {
         if let Some(value) = value {
             self.save(key, &value);
         }
+    }
+
+    /// Rewrites the replay settings, which are stored as one row.
+    pub fn edit_replay(self, apply: impl FnOnce(&mut ReplaySettings)) {
+        self.edit(keys::REPLAY_SETTINGS, |settings| {
+            apply(&mut settings.replay);
+            settings.replay.clone()
+        });
     }
 
     /// Writes `value` under `key`.

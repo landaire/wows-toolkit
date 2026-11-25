@@ -22,6 +22,7 @@ use landaire_ui::TooltipContentProps;
 use landaire_ui::TooltipProps;
 use landaire_ui::TooltipTriggerProps;
 use wows_toolkit_icons::Glyph;
+use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_viewmodel::text_filter::FilterQuery;
 use wt_translations::t;
 use zgui::component;
@@ -451,6 +452,12 @@ pub fn row_test_id(setting: Setting) -> String {
     format!("settings-row-{setting:?}")
 }
 
+fn matches_setting(setting: Setting, query: &FilterQuery) -> bool {
+    setting.matches(query)
+        || (setting == Setting::ReplayColumns
+            && ReplayColumn::ALL.into_iter().any(|column| query.keeps(&column.visibility_label())))
+}
+
 /// What a test finds a section's heading by.
 pub fn section_test_id(section: SettingsSection) -> String {
     format!("settings-section-{section:?}")
@@ -586,7 +593,7 @@ fn SettingsPage(shell: Shell, page: RwSignal<DrawerPage, LocalStorage>) -> impl 
     // and its row then takes the jump.
     let revealing = RenderEffect::new(move |_| {
         let Some(SettingsTarget::Setting(setting)) = control.jump.get() else { return };
-        if !query.with_untracked(|query| setting.matches(query)) {
+        if !query.with_untracked(|query| matches_setting(setting, query)) {
             typed.set(String::new());
         }
     });
@@ -709,7 +716,7 @@ fn SettingsBody(shell: Shell, query: Signal<FilterQuery, LocalStorage>) -> impl 
         locale.track();
         Setting::ALL
             .into_iter()
-            .filter(|setting| present(shell, *setting) && setting.matches(&query))
+            .filter(|setting| present(shell, *setting) && matches_setting(*setting, &query))
             .collect::<Vec<_>>()
     });
     let viewport = NodeRef::new();
@@ -888,7 +895,7 @@ fn SectionHeading(shell: Shell, section: SettingsSection, first: Signal<bool, Lo
         SettingsTarget::Setting(setting) => {
             setting.section() == section
                 && !list.rows.with_untracked(|rows| rows.contains(&setting))
-                && list.query.with_untracked(|query| setting.matches(query))
+                && list.query.with_untracked(|query| matches_setting(setting, query))
         }
     };
     follow_jump(shell, node, wanted, || {});
@@ -970,7 +977,7 @@ fn SettingRow(shell: Shell, setting: Setting, query: Signal<FilterQuery, LocalSt
                     if setting != Setting::Language {
                         locale.track();
                     }
-                    view! { SettingControl(shell = shell, setting = setting) }
+                    view! { SettingControl(shell = shell, setting = setting, query = query) }
                 }}
             }
             SettingNote(faults = faults, shell = shell, setting = setting)

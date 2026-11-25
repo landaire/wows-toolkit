@@ -13,6 +13,7 @@ use landaire_ui::DockTarget;
 use landaire_ui::Edge;
 use landaire_ui::PanelEntry;
 use landaire_ui::PanelKind;
+use landaire_ui::test_support::Element;
 use landaire_ui::test_support::HeadlessOptions;
 use landaire_ui::test_support::HeadlessWindow;
 use landaire_ui::test_support::WindowSize;
@@ -25,7 +26,13 @@ use wows_replay_insights::timeline::HealthSnapshot;
 use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::queries;
+use wows_toolkit_replay_data::columns::ColumnArrangement;
+use wows_toolkit_replay_data::columns::ReplayColumn;
+use wows_toolkit_replay_data::columns::StoredArrangement;
+use wows_toolkit_replay_data::columns::default_columns;
 use wows_toolkit_replay_data::load::GameDataCache;
 use wows_toolkit_replay_data::load::LoadedGameData;
 use wows_toolkit_replay_data::replay_dir::MissingBuild;
@@ -36,6 +43,7 @@ use wows_toolkit_replay_data::sample::sample_model;
 use wows_toolkit_services::collab::CollabState;
 use wows_toolkit_services::collab::SharedWindow;
 use wows_toolkit_services::settings::StartupSettings;
+use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -53,11 +61,13 @@ use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::Owner;
+use zgui::reactive::prelude::GetUntracked;
 use zgui::reactive::prelude::Set;
 use zgui::reactive::prelude::WithUntracked;
 use zgui::vocab::Modifiers;
 use zgui::vocab::NamedKey;
 use zgui::vocab::Role;
+use zgui::vocab::Toggled;
 
 use super::BUILT;
 use super::arrivals::Arrivals;
@@ -75,6 +85,7 @@ use crate::interaction_tests::review_options;
 use crate::interaction_tests::save_shot;
 use crate::interaction_tests::settle_in_real_time;
 use crate::shell::ReplayRequest;
+use crate::shell::settings::Setting;
 use crate::shell::tabs::AppTab;
 use crate::shell::tabs::TabKey;
 use crate::tabs::armor_viewer::library::ViewerFeed;
@@ -813,6 +824,188 @@ fn the_listing_options_open_on_click() {
     window.advance(Duration::from_millis(300));
     assert!(laid_out(&window, "replay-listing-options-menu"), "the options popover opened");
     assert!(laid_out(&window, "directory-game-data"));
+}
+
+#[test]
+fn inspector_column_visibility_keeps_the_header_menu_open_and_preserves_layout() {
+    use super::table::COLUMN_ARRANGEMENT_KEY;
+    use super::table::COLUMN_WIDTHS_KEY;
+
+    const KILLS_WIDTH_CSS: f32 = 64.0;
+
+    let (mut window, workspace) = open();
+    let services = workspace.services;
+    let runtime = services.runtime().expect("the runtime is up");
+    let pool = runtime.block_on(wows_toolkit_config::test_pool());
+    let mut arrangement = ColumnArrangement::new();
+    arrangement.unpin(ReplayColumn::ShipName);
+    arrangement.pin(ReplayColumn::Kills);
+    let stored = arrangement.to_stored();
+    let mut widths = vec![None; ReplayColumn::ALL.len()];
+    widths[ReplayColumn::Kills as usize] = Some(KILLS_WIDTH_CSS);
+    let replay = ReplaySettings { show_nation_flags: false, ..ReplaySettings::default() };
+    runtime.block_on(async {
+        queries::set_setting(&pool, keys::REPLAY_SETTINGS, &replay).await.expect("the preferences are stored");
+        queries::set_setting(&pool, COLUMN_ARRANGEMENT_KEY, &stored).await.expect("the arrangement is stored");
+        queries::set_setting(&pool, COLUMN_WIDTHS_KEY, &widths).await.expect("the widths are stored");
+    });
+    let settings = runtime.block_on(StartupSettings::load(&pool));
+    services.settings.adopt(settings, pool.clone());
+    super::panel::tests::seed_next_panel(sample_model());
+    workspace.open(PathBuf::from("column-visibility.wowsreplay"), OpenTarget::ShowingTab);
+    settle_in_real_time(&mut window);
+
+    let header = |window: &mut HeadlessWindow, column: ReplayColumn| {
+        window.by_role_and_label(Role::ColumnHeader, &column.label())
+    };
+    let inspect_layout = |window: &mut HeadlessWindow| {
+        let kills = header(window, ReplayColumn::Kills).expect("the Kills column is visible");
+        let ship = header(window, ReplayColumn::ShipName).expect("the Ship Name column is visible");
+        let kills_bounds = window.bounds(kills).expect("Kills has a box");
+        let ship_bounds = window.bounds(ship).expect("Ship Name has a box");
+        assert!(window.attribute(kills, "data-pinned").is_some());
+        assert!(window.attribute(ship, "data-pinned").is_none());
+        assert!(kills_bounds.left().0 < ship_bounds.left().0);
+        let zoom = workspace.shell.appearance.zoom.get_untracked().get();
+        let expected_width = KILLS_WIDTH_CSS * zoom;
+        let actual_width = kills_bounds.size.width.0;
+        assert!((actual_width - expected_width).abs() < 1.5, "expected {expected_width}px, got {actual_width}px");
+    };
+    inspect_layout(&mut window);
+
+    let name = header(&mut window, ReplayColumn::Name).expect("the Name header is visible");
+    window.right_click(name).expect("the header has a box");
+    window.advance(SLIDE);
+    let option_id = |column: ReplayColumn| format!("replay-header-column-{}", column.storage_key());
+    let click_menu = |window: &mut HeadlessWindow, id: &str| {
+        let item = window.by_test_id(id).unwrap_or_else(|| panic!("{id} is in the same open menu"));
+        let panel = window.by_role(Role::Menu)[0];
+        let within = |window: &HeadlessWindow, element: Element| {
+            let item = window.bounds(element).expect("the menu item has a box");
+            let panel = window.bounds(panel).expect("the menu has a box");
+            item.top().0 >= panel.top().0 && item.bottom().0 <= panel.bottom().0
+        };
+        for _ in 0..8 {
+            if within(window, item) {
+                window.click(item).expect("the menu item can be clicked");
+                window.advance(SLIDE);
+                return;
+            }
+            let above = window.bounds(item).expect("the menu item has a box").top().0
+                < window.bounds(panel).expect("the menu has a box").top().0;
+            window.wheel(panel, if above { -120.0 } else { 120.0 }).expect("the menu can be scrolled");
+            window.advance(SLIDE);
+        }
+        panic!("{id} did not scroll into view");
+    };
+    let saved_replay = || {
+        runtime
+            .block_on(queries::get_setting::<ReplaySettings>(&pool, keys::REPLAY_SETTINGS))
+            .expect("replay preferences are stored")
+    };
+
+    click_menu(&mut window, &option_id(ReplayColumn::Name));
+    assert!(header(&mut window, ReplayColumn::Name).is_none(), "the menu's trigger was hidden");
+    for column in [ReplayColumn::RawXp, ReplayColumn::ObservedDamage] {
+        click_menu(&mut window, &option_id(column));
+        assert!(header(&mut window, column).is_some(), "{column:?} can be shown");
+    }
+    settle_in_real_time(&mut window);
+    let saved = saved_replay();
+    assert!(!ReplayColumn::Name.is_visible(&saved));
+    assert!(saved.show_raw_xp);
+    assert!(saved.show_observed_damage);
+
+    click_menu(&mut window, "replay-header-reset-columns");
+    assert!(header(&mut window, ReplayColumn::Name).is_some(), "reset restores the trigger");
+    assert!(header(&mut window, ReplayColumn::RawXp).is_none(), "reset restores the Raw XP default");
+    assert!(header(&mut window, ReplayColumn::ObservedDamage).is_none(), "reset restores the Observed Damage default");
+    inspect_layout(&mut window);
+
+    let defaults = default_columns(&ReplaySettings::default());
+    for column in &defaults {
+        click_menu(&mut window, &option_id(*column));
+        assert!(header(&mut window, *column).is_none(), "{column:?} is hidden");
+    }
+    assert!(window.by_role(Role::ColumnHeader).is_empty());
+    assert!(window.by_test_id(&option_id(ReplayColumn::ShipName)).is_some(), "the menu stays open with no headers");
+    settle_in_real_time(&mut window);
+    assert!(default_columns(&saved_replay()).is_empty(), "no columns survives a database read");
+
+    let outside = window.by_test_id("replay-listing-header").expect("the listing header is outside the menu");
+    window.click(outside).expect("the listing header has a box");
+    window.advance(SLIDE);
+    assert!(window.by_test_id(&option_id(ReplayColumn::Name)).is_none(), "an outside press dismisses the menu");
+
+    let recovery = window.by_test_id("replay-empty-reset-columns").expect("an empty table offers recovery");
+    window.click(recovery).expect("the recovery button can be clicked");
+    window.advance(SLIDE);
+    inspect_layout(&mut window);
+    settle_in_real_time(&mut window);
+    let restored = saved_replay();
+    assert_eq!(default_columns(&restored), defaults);
+    assert!(!restored.show_nation_flags, "reset leaves other replay preferences alone");
+    assert_eq!(
+        runtime.block_on(queries::get_setting::<StoredArrangement>(&pool, COLUMN_ARRANGEMENT_KEY)),
+        Some(stored)
+    );
+    assert_eq!(runtime.block_on(queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY)), Some(widths));
+}
+
+#[test]
+fn replay_settings_lists_all_columns_and_changes_the_open_inspector() {
+    let (mut window, workspace) = open();
+    let settings = workspace.services.settings;
+    settings.use_private_database_for_test();
+    settings.adopt_unsaved(crate::shell::settings::tests::test_settings());
+    super::panel::tests::seed_next_panel(sample_model());
+    workspace.open(PathBuf::from("column-settings.wowsreplay"), OpenTarget::ShowingTab);
+    window.advance(SLIDE);
+    workspace.shell.settings_drawer.open_at(Setting::ReplayColumns);
+    window.advance(SLIDE);
+    window.advance(SLIDE);
+
+    for column in ReplayColumn::ALL {
+        let id = format!("settings-replay-column-{}", column.storage_key());
+        assert!(window.by_test_id(&id).is_some(), "{column:?} has a checkbox in Replay Settings");
+    }
+    let ship = window.by_test_id("settings-replay-column-ship_name").expect("Ship Name has a checkbox");
+    assert_eq!(window.a11y(ship).and_then(|state| state.checked), Some(Toggled::True));
+    window.click(ship).expect("the Ship Name option can be clicked");
+    window.advance(SLIDE);
+    assert_eq!(window.a11y(ship).and_then(|state| state.checked), Some(Toggled::False));
+
+    let close = window.by_test_id("settings-close").expect("the drawer has a close button");
+    window.click(close).expect("the close button can be clicked");
+    window.advance(SLIDE);
+    assert!(window.by_role_and_label(Role::ColumnHeader, &ReplayColumn::ShipName.label()).is_none());
+    assert!(window.by_role_and_label(Role::ColumnHeader, &ReplayColumn::RawXp.label()).is_some());
+
+    let listing_raw_xp = |window: &mut HeadlessWindow| {
+        let options = window.by_test_id("replay-listing-options").expect("the listing offers options");
+        window.click(options).expect("the listing options can be opened");
+        window.advance(SLIDE);
+        let option = window.by_test_id("replay-listing-filter-raw-xp").expect("the old filter remains");
+        let checked = window.a11y(option).and_then(|state| state.checked);
+        window.press_key(NamedKey::Escape, Modifiers::NONE);
+        window.advance(SLIDE);
+
+        checked
+    };
+    assert_eq!(listing_raw_xp(&mut window), Some(Toggled::True));
+
+    workspace.shell.settings_drawer.open_at(Setting::ReplayColumns);
+    window.advance(SLIDE);
+    window.advance(SLIDE);
+    let clear = window.by_test_id("settings-replay-reset-columns").expect("the drawer offers reset");
+    window.click(clear).expect("the reset button can be clicked");
+    window.advance(SLIDE);
+    let close = window.by_test_id("settings-close").expect("the drawer has a close button");
+    window.click(close).expect("the close button can be clicked");
+    window.advance(SLIDE);
+    assert!(window.by_role_and_label(Role::ColumnHeader, &ReplayColumn::ShipName.label()).is_some());
+    assert!(window.by_role_and_label(Role::ColumnHeader, &ReplayColumn::RawXp.label()).is_none());
+    assert_eq!(listing_raw_xp(&mut window), Some(Toggled::False), "the browser filter follows the reset");
 }
 
 /// The listing options' anonymize box saves the setting, and the open replay's table names its

@@ -151,6 +151,14 @@ mod tests {
     }
 
     #[test]
+    fn reading_an_unchanged_layout_keeps_hidden_columns_in_their_places() {
+        let columns = Columns::new();
+        let layout = columns.layout(&SHOWN);
+
+        assert_eq!(columns.with_layout(&layout, &SHOWN), columns);
+    }
+
+    #[test]
     fn a_stored_width_reads_back_onto_its_column_and_no_narrower_than_the_grip() {
         let mut widths = vec![None; ReplayColumn::ALL.len()];
         widths[ReplayColumn::Kills as usize] = Some(4.0);

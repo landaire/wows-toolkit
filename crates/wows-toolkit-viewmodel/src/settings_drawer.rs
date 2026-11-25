@@ -84,10 +84,8 @@ pub enum Setting {
     CachedBuilds,
     ReplayIndex,
     CurrentReplayPath,
-    ShowRawXp,
-    ShowObservedDamage,
+    ReplayColumns,
     ShowEntityId,
-    ShowHeals,
     ShowDamageDealtBar,
     ShowDamageReceivedBar,
     ShowNationFlags,
@@ -111,7 +109,7 @@ pub enum Setting {
 
 impl Setting {
     /// Every setting, in the order the drawer lists them.
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 41] = [
         Self::Language,
         Self::DataSharing,
         Self::CodeIntegrity,
@@ -133,10 +131,8 @@ impl Setting {
         Self::CachedBuilds,
         Self::ReplayIndex,
         Self::CurrentReplayPath,
-        Self::ShowRawXp,
-        Self::ShowObservedDamage,
+        Self::ReplayColumns,
         Self::ShowEntityId,
-        Self::ShowHeals,
         Self::ShowDamageDealtBar,
         Self::ShowDamageReceivedBar,
         Self::ShowNationFlags,
@@ -177,10 +173,8 @@ impl Setting {
             Self::AutoDump | Self::CacheDirectory | Self::CachedBuilds => SettingsSection::GameDataCache,
             Self::ReplayIndex => SettingsSection::ReplayIndex,
             Self::CurrentReplayPath
-            | Self::ShowRawXp
-            | Self::ShowObservedDamage
+            | Self::ReplayColumns
             | Self::ShowEntityId
-            | Self::ShowHeals
             | Self::ShowDamageDealtBar
             | Self::ShowDamageReceivedBar
             | Self::ShowNationFlags
@@ -216,10 +210,8 @@ impl Setting {
             Self::CachedBuilds => t!("ui-settings-panel-cached_builds"),
             Self::ReplayIndex => t!("ui-settings-index-build"),
             Self::CurrentReplayPath => t!("ui-settings-replay-current_path"),
-            Self::ShowRawXp => t!("ui-settings-replay-show_raw_xp"),
-            Self::ShowObservedDamage => t!("ui-settings-replay-show_observed_damage"),
+            Self::ReplayColumns => t!("ui-replay-column-visibility"),
             Self::ShowEntityId => t!("ui-settings-replay-show_entity_id"),
-            Self::ShowHeals => t!("ui-settings-replay-show_heals"),
             Self::ShowDamageDealtBar => t!("ui-settings-replay-show_damage_dealt_bar"),
             Self::ShowDamageReceivedBar => t!("ui-settings-replay-show_damage_received_bar"),
             Self::ShowNationFlags => t!("ui-settings-replay-show_nation_flags"),
@@ -265,10 +257,8 @@ impl Setting {
             Self::CachedBuilds => t!("ui-settings-wows-cache-actions_tooltip"),
             Self::ReplayIndex => t!("ui-settings-index-description"),
             Self::CurrentReplayPath => t!("ui-settings-panel-current_path_description"),
-            Self::ShowRawXp => t!("ui-settings-panel-show_raw_xp_description"),
-            Self::ShowObservedDamage => t!("ui-settings-panel-show_observed_damage_description"),
+            Self::ReplayColumns => t!("ui-settings-replay-column_visibility_description"),
             Self::ShowEntityId => t!("ui-settings-panel-show_entity_id_description"),
-            Self::ShowHeals => t!("ui-settings-panel-show_heals_description"),
             Self::ShowDamageDealtBar => t!("ui-settings-panel-show_damage_dealt_bar_description"),
             Self::ShowDamageReceivedBar => t!("ui-settings-panel-show_damage_received_bar_description"),
             Self::ShowNationFlags => t!("ui-settings-panel-show_nation_flags_description"),
@@ -309,6 +299,7 @@ impl Setting {
                 | Self::CachedBuilds
                 | Self::ReplayIndex
                 | Self::CurrentReplayPath
+                | Self::ReplayColumns
                 | Self::AutoExport
                 | Self::DisplayName
                 | Self::TwitchToken
@@ -355,11 +346,8 @@ mod tests {
 
     #[test]
     fn a_query_reads_descriptions_in_any_case() {
-        assert_eq!(
-            kept("results table"),
-            [Setting::ShowRawXp, Setting::ShowObservedDamage, Setting::ShowEntityId, Setting::ShowHeals]
-        );
-        assert_eq!(kept("  RAW XP "), [Setting::ShowRawXp]);
+        assert_eq!(kept("results table"), [Setting::ReplayColumns, Setting::ShowEntityId]);
+        assert_eq!(kept("  VISIBLE COLUMNS "), [Setting::ReplayColumns]);
         assert!(kept("zzz").is_empty());
     }
 

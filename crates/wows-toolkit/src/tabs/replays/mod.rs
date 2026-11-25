@@ -34,13 +34,13 @@ use landaire_ui::SidePanel;
 use landaire_ui::SideSplitProps;
 use landaire_ui::WidthRange;
 use wows_toolkit_config::ReplaySettings;
-use wows_toolkit_replay_data::columns::ReplayColumn;
 use wows_toolkit_replay_data::columns::default_columns;
 use wows_toolkit_viewmodel::settings::keys;
 use wt_translations::t;
 use zgui::component;
 use zgui::css;
 use zgui::reactive::LocalStorage;
+use zgui::reactive::Memo;
 use zgui::reactive::RenderEffect;
 use zgui::reactive::RwSignal;
 use zgui::reactive::Signal;
@@ -169,14 +169,14 @@ pub fn ReplaysTab() -> impl IntoView {
     install_stylesheet(SHEET, CSS);
     let shell = Shell::current();
     let services = Services::current();
-    let columns: Signal<Vec<ReplayColumn>, LocalStorage> = Signal::derive_local(move || {
+    let columns = Memo::new(move |_| {
         services
             .settings
             .read(|settings| default_columns(&settings.replay))
             .unwrap_or_else(|| default_columns(&ReplaySettings::default()))
     });
     let control = BrowserControl::new();
-    let workspace = ReplayWorkspace::new(columns, control);
+    let workspace = ReplayWorkspace::new(Signal::derive_local(move || columns.get()), control);
     #[cfg(test)]
     BUILT.with(|built| built.set(Some(workspace)));
     let session_reads = SessionReads::new(workspace, control);

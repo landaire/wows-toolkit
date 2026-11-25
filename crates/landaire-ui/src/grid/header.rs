@@ -7,6 +7,7 @@ use zgui::geom::Device;
 use zgui::geom::DevicePx;
 use zgui::geom::Point;
 use zgui::reactive::RenderEffect;
+use zgui::reactive::Signal;
 use zgui::reactive::UnsyncCallback;
 use zgui::reactive::on_cleanup_local;
 use zgui::reactive::prelude::Get;
@@ -32,6 +33,7 @@ use zgui::vocab::NamedKey;
 use zgui::vocab::PointerButton;
 use zgui::vocab::Role;
 use zgui_ui::MenuItemProps;
+use zgui_ui::MenuSeparatorProps;
 use zgui_ui_icons::IconProps;
 use zgui_ui_icons::IconSize;
 use zgui_ui_icons::set::arrow::ARROW_DOWN;
@@ -539,11 +541,22 @@ where
     T: Clone + PartialEq + 'static,
     K: Clone + Eq + Hash + 'static,
 {
-    let pinned = cx.layout.with_untracked(|layout| layout.is_pinned(&id));
+    let layout = cx.layout;
+    let pinned = layout.with_untracked(|layout| layout.is_pinned(&id));
     // A column that can never be pinned has no pin item rather than one that is always refused.
     let offers_pin = pinned || cx.with_column(&id, GridColumn::is_pinnable) == Some(true);
-    let refused = !pinned && !cx.may_pin(&id);
-    let resized = cx.layout.with_untracked(|layout| layout.width(&id).is_some());
+    let pin_disabled = {
+        let cx = Rc::clone(&cx);
+        let id = id.clone();
+        Signal::derive_local(move || {
+            let hidden = layout.with(|layout| layout.position(&id).is_none());
+            hidden || (!pinned && !cx.may_pin(&id))
+        })
+    };
+    let reset_disabled = {
+        let id = id.clone();
+        Signal::derive_local(move || layout.with(|layout| layout.width(&id).is_none()))
+    };
     let (pin_label, reset_label) = cx.strings.with(|strings| {
         let pin = if pinned { &strings.unpin } else { &strings.pin };
         (pin.clone(), strings.reset_width.clone())
@@ -562,15 +575,23 @@ where
             cx.rearrange(next);
         })
     };
-    let on_reset = UnsyncCallback::new(move |()| cx.reset_width(&id));
-    let reset = view! { MenuItem(disabled = !resized, on_select = on_reset) {{reset_label}} };
+    let on_reset = {
+        let cx = Rc::clone(&cx);
+        UnsyncCallback::new(move |()| cx.reset_width(&id))
+    };
+    let pin = offers_pin.then(|| {
+        AnyView::new(view! {
+            MenuItem(disabled = pin_disabled, on_select = on_pin) {{pin_label}}
+        })
+    });
+    let extra = cx.header_menu.as_ref().map(|items| items.build());
+    let separator = extra.is_some().then(|| AnyView::new(view! { MenuSeparator() }));
 
-    if !offers_pin {
-        return AnyView::new(reset);
-    }
     AnyView::new(view! {
-        MenuItem(disabled = refused, on_select = on_pin) {{pin_label}}
-        {reset}
+        {pin}
+        MenuItem(disabled = reset_disabled, on_select = on_reset) {{reset_label}}
+        {separator}
+        {extra}
     })
 }
 

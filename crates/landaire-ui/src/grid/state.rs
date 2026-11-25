@@ -304,6 +304,7 @@ where
     pub(crate) on_row_hover: Option<UnsyncCallback<RowHover<K>>>,
 
     pub(crate) row_menu: Option<RowMenu<K>>,
+    pub(crate) header_menu: Option<MenuItems>,
     pub(crate) menu_target: RwSignal<Option<MenuTarget<K>>, LocalStorage>,
     /// Whether a header or row named itself the target of the context menu being asked for. The
     /// menu opens only for a target named by the gesture that asks for it.

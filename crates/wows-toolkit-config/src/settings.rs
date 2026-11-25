@@ -1,5 +1,7 @@
 //! Leaf settings types.
 
+use std::collections::BTreeSet;
+
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -77,6 +79,9 @@ pub struct ReplaySettings {
     pub show_nation_flags: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_distance_traveled: bool,
+    /// Storage keys of hidden inspector columns that have no individual visibility field.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub hidden_columns: BTreeSet<String>,
     #[serde(default = "default_bool::<false>")]
     pub auto_export_data: bool,
     #[serde(default)]
@@ -117,6 +122,7 @@ impl Default for ReplaySettings {
             show_damage_received_bar: true,
             show_nation_flags: true,
             show_distance_traveled: true,
+            hidden_columns: BTreeSet::new(),
             auto_export_data: false,
             auto_export_path: String::new(),
             auto_export_format: ReplayExportFormat::default(),
