@@ -27,9 +27,9 @@ const LEGEND_MIN_WIDTH: f32 = 96.0;
 const LEGEND_MAX_WIDTH: f32 = 190.0;
 const LEGEND_GAP: f32 = 12.0;
 
-/// Ticks per axis. Enough to read a value off, few enough not to crowd.
-const TICKS: usize = 5;
-const MIN_GAME_TICK_SPACING: f32 = 56.0;
+/// The fitted value range uses fixed rounding so a resize cannot change the data window.
+const VALUE_FIT_INTERVALS: f64 = 5.0;
+const GAME_TICK_LABEL_GAP: f32 = 6.0;
 const MIN_VALUE_TICK_SPACING: f32 = 28.0;
 
 const TICK_FONT: f32 = 11.0;
@@ -473,7 +473,7 @@ pub fn draw(plot: &Plot<'_>, bounds: PlotRect, colors: PlotColors, canvas: &mut 
 
     paint_grid(&frame, colors, canvas);
     if plot.bars.is_empty() {
-        paint_game_ticks(plot, &frame, colors, canvas);
+        paint_game_ticks(plot, &frame, bounds, colors, canvas);
     }
     paint_axes(area, colors.axis, canvas);
 
@@ -523,13 +523,12 @@ impl Frame {
         self,
         plot: &'a Plot<'a>,
     ) -> impl Iterator<Item = impl Iterator<Item = PlotPoint> + use<'a>> + use<'a> {
-        let longest = longest_line(plot);
-
         plot.series.iter().map(move |series| {
-            let count = series.points.len();
-            series.points.iter().enumerate().map(move |(index, point)| {
-                PlotPoint::new(self.x(game_position(index, count, longest)), self.y(point.value))
-            })
+            series
+                .points
+                .iter()
+                .enumerate()
+                .map(move |(index, point)| PlotPoint::new(self.x(index as f64), self.y(point.value)))
         })
     }
 
@@ -551,8 +550,7 @@ impl Frame {
 /// ticks' range up the height.
 fn fit_window(plot: &Plot<'_>) -> DataWindow {
     let (min, max) = value_range(plot);
-    let ticks = tick_values(min, max);
-    let y = AxisRange::new(ticks.first().copied().unwrap_or(min), ticks.last().copied().unwrap_or(max));
+    let y = fit_value_range(min, max);
 
     let x = if !plot.bars.is_empty() {
         AxisRange::new(0.0, plot.bars.len() as f64)
@@ -570,18 +568,6 @@ fn fit_window(plot: &Plot<'_>) -> DataWindow {
 /// The number of games in the longest line, which numbers the game axis.
 fn longest_line(plot: &Plot<'_>) -> usize {
     plot.series.iter().map(|series| series.points.len()).max().unwrap_or(0)
-}
-
-/// Where the `index`th of a line's `count` games sits on the game axis of a plot whose longest
-/// line has `longest`. Every line is drawn across the whole width, each against its own games,
-/// so a ship that played fewer of them still spans the chart.
-fn game_position(index: usize, count: usize, longest: usize) -> f64 {
-    let last = longest.saturating_sub(1) as f64;
-    if count <= 1 {
-        return last * 0.5;
-    }
-
-    index as f64 * last / (count - 1) as f64
 }
 
 /// The rectangle the data itself is drawn in, inside the gutters the axes and their titles take.
@@ -610,84 +596,96 @@ fn value_range(plot: &Plot<'_>) -> (f64, f64) {
     if max <= min { (min, min + 1.0) } else { (min, max) }
 }
 
-/// Tick values covering `min..=max`, rounded to a step that reads as a round number rather than
-/// to the data's own extremes.
-fn tick_values(min: f64, max: f64) -> Vec<f64> {
-    let rough = (max - min) / TICKS as f64;
-    if !rough.is_finite() || rough <= 0.0 {
-        return vec![min, max];
-    }
-    let magnitude = 10f64.powf(rough.log10().floor());
-    let step = [1.0, 2.0, 2.5, 5.0, 10.0]
-        .into_iter()
-        .map(|multiple| multiple * magnitude)
-        .find(|step| *step >= rough)
-        .unwrap_or(magnitude * 10.0);
+fn fit_value_range(min: f64, max: f64) -> AxisRange {
+    let Some(ticks) = ValueTicks::new((max - min) / VALUE_FIT_INTERVALS) else {
+        return AxisRange::new(min, max);
+    };
 
-    let first = (min / step).floor() * step;
-    let mut ticks = Vec::new();
-    let mut value = first;
-    while value < max + step && ticks.len() < TICKS * 3 {
-        ticks.push(value);
-        value += step;
-    }
+    AxisRange::new((min / ticks.step).floor() * ticks.step, (max / ticks.step).ceil() * ticks.step)
+}
 
-    ticks
+struct ValueTicks {
+    step: f64,
+    precision: usize,
+}
+
+impl ValueTicks {
+    fn new(minimum_step: f64) -> Option<Self> {
+        if !minimum_step.is_finite() || minimum_step <= 0.0 {
+            return None;
+        }
+
+        let power = minimum_step.log10().floor() as i32;
+        let magnitude = 10f64.powi(power);
+        let (multiple, fractional_digits) = [(1.0, 0), (2.0, 0), (2.5, 1), (5.0, 0)]
+            .into_iter()
+            .find(|(multiple, _)| multiple * magnitude >= minimum_step)
+            .unwrap_or((10.0, -1));
+        let step = multiple * magnitude;
+
+        (step.is_finite() && step > 0.0)
+            .then_some(Self { step, precision: (fractional_digits - power).max(0) as usize })
+    }
 }
 
 fn paint_grid(frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
     let area = frame.area;
     let window = frame.window.y;
-    let ticks = tick_values(window.min, window.max);
-    let step = match ticks.as_slice() {
-        [first, second, ..] => second - first,
-        _ => window.span(),
+    let minimum_step = window.span() * f64::from(MIN_VALUE_TICK_SPACING) / f64::from(area.height);
+    let Some(ValueTicks { step, precision }) = ValueTicks::new(minimum_step) else {
+        return;
     };
-    let spacing = area.height * (step / window.span()) as f32;
-    let stride = spacing_stride(spacing, MIN_VALUE_TICK_SPACING);
-    for tick in ticks.iter().step_by(stride) {
-        let y = frame.y(*tick);
+
+    let first = (window.min / step).floor();
+    let intervals = (window.span() / step).ceil() as usize;
+    for index in 0..=intervals + 1 {
+        let tick = (first + index as f64) * step;
+        let y = frame.y(tick);
         if y < area.y - 0.5 || y > area.bottom() + 0.5 {
             continue;
         }
         canvas.fill(PlotRect::new(area.x, y, area.width, 1.0), colors.grid, 0.0);
-        let label = format_value(*tick);
+        let label = format!("{tick:.precision$}");
         let width = canvas.measure(&label, TICK_FONT);
         let origin = PlotPoint::new(area.x - width - 6.0, y - TICK_FONT * 0.7);
         canvas.text(origin, &label, TICK_FONT, colors.text);
     }
 }
 
-/// Numbers the games under the value axis, counting the longest line's.
-fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
+/// Numbers each line's games from one, as the point tooltip does.
+fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, bounds: PlotRect, colors: PlotColors, canvas: &mut dyn PlotCanvas) {
     let longest = longest_line(plot);
-    if longest == 0 {
+    let window = frame.window.x;
+    if longest == 0 || window.max < 0.0 || window.min > (longest - 1) as f64 {
         return;
     }
 
     let area = frame.area;
-    let window = frame.window.x;
-    let per_game = area.width / window.span() as f32;
-    let step =
-        ((window.span() / TICKS as f64).ceil() as usize).max(1).max(spacing_stride(per_game, MIN_GAME_TICK_SPACING));
-    let first = ((window.min.max(0.0) / step as f64).ceil() as usize).saturating_mul(step);
-    let last = (longest - 1).min(window.max.max(0.0).floor() as usize);
-    for index in (first..=last).step_by(step) {
-        let x = frame.x(game_position(index, longest, longest));
-        if x < area.x - 0.5 || x > area.right() + 0.5 {
+    let first = window.min.ceil().max(0.0) as usize;
+    let last = (longest - 1).min(window.max.floor() as usize);
+    if first > last {
+        return;
+    }
+
+    let mut next_left = bounds.x;
+    let right_edge = bounds.right();
+    for index in first..=last {
+        let x = frame.x(index as f64);
+        if x < next_left {
             continue;
         }
-        canvas.fill(PlotRect::new(x, area.y, 1.0, area.height), colors.grid, 0.0);
+
         let label = (index + 1).to_string();
         let width = canvas.measure(&label, TICK_FONT);
-        let origin = PlotPoint::new(x - width * 0.5, area.bottom() + 6.0);
-        canvas.text(origin, &label, TICK_FONT, colors.text);
-    }
-}
+        let left = x - width * 0.5;
+        if left < next_left || left + width > right_edge {
+            continue;
+        }
 
-/// Drops axis marks whose spacing would make their labels overlap.
-fn spacing_stride(spacing: f32, minimum: f32) -> usize {
-    if !spacing.is_finite() || spacing <= 0.0 { usize::MAX } else { (minimum / spacing).ceil().max(1.0) as usize }
+        canvas.fill(PlotRect::new(x, area.y, 1.0, area.height), colors.grid, 0.0);
+        canvas.text(PlotPoint::new(left, area.bottom() + 6.0), &label, TICK_FONT, colors.text);
+        next_left = left + width + GAME_TICK_LABEL_GAP;
+    }
 }
 
 fn paint_axes(area: PlotRect, color: PlotColor, canvas: &mut dyn PlotCanvas) {
@@ -854,6 +852,7 @@ mod tests {
         lines: Vec<Vec<PlotPoint>>,
         texts: Vec<String>,
         text_colors: Vec<PlotColor>,
+        text_origins: Vec<PlotPoint>,
     }
 
     impl PlotCanvas for Recorder {
@@ -869,9 +868,10 @@ mod tests {
             text.chars().count() as f32 * 6.0
         }
 
-        fn text(&mut self, _origin: PlotPoint, text: &str, _size: f32, color: PlotColor) {
+        fn text(&mut self, origin: PlotPoint, text: &str, _size: f32, color: PlotColor) {
             self.texts.push(text.to_string());
             self.text_colors.push(color);
+            self.text_origins.push(origin);
         }
 
         fn clipped(&mut self, _area: PlotRect, body: &mut dyn FnMut(&mut dyn PlotCanvas)) {
@@ -893,32 +893,40 @@ mod tests {
     }
 
     #[test]
-    fn ticks_cover_the_range_with_round_steps() {
-        let ticks = tick_values(0.0, 47_000.0);
-        assert!(ticks.len() >= 2);
-        assert_eq!(ticks[0], 0.0);
-        assert!(ticks.last().copied().unwrap() >= 47_000.0, "the range is covered");
-        let step = ticks[1] - ticks[0];
-        assert!(ticks.windows(2).all(|pair| (pair[1] - pair[0] - step).abs() < step * 1e-6), "one even step");
+    fn value_grid_uses_the_available_height_without_changing_the_range() {
+        let (wide_canvas, wide) = drawn(PlotView::Fit, WIDE);
+        let (small_canvas, small) = drawn(PlotView::Fit, SMALL);
+        let values = |canvas: &Recorder, area: PlotRect| {
+            canvas
+                .texts
+                .iter()
+                .zip(&canvas.text_origins)
+                .filter(|(_, origin)| origin.x < area.x && origin.y < area.bottom())
+                .filter_map(|(label, _)| label.parse::<u32>().ok())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(wide.window, small.window);
+        assert_eq!(values(&wide_canvas, wide.area), [0, 500, 1000, 1500, 2000, 2500, 3000]);
+        assert_eq!(values(&small_canvas, small.area), [0, 1000, 2000, 3000]);
     }
 
     #[test]
-    fn the_top_tick_is_at_or_above_the_largest_value() {
-        let ticks = tick_values(0.0, 337_082.0);
-        assert_eq!(ticks.last().copied(), Some(400_000.0), "a line is not cut off above the top tick");
-        assert_eq!(tick_values(0.0, 300_000.0).last().copied(), Some(300_000.0));
-    }
-
-    #[test]
-    fn a_flat_range_still_yields_ticks() {
-        assert_eq!(tick_values(5.0, 5.0).len(), 2);
+    fn the_fitted_range_contains_the_largest_value() {
+        assert_eq!(fit_value_range(0.0, 337_082.0).max, 400_000.0);
+        assert_eq!(fit_value_range(0.0, 300_000.0).max, 300_000.0);
     }
 
     /// A three-game line drawn into `bounds` through `view`, and where it went.
     fn drawn(view: PlotView, bounds: PlotRect) -> (Recorder, PlotLayout) {
         let lines = [series(&[1_000.0, 3_000.0, 2_000.0])];
+
+        drawn_lines(&lines, view, bounds)
+    }
+
+    fn drawn_lines(lines: &[ChartSeries], view: PlotView, bounds: PlotRect) -> (Recorder, PlotLayout) {
         let plot = Plot {
-            series: &lines,
+            series: lines,
             bars: &[],
             x_label: "Game",
             y_label: "Damage",
@@ -939,6 +947,31 @@ mod tests {
 
     const WIDE: PlotRect = PlotRect::new(0.0, 0.0, 600.0, 300.0);
     const SMALL: PlotRect = PlotRect::new(0.0, 0.0, 300.0, 180.0);
+
+    #[test]
+    fn unequal_lines_share_their_game_ticks_and_labels_thin_only_when_needed() {
+        let lines = [series(&[2000.0; 10]), series(&[1000.0; 8]), series(&[1500.0])];
+        for (width, expected) in [
+            (600.0, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10][..]),
+            (210.0, &[1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            (160.0, &[1, 3, 5, 7, 9]),
+        ] {
+            let bounds = PlotRect::new(0.0, 0.0, width, 300.0);
+            let (canvas, layout) = drawn_lines(&lines, PlotView::Fit, bounds);
+            let ticks = canvas.texts.iter().zip(&canvas.text_origins).filter_map(|(label, origin)| {
+                let game = label.parse::<usize>().ok()?;
+                (origin.y > layout.area.bottom()).then_some((game, origin.x + label.len() as f32 * 3.0))
+            });
+
+            let mut numbers = Vec::new();
+            for (game, x) in ticks {
+                numbers.push(game);
+                assert!(canvas.fills.contains(&PlotRect::new(x, layout.area.y, 1.0, layout.area.height)));
+                assert!(canvas.lines.iter().filter_map(|line| line.get(game - 1)).all(|point| point.x == x));
+            }
+            assert_eq!(numbers, expected, "plot width {width}");
+        }
+    }
 
     #[test]
     fn the_whole_plot_fills_its_area_at_any_size() {

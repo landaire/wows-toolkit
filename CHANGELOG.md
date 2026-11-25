@@ -95,6 +95,7 @@ All notable changes to this project will be documented in this file.
 - *(renderer)* Draw dead ship markers beneath living ships and their labels and status bars
 - *(toolkit)* Open the replay renderer directly from a Render button beside Actions in the Replay Inspector
 - *(toolkit)* Show each ship's average base XP in the Stats overview
+- *(toolkit)* Align Stats chart points with their game numbers. Show more ticks and gridlines on both axes when the labels have room.
 - *(toolkit)* Scale replay player damage dealt and received bars against the highest figure on that player's team
 - *(toolkit)* Apply replay renderer player and ship name switches when a baked frame is drawn
 - *(toolkit)* Apply replay renderer switches to dead ship labels, armament, the score display, and activity in the stats panel even while playback is paused
