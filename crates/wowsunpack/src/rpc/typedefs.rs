@@ -478,8 +478,14 @@ impl ArgType {
                 Ok(ArgValue::Tuple(values))
             }
             Self::Named { inner, .. } => inner.parse_value(input),
-            // Transparent on the wire: the value is the bare inner type.
-            Self::UserType(inner) => inner.parse_value(input),
+            // A length-prefixed string holding the inner value
+            Self::UserType(inner) => {
+                let mut data = parse_length_prefixed_bytes(input)?;
+                match **inner {
+                    Self::Primitive(PrimitiveType::Blob) => Ok(ArgValue::Blob(data)),
+                    _ => inner.parse_value(&mut data),
+                }
+            }
         }
     }
 
@@ -836,11 +842,11 @@ mod test {
 
         assert_eq!(t.sort_size(), INFINITY, "USER_TYPE is variable-size for ordering");
 
-        // Parsing is transparent: the inner VECTOR2's 8 bytes, no length prefix.
-        let data = [0, 0, 0x80, 0x3f, 0, 0, 0, 0x40]; // (1.0, 2.0)
+        // Length byte, then the inner VECTOR2's 8 bytes.
+        let data = [8, 0, 0, 0x80, 0x3f, 0, 0, 0, 0x40]; // (1.0, 2.0)
         let mut input = &data[..];
         let result = t.parse_value(&mut input).unwrap();
-        assert!(input.is_empty(), "transparent: all 8 bytes consumed, no length prefix");
+        assert!(input.is_empty(), "all 9 bytes consumed");
         assert_eq!(result, ArgValue::Vector2((1.0, 2.0)));
     }
 
